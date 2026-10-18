@@ -1,0 +1,583 @@
+{
+  "project": "koda",
+  "feature": "fleet-s5b-koda-mcp",
+  "branchName": "feat/fleet-s5b-koda-mcp",
+  "createdAt": "2026-10-18T00:00:00.000Z",
+  "updatedAt": "2026-10-18T04:00:26.211Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Actor model schema and persistence",
+      "description": "**Goal** — Add the actor/approval columns to PendingAction and AssistantToolCall (schema, migration with backfill) and carry them through both domain record types, both Prisma repositories and the executor's audit-row literal, with thread behaviour unchanged.\n\n**Motivation** — An agent's write cannot be recorded today (PendingAction.threadId, jobId and toolCallId are required and requestedById means both 'who asked' and 'who the write ran as'), and no row says who approved, as distinct from who acted.\n\n**Approach** —\n- **3-D7 Action columns.** On `PendingAction`: `actorType` `String` ('user' or 'agent', who the write ran as); `actorId` `String` (User.id or Agent.id); `origin` `String @default(\"thread\")` ('thread' or 'mcp'); `approvalMode` `String @default(\"human\")` (one of none|self|agent|human); `approverType` `String?` ('user' or 'agent', null for `none` and for an expiry); `approverId` `String?`. `threadId`, `jobId`, `toolCallId` and `requestedById` become nullable, and the `thread` relation becomes optional (a thread-origin row is still deleted with its thread). `expiresAt` stays required: a direct action stores its `decidedAt` there, and it is never PENDING, so the expiry sweeper never selects it. `requestedById` and `decidedById` stay and are still written for thread-origin rows (expand step); an MCP-origin row leaves both null.\n- **3-D8 Two record views.** `PendingActionRecord` stays the thread-action view: its `threadId`, `jobId`, `toolCallId` and `requestedById` stay `string`, and it gains `actorType`, `actorId`, `origin`, `approvalMode`, `approverType` and `approverId`. Every repository read that answers it (`findByCall`, `findById`, `findScopedById`, `findDue`, `lockById`, `resolve`) only ever matches thread-origin rows. The mapper throws on a thread field that is null in such a row. A direct action is written through `insertDirect` (US-004) and read back through `findScopedByActor`, which answers an `ActionStatusView` (`id`, `tool`, `status`, `createdAt`, `decidedAt`, `result`).\n- **3-D9 Thread action writes.** `NewPendingAction`, `ProposeInput` and `AssistantActionService.propose` are unchanged. `PrismaPendingActionRepository.insert` derives the actor fields of a thread proposal itself: `actorType 'user'`, `actorId` = `requestedById`, `origin 'thread'`, `approvalMode 'human'`. `resolve`, when the resolution carries `decidedById`, also writes `approverType 'user'` and `approverId` = `decidedById`; an expiry carries none and writes neither. `AssistantActionDecisions` is unchanged.\n- **3-D10 Audit columns.** On `AssistantToolCall`: `jobId`, `threadId`, `toolCallId` and `projectId` become nullable (the `job` relation optional), and `actorType`/`actorId` are added. `projectId` is null for a call that resolves no project: `koda_my_projects`, `invalid_input: project` and `not_found: project`. The unique `(jobId, toolCallId)` stays; Postgres treats nulls as distinct, so MCP rows never collide.\n- **3-D11 Migration.** `apps/api/prisma/migrations/20261025090000_assistant_action_actor/migration.sql` adds the columns, relaxes the nullability and backfills existing rows: `PendingAction`: `actorType = 'user'`, `actorId = \"requestedById\"`, `origin = 'thread'`, `approvalMode = 'human'`; where `\"decidedById\"` is not null, `approverType = 'user'` and `approverId = \"decidedById\"`. `AssistantToolCall`: `actorType = 'user'` and `actorId` = the `requestedById` of the row's `FleetJob` (`AssistantToolCall.jobId` cascades from `FleetJob`, so every existing row has its job; a thread is not used, because a deleted thread leaves its job's audit rows behind). Then `PendingAction.actorType`, `PendingAction.actorId`, `AssistantToolCall.actorType` and `AssistantToolCall.actorId` are set NOT NULL. No SQL comment or string contains a `;` (the test helper `migrationStatements` splits on it).\n- Executor: the audit-row literal in `execute` gains `actorType: 'user'` and `actorId` = the thread creator's id; nothing else changes in this story.\n- Existing seeds: `assistant-action-delivery.integration.spec.ts` (create call near line 89) and `assistant-action-send-delivery.integration.spec.ts` (near line 108) add `actorType: 'user'` and `actorId` equal to the seed's `requestedById`; no assertion changes.\n\n**Scope** — In: schema.prisma, migration, both domain files, both Prisma repositories (mappers, writers, insert/resolve actor derivation, findUserActor, findScopedByActor), executor audit-row literal, the two seed fixes. Out: `insertDirect`/`recordDirect`/`DirectActionInput` (US-004), `executeFor`/ToolCaller (US-002), `checkAction`/`executeAction` reading findUserActor (US-003), approval policy (US-004), any web or REST change. Feature-level: no dropping of requestedById/decidedById, no table rename.\n\n**Interface**\n```typescript\n// assistant-tool-call.domain.ts\nexport interface AssistantToolCallRecord {\n  // jobId, threadId, toolCallId, projectId become string | null\n  actorType: 'user' | 'agent';\n  actorId: string;\n}\ninterface AssistantToolCallRepository {\n  findUserActor(userId: string): Promise<{ id: string; email: string; role: string; disabled: boolean } | null>;\n}\n\n// actions/pending-action.domain.ts\nexport interface ActionStatusView { id: string; tool: string; status: string; createdAt: Date; decidedAt: Date | null; result: string | null }\ninterface PendingActionRepository {\n  findScopedByActor(id: string, projectId: string, actor: { type: 'user' | 'agent'; id: string }): Promise<ActionStatusView | null>;\n}\n```",
+      "acceptanceCriteria": [
+        "In a scratch schema migrated with every migration before `20261025090000_assistant_action_actor`, a `PendingAction` row with `requestedById` `u1`, then the `20261025090000_assistant_action_actor` migration applied, reads back `actorType` `user` and `actorId` `u1`.",
+        "That migrated row reads back `origin` `thread` and `approvalMode` `human`.",
+        "A `PendingAction` row with `decidedById` `u2` before the migration reads back `approverType` `user` and `approverId` `u2` after it.",
+        "A `PendingAction` row with `decidedById` null before the migration reads back `approverType` null and `approverId` null after it.",
+        "An `AssistantToolCall` row whose `FleetJob` has `requestedById` `u1`, inserted before the migration, reads back `actorType` `user` and `actorId` `u1` after it.",
+        "An `AssistantToolCall` row whose `threadId` names no existing `ChatThread` (the thread was deleted), inserted before the migration, reads back `actorId` equal to its job's `requestedById` after it, and the migration completes.",
+        "On the pushed test schema, `prisma.pendingAction.create` with `threadId`, `jobId`, `toolCallId` and `requestedById` null, `actorType` `agent`, `origin` `mcp` and `approvalMode` `none` succeeds.",
+        "`prisma.assistantToolCall.create` with `jobId`, `threadId`, `toolCallId` and `projectId` null and `actorType` `agent` succeeds.",
+        "`POST /fleet/runner/jobs/:jobId/tools/koda_add_comment?leaseEpoch=<n>` from the runner holding `dev`'s RUNNING REPO THREAD job, with `{ ref: <a ticket of web>, body: 'x' }`, stores a `PendingAction` whose `actorType` is `user`, `actorId` is `dev`'s id, `origin` is `thread` and `approvalMode` is `human`.",
+        "The `AssistantToolCall` row stored for that route call has `actorType` `user` and `actorId` equal to `dev`'s id.",
+        "After `dev` approves that action at `POST /projects/web/fleet/approvals/:approvalId/decide` with `{ decision: 'approve' }`, the action has `approverType` `user` and `approverId` equal to `dev`'s id.",
+        "After `dev` rejects another such action with `{ decision: 'reject' }`, it has status `REJECTED`, `approverType` `user` and `approverId` equal to `dev`'s id.",
+        "An action expired by `PendingActionExpirySweeper` has status `EXPIRED`, `approverType` null and `approverId` null.",
+        "`findUserActor` on the tool-call repository answers the user's `id`, `email`, `role` and `disabled` for an existing user, and `null` for an unknown id.",
+        "The pending-action repository's `findScopedByActor` answers a view of an action stored with that project and actor, and `null` for the same id asked with another agent's id."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "prisma",
+        "migration",
+        "backend"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Schema migration with backfill plus ripple through domain types, two Prisma repositories, executor literal and existing seeds; high blast radius but standard patterns.",
+        "agentProfileId": "native-sol",
+        "agent": "native",
+        "profileModelTier": "powerful",
+        "initialAgent": "native",
+        "initialProfileId": "native-sol",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/test/helpers/migration-schema.ts",
+        "apps/api/test/integration/outbox/outbox-migration.integration.spec.ts",
+        "apps/api/src/fleet/assistant/actions/assistant-action-decisions.ts",
+        "apps/api/test/integration/fleet/assistant-actions-decide.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261025090000_assistant_action_actor/migration.sql",
+        "apps/api/test/integration/fleet/assistant-action-actor-migration.integration.spec.ts",
+        "apps/api/test/integration/fleet/assistant-action-actor.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "The pending-action mapper throws when a row it maps for a thread-action read has a null threadId",
+        "findScopedByActor answers null for the same id asked with a different projectId"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`PendingAction` gains `actorType`, `actorId`, `origin` (default `thread`), `approvalMode` (default `human`), `approverType?`, `approverId?`; `threadId`, `jobId`, `toolCallId` and `requestedById` become optional and the `thread` relation optional; `AssistantToolCall` gains `actorType` and `actorId`, and `jobId`, `threadId`, `toolCallId` and `projectId` become optional with the `job` relation optional (3-D7, 3-D10). Every other model unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-action-delivery.integration.spec.ts",
+          "reason": "its seed helper's `prisma.pendingAction.create` call (line 89) adds `actorType: 'user'` and `actorId` equal to the seed's `requestedById`, because both columns become required; no assertion changes."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-action-send-delivery.integration.spec.ts",
+          "reason": "its seed helper's `prisma.pendingAction.create` call (line 108) adds `actorType: 'user'` and `actorId` equal to the seed's `requestedById`, because both columns become required; no assertion changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool-call.domain.ts",
+          "reason": "`AssistantToolCallRecord` gains `actorType`/`actorId`, and `jobId`, `threadId`, `toolCallId`, `projectId` become nullable (3-D10); `AssistantToolCallRepository` gains `findUserActor(userId)` (3-D12)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/prisma-assistant-tool-call.repository.ts",
+          "reason": "`toPersistenceCreate`/`toDomain` carry the actor columns and the nullable fields; implements `findUserActor` (id, email, role, disabled of the user; null when absent); `findByCall` and `findCallContext` unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/pending-action.domain.ts",
+          "reason": "`PendingActionRecord` gains `actorType`, `actorId`, `origin`, `approvalMode`, `approverType`, `approverId` (thread fields stay `string`, 3-D8); adds `ActionStatusView`; `PendingActionRepository` gains `findScopedByActor`. `NewPendingAction`, `ProposeInput` and `ActionResolution` unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/prisma-pending-action.repository.ts",
+          "reason": "`insert` derives the thread actor fields and `resolve` writes the approver when `decidedById` is given (3-D9); the mapper reads the new columns and throws on a null thread field of a row it maps; implements `findScopedByActor` (the id, in the project, with the given actor; null otherwise)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+          "reason": "the audit-row literal in `execute` gains `actorType: 'user'` and `actorId` = the thread creator's id; nothing else changes in this story."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Tool caller and origin-aware tools",
+      "description": "**Goal** — Make the executor and ToolContext caller-based (principal + origin) with a new `executeFor` entry for non-thread callers, and make the four origin-dependent tools work with no thread.\n\n**Motivation** — `AssistantToolExecutor.execute` resolves everything from `findCallContext(jobId)` and `ToolContext.actor` is a `UserPrincipal` with required threadId/jobId, so a tool cannot run for an agent or outside a thread.\n\n**Approach** —\n- **3-D1 Caller shape.** `ToolContext.actor` becomes `UserPrincipal | AgentPrincipal`, and `ToolContext.threadId` and `jobId` become `string | null` (null for an MCP call). `ToolContext` gains no other field.\n- **3-D2 Executor entry points.** Two public entry points share one private run path: `execute(call: ToolCall)` is the thread adapter and keeps today's front checks in today's order: the `(jobId, toolCallId)` replay, then the registry lookup, then `findCallContext(call.jobId)`. It then builds a thread caller from the context and hands it to the shared run path. `RunnerToolService.call` and every existing caller are unchanged. `executeFor(caller, call)` is the entry for a caller that is not a thread job (MCP). It looks the tool up (an unknown name throws `NotFoundAppException`, as `execute` does), skips the replay (MCP calls carry no tool-call id, 3-D5) and runs the shared path. The shared path is today's scope, parse, permission, execute and audit, with the actor taken from the caller.\n- **3-D3 Project scope by origin.** A thread origin keeps today's rules (REPO and PROJECT: the job's project, a `project` key refused; WORKSPACE: `project` required for project tools). An MCP origin follows the WORKSPACE rules: `koda_my_projects` takes no `project`, every other tool requires `project`, and the slug is resolved and checked with `ProjectAccessService.resolveMembership` for the caller's principal. For an agent that is its roster under the default `AGENT_PROJECT_SCOPING`; a slug the agent cannot reach answers `not_found: project`. With scoping turned off, `resolveMembership` admits an agent to every project, the same reach its key has over REST (deliberate parity). `koda_my_projects` over MCP runs with `ctx.projectId` and `ctx.projectSlug` both `''`; the tool reads neither.\n- **3-D4 Permission.** Unchanged code: membership, then the tool's CASL tuple via `KodaCaslAbilityFactory.createForUser`, which accepts any principal. An agent holds agent CASL, so a tool whose tuple the agent lacks answers `forbidden: <tool> needs <action> <subject> on <slug>`. Every agent is refused the three fleet write tools (no agent holds `create` or `update` `FleetJob`). `koda_update_ticket`'s preview requires `transition Ticket`, so an agent whose roles grant no transition is refused it, as the tool already behaves for every caller.\n- **3-D5 Idempotency.** The thread origin keeps the `(jobId, toolCallId)` replay. An MCP call has no tool-call id: no replay, and every call is audited as its own `AssistantToolCall` row with `toolCallId` null. The audit row takes `actorType`/`actorId` from the caller and a null `projectId` when no project resolved.\n- **3-D6 Origin-dependent tools.** `koda_get_action`: a thread origin reads `findScopedById(id, projectId, threadId)` (today). An MCP origin reads `findScopedByActor(id, projectId, { type, id })`, so an agent sees only its own actions in that project. `getActionTool`'s dependency widens to `Pick<PendingActionRepository, 'findScopedById' | 'findScopedByActor'>`. `koda_add_memory`: a thread origin stores `sourceType: 'thread'`, `sourceId: threadId` (today); an MCP origin stores `sourceType: 'mcp'`, `sourceId: <actor id>`. `koda_record_decision`: a thread origin passes `sourceId: thread:<threadId>` (today); an MCP origin passes `sourceId: mcp:<actor id>`. `koda_list_approvals` reads `ctx.actor.projectRole`; it narrows with `isAgentPrincipal(ctx.actor) ? null : ctx.actor.projectRole ?? null`, so an agent passes `role: null` and a user actor (including test fixtures built without `actorType`) keeps its project role.\n- `ToolScope` and the principal casts in the executor widen to the union.\n\n**Scope** — In: assistant-tool.types.ts, executor (`executeFor`, shared run path, scope, audit actor/projectId), action-tools.ts (`getActionTool`), add-memory-tool.ts, record-decision-tool.ts, fleet-tools.ts. Out: the write/approval path (`proposeWrite`, `checkAction`, `executeAction`) stays as is (US-003, US-005); `approvalModeFor` and `recordDirect` (US-004); MCP catalog and route (US-006, US-007). The WORKSPACE-thread and REPO-thread project rules are unchanged and covered by existing executor specs; this feature adds no AC for them. Feature-level: no idempotent replay of MCP calls, no new agent abilities.\n\n**Interface**\n```typescript\nexport type ToolOrigin =\n  | { kind: 'thread'; threadId: string; jobId: string; threadKind: ChatThreadKind; homeProject: { id: string; slug: string } }\n  | { kind: 'mcp' };\n\nexport interface ToolCaller {\n  principal: UserPrincipal | AgentPrincipal;\n  origin: ToolOrigin;\n  /** A thread creator who is disabled is refused (today's rule); an agent caller is never disabled here. */\n  disabled: boolean;\n}\n\n// ToolContext: actor: UserPrincipal | AgentPrincipal; threadId: string | null; jobId: string | null\n\n// AssistantToolExecutor\nexecute(call: ToolCall): Promise<ToolResult>;\nexecuteFor(caller: ToolCaller, call: { name: string; input: unknown }): Promise<ToolResult>;\n```",
+      "acceptanceCriteria": [
+        "`AssistantToolExecutor.execute` with a thread `ToolCall` runs the tool with `ctx.actor.id` equal to the thread creator's id and `ctx.threadId`/`ctx.jobId` equal to the thread and job of `findCallContext`.",
+        "`execute` with a `(jobId, toolCallId)` that `findByCall` already holds answers the stored result without calling `findCallContext` (today's order).",
+        "`executeFor` with an MCP caller for agent `claude` running `koda_get_ticket` with `{ project: 'web', ref: 'WEB-1' }`, when `resolveMembership` answers `null`, calls the tool's `execute` with `ctx.actor.id` equal to `claude`'s id.",
+        "In that call, the tool's `execute` receives `ctx.projectSlug` `web`, `ctx.threadId` `null` and `ctx.jobId` `null`.",
+        "`executeFor` with an MCP caller for `koda_get_ticket` and no `project` key answers content `invalid_input: project` with `isError` true.",
+        "`executeFor` with an MCP caller for `koda_my_projects` and no `project` key calls the tool's `execute` with `ctx.projectId` `''`.",
+        "`executeFor` with an MCP caller records one `AssistantToolCall` whose `actorType` is `agent`, `actorId` the agent's id, and `jobId`, `threadId` and `toolCallId` null, and never calls `findByCall`.",
+        "`executeFor` with an MCP caller for `koda_get_ticket` and no `project` key records an `AssistantToolCall` whose `projectId` is null.",
+        "`getActionTool(...).execute` with `ctx.threadId` null and an agent actor calls `findScopedByActor` with the id, `ctx.projectId` and `{ type: 'agent', id: ctx.actor.id }`.",
+        "`addMemoryTool(...).execute` with `ctx.threadId` null passes `sourceType` `mcp` and `sourceId` equal to `ctx.actor.id` to the memory upsert.",
+        "`recordDecisionTool(...).execute` with `ctx.threadId` null passes `sourceId` equal to `mcp:` followed by `ctx.actor.id` to `recordDecision`.",
+        "`koda_list_approvals` executed with an agent actor passes an approval route whose `role` is `null`, and with a user actor whose `projectRole` is `DEVELOPER` passes `role` `DEVELOPER`.",
+        "`AssistantToolExecutor.executeFor` with an MCP caller for agent `claude` (rostered on `web` only) running `koda_search_tickets` with `project` `web` answers `isError` false and content naming a ticket of `web`.",
+        "The same caller running `koda_search_tickets` with `project` `ops` answers content `not_found: project`.",
+        "The `AssistantToolCall` row stored for the `web` call has `actorType` `agent`, `actorId` equal to `claude`'s id, and `jobId` null."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "security",
+        "access-control",
+        "backend"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Reshapes the executor's scope, permission and audit path for a new principal type; project access and CASL checks make this access-control code, so security override applies.",
+        "agentProfileId": "native-sol",
+        "agent": "native",
+        "profileModelTier": "powerful",
+        "initialAgent": "native",
+        "initialProfileId": "native-sol",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/assistant-tool.types.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+        "apps/api/src/projects/project-context.ts",
+        "apps/api/src/fleet/assistant/actions/pending-action.domain.ts",
+        "apps/api/test/helpers/fleet-fixtures.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/assistant-tool.executor.caller.spec.ts",
+        "apps/api/src/fleet/assistant/tools/origin-tools.spec.ts",
+        "apps/api/test/integration/fleet/assistant-executor-caller.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "executeFor with an MCP caller and an unknown tool name throws NotFoundAppException",
+        "executeFor with an MCP caller for an agent that lacks the tool's CASL tuple answers forbidden: <tool> needs <action> <subject> on <slug> with isError true and does not call the tool's execute"
+      ],
+      "outOfScope": [
+        "US-002 only: the WORKSPACE-thread and REPO-thread project rules are unchanged and are covered by the existing executor specs; this feature adds no AC for them."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.types.ts",
+          "reason": "`ToolContext.actor` widens to `UserPrincipal | AgentPrincipal`, `threadId`/`jobId` to `string | null`; adds `ToolOrigin` and `ToolCaller` (3-D1). `AssistantTool` and the error classes unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+          "reason": "adds `executeFor`; `execute` keeps its front checks and hands a thread caller to the shared path; the MCP origin follows the WORKSPACE project rules (3-D2, 3-D3); the audit row takes its actor from the caller and a null `projectId` when no project resolved; `ToolScope` and the principal casts widen to the union."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/action-tools.ts",
+          "reason": "`getActionTool`'s dependency widens to `findScopedById | findScopedByActor`, and a call with `ctx.threadId` null reads `findScopedByActor` with `{ type: ctx.actor.actorType, id: ctx.actor.id }` and prints from an `ActionStatusView` (3-D6); thread behaviour unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/add-memory-tool.ts",
+          "reason": "stores `sourceType: 'mcp'` and `sourceId: ctx.actor.id` when `ctx.threadId` is null (3-D6); thread behaviour unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/record-decision-tool.ts",
+          "reason": "passes `sourceId: mcp:<ctx.actor.id>` when `ctx.threadId` is null (3-D6); thread behaviour unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/fleet-tools.ts",
+          "reason": "`koda_list_approvals` narrows with `isAgentPrincipal` and passes `role: null` for an agent actor (3-D6); user behaviour unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Approval check reads the action's actor",
+      "description": "**Goal** — Make `AssistantToolExecutor.checkAction` and `executeAction` resolve the requester from the action's `actorType`/`actorId` through `findUserActor` instead of `findCallContext(action.jobId)`.\n\n**Motivation** — A PendingAction no longer always has a job (direct and MCP actions carry none), and 'who the write ran as' is now recorded explicitly as the actor, distinct from the approver.\n\n**Approach** —\n- **3-D12 Approval check reads the action's actor.** `AssistantToolExecutor.checkAction` and `executeAction` resolve the requester from `action.actorType`/`action.actorId` through `findUserActor(userId): Promise<{ id: string; email: string; role: string; disabled: boolean } | null>` on `AssistantToolCallRepository`, not from `findCallContext(action.jobId)`. An action whose `actorType` is not `'user'` answers `forbidden` without a read (no default produces one; koda #301). A disabled user answers `forbidden` (today's rule).\n- **3-R3 The actor is the requesting principal.** An executed tool runs as whoever requested it; an approver is never the actor.\n- Existing unit specs are updated without changing any expected outcome: `assistant-tool.executor.spec.ts` (stub `findUserActor` with the same user their `findCallContext` stub carries; action fixtures gain `actorType: 'user'` and `actorId` equal to that user), `actions/action-result-masking.spec.ts` (repository stub gains `findUserActor`; `approvedAction()` gains `actorType`/`actorId`), `write-tool-errors.spec.ts` (same), `actions/assistant-action-decisions.spec.ts` (stubs behind its real executor gain `findUserActor` answering the requester; action fixtures gain `actorType`/`actorId`).\n\n**Scope** — In: `checkAction`/`executeAction` in the executor and the four existing specs. Out: `executeFor`/ToolCaller work (US-002, already done), approval policy and `recordDirect` (US-004), the `none` write path (US-005). Feature-level: no serving of `self`/`agent` approval modes, no agent decide path (koda #301).\n\n**Interface**\n```typescript\n// AssistantToolCallRepository (added in US-001)\nfindUserActor(userId: string): Promise<{ id: string; email: string; role: string; disabled: boolean } | null>;\n```",
+      "acceptanceCriteria": [
+        "`AssistantToolExecutor.checkAction` for an action with `actorType` `user` and `actorId` `u1` calls `findUserActor` with `u1` and does not call `findCallContext`.",
+        "`checkAction` for an action whose `findUserActor` answer is a disabled user answers `forbidden`.",
+        "`checkAction` for an action with `actorType` `agent` answers `forbidden` without calling `findUserActor`.",
+        "`executeAction` for an action with `actorType` `user` runs the tool's `execute` with `ctx.actor.id` equal to the action's `actorId`.",
+        "After `dev` approves a `koda_add_comment` action proposed from `dev`'s REPO THREAD job, the comment exists on the ticket and the action's status is `EXECUTED`."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "security",
+        "access-control",
+        "backend"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small executor change plus fixture updates in four specs; approval authorization (who may execute an approved action) is access control so security override applies.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+        "apps/api/src/fleet/assistant/assistant-tool-call.domain.ts",
+        "apps/api/src/fleet/assistant/actions/pending-action.domain.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.executor.spec.ts",
+        "apps/api/src/fleet/assistant/actions/assistant-action-decisions.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/assistant-tool.executor.actor.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "checkAction answers forbidden when findUserActor answers null for the action's actorId"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+          "reason": "`checkAction`/`executeAction` resolve the actor with `findUserActor(action.actorId)` and refuse a non-user actor (3-D12)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.spec.ts",
+          "reason": "the `checkAction`/`executeAction` tests stub `findUserActor` with the same user their `findCallContext` stub carries today, and their action fixtures gain `actorType: 'user'` and `actorId` equal to that user; no expected outcome changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/action-result-masking.spec.ts",
+          "reason": "its repository stub gains `findUserActor` answering the same user its `findCallContext` stub carries, and `approvedAction()` gains `actorType: 'user'` and `actorId` equal to that user, because `executeAction` now reads the actor from the action; no expected outcome changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/write-tool-errors.spec.ts",
+          "reason": "its repository stub gains `findUserActor` answering the same user its `findCallContext` stub carries, and its approved-action fixture gains `actorType: 'user'` and `actorId` equal to that user, for the same reason; no expected outcome changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/assistant-action-decisions.spec.ts",
+          "reason": "the stubs behind its real executor gain `findUserActor` answering the requester, and its action fixtures gain `actorType: 'user'` and `actorId` equal to the requester, for the same reason; no expected outcome changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Approval policy and the direct action record",
+      "description": "**Goal** — Add the `ApprovalPolicy` seam (`approvalModeFor`) and the direct-action record path (`recordDirect` / `insertDirect`) that stores a terminal action row in one insert.\n\n**Motivation** — Every action must record who acted and how it was approved, and an MCP agent's write has no thread, job or approval to hang a PENDING row on.\n\n**Approach** —\n- **3-R5 Four approval modes.** `none` (no approval step, no approver), `self` (the actor approves its own action), `agent` (another agent approves) and `human` (a user approves).\n- **3-R6 Code defaults.** `ApprovalPolicy` answers `human` for every thread write and `none` for every MCP write. No default answers `self` or `agent`; the web policy editor and an agent decide path are koda #301.\n- **3-D13 Approval policy.** `apps/api/src/fleet/assistant/actions/approval-policy.ts`:\n  ```ts\n  export const APPROVAL_MODES = ['none', 'self', 'agent', 'human'] as const;\n  export type ApprovalMode = (typeof APPROVAL_MODES)[number];\n  /** 3-R6: the code defaults; koda #301 replaces the source, not the call sites. */\n  export function approvalModeFor(origin: ToolOrigin, tool: string): ApprovalMode {\n    return origin.kind === 'thread' ? 'human' : 'none';\n  }\n  ```\n  The executor calls it once per write call, after the permission check and before the preview (wired in US-005).\n- **3-D14 Direct action record.** `ActionProposer` (the executor's late-bound port, 2a-D1) gains `recordDirect(input: DirectActionInput): Promise<{ actionId: string }>`, implemented by `AssistantActionService`. `DirectActionInput` (in `pending-action.domain.ts`) carries `projectId`, `tool`, `input`, `preview`, `actorType`, `actorId`, `origin`, `status` (`EXECUTED` or `FAILED`), `result` and `now`. `recordDirect` calls the repository's `insertDirect` once: a single insert of the terminal row with `approvalMode 'none'`, no approver, no `approvalId`, thread, job, tool-call id, `requestedById` or `decidedById`, `decidedAt` and `expiresAt` = `now`. No PENDING row ever exists for a direct action, and no `FleetApproval` is opened. `PrismaPendingActionRepository.insertDirect` is implemented as one `create` of the terminal row. `propose` is unchanged.\n\n**Scope** — In: approval-policy.ts, `DirectActionInput`, `ActionProposer.recordDirect`, `PendingActionRepository.insertDirect`, Prisma `insertDirect`, `AssistantActionService.recordDirect`. Out: calling `approvalModeFor` or `recordDirect` from the executor (US-005); MCP route (US-007). Feature-level: the policy never answers `self`/`agent`; no notifications for `none`-mode actions; no per-agent action cap.\n\n**Interface**\n```typescript\nexport const APPROVAL_MODES = ['none', 'self', 'agent', 'human'] as const;\nexport type ApprovalMode = (typeof APPROVAL_MODES)[number];\nexport function approvalModeFor(origin: ToolOrigin, tool: string): ApprovalMode;\n\n// pending-action.domain.ts\nexport interface DirectActionInput {\n  projectId: string; tool: string; input: unknown; preview: string;\n  actorType: 'user' | 'agent'; actorId: string; origin: 'thread' | 'mcp';\n  status: 'EXECUTED' | 'FAILED'; result: string; now: Date;\n}\ninterface ActionProposer { recordDirect(input: DirectActionInput): Promise<{ actionId: string }>; }\ninterface PendingActionRepository { insertDirect(input: DirectActionInput): Promise<{ id: string }>; }\n```",
+      "acceptanceCriteria": [
+        "`APPROVAL_MODES` equals `['none', 'self', 'agent', 'human']`.",
+        "`approvalModeFor({ kind: 'thread', threadId: 't1', jobId: 'j1', threadKind: 'REPO', homeProject: { id: 'p1', slug: 'web' } }, 'koda_add_comment')` returns `human`.",
+        "`approvalModeFor({ kind: 'mcp' }, 'koda_add_comment')` returns `none`.",
+        "`AssistantActionService.recordDirect` with status `EXECUTED`, actor agent `claude`, origin `mcp` and result `done` answers an `actionId` naming a stored `PendingAction` with status `EXECUTED` and result `done`.",
+        "That stored row has `actorType` `agent`, `actorId` equal to `claude`'s id, `origin` `mcp` and `approvalMode` `none`.",
+        "That stored row has `approverType`, `approverId`, `approvalId`, `threadId`, `jobId`, `toolCallId`, `requestedById` and `decidedById` all null.",
+        "That stored row has `decidedAt` and `expiresAt` both equal to the `now` passed in.",
+        "`recordDirect` opens no `FleetApproval`: no approval row's payload names the new action id.",
+        "`recordDirect` with status `FAILED` and result `not_found` stores a row with status `FAILED` and result `not_found`.",
+        "`PendingActionExpirySweeper` run with a clock a day after the `now` of a `recordDirect` row leaves that row's status unchanged."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "backend",
+        "data"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Three small files with standard repository/service patterns and a pure policy function; no auth logic of its own.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/actions/pending-action.domain.ts",
+        "apps/api/src/fleet/assistant/actions/assistant-action.service.ts",
+        "apps/api/src/fleet/assistant/actions/prisma-pending-action.repository.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.types.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/actions/approval-policy.ts",
+        "apps/api/src/fleet/assistant/actions/approval-policy.spec.ts",
+        "apps/api/test/integration/fleet/assistant-direct-action-record.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/actions/pending-action.domain.ts",
+          "reason": "adds `DirectActionInput`; `ActionProposer` gains `recordDirect`; `PendingActionRepository` gains `insertDirect` (3-D14)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/prisma-pending-action.repository.ts",
+          "reason": "implements `insertDirect` as one `create` of the terminal row (3-D14)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/assistant-action.service.ts",
+          "reason": "implements `recordDirect` (3-D14); `propose` unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "The none path in the executor",
+      "description": "**Goal** — Wire `approvalModeFor` into the executor's write path so a `none`-mode write runs at once as the caller and is recorded as a terminal action, while `human` keeps proposing for a thread origin and other answers are refused.\n\n**Motivation** — MCP agent writes must execute immediately with an explicit action record (actor, origin, approval mode), unlike thread writes which a human approves.\n\n**Approach** —\n- **3-D13** The executor calls `approvalModeFor` once per write call, after the permission check and before the preview.\n- **3-D15 The `none` path in the executor.** For a write tool whose mode is `none`, the executor:\n  1. runs the tool's `preview` (its refusals stay `invalid_input`/`forbidden`/`not_found`, record no action and skip the execute);\n  2. runs the tool's `execute` as the caller;\n  3. masks the outcome text with `maskSecrets` and caps it at `RESULT_CAP_BYTES` minus 64 bytes, so the action suffix always fits: `EXECUTED` with the execute text, or `FAILED` with the `ToolActionError` text, `not_found`, or `error: <tool> failed` (the mapping `executeAction` uses);\n  4. calls `recordDirect` with that status and text;\n  5. answers `<text>\\naction <actionId>`, with `isError` false for `EXECUTED` and true for `FAILED`. The audit row's `outcome` is `ok` for `EXECUTED`, `not_found` for a `not_found` failure and `error` for any other failure.\n  - If `recordDirect` throws after the tool's write, the executor logs the error and answers `error: <tool> failed (the change was made but its action was not recorded)` with `isError` true; the tool's write stands.\n  - Modes `self` and `agent` are not served: the executor answers `error: <tool> failed`, logs it, and records no action. Mode `human` for an MCP origin is likewise refused (only a thread can hold a proposal).\n- Mode `human` for a thread origin keeps `proposeWrite` exactly as today.\n- Failure mapping: a preview refusal by `ToolInputError` answers `invalid_input: <reason>`; by `ToolForbiddenError` answers `forbidden: …`; by `NotFoundAppException` answers `not_found`; an execute that throws `ToolActionError` records `FAILED` with its text; `NotFoundAppException` records `FAILED` with `not_found`; anything else records `FAILED` with `error: <tool> failed` and the stack is logged.\n\n**Scope** — In: the executor's write path in assistant-tool.executor.ts. Out: the policy and `recordDirect` implementations (US-004, already done); MCP catalog and route (US-006, US-007). A preview refusal by `ToolForbiddenError` or `NotFoundAppException`, an execute that throws `NotFoundAppException` or an unexpected error, and the policy answering `agent` or `human` for an MCP origin follow the Failure Handling mappings through the code paths the pinned cases use; this feature adds no AC for each of them. `koda_get_action` for an action of another project answers `not_found` through the same scoped read the other-agent case pins; no AC for it. Feature-level: no notifications for `none`-mode actions, no serving of `self`/`agent`.\n\n**Interface**\n```typescript\n// executor write path (internal)\nconst mode: ApprovalMode = approvalModeFor(caller.origin, tool.name);\n// none  -> preview, execute, mask+cap (RESULT_CAP_BYTES - 64), recordDirect, answer `${text}\\naction ${actionId}`\n// human + thread origin -> proposeWrite (today)\n// self | agent | human + mcp origin -> { content: `error: ${tool} failed`, isError: true }, logged, no action\n```",
+      "acceptanceCriteria": [
+        "`executeFor` with an MCP caller for a write tool calls the tool's `execute` once and does not call the action proposer's `propose`.",
+        "When that write tool's `execute` answers `comment c1 added to WEB-1 /web/tickets/WEB-1` and `recordDirect` answers action id `a1`, the result content is `comment c1 added to WEB-1 /web/tickets/WEB-1\\naction a1` with `isError` false.",
+        "When that write tool's `execute` throws `new ToolActionError('dispatch refused: open PR on WEB-1')`, `recordDirect` receives status `FAILED` and result `dispatch refused: open PR on WEB-1`, and the answer has `isError` true.",
+        "When that write tool's `preview` throws `new ToolInputError('ref')`, the answer is `invalid_input: ref`, and neither the tool's `execute` nor `recordDirect` is called.",
+        "When `approvalModeFor` answers `self`, `executeFor` answers content `error: koda_add_comment failed` and calls neither `execute` nor `recordDirect`.",
+        "`recordDirect` receives `actorType` `agent`, `actorId` equal to the caller's agent id, `origin` `mcp` and the preview text the tool's `preview` answered.",
+        "When the tool's `execute` answers a text containing `ghp_abcdefghijklmnopqrstuvwxyz0123456789`, `recordDirect` receives a result with that token masked.",
+        "When the tool's `execute` answers a 20000-byte text, the answer content ends with `\\naction a1` and is at most `RESULT_CAP_BYTES` bytes long.",
+        "When `recordDirect` throws after the tool's `execute` succeeded, the answer is `error: koda_add_comment failed (the change was made but its action was not recorded)` with `isError` true.",
+        "The audit row of an `EXECUTED` direct call has `outcome` `ok` and `isError` false.",
+        "The audit row of a direct call whose `execute` threw `ToolActionError` has `outcome` `error` and `isError` true.",
+        "`executeFor` with an MCP caller for agent `claude` (rostered on `web`) running `koda_add_comment` with `{ project: 'web', ref: <a ticket of web>, body: 'from mcp' }` creates a `Comment` on that ticket whose `authorAgentId` is `claude`'s id.",
+        "That call stores one `PendingAction` with status `EXECUTED`, `actorType` `agent`, `actorId` `claude`'s id, `origin` `mcp` and `approvalMode` `none`.",
+        "`executeFor` with an MCP caller for `claude` running `koda_add_comment` with `{ project: 'ops', ... }` answers `not_found: project`, creates no `Comment` on `ops`, and stores no `PendingAction` in `ops`.",
+        "`executeFor` with an MCP caller for a second agent rostered on `web`, running `koda_get_action` with the id of `claude`'s stored action, answers content `not_found`."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "backend",
+        "logic"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "New write-execution branch in the core executor with masking, byte capping, partial-failure recording and audit mapping; many failure paths.",
+        "agentProfileId": "native-sol",
+        "agent": "native",
+        "profileModelTier": "powerful",
+        "initialAgent": "native",
+        "initialProfileId": "native-sol",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+        "apps/api/src/fleet/assistant/actions/approval-policy.ts",
+        "apps/api/src/fleet/assistant/tools/action-tools.ts",
+        "apps/api/test/integration/fleet/assistant-tool-executor.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/assistant-tool.executor.direct.spec.ts",
+        "apps/api/test/integration/fleet/assistant-direct-action.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A thread-origin write tool call still calls proposer.propose and never calls recordDirect",
+        "When the tool's execute throws NotFoundAppException, recordDirect receives status FAILED and result not_found and the audit outcome is not_found",
+        "When approvalModeFor answers human for an MCP origin, executeFor answers error: <tool> failed and records no action",
+        "When the tool's execute throws an unexpected Error, recordDirect receives status FAILED and result error: <tool> failed and the answer has isError true",
+        "When the tool's preview throws ToolForbiddenError, the answer starts with forbidden: and neither execute nor recordDirect is called"
+      ],
+      "outOfScope": [
+        "US-005 only: a preview refusal by `ToolForbiddenError` or `NotFoundAppException`, an execute that throws `NotFoundAppException` or an unexpected error, and the policy answering `agent` or `human` for an MCP origin follow the Failure Handling mappings through the code paths the pinned cases use; this feature adds no AC for each of them.",
+        "US-005 only: `koda_get_action` for an action of another project answers `not_found` through the same scoped read the other-agent case pins; this feature adds no AC for it."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+          "reason": "the write path calls `approvalModeFor`; `human` keeps `proposeWrite` for a thread origin, `none` takes the direct path, and the other answers refuse (3-D13, 3-D15)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "MCP tool catalog",
+      "description": "**Goal** — Add the MCP projection of the tool descriptors (`mcpToolDescriptors`, `MCP_DESCRIPTIONS`) and the `toMcpToolResult` mapper.\n\n**Motivation** — The thread wording ('only after the user approves it … do not call this tool again') is false over MCP, where writes run at once, so MCP clients need their own descriptions over the same input schemas.\n\n**Approach** —\n- **3-D16 MCP catalog.** `apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts` exports `mcpToolDescriptors(): readonly KodaToolDescriptor[]`: the WORKSPACE projection (`kodaToolDescriptorsFor('WORKSPACE')`), in its order, with the description of each tool named in `MCP_DESCRIPTIONS` replaced. `MCP_DESCRIPTIONS` holds one description for each of the nine write tools and for `koda_get_action`: the thread wording ('only after the user approves it … do not call this tool again') is false over MCP. Each write description says the call 'runs at once as the calling agent' and that the answer ends with the action id. In every MCP description, the WORKSPACE sentence ``In a workspace thread, name the project with `project` (a slug koda_my_projects lists).`` is replaced by ``Name the project with `project` (a slug koda_my_projects lists).``, which is true outside a thread. Input schemas are not changed.\n- **3-D17 MCP results.** `toMcpToolResult(result: ToolResult)` answers `{ content: [{ type: 'text', text: result.content }], isError: result.isError }`.\n- The nine write tools are `koda_add_comment`, `koda_create_tickets`, `koda_update_ticket`, `koda_link_tickets`, `koda_add_memory`, `koda_record_decision`, `koda_dispatch_job`, `koda_requeue_job`, `koda_cancel_job`.\n\n**Scope** — In: the new mcp-tool-catalog.ts and its spec only; it reads the descriptors without changing them (no edit to koda-tool-descriptors.ts). Out: the MCP server factory, controller, config and module wiring (US-007). Feature-level: no deriving of descriptions from the approval mode (fixed map until koda #301).\n\n**Interface**\n```typescript\nexport const MCP_DESCRIPTIONS: Readonly<Record<string, string>>;\nexport function mcpToolDescriptors(): readonly KodaToolDescriptor[];\nexport function toMcpToolResult(result: ToolResult): { content: Array<{ type: 'text'; text: string }>; isError: boolean };\n```",
+      "acceptanceCriteria": [
+        "`mcpToolDescriptors().map((d) => d.name)` equals `kodaToolDescriptorsFor('WORKSPACE').map((d) => d.name)`.",
+        "`mcpToolDescriptors()[0].name` is `koda_my_projects`.",
+        "Every `mcpToolDescriptors()` entry other than `koda_my_projects` has `inputSchema.required[0]` equal to `project`.",
+        "For every name, the `inputSchema` of the `mcpToolDescriptors()` entry deep-equals the `inputSchema` of the `kodaToolDescriptorsFor('WORKSPACE')` entry with the same name.",
+        "The keys of `MCP_DESCRIPTIONS`, as a set, equal `koda_get_action`, `koda_add_comment`, `koda_create_tickets`, `koda_update_ticket`, `koda_link_tickets`, `koda_add_memory`, `koda_record_decision`, `koda_dispatch_job`, `koda_requeue_job` and `koda_cancel_job`.",
+        "No `mcpToolDescriptors()` entry's `description` contains `only after the user approves`.",
+        "Every `mcpToolDescriptors()` entry for one of the nine write tools has a `description` containing `runs at once as the calling agent`.",
+        "Every `mcpToolDescriptors()` entry other than `koda_my_projects` has a `description` containing the text Name the project with `project` (literal backticks around project) and none contains `In a workspace thread`.",
+        "The `koda_search_tickets` entry of `mcpToolDescriptors()` has a `description` that starts with the `description` of `koda_search_tickets` in `KODA_TOOL_DESCRIPTORS`.",
+        "Every `mcpToolDescriptors()` description is at most 2000 characters long.",
+        "`toMcpToolResult({ content: 'x', isError: false })` deep-equals `{ content: [{ type: 'text', text: 'x' }], isError: false }`.",
+        "`toMcpToolResult({ content: 'not_found', isError: true })` answers `isError` true with the single text `not_found`."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "mcp",
+        "backend"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Single new pure module over existing descriptors plus a spec; no runtime dependencies on other stories.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/koda-tool-descriptors.ts",
+        "apps/api/src/fleet/assistant/koda-tool-descriptors.spec.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.types.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "MCP route",
+      "description": "**Goal** — Expose the tool layer at `POST/GET/DELETE /api/mcp` through the MCP TypeScript SDK v2, authenticated with agent API keys, behind an `MCP_ENABLED` flag.\n\n**Motivation** — koda was built agent-first (agents hold API keys, sit on rosters, work tickets via the CLI) yet an agent talking MCP has no koda server to call, so it cannot use the cited, masked, fenced tool results the in-app assistant gets.\n\n**Approach** —\n- **3-R1 Agent keys only.** MCP authenticates with the existing agent API key (`CombinedAuthGuard.tryApiKey`). No personal access token and no new key type. A user JWT is refused on the MCP route; runner `kr_` keys are already refused on every non-runner route.\n- **3-R7 MCP SDK v2.** `@modelcontextprotocol/server` 2.3.1 and `@modelcontextprotocol/node` 2.1.1 (already added to apps/api/package.json; this story only imports them). Both ship CommonJS builds. The SDK implements the stateless 2026-07-28 protocol and serves 2025-era clients through its stateless legacy fallback.\n- **3-D18 MCP route.** `apps/api/src/fleet/assistant/mcp/mcp.controller.ts`, in `AssistantModule`: `@Post('mcp')`, `@Get('mcp')` and `@Delete('mcp')` under the global `api` prefix, all forwarded to one handler. `@Throttle({ default: { limit: 120, ttl: 60_000 } })`. `@ApiExcludeController()` keeps the route out of `openapi.json` (precedent `fleet/repo-config/fleet-config-test-hooks.controller.ts`): MCP is a JSON-RPC protocol endpoint, not a REST contract. For the same reason it writes the SDK's `Response` directly instead of `JsonResponse.Ok`, with an inline comment saying so (`.nax/rules/api-controllers.md`). Refusals before the handler, in order: `mcpEnabled` false answers 409 `mcp.disabled`; a principal that is not an agent answers 403 `mcp.agentOnly`. The guard has already answered 401 for no or a bad bearer. The MCP handler is created once, in the controller's constructor: `createMcpHandler(factory, { responseMode: 'json' })` (default `legacy: 'stateless'`). Each request is converted with `toWebRequest(req.raw, body)`, passed as `handler.fetch(request, { authInfo })` where `authInfo.extra.principal` is the agent principal, and the `Response` status, headers and body are written to the Fastify reply. `mcp/mcp-server.factory.ts` exports two functions: `kodaMcpToolRegistrations(executor: Pick<AssistantToolExecutor, 'executeFor'>, principal: AgentPrincipal): McpToolRegistration[]`, one `{ name, description, inputSchema, handler }` per `mcpToolDescriptors()` entry, in order. Each `handler(input)` calls `executor.executeFor({ principal, origin: { kind: 'mcp' }, disabled: false }, { name, input })` and answers `toMcpToolResult(...)`; if `executeFor` throws, it logs the error and answers `toMcpToolResult({ content: 'error: <name> failed', isError: true })`. `createKodaMcpServer(registrations: McpToolRegistration[]): McpServer` builds `McpServer({ name: 'koda', version: '1' })` and calls `registerTool(name, { description, inputSchema }, handler)` for each, the schema wrapped with the SDK's JSON Schema adapter (for example `fromJsonSchema`). The handler factory passed to `createMcpHandler` reads the agent principal from the request's `authInfo` and answers `createKodaMcpServer(kodaMcpToolRegistrations(executor, principal))`. No Host or Origin validation: the route requires a bearer key, and koda-wk binds behind its own proxy.\n- **3-D19 Config.** A new `apps/api/src/config/mcp.config.ts`: `mcpConfig = registerAs('mcp', ...)` answering `IMcpConfig { mcpEnabled: boolean }` from `MCP_ENABLED` (`'true'` turns it on, anything else keeps it off). `AssistantModule` imports `ConfigModule.forFeature(mcpConfig)`, and `McpController` injects it with `@Inject(mcpConfig.KEY) cfg: ConfigType<typeof mcpConfig>`. It is not added to `ConfigBridgeModule` or the root `load` list, and `IFleetConfig` is unchanged.\n- i18n: `apps/api/src/i18n/en/mcp.json` and `apps/api/src/i18n/zh/mcp.json` carry the `disabled` (409) and `agentOnly` (403) messages (keys `mcp.disabled`, `mcp.agentOnly`).\n- Failure handling: GET/DELETE with an enabled route and an agent key answer 405 from the SDK's stateless legacy handling; an `executeFor` throw inside a tool handler answers `error: <tool> failed`, `isError: true`, logged.\n\n**Scope** — In: mcp.config.ts, mcp.controller.ts, mcp-server.factory.ts (+ spec), i18n json files, assistant.module.ts wiring and assistant.module.spec.ts. Out: executor and catalog changes (US-002..US-006, already done); web changes; openapi.json. A PAUSED agent authenticates and an unknown or OFFLINE key answers 401 as the existing guard does today (no AC beyond the missing-bearer case). `DELETE /api/mcp` answers 405 through the same SDK path as `GET`; the 409 `mcp.disabled` answer is the same controller check for every method; the 120-per-minute throttle (tracked per client IP, so agents behind one proxy share it), the JSON response mode, the handler being built once and the `error: <tool> failed` answer for a throwing `executeFor` carry no AC of their own. Feature-level: no OAuth metadata, no MCP resources/prompts/completions/tasks/elicitation/sampling, no Host/Origin validation.\n\n**Interface**\n```typescript\n// config/mcp.config.ts\nexport interface IMcpConfig { mcpEnabled: boolean }\nexport const mcpConfig = registerAs('mcp', (): IMcpConfig => ({ mcpEnabled: process.env.MCP_ENABLED === 'true' }));\n\n// mcp/mcp-server.factory.ts\n// one { name, description, inputSchema, handler } per mcpToolDescriptors() entry; handler(input) answers toMcpToolResult(...)\nexport interface McpToolRegistration { name: string; description: string; inputSchema: unknown; handler: (input: unknown) => Promise<unknown> }\nexport function kodaMcpToolRegistrations(executor: Pick<AssistantToolExecutor, 'executeFor'>, principal: AgentPrincipal): McpToolRegistration[];\nexport function createKodaMcpServer(registrations: McpToolRegistration[]): McpServer;\n```",
+      "acceptanceCriteria": [
+        "With `MCP_ENABLED` unset, `POST /api/mcp` with `claude`'s agent key and a `tools/list` request answers HTTP 409.",
+        "With `MCP_ENABLED=true`, `POST /api/mcp` with a user's JWT bearer answers HTTP 403.",
+        "With `MCP_ENABLED=true`, `POST /api/mcp` with no `Authorization` header answers HTTP 401.",
+        "With `MCP_ENABLED=true`, a JSON-RPC `initialize` request (`protocolVersion` `2025-11-25`) with `claude`'s key answers HTTP 200 with `result.serverInfo.name` `koda`.",
+        "A `tools/list` request with `claude`'s key answers tool names equal to `mcpToolDescriptors().map((d) => d.name)`.",
+        "A `tools/call` for `koda_search_tickets` with `{ project: 'web' }` and `claude`'s key (rostered on `web`) answers `result.isError` false and text naming a ticket of `web`.",
+        "A `tools/call` for `koda_search_tickets` with `{ project: 'ops' }` answers `result.isError` true and text `not_found: project`.",
+        "A `tools/call` for `koda_add_comment` with `{ project: 'web', ref: <a ticket of web>, body: 'via mcp' }` answers text ending `action <id>`, where `<id>` names a stored `PendingAction` with `approvalMode` `none`.",
+        "After that call, the ticket has a `Comment` with body `via mcp` and `authorAgentId` equal to `claude`'s id.",
+        "A `tools/call` for `koda_dispatch_job` with `{ project: 'web', repo: 'acme/app', command: 'RUN', feature: <a feature no other test uses>, maxCostUsd: 0.5 }` answers `result.isError` true and text `forbidden: koda_dispatch_job needs create FleetJob on web`.",
+        "After that call, no `FleetJob` with that feature exists and no `PendingAction` names `koda_dispatch_job` for `claude`.",
+        "While a `tools/call` for `koda_get_ticket` is sent to `POST /api/mcp` with `claude`'s key, a spy on `AssistantToolExecutor.executeFor` receives a caller whose `principal.id` is `claude`'s id and whose `origin` is `{ kind: 'mcp' }`.",
+        "`GET /api/mcp` with `claude`'s key and `MCP_ENABLED=true` answers HTTP 405.",
+        "In `assistant.module.spec.ts`, the compiled `AssistantModule` resolves `McpController`.",
+        "`kodaMcpToolRegistrations(stubExecutor, principal).map((r) => r.name)` equals `mcpToolDescriptors().map((d) => d.name)`."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "security",
+        "authentication",
+        "mcp",
+        "backend"
+      ],
+      "dependencies": [
+        "US-005",
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New externally reachable authenticated endpoint integrating a new SDK, agent-only authorization and feature flag; authentication/access-control surface triggers the security override.",
+        "agentProfileId": "claude-sonnet",
+        "agent": "claude",
+        "profileModelTier": "balanced",
+        "initialAgent": "claude",
+        "initialProfileId": "claude-sonnet",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/runner-tool.controller.ts",
+        "apps/api/src/fleet/assistant/assistant.module.ts",
+        "apps/api/src/config/fleet.config.ts",
+        "apps/api/src/fleet/repo-config/fleet-config-test-hooks.controller.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/config/mcp.config.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp.controller.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp-server.factory.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp-server.factory.spec.ts",
+        "apps/api/test/integration/fleet/mcp-route.integration.spec.ts",
+        "apps/api/src/i18n/en/mcp.json",
+        "apps/api/src/i18n/zh/mcp.json"
+      ],
+      "suggestedCriteria": [
+        "DELETE /api/mcp with claude's key and MCP_ENABLED=true answers HTTP 405",
+        "A registration handler whose executeFor throws answers { content: [{ type: 'text', text: 'error: <name> failed' }], isError: true }",
+        "GET /api/mcp with MCP_ENABLED unset answers HTTP 409"
+      ],
+      "outOfScope": [
+        "US-007 only: a PAUSED agent authenticates and an unknown or OFFLINE key answers 401, as the existing guard does today; this feature adds no AC for agent status or a bad key beyond the missing-bearer case.",
+        "US-007 only: `DELETE /api/mcp` answers 405 through the same SDK path as `GET`; the 409 `mcp.disabled` answer is the same controller check for every method; the 120-per-minute throttle (tracked per client IP, so agents behind one proxy share it), the JSON response mode, the handler being built once and the `error: <tool> failed` answer for a throwing `executeFor` carry no AC of their own."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.ts",
+          "reason": "imports gain `ConfigModule.forFeature(mcpConfig)` (3-D19); controllers gain `McpController`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.spec.ts",
+          "reason": "gains a test that `McpController` resolves in the compiled module; existing tests unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Goal: expose the S5b koda assistant tool layer (25 read/write tools in AssistantToolRegistry, run by AssistantToolExecutor) to external agents over MCP at POST /api/mcp, authenticated with existing agent API keys (CombinedAuthGuard.tryApiKey). The tool layer stops assuming a thread: a call has a ToolCaller (principal user|agent + origin thread|mcp). Every assistant write becomes one action record (PendingAction table generalised in place) with actorType/actorId, origin, approvalMode (none|self|agent|human), approverType/approverId. ApprovalPolicy code defaults: thread writes 'human' (propose, as today), MCP writes 'none' (execute at once, record EXECUTED/FAILED via recordDirect).\n\nKey files (all under apps/api): prisma/schema.prisma (PendingAction ~1114-1141, AssistantToolCall ~1090-1109); src/fleet/assistant/assistant-tool.executor.ts (execute, run, runInNamedProject, execTool, checkAction, executeAction, proposeWrite, RESULT_CAP_BYTES line ~19, findCallContext use ~147); assistant-tool.types.ts (ToolContext lines 7-17, ToolResult, ToolInputError, ToolForbiddenError, ToolActionError); assistant-tool-call.domain.ts + prisma-assistant-tool-call.repository.ts; actions/pending-action.domain.ts, actions/prisma-pending-action.repository.ts, actions/assistant-action.service.ts, actions/assistant-action-decisions.ts (unchanged); tools/action-tools.ts (getActionTool, addCommentTool), tools/add-memory-tool.ts, tools/record-decision-tool.ts, tools/fleet-tools.ts (koda_list_approvals reads ctx.actor.projectRole ~247); koda-tool-descriptors.ts (kodaToolDescriptorsFor, withProjectArgument ~704-724); runner-tool.controller.ts, assistant.module.ts; config/fleet.config.ts (registerAs pattern); fleet/repo-config/fleet-config-test-hooks.controller.ts (@ApiExcludeController precedent); auth/guards/combined-auth.guard.ts (tryApiKey 75-101); auth/principal/koda-principal.types.ts (isAgentPrincipal :44); projects/project-access.service.ts (findProjectIdBySlug, resolveMembership); auth/casl/koda-casl-ability.factory.ts; projects/project-context.ts (withProjectRole passes agent through).\n\nStory chain: US-001 -> US-002 -> US-003 -> US-004 -> US-005 -> US-007; US-006 independent, feeds US-007. US-001/002/003/005 all edit assistant-tool.executor.ts so they run sequentially; US-001 and US-004 both edit the pending-action domain/repository. US-001 must land schema + migration + every persistence consequence (both domain record types, both Prisma repositories, executor audit-row literal) so type-check and build pass on its own; thread behaviour unchanged.\n\nRisks: (1) Schema nullability change ripples into every mapper/seed that creates PendingAction/AssistantToolCall rows: assistant-action-delivery and assistant-action-send-delivery integration specs create PendingAction directly and need actorType/actorId. (2) PendingActionRecord stays the thread-action view (thread fields remain string); the mapper throws on a null thread field; all record-returning reads only match thread-origin rows. Direct actions are written by insertDirect and read by findScopedByActor returning ActionStatusView. (3) Migration 20261025090000_assistant_action_actor must backfill then set NOT NULL; no SQL comment or string may contain a semicolon (test helper migrationStatements splits on it). AssistantToolCall actorId is backfilled from the FleetJob.requestedById (not the thread, which may be deleted). (4) execute() keeps its front-check order: (jobId, toolCallId) replay, registry lookup, findCallContext, then shared run path; executeFor skips replay. (5) MCP origin follows WORKSPACE project rules; agent reach = roster under default AGENT_PROJECT_SCOPING; unreachable slug answers not_found: project. koda_my_projects over MCP runs with projectId/projectSlug ''. (6) Direct path: result text is masked with maskSecrets and capped at RESULT_CAP_BYTES minus 64 so the '\\naction <id>' suffix fits; recordDirect failure after write answers the 'change was made but its action was not recorded' error. (7) checkAction/executeAction switch from findCallContext(action.jobId) to findUserActor(action.actorId); non-user actor => forbidden without a read; existing unit specs (assistant-tool.executor.spec.ts, action-result-masking.spec.ts, write-tool-errors.spec.ts, assistant-action-decisions.spec.ts) must have stubs/fixtures updated with findUserActor and actorType/actorId, no outcome changes. (8) MCP SDK v2 (@modelcontextprotocol/server 2.3.1, @modelcontextprotocol/node 2.1.1) is already added to apps/api/package.json before the run; US-007 only imports them. Handler built once in controller constructor via createMcpHandler(factory, { responseMode: 'json' }); request converted with toWebRequest(req.raw, body); authInfo.extra.principal carries the agent principal; Response written directly to the Fastify reply (with an inline comment explaining why not JsonResponse.Ok, per .nax/rules/api-controllers.md). Controller is @ApiExcludeController so openapi.json is unchanged. MCP_ENABLED config via registerAs('mcp') in config/mcp.config.ts, imported with ConfigModule.forFeature in AssistantModule only (not ConfigBridgeModule, not root load list, IFleetConfig unchanged). i18n keys mcp.disabled (409) and mcp.agentOnly (403) in both en and zh (API i18n lives in apps/api/src/i18n/{en,zh}).\n\nTests: unit specs *.spec.ts beside source (vitest); integration under apps/api/test/integration/fleet/ using seedFleetHttpWorld (project web with repo acme/app, foreign project ops), DEVELOPER dev, RUNNING REPO THREAD job from seedThreadJobFor, FLEET_THREADS_ENABLED=true before boot; agent tests create agent claude via seedFleetHttpAgent plus AgentProject row for web only. Compose test DB required (bun run test:db:up). Each test reads only what it wrote and passes in any order (.nax/rules/api-test-isolation.md). Migration test follows test/integration/outbox/outbox-migration.integration.spec.ts using migrationsBefore/applyMigration from test/helpers/migration-schema.ts. No REST DTO changes so openapi.json is not regenerated.\n\nCode style: immutability, small files, no emojis, conventional commits.",
+  "outOfScope": [
+    "A personal access token or any user-scoped key; MCP authenticates with agent API keys only (3-R1).",
+    "User JWT callers on the MCP route; they are refused with `mcp.agentOnly` (3-R1).",
+    "A web editor or store for the approval policy, per-project or per-agent modes, and an agent-facing decide path for `agent` mode (koda #301).",
+    "Serving the `self` and `agent` approval modes; the policy never answers them here, and the executor refuses them.",
+    "Dropping `PendingAction.requestedById` and `PendingAction.decidedById`. This feature still writes them for thread rows; the contract step that drops them follows after this feature is deployed.",
+    "Renaming the `PendingAction` table or its model.",
+    "Changing the approval payload key `requestedById` that the web reads (`apps/web/lib/fleet-approvals.ts`).",
+    "Any web change: thread actions render as today, and MCP actions never reach the inbox (mode `none`).",
+    "Changes to the runner, the fleet protocol, the ASSIGN tool descriptors or `FLEET_PROTOCOL_VERSION`.",
+    "Deriving tool descriptions from the approval mode; the MCP descriptions are a fixed map until koda #301.",
+    "Granting agents `FleetJob` or other new abilities; agents keep the agent CASL they have over REST.",
+    "Idempotent replay of an MCP tool call; MCP calls carry no tool-call id (3-D5).",
+    "MCP resources, prompts, completions, `subscriptions/listen`, tasks, elicitation and sampling.",
+    "OAuth protected-resource metadata or any MCP authorization-server flow.",
+    "Host-header or Origin validation on the MCP route (3-D18).",
+    "A per-agent cap on actions; `none`-mode actions are never pending, and the per-thread cap is unchanged.",
+    "Adding `@modelcontextprotocol/server@2.3.1` and `@modelcontextprotocol/node@2.1.1` to `apps/api/package.json` and the lockfile; this is done on the spec branch before `nax run`, not by a story.",
+    "Notifications for `none`-mode actions; no approval is requested, so `fleet_approval_requested` is not enqueued.",
+    "An `openapi.json` change; the MCP controller is excluded from the spec (3-D18).",
+    "US-002 only: the WORKSPACE-thread and REPO-thread project rules are unchanged and are covered by the existing executor specs; this feature adds no AC for them.",
+    "US-005 only: a preview refusal by `ToolForbiddenError` or `NotFoundAppException`, an execute that throws `NotFoundAppException` or an unexpected error, and the policy answering `agent` or `human` for an MCP origin follow the Failure Handling mappings through the code paths the pinned cases use; this feature adds no AC for each of them.",
+    "US-005 only: `koda_get_action` for an action of another project answers `not_found` through the same scoped read the other-agent case pins; this feature adds no AC for it.",
+    "US-007 only: a PAUSED agent authenticates and an unknown or OFFLINE key answers 401, as the existing guard does today; this feature adds no AC for agent status or a bad key beyond the missing-bearer case.",
+    "US-007 only: `DELETE /api/mcp` answers 405 through the same SDK path as `GET`; the 409 `mcp.disabled` answer is the same controller check for every method; the 120-per-minute throttle (tracked per client IP, so agents behind one proxy share it), the JSON response mode, the handler being built once and the `error: <tool> failed` answer for a throwing `executeFor` carry no AC of their own."
+  ],
+  "routingProfile": "cross-agent+cc-plan"
+}
