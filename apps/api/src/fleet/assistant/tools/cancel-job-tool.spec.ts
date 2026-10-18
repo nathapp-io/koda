@@ -162,6 +162,16 @@ describe('koda_cancel_job preview (US-005)', () => {
     expect(await previewReasonOf(tool, tool.parse({ jobId: 'j1' }))).toBe('command');
   });
 
+  it('#299: the state and command refusals say why', async () => {
+    const ended = harness({ job: { ...JOB, state: 'CANCELLED' } as FleetJobDto }).tool;
+    const thread = harness({ job: { ...JOB, command: 'THREAD', state: 'RUNNING' } as FleetJobDto }).tool;
+
+    expect(((await failureOf(() => previewOf(ended, ended.parse({ jobId: 'j1' })))) as ToolInputError).detail)
+      .toBe('the job is CANCELLED and has already ended');
+    expect(((await failureOf(() => previewOf(thread, thread.parse({ jobId: 'j1' })))) as ToolInputError).detail)
+      .toBe('a THREAD job cannot be cancelled with this tool');
+  });
+
   it('AC-13: the preview is masked, so a token in the feature never appears', async () => {
     const { tool } = harness({ job: { ...JOB, feature: TOKEN } as FleetJobDto });
 

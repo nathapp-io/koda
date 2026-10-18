@@ -109,6 +109,12 @@ describe('US-001 2b1-D1: a write preview refuses with a mapped outcome', () => {
     expect(await executor.execute(call())).toEqual({ content: 'invalid_input: status', isError: true });
   });
 
+  it('#299: a refusal with a detail answers invalid_input: <field>: <detail>', async () => {
+    const { executor } = setup({ preview: vi.fn(async () => { throw new ToolInputError('status', 'SB-1 is VERIFY_FIX'); }) });
+
+    expect(await executor.execute(call())).toEqual({ content: 'invalid_input: status: SB-1 is VERIFY_FIX', isError: true });
+  });
+
   it('AC-2: that call never reaches the proposer', async () => {
     const { executor, tool, proposer } = setup({ preview: vi.fn(async () => { throw new ToolInputError('status'); }) });
 

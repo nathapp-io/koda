@@ -116,12 +116,12 @@ describeIntegration('fleet assistant update ticket tool (PG, US-004)', () => {
 
     const { content, isError } = resultOf(await callTool('ac14', { ref: 'KODA-1', status: 'IN_PROGRESS' }).expect(200));
 
-    expect({ content, isError }).toEqual({ content: 'invalid_input: status', isError: true });
+    expect({ content, isError }).toEqual({ content: 'invalid_input: status: KODA-1 is VERIFY_FIX; only a CREATED or VERIFIED ticket can be started', isError: true });
     expect(await prisma.pendingAction.count({ where: { jobId: repo.jobId, toolCallId: 'ac14' } })).toBe(0);
     expect(await ticketState()).toMatchObject({ status: 'VERIFY_FIX' });
     // The audit row proves the call reached the registered tool rather than being refused by name.
     expect(await prisma.assistantToolCall.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId: repo.jobId, toolCallId: 'ac14' } } }))
-      .toMatchObject({ tool: TOOL, outcome: 'invalid_input', isError: true, content: 'invalid_input: status' });
+      .toMatchObject({ tool: TOOL, outcome: 'invalid_input', isError: true, content: 'invalid_input: status: KODA-1 is VERIFY_FIX; only a CREATED or VERIFIED ticket can be started' });
   });
 
   it('AC-15: the approved start and priority change leave the ticket started with the new priority', async () => {
@@ -184,7 +184,7 @@ describeIntegration('fleet assistant update ticket tool (PG, US-004)', () => {
 
     const { content, isError } = resultOf(await callTool('ac-invalid', { ref: 'KODA-1', status: 'CLOSED' }).expect(200));
 
-    expect({ content, isError }).toEqual({ content: 'invalid_input: status', isError: true });
+    expect({ content, isError }).toEqual({ content: 'invalid_input: status: only IN_PROGRESS is accepted', isError: true });
     expect(await prisma.pendingAction.count({ where: { jobId: repo.jobId, toolCallId: 'ac-invalid' } })).toBe(0);
   });
 

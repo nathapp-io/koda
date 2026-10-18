@@ -1,3 +1,4 @@
+import { FleetJobState } from '../../../common/enums';
 import { maskSecrets } from '../assistant-tool-safety';
 import { KODA_REQUEUE_JOB } from '../koda-tool-descriptors';
 import { ToolActionError, ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
@@ -6,7 +7,7 @@ import { canTransition } from '../../jobs/job-state';
 import type { FleetJobsService } from '../../jobs/fleet-jobs.service';
 import type { KnowledgeIndexService } from '../../knowledge/knowledge-index.service';
 import { fleetWriteRefusal } from './fleet-write-refusal';
-import { asRecord, jobPath } from './tool-input';
+import { asRecord, jobPath, orList } from './tool-input';
 
 /**
  * Fleet S5b 2b2 US-004: `koda_requeue_job` proposes running one terminal job of the thread's project again —
@@ -17,6 +18,8 @@ import { asRecord, jobPath } from './tool-input';
 
 /** 2b2-D3: a job id, as `koda_list_jobs` spells it. */
 const MAX_JOB_ID_CHARS = 64;
+/** The states the server may move back to QUEUED, read off the state machine so the refusal never drifts from it. */
+const REQUEUEABLE: readonly string[] = Object.values(FleetJobState).filter((state) => canTransition(state, 'QUEUED', 'server'));
 
 /** One proposed requeue, as the parser accepted it. */
 export interface RequeueJobInput {
@@ -48,8 +51,10 @@ export function requeueJobTool(fleetJobs: FleetJobsService, knowledge: Knowledge
      */
     async preview(ctx: ToolContext, input: RequeueJobInput): Promise<string> {
       const job = await fleetJobs.get(ctx.projectId, input.jobId);
-      if (isThreadKind(job.command)) throw new ToolInputError('command');
-      if (!canTransition(job.state, 'QUEUED', 'server')) throw new ToolInputError('state');
+      if (isThreadKind(job.command)) throw new ToolInputError('command', `a ${job.command} job cannot be requeued with this tool`);
+      if (!canTransition(job.state, 'QUEUED', 'server')) {
+        throw new ToolInputError('state', `the job is ${job.state}; only a ${orList(REQUEUEABLE)} job can be requeued`);
+      }
       const repo = await knowledge.resolveProjectRepo(ctx.projectId, { repoId: job.repoId });
       const named = repo ? `${repo.owner}/${repo.name}` : job.repoId;
       return maskSecrets(

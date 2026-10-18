@@ -47,11 +47,23 @@ export interface ToolResult {
   isError: boolean;
 }
 
-/** A tool's parser refuses the input; the executor answers `invalid_input: <reason>`. */
+/** Longest `detail` an `invalid_input` refusal carries. */
+const MAX_INPUT_DETAIL_CHARS = 200;
+
+/**
+ * A tool's parser or preview refuses the input; the executor answers `invalid_input: <reason>`, or
+ * `invalid_input: <reason>: <detail>` when the field alone does not say why (#299). A detail is built from
+ * server-side values only (enum states, a validated ref), never from untrusted text such as a ticket title.
+ */
 export class ToolInputError extends Error {
-  constructor(readonly reason: string) {
+  constructor(readonly reason: string, readonly detail?: string) {
     super(reason);
     this.name = 'ToolInputError';
+  }
+
+  /** The refusal text the agent reads. */
+  get refusalText(): string {
+    return this.detail ? `invalid_input: ${this.reason}: ${this.detail.slice(0, MAX_INPUT_DETAIL_CHARS)}` : `invalid_input: ${this.reason}`;
   }
 }
 

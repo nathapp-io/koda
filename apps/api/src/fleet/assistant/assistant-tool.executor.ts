@@ -315,7 +315,7 @@ export class AssistantToolExecutor {
     } catch (error) {
       if (error instanceof NotFoundAppException) return { ...refusal('not_found', 'not_found'), projectId: scope.id };
       // 2b1-D1: a preview's own refusals are data for the agent, and both stop before `propose`, so no action exists.
-      if (error instanceof ToolInputError) return { ...refusal('invalid_input', `invalid_input: ${error.reason}`), projectId: scope.id };
+      if (error instanceof ToolInputError) return { ...refusal('invalid_input', error.refusalText), projectId: scope.id };
       if (error instanceof ToolForbiddenError) {
         return { ...refusal('forbidden', `forbidden: ${name} needs ${error.need} on ${scope.slug}`), projectId: scope.id };
       }
@@ -455,7 +455,7 @@ function parseInput(tool: AssistantTool, input: unknown): { value: unknown } | {
   try {
     return { value: tool.parse(input) };
   } catch (error) {
-    if (error instanceof ToolInputError) return { refusal: refusal('invalid_input', `invalid_input: ${error.reason}`) };
+    if (error instanceof ToolInputError) return { refusal: refusal('invalid_input', error.refusalText) };
     throw error;
   }
 }

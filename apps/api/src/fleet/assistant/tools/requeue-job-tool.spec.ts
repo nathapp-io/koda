@@ -169,6 +169,16 @@ describe('koda_requeue_job preview (US-004)', () => {
     expect(await previewReasonOf(tool, tool.parse({ jobId: 'j1' }))).toBe('state');
   });
 
+  it('#299: the state and command refusals say why', async () => {
+    const running = harness({ job: { ...JOB, state: 'RUNNING' } as FleetJobDto }).tool;
+    const thread = harness({ job: { ...JOB, command: 'THREAD', state: 'CRASHED' } as FleetJobDto }).tool;
+
+    expect(((await failureOf(() => previewOf(running, running.parse({ jobId: 'j1' })))) as ToolInputError).detail)
+      .toBe('the job is RUNNING; only a FAILED, CRASHED or CANCELLED job can be requeued');
+    expect(((await failureOf(() => previewOf(thread, thread.parse({ jobId: 'j1' })))) as ToolInputError).detail)
+      .toBe('a THREAD job cannot be requeued with this tool');
+  });
+
   it('AC-5: a THREAD job refuses with reason command, whatever its state (2b2-R5)', async () => {
     const { tool } = harness({ job: { ...JOB, command: 'THREAD', state: 'CRASHED' } as FleetJobDto });
 
