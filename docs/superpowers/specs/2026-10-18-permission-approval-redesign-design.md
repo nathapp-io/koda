@@ -537,6 +537,52 @@ Each phase can be split into an API feature and a web feature. P1 and P2 can run
 
 ---
 
+## Notes for writing the P1 specs (read before drafting any `permissions-p1-*` spec)
+
+The first spec, `permissions-p1-roles`, needed three spec-review passes. Each item below was a blocker in one of those passes. A spec that follows these notes should pass in one or two.
+
+### Before drafting
+
+- **Size the feature first.** Count the routes, readers and writers it touches, and the existing tests that build the services it changes, before writing any story. If the count points past 7 stories or 15 ACs per story, split the feature **before** drafting, not after the first review. `permissions-p1-roles` was split after review 1 into roles + membership.
+- **Treat `.nax/features/permissions-p1-roles/spec.md` as the reference.** Reuse its conventions: rulings 1-9 in its Design, the Service signatures, Failure Handling with exception classes, and the Modifies wording. Its decisions carry over to every later P1 feature unless a spec says otherwise.
+
+### Decisions already made: do not re-decide them
+
+- **Global Owner and Admin** hold every key in `expandEntries(['*'], 'PROJECT')`, in every project **and** in the `'global'` set used for escalation checks.
+- **Order of checks** on every new write route:
+  1. the permission key;
+  2. input validation and lookups;
+  3. self-binding;
+  4. escalation;
+  5. Owner lock.
+
+  Write ACs that match this order. An AC that expects a later step's error when an earlier step fails is a contradiction.
+- **Legacy reads are unioned until `permissions-p1-cleanup`.** Membership answers combine bindings with the legacy `ProjectMember`, `AgentProject` and `User.role = 'ADMIN'`. New writes go to bindings only. Removals and demotions also clear the legacy row or column.
+- **Every change to `User.role`** bumps `tokenVersion` and invalidates `userTokenVersionCacheTag` and `userAuthStateCacheKey`, as `UsersAdminService.update` does today. A spec that drops this is a security regression.
+- **Exceptions** are constructed as `new XAppException({}, 'permissions.<code>')`, with messages at the nested i18n key `permissions.<code>.<status>` in both `en` and `zh`.
+- **Repositories** extend `AbstractPrismaRepository`, sit behind symbol tokens, and are never exported (`.nax/rules/api-data.md`).
+- **Unique index names must contain the column** that `isUniqueViolation(error, field)` matches on. The helper substring-matches index names, because Prisma 7 driver adapters give no field list.
+- **A new module** must be added to `AppModule` imports, and the spec must list `apps/api/src/app.module.ts` in Modifies.
+- **Tests that need seeded roles** run `SystemRoleSeeder` after `resetDb`, which truncates every table.
+
+### Checks to run before handing a draft to spec-review
+
+1. **Derivation check.**
+   - Before `permissions-p1-roles` is implemented: run any catalog, scope or role-entry rule the spec states against the TSV with a script. Expand every seeded role and every wildcard.
+   - After it is implemented: use `expandEntries` and `findCatalogEntry` from `apps/api/src/permissions/` instead of re-deriving.
+
+   A rule that is never executed is where review 1 found its blockers.
+2. **Constructor and DI sweep.** For every service whose constructor or module wiring changes, grep `src/` and `test/` for:
+   - `new <Service>(`;
+   - provider lists that include the real class, not a `useValue` double;
+   - module specs with their own `FakeGlobalsModule`.
+
+   Every hit that a correct implementation breaks goes into `### Modifies`, one file per bullet. Also state the position of any new constructor parameter: required parameters come before the `@Optional()` ones.
+3. **Prisma-stub sweep.** For every reader moved off a legacy table, grep its `*.spec.ts` for stubs of `projectMember`, `agentProject`, `agentRoleEntry` or `user`, and for exact `where` assertions. Each stub test goes into Modifies.
+4. **Story-order check.** No AC may call a route or symbol created by a later story. No Modifies entry may import a class a later story creates. That was the `GlobalStubsModule` blocker.
+5. **Fix-induced drift.** After fixing review findings, re-read every place the changed rule is used before re-submitting: the `can` rules, the escalation rules, the Failure table and the ACs. Review 3's blockers were all fixes that reached only one of the places the rule applies.
+6. Run `nax spec lint` and the banned-token sweep last.
+
 ## Appendix A: seeded roles (P1 seed and test matrix)
 
 Entries use the grammar in §2. Keys come from the TSV, plus the new keys listed below. Expand wildcards against the catalog at seed time.
