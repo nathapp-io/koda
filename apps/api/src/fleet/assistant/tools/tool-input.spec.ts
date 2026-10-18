@@ -1,4 +1,4 @@
-import { asRecord, jobPath, ticketPath } from './tool-input';
+import { asRecord, jobPath, orList, ticketPath } from './tool-input';
 
 /**
  * US-002 (2b1-D8): the two input helpers every write tool shares, moved out of `action-tools.ts` unchanged.
@@ -41,5 +41,14 @@ describe('US-001 AC-14: jobPath names a fleet job by its web path', () => {
 
   it('does not rewrite its arguments', () => {
     expect(jobPath('koda-api', 'job-42')).toBe('/koda-api/fleet/jobs/job-42');
+  });
+});
+
+describe('#299: orList names the allowed values a refusal lists', () => {
+  it('joins none, one, two and three values', () => {
+    expect(orList([])).toBe('');
+    expect(orList(['A'])).toBe('A');
+    expect(orList(['A', 'B'])).toBe('A or B');
+    expect(orList(['A', 'B', 'C'])).toBe('A, B or C');
   });
 });

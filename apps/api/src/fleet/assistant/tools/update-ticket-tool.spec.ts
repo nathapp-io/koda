@@ -81,6 +81,12 @@ describe('koda_update_ticket parse (US-004)', () => {
     expect(reasonOf(() => toolDeps().tool.parse({ ref: 'KODA-1', status: 'CLOSED' }))).toBe('status');
   });
 
+  it('#299: a status other than IN_PROGRESS says which status is accepted', async () => {
+    const failure = await failureOf(async () => toolDeps().tool.parse({ ref: 'KODA-1', status: 'CLOSED' }));
+
+    expect((failure as ToolInputError).detail).toBe('only IN_PROGRESS is accepted');
+  });
+
   it('keeps the fields as written and drops nothing the caller gave', () => {
     const tool = toolDeps().tool;
 
@@ -186,6 +192,14 @@ describe('koda_update_ticket preview (US-004)', () => {
 
     expect(failure).toBeInstanceOf(ToolInputError);
     expect((failure as ToolInputError).reason).toBe('status');
+  });
+
+  it('#299: a refused start names the ticket status and the statuses that can start', async () => {
+    const deps = toolDeps({ ticket: { status: TicketStatus.VERIFY_FIX } });
+
+    const failure = await failureOf(() => previewOf(deps.tool, deps.tool.parse({ ref: 'KODA-1', status: 'IN_PROGRESS' })));
+
+    expect((failure as ToolInputError).detail).toBe('KODA-1 is VERIFY_FIX; only a CREATED or VERIFIED ticket can be started');
   });
 
   it('refuses a start from CLOSED, REJECTED and an already started ticket', async () => {

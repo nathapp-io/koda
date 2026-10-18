@@ -52,8 +52,8 @@ export function cancelJobTool(fleetJobs: FleetJobsService, knowledge: KnowledgeI
      */
     async preview(ctx: ToolContext, input: CancelJobInput): Promise<string> {
       const job = await fleetJobs.get(ctx.projectId, input.jobId);
-      if (isThreadKind(job.command)) throw new ToolInputError('command');
-      if (isTerminal(job.state)) throw new ToolInputError('state');
+      if (isThreadKind(job.command)) throw new ToolInputError('command', `a ${job.command} job cannot be cancelled with this tool`);
+      if (isTerminal(job.state)) throw new ToolInputError('state', `the job is ${job.state} and has already ended`);
       const repo = await knowledge.resolveProjectRepo(ctx.projectId, { repoId: job.repoId });
       const named = repo ? `${repo.owner}/${repo.name}` : job.repoId;
       return maskSecrets(

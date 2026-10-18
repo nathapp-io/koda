@@ -138,13 +138,13 @@ describeIntegration('fleet assistant cancel job tool (PG, US-005)', () => {
   it('AC-12: cancelling the runner\'s own THREAD job answers invalid_input: command and stores no action', async () => {
     const { content, isError } = resultOf(await callTool('ac12', { jobId: repo.jobId }).expect(200));
 
-    expect({ content, isError }).toEqual({ content: 'invalid_input: command', isError: true });
+    expect({ content, isError }).toEqual({ content: 'invalid_input: command: a THREAD job cannot be cancelled with this tool', isError: true });
     expect(await prisma.pendingAction.count({ where: { jobId: repo.jobId, toolCallId: 'ac12' } })).toBe(0);
     // The thread's own job is untouched: a THREAD session ends through end-session, never through this tool (2b2-R5).
     expect((await jobState(repo.jobId)).state).toBe('RUNNING');
     // The audit row proves the call reached the registered tool rather than being refused by name.
     expect(await prisma.assistantToolCall.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId: repo.jobId, toolCallId: 'ac12' } } }))
-      .toMatchObject({ tool: TOOL, outcome: 'invalid_input', isError: true, content: 'invalid_input: command' });
+      .toMatchObject({ tool: TOOL, outcome: 'invalid_input', isError: true, content: 'invalid_input: command: a THREAD job cannot be cancelled with this tool' });
   });
 
   it('a terminal job answers invalid_input: state and stores no action', async () => {
@@ -152,7 +152,7 @@ describeIntegration('fleet assistant cancel job tool (PG, US-005)', () => {
 
     const { content, isError } = resultOf(await callTool('ac-state', { jobId }).expect(200));
 
-    expect({ content, isError }).toEqual({ content: 'invalid_input: state', isError: true });
+    expect({ content, isError }).toEqual({ content: 'invalid_input: state: the job is COMPLETED and has already ended', isError: true });
     expect(await prisma.pendingAction.count({ where: { jobId: repo.jobId, toolCallId: 'ac-state' } })).toBe(0);
     expect((await jobState(jobId)).state).toBe('COMPLETED');
   });

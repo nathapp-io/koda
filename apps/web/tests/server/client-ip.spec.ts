@@ -63,8 +63,9 @@ describe('wiring', () => {
 
   test('catch-all /api proxy overrides browser headers with the event client IP', () => {
     expect(read('server', 'api', '[...].ts')).toMatch(
-      /proxyRequest\(event, target, \{\s*headers: clientIpHeaders\(event\.context\.clientIp\)/,
+      /proxyRequest\(event, target, \{\s*headers: proxyHeaders\(event\.context\.clientIp, /,
     )
+    expect(read('server', 'utils', 'proxy-target.ts')).toMatch(/\.\.\.clientIpHeaders\(clientIp\),?\s*\}/)
   })
 
   test('SSR useApi sends the request event client IP, applied last', () => {

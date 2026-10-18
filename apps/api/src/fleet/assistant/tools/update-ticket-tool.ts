@@ -8,7 +8,7 @@ import { maskSecrets } from '../assistant-tool-safety';
 import { KODA_UPDATE_TICKET } from '../koda-tool-descriptors';
 import { ToolActionError, ToolForbiddenError, ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
 import { TICKET_REF } from './ticket-tools';
-import { asRecord, ticketPath } from './tool-input';
+import { asRecord, orList, ticketPath } from './tool-input';
 
 /**
  * Fleet S5b 2b1 US-004 (2b1-D5 to D7): `koda_update_ticket` proposes one ticket's title, description, priority or
@@ -85,7 +85,9 @@ export function updateTicketTool(deps: {
       if (input.status !== undefined) {
         // 2b1-D6: the ability first, so a requester without it answers `forbidden` whatever the ticket's status.
         await assertTransitionPermission(deps, ctx);
-        if (!canStart(ticket.status as TicketStatus)) throw new ToolInputError('status');
+        if (!canStart(ticket.status as TicketStatus)) {
+          throw new ToolInputError('status', `${ticket.ref} is ${ticket.status}; only a ${orList(STARTABLE)} ticket can be started`);
+        }
         lines.push(`status: ${ticket.status} -> ${input.status}`);
       }
       return maskSecrets(lines.join('\n'));
@@ -145,6 +147,9 @@ function canStart(from: TicketStatus): boolean {
   }
 }
 
+/** The statuses a start is allowed from, read off the state machine so the refusal never drifts from it. */
+const STARTABLE: readonly TicketStatus[] = Object.values(TicketStatus).filter(canStart);
+
 /** An absent field, or a string judged after trim by its own bounds; anything else is the named refusal (2b1-D5). */
 function optionalString(value: unknown, reason: string, minChars: number, maxChars: number): string | undefined {
   if (value === undefined) return undefined;
@@ -163,7 +168,7 @@ function optionalPriority(value: unknown): Priority | undefined {
 /** An absent field, or exactly the start status; every other status needs a typed comment this tool does not take. */
 function optionalStatus(value: unknown): TicketStatus | undefined {
   if (value === undefined) return undefined;
-  if (value !== START_STATUS) throw new ToolInputError('status');
+  if (value !== START_STATUS) throw new ToolInputError('status', `only ${START_STATUS} is accepted`);
   return START_STATUS;
 }
 

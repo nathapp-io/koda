@@ -141,12 +141,12 @@ describeIntegration('fleet assistant requeue job tool (PG, US-004)', () => {
 
     const { content, isError } = resultOf(await callTool('ac14', { jobId }).expect(200));
 
-    expect({ content, isError }).toEqual({ content: 'invalid_input: state', isError: true });
+    expect({ content, isError }).toEqual({ content: 'invalid_input: state: the job is RUNNING; only a FAILED, CRASHED or CANCELLED job can be requeued', isError: true });
     expect(await prisma.pendingAction.count({ where: { jobId: repo.jobId, toolCallId: 'ac14' } })).toBe(0);
     expect((await jobState(jobId)).state).toBe('RUNNING');
     // The audit row proves the call reached the registered tool rather than being refused by name.
     expect(await prisma.assistantToolCall.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId: repo.jobId, toolCallId: 'ac14' } } }))
-      .toMatchObject({ tool: TOOL, outcome: 'invalid_input', isError: true, content: 'invalid_input: state' });
+      .toMatchObject({ tool: TOOL, outcome: 'invalid_input', isError: true, content: 'invalid_input: state: the job is RUNNING; only a FAILED, CRASHED or CANCELLED job can be requeued' });
   });
 
   it('a job of another project answers not_found and stores no action', async () => {

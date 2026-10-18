@@ -9,6 +9,11 @@ export function asRecord(input: unknown): Record<string, unknown> {
   return input !== null && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
 }
 
+/** `a`, `a or b`, `a, b or c`: the allowed values a refusal names (#299). */
+export function orList(values: readonly string[]): string {
+  return values.length < 2 ? values.join('') : `${values.slice(0, -1).join(', ')} or ${values.at(-1)}`;
+}
+
 /** What every result names a ticket by: the web path a human can open. */
 export const ticketPath = (slug: string, ref: string): string => `/${slug}/tickets/${ref}`;
 
