@@ -27,6 +27,7 @@ import { RunnerToolController } from './runner-tool.controller';
 import { RunnerToolService } from './runner-tool.service';
 import { ActionTools } from './tools/action-tools';
 import { FleetTools } from './tools/fleet-tools';
+import { FleetWriteTools } from './tools/fleet-write-tools';
 import { KnowledgeTools } from './tools/knowledge-tools';
 import { MemoryWriteTools } from './tools/memory-write-tools';
 import { TicketTools } from './tools/ticket-tools';
@@ -69,6 +70,9 @@ import { WorkspaceTools } from './tools/workspace-tools';
     ActionTools,
     // S5b 2b1 US-003: the ticket write group. `koda_create_tickets` registers on init (2b1-D8).
     TicketWriteTools,
+    // S5b 2b2 US-003: the fleet write group. `koda_dispatch_job` registers on init (2b2-D8) and dispatches through
+    // FleetJobsModule's service; KnowledgeModule resolves the repository the input names.
+    FleetWriteTools,
     // S5b 2b1 US-006: the memory write group. `koda_add_memory` registers on init (2b1-D8) and upserts through
     // the repository MemoryModule already exports.
     MemoryWriteTools,
