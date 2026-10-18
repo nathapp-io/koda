@@ -96,7 +96,13 @@ export interface PermissionCatalogEntry {
 | 4 | `IMPLICIT_KEYS`: `auth.me.read`, `session.logout`, `home.read`, `notification.read`, `notification.mark-read`, `notification.preference.read`, `notification.preference.update`, `agent.self.read`, `assistant.action.read`, `mcp.access` | `implicit` | `any` | false |
 | 5 | every other key | `role` | see below | key is in `OWNABLE_KEYS` |
 
-**Scope for `role` keys.** Take every TSV row of the key, ignoring rows whose `catalog_scope` is `runner`, `system`, `public` or `implicit`. Then:
+**Scope for `role` keys.**
+- Keys in `OWNABLE_KEYS` take `any`.
+- For other keys, take every TSV row of the key:
+  - a row whose `catalog_scope` is `runner` counts as `global` (these are the admin runner routes, such as `fleet.runner.update`);
+  - rows whose `catalog_scope` is `system`, `public` or `implicit` are ignored.
+
+  Then:
 - only `project` rows → `project`;
 - only `global` rows → `global`;
 - a mix of `project` and `global`, or any `own (see design §1)` row → `any`.
@@ -509,7 +515,7 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 2. [unit] `findCatalogEntry` returns an entry for each of `role.read`, `role.manage`, `role.binding.manage`, `role.binding.global`, `role.binding.owner`, `approval.decide`, `approval.policy.read`, `approval.policy.manage`, `audit.read` and `memory.update`, and returns `undefined` for `no.such.key`.
 3. [unit] `findCatalogEntry('runner.sync').access` is `'runner'` and `findCatalogEntry('system.schedule.dispatch').access` is `'system'`.
 4. [unit] `findCatalogEntry('notification.read').access` is `'implicit'`, `findCatalogEntry('mcp.access').access` is `'implicit'`, and `findCatalogEntry('session.login').access` is `'public'`.
-5. [unit] `findCatalogEntry('ticket.delete')` has `access` `'role'` and `scope` `'project'`; `findCatalogEntry('user.create')` has `scope` `'global'`; `findCatalogEntry('agent.read')` has `scope` `'any'`.
+5. [unit] `findCatalogEntry('ticket.delete')` has `access` `'role'` and `scope` `'project'`; `findCatalogEntry('user.create')` and `findCatalogEntry('fleet.runner.update')` have `scope` `'global'`; `findCatalogEntry('agent.read')` and `findCatalogEntry('comment.update')` have `scope` `'any'`.
 6. [unit] `findCatalogEntry('comment.update').ownable` and `findCatalogEntry('thread.stop').ownable` are `true`; `findCatalogEntry('ticket.delete').ownable` and `findCatalogEntry('thread.create').ownable` are `false`.
 7. [unit] `findCatalogEntry('ticket.delete').risk` is `'high'`, `findCatalogEntry('ticket.read').risk` is `'low'`, `findCatalogEntry('role.manage').risk` is `'critical'`, and `findCatalogEntry('ticket.create').risk` is `'medium'`.
 8. [unit] `findCatalogEntry('role.binding.owner').principals` equals `['user']`, and `findCatalogEntry('ticket.create').principals` equals `['user', 'agent']`.
