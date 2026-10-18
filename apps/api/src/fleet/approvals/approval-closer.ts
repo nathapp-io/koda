@@ -48,7 +48,8 @@ export interface AssistantActionAsk {
   threadId: string;
   jobId: string;
   tool: string;
-  requestedById: string;
+  /** The requesting user (the action's `user` actor); the approval payload names it `requestedById`. */
+  actorId: string;
   expiresAt: Date;
 }
 
@@ -143,15 +144,15 @@ export class ApprovalCloser {
    * threadPath, requestedById}`. Born pending — the decide handler and the expiry sweeper are its only closers.
    */
   async openAssistant(action: AssistantActionAsk, threadPath: string, now: Date): Promise<AssistantApprovalChange> {
-    const actor = userActor(action.requestedById);
+    const actor = userActor(action.actorId);
     const approval = await this.repo.create({
       type: 'assistant_action', projectId: action.projectId, policyId: null, jobId: action.jobId, expiresAt: action.expiresAt,
       requestedAt: now,
-      payload: { actionId: action.id, tool: action.tool, threadId: action.threadId, threadPath, requestedById: action.requestedById },
+      payload: { actionId: action.id, tool: action.tool, threadId: action.threadId, threadPath, requestedById: action.actorId },
     });
     await this.record(approval, actor, 'approval.requested', { threadId: action.threadId });
     await this.dispatch(approval, 'fleet.approval.requested');
-    await this.enqueueRequested(approval, { requestedById: action.requestedById, threadPath, tool: action.tool });
+    await this.enqueueRequested(approval, { requestedById: action.actorId, threadPath, tool: action.tool });
     return { approval, live: this.livePublisher.event(approval) };
   }
 

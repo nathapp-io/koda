@@ -169,7 +169,7 @@ describeIntegration('fleet assistant link tickets tool (PG, US-005)', () => {
     expect(isError).toBe(false);
     expect(content.startsWith('pending ')).toBe(true);
     expect(await actionOf('ac15', viewerRepo)).toMatchObject({
-      tool: TOOL, status: 'PENDING', requestedById: world.ids.viewer,
+      tool: TOOL, status: 'PENDING', actorType: 'user', actorId: world.ids.viewer,
     });
     // Nothing is written while the approval waits.
     expect(await prisma.ticketLink.count({ where: { url: 'https://x.dev/viewer-doc' } })).toBe(0);

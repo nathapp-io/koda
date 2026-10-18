@@ -74,11 +74,11 @@ function executorFor(tool: AssistantTool<unknown>): AssistantToolExecutor {
 
 /** One approved action of that tool in project `web`, ready for `executeAction`. */
 const approvedAction = (): PendingActionRecord => ({
-  actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
+  actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: 'user', approverId: 'u1',
   id: 'a1', projectId: 'p1', projectSlug: 'web', threadId: 't1', jobId: 'j1', toolCallId: 'c1',
   tool: 'koda_link_tickets', input: { links: [{ ref: 'KODA-1', url: 'https://x.dev/a' }] },
-  preview: 'Link 1 URL(s) in web:', status: 'APPROVED', requestedById: 'u1', approvalId: 'ap1',
-  decidedById: 'u1', decidedAt: null, result: null, deliveredAt: null,
+  preview: 'Link 1 URL(s) in web:', status: 'APPROVED', approvalId: 'ap1',
+  decidedAt: null, result: null, deliveredAt: null,
   expiresAt: new Date('2026-10-24T09:00:00.000Z'), createdAt: new Date('2026-10-23T09:00:00.000Z'),
 });
 

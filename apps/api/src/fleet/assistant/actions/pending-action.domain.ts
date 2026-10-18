@@ -30,7 +30,7 @@ export interface PendingActionRecord {
   input: Record<string, unknown>;
   preview: string;
   status: PendingActionStatus;
-  requestedById: string;
+  /** Who asked for the action. A thread action's actor is always the requesting user. */
   actorType: 'user' | 'agent';
   actorId: string;
   origin: 'thread' | 'mcp';
@@ -38,7 +38,6 @@ export interface PendingActionRecord {
   approverType: 'user' | 'agent' | null;
   approverId: string | null;
   approvalId: string | null;
-  decidedById: string | null;
   decidedAt: Date | null;
   result: string | null;
   /** Written by `fleet-s5b-koda-actions-web`; this feature only creates the column. */
@@ -61,7 +60,8 @@ export interface NewPendingAction {
   tool: string;
   input: Record<string, unknown>;
   preview: string;
-  requestedById: string;
+  /** The requesting user, stored as the action's `user` actor. */
+  actorId: string;
   expiresAt: Date;
 }
 
@@ -79,7 +79,8 @@ export interface ProposeInput {
   tool: string;
   input: Record<string, unknown>;
   preview: string;
-  requestedById: string;
+  /** The requesting user, stored as the action's `user` actor. */
+  actorId: string;
   now: Date;
 }
 
@@ -163,11 +164,12 @@ export interface PendingActionRepository {
   insertSystemNote(threadId: string, content: string): Promise<string>;
 }
 
-/** 2a-D8 / 2a-D10: what a decide or an expiry writes to an action. `decidedById` stays null for an expiry. */
+/** 2a-D8 / 2a-D10: what a decide or an expiry writes to an action. An expiry records no approver. */
 export interface ActionResolution {
   status: Exclude<PendingActionStatus, 'PENDING'>;
   decidedAt: Date;
-  decidedById?: string;
+  /** The deciding user, stored as the action's `user` approver. */
+  approverId?: string;
   /** 2a-D8 step 8: the outcome an approved action's tool answered; absent when there is nothing to record. */
   result?: string;
 }

@@ -103,7 +103,7 @@ export class AssistantActionDecisions implements OnModuleInit, AssistantActionDe
   async expireLocked(action: PendingActionRecord, approval: FleetApprovalRecord, now: Date): Promise<SettledAction> {
     const expiredAction = await this.actions.resolve(action.id, { status: 'EXPIRED', decidedAt: now });
     const expired = await this.approvals.resolve(approval.id, { status: 'expired', resolvedBy: 'timeout', decidedAt: now });
-    const actor: ApprovalActor = { type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId: action.requestedById };
+    const actor: ApprovalActor = { type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId: action.actorId };
     const live = await this.closer.recordResolved(expired, actor);
     return { approval: expired, live, noteId: await this.actions.insertSystemNote(action.threadId, outcomeNote(expiredAction)) };
   }
@@ -128,7 +128,7 @@ export class AssistantActionDecisions implements OnModuleInit, AssistantActionDe
     const decided = await this.approvals.resolve(approval.id, {
       status: 'approved', resolvedBy: 'user', decidedAt: now, decision: 'approve', decidedById: caller.id, comment: dto.comment ?? null,
     });
-    const approved = await this.actions.resolve(action.id, { status: 'APPROVED', decidedById: caller.id, decidedAt: now });
+    const approved = await this.actions.resolve(action.id, { status: 'APPROVED', approverId: caller.id, decidedAt: now });
     return { approval: decided, live: await this.closer.recordResolved(decided, userActor(caller.id)), action: approved };
   }
 
@@ -146,7 +146,7 @@ export class AssistantActionDecisions implements OnModuleInit, AssistantActionDe
         // The column's own invariant: whatever answered the outcome, `result` never exceeds `RESULT_CAP_BYTES`.
         // `executeAction` already caps, so this is a clamp on text that fits, not a second truncation.
         result: capText(outcome.text, RESULT_CAP_BYTES),
-        decidedById: action.decidedById ?? undefined,
+        approverId: action.approverId ?? undefined,
         decidedAt: now,
       });
       return this.actions.insertSystemNote(settled.threadId, outcomeNote(settled));
@@ -157,7 +157,7 @@ export class AssistantActionDecisions implements OnModuleInit, AssistantActionDe
     const decided = await this.approvals.resolve(approval.id, {
       status: 'rejected', resolvedBy: 'user', decidedAt: now, decision: 'reject', decidedById: caller.id, comment: dto.comment ?? null,
     });
-    const rejected = await this.actions.resolve(action.id, { status: 'REJECTED', decidedById: caller.id, decidedAt: now });
+    const rejected = await this.actions.resolve(action.id, { status: 'REJECTED', approverId: caller.id, decidedAt: now });
     const live = await this.closer.recordResolved(decided, userActor(caller.id));
     return { approval: decided, live, noteId: await this.actions.insertSystemNote(action.threadId, outcomeNote(rejected)) };
   }

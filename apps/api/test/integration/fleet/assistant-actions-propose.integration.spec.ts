@@ -61,7 +61,7 @@ describeIntegration('AssistantActionService.propose (PG, US-001)', () => {
   const ask = (seed: Seed, over: Partial<ProposeInput> = {}): ProposeInput => ({
     projectId: world.projectId, threadId: seed.threadId, threadKind: 'REPO', threadProjectSlug: slug, jobId: seed.jobId,
     toolCallId: `tc-${++seq}`, tool: TOOL, input: { ref: 'KODA-1', body: 'hello' }, preview: 'Add a comment to KODA-1 "Fix login":\n\nhello',
-    requestedById: world.ids.dev, now: NOW, ...over,
+    actorId: world.ids.dev, now: NOW, ...over,
   });
 
   const call = (seed: Seed, over: Partial<ProposeInput> = {}) => service.propose(ask(seed, over));
@@ -97,7 +97,7 @@ describeIntegration('AssistantActionService.propose (PG, US-001)', () => {
     const row = await prisma.pendingAction.findUniqueOrThrow({ where: { id: actionId(result) } });
     expect(row).toMatchObject({
       status: 'PENDING', projectId: world.projectId, threadId: seed.threadId, jobId: seed.jobId,
-      tool: TOOL, requestedById: world.ids.dev, decidedById: null, decidedAt: null, result: null, deliveredAt: null,
+      tool: TOOL, actorType: 'user', actorId: world.ids.dev, approverId: null, decidedAt: null, result: null, deliveredAt: null,
     });
   });
 

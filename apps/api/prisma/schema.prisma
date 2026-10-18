@@ -1124,9 +1124,7 @@ model PendingAction {
   input              Json
   preview            String    @db.Text
   status             String    @default("PENDING") // PENDING | APPROVED | REJECTED | EXPIRED | EXECUTED | FAILED
-  requestedById      String?
   approvalId         String?   @unique
-  decidedById        String?
   decidedAt          DateTime?
   result             String?   @db.Text
   deliveredAt        DateTime?

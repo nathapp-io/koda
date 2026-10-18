@@ -24,7 +24,7 @@ const CALLER = { id: 'u1', globalAdmin: false };
 const action = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
   actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'act1', projectId: 'p1', projectSlug: 'web', threadId: 't1', jobId: 'j1', toolCallId: 'tc1', tool: 'koda_add_comment',
-  input: {}, preview: 'p', status: 'PENDING', requestedById: 'u1', approvalId: 'ap1', decidedById: null, decidedAt: null,
+  input: {}, preview: 'p', status: 'PENDING', approvalId: 'ap1', decidedAt: null,
   result: null, deliveredAt: null, expiresAt: FUTURE, createdAt: NOW, ...over,
 });
 
@@ -180,7 +180,7 @@ describe('AssistantActionDecisions.decide locked checks and reject', () => {
     expect(approvals.resolve).toHaveBeenCalledWith('ap1', {
       status: 'rejected', resolvedBy: 'user', decidedAt: NOW, decision: 'reject', decidedById: 'u1', comment: 'no thanks',
     });
-    expect(actions.resolve).toHaveBeenCalledWith('act1', { status: 'REJECTED', decidedById: 'u1', decidedAt: NOW });
+    expect(actions.resolve).toHaveBeenCalledWith('act1', { status: 'REJECTED', approverId: 'u1', decidedAt: NOW });
     expect(actions.insertSystemNote).toHaveBeenCalledWith('t1', 'Action act1 (koda_add_comment) was rejected by the user.');
     expect(closer.recordResolved).toHaveBeenCalledWith(expect.objectContaining({ status: 'rejected' }), { type: 'USER', id: 'u1', responsibleUserId: 'u1' });
     expect(result).toEqual(expect.objectContaining({ status: 'rejected', decision: 'reject' }));
@@ -276,7 +276,7 @@ describe('AssistantActionDecisions approve (2a-D8 step 8)', () => {
     expect(approvals.resolve).toHaveBeenCalledWith('ap1', {
       status: 'approved', resolvedBy: 'user', decidedAt: NOW, decision: 'approve', decidedById: 'u1', comment: 'ship it',
     });
-    expect(actions.resolve).toHaveBeenCalledWith('act1', { status: 'APPROVED', decidedById: 'u1', decidedAt: NOW });
+    expect(actions.resolve).toHaveBeenCalledWith('act1', { status: 'APPROVED', approverId: 'u1', decidedAt: NOW });
     expect(closer.recordResolved).toHaveBeenCalledWith(expect.objectContaining({ status: 'approved', decision: 'approve' }), { type: 'USER', id: 'u1', responsibleUserId: 'u1' });
     expect(executor.executeAction).toHaveBeenCalledWith(expect.objectContaining({ id: 'act1', projectSlug: 'web' }));
     expect(actions.resolve).toHaveBeenCalledWith('act1', expect.objectContaining({ status: 'EXECUTED', result: 'comment c1 added to KODA-1 /web/tickets/KODA-1' }));
@@ -374,7 +374,7 @@ describe('AssistantActionDecisions approve (2a-D8 step 8)', () => {
 
     expect(execute).not.toHaveBeenCalled();
     expect(run).not.toHaveBeenCalled();
-    expect(actions.resolve).toHaveBeenCalledWith('act1', { status: 'REJECTED', decidedById: 'u1', decidedAt: NOW });
+    expect(actions.resolve).toHaveBeenCalledWith('act1', { status: 'REJECTED', approverId: 'u1', decidedAt: NOW });
     expect(approvals.resolve).toHaveBeenCalledWith('ap1', expect.objectContaining({ status: 'rejected', decision: 'reject' }));
   });
 

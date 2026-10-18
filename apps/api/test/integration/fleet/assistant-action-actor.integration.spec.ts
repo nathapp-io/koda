@@ -48,7 +48,7 @@ integration('assistant action actors (PG)', () => {
   });
 
   const direct = () => db.pendingAction.create({ data: {
-    projectId: world.projectId, threadId: null, jobId: null, toolCallId: null, requestedById: null,
+    projectId: world.projectId, threadId: null, jobId: null, toolCallId: null,
     actorType: 'agent', actorId: 'agent-1', origin: 'mcp', approvalMode: 'none',
     tool: 'koda_add_comment', input: {}, preview: 'direct', status: 'EXECUTED', result: 'ok',
     decidedAt: new Date(), expiresAt: new Date(),
@@ -66,7 +66,7 @@ integration('assistant action actors (PG)', () => {
   }
 
   it('AC-7: permits an agent direct action with null thread fields', async () => {
-    expect(await direct()).toMatchObject({ actorType: 'agent', threadId: null, jobId: null, toolCallId: null, requestedById: null });
+    expect(await direct()).toMatchObject({ actorType: 'agent', threadId: null, jobId: null, toolCallId: null });
   });
   it('AC-8: permits multiple agent audit rows with null replay and project fields', async () => {
     for (let i = 0; i < 2; i++) {
@@ -89,7 +89,7 @@ integration('assistant action actors (PG)', () => {
   it.each([['AC-11', 'approve', 'EXECUTED'], ['AC-12', 'reject', 'REJECTED']])('%s: records the human approver on %s', async (_ac, decision, status) => {
     const row = await propose();
     await decide(row.approvalId as string, decision);
-    expect(await actions.findById(row.id)).toMatchObject({ status, approverType: 'user', approverId: world.ids.dev, decidedById: world.ids.dev });
+    expect(await actions.findById(row.id)).toMatchObject({ status, approverType: 'user', approverId: world.ids.dev });
   });
   it('AC-13: sweeper expiry has no approver', async () => {
     const row = await propose();

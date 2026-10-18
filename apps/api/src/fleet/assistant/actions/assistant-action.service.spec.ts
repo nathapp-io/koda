@@ -20,9 +20,9 @@ function fakes() {
     findByCall: vi.fn(async (): Promise<PendingActionRecord | null> => null),
     countPending: vi.fn(async () => 0),
     insert: vi.fn(async (action: NewPendingAction): Promise<PendingActionRecord> => ({
-      actorType: 'user', actorId: action.requestedById, origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
+      actorType: 'user', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
       ...action, id: 'act1', projectSlug: 'web', status: 'PENDING', approvalId: null,
-      decidedById: null, decidedAt: null, result: null, deliveredAt: null, createdAt: NOW,
+      decidedAt: null, result: null, deliveredAt: null, createdAt: NOW,
     })),
     setApprovalId: vi.fn(async () => undefined),
     insertDirect: vi.fn(async (_input: DirectActionInput): Promise<{ id: string }> => ({ id: 'ad1' })),
@@ -43,14 +43,14 @@ function fakes() {
 const ask = (over: Partial<ProposeInput> = {}): ProposeInput => ({
   projectId: 'p1', threadId: 't1', threadKind: 'REPO', threadProjectSlug: 'web', jobId: 'j1', toolCallId: 'tc1',
   tool: 'koda_add_comment', input: { ref: 'KODA-1', body: 'hello' }, preview: 'Add a comment to KODA-1 "Fix login":\n\nhello',
-  requestedById: 'u1', now: NOW, ...over,
+  actorId: 'u1', now: NOW, ...over,
 });
 
 const storedAction = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
   actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'act9', projectId: 'p1', projectSlug: 'web', threadId: 't1', jobId: 'j1', toolCallId: 'tc1', tool: 'koda_add_comment',
-  input: { ref: 'KODA-1', body: 'hello' }, preview: 'preview', status: 'PENDING', requestedById: 'u1', approvalId: 'ap1',
-  decidedById: null, decidedAt: null, result: null, deliveredAt: null, expiresAt: new Date(NOW.getTime() + ACTION_TTL_MS),
+  input: { ref: 'KODA-1', body: 'hello' }, preview: 'preview', status: 'PENDING', approvalId: 'ap1',
+  decidedAt: null, result: null, deliveredAt: null, expiresAt: new Date(NOW.getTime() + ACTION_TTL_MS),
   createdAt: NOW, ...over,
 });
 
@@ -94,7 +94,7 @@ describe('AssistantActionService.propose', () => {
 
     expect(repo.lockThread).toHaveBeenCalledWith('t7');
     expect(repo.insert).toHaveBeenCalledWith(expect.objectContaining({
-      projectId: 'p1', threadId: 't7', jobId: 'j1', toolCallId: 'tc1', tool: 'koda_add_comment', requestedById: 'u1',
+      projectId: 'p1', threadId: 't7', jobId: 'j1', toolCallId: 'tc1', tool: 'koda_add_comment', actorId: 'u1',
       expiresAt: new Date(NOW.getTime() + ACTION_TTL_MS),
     }));
     expect(repo.setApprovalId).toHaveBeenCalledWith('act1', 'ap1');

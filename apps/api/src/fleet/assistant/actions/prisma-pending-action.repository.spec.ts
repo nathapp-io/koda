@@ -10,8 +10,8 @@ import type { DirectActionInput } from './pending-action.domain';
 describe('PrismaPendingActionRepository deliveredMessageId mapping (2aw US-001 AC-11)', () => {
   const row = (over: Record<string, unknown> = {}) => ({
     id: 'a1', projectId: 'p1', threadId: 't1', jobId: 'j1', toolCallId: 'tc1', tool: 'koda_add_comment',
-    input: { ref: 'KODA-1' }, preview: 'Add a comment', status: 'REJECTED', requestedById: 'u1', approvalId: 'ap1',
-    decidedById: 'u1', decidedAt: new Date('2026-01-02T00:00:00.000Z'), result: null,
+    input: { ref: 'KODA-1' }, preview: 'Add a comment', status: 'REJECTED', approvalId: 'ap1',
+    actorType: 'user', actorId: 'u1', approverType: 'user', approverId: 'u1', decidedAt: new Date('2026-01-02T00:00:00.000Z'), result: null,
     deliveredAt: new Date('2026-01-03T00:00:00.000Z'), deliveredMessageId: 'm1',
     expiresAt: new Date('2026-01-04T00:00:00.000Z'), createdAt: new Date('2026-01-01T00:00:00.000Z'), ...over,
   });
@@ -101,7 +101,7 @@ describe('PrismaPendingActionRepository.insertDirect (US-004)', () => {
         preview: 'Add a comment to KODA-1 "Fix login":\n\nhello', status: 'EXECUTED', result: 'done',
         actorType: 'agent', actorId: 'ag1', origin: 'mcp', approvalMode: 'none',
         approverType: null, approverId: null, approvalId: null,
-        threadId: null, jobId: null, toolCallId: null, requestedById: null, decidedById: null,
+        threadId: null, jobId: null, toolCallId: null,
         decidedAt: NOW, expiresAt: NOW,
       },
       select: { id: true },

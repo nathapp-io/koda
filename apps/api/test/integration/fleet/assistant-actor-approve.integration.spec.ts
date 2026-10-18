@@ -121,7 +121,7 @@ integration('an approved thread action runs as its actor (PG, US-003)', () => {
 
     expect(readActor).toHaveBeenCalledWith(world.ids.dev);
     expect(readContext).not.toHaveBeenCalled();
-    expect(await actionRow(action.id)).toMatchObject({ status: 'EXECUTED', decidedById: world.ids.dev });
+    expect(await actionRow(action.id)).toMatchObject({ status: 'EXECUTED', approverType: 'user', approverId: world.ids.dev });
     const created = await commentsOf(ticket.id);
     expect(created).toHaveLength(1);
     expect(created[0]).toMatchObject({ body: BODY, authorUserId: world.ids.dev, authorAgentId: null });

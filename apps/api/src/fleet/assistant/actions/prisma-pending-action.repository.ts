@@ -51,8 +51,8 @@ export class PrismaPendingActionRepository
       actorType: d.actorType, actorId: d.actorId, origin: d.origin, approvalMode: d.approvalMode,
       approverType: d.approverType, approverId: d.approverId,
       projectId: d.projectId, threadId: d.threadId, jobId: d.jobId, toolCallId: d.toolCallId, tool: d.tool,
-      input: json(d.input), preview: d.preview, status: d.status, requestedById: d.requestedById,
-      approvalId: d.approvalId, decidedById: d.decidedById, decidedAt: d.decidedAt, result: d.result,
+      input: json(d.input), preview: d.preview, status: d.status,
+      approvalId: d.approvalId, decidedAt: d.decidedAt, result: d.result,
       deliveredAt: d.deliveredAt, deliveredMessageId: d.deliveredMessageId, expiresAt: d.expiresAt,
     };
   }
@@ -65,7 +65,6 @@ export class PrismaPendingActionRepository
     if (patch.input !== undefined) data['input'] = json(patch.input);
     if (patch.status !== undefined) data['status'] = patch.status;
     if (patch.approvalId !== undefined) data['approvalId'] = patch.approvalId;
-    if (patch.decidedById !== undefined) data['decidedById'] = patch.decidedById;
     if (patch.decidedAt !== undefined) data['decidedAt'] = patch.decidedAt;
     if (patch.result !== undefined) data['result'] = patch.result;
     if (patch.deliveredAt !== undefined) data['deliveredAt'] = patch.deliveredAt;
@@ -121,7 +120,7 @@ export class PrismaPendingActionRepository
 
   async insert(action: NewPendingAction): Promise<PendingActionRecord> {
     const row = await this.db.pendingAction.create({ data: {
-      ...action, input: json(action.input), actorType: 'user', actorId: action.requestedById, origin: 'thread', approvalMode: 'human',
+      ...action, input: json(action.input), actorType: 'user', origin: 'thread', approvalMode: 'human',
     } });
     return (await this.withSlug([row]))[0];
   }
@@ -138,7 +137,7 @@ export class PrismaPendingActionRepository
         status: input.status, result: input.result,
         actorType: input.actorType, actorId: input.actorId, origin: input.origin, approvalMode: 'none',
         approverType: null, approverId: null, approvalId: null,
-        threadId: null, jobId: null, toolCallId: null, requestedById: null, decidedById: null,
+        threadId: null, jobId: null, toolCallId: null,
         decidedAt: input.now, expiresAt: input.now,
       },
       select: { id: true },
@@ -160,7 +159,7 @@ export class PrismaPendingActionRepository
       data: {
         status: resolution.status,
         decidedAt: resolution.decidedAt,
-        ...(resolution.decidedById !== undefined ? { decidedById: resolution.decidedById, approverType: 'user', approverId: resolution.decidedById } : {}),
+        ...(resolution.approverId !== undefined ? { approverType: 'user', approverId: resolution.approverId } : {}),
         // 2a-D8 step 8: the terminal status and the tool's own outcome are written by the same statement.
         ...(resolution.result !== undefined ? { result: resolution.result } : {}),
       },
@@ -192,7 +191,7 @@ export class PrismaPendingActionRepository
   }
 
   private toRecord(m: PendingActionModel, projectSlug: string): PendingActionRecord {
-    if (m.threadId === null || m.jobId === null || m.toolCallId === null || m.requestedById === null) {
+    if (m.threadId === null || m.jobId === null || m.toolCallId === null) {
       throw new Error(`Malformed thread action ${m.id}: missing thread fields`);
     }
     return {
@@ -212,9 +211,7 @@ export class PrismaPendingActionRepository
       input: asObject(m.input),
       preview: m.preview,
       status: m.status as PendingActionStatus,
-      requestedById: m.requestedById,
       approvalId: m.approvalId,
-      decidedById: m.decidedById,
       decidedAt: m.decidedAt,
       result: m.result,
       deliveredAt: m.deliveredAt,
