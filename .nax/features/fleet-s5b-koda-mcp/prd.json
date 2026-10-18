@@ -3,7 +3,7 @@
   "feature": "fleet-s5b-koda-mcp",
   "branchName": "feat/fleet-s5b-koda-mcp",
   "createdAt": "2026-10-18T00:00:00.000Z",
-  "updatedAt": "2026-10-18T05:22:27.345Z",
+  "updatedAt": "2026-10-18T05:28:52.652Z",
   "userStories": [
     {
       "id": "US-001",
@@ -389,8 +389,8 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -402,7 +402,9 @@
         "profileModelTier": "powerful",
         "initialAgent": "native",
         "initialProfileId": "native-sol",
-        "initialModelTier": "powerful"
+        "initialModelTier": "powerful",
+        "initialComplexity": "complex",
+        "modelTier": "powerful"
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
@@ -431,7 +433,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "df4c61e3dab936d1a038dc5d41840bc0a76e806c"
     },
     {
       "id": "US-006",
