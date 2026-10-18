@@ -8,7 +8,7 @@ import { ApprovalLivePublisher } from '../../approvals/approval-live.publisher';
 import { ApprovalCloser } from '../../approvals/approval-closer';
 import { AssistantToolExecutor } from '../assistant-tool.executor';
 import {
-  ACTION_TTL_MS, MAX_PENDING_ACTIONS, PENDING_ACTION_REPOSITORY, ActionProposer, PendingActionRepository,
+  ACTION_TTL_MS, MAX_PENDING_ACTIONS, PENDING_ACTION_REPOSITORY, ActionProposer, DirectActionInput, PendingActionRepository,
   ProposeInput, ProposeResult, assistantThreadPath,
 } from './pending-action.domain';
 
@@ -51,6 +51,17 @@ export class AssistantActionService implements OnModuleInit, ActionProposer {
     // The thread's readers re-render on this: a new action card and its inbox row exist now.
     this.threads.publish({ id: randomUUID(), threadId: input.threadId, at: input.now.toISOString(), type: 'thread' });
     return { actionId: proposal.actionId };
+  }
+
+  /**
+   * 3-D14: the record of one write whose approval mode is `none` — the caller already ran the tool, so there is
+   * nothing to propose and nothing to decide. One insert of the terminal row is the whole record: `insertDirect`
+   * writes `approvalMode 'none'` with no approver, no approval, no thread fields and no requester, and no `PENDING`
+   * row ever exists for a direct action. Nothing is published on either bus and no `FleetApproval` is opened.
+   */
+  async recordDirect(input: DirectActionInput): Promise<{ actionId: string }> {
+    const { id } = await this.actions.insertDirect(input);
+    return { actionId: id };
   }
 
   /**

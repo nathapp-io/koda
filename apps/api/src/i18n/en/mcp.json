@@ -1,0 +1,4 @@
+{
+  "disabled": { "409": "The MCP endpoint is disabled" },
+  "agentOnly": { "403": "Only agents can use the MCP endpoint" }
+}

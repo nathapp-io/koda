@@ -1,5 +1,17 @@
 import type { KodaToolDescriptor } from '@nathapp/fleet-protocol';
-import type { UserPrincipal } from '../../auth/principal/koda-principal.types';
+import type { AgentPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
+import type { ChatThreadKind } from '../common/thread-jobs';
+
+export type ToolOrigin =
+  | { kind: 'thread'; threadId: string; jobId: string; threadKind: ChatThreadKind; homeProject: { id: string; slug: string } }
+  | { kind: 'mcp' };
+
+export interface ToolCaller {
+  principal: UserPrincipal | AgentPrincipal;
+  origin: ToolOrigin;
+  /** Disabled thread creators are refused; agent callers are never disabled here. */
+  disabled: boolean;
+}
 
 /** What a tool needs from the acting user: project membership, or a CASL `(action, subject)` ability on top of it. */
 export type ToolPermission = { kind: 'member' } | { kind: 'ability'; action: string; subject: string };
@@ -7,9 +19,9 @@ export type ToolPermission = { kind: 'member' } | { kind: 'ability'; action: str
 export interface ToolContext {
   projectId: string;
   projectSlug: string;
-  actor: UserPrincipal;
-  threadId: string;
-  jobId: string;
+  actor: UserPrincipal | AgentPrincipal;
+  threadId: string | null;
+  jobId: string | null;
   now: Date;
   /** Masks secrets, then wraps the text in this call's fence. Every user-written field goes through it. */
   data(text: string): string;

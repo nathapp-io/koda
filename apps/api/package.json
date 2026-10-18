@@ -41,6 +41,8 @@
     "@fastify/static": "^10.1.2",
     "@keyv/redis": "^3.0.0",
     "@lancedb/lancedb": "0.17.0",
+    "@modelcontextprotocol/node": "2.1.1",
+    "@modelcontextprotocol/server": "2.3.1",
     "@nathapp/nestjs-app": "~4.1.0",
     "@nathapp/nestjs-auth": "~4.1.1",
     "@nathapp/nestjs-cache": "~4.1.0",

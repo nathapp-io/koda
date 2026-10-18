@@ -22,6 +22,7 @@ const FUTURE = new Date(NOW.getTime() + 60_000);
 const CALLER = { id: 'u1', globalAdmin: false };
 
 const action = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
+  actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'act1', projectId: 'p1', projectSlug: 'web', threadId: 't1', jobId: 'j1', toolCallId: 'tc1', tool: 'koda_add_comment',
   input: {}, preview: 'p', status: 'PENDING', requestedById: 'u1', approvalId: 'ap1', decidedById: null, decidedAt: null,
   result: null, deliveredAt: null, expiresAt: FUTURE, createdAt: NOW, ...over,
@@ -65,12 +66,13 @@ function build(opts: { stored?: PendingActionRecord | null; threadsEnabled?: boo
 /**
  * The real executor an approve runs the tool with: one registered tool, a job whose thread creator is `u1`, and a
  * membership that answers DEVELOPER. It is what makes the cap (AC-18) and the tool-never-runs regression (AC-28)
- * assertions about the shipped code rather than about a stub.
+ * assertions about the shipped code rather than about a stub. 3-D12: its `findUserActor` answers the requester the
+ * action fixtures name, exactly as the real repository would.
  */
 function realExecutor(tool: AssistantTool<unknown>): AssistantToolExecutor {
   const registry = new AssistantToolRegistry();
   registry.register(tool);
-  const calls = { findCallContext: vi.fn(async () => CONTEXT) };
+  const calls = { findUserActor: vi.fn(async () => CONTEXT.creator), findCallContext: vi.fn(async () => CONTEXT) };
   const access = { resolveMembership: vi.fn(async () => 'DEVELOPER') };
   return new AssistantToolExecutor(registry, calls as never, access as never, new KodaCaslAbilityFactory());
 }

@@ -25,6 +25,9 @@ const CALL_CONTEXT: ToolCallContext = {
 function makeRepo(): { repo: AssistantToolCallRepository; rows: AssistantToolCallRecord[] } {
   const rows: AssistantToolCallRecord[] = [];
   const repo: AssistantToolCallRepository = {
+    // 3-D12: `executeAction` resolves the requester through `findUserActor`, so it answers the same user the
+    // call-context stub carries — the creator every approved-action fixture here names.
+    findUserActor: vi.fn(async () => CALL_CONTEXT.creator),
     findByCall: vi.fn(async (jobId: string, toolCallId: string) => rows.find((r) => r.jobId === jobId && r.toolCallId === toolCallId) ?? null),
     record: vi.fn(async (row: AssistantToolCallRecord) => { rows.push(row); }),
     findCallContext: vi.fn(async () => CALL_CONTEXT),
@@ -45,8 +48,12 @@ function makeWriteTool(over: Partial<AssistantTool<unknown>> = {}): AssistantToo
   };
 }
 
-function makeProposer(): { propose: ReturnType<typeof vi.fn> } {
-  return { propose: vi.fn(async (_input: ProposeInput): Promise<ProposeResult> => ({ actionId: 'a1' })) };
+function makeProposer(): { propose: ReturnType<typeof vi.fn>; recordDirect: ReturnType<typeof vi.fn> } {
+  // 3-D14: the port gained the direct-action record; this harness exercises the propose path.
+  return {
+    propose: vi.fn(async (_input: ProposeInput): Promise<ProposeResult> => ({ actionId: 'a1' })),
+    recordDirect: vi.fn(async (): Promise<{ actionId: string }> => ({ actionId: 'a1' })),
+  };
 }
 
 interface Setup {
@@ -78,6 +85,7 @@ const call = (over: Partial<{ jobId: string; toolCallId: string; name: string; i
 
 /** One approved action of the `w` stub in project `web`, ready for `executeAction`. */
 const approvedAction = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
+  actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'a1', projectId: 'p1', projectSlug: 'web', threadId: 't1', jobId: 'j1', toolCallId: 'c1', tool: 'w',
   input: { ref: 'WEB-1' }, preview: 'Add a comment to WEB-1 "Fix"', status: 'APPROVED', requestedById: 'u1',
   approvalId: 'ap1', decidedById: 'u1', decidedAt: null, result: null, deliveredAt: null,

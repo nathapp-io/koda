@@ -1089,10 +1089,10 @@ model FleetJob {
 /// only its sha256; (jobId, toolCallId) is the replay key. Deleted with its job.
 model AssistantToolCall {
   id          String   @id @default(cuid())
-  jobId       String
-  threadId    String
-  projectId   String
-  toolCallId  String // at most 200 chars
+  jobId       String?
+  threadId    String?
+  projectId   String?
+  toolCallId  String? // at most 200 chars
   tool        String
   inputHash   String // sha256 hex of the stable JSON of the raw input
   outcome     String // ok | invalid_input | forbidden | not_found | error | pending | refused
@@ -1102,7 +1102,10 @@ model AssistantToolCall {
   durationMs  Int
   createdAt   DateTime @default(now())
 
-  job FleetJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  actorType   String
+  actorId     String
+
+  job FleetJob? @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@unique([jobId, toolCallId])
   @@index([threadId, createdAt])
@@ -1114,14 +1117,14 @@ model AssistantToolCall {
 model PendingAction {
   id                 String    @id @default(cuid())
   projectId          String
-  threadId           String
-  jobId              String
-  toolCallId         String
+  threadId           String?
+  jobId              String?
+  toolCallId         String?
   tool               String
   input              Json
   preview            String    @db.Text
   status             String    @default("PENDING") // PENDING | APPROVED | REJECTED | EXPIRED | EXECUTED | FAILED
-  requestedById      String
+  requestedById      String?
   approvalId         String?   @unique
   decidedById        String?
   decidedAt          DateTime?
@@ -1131,7 +1134,14 @@ model PendingAction {
   expiresAt          DateTime
   createdAt          DateTime  @default(now())
 
-  thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  actorType          String
+  actorId            String
+  origin             String    @default("thread")
+  approvalMode       String    @default("human")
+  approverType       String?
+  approverId         String?
+
+  thread ChatThread? @relation(fields: [threadId], references: [id], onDelete: Cascade)
 
   @@unique([jobId, toolCallId])
   @@index([threadId, status])

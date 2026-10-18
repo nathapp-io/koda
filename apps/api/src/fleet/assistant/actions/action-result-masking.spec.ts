@@ -50,6 +50,9 @@ function makeLinkTool(execute: () => Promise<string>): AssistantTool<unknown> {
 function executorFor(tool: AssistantTool<unknown>): AssistantToolExecutor {
   const rows: AssistantToolCallRecord[] = [];
   const calls: AssistantToolCallRepository = {
+    // 3-D12: `executeAction` resolves the requester through `findUserActor`, so it answers the same user the
+    // call-context stub carries — the creator `approvedAction()` names.
+    findUserActor: vi.fn(async () => CALL_CONTEXT.creator),
     findByCall: async () => null,
     record: async (row) => { rows.push(row); },
     findCallContext: async () => CALL_CONTEXT,
@@ -61,12 +64,17 @@ function executorFor(tool: AssistantTool<unknown>): AssistantToolExecutor {
   const registry = new AssistantToolRegistry();
   registry.register(tool);
   const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, new KodaCaslAbilityFactory());
-  executor.attachActions({ propose: async (_input: ProposeInput): Promise<ProposeResult> => ({ actionId: 'a1' }) });
+  // 3-D14: the port carries `recordDirect` too; this harness only drives the thread propose path.
+  executor.attachActions({
+    propose: async (_input: ProposeInput): Promise<ProposeResult> => ({ actionId: 'a1' }),
+    recordDirect: async (): Promise<{ actionId: string }> => ({ actionId: 'a1' }),
+  });
   return executor;
 }
 
 /** One approved action of that tool in project `web`, ready for `executeAction`. */
 const approvedAction = (): PendingActionRecord => ({
+  actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'a1', projectId: 'p1', projectSlug: 'web', threadId: 't1', jobId: 'j1', toolCallId: 'c1',
   tool: 'koda_link_tickets', input: { links: [{ ref: 'KODA-1', url: 'https://x.dev/a' }] },
   preview: 'Link 1 URL(s) in web:', status: 'APPROVED', requestedById: 'u1', approvalId: 'ap1',

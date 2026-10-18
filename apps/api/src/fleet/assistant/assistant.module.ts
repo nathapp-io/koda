@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { mcpConfig } from '../../config/mcp.config';
 import { CommentsModule } from '../../comments/comments.module';
 import { MemoryModule } from '../../memory/memory.module';
 import { ProjectAccessModule } from '../../projects/project-access.module';
@@ -23,6 +25,7 @@ import { ASSISTANT_TOOL_CALL_REPOSITORY, PROJECT_COUNTS_READER } from './assista
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
 import { PrismaAssistantToolCallRepository } from './prisma-assistant-tool-call.repository';
+import { McpController } from './mcp/mcp.controller';
 import { RunnerToolController } from './runner-tool.controller';
 import { RunnerToolService } from './runner-tool.service';
 import { ActionTools } from './tools/action-tools';
@@ -52,8 +55,10 @@ import { WorkspaceTools } from './tools/workspace-tools';
     // S5b 2a: the propose service publishes on ThreadEventBus (LiveModule) and opens its summary approval
     // through ApprovalCloser (ApprovalStoreModule, one shared instance for both importers — 2a-D1).
     LiveModule, ApprovalStoreModule,
+    // S5b US-007: the MCP route reads MCP_ENABLED through its own namespaced config (3-D19).
+    ConfigModule.forFeature(mcpConfig),
   ],
-  controllers: [RunnerToolController],
+  controllers: [RunnerToolController, McpController],
   providers: [
     AssistantToolRegistry,
     PrismaAssistantToolCallRepository,

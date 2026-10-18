@@ -41,6 +41,7 @@ function commentDeps() {
 
 /** An action row as the repository answers it, with the fields `koda_get_action` prints. */
 const action = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
+  actorType: 'user', actorId: 'dev-1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'a1', projectId: 'project-1', projectSlug: 'web', threadId: 'thread-1', jobId: 'job-1', toolCallId: 'c1',
   tool: 'koda_add_comment', input: { ref: 'KODA-1', body: 'hello' }, preview: 'Add a comment to KODA-1 "Fix login page":\n\nhello',
   status: 'PENDING', requestedById: 'dev-1', approvalId: 'ap1', decidedById: null, decidedAt: null, result: null,
@@ -51,7 +52,7 @@ const action = (over: Partial<PendingActionRecord> = {}): PendingActionRecord =>
 /** The `koda_get_action` dependency: one scoped repository read. */
 function actionDeps(found: PendingActionRecord | null) {
   const findScopedById = vi.fn(async () => found);
-  return { findScopedById, tool: getActionTool({ findScopedById }) };
+  return { findScopedById, tool: getActionTool({ findScopedById, findScopedByActor: vi.fn(async () => null) }) };
 }
 
 /** The `reason` a parser refuses with; fails loudly when it accepts or throws something else. */

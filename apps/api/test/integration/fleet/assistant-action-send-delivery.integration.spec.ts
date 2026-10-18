@@ -109,7 +109,7 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
       data: {
         projectId, threadId: p.threadId, jobId: `job-${p.threadId}`, toolCallId: uid('tc'), tool: TOOL,
         input: { ref: 'KODA-1', body: 'hello' } as Prisma.InputJsonValue, preview: 'Add a comment', status: p.status,
-        requestedById: userId, result: p.result ?? null,
+        requestedById: userId, actorType: 'user', actorId: userId, result: p.result ?? null,
         expiresAt: new Date(Date.now() + 3_600_000), createdAt: p.createdAt,
       },
     });

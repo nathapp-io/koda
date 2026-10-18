@@ -42,6 +42,8 @@ export class PrismaAssistantToolCallRepository
 
   protected toDomain(m: AssistantToolCallModel): AssistantToolCallRecord {
     return {
+      actorType: m.actorType as AssistantToolCallRecord['actorType'],
+      actorId: m.actorId,
       jobId: m.jobId,
       threadId: m.threadId,
       projectId: m.projectId,
@@ -71,6 +73,12 @@ export class PrismaAssistantToolCallRepository
 
   async record(row: AssistantToolCallRecord): Promise<void> {
     await this.prisma.client.assistantToolCall.create({ data: this.toPersistenceCreate(row) });
+  }
+
+  async findUserActor(userId: string): Promise<ToolCallContext['creator'] | null> {
+    return this.prisma.client.user.findUnique({
+      where: { id: userId }, select: { id: true, email: true, role: true, disabled: true },
+    });
   }
 
   async findCallContext(jobId: string): Promise<ToolCallContext | null> {

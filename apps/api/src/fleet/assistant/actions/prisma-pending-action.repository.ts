@@ -4,13 +4,14 @@ import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, Prisma
 import { PendingAction as PendingActionModel, Prisma, PrismaClient } from '../../../generated/prisma/client';
 import { allocateThreadSeq } from '../../threads/domain/chat-thread.domain';
 import {
-  ActionResolution, NewPendingAction, PendingActionRecord, PendingActionRepository, PendingActionStatus,
+  ActionResolution, ActionStatusView, DirectActionInput, NewPendingAction, PendingActionRecord, PendingActionRepository, PendingActionStatus,
 } from './pending-action.domain';
 
 const asObject = (v: Prisma.JsonValue): Record<string, unknown> =>
   v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 
-const json = (v: Record<string, unknown>): Prisma.InputJsonValue => v as Prisma.InputJsonValue;
+/** A stored input is JSON: `NewPendingAction.input` is an object, a direct action's is whatever its tool parsed. */
+const json = (v: unknown): Prisma.InputJsonValue => v as Prisma.InputJsonValue;
 
 /**
  * 2a-D3: the action rows of koda write-tool calls. Module-private (never exported): the only writer is
@@ -47,6 +48,8 @@ export class PrismaPendingActionRepository
 
   protected toPersistenceCreate(d: PendingActionRecord) {
     return {
+      actorType: d.actorType, actorId: d.actorId, origin: d.origin, approvalMode: d.approvalMode,
+      approverType: d.approverType, approverId: d.approverId,
       projectId: d.projectId, threadId: d.threadId, jobId: d.jobId, toolCallId: d.toolCallId, tool: d.tool,
       input: json(d.input), preview: d.preview, status: d.status, requestedById: d.requestedById,
       approvalId: d.approvalId, decidedById: d.decidedById, decidedAt: d.decidedAt, result: d.result,
@@ -56,6 +59,9 @@ export class PrismaPendingActionRepository
 
   protected toPersistenceUpdate(patch: Partial<PendingActionRecord>) {
     const data: Record<string, unknown> = {};
+    for (const key of ['actorType', 'actorId', 'origin', 'approvalMode', 'approverType', 'approverId'] as const) {
+      if (patch[key] !== undefined) data[key] = patch[key];
+    }
     if (patch.input !== undefined) data['input'] = json(patch.input);
     if (patch.status !== undefined) data['status'] = patch.status;
     if (patch.approvalId !== undefined) data['approvalId'] = patch.approvalId;
@@ -78,11 +84,11 @@ export class PrismaPendingActionRepository
   }
 
   async findByCall(jobId: string, toolCallId: string): Promise<PendingActionRecord | null> {
-    return this.first(await this.db.pendingAction.findUnique({ where: { jobId_toolCallId: { jobId, toolCallId } } }));
+    return this.first(await this.db.pendingAction.findUnique({ where: { jobId_toolCallId: { jobId, toolCallId }, origin: 'thread' } }));
   }
 
   async findById(id: string): Promise<PendingActionRecord | null> {
-    return this.first(await this.db.pendingAction.findUnique({ where: { id } }));
+    return this.first(await this.db.pendingAction.findUnique({ where: { id, origin: 'thread' } }));
   }
 
   /**
@@ -90,7 +96,14 @@ export class PrismaPendingActionRepository
    * loaded and cannot be answered differently from an id that does not exist.
    */
   async findScopedById(id: string, projectId: string, threadId: string): Promise<PendingActionRecord | null> {
-    return this.first(await this.db.pendingAction.findFirst({ where: { id, projectId, threadId } }));
+    return this.first(await this.db.pendingAction.findFirst({ where: { id, projectId, threadId, origin: 'thread' } }));
+  }
+
+  async findScopedByActor(id: string, projectId: string, actor: { type: 'user' | 'agent'; id: string }): Promise<ActionStatusView | null> {
+    return this.db.pendingAction.findFirst({
+      where: { id, projectId, actorType: actor.type, actorId: actor.id },
+      select: { id: true, tool: true, status: true, createdAt: true, decidedAt: true, result: true },
+    });
   }
 
   async countPending(threadId: string): Promise<number> {
@@ -100,15 +113,36 @@ export class PrismaPendingActionRepository
   /** 2a-D10: the sweeper's scan. `expiresAt` at or before `now`, soonest first, then by id for a stable order. */
   async findDue(now: Date, limit: number): Promise<PendingActionRecord[]> {
     const rows = await this.db.pendingAction.findMany({
-      where: { status: 'PENDING', expiresAt: { lte: now } },
+      where: { origin: 'thread', status: 'PENDING', expiresAt: { lte: now } },
       orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }], take: limit,
     });
     return this.withSlug(rows);
   }
 
   async insert(action: NewPendingAction): Promise<PendingActionRecord> {
-    const row = await this.db.pendingAction.create({ data: { ...action, input: json(action.input) } });
+    const row = await this.db.pendingAction.create({ data: {
+      ...action, input: json(action.input), actorType: 'user', actorId: action.requestedById, origin: 'thread', approvalMode: 'human',
+    } });
     return (await this.withSlug([row]))[0];
+  }
+
+  /**
+   * 3-D14: the terminal row of a direct action, in one insert. Every thread field stays null — the action has no
+   * thread, job, replay key or requester — `approvalMode` is `none` with no approver and no approval link, and
+   * `decidedAt` and `expiresAt` are both `now`. It is never `PENDING`, so the expiry sweeper never selects it.
+   */
+  async insertDirect(input: DirectActionInput): Promise<{ id: string }> {
+    return this.db.pendingAction.create({
+      data: {
+        projectId: input.projectId, tool: input.tool, input: json(input.input), preview: input.preview,
+        status: input.status, result: input.result,
+        actorType: input.actorType, actorId: input.actorId, origin: input.origin, approvalMode: 'none',
+        approverType: null, approverId: null, approvalId: null,
+        threadId: null, jobId: null, toolCallId: null, requestedById: null, decidedById: null,
+        decidedAt: input.now, expiresAt: input.now,
+      },
+      select: { id: true },
+    });
   }
 
   async setApprovalId(id: string, approvalId: string): Promise<void> {
@@ -116,17 +150,17 @@ export class PrismaPendingActionRepository
   }
 
   async lockById(id: string): Promise<PendingActionRecord | null> {
-    const rows = await this.db.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "PendingAction" WHERE "id" = ${id} FOR UPDATE`;
+    const rows = await this.db.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "PendingAction" WHERE "id" = ${id} AND "origin" = 'thread' FOR UPDATE`;
     return rows.length > 0 ? this.findById(id) : null;
   }
 
   async resolve(id: string, resolution: ActionResolution): Promise<PendingActionRecord> {
     const row = await this.db.pendingAction.update({
-      where: { id },
+      where: { id, origin: 'thread' },
       data: {
         status: resolution.status,
         decidedAt: resolution.decidedAt,
-        ...(resolution.decidedById !== undefined ? { decidedById: resolution.decidedById } : {}),
+        ...(resolution.decidedById !== undefined ? { decidedById: resolution.decidedById, approverType: 'user', approverId: resolution.decidedById } : {}),
         // 2a-D8 step 8: the terminal status and the tool's own outcome are written by the same statement.
         ...(resolution.result !== undefined ? { result: resolution.result } : {}),
       },
@@ -158,7 +192,16 @@ export class PrismaPendingActionRepository
   }
 
   private toRecord(m: PendingActionModel, projectSlug: string): PendingActionRecord {
+    if (m.threadId === null || m.jobId === null || m.toolCallId === null || m.requestedById === null) {
+      throw new Error(`Malformed thread action ${m.id}: missing thread fields`);
+    }
     return {
+      actorType: m.actorType as PendingActionRecord['actorType'],
+      actorId: m.actorId,
+      origin: m.origin as PendingActionRecord['origin'],
+      approvalMode: m.approvalMode as PendingActionRecord['approvalMode'],
+      approverType: m.approverType as PendingActionRecord['approverType'],
+      approverId: m.approverId,
       id: m.id,
       projectId: m.projectId,
       projectSlug,

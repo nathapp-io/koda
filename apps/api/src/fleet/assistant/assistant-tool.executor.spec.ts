@@ -22,9 +22,15 @@ const context = (over: Partial<ToolCallContext['creator']> = {}): ToolCallContex
   creator: { id: 'u1', email: 'u1@koda.test', role: 'MEMBER', disabled: false, ...over },
 });
 
-function makeRepo(ctx: ToolCallContext | null) {
+/**
+ * The repository stub. 3-D12: `checkAction`/`executeAction` resolve the requester through `findUserActor`, so it
+ * answers the same user the call-context stub carries — the thread creator every action fixture here names — unless
+ * `actor` overrides it.
+ */
+function makeRepo(ctx: ToolCallContext | null, actor: ToolCallContext['creator'] | null = ctx?.creator ?? null) {
   const rows: AssistantToolCallRecord[] = [];
   const repo: AssistantToolCallRepository = {
+    findUserActor: vi.fn(async (userId: string) => (actor?.id === userId ? actor : null)),
     findByCall: vi.fn(async (jobId, toolCallId) => rows.find((r) => r.jobId === jobId && r.toolCallId === toolCallId) ?? null),
     record: vi.fn(async (row) => { rows.push(row); }),
     findCallContext: vi.fn(async () => ctx),
@@ -52,8 +58,8 @@ interface SetupOptions {
   kind?: ToolCallContext['kind'];
   /** A stubbed ability factory, for the permission a built-in project role always has (2a-D8 step 5). */
   abilities?: KodaCaslAbilityFactory;
-  /** The job has no thread at all (`findCallContext` answers null). */
-  noThread?: boolean;
+  /** The action's actor cannot be read at all (`findUserActor` answers null, as it does for a deleted user). */
+  noActor?: boolean;
 }
 
 interface Setup {
@@ -64,7 +70,7 @@ interface Setup {
 }
 
 function setup(tool: AssistantTool<unknown> | null, opts: SetupOptions = {}): Setup {
-  const { repo, rows } = makeRepo(opts.noThread ? null : { ...context(opts.creator), ...(opts.kind ? { kind: opts.kind } : {}) });
+  const { repo, rows } = makeRepo({ ...context(opts.creator), ...(opts.kind ? { kind: opts.kind } : {}) }, opts.noActor ? null : undefined);
   const access = {
     findProjectIdBySlug: vi.fn(async (slug: string) => {
       const id = PROJECT_IDS[slug];
@@ -91,6 +97,7 @@ const call = (over: Partial<{ jobId: string; toolCallId: string; name: string; i
  * so the context the executor builds for an approve can be told apart from the proposing call's (AC-21).
  */
 const pendingAction = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
+  actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'a1', projectId: 'p2', projectSlug: 'ops', threadId: 't1', jobId: 'j1', toolCallId: 'c1', tool: 'koda_fake',
   input: { ref: 'OPS-1' }, preview: 'Add a comment to OPS-1 "Fix"', status: 'PENDING', requestedById: 'u1',
   approvalId: 'ap1', decidedById: null, decidedAt: null, result: null, deliveredAt: null,
@@ -240,7 +247,7 @@ describe('AssistantToolExecutor', () => {
     const tool = makeTool();
     const { repo, rows } = setup(tool);
     const { Prisma } = await import('../../generated/prisma/client');
-    const winner: AssistantToolCallRecord = { jobId: 'j1', threadId: 't1', projectId: 'p1', toolCallId: 'c1', tool: 'koda_fake', inputHash: createHash('sha256').update(stableStringify(call().input)).digest('hex'), outcome: 'ok', content: 'winner', isError: false, resultBytes: 6, durationMs: 1 };
+    const winner: AssistantToolCallRecord = { actorType: 'user', actorId: 'u1', jobId: 'j1', threadId: 't1', projectId: 'p1', toolCallId: 'c1', tool: 'koda_fake', inputHash: createHash('sha256').update(stableStringify(call().input)).digest('hex'), outcome: 'ok', content: 'winner', isError: false, resultBytes: 6, durationMs: 1 };
     let lookups = 0;
     repo.findByCall = vi.fn(async () => (lookups++ === 0 ? null : winner));
     repo.record = vi.fn(async () => {
@@ -270,7 +277,11 @@ function makeWriteTool(over: Partial<AssistantTool<unknown>> = {}): AssistantToo
 }
 
 function makeProposer(result: ProposeResult = { actionId: 'a1' }) {
-  return { propose: vi.fn(async (_input: ProposeInput): Promise<ProposeResult> => result) };
+  // 3-D14: the port carries the direct-action record too; this harness serves the propose path only.
+  return {
+    propose: vi.fn(async (_input: ProposeInput): Promise<ProposeResult> => result),
+    recordDirect: vi.fn(async (): Promise<{ actionId: string }> => ({ actionId: 'a1' })),
+  };
 }
 
 /** A write-tool harness with a proposer attached, as `AssistantActionService.onModuleInit` attaches it (2a-D1). */
@@ -438,8 +449,8 @@ describe('S5b 2a-D8: checkAction and executeAction', () => {
     expect(await executor.checkAction(pendingAction({ tool: 'koda_retired' }))).toBe('forbidden');
   });
 
-  it('checkAction answers forbidden when the job has no thread', async () => {
-    const { executor } = setup(makeTool(), { noThread: true });
+  it('checkAction answers forbidden when the action\'s actor cannot be read', async () => {
+    const { executor } = setup(makeTool(), { noActor: true });
 
     expect(await executor.checkAction(pendingAction())).toBe('forbidden');
   });
