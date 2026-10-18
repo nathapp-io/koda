@@ -193,7 +193,6 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
   let app: NathApplication;
   let h: ReturnType<typeof harness>;
   let rootToken: string;
-  let rootId: string;
 
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 
@@ -208,6 +207,33 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
 
   const patchUser = (id: string, patch: Record<string, unknown>) =>
     request(h.server).patch(`/api/admin/users/${id}`).set(auth(rootToken)).send(patch);
+
+  /**
+   * What the last-admin guard counts (`PrismaUsersRepository.countActiveAdmins`):
+   * `user.count({ where: { role: 'ADMIN', disabled: false } })`. Asserted, not assumed, so a test
+   * whose premise is "exactly one active admin" cannot pass while the table holds more.
+   */
+  const activeAdminCount = (): Promise<number> => h.db.user.count({ where: { role: 'ADMIN', disabled: false } });
+
+  /**
+   * Runs `fn` with `targetId` as the installation's only active admin: the other tests in this
+   * describe leave their own ADMIN users behind, and the guard counts every one of them. The other
+   * admins are demoted with a direct write (their `tokenVersion` is untouched, so their tokens stay
+   * valid) and restored afterwards.
+   */
+  const withOnlyActiveAdmin = async (targetId: string, fn: () => Promise<void>): Promise<void> => {
+    const others = await h.db.user.findMany({
+      where: { role: 'ADMIN', id: { not: targetId } },
+      select: { id: true },
+    });
+    const ids = others.map((user) => user.id);
+    await h.db.user.updateMany({ where: { id: { in: ids } }, data: { role: 'MEMBER' } });
+    try {
+      await fn();
+    } finally {
+      await h.db.user.updateMany({ where: { id: { in: ids } }, data: { role: 'ADMIN' } });
+    }
+  };
 
   /** Gives the user a projectId-null `owner` binding, as an installation Owner holds. */
   const grantOwner = async (userId: string): Promise<void> => {
@@ -230,9 +256,7 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
     h = harness(app);
     // Setup, not an assertion: the whole describe acts as the installation's Owner.
     const res = await h.register(OWNER_EMAIL).expect(201);
-    const session = data<{ accessToken: string; user: UserRow }>(res);
-    rootToken = session.accessToken;
-    rootId = session.user.id;
+    rootToken = data<{ accessToken: string }>(res).accessToken;
   }, BOOT_TIMEOUT_MS);
 
   beforeEach(() => {
@@ -278,28 +302,25 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
 
   it('AC-16: demoting the last active admin answers the existing last-admin error', async () => {
     const target = await createUser('last-admin@koda.test', 'ADMIN');
-    // Make the target the only active admin: the acting Owner must not count for the guard. The
-    // direct write leaves `tokenVersion` alone, so the Owner's own token stays valid.
-    await h.db.user.update({ where: { id: rootId }, data: { role: 'MEMBER' } });
-    try {
+    await withOnlyActiveAdmin(target.id, async () => {
+      // The premise of the AC, checked rather than assumed: the guard counts `User.role`.
+      expect(await activeAdminCount()).toBe(1);
+
       const res = await patchUser(target.id, { role: 'MEMBER' });
 
       expect(res.status).toBe(409);
       // `ConflictAppException({}, 'users.lastAdmin')` translates `users.lastAdmin.409`.
       expect(String(res.body.message)).toContain('At least one active administrator must remain');
-    } finally {
-      await h.db.user.update({ where: { id: rootId }, data: { role: 'ADMIN' } });
-    }
+    });
   });
 
   it("AC-17: the refused demotion leaves the target's admin binding in place", async () => {
     const target = await createUser('last-admin2@koda.test', 'ADMIN');
-    await h.db.user.update({ where: { id: rootId }, data: { role: 'MEMBER' } });
-    try {
+    await withOnlyActiveAdmin(target.id, async () => {
+      expect(await activeAdminCount()).toBe(1);
+
       await patchUser(target.id, { role: 'MEMBER' }).expect(409);
-    } finally {
-      await h.db.user.update({ where: { id: rootId }, data: { role: 'ADMIN' } });
-    }
+    });
 
     expect(await h.boundRoles('USER', target.id)).toContainEqual({ roleKey: 'admin', projectId: null });
   });
