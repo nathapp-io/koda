@@ -468,7 +468,7 @@ ActionContext { actor: { type: USER|AGENT|SYSTEM, id }, onBehalfOf?: { type, id 
 
 koda has no production use, so this is a schema replacement.
 
-- **P1 drops** `User.role`, `ProjectMember`, `AgentProject` and `AgentRoleEntry`, and replaces them with `Role` and `RoleBinding`. `ProjectInvite.role` becomes `roleId`.
+- **P1 replaces** `User.role`, `ProjectMember`, `AgentProject` and `AgentRoleEntry` with `Role` and `RoleBinding`. `ProjectInvite.role` becomes `roleId`. The tables and columns are physically dropped in `permissions-p1-cleanup`.
 - **P3 drops** `PendingAction` and `FleetApproval`, replacing them with `ApprovalRequest` and `ApprovalDecision`.
 - No data is copied.
 - **Bootstrap:**
@@ -497,6 +497,17 @@ P1 delivers:
 - the CI catalog contract test and the role allow/deny matrix test.
 
 Each phase can be split into an API feature and a web feature. P1 and P2 can run in parallel; P3 needs both.
+
+**P1 is delivered as five nax features**, in this order (split 2026-10-18, because P1 exceeds one spec's story limit):
+
+1. `permissions-p1-roles` (api): the catalog, `PermissionService` and `MembershipService`, the `Role` and `RoleBinding` tables, the seeded roles and the Owner bootstrap, and the role and binding REST API.
+   - The legacy membership routes write bindings.
+   - A compatibility layer derives today's `role`, `projectRole` and `agentRoles` from bindings, so no permission check changes yet.
+   - Until cleanup, reads see bindings **unioned with** the legacy rows, so existing fixtures stay valid. New writes go only to bindings, and removals clear both.
+2. `permissions-p1-enforce-core` (api): `@Requires` keys on the ticket, comment, label, link, project, agent, user and admin routes.
+3. `permissions-p1-enforce-fleet` (api): fleet routes, assistant and MCP tool keys, and the KB, memory and thread ownership rules.
+4. `permissions-p1-cleanup` (api): removes the compatibility layer and the old mechanisms, **drops the legacy tables and columns**, and adds the catalog contract and role-matrix tests.
+5. `permissions-p1-web` (web): the P1 web pages. It can run in parallel with 2–4.
 
 ---
 
