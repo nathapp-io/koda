@@ -23,7 +23,12 @@ import { UsersModule } from './users.module';
     // Permissions P1a (US-004): UsersAdminService injects the permissions module's MembershipService.
     {
       provide: MembershipService,
-      useValue: { bindBaseline: vi.fn(), setGlobalAdmin: vi.fn() },
+      useValue: {
+        bindBaseline: vi.fn(),
+        setGlobalAdmin: vi.fn(),
+        // B3: the user writes run inside their own transaction; the stub runs the callback as-is.
+        afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
+      },
     },
   ],
   exports: [PrismaService, TRANSACTION_MANAGER, CacheManager, MembershipService],

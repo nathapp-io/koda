@@ -1,4 +1,5 @@
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { AfterCommitService } from './after-commit.service';
 import { PermissionCache } from './permission-cache';
 import { MembershipService } from './membership.service';
 import type { Granter } from './permissions.types';
@@ -12,6 +13,12 @@ import { FakeCacheManager, InMemoryPermissionStore } from './test-helpers/in-mem
 
 const BY: Granter = { type: 'SYSTEM', id: 'test' };
 const USER = (id: string) => ({ type: 'USER' as const, id });
+
+/** A transaction manager double that runs the callback immediately, outside any transaction. */
+const immediateTx = () => ({
+  run: <T>(fn: () => Promise<T>): Promise<T> => fn(),
+  isInTransaction: () => false,
+});
 
 describe('MembershipService', () => {
   let store: InMemoryPermissionStore;
@@ -27,12 +34,19 @@ describe('MembershipService', () => {
     txRuns = 0;
     // Transactions run one at a time, as the owner-row lock makes concurrent owner writes do in Postgres.
     let queue: Promise<unknown> = Promise.resolve();
+    // Nesting is tracked so `isInTransaction()` answers like the real manager's AsyncLocalStorage: a
+    // `run` that joins an open transaction leaves the store in place for its caller.
+    let depth = 0;
     const txManager = {
+      isInTransaction: () => depth > 0,
       run: <T>(fn: () => Promise<T>): Promise<T> => {
         txRuns += 1;
+        depth += 1;
         const result = queue.then(fn);
         queue = result.catch(() => undefined);
-        return result;
+        return result.finally(() => {
+          depth -= 1;
+        });
       },
     };
     service = new MembershipService(
@@ -41,6 +55,7 @@ describe('MembershipService', () => {
       txManager as never,
       permissionCache,
       cache as never,
+      new AfterCommitService(),
     );
     store.addUser('u1');
     store.addUser('u2');
@@ -88,7 +103,7 @@ describe('MembershipService', () => {
       };
       const broken = new MembershipService(
         store.roleRepo() as never, bindings as never,
-        { run: (fn: () => Promise<unknown>) => fn() } as never, permissionCache, cache as never,
+        immediateTx() as never, permissionCache, cache as never, new AfterCommitService(),
       );
       await expect(
         broken.createBinding({ principal: USER('u1'), roleKey: 'member', projectId: null }, BY),
@@ -166,6 +181,68 @@ describe('MembershipService', () => {
       await expect(service.removeBinding('missing')).rejects.toBeInstanceOf(NotFoundAppException);
     });
 
+    it('M1: answers 404 when another caller deleted the same row first', async () => {
+      const view = await service.createBinding(
+        { principal: USER('u1'), roleKey: 'admin', projectId: null },
+        BY,
+      );
+      expect(store.users.get('u1')?.role).toBe('ADMIN');
+      cache.invalidations.length = 0;
+
+      // The row was read, then a concurrent delete removed it before this transaction's statement:
+      // the delete reports zero affected rows, which is the 404 the loser must answer.
+      const bindings = store.bindingRepo();
+      bindings.deleteById = async () => false;
+      const loser = new MembershipService(
+        store.roleRepo() as never,
+        bindings as never,
+        immediateTx() as never,
+        permissionCache,
+        cache as never,
+        new AfterCommitService(),
+      );
+
+      const error = await loser.removeBinding(view.id).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(NotFoundAppException);
+      expect(JSON.stringify(error)).toContain('permissions.bindingNotFound');
+      // Losing the delete changes nothing: no demotion, no token revocation, no cache invalidation.
+      expect(store.users.get('u1')?.role).toBe('ADMIN');
+      expect(store.users.get('u1')?.tokenVersion).toBe(1);
+      expect(cache.invalidations).toEqual([]);
+    });
+
+    it('B2: locks the binding\'s user before deciding the legacy role', async () => {
+      store.addUser('admin-1', 'ADMIN');
+      const binding = await service.createBinding(
+        { principal: USER('admin-1'), roleKey: 'admin', projectId: null },
+        BY,
+      );
+      store.calls.length = 0;
+
+      await service.removeBinding(binding.id);
+
+      // The survivor count runs under the user lock, so a concurrent owner/admin removal of the same
+      // user is either fully before it or fully after it.
+      const lock = store.calls.indexOf('lock-user:admin-1');
+      expect(lock).toBeGreaterThanOrEqual(0);
+      expect(lock).toBeLessThan(store.calls.indexOf(`delete-binding:${binding.id}`));
+    });
+
+    it('B2: takes the owner role lock before the user lock, never the other way round', async () => {
+      const binding = await service.createBinding(
+        { principal: USER('u1'), roleKey: 'owner', projectId: null },
+        BY,
+      );
+      // A second owner keeps the last-owner rule out of the way.
+      await service.createBinding({ principal: USER('u2'), roleKey: 'owner', projectId: null }, BY);
+      store.calls.length = 0;
+
+      await service.removeBinding(binding.id);
+
+      expect(store.calls.indexOf('lock-owner')).toBeLessThan(store.calls.indexOf('lock-user:u1'));
+    });
+
     it('AC-20/21: removing the only global admin binding demotes the user and revokes tokens', async () => {
       const view = await service.createBinding({ principal: USER('u1'), roleKey: 'admin', projectId: null }, BY);
       cache.invalidations.length = 0;
@@ -211,6 +288,18 @@ describe('MembershipService', () => {
       const results = await Promise.allSettled([service.removeBinding(a.id), service.removeBinding(b.id)]);
       expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
       expect(store.bindings).toHaveLength(1);
+    });
+
+    it('B2: locks the user row before the survivor count of removeAllBindings', async () => {
+      await service.createBinding({ principal: USER('u1'), roleKey: 'owner', projectId: null }, BY);
+      await service.createBinding({ principal: USER('u2'), roleKey: 'owner', projectId: null }, BY);
+      await service.createBinding({ principal: USER('u1'), roleKey: 'admin', projectId: null }, BY);
+      store.calls.length = 0;
+
+      await service.removeAllBindings(USER('u1'));
+
+      expect(store.calls.indexOf('lock-user:u1')).toBeGreaterThanOrEqual(0);
+      expect(store.calls.indexOf('lock-owner')).toBeLessThan(store.calls.indexOf('lock-user:u1'));
     });
   });
 
@@ -321,6 +410,49 @@ describe('MembershipService', () => {
       await service.bindBaseline({ type: 'AGENT', id: 'a1' });
       await service.removeAllBindings({ type: 'AGENT', id: 'a1' });
       expect(store.bindings).toHaveLength(0);
+    });
+  });
+
+  describe('the commit boundary of a nested write (B3)', () => {
+    it('defers the invalidation to the end of the transaction that owns the write', async () => {
+      await service.afterCommit(async () => {
+        await service.setGlobalAdmin('u1', true, BY);
+        // Nothing outside can see the binding yet, so nothing may drop the cache here: a request in
+        // this window would recompute the old keys and cache them under the new generation.
+        expect(cache.invalidations).toEqual([]);
+      });
+
+      expect(cache.invalidations).toContain('permissions#tag');
+      expect(cache.invalidations).toEqual(expect.arrayContaining(['USER:u1#tag', 'user-auth-state|u1']));
+    });
+
+    it('defers through several nested writes, flushing once at the end', async () => {
+      await service.afterCommit(async () => {
+        await service.bindBaseline(USER('u1'));
+        await service.bindBaseline(USER('u2'));
+        expect(cache.invalidations).toEqual([]);
+      });
+
+      expect(cache.invalidations).toEqual(['permissions#tag', 'permissions#tag']);
+    });
+
+    it('invalidates nothing when the transaction is rolled back', async () => {
+      const failure = new Error('rolled back');
+
+      await expect(
+        service.afterCommit(async () => {
+          await service.setGlobalAdmin('u1', true, BY);
+          throw failure;
+        }),
+      ).rejects.toBe(failure);
+
+      expect(cache.invalidations).toEqual([]);
+    });
+
+    it('invalidates immediately when the write owns the transaction', async () => {
+      await service.setGlobalAdmin('u1', true, BY);
+
+      expect(cache.invalidations).toContain('permissions#tag');
     });
   });
 });

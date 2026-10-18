@@ -226,7 +226,11 @@ describe('POST /api/agents (US-003)', () => {
         // Permissions P1a (US-004): the create path binds the new agent to the baseline.
         {
           provide: MembershipService,
-          useValue: { bindBaseline: vi.fn().mockResolvedValue(undefined) },
+          useValue: {
+            bindBaseline: vi.fn().mockResolvedValue(undefined),
+            // B3: the baseline write joins the create transaction; the stub runs the callback as-is.
+            afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
+          },
         },
         {
           provide: AUTH_CFG,

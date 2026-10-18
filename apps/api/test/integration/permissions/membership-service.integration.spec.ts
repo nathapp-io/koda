@@ -7,9 +7,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { AppModule } from '../../../src/app.module';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { PermissionCache } from '../../../src/permissions/permission-cache';
+import { PermissionService } from '../../../src/permissions/permission.service';
+import { PrismaRoleBindingRepository } from '../../../src/permissions/prisma-role-binding.repository';
+import { PrismaRoleRepository } from '../../../src/permissions/prisma-role.repository';
+import { createTestPrismaClient } from '../../helpers/test-prisma';
 import { resetDb } from '../../helpers/reset-db';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -133,6 +139,99 @@ describeIntegration('MembershipService (PG)', () => {
       expect(rejected).toHaveLength(1);
       expect(rejected[0]?.reason).toBeInstanceOf(ForbiddenAppException);
       expect(JSON.stringify(rejected[0]?.reason)).toContain('permissions.ownerLocked');
+    });
+  });
+
+  describe('concurrent legacy-role mirroring (B2)', () => {
+    it('removing one user\'s owner and admin bindings concurrently leaves MEMBER', async () => {
+      const user = await newUser();
+      const [owner, admin] = [await bindGlobal(user.id, 'owner'), await bindGlobal(user.id, 'admin')];
+      // A second owner keeps the last-owner rule out of the way: this test is about the user's mirror.
+      await bindGlobal((await newUser()).id, 'owner');
+      expect((await userRow(user.id)).role).toBe('ADMIN');
+
+      const results = await Promise.allSettled([
+        membership.removeBinding(owner.id),
+        membership.removeBinding(admin.id),
+      ]);
+
+      expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+      expect(await prisma.roleBinding.count({ where: { principalId: user.id } })).toBe(0);
+      const row = await userRow(user.id);
+      expect(row.role).toBe('MEMBER');
+      // One bump for the promotion the two bindings caused, one for the demotion they now leave behind:
+      // the second removal must not count the first's uncommitted delete as a surviving binding.
+      expect(row.tokenVersion).toBe(2);
+      expect(await membership.isGlobalAdmin(user.id)).toBe(false);
+    });
+
+    it('a removal racing a grant of the same user\'s admin side keeps the user ADMIN', async () => {
+      const user = await newUser();
+      const owner = await bindGlobal(user.id, 'owner');
+      // A second owner keeps the last-owner rule out of the way, so the removal is about the mirror.
+      await bindGlobal((await newUser()).id, 'owner');
+
+      const [removed, granted] = await Promise.allSettled([
+        membership.removeBinding(owner.id),
+        bindGlobal(user.id, 'admin'),
+      ]);
+
+      expect([removed.status, granted.status]).toEqual(['fulfilled', 'fulfilled']);
+      // The admin binding is there when the dust settles, so the demotion the removal may have made must
+      // not outlive it: the two transactions serialize on the user's row.
+      expect(await prisma.roleBinding.count({ where: { principalId: user.id, role: { key: 'admin' } } })).toBe(1);
+      expect((await userRow(user.id)).role).toBe('ADMIN');
+    });
+  });
+
+  describe('the commit boundary of a nested write (B3)', () => {
+    /**
+     * A second "request": its own connection, so its reads never join the transaction the test has open.
+     * The permission cache is the module's, which is what makes the read sequence meaningful.
+     */
+    const anotherRequest = (cache: PermissionCache) => {
+      const outside = createTestPrismaClient();
+      const tx = {
+        run: <T>(fn: () => Promise<T>): Promise<T> => fn(),
+        getClient: () => outside,
+        isInTransaction: () => false,
+      };
+      return {
+        service: new PermissionService(
+          new PrismaRoleRepository(tx as never, { client: outside } as never),
+          new PrismaRoleBindingRepository(tx as never, { client: outside } as never),
+          cache,
+        ),
+        close: () => outside.$disconnect(),
+      };
+    };
+
+    it('a nested demotion invalidates the permission cache only after the outer transaction commits', async () => {
+      const cache = moduleRef.get(PermissionCache, { strict: false });
+      const tx = moduleRef.get<ITransactionManager>(TRANSACTION_MANAGER, { strict: false });
+      const reader = anotherRequest(cache);
+
+      try {
+        const user = await newUser('ADMIN');
+        const principal = { type: 'USER' as const, id: user.id };
+        // Warm the cache from a request that is not inside any transaction.
+        expect((await reader.service.effectiveKeys(principal, 'global')).has('user.create')).toBe(true);
+
+        await membership.afterCommit(() =>
+          tx.run(async () => {
+            await membership.setGlobalAdmin(user.id, false, SYSTEM);
+            // The read that makes the timing matter: between the nested write and the commit, the
+            // demotion is invisible outside, so the keys are unchanged — and this read must not cache
+            // them under a generation the commit will not invalidate again.
+            expect((await reader.service.effectiveKeys(principal, 'global')).has('user.create')).toBe(true);
+          }),
+        );
+
+        expect((await userRow(user.id)).role).toBe('MEMBER');
+        expect((await reader.service.effectiveKeys(principal, 'global')).has('user.create')).toBe(false);
+      } finally {
+        await reader.close();
+      }
     });
   });
 });

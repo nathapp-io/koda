@@ -1,6 +1,7 @@
 import { Global, Inject, Module, OnModuleInit } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
+import { AfterCommitService } from './after-commit.service';
 import { MembershipService } from './membership.service';
 import { PermissionCache } from './permission-cache';
 import { PermissionService } from './permission.service';
@@ -43,6 +44,9 @@ import { SystemRoleSeeder } from './system-role.seeder';
     { provide: SYSTEM_ROLES_SEED, useValue: SYSTEM_ROLES },
     SystemRoleSeeder,
     PermissionCache,
+    // Internal: `MembershipService` defers its cache invalidation through it, and `afterCommit` is the
+    // only way for an outer transaction owner to flush that deferral at commit.
+    AfterCommitService,
     PermissionService,
     MembershipService,
     RoleAdminService,

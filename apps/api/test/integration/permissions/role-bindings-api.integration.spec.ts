@@ -31,6 +31,8 @@ const PA_ALPHA_EMAIL = 'pa-alpha@koda.test';
 const PA_BETA_EMAIL = 'pa-beta@koda.test';
 const ESCALATOR_EMAIL = 'escalator@koda.test';
 const BINDING_MGR_EMAIL = 'binding-mgr@koda.test';
+/** B1's grantor: the two keys the role and binding routes need, and nothing else global. */
+const B1_GRANTER_EMAIL = 'b1-granter@koda.test';
 /** Booting `AppModule` runs the system-role seeder, so the first hook needs a generous budget. */
 const BOOT_TIMEOUT_MS = 30_000;
 
@@ -690,5 +692,48 @@ describeIntegration('role bindings API (US-006)', () => {
     await Promise.all([postBinding(ownerToken, body), postBinding(ownerToken, body)]);
 
     expect(await bindingCount({ principalId: raceBId, projectId: alphaId })).toBe(1);
+  });
+
+  /**
+   * B1: `admin` confers its synthetic authority — every project key, and the legacy `User.role = 'ADMIN'`
+   * its binding writes — whatever its editable entry list says. A grantor holding only `role.manage` and
+   * `role.binding.global` could otherwise empty the role and then bind it, handing out authority it does
+   * not hold. The stored entry list is emptied straight in the database: the check must not depend on it.
+   */
+  it('B1: a restricted grantor cannot bind an emptied global admin role', async () => {
+    const role = await createRole('restricted-granter', 'GLOBAL', ['role.manage', 'role.binding.global']);
+    const granterToken = await createUserWithToken(B1_GRANTER_EMAIL, 'MEMBER');
+    const granter = await db.user.findUniqueOrThrow({ where: { email: B1_GRANTER_EMAIL } });
+    await db.roleBinding.create({
+      data: {
+        principalType: 'USER',
+        principalId: granter.id,
+        roleId: role.id,
+        projectId: null,
+        grantedByType: 'SYSTEM',
+        grantedById: 'test',
+      },
+    });
+    const target = await newUser('b1-target@koda.test');
+    const admin = await db.role.findUniqueOrThrow({ where: { key: 'admin' } });
+    await db.role.update({ where: { key: 'admin' }, data: { permissions: [] } });
+
+    try {
+      const res = await postBinding(granterToken, {
+        principalType: 'USER',
+        principalId: target.id,
+        roleKey: 'admin',
+      });
+
+      expectRefusal(res, { status: 403, code: CODE.forbidden, key: 'escalation' });
+      expect(await bindingCount({ principalId: target.id })).toBe(0);
+      // The mirror never ran either: the target keeps the MEMBER role it was created with.
+      expect((await userRow(target.id)).role).toBe('MEMBER');
+    } finally {
+      await db.role.update({
+        where: { key: 'admin' },
+        data: { permissions: ['*', '!role.binding.owner'] },
+      });
+    }
   });
 });

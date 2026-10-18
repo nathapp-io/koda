@@ -14,7 +14,7 @@ const user = (over: Partial<UserAdminRecord> = {}): UserAdminRecord => ({
 describe('UsersAdminService', () => {
   let repo: Record<string, Mock>;
   let cache: { invalidate: Mock };
-  let membership: { bindBaseline: Mock; setGlobalAdmin: Mock };
+  let membership: { bindBaseline: Mock; setGlobalAdmin: Mock; afterCommit: Mock };
   let service: UsersAdminService;
   /** The row `findById`/`updateUser` serve, so the service's reads reflect what was stored. */
   let stored: UserAdminRecord;
@@ -31,7 +31,13 @@ describe('UsersAdminService', () => {
       lockUserAdministration: vi.fn(),
     };
     cache = { invalidate: vi.fn() };
-    membership = { bindBaseline: vi.fn(), setGlobalAdmin: vi.fn() };
+    membership = {
+      bindBaseline: vi.fn(),
+      setGlobalAdmin: vi.fn(),
+      // B3/B4: the writes run inside `update`'s transaction and `create`'s own one; the stub runs the
+      // callback and flushes nothing, exactly as the real service does when it defers nothing.
+      afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
+    };
     const txManager = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
     // Permissions P1a (US-004): MembershipService is the required fourth parameter.
     service = new UsersAdminService(repo as never, txManager as never, cache as never, membership as never);
@@ -90,6 +96,27 @@ describe('UsersAdminService', () => {
 
       expect(membership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'new-admin' });
       expect(membership.setGlobalAdmin).toHaveBeenCalledWith('new-admin', true, { type: 'SYSTEM', id: 'admin-users' });
+    });
+
+    it('B4: runs the user row and its bindings in one commit-aware transaction', async () => {
+      repo.createUser.mockResolvedValue(user({ id: 'new-member' }));
+
+      await service.create({ email: 'm@k.t', name: 'M', password: 'Admin1234!Aa', role: 'MEMBER' });
+
+      // The binding write is nested inside the create transaction; only the outer scope may invalidate
+      // the permission cache, and only once that transaction committed.
+      expect(membership.afterCommit).toHaveBeenCalled();
+    });
+
+    it('B4: a failed baseline binding rejects instead of returning a user', async () => {
+      repo.createUser.mockResolvedValue(user({ id: 'new-member' }));
+      membership.bindBaseline.mockRejectedValueOnce(new NotFoundAppException({}, 'permissions.roleNotFound'));
+
+      await expect(
+        service.create({ email: 'm@k.t', name: 'M', password: 'Admin1234!Aa', role: 'MEMBER' }),
+      ).rejects.toBeInstanceOf(NotFoundAppException);
+
+      expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
     });
   });
 

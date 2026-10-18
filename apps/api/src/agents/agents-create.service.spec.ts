@@ -27,7 +27,7 @@ describe('AgentsService create path (US-003)', () => {
   };
 
   /** Permissions P1a (US-004): the create path binds the new agent to the baseline. */
-  let membership: { bindBaseline: Mock };
+  let membership: { bindBaseline: Mock; afterCommit: Mock };
 
   // Records which txManager.run callback was active while a repository call ran.
   let activeRunId: number | null = null;
@@ -71,7 +71,12 @@ describe('AgentsService create path (US-003)', () => {
       createRolesAndCapabilities: vi.fn().mockResolvedValue(undefined),
     };
 
-    membership = { bindBaseline: vi.fn().mockResolvedValue(undefined) };
+    membership = {
+      bindBaseline: vi.fn().mockResolvedValue(undefined),
+      // B3: the baseline write joins the create transaction; the stub resolves the callback and has
+      // nothing of its own to invalidate.
+      afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
+    };
 
     txManager = {
       run: vi.fn(async (fn: () => Promise<unknown>) => {

@@ -14,7 +14,7 @@ import request from 'supertest';
 import { CommonExceptionCode } from '@nathapp/nestjs-common';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '../../../src/generated/prisma/client';
+import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -123,6 +123,42 @@ describeIntegration('registration with no owner email configured (US-004)', () =
     expect(res.status).toBe(201);
     const created = data<{ user: UserRow }>(res);
     expect(await h.boundRoles('USER', created.user.id)).toEqual([{ roleKey: 'member', projectId: null }]);
+  });
+
+  it('B4: a failed Owner binding rolls the registration back instead of spending the Owner seat', async () => {
+    await h.emptyPrincipalTables();
+    // No `owner` role row: the first user's Owner binding cannot be written. Leaving the user committed
+    // would answer an error and consume the only seat an Owner can ever take (firstUser is then false).
+    const owner = await h.db.role.findUniqueOrThrow({ where: { key: 'owner' } });
+    await h.db.role.delete({ where: { key: 'owner' } });
+
+    try {
+      const res = await h.register('bootstrap@koda.test');
+
+      expect(res.status).toBe(404);
+      expect(await h.db.user.count()).toBe(0);
+    } finally {
+      await h.db.role.create({
+        data: {
+          id: owner.id,
+          key: owner.key,
+          name: owner.name,
+          description: owner.description,
+          scope: owner.scope,
+          system: owner.system,
+          locked: owner.locked,
+          permissions: owner.permissions as Prisma.InputJsonValue,
+        },
+      });
+    }
+
+    // The seat is still free: the next registration bootstraps the Owner as it would on a fresh install.
+    const retry = await h.register('first@koda.test');
+
+    expect(retry.status).toBe(201);
+    const created = data<{ user: UserRow }>(retry);
+    expect(await h.boundRoles('USER', created.user.id)).toContainEqual({ roleKey: 'owner', projectId: null });
+    expect(await h.storedRole(created.user.id)).toBe('ADMIN');
   });
 });
 
@@ -401,5 +437,49 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
     await patchUser(target.id, { disabled: true }).expect(200);
 
     await request(h.server).get('/api/auth/me').set(auth(token)).expect(401);
+  });
+
+  it('B4: a failed baseline binding rolls the admin-created user back', async () => {
+    // No `member` role row: the baseline binding cannot be written, so the user row must not survive.
+    // The role's bindings are removed first (the relation is RESTRICT) and put back afterwards.
+    const member = await h.db.role.findUniqueOrThrow({ where: { key: 'member' } });
+    const memberBindings = await h.db.roleBinding.findMany({ where: { roleId: member.id } });
+    await h.db.roleBinding.deleteMany({ where: { roleId: member.id } });
+    await h.db.role.delete({ where: { key: 'member' } });
+
+    try {
+      const res = await request(h.server)
+        .post('/api/admin/users')
+        .set(auth(rootToken))
+        .send({
+          email: 'no-baseline@koda.test',
+          name: 'No baseline',
+          password: TEST_PASSWORD,
+          role: 'MEMBER',
+        });
+
+      expect(res.status).toBe(404);
+      expect(await h.db.user.count({ where: { email: 'no-baseline@koda.test' } })).toBe(0);
+    } finally {
+      await h.db.role.create({
+        data: {
+          id: member.id,
+          key: member.key,
+          name: member.name,
+          description: member.description,
+          scope: member.scope,
+          system: member.system,
+          locked: member.locked,
+          permissions: member.permissions as Prisma.InputJsonValue,
+        },
+      });
+      await h.db.roleBinding.createMany({ data: memberBindings });
+    }
+
+    // With the baseline writable again the same request succeeds, and nothing of the failed attempt
+    // is left behind.
+    const retry = await createUser('no-baseline@koda.test');
+
+    expect(await h.boundRoles('USER', retry.id)).toEqual([{ roleKey: 'member', projectId: null }]);
   });
 });

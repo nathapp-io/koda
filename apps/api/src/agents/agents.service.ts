@@ -125,18 +125,21 @@ export class AgentsService {
       // `txManager.run` callback. A failed role/capability write rejects out of
       // the callback and the transaction manager rolls back the agent row.
       // Permissions P1a (US-004): the baseline binding is inside the same callback, so a rolled-back
-      // create leaves no RoleBinding row for the agent either.
-      const result = await this.txManager.run(async () => {
-        const agent = await this.agentRepo.create(createData).catch((error: unknown) => {
-          if (isUniqueViolation(error, 'slug')) {
-            throw new ConflictAppException({}, 'agents');
-          }
-          throw error;
-        });
-        await this.agentRepo.createRolesAndCapabilities(agent.id, validatedRoles, capabilities ?? []);
-        await this.membership.bindBaseline({ type: 'AGENT', id: agent.id });
-        return agent;
-      });
+      // create leaves no RoleBinding row for the agent either. `afterCommit` keeps the permission-cache
+      // invalidation of that nested write until this transaction committed (B3).
+      const result = await this.membership.afterCommit(() =>
+        this.txManager.run(async () => {
+          const agent = await this.agentRepo.create(createData).catch((error: unknown) => {
+            if (isUniqueViolation(error, 'slug')) {
+              throw new ConflictAppException({}, 'agents');
+            }
+            throw error;
+          });
+          await this.agentRepo.createRolesAndCapabilities(agent.id, validatedRoles, capabilities ?? []);
+          await this.membership.bindBaseline({ type: 'AGENT', id: agent.id });
+          return agent;
+        }),
+      );
       await this.agentAuthProvider?.invalidateByTag(`AGENT:${result.id}`);
       const agentWithRelations = {
         ...result,

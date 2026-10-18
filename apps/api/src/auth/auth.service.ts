@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
 import { AuthException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { CacheManager } from '@nathapp/nestjs-cache';
 import * as bcrypt from 'bcrypt';
 import { RegisterDto } from './dto/register.dto';
@@ -36,6 +37,7 @@ export class AuthService {
     private cache: CacheManager,
     @Inject(AUTH_CFG) private readonly authConfig: IAuthConfig,
     private readonly membership: MembershipService,
+    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -75,24 +77,34 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-    const created = await this.authRepo
-      .findAnyUserAndCreate({ email, name, passwordHash }, { allowWhenUsersExist })
-      .catch((error: unknown) => {
-        if (isUniqueViolation(error, 'email')) throw new ConflictAppException({}, 'auth');
-        throw error;
-      });
+
+    // The user row and the bindings it must never be missing are one unit (B4): a committed user whose
+    // Owner or baseline binding failed would answer an error, leave the Owner seat taken, and leave an
+    // installation with an Owner nobody holds. The session is issued after the commit, so a rolled-back
+    // registration never hands out a token for a user that does not exist.
+    const created = await this.membership.afterCommit(() =>
+      this.txManager.run(async () => {
+        const outcome = await this.authRepo
+          .findAnyUserAndCreate({ email, name, passwordHash }, { allowWhenUsersExist })
+          .catch((error: unknown) => {
+            if (isUniqueViolation(error, 'email')) throw new ConflictAppException({}, 'auth');
+            throw error;
+          });
+        if (!outcome) return null;
+
+        // The first user gets the installation's Owner binding (the repository already stores role ADMIN
+        // for them); everyone else starts at the member baseline. The hooks run before the session is
+        // issued, so the response always describes the user as the bindings left them.
+        await this.membership.bindOwnerIfFirst(outcome.user.id, outcome.firstUser);
+        await this.membership.bindBaseline({ type: 'USER', id: outcome.user.id });
+        return outcome.user;
+      }),
+    );
     if (!created) {
       throw new ForbiddenAppException({}, 'registration');
     }
-    const { user, firstUser } = created;
 
-    // The first user gets the installation's Owner binding (the repository already stores role ADMIN
-    // for them); everyone else starts at the member baseline. The hooks run before the session is
-    // issued, so the response always describes the user as the bindings left them.
-    await this.membership.bindOwnerIfFirst(user.id, firstUser);
-    await this.membership.bindBaseline({ type: 'USER', id: user.id });
-
-    return this.issueSession(user);
+    return this.issueSession(created);
   }
 
   async registrationStatus(): Promise<{ open: boolean }> {

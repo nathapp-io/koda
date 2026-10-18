@@ -107,6 +107,7 @@ export const mockMembershipService = {
   listBindings: vi.fn(async () => ({ records: [], total: 0, current: 1, size: 50, hasNext: false, hasPrev: false })),
   removeBinding: vi.fn(async () => undefined),
   removeAllBindings: vi.fn(async () => undefined),
+  afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
 } as unknown as MembershipService;
 
 export const mockAuthConfig: IAuthConfig = {

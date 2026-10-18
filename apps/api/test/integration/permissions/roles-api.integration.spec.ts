@@ -26,6 +26,9 @@ const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : descr
 const OWNER_EMAIL = 'owner@koda.test';
 const ADMIN_EMAIL = 'admin@koda.test';
 const MEMBER_EMAIL = 'member@koda.test';
+/** B1's two restricted grantors: they hold `role.manage` and `role.binding.global`, nothing else global. */
+const RESTRICTED_GRANTER_EMAIL = 'restricted-granter@koda.test';
+const RESTRICTED_GRANTER_2_EMAIL = 'restricted-granter-2@koda.test';
 /** Booting `AppModule` runs the system-role seeder, so the first hook needs a generous budget. */
 const BOOT_TIMEOUT_MS = 30_000;
 
@@ -582,5 +585,60 @@ describeIntegration('roles API (US-005)', () => {
 
     expectRefusal(res, { status: 403, code: CODE.forbidden, key: '' });
     expect(await storedRole('member-role')).toBeNull();
+  });
+
+  /**
+   * B1: the admin role is unlocked, so a caller holding `role.manage` may edit it — but only within its
+   * own authority. `admin` confers every global key except `role.binding.owner` **plus** every project
+   * key and the legacy `User.role = 'ADMIN'` status, none of which are in its editable entry list. The
+   * escalation check therefore compares the whole conferred set, not just the entries it is handed.
+   */
+  const restrictedRoleGranter = async (email: string): Promise<string> => {
+    const token = await createUser(email, 'MEMBER');
+    const granter = await userByEmail(email);
+    const role =
+      (await db.role.findUnique({ where: { key: 'restricted-role-granter' } })) ??
+      (await db.role.create({
+        data: {
+          key: 'restricted-role-granter',
+          name: 'Restricted role granter',
+          description: '',
+          scope: 'GLOBAL',
+          system: false,
+          locked: false,
+          permissions: ['role.manage', 'role.binding.global'],
+        },
+      }));
+    await db.roleBinding.create({
+      data: {
+        principalType: 'USER',
+        principalId: granter.id,
+        roleId: role.id,
+        projectId: null,
+        grantedByType: 'SYSTEM',
+        grantedById: 'test',
+      },
+    });
+    return token;
+  };
+
+  it('B1: a role manager without admin authority cannot empty the admin role', async () => {
+    const token = await restrictedRoleGranter(RESTRICTED_GRANTER_EMAIL);
+    const admin = await storedRoleId('admin');
+    const before = (await storedRole('admin'))?.permissions;
+
+    const res = await patchRole(token, admin, { permissions: [] });
+
+    expectRefusal(res, { status: 403, code: CODE.forbidden, key: 'escalation' });
+    expect((await storedRole('admin'))?.permissions).toEqual(before);
+  });
+
+  it("B1: the same caller is refused when it strips the admin role's owner-key exclusion", async () => {
+    const token = await restrictedRoleGranter(RESTRICTED_GRANTER_2_EMAIL);
+    const admin = await storedRoleId('admin');
+
+    const res = await patchRole(token, admin, { permissions: ['*'] });
+
+    expectRefusal(res, { status: 403, code: CODE.forbidden, key: 'escalation' });
   });
 });

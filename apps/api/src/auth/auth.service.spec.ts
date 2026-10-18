@@ -5,8 +5,9 @@ import { CacheManager } from '@nathapp/nestjs-cache';
 import { AuthService } from './auth.service';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import { ConfigService } from '@nestjs/config';
-import { AppException, AuthException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { AppException, AuthException, ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { Prisma } from '../generated/prisma/client';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AUTH_CFG } from '../config/auth.config';
 import { MembershipService } from '../permissions/membership.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
@@ -52,6 +53,15 @@ describe('AuthService', () => {
   const mockMembership = {
     bindOwnerIfFirst: vi.fn(),
     bindBaseline: vi.fn(),
+    // B3/B4: the registration transaction is handed to MembershipService, which flushes its deferred
+    // cache invalidations when the callback resolves.
+    afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
+  };
+
+  const mockTxManager = {
+    run: vi.fn((fn: () => Promise<unknown>) => fn()),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => false),
   };
 
   const mockJwtStrategyProvider = {
@@ -82,6 +92,7 @@ describe('AuthService', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: AUTH_CFG, useValue: mockAuthConfig },
         { provide: MembershipService, useValue: mockMembership },
+        { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
         { provide: JwtStrategyProvider, useValue: mockJwtStrategyProvider },
         { provide: JwtRefreshStrategyProvider, useValue: mockJwtRefreshStrategyProvider },
         { provide: CacheManager, useValue: mockCacheManager },
@@ -203,6 +214,27 @@ describe('AuthService', () => {
 
       expect(mockMembership.bindOwnerIfFirst).toHaveBeenCalledWith('second-user', false);
       expect(mockMembership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'second-user' });
+    });
+
+    it('B4: a failed Owner binding rejects and issues no session', async () => {
+      mockAuthConfig.registrationEnabled = true;
+      mockAuthRepository.findUserByEmail.mockResolvedValueOnce(null);
+      mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({
+        user: { ...mockUser, id: 'first-user', role: 'ADMIN' },
+        firstUser: true,
+      });
+      mockMembership.bindOwnerIfFirst.mockRejectedValueOnce(
+        new NotFoundAppException({}, 'permissions.roleNotFound'),
+      );
+
+      await expect(
+        service.register({ email: 'first@example.com', name: 'First', password: 'Password123!' }),
+      ).rejects.toBeInstanceOf(NotFoundAppException);
+
+      // The user row and its bindings are one transaction, so the failed binding takes the row with it
+      // and the Owner seat stays free. The response is the failure, never a session.
+      expect(mockMembership.bindBaseline).not.toHaveBeenCalled();
+      expect(mockJwtStrategyProvider.sign).not.toHaveBeenCalled();
     });
   });
 

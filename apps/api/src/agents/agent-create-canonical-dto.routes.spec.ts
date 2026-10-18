@@ -80,7 +80,14 @@ describe('POST /api/agents with the canonical CreateAgentDto (US-005 AC3)', () =
         { provide: TRANSACTION_MANAGER, useValue: txManager },
         { provide: AUTH_CFG, useValue: authConfig },
         // Permissions P1a (US-004): the create path binds the new agent to the baseline.
-        { provide: MembershipService, useValue: { bindBaseline: vi.fn().mockResolvedValue(undefined) } },
+        {
+          provide: MembershipService,
+          useValue: {
+            bindBaseline: vi.fn().mockResolvedValue(undefined),
+            // B3: the baseline write joins the create transaction; the stub runs the callback as-is.
+            afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
+          },
+        },
         {
           provide: KodaDomainWriter,
           useValue: { writeAgentAction: vi.fn().mockResolvedValue({ canonicalId: 'evt-1' }) },

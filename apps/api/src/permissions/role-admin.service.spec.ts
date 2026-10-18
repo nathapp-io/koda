@@ -6,6 +6,7 @@ import {
 } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
+import { AfterCommitService } from './after-commit.service';
 import { MembershipService } from './membership.service';
 import { PermissionCache } from './permission-cache';
 import { PermissionService } from './permission.service';
@@ -72,6 +73,7 @@ describe('RoleAdminService', () => {
       txManager as never,
       permissionCache,
       cache as never,
+      new AfterCommitService(),
     );
     service = new RoleAdminService(
       store.roleRepo() as never,
@@ -199,6 +201,7 @@ describe('RoleAdminService', () => {
           txManager as never,
           permissionCache,
           cache as never,
+          new AfterCommitService(),
         ),
       );
 
@@ -465,6 +468,104 @@ describe('RoleAdminService', () => {
       });
     });
 
+    /**
+     * B1: the implicit powers of a global `owner`/`admin` binding are not in its editable entry list.
+     * A caller that holds only what the role routes need could clear `admin.permissions` and then bind
+     * the emptied role; `MembershipService` mirrors that binding into a legacy `User.role = 'ADMIN'`,
+     * which `PermissionService` turns into every project key. The escalation check must therefore
+     * count what the binding confers, not what the role happens to store.
+     */
+    describe('the implicit powers of a global admin binding (B1)', () => {
+      /** A caller holding exactly the two keys the role and binding routes need, and nothing else. */
+      const restrictedGranter = (): KodaPrincipal => {
+        store.roles.push({
+          id: 'role-restricted-granter',
+          key: 'restricted-granter',
+          name: 'Restricted granter',
+          description: '',
+          scope: 'GLOBAL',
+          system: false,
+          locked: false,
+          permissions: ['role.manage', 'role.binding.global'],
+        });
+        store.addUser('restricted-1');
+        store.bind(USER('restricted-1'), 'restricted-granter', null);
+        return principal('restricted-1');
+      };
+
+      it('refuses to empty the admin role: the caller does not hold what the role confers', async () => {
+        const caller = restrictedGranter();
+        const before = role('admin').permissions;
+
+        const error = await thrown(() => service.updateRole(caller, role('admin').id, { permissions: [] }));
+
+        expect(error).toBeInstanceOf(ForbiddenAppException);
+        expect(error.prefix).toBe('permissions.escalation');
+        expect(role('admin').permissions).toEqual(before);
+      });
+
+      it('refuses to bind a global admin role the caller only holds after editing it', async () => {
+        const caller = restrictedGranter();
+        store.addUser('promoted-target');
+        // The hand-edited row the exploit leaves behind: the entries are gone, the binding still
+        // promotes its target to a legacy ADMIN with every project key.
+        store.roleByKey('admin').permissions = [];
+
+        const error = await thrown(() =>
+          service.createBinding(caller, {
+            principalType: 'USER',
+            principalId: 'promoted-target',
+            roleKey: 'admin',
+            projectId: null,
+          }),
+        );
+
+        expect(error).toBeInstanceOf(ForbiddenAppException);
+        expect(error.prefix).toBe('permissions.escalation');
+        expect(bindingsOf('promoted-target')).toHaveLength(0);
+      });
+
+      it('refuses to remove a global admin binding whose role the caller could not grant', async () => {
+        const caller = restrictedGranter();
+        const binding = store.bind(USER('someone'), 'admin', null);
+
+        const error = await thrown(() => service.removeBinding(caller, binding.id));
+
+        expect(error).toBeInstanceOf(ForbiddenAppException);
+        expect(error.prefix).toBe('permissions.escalation');
+        expect(store.bindings.some((entry) => entry.id === binding.id)).toBe(true);
+      });
+
+      it('still lets a global admin edit and grant the admin role it holds in full', async () => {
+        store.addUser('grantable-target');
+        const target = store.roleByKey('admin');
+        // The exact entry list an admin holds itself, exclusion included: the check compares the
+        // whole conferred key set, so keeping the exclusion keeps the edit inside its own authority.
+        const edited = await service.updateRole(admin, target.id, {
+          permissions: ['*', '!role.binding.owner'],
+        });
+
+        expect(edited.permissions).toEqual(['*', '!role.binding.owner']);
+        await expect(
+          service.createBinding(admin, {
+            principalType: 'USER',
+            principalId: 'grantable-target',
+            roleKey: 'admin',
+            projectId: null,
+          }),
+        ).resolves.toMatchObject({ roleKey: 'admin', projectId: null });
+      });
+
+      it('refuses an edit that drops the admin role\'s owner-key exclusion', async () => {
+        const error = await thrown(() =>
+          service.updateRole(admin, role('admin').id, { permissions: ['*'] }),
+        );
+
+        expect(error).toBeInstanceOf(ForbiddenAppException);
+        expect(error.prefix).toBe('permissions.escalation');
+      });
+    });
+
     describe('createBinding', () => {
       const developerInProject = (principalType: 'AGENT') => ({
         principalType,
@@ -609,8 +710,10 @@ describe('RoleAdminService', () => {
       });
 
       it('AC-22 (unit): removing the last owner binding is refused by the owner lock', async () => {
-        // A caller holding every key the owner role holds without holding an owner binding itself:
-        // only such a caller gets past the escalation rule and reaches the owner lock.
+        // A caller holding every key the owner role confers — its entry list **and** the synthetic
+        // project authority every global admin binding carries — without holding an owner binding
+        // itself: only such a caller gets past the escalation rule and reaches the owner lock. The
+        // legacy `User.role = 'ADMIN'` supplies the project half, the custom `*` role the owner key.
         store.roles.push({
           id: 'role-superuser',
           key: 'superuser',
@@ -621,7 +724,7 @@ describe('RoleAdminService', () => {
           locked: false,
           permissions: ['*'],
         });
-        store.addUser('grantor-2');
+        store.addUser('grantor-2', 'ADMIN');
         store.bind(USER('grantor-2'), 'superuser', null);
         // The store's only owner binding belongs to someone else, so removing it is the last one.
         store.bindings = store.bindings.filter((entry) => entry.roleId !== store.roleByKey('owner').id);

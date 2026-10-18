@@ -136,7 +136,12 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
         // Permissions P1a (US-004): AgentsService injects the permissions module's MembershipService.
         {
           provide: MembershipService,
-          useValue: { bindBaseline: vi.fn(), removeAllBindings: vi.fn() },
+          useValue: {
+            bindBaseline: vi.fn(),
+            removeAllBindings: vi.fn(),
+            // B3: the baseline write joins the create transaction; the stub runs the callback as-is.
+            afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
+          },
         },
         {
           provide: KodaDomainWriter,

@@ -53,7 +53,11 @@ describe('AgentsService project roster writes (S4c US-003)', () => {
       authConfig,
       txManager as never,
       // Permissions P1a (US-004): MembershipService is the required fourth parameter.
-      { bindBaseline: vi.fn(), removeAllBindings: vi.fn() } as unknown as MembershipService,
+      {
+        bindBaseline: vi.fn(),
+        removeAllBindings: vi.fn(),
+        afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
+      } as unknown as MembershipService,
     );
   });
 

@@ -176,6 +176,7 @@ export class InMemoryPermissionStore {
       deleteById: async (id: string) => {
         const before = this.bindings.length;
         this.bindings = this.bindings.filter((b) => b.id !== id);
+        this.calls.push(`delete-binding:${id}`);
         return this.bindings.length < before;
       },
       deleteForPrincipal: async (principal: PrincipalRef) => {
@@ -184,6 +185,9 @@ export class InMemoryPermissionStore {
       lockOwnerRole: async () => {
         this.calls.push('lock-owner');
         return this.roleByKey('owner').id;
+      },
+      lockUser: async (userId: string) => {
+        this.calls.push(`lock-user:${userId}`);
       },
       countEnabledOwnerBindings: async (ownerRoleId: string, excludeIds: readonly string[]) =>
         this.bindings.filter(

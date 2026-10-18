@@ -194,6 +194,17 @@ export class PrismaRoleBindingRepository
     return rows[0]?.id ?? null;
   }
 
+  /**
+   * Takes the user's row lock (`SELECT … FOR UPDATE`) so the legacy `User.role` mirror of concurrent
+   * global `owner`/`admin` binding writes of that user is decided one transaction at a time: without
+   * it, two removals each count the other's uncommitted binding as still present and neither demotes.
+   * Call inside `txManager.run` only, after `lockOwnerRole` when the same write takes that one too —
+   * never in the opposite order, or two transactions deadlock.
+   */
+  async lockUser(userId: string): Promise<void> {
+    await this.db.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+  }
+
   /** Owner bindings of enabled users, leaving out `excludeIds` (the bindings about to be removed). */
   async countEnabledOwnerBindings(ownerRoleId: string, excludeIds: readonly string[]): Promise<number> {
     const owners = await this.db.roleBinding.findMany({

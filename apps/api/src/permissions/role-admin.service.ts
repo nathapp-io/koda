@@ -54,6 +54,8 @@ const OWN_SUFFIX = '.own';
 const APPROVAL_DECIDE = 'approval.decide';
 const APPROVAL_DECIDE_PREFIX = 'approval.decide@';
 const OWNER_ROLE_KEY = 'owner';
+const ADMIN_ROLE_KEY = 'admin';
+const OWNER_BINDING_KEY = 'role.binding.owner';
 
 /**
  * Permissions P1a: role administration (`/roles` and `/role-bindings`).
@@ -102,7 +104,7 @@ export class RoleAdminService {
     if (await this.roles.findOne({ key: input.key })) {
       throw new ConflictAppException({}, 'permissions.roleKeyTaken');
     }
-    await this.assertNoEscalation(principal, expanded);
+    await this.assertNoEscalation(principal, this.confer(input, expanded, true));
 
     try {
       const created = await this.roles.createRole({
@@ -132,7 +134,9 @@ export class RoleAdminService {
     const role = await this.findById(id);
 
     const expanded =
-      patch.permissions === undefined ? undefined : this.expand(patch.permissions, role.scope);
+      patch.permissions === undefined
+        ? undefined
+        : this.confer(role, this.expand(patch.permissions, role.scope), true);
     if (role.system && patch.name !== undefined) {
       throw new ValidationAppException({}, 'permissions.systemRole');
     }
@@ -213,7 +217,11 @@ export class RoleAdminService {
     const expanded = this.expandStored(role);
     this.assertPrincipalType(expanded, input.principalType);
     this.assertNotSelf(principal, target);
-    if (expanded !== null) await this.assertNoEscalation(principal, expanded, scopeOf(projectId));
+    await this.assertNoEscalation(
+      principal,
+      this.confer(role, expanded, projectId === null),
+      scopeOf(projectId),
+    );
 
     return this.membership.createBinding(
       { principal: target, roleKey: input.roleKey, projectId },
@@ -236,9 +244,11 @@ export class RoleAdminService {
     // The FK makes this unreachable; refusing is still safer than skipping the escalation rule.
     const role = await this.findByKey(binding.roleKey);
     const expanded = this.expandStored(role);
-    if (expanded !== null) {
-      await this.assertNoEscalation(principal, expanded, scopeOf(binding.projectId));
-    }
+    await this.assertNoEscalation(
+      principal,
+      this.confer(role, expanded, binding.projectId === null),
+      scopeOf(binding.projectId),
+    );
 
     await this.membership.removeBinding(id);
   }
@@ -292,6 +302,27 @@ export class RoleAdminService {
     }
   }
 
+  /**
+   * The keys a role confers where it is being written: its own entries, plus the authority a global
+   * `owner` or `admin` binding carries whatever its entry list says. Escalation that read only the
+   * editable entries could be defeated — a caller holding `role.manage` and `role.binding.global`
+   * clears `admin.permissions`, binds the emptied role, and `MembershipService` mirrors that binding
+   * into a legacy `User.role = 'ADMIN'`, which is every project key in every project.
+   *
+   * `globallyBound` is true for a `projectId`-null binding and for a role write (a role's own scope is
+   * global, whatever the caller's project). An invalid stored entry list contributes nothing, so the
+   * `null` of `expandStored` only ever removes the role's own contribution.
+   */
+  private confer(
+    role: { key: string; scope: RoleScope },
+    expanded: ReadonlySet<string> | null,
+    globallyBound: boolean,
+  ): ReadonlySet<string> {
+    const synthetic = globallyBound ? syntheticGlobalAdminKeys(role) : null;
+    if (synthetic === null) return expanded ?? new Set<string>();
+    return new Set<string>([...(expanded ?? []), ...synthetic]);
+  }
+
   /** `expandEntries` with its two grammar errors turned into the routes' 400s. */
   private expand(entries: readonly string[], scope: RoleScope): ReadonlySet<string> {
     try {
@@ -328,6 +359,24 @@ export class RoleAdminService {
 /** The scope a binding's escalation check runs against: global for a null `projectId`. */
 function scopeOf(projectId: string | null): PermissionScope {
   return projectId === null ? 'global' : { projectId };
+}
+
+/**
+ * What a global `owner`/`admin` binding confers on top of its role's editable entries, straight from
+ * the rules `PermissionService` applies: such a binding also gives its principal every key in
+ * `expandEntries(['*'], 'PROJECT')`, in every project, and its legacy `User.role = 'ADMIN'` carries
+ * the admin role's own global authority. `owner` therefore holds `role.binding.owner` and `admin`
+ * does not, exactly as the seeded entries say.
+ *
+ * `null` for every other role: a custom GLOBAL role — even one holding `*` — confers only what its
+ * entries expand to, because `PermissionService` grants the synthetic project set to `owner`/`admin`
+ * bindings alone.
+ */
+function syntheticGlobalAdminKeys(role: { key: string; scope: RoleScope }): ReadonlySet<string> | null {
+  if (role.scope !== 'GLOBAL') return null;
+  if (role.key !== OWNER_ROLE_KEY && role.key !== ADMIN_ROLE_KEY) return null;
+  const globalEntries = role.key === OWNER_ROLE_KEY ? ['*'] : ['*', `!${OWNER_BINDING_KEY}`];
+  return new Set([...expandEntries(globalEntries, 'GLOBAL'), ...expandEntries(['*'], 'PROJECT')]);
 }
 
 /** `comment.update.own` → `comment.update`; `approval.decide@…` → `approval.decide`. */

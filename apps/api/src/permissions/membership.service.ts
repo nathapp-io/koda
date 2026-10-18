@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CacheManager } from '@nathapp/nestjs-cache';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
@@ -6,6 +6,7 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { userAuthStateCacheKey, userTokenVersionCacheTag } from '../auth/token-version.cache';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
+import { AfterCommitService } from './after-commit.service';
 import { PermissionCache } from './permission-cache';
 import { ROLE_BINDING_REPOSITORY, ROLE_REPOSITORY } from './permissions.tokens';
 import type {
@@ -39,17 +40,39 @@ interface WriteOutcome<T> {
  * Owner bindings are serialised by a `SELECT … FOR UPDATE` on the `owner` Role row, which also
  * protects the last-owner rule. For USER principals a global `owner` or `admin` binding is mirrored
  * into the legacy `User.role` in the same transaction; a change of `User.role` revokes the user's
- * tokens, and the cache entries that hold their auth state are dropped after the transaction.
+ * tokens, and the cache entries that hold their auth state are dropped once the write's transaction
+ * committed (see `afterCommit`).
+ *
+ * Two locks serialize the legacy-role mirror, always in the same order — the `owner` Role row when the
+ * write can touch an owner binding, then the user's row: the survivor count of a removal must see
+ * every concurrent owner/admin change of that user, or two transactions each count the other's
+ * binding as still present and nobody demotes.
  */
 @Injectable()
 export class MembershipService {
+  private readonly logger = new Logger(MembershipService.name);
+
   constructor(
     @Inject(ROLE_REPOSITORY) private readonly roles: PrismaRoleRepository,
     @Inject(ROLE_BINDING_REPOSITORY) private readonly bindings: PrismaRoleBindingRepository,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly permissionCache: PermissionCache,
     private readonly cache: CacheManager,
+    private readonly afterCommitHooks: AfterCommitService,
   ) {}
+
+  /**
+   * The transaction owner's hook. Runs `fn` — normally its own `txManager.run` — and performs the
+   * invalidations a nested binding write deferred inside it once the transaction ended.
+   *
+   * Any service that wraps a `MembershipService` write in its own transaction must pass the callback
+   * through here. Nested `run`s join the outer transaction, so invalidating inside it drops the
+   * permission cache before the binding is visible: a request in that window recomputes the old keys
+   * and caches them under the new generation, and the commit invalidates nothing afterwards.
+   */
+  async afterCommit<T>(fn: () => Promise<T>): Promise<T> {
+    return this.afterCommitHooks.scope(fn);
+  }
 
   /** Legacy `User.role = 'ADMIN'` or a global `owner`/`admin` binding. */
   async isGlobalAdmin(userId: string): Promise<boolean> {
@@ -75,6 +98,7 @@ export class MembershipService {
     }
     const adminRole = await this.roles.findOne({ key: ADMIN_ROLE_KEY });
     const outcome = await this.txManager.run(async (): Promise<WriteOutcome<void>> => {
+      await this.lockUserPrincipal({ type: 'USER', id: userId });
       if (!(await this.bindings.findUserState(userId))) throw new NotFoundAppException({}, 'users');
       const existing = adminRole
         ? await this.bindings.findExisting({ type: 'USER', id: userId }, adminRole.id, null)
@@ -123,13 +147,18 @@ export class MembershipService {
       const first = await this.bindings.findViewById(id);
       if (!first) throw new NotFoundAppException({}, 'permissions.bindingNotFound');
       const ownerRoleId = first.roleKey === OWNER_ROLE_KEY ? await this.bindings.lockOwnerRole() : null;
+      await this.lockUserPrincipal(principalOfBinding(first.binding));
 
       // Re-read under the lock: a concurrent removal may have deleted it while this call waited.
       const current = ownerRoleId ? await this.bindings.findViewById(id) : first;
       if (!current) throw new NotFoundAppException({}, 'permissions.bindingNotFound');
       if (ownerRoleId) await this.assertOwnerRemains(ownerRoleId, [current.binding.id]);
 
-      await this.bindings.deleteById(id);
+      // The delete itself decides: a concurrent removal that won reports zero affected rows, and the
+      // loser answers 404 instead of demoting a user it did not change.
+      if (!(await this.bindings.deleteById(id))) {
+        throw new NotFoundAppException({}, 'permissions.bindingNotFound');
+      }
       return this.afterRemoval([current]);
     });
     await this.afterWrite(outcome);
@@ -141,6 +170,7 @@ export class MembershipService {
       const ownerRoleId = probe.some((row) => row.roleKey === OWNER_ROLE_KEY)
         ? await this.bindings.lockOwnerRole()
         : null;
+      await this.lockUserPrincipal(principal);
 
       const current = ownerRoleId ? await this.bindings.findPrincipalBindings(principal) : probe;
       if (ownerRoleId) {
@@ -160,6 +190,8 @@ export class MembershipService {
     by: Granter,
   ): Promise<WriteOutcome<RoleBindingView>> {
     if (role.key === OWNER_ROLE_KEY) await this.bindings.lockOwnerRole();
+    // The same order as every other path that takes both: the owner Role row, then the user's row.
+    await this.lockUserPrincipal(input.principal);
 
     const existing = await this.bindings.findExisting(input.principal, role.id, input.projectId);
     if (existing) return { value: toView(existing, role.key), changed: false, revokedUserIds: [] };
@@ -216,6 +248,15 @@ export class MembershipService {
     return this.bindings.setUserRole(userId, 'MEMBER');
   }
 
+  /**
+   * The row lock that serializes this user's legacy-role mirror. Taken after the `owner` Role row
+   * (when the write takes that one too) and before any binding is read, changed or counted, so the
+   * survivor count always runs against the state a concurrent owner/admin change committed.
+   */
+  private async lockUserPrincipal(principal: PrincipalRef): Promise<void> {
+    if (principal.type === 'USER') await this.bindings.lockUser(principal.id);
+  }
+
   private async assertTargetsExist(principal: PrincipalRef, projectId: string | null): Promise<void> {
     if (!(await this.bindings.principalExists(principal))) {
       throw new NotFoundAppException({}, principal.type === 'USER' ? 'users' : 'agents');
@@ -225,14 +266,36 @@ export class MembershipService {
     }
   }
 
-  /** After the transaction committed: drop the permission cache and every revoked user's auth state. */
+  /**
+   * After the transaction ended: drop the permission cache and every revoked user's auth state.
+   *
+   * A write that joined a caller's transaction defers this to that caller's `afterCommit` scope, so
+   * nothing is invalidated before the rows are visible to other requests.
+   */
   private async afterWrite(outcome: WriteOutcome<unknown>): Promise<void> {
-    if (outcome.changed) await this.permissionCache.invalidate();
-    for (const userId of outcome.revokedUserIds) {
-      await this.cache.invalidate(userTokenVersionCacheTag(userId), { mode: 'tag' });
-      await this.cache.invalidate(userAuthStateCacheKey(userId));
+    const invalidate = async (): Promise<void> => {
+      if (outcome.changed) await this.permissionCache.invalidate();
+      for (const userId of outcome.revokedUserIds) {
+        await this.cache.invalidate(userTokenVersionCacheTag(userId), { mode: 'tag' });
+        await this.cache.invalidate(userAuthStateCacheKey(userId));
+      }
+    };
+    if (this.afterCommitHooks.defer(invalidate)) return;
+    if (this.txManager.isInTransaction()) {
+      // A caller wrapped this write in its own transaction without routing it through `afterCommit`.
+      // The invalidation below is early, which can leave a stale cache entry behind for one TTL.
+      this.logger.error(
+        'a binding write ran inside a transaction that is not wrapped in MembershipService.afterCommit: ' +
+          'the permission cache may be invalidated before the commit',
+      );
     }
+    await invalidate();
   }
+}
+
+/** The principal a stored binding names, as the permission layer spells it. */
+function principalOfBinding(binding: BindingWithRole['binding']): PrincipalRef {
+  return { type: binding.principalType, id: binding.principalId };
 }
 
 function toView(binding: BindingWithRole['binding'], roleKey: string): RoleBindingView {

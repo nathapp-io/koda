@@ -99,6 +99,7 @@ describe('AgentsService', () => {
     bindBaseline: vi.fn(),
     setGlobalAdmin: vi.fn(),
     removeAllBindings: vi.fn(),
+    afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
   };
 
   // US-003: AgentsService wraps the agent create in txManager.run — the provider
