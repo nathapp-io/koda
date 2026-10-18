@@ -10,6 +10,7 @@ import { PrismaPendingActionRepository } from './actions/prisma-pending-action.r
 import { AssistantModule } from './assistant.module';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
+import { McpController } from './mcp/mcp.controller';
 import { KODA_GET_ACTION, KODA_MY_PROJECTS } from './koda-tool-descriptors';
 import { FleetWriteTools } from './tools/fleet-write-tools';
 import { KnowledgeTools } from './tools/knowledge-tools';
@@ -28,6 +29,10 @@ describe('AssistantModule', () => {
 
   it('AC-15: compiles and resolves AssistantToolExecutor', () => {
     expect(module.get(AssistantToolExecutor)).toBeDefined();
+  });
+
+  it('AC-14 (US-007): resolves McpController', () => {
+    expect(module.get(McpController)).toBeInstanceOf(McpController);
   });
 
   it('AC-1 (US-004): provides KnowledgeTools with the memory service it injects', () => {
