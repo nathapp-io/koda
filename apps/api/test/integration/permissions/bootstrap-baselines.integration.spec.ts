@@ -63,7 +63,17 @@ function harness(app: NathApplication) {
 
   const userByEmail = (email: string) => db.user.findFirstOrThrow({ where: { email } });
 
-  return { server, db, register, boundRoles, storedRole, userByEmail };
+  /**
+   * Empty the user-facing tables without touching the seeded `Role` rows, so a test that needs the
+   * empty-table bootstrap starts from it whatever ran before. `RoleBinding.principalId` has no foreign
+   * key, so bindings are cleared first.
+   */
+  const emptyPrincipalTables = async (): Promise<void> => {
+    await db.roleBinding.deleteMany({});
+    await db.user.deleteMany({});
+  };
+
+  return { server, db, register, boundRoles, storedRole, userByEmail, emptyPrincipalTables };
 }
 
 describeIntegration('registration with no owner email configured (US-004)', () => {
@@ -85,6 +95,10 @@ describeIntegration('registration with no owner email configured (US-004)', () =
   });
 
   it('AC-5: the first registration gets a projectId-null owner binding and a projectId-null member binding', async () => {
+    // The Owner seat is only free on an empty table, so the test clears it rather than relying on
+    // whatever another test left behind.
+    await h.emptyPrincipalTables();
+
     const res = await h.register('first@koda.test');
 
     expect(res.status).toBe(201);
@@ -101,6 +115,7 @@ describeIntegration('registration with no owner email configured (US-004)', () =
   });
 
   it('AC-6: with users already present a new registration gets a member binding and no owner binding', async () => {
+    await h.emptyPrincipalTables();
     await h.register('second@koda.test').expect(201);
 
     const res = await h.register('third@koda.test');
@@ -130,13 +145,24 @@ describeIntegration('KODA_OWNER_EMAIL gates the first registration (US-004)', ()
     resetThrottle(app);
   });
 
+  /**
+   * The state every case in this describe needs: an empty users table, then the Owner's registration
+   * attempt, which is the only one the gate lets through. Each case builds it itself so the assertions
+   * do not depend on another test having run.
+   */
+  const registerOwnerFromEmptyTable = () => h.emptyPrincipalTables().then(() => h.register(OWNER_EMAIL));
+
   it('AC-8: a refused first registration leaves the users table empty', async () => {
+    await h.emptyPrincipalTables();
+
     await h.register('other@koda.test').expect(403);
 
     expect(await h.db.user.count()).toBe(0);
   });
 
   it('AC-7: the refusal answers 403 with the registration gate', async () => {
+    await h.emptyPrincipalTables();
+
     const res = await h.register('other@koda.test');
 
     expect(res.status).toBe(403);
@@ -146,14 +172,17 @@ describeIntegration('KODA_OWNER_EMAIL gates the first registration (US-004)', ()
   });
 
   it("AC-9: the configured owner email registers with the route's existing 201", async () => {
-    const res = await h.register('Owner@Koda.test');
+    const res = await registerOwnerFromEmptyTable();
 
     expect(res.status).toBe(201);
     expect(data<{ user: UserRow }>(res).user.email).toBe(OWNER_EMAIL);
   });
 
   it('AC-10: the owner registration gives the created user an owner binding', async () => {
-    // Registered by AC-9 (same app, same database); read back by its canonical email.
+    const res = await registerOwnerFromEmptyTable();
+    // Precondition of this AC: the owner's registration is the one the gate lets through.
+    expect(res.status).toBe(201);
+
     const owner = await h.userByEmail(OWNER_EMAIL);
 
     expect(await h.boundRoles('USER', owner.id)).toContainEqual({ roleKey: 'owner', projectId: null });
