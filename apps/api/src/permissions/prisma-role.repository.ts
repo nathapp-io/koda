@@ -9,6 +9,9 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient, Role as RoleModel } from '../generated/prisma/client';
 import type { RoleDomain, RoleRepository, RoleScope } from './permissions.types';
 
+/** Upper bound of a role list read; the table is small and admin-written. */
+const ROLE_SCAN_LIMIT = 500;
+
 /**
  * Permissions P1a: the only code that reads or writes `Role` through Prisma.
  *
@@ -73,6 +76,22 @@ export class PrismaRoleRepository
   /** A new role has no id yet: Prisma's `cuid()` default assigns it on insert. */
   async createRole(input: Omit<RoleDomain, 'id'>): Promise<RoleDomain> {
     return this.create({ ...input, id: '' });
+  }
+
+  /**
+   * The whole role list, system roles first (`Role` is an admin-written table, so it is small).
+   * `take` is the bounded-read rule of `.nax/rules/api-data.md`: never a bare `findMany`.
+   */
+  async findRoles(): Promise<RoleDomain[]> {
+    const models = await this.db.role.findMany({
+      orderBy: [{ system: 'desc' }, { key: 'asc' }],
+      take: ROLE_SCAN_LIMIT,
+    });
+    return models.map((model: RoleModel) => this.toDomain(model));
+  }
+
+  private get db() {
+    return this.prisma.client;
   }
 }
 

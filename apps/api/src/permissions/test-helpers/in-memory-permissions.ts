@@ -35,6 +35,8 @@ export class InMemoryPermissionStore {
   calls: string[] = [];
   /** Runs once, right before the next insert: lets a spec insert the row a concurrent caller won with. */
   beforeInsert: (() => void) | null = null;
+  /** When true, `delete` refuses like Postgres does when a binding appeared after the in-use check. */
+  raceBindingOnDelete = false;
   private counter = 0;
 
   addUser(id: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER', disabled = false): void {
@@ -62,10 +64,49 @@ export class InMemoryPermissionStore {
     return binding;
   }
 
+  /** The `ROLE_REPOSITORY` double: role reads and writes, with the repository's own errors. */
   roleRepo() {
     return {
       findOne: async (criteria: Partial<RoleDomain>) =>
         this.roles.find((role) => role.key === criteria.key) ?? null,
+      findById: async (id: string) => this.roles.find((role) => role.id === id) ?? null,
+      findRoles: async () => {
+        this.calls.push('find-roles');
+        return [...this.roles];
+      },
+      createRole: async (input: Omit<RoleDomain, 'id'>) => {
+        if (this.roles.some((role) => role.key === input.key)) {
+          throw uniqueKeyViolation();
+        }
+        const role: RoleDomain = { ...input, id: `role-${(this.counter += 1)}` };
+        this.roles.push(role);
+        this.calls.push(`create-role:${role.key}`);
+        return role;
+      },
+      update: async (id: string, patch: Partial<RoleDomain>) => {
+        const index = this.roles.findIndex((role) => role.id === id);
+        if (index < 0) throw new Error(`no role ${id}`);
+        const updated = { ...this.roles[index], ...patch };
+        this.roles[index] = updated;
+        this.calls.push(`update-role:${updated.key}`);
+        return updated;
+      },
+      delete: async (id: string) => {
+        if (this.raceBindingOnDelete) throw foreignKeyViolation();
+        this.roles = this.roles.filter((role) => role.id !== id);
+        this.calls.push(`delete-role:${id}`);
+      },
+    };
+  }
+
+  /** A role repository whose insert always loses the unique-index race, whatever the pre-check saw. */
+  racingRoleRepo() {
+    return {
+      ...this.roleRepo(),
+      findOne: async () => null,
+      createRole: async (): Promise<RoleDomain> => {
+        throw uniqueKeyViolation();
+      },
     };
   }
 
@@ -171,8 +212,30 @@ export class InMemoryPermissionStore {
       principalExists: async (principal: PrincipalRef) =>
         principal.type === 'USER' ? this.users.has(principal.id) : this.agents.has(principal.id),
       projectExists: async (id: string) => this.projects.has(id),
+      countByRole: async (roleId: string) =>
+        this.bindings.filter((binding) => binding.roleId === roleId).length,
     };
   }
+}
+
+function uniqueKeyViolation(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`key`)', {
+    code: 'P2002',
+    clientVersion: 'test',
+    meta: { target: 'Role_key_key' },
+  });
+}
+
+/** The driver-adapter shape Prisma 7 reports for an `ON DELETE RESTRICT` refusal: no constraint name. */
+function foreignKeyViolation(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    'Foreign key constraint violated on the constraint: `RoleBinding_roleId_fkey`',
+    {
+      code: 'P2003',
+      clientVersion: 'test',
+      meta: { modelName: 'Role', driverAdapterError: { name: 'DriverAdapterError', cause: { kind: 'ForeignKeyConstraintViolation' } } },
+    },
+  );
 }
 
 /** A cache double with the two CacheManager calls the permission cache uses. */

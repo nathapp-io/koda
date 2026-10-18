@@ -10923,6 +10923,174 @@
           "invites"
         ]
       }
+    },
+    "/api/roles": {
+      "get": {
+        "operationId": "RolesController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RoleDto"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "role.read permission required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List every role, system roles first",
+        "tags": [
+          "roles"
+        ]
+      },
+      "post": {
+        "operationId": "RolesController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRoleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown or out-of-scope permission entry"
+          },
+          "403": {
+            "description": "role.manage missing, or a grant above the caller's own keys"
+          },
+          "409": {
+            "description": "A role with that key already exists"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a role (role.manage)",
+        "tags": [
+          "roles"
+        ]
+      }
+    },
+    "/api/roles/{id}": {
+      "patch": {
+        "operationId": "RolesController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRoleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown or out-of-scope permission entry, or a system-role rename"
+          },
+          "403": {
+            "description": "A grant above the caller's own keys, or the locked owner role"
+          },
+          "404": {
+            "description": "Role not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change a role's name, description or permissions (role.manage)",
+        "tags": [
+          "roles"
+        ]
+      },
+      "delete": {
+        "operationId": "RolesController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "A system or locked role"
+          },
+          "404": {
+            "description": "Role not found"
+          },
+          "409": {
+            "description": "A binding still uses this role"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a role no binding uses (role.manage)",
+        "tags": [
+          "roles"
+        ]
+      }
     }
   },
   "info": {
@@ -19392,6 +19560,125 @@
         "required": [
           "password"
         ]
+      },
+      "RoleDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string",
+            "description": "Stable kebab-case identifier",
+            "example": "project-admin"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "description": "Empty string when the role has no description"
+          },
+          "scope": {
+            "enum": [
+              "GLOBAL",
+              "PROJECT"
+            ],
+            "type": "string"
+          },
+          "system": {
+            "type": "boolean",
+            "description": "Seeded system role"
+          },
+          "locked": {
+            "type": "boolean",
+            "description": "The owner role: no write may change or delete it"
+          },
+          "permissions": {
+            "description": "Catalog entries, in the order they were stored",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "name",
+          "description",
+          "scope",
+          "system",
+          "locked",
+          "permissions"
+        ]
+      },
+      "CreateRoleDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "example": "qa",
+            "description": "kebab-case; cannot change after creation"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "QA"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "example": "Runs the QA pass"
+          },
+          "scope": {
+            "enum": [
+              "GLOBAL",
+              "PROJECT"
+            ],
+            "type": "string",
+            "description": "Cannot change after creation"
+          },
+          "permissions": {
+            "example": [
+              "ticket.read",
+              "comment.create"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "scope",
+          "permissions"
+        ]
+      },
+      "UpdateRoleDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Rejected for a system role"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "permissions": {
+            "description": "Replaces the stored entry list",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       }
     }
   }

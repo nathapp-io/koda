@@ -175,6 +175,11 @@ export class PrismaRoleBindingRepository
     return result.count > 0;
   }
 
+  /** How many bindings reference a role. A non-zero count is why a role cannot be deleted. */
+  async countByRole(roleId: string): Promise<number> {
+    return this.db.roleBinding.count({ where: { roleId } });
+  }
+
   async deleteForPrincipal(principal: PrincipalRef): Promise<void> {
     await this.db.roleBinding.deleteMany({ where: this.principalWhere(principal) });
   }

@@ -6,6 +6,8 @@ import { PermissionCache } from './permission-cache';
 import { PermissionService } from './permission.service';
 import { PrismaRoleBindingRepository } from './prisma-role-binding.repository';
 import { PrismaRoleRepository } from './prisma-role.repository';
+import { RoleAdminService } from './role-admin.service';
+import { RolesController } from './roles.controller';
 import {
   ROLE_BINDING_REPOSITORY,
   ROLE_REPOSITORY,
@@ -19,8 +21,8 @@ import { SystemRoleSeeder } from './system-role.seeder';
  *
  * The module is global because permission checks run in every feature module. The repositories stay
  * module-private (`.nax/rules/api-data.md`): the public surface is `PermissionService`,
- * `MembershipService` and `RoleAdminService`. The first two are exported; US-005 adds the third.
- * `PermissionCache` is internal: it is the one invalidation point both services share. The module is
+ * `MembershipService` and `RoleAdminService`. All three are exported.
+ * `PermissionCache` is internal: it is the one invalidation point the services share. The module is
  * imported by `AppModule`, so `SystemRoleSeeder` runs when the API bootstraps.
  *
  * `onModuleInit` is the owner bootstrap's fail-fast (US-004): in production an installation with no
@@ -30,6 +32,7 @@ import { SystemRoleSeeder } from './system-role.seeder';
 @Global()
 @Module({
   imports: [PrismaModule],
+  controllers: [RolesController],
   providers: [
     PrismaRoleRepository,
     { provide: ROLE_REPOSITORY, useExisting: PrismaRoleRepository },
@@ -41,8 +44,9 @@ import { SystemRoleSeeder } from './system-role.seeder';
     PermissionCache,
     PermissionService,
     MembershipService,
+    RoleAdminService,
   ],
-  exports: [PermissionService, MembershipService],
+  exports: [PermissionService, MembershipService, RoleAdminService],
 })
 export class PermissionsModule implements OnModuleInit {
   constructor(@Inject(AUTH_CFG) private readonly authConfig: IAuthConfig) {}
