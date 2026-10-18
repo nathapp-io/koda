@@ -18,7 +18,7 @@ const FUTURE = new Date(NOW.getTime() + 60_000);
 const action = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
   actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'act1', projectId: 'p1', projectSlug: 'web', threadId: 't1', jobId: 'j1', toolCallId: 'tc1', tool: 'koda_add_comment',
-  input: {}, preview: 'p', status: 'PENDING', requestedById: 'u1', approvalId: 'ap1', decidedById: null, decidedAt: null,
+  input: {}, preview: 'p', status: 'PENDING', approvalId: 'ap1', decidedAt: null,
   result: null, deliveredAt: null, expiresAt: PAST, createdAt: new Date(NOW.getTime() - 86_400_000), ...over,
 });
 
@@ -79,7 +79,7 @@ describe('PendingActionExpirySweeper.tick (2a-D10)', () => {
   });
 
   it('skips an action a decide settled between the scan and the lock, writing nothing', async () => {
-    const b = build({ due: [action({ status: 'REJECTED', decidedById: 'u1' })] });
+    const b = build({ due: [action({ status: 'REJECTED', approverType: 'user', approverId: 'u1' })] });
 
     expect(await b.sweeper.tick(NOW)).toEqual({ expired: 0, failed: 0 });
 
@@ -281,7 +281,7 @@ describe('PendingActionExpirySweeper and a direct action (US-004 AC-10)', () => 
   /** The thread column set a `findDue` row must carry, since the scan maps them through the thread-action record. */
   const threadRow = { id: 'thread-1', origin: 'thread', status: 'PENDING', expiresAt: new Date(0), actorType: 'user', actorId: 'u1',
     approvalMode: 'human', approverType: null, approverId: null, projectId: 'p1', threadId: 't1', jobId: 'j1', toolCallId: 'tc1',
-    tool: 'koda_add_comment', input: {}, preview: 'p', requestedById: 'u1', approvalId: 'ap1', decidedById: null, decidedAt: null,
+    tool: 'koda_add_comment', input: {}, preview: 'p', approvalId: 'ap1', decidedAt: null,
     result: null, deliveredAt: null, deliveredMessageId: null, createdAt: DAWN };
 
   it('AC-10: a direct action recorded at `now` is not due a day later and the sweep leaves it EXECUTED', async () => {

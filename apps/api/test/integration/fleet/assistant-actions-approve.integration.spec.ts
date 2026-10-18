@@ -97,7 +97,7 @@ describeIntegration('approving an assistant_action (PG, US-006)', () => {
     const result = await actions.propose({
       projectId: world.projectId, threadId, threadKind: 'REPO', threadProjectSlug: 'web', jobId,
       toolCallId: `tc-${++seq}`, tool: TOOL, input: { ref: ticket.ref, body: BODY },
-      preview: `Add a comment to ${ticket.ref} "${TITLE}":\n\n${BODY}`, requestedById: world.ids.dev, now: new Date(), ...over,
+      preview: `Add a comment to ${ticket.ref} "${TITLE}":\n\n${BODY}`, actorId: world.ids.dev, now: new Date(), ...over,
     });
     if ('refused' in result) throw new Error('propose refused');
     const row = await prisma.pendingAction.findUniqueOrThrow({ where: { id: result.actionId } });
@@ -143,7 +143,7 @@ describeIntegration('approving an assistant_action (PG, US-006)', () => {
     expect(action.status).toBe('EXECUTED');
     expect(action.result).not.toBeNull();
     expect(action.result?.startsWith('comment ')).toBe(true);
-    expect(action.decidedById).toBe(world.ids.dev);
+    expect(action.approverId).toBe(world.ids.dev);
     expect(action.decidedAt).not.toBeNull();
     expect(await approvalRow(approvalId)).toMatchObject({
       status: 'approved', decision: 'approve', resolvedBy: 'user', decidedById: world.ids.dev,
@@ -196,7 +196,7 @@ describeIntegration('approving an assistant_action (PG, US-006)', () => {
       const res = await decide(approvalId, world.tokens.dev, { decision: 'approve' }).expect(403);
 
       expect(res.status).toBe(403);
-      expect(await actionRow(actionId)).toMatchObject({ status: 'PENDING', result: null, decidedById: null });
+      expect(await actionRow(actionId)).toMatchObject({ status: 'PENDING', result: null, approverId: null });
       expect(await approvalRow(approvalId)).toMatchObject({ status: 'pending', decision: null });
       expect(await commentsOf(ticketId)).toHaveLength(0);
       expect(await systemNotes(threadId)).toHaveLength(0);

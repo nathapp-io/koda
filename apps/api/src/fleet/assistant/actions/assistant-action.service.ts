@@ -76,7 +76,7 @@ export class AssistantActionService implements OnModuleInit, ActionProposer {
     if ((await this.actions.countPending(input.threadId)) >= MAX_PENDING_ACTIONS) return { kind: 'refused' };
     const action = await this.actions.insert({
       projectId: input.projectId, threadId: input.threadId, jobId: input.jobId, toolCallId: input.toolCallId,
-      tool: input.tool, input: input.input, preview: input.preview, requestedById: input.requestedById,
+      tool: input.tool, input: input.input, preview: input.preview, actorId: input.actorId,
       expiresAt: new Date(input.now.getTime() + ACTION_TTL_MS),
     });
     const path = assistantThreadPath(input.threadId, input.threadKind, input.threadProjectSlug);

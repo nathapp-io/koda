@@ -130,7 +130,7 @@ describeIntegration('fleet assistant record decision tool (PG, US-007)', () => {
     expect(isError).toBe(false);
     expect(content.startsWith('pending ')).toBe(true);
     const action = await actionOf('us007-ac10');
-    expect(action).toMatchObject({ tool: TOOL, status: 'PENDING', requestedById: world.ids.dev });
+    expect(action).toMatchObject({ tool: TOOL, status: 'PENDING', actorType: 'user', actorId: world.ids.dev });
     expect(content).toBe(`pending ${action.id}: awaiting user approval; do not retry`);
     // The stored preview is the text the user approves: the slug, the quoted topic, the decision and the rationale,
     // with no supersession line, because dev holds no active decision on `db` yet.

@@ -344,7 +344,7 @@ export class AssistantToolExecutor {
       // 2a-D3: `PendingAction.input` is the parsed input, and a write tool's parser answers a JSON object.
       input: scope.input as Record<string, unknown>,
       preview,
-      requestedById: caller.principal.id,
+      actorId: caller.principal.id,
       now: ctx.now,
     });
     if ('refused' in proposed) return { ...refusal('refused', REFUSED_CONTENT), projectId: scope.id };

@@ -66,7 +66,7 @@ describeIntegration('thread detail pending actions and the creator-only ask (PG,
     const result = await actions.propose({
       projectId: world.projectId, threadId: seed.threadId, threadKind: 'REPO', threadProjectSlug: 'web',
       jobId: seed.jobId, toolCallId: `tc-${++seq}`, tool: TOOL, input: { ref: 'KODA-1', body: 'hello' },
-      preview: PREVIEW, requestedById: world.ids.dev, now: NOW, ...over,
+      preview: PREVIEW, actorId: world.ids.dev, now: NOW, ...over,
     });
     if ('refused' in result) throw new Error('propose refused');
     return result.actionId;
@@ -103,7 +103,7 @@ describeIntegration('thread detail pending actions and the creator-only ask (PG,
     const seed = await seedThread('REPO');
     const pending = await propose(seed);
     const decided = await propose(seed);
-    await prisma.pendingAction.update({ where: { id: decided }, data: { status: 'REJECTED', decidedAt: NOW, decidedById: world.ids.dev } });
+    await prisma.pendingAction.update({ where: { id: decided }, data: { status: 'REJECTED', decidedAt: NOW, approverType: 'user', approverId: world.ids.dev } });
 
     const detail = await getDetail(`/api/projects/web/threads/${seed.threadId}`);
 

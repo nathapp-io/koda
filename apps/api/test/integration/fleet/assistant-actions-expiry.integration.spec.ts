@@ -74,7 +74,7 @@ describeIntegration('expiring an assistant_action (PG, US-007)', () => {
     const result = await actions.propose({
       projectId: world.projectId, threadId, threadKind: 'REPO', threadProjectSlug: 'web', jobId,
       toolCallId: `tc-${++seq}`, tool: TOOL, input: { ref: 'KODA-1', body: 'hello' }, preview: 'Add a comment',
-      requestedById: world.ids.dev, now: new Date(), ...over,
+      actorId: world.ids.dev, now: new Date(), ...over,
     });
     if ('refused' in result) throw new Error('propose refused');
     const row = await prisma.pendingAction.findUniqueOrThrow({ where: { id: result.actionId } });
@@ -131,14 +131,14 @@ describeIntegration('expiring an assistant_action (PG, US-007)', () => {
     expect(await sweeper.tick(new Date())).toEqual({ expired: 1, failed: 0 });
   });
 
-  it('AC-2: after that tick the action is EXPIRED, with a decidedAt and no decidedById', async () => {
+  it('AC-2: after that tick the action is EXPIRED, with a decidedAt and no approver', async () => {
     const { actionId } = await propose({ now: past() });
 
     await sweeper.tick(new Date());
 
     const action = await actionRow(actionId);
     expect(action.status).toBe('EXPIRED');
-    expect(action.decidedById).toBeNull();
+    expect(action.approverId).toBeNull();
     expect(action.decidedAt).not.toBeNull();
   });
 
@@ -166,7 +166,7 @@ describeIntegration('expiring an assistant_action (PG, US-007)', () => {
 
     await sweeper.tick(new Date());
 
-    expect(await actionRow(actionId)).toMatchObject({ status: 'PENDING', decidedAt: null, decidedById: null });
+    expect(await actionRow(actionId)).toMatchObject({ status: 'PENDING', decidedAt: null, approverId: null });
     expect(await approvalRow(approvalId)).toMatchObject({ status: 'pending', resolvedBy: null });
     expect(await systemNotes(threadId)).toHaveLength(0);
   });

@@ -89,12 +89,11 @@ describeIntegration('recording a direct assistant action (PG, US-004)', () => {
     });
   });
 
-  it('AC-6: that row has no approver, approval, thread, job, tool-call id or requester', async () => {
+  it('AC-6: that row has no approver, approval, thread, job or tool-call id', async () => {
     const { actionId } = await record();
 
     expect(await row(actionId)).toMatchObject({
       approverType: null, approverId: null, approvalId: null, threadId: null, jobId: null, toolCallId: null,
-      requestedById: null, decidedById: null,
     });
   });
 

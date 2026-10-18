@@ -210,7 +210,7 @@ describe('bash (S1.5 2a)', () => {
 
 describe('assistant action (S5b 2a)', () => {
   const expiresAt = new Date(NOW.getTime() + 86_400_000);
-  const action = { id: 'act1', projectId: 'p1', threadId: 't1', jobId: 'j1', tool: 'koda_add_comment', requestedById: 'u9', expiresAt };
+  const action = { id: 'act1', projectId: 'p1', threadId: 't1', jobId: 'j1', tool: 'koda_add_comment', actorId: 'u9', expiresAt };
 
   it('AC-5, AC-6: opens one pending assistant_action approval expiring with the action and holding only the summary', async () => {
     const { closer, repo, activity, webhooks, outbox } = fakes();

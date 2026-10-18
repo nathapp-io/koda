@@ -55,13 +55,13 @@ describeIntegration('deciding an assistant_action approval (PG, US-005)', () => 
     return { threadId: thread.id, jobId: job.id };
   }
 
-  /** A real propose for a fresh thread; `requestedById` defaults to dev, `now` to the present. */
+  /** A real propose for a fresh thread; `actorId` defaults to dev, `now` to the present. */
   async function propose(over: Partial<ProposeInput> = {}): Promise<{ actionId: string; approvalId: string; threadId: string }> {
     const seed = await seedThread();
     const result = await actions.propose({
       projectId: world.projectId, threadId: seed.threadId, threadKind: 'REPO', threadProjectSlug: 'web', jobId: seed.jobId,
       toolCallId: `tc-${++seq}`, tool: TOOL, input: { ref: 'KODA-1', body: 'hello' }, preview: 'Add a comment',
-      requestedById: world.ids.dev, now: new Date(), ...over,
+      actorId: world.ids.dev, now: new Date(), ...over,
     });
     if ('refused' in result) throw new Error('propose refused');
     const row = await prisma.pendingAction.findUniqueOrThrow({ where: { id: result.actionId } });
@@ -112,11 +112,11 @@ describeIntegration('deciding an assistant_action approval (PG, US-005)', () => 
     expect((await actionRow(actionId)).status).toBe('REJECTED');
   });
 
-  it('AC-3: after that reject the action\'s decidedById is the requester, with a decidedAt', async () => {
+  it('AC-3: after that reject the action\'s approver is the requester, with a decidedAt', async () => {
     const { actionId, approvalId } = await propose();
     await decide(PROJECT, approvalId, world.tokens.dev, { decision: 'reject' }).expect(200);
     const row = await actionRow(actionId);
-    expect(row.decidedById).toBe(world.ids.dev);
+    expect(row.approverId).toBe(world.ids.dev);
     expect(row.decidedAt).not.toBeNull();
   });
 
@@ -134,7 +134,7 @@ describeIntegration('deciding an assistant_action approval (PG, US-005)', () => 
   });
 
   it('AC-5: the requester, who is a global ADMIN, rejecting on the admin prefix answers 200', async () => {
-    const { actionId, approvalId } = await propose({ requestedById: world.ids.root });
+    const { actionId, approvalId } = await propose({ actorId: world.ids.root });
 
     const res = await decide(ADMIN, approvalId, world.tokens.root, { decision: 'reject' }).expect(200);
 
@@ -201,7 +201,7 @@ describeIntegration('deciding an assistant_action approval (PG, US-005)', () => 
     expect(res.body.message).toBe(NOT_PENDING);
     const row = await actionRow(actionId);
     expect(row.status).toBe('EXPIRED');
-    expect(row.decidedById).toBeNull();
+    expect(row.approverId).toBeNull();
     expect(row.decidedAt).not.toBeNull();
     expect(await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approvalId } })).toMatchObject({ status: 'expired', resolvedBy: 'timeout' });
   });

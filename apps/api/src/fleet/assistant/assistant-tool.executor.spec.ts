@@ -99,8 +99,8 @@ const call = (over: Partial<{ jobId: string; toolCallId: string; name: string; i
 const pendingAction = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
   actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'a1', projectId: 'p2', projectSlug: 'ops', threadId: 't1', jobId: 'j1', toolCallId: 'c1', tool: 'koda_fake',
-  input: { ref: 'OPS-1' }, preview: 'Add a comment to OPS-1 "Fix"', status: 'PENDING', requestedById: 'u1',
-  approvalId: 'ap1', decidedById: null, decidedAt: null, result: null, deliveredAt: null,
+  input: { ref: 'OPS-1' }, preview: 'Add a comment to OPS-1 "Fix"', status: 'PENDING',
+  approvalId: 'ap1', decidedAt: null, result: null, deliveredAt: null,
   expiresAt: new Date('2026-10-24T09:00:00.000Z'), createdAt: new Date('2026-10-23T09:00:00.000Z'), ...over,
 });
 
@@ -539,7 +539,7 @@ describe('S5b 2a-D1: the propose service attaches itself to the executor at init
     const result = await module.get(AssistantToolExecutor).execute(call());
 
     expect(propose).toHaveBeenCalledTimes(1);
-    expect(propose).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p1', tool: 'koda_fake', preview: PREVIEW, requestedById: 'u1' }));
+    expect(propose).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p1', tool: 'koda_fake', preview: PREVIEW, actorId: 'u1' }));
     expect(result).toEqual({ content: 'pending a1: awaiting user approval; do not retry', isError: false });
     expect(tool.execute).not.toHaveBeenCalled();
   });

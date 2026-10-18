@@ -4266,7 +4266,7 @@ describeIntegration('API Integration Tests', () => {
         const result = await app.get(AssistantActionService, { strict: false }).propose({
           projectId: world.projectId, threadId: seeded.threadId, threadKind: 'REPO', threadProjectSlug: projectSlug, jobId: seeded.jobId,
           toolCallId: `e2e-${Math.random().toString(36).slice(2, 10)}`, tool: 'koda_add_comment', input: { ref: 'X-1', body: 'hi' },
-          preview: 'Add a comment', requestedById: world.ids.dev, now: new Date(),
+          preview: 'Add a comment', actorId: world.ids.dev, now: new Date(),
         });
         if ('refused' in result) throw new Error('propose refused');
         const row = await db().pendingAction.findUniqueOrThrow({ where: { id: result.actionId } });

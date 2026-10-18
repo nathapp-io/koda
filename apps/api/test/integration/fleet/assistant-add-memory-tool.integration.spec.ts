@@ -127,7 +127,7 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
     expect(isError).toBe(false);
     expect(content.startsWith('pending ')).toBe(true);
     const action = await actionOf('ac10');
-    expect(action).toMatchObject({ tool: TOOL, status: 'PENDING', requestedById: world.ids.dev });
+    expect(action).toMatchObject({ tool: TOOL, status: 'PENDING', actorType: 'user', actorId: world.ids.dev });
     expect(content).toBe(`pending ${action.id}: awaiting user approval; do not retry`);
     // The stored preview is the text the user approves: the project slug, the key and the object, no replacement line.
     expect(action.preview).toBe('Remember in web: FACT api / runs on\nbun');
