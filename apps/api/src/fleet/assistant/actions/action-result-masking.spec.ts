@@ -50,7 +50,9 @@ function makeLinkTool(execute: () => Promise<string>): AssistantTool<unknown> {
 function executorFor(tool: AssistantTool<unknown>): AssistantToolExecutor {
   const rows: AssistantToolCallRecord[] = [];
   const calls: AssistantToolCallRepository = {
-    findUserActor: vi.fn(async () => null),
+    // 3-D12: `executeAction` resolves the requester through `findUserActor`, so it answers the same user the
+    // call-context stub carries — the creator `approvedAction()` names.
+    findUserActor: vi.fn(async () => CALL_CONTEXT.creator),
     findByCall: async () => null,
     record: async (row) => { rows.push(row); },
     findCallContext: async () => CALL_CONTEXT,

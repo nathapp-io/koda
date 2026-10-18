@@ -22,10 +22,15 @@ const context = (over: Partial<ToolCallContext['creator']> = {}): ToolCallContex
   creator: { id: 'u1', email: 'u1@koda.test', role: 'MEMBER', disabled: false, ...over },
 });
 
-function makeRepo(ctx: ToolCallContext | null) {
+/**
+ * The repository stub. 3-D12: `checkAction`/`executeAction` resolve the requester through `findUserActor`, so it
+ * answers the same user the call-context stub carries — the thread creator every action fixture here names — unless
+ * `actor` overrides it.
+ */
+function makeRepo(ctx: ToolCallContext | null, actor: ToolCallContext['creator'] | null = ctx?.creator ?? null) {
   const rows: AssistantToolCallRecord[] = [];
   const repo: AssistantToolCallRepository = {
-    findUserActor: vi.fn(async () => null),
+    findUserActor: vi.fn(async (userId: string) => (actor?.id === userId ? actor : null)),
     findByCall: vi.fn(async (jobId, toolCallId) => rows.find((r) => r.jobId === jobId && r.toolCallId === toolCallId) ?? null),
     record: vi.fn(async (row) => { rows.push(row); }),
     findCallContext: vi.fn(async () => ctx),
@@ -53,8 +58,8 @@ interface SetupOptions {
   kind?: ToolCallContext['kind'];
   /** A stubbed ability factory, for the permission a built-in project role always has (2a-D8 step 5). */
   abilities?: KodaCaslAbilityFactory;
-  /** The job has no thread at all (`findCallContext` answers null). */
-  noThread?: boolean;
+  /** The action's actor cannot be read at all (`findUserActor` answers null, as it does for a deleted user). */
+  noActor?: boolean;
 }
 
 interface Setup {
@@ -65,7 +70,7 @@ interface Setup {
 }
 
 function setup(tool: AssistantTool<unknown> | null, opts: SetupOptions = {}): Setup {
-  const { repo, rows } = makeRepo(opts.noThread ? null : { ...context(opts.creator), ...(opts.kind ? { kind: opts.kind } : {}) });
+  const { repo, rows } = makeRepo({ ...context(opts.creator), ...(opts.kind ? { kind: opts.kind } : {}) }, opts.noActor ? null : undefined);
   const access = {
     findProjectIdBySlug: vi.fn(async (slug: string) => {
       const id = PROJECT_IDS[slug];
@@ -440,8 +445,8 @@ describe('S5b 2a-D8: checkAction and executeAction', () => {
     expect(await executor.checkAction(pendingAction({ tool: 'koda_retired' }))).toBe('forbidden');
   });
 
-  it('checkAction answers forbidden when the job has no thread', async () => {
-    const { executor } = setup(makeTool(), { noThread: true });
+  it('checkAction answers forbidden when the action\'s actor cannot be read', async () => {
+    const { executor } = setup(makeTool(), { noActor: true });
 
     expect(await executor.checkAction(pendingAction())).toBe('forbidden');
   });

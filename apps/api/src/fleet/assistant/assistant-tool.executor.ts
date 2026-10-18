@@ -61,11 +61,12 @@ export class AssistantToolExecutor {
   }
 
   /**
-   * 2a-D8 step 5: whether the requester may still run this action's tool. The requester is the thread creator of the
-   * action's job, re-read now, and their membership and ability are re-resolved against the project the action acts
-   * in (2a-D3) — never the thread's home project. A tool that left the registry, a job whose thread is gone and a
-   * requester who is disabled, outside that project or without the tool's ability all answer `forbidden`, so an
-   * approve writes nothing for any of them.
+   * 2a-D8 step 5 + 3-D12: whether the requester may still run this action's tool. The requester is the action's own
+   * actor — the principal that asked for the write, never the approver (3-R3) — re-read now, and their membership and
+   * ability are re-resolved against the project the action acts in (2a-D3), never the thread's home project. A tool
+   * that left the registry, an actor who is gone or disabled, an actor that is not a user (no code default produces
+   * one; koda #301), a requester outside that project and a requester without the tool's ability all answer
+   * `forbidden`, so an approve writes nothing for any of them.
    */
   async checkAction(action: PendingActionRecord): Promise<'ok' | 'forbidden'> {
     return (await this.actionScope(action)) === null ? 'forbidden' : 'ok';
@@ -107,12 +108,15 @@ export class AssistantToolExecutor {
   private async actionScope(action: PendingActionRecord): Promise<ActionScope | null> {
     const tool = this.registry.get(action.tool);
     if (!tool) return null;
-    const context = await this.calls.findCallContext(action.jobId);
-    if (!context || context.creator.disabled) return null;
-    const requester = userPrincipal(context.creator);
-    const role = await this.membership(action.projectId, requester);
+    // 3-D12: the actor is the requesting principal (3-R3), so a non-user actor is refused before any read. Only MCP
+    // actions carry one today, and no default serves them yet (koda #301).
+    if (action.actorType !== 'user') return null;
+    const requester = await this.calls.findUserActor(action.actorId);
+    if (!requester || requester.disabled) return null;
+    const principal = userPrincipal(requester);
+    const role = await this.membership(action.projectId, principal);
     if (role === undefined) return null;
-    const actor = withProjectRole(requester, role) as UserPrincipal;
+    const actor = withProjectRole(principal, role) as UserPrincipal;
     if (tool.permission.kind === 'ability') {
       const { action: caslAction, subject: target } = tool.permission;
       const ability = await this.abilities.createForUser(actor);
