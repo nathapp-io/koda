@@ -1,17 +1,28 @@
 import { Inject, Injectable } from '@nestjs/common';
+import type { IPageOption } from '@nathapp/nestjs-common';
 import {
   ForbiddenAppException,
   NotFoundAppException,
   ValidationAppException,
 } from '@nathapp/nestjs-common';
+import type { IPageResult } from '@nathapp/nestjs-data';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { isForeignKeyViolation, isRecordNotFound, isUniqueViolation } from '../common/utils/prisma-errors';
+import { findCatalogEntry } from './catalog';
 import { expandEntries, ScopeMismatchEntryError, UnknownPermissionEntryError } from './entry-matcher';
+import { MembershipService } from './membership.service';
 import { PermissionCache } from './permission-cache';
-import { PermissionService } from './permission.service';
+import { PermissionService, PermissionScope } from './permission.service';
 import { ROLE_BINDING_REPOSITORY, ROLE_REPOSITORY } from './permissions.tokens';
-import type { PrincipalRef, RoleDomain, RoleScope } from './permissions.types';
+import type {
+  BindingFilter,
+  PrincipalRef,
+  PrincipalType,
+  RoleBindingView,
+  RoleDomain,
+  RoleScope,
+} from './permissions.types';
 import type { PrismaRoleBindingRepository } from './prisma-role-binding.repository';
 import type { PrismaRoleRepository } from './prisma-role.repository';
 
@@ -31,12 +42,21 @@ export interface UpdateRoleInput {
   permissions?: string[];
 }
 
+/** What `POST /role-bindings` accepts. An omitted `projectId` and null both mean a global binding. */
+export interface CreateBindingInput {
+  principalType: PrincipalType;
+  principalId: string;
+  roleKey: string;
+  projectId?: string | null;
+}
+
 const OWN_SUFFIX = '.own';
 const APPROVAL_DECIDE = 'approval.decide';
 const APPROVAL_DECIDE_PREFIX = 'approval.decide@';
+const OWNER_ROLE_KEY = 'owner';
 
 /**
- * Permissions P1a: role administration (`/roles`).
+ * Permissions P1a: role administration (`/roles` and `/role-bindings`).
  *
  * The service owns the four rules the routes must not re-implement: catalog validation of every
  * entry list, the anti-escalation rule (a caller can only write into a role keys it holds itself),
@@ -44,8 +64,12 @@ const APPROVAL_DECIDE_PREFIX = 'approval.decide@';
  * permission check goes through `assertCan`, which is the one place these routes consult
  * `PermissionService` instead of the legacy `@RequiredPermission` decorators.
  *
+ * The binding routes add the scope, principal, self-binding and escalation rules in front of
+ * `MembershipService`, which owns every `RoleBinding` write (idempotency, owner-row lock, legacy
+ * `User.role` mirroring). Deleting a role needs no escalation check: removing a role grants nothing.
+ *
  * Every write invalidates the permission cache in the same call, so the next `can` evaluation sees
- * the edited role. Deleting a role needs no escalation check: removing a role grants nothing.
+ * the edited role or the new binding.
  */
 @Injectable()
 export class RoleAdminService {
@@ -54,6 +78,7 @@ export class RoleAdminService {
     @Inject(ROLE_BINDING_REPOSITORY) private readonly bindings: PrismaRoleBindingRepository,
     private readonly permissions: PermissionService,
     private readonly permissionCache: PermissionCache,
+    private readonly membership: MembershipService,
   ) {}
 
   /** The routes' own check: `ForbiddenAppException({}, 'permissions')` when `can` denies. */
@@ -152,6 +177,121 @@ export class RoleAdminService {
     return role;
   }
 
+  /** `GET /role-bindings`: the `role.read` gate, then the paginated view. */
+  async listBindings(
+    principal: KodaPrincipal,
+    filter: BindingFilter,
+    page: IPageOption,
+  ): Promise<IPageResult<RoleBindingView>> {
+    await this.assertCan(principal, 'role.read');
+    return this.membership.listBindings(filter, page);
+  }
+
+  /**
+   * `POST /role-bindings`. The checks run in the brief's order and the first failure decides the
+   * response: route keys, then the role, project and principal lookups, the scope and principal-type
+   * rules, the self-binding rule and finally escalation. `MembershipService` takes the owner lock.
+   */
+  async createBinding(principal: KodaPrincipal, input: CreateBindingInput): Promise<RoleBindingView> {
+    const projectId = input.projectId ?? null;
+    await this.assertBindingKeys(principal, { projectId, roleKey: input.roleKey });
+
+    const role = await this.findByKey(input.roleKey);
+    if (projectId !== null && !(await this.bindings.projectExists(projectId))) {
+      throw new NotFoundAppException({}, 'projects');
+    }
+    const target: PrincipalRef = { type: input.principalType, id: input.principalId };
+    if (!(await this.bindings.principalExists(target))) {
+      throw new NotFoundAppException({}, 'permissions.principalNotFound');
+    }
+    if (role.scope === 'GLOBAL' && projectId !== null) {
+      // The sentence interpolates the entry that cannot be granted in this scope. Nothing is being
+      // granted entry-by-entry here — the caller is trying to hand out a whole GLOBAL role inside a
+      // project — so the role itself is the thing that cannot be granted in a project scope.
+      throw new ValidationAppException({ entry: role.key }, 'permissions.scopeMismatch');
+    }
+    const expanded = this.expandStored(role);
+    this.assertPrincipalType(expanded, input.principalType);
+    this.assertNotSelf(principal, target);
+    if (expanded !== null) await this.assertNoEscalation(principal, expanded, scopeOf(projectId));
+
+    return this.membership.createBinding(
+      { principal: target, roleKey: input.roleKey, projectId },
+      principalRef(principal),
+    );
+  }
+
+  /**
+   * `DELETE /role-bindings/:id`. The route's keys come from the stored binding, never from the
+   * request: a caller cannot pick the scope it is checked against.
+   */
+  async removeBinding(principal: KodaPrincipal, id: string): Promise<void> {
+    const binding = await this.membership.findBinding(id);
+    if (!binding) throw new NotFoundAppException({}, 'permissions.bindingNotFound');
+    await this.assertBindingKeys(principal, { projectId: binding.projectId, roleKey: binding.roleKey });
+
+    const target: PrincipalRef = { type: binding.principalType, id: binding.principalId };
+    this.assertNotSelf(principal, target);
+
+    // The FK makes this unreachable; refusing is still safer than skipping the escalation rule.
+    const role = await this.findByKey(binding.roleKey);
+    const expanded = this.expandStored(role);
+    if (expanded !== null) {
+      await this.assertNoEscalation(principal, expanded, scopeOf(binding.projectId));
+    }
+
+    await this.membership.removeBinding(id);
+  }
+
+  /** The binding routes' own keys: the scope's key, plus the owner key for an `owner` binding. */
+  private async assertBindingKeys(
+    principal: KodaPrincipal,
+    target: { projectId: string | null; roleKey: string },
+  ): Promise<void> {
+    if (target.projectId === null) await this.assertCan(principal, 'role.binding.global');
+    else await this.assertCan(principal, 'role.binding.manage', target.projectId);
+    if (target.roleKey === OWNER_ROLE_KEY) await this.assertCan(principal, 'role.binding.owner');
+  }
+
+  private async findByKey(key: string): Promise<RoleDomain> {
+    const role = await this.roles.findOne({ key });
+    if (!role) throw new NotFoundAppException({}, 'permissions.roleNotFound');
+    return role;
+  }
+
+  /** Nobody binds a role to itself: type and id must both differ from the caller's. */
+  private assertNotSelf(principal: KodaPrincipal, target: PrincipalRef): void {
+    const caller = principalRef(principal);
+    if (caller.type === target.type && caller.id === target.id) {
+      throw new ForbiddenAppException({}, 'permissions.selfBinding');
+    }
+  }
+
+  /** A role holding a key this principal type can never have (today: `owner` and an AGENT). */
+  private assertPrincipalType(expanded: ReadonlySet<string> | null, type: PrincipalType): void {
+    if (expanded === null) return;
+    const kind = type === 'USER' ? 'user' : 'agent';
+    for (const key of expanded) {
+      const entry = findCatalogEntry(baseKey(key));
+      if (entry && !entry.principals.includes(kind)) {
+        throw new ValidationAppException({}, 'permissions.principalType');
+      }
+    }
+  }
+
+  /**
+   * `expandEntries` for an already-stored role, or null when its entries no longer expand. A role
+   * whose entries are invalid grants nothing (`PermissionService` logs and skips it), so there is
+   * nothing for the caller to escalate to and there is no principal-type rule to break.
+   */
+  private expandStored(role: RoleDomain): ReadonlySet<string> | null {
+    try {
+      return expandEntries(role.permissions, role.scope);
+    } catch {
+      return null;
+    }
+  }
+
   /** `expandEntries` with its two grammar errors turned into the routes' 400s. */
   private expand(entries: readonly string[], scope: RoleScope): ReadonlySet<string> {
     try {
@@ -168,19 +308,26 @@ export class RoleAdminService {
   }
 
   /**
-   * Nobody writes into a role a key it does not hold itself. `X.own` counts as `X` and
+   * Nobody writes into a role a key it does not hold itself, at the scope the write lands in:
+   * `'global'` for a global role, the project for a binding inside one. `X.own` counts as `X` and
    * `approval.decide@…` as `approval.decide`; the raw entry is accepted too, so a caller can always
    * delegate the exact entry it holds.
    */
   private async assertNoEscalation(
     principal: KodaPrincipal,
     expanded: ReadonlySet<string>,
+    scope: PermissionScope = 'global',
   ): Promise<void> {
     if (expanded.size === 0) return;
-    const held = await this.permissions.effectiveKeys(principalRef(principal), 'global');
+    const held = await this.permissions.effectiveKeys(principalRef(principal), scope);
     const escalating = [...expanded].filter((key) => !held.has(key) && !held.has(baseKey(key)));
     if (escalating.length > 0) throw new ForbiddenAppException({}, 'permissions.escalation');
   }
+}
+
+/** The scope a binding's escalation check runs against: global for a null `projectId`. */
+function scopeOf(projectId: string | null): PermissionScope {
+  return projectId === null ? 'global' : { projectId };
 }
 
 /** `comment.update.own` → `comment.update`; `approval.decide@…` → `approval.decide`. */

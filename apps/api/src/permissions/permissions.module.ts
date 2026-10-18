@@ -7,6 +7,7 @@ import { PermissionService } from './permission.service';
 import { PrismaRoleBindingRepository } from './prisma-role-binding.repository';
 import { PrismaRoleRepository } from './prisma-role.repository';
 import { RoleAdminService } from './role-admin.service';
+import { RoleBindingsController } from './role-bindings.controller';
 import { RolesController } from './roles.controller';
 import {
   ROLE_BINDING_REPOSITORY,
@@ -32,7 +33,7 @@ import { SystemRoleSeeder } from './system-role.seeder';
 @Global()
 @Module({
   imports: [PrismaModule],
-  controllers: [RolesController],
+  controllers: [RolesController, RoleBindingsController],
   providers: [
     PrismaRoleRepository,
     { provide: ROLE_REPOSITORY, useExisting: PrismaRoleRepository },

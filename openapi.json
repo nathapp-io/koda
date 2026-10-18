@@ -11091,6 +11091,163 @@
           "roles"
         ]
       }
+    },
+    "/api/role-bindings": {
+      "get": {
+        "operationId": "RoleBindingsController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "principalType",
+            "required": false,
+            "in": "query",
+            "description": "Requires principalId",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "USER",
+                "AGENT"
+              ]
+            }
+          },
+          {
+            "name": "principalId",
+            "required": false,
+            "in": "query",
+            "description": "Requires principalType",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "required": false,
+            "in": "query",
+            "description": "Only bindings of this project; omit to list every project",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of bindings: { total, current, size, hasNext, hasPrev, records }"
+          },
+          "403": {
+            "description": "role.read permission required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List role bindings, optionally for one principal or one project (role.read)",
+        "tags": [
+          "role-bindings"
+        ]
+      },
+      "post": {
+        "operationId": "RoleBindingsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRoleBindingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleBindingDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A GLOBAL role with a project id, or a principal type the role cannot serve"
+          },
+          "403": {
+            "description": "A missing key, a self-binding, or a grant above the caller's own keys"
+          },
+          "404": {
+            "description": "Unknown role, project or principal"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Grant a role to a principal (role.binding.global or role.binding.manage, plus role.binding.owner for the owner role)",
+        "tags": [
+          "role-bindings"
+        ]
+      }
+    },
+    "/api/role-bindings/{id}": {
+      "delete": {
+        "operationId": "RoleBindingsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "403": {
+            "description": "A missing key, a self-binding, a grant above the caller's own keys, or the last owner"
+          },
+          "404": {
+            "description": "Binding not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove a binding, authorised from the stored row (role.binding.global or role.binding.manage, plus role.binding.owner for the owner role)",
+        "tags": [
+          "role-bindings"
+        ]
+      }
     }
   },
   "info": {
@@ -19679,6 +19836,90 @@
             }
           }
         }
+      },
+      "CreateRoleBindingDto": {
+        "type": "object",
+        "properties": {
+          "principalType": {
+            "enum": [
+              "USER",
+              "AGENT"
+            ],
+            "type": "string"
+          },
+          "principalId": {
+            "type": "string",
+            "description": "The user or agent the binding names"
+          },
+          "roleKey": {
+            "type": "string",
+            "example": "developer"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Omit or null for a global binding"
+          }
+        },
+        "required": [
+          "principalType",
+          "principalId",
+          "roleKey"
+        ]
+      },
+      "RoleBindingDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "principalType": {
+            "enum": [
+              "USER",
+              "AGENT"
+            ],
+            "type": "string"
+          },
+          "principalId": {
+            "type": "string",
+            "description": "A `User.id` or an `Agent.id`; the column has no foreign key"
+          },
+          "roleId": {
+            "type": "string"
+          },
+          "roleKey": {
+            "type": "string",
+            "description": "The role's stable key",
+            "example": "developer"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Null for a GLOBAL binding"
+          },
+          "grantedByType": {
+            "type": "string",
+            "description": "USER, AGENT or SYSTEM"
+          },
+          "grantedById": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "principalType",
+          "principalId",
+          "roleId",
+          "roleKey",
+          "projectId",
+          "grantedByType",
+          "grantedById",
+          "createdAt"
+        ]
       }
     }
   }
