@@ -14,6 +14,7 @@ import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.servi
 import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
+import { MembershipService } from '../permissions/membership.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
 import { CreateAgentDto } from './dto/create-agent.dto';
@@ -40,6 +41,7 @@ export class AgentsService {
     private readonly agentRepo: PrismaAgentRepository,
     @Inject(AUTH_CFG) private readonly authConfig: IAuthConfig,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly membership: MembershipService,
     @Optional() private readonly kodaDomainWriter?: KodaDomainWriter,
     @Optional() private readonly agentAuthProvider?: AgentAuthProvider,
   ) {}
@@ -122,6 +124,8 @@ export class AgentsService {
       // US-003: wrap the agent row, role and capability writes in a single
       // `txManager.run` callback. A failed role/capability write rejects out of
       // the callback and the transaction manager rolls back the agent row.
+      // Permissions P1a (US-004): the baseline binding is inside the same callback, so a rolled-back
+      // create leaves no RoleBinding row for the agent either.
       const result = await this.txManager.run(async () => {
         const agent = await this.agentRepo.create(createData).catch((error: unknown) => {
           if (isUniqueViolation(error, 'slug')) {
@@ -130,6 +134,7 @@ export class AgentsService {
           throw error;
         });
         await this.agentRepo.createRolesAndCapabilities(agent.id, validatedRoles, capabilities ?? []);
+        await this.membership.bindBaseline({ type: 'AGENT', id: agent.id });
         return agent;
       });
       await this.agentAuthProvider?.invalidateByTag(`AGENT:${result.id}`);
@@ -328,6 +333,9 @@ export class AgentsService {
     if (!agent) throw new NotFoundAppException({}, 'agents');
 
     await this.agentRepo.deleteBySlug(slug);
+    // Permissions P1a (US-004): `RoleBinding.principalId` has no foreign key, so the agent's bindings
+    // outlive its row. A deleted principal must not keep a role.
+    await this.membership.removeAllBindings({ type: 'AGENT', id: agent.id });
     await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
     return AgentResponseDto.from(agent);
   }

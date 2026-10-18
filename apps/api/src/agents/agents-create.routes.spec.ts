@@ -28,6 +28,7 @@ import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG } from '../config/auth.config';
+import { MembershipService } from '../permissions/membership.service';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
@@ -222,6 +223,11 @@ describe('POST /api/agents (US-003)', () => {
         PrismaAgentRepository,
         { provide: PrismaService, useValue: prisma },
         { provide: TRANSACTION_MANAGER, useValue: txManager },
+        // Permissions P1a (US-004): the create path binds the new agent to the baseline.
+        {
+          provide: MembershipService,
+          useValue: { bindBaseline: vi.fn().mockResolvedValue(undefined) },
+        },
         {
           provide: AUTH_CFG,
           useValue: {

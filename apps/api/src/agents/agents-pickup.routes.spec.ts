@@ -14,6 +14,7 @@ import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
+import { MembershipService } from '../permissions/membership.service';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import {
@@ -131,6 +132,11 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
             getClient: vi.fn(),
             isInTransaction: vi.fn(() => false),
           },
+        },
+        // Permissions P1a (US-004): AgentsService injects the permissions module's MembershipService.
+        {
+          provide: MembershipService,
+          useValue: { bindBaseline: vi.fn(), removeAllBindings: vi.fn() },
         },
         {
           provide: KodaDomainWriter,

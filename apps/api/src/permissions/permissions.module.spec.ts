@@ -3,6 +3,7 @@ import { Global, Module } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { CacheManager } from '@nathapp/nestjs-cache';
+import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { MembershipService } from './membership.service';
 import { PermissionService } from './permission.service';
 import { PrismaRoleRepository } from './prisma-role.repository';
@@ -42,6 +43,16 @@ const mockTransactionManager: ITransactionManager = {
 
 const mockPrismaService = { client: mockPrismaClient } as unknown as PrismaService<PrismaClient>;
 
+/** US-004: the module reads `ownerEmail` in `onModuleInit`; outside production it only needs to resolve. */
+const mockAuthConfig: IAuthConfig = {
+  jwtSecret: 'test-secret',
+  jwtExpiresIn: '15m',
+  jwtRefreshSecret: 'test-refresh-secret',
+  jwtRefreshExpiresIn: '7d',
+  apiKeySecret: 'test-api-key-secret',
+  registrationEnabled: false,
+};
+
 /**
  * What `PrismaModule.forRoot({ isGlobal: true })` provides in the application: the repositories below
  * inject both, and a module-scoped provider cannot see the testing module's root providers.
@@ -53,8 +64,10 @@ const mockPrismaService = { client: mockPrismaClient } as unknown as PrismaServi
     { provide: TRANSACTION_MANAGER, useValue: mockTransactionManager },
     // The application registers the cache globally (`CacheModule.register({ isGlobal: true })`).
     { provide: CacheManager, useValue: {} },
+    // The application registers it globally (`ConfigBridgeModule` over `ConfigModule.forRoot`).
+    { provide: AUTH_CFG, useValue: mockAuthConfig },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, CacheManager],
+  exports: [PrismaService, TRANSACTION_MANAGER, CacheManager, AUTH_CFG],
 })
 class PermissionStubsModule {}
 

@@ -11,6 +11,7 @@ import { PrismaAuthRepository } from './prisma-auth.repository';
 import { UserDomain } from './domain/auth.domain';
 import { userAuthStateCacheKey, userTokenVersionCacheTag } from './token-version.cache';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
+import { MembershipService } from '../permissions/membership.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
 
@@ -34,6 +35,7 @@ export class AuthService {
     private jwtRefreshStrategyProvider: JwtRefreshStrategyProvider,
     private cache: CacheManager,
     @Inject(AUTH_CFG) private readonly authConfig: IAuthConfig,
+    private readonly membership: MembershipService,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -45,9 +47,24 @@ export class AuthService {
     const name = registerDto.name ?? 'User';
     const allowWhenUsersExist = this.authConfig.registrationEnabled;
 
+    // Both bootstrap gates need the same fact — whether the users table is empty — so it is read once.
+    // The owner rule (permissions P1a, US-004) only applies while the seat is free; the closed-
+    // registration gate only refuses when it is taken.
+    const ownerEmail = this.authConfig.ownerEmail;
+    const anyUser = ownerEmail !== undefined || !allowWhenUsersExist
+      ? await this.authRepo.findAnyUser()
+      : null;
+
+    // Permissions P1a (US-004): when the installation names its Owner, only that email may take the
+    // first registration. Refused before the create (and before bcrypt), so a refused attempt leaves
+    // the users table empty; the repository's locked check stays authoritative for the empty-table race.
+    if (ownerEmail !== undefined && email !== ownerEmail && anyUser === null) {
+      throw new ForbiddenAppException({}, 'registration');
+    }
+
     // Fast path: refuse before paying for bcrypt. The locked check in the
     // repository stays authoritative for the empty-table race.
-    if (!allowWhenUsersExist && (await this.authRepo.findAnyUser()) !== null) {
+    if (!allowWhenUsersExist && anyUser !== null) {
       throw new ForbiddenAppException({}, 'registration');
     }
 
@@ -67,7 +84,13 @@ export class AuthService {
     if (!created) {
       throw new ForbiddenAppException({}, 'registration');
     }
-    const { user } = created;
+    const { user, firstUser } = created;
+
+    // The first user gets the installation's Owner binding (the repository already stores role ADMIN
+    // for them); everyone else starts at the member baseline. The hooks run before the session is
+    // issued, so the response always describes the user as the bindings left them.
+    await this.membership.bindOwnerIfFirst(user.id, firstUser);
+    await this.membership.bindBaseline({ type: 'USER', id: user.id });
 
     return this.issueSession(user);
   }

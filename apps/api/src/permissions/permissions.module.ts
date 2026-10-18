@@ -1,5 +1,6 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Inject, Module, OnModuleInit } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
+import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { MembershipService } from './membership.service';
 import { PermissionCache } from './permission-cache';
 import { PermissionService } from './permission.service';
@@ -21,6 +22,10 @@ import { SystemRoleSeeder } from './system-role.seeder';
  * `MembershipService` and `RoleAdminService`. The first two are exported; US-005 adds the third.
  * `PermissionCache` is internal: it is the one invalidation point both services share. The module is
  * imported by `AppModule`, so `SystemRoleSeeder` runs when the API bootstraps.
+ *
+ * `onModuleInit` is the owner bootstrap's fail-fast (US-004): in production an installation with no
+ * `KODA_OWNER_EMAIL` cannot be configured later — the first registration is already taken — so the API
+ * refuses to start instead of creating an Owner nobody chose.
  */
 @Global()
 @Module({
@@ -39,4 +44,12 @@ import { SystemRoleSeeder } from './system-role.seeder';
   ],
   exports: [PermissionService, MembershipService],
 })
-export class PermissionsModule {}
+export class PermissionsModule implements OnModuleInit {
+  constructor(@Inject(AUTH_CFG) private readonly authConfig: IAuthConfig) {}
+
+  onModuleInit(): void {
+    if (process.env['NODE_ENV'] === 'production' && !this.authConfig.ownerEmail) {
+      throw new Error('permissions.ownerEmailRequired');
+    }
+  }
+}

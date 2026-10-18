@@ -10,6 +10,7 @@ import { ConflictAppException } from '../common/exceptions/conflict-app.exceptio
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
+import { MembershipService } from '../permissions/membership.service';
 import { IAuthConfig } from '../config/auth.config';
 import type { ProjectAgentRecord } from './dto/project-agent.dto';
 
@@ -51,6 +52,8 @@ describe('AgentsService project roster writes (S4c US-003)', () => {
       repo as unknown as PrismaAgentRepository,
       authConfig,
       txManager as never,
+      // Permissions P1a (US-004): MembershipService is the required fourth parameter.
+      { bindBaseline: vi.fn(), removeAllBindings: vi.fn() } as unknown as MembershipService,
     );
   });
 
