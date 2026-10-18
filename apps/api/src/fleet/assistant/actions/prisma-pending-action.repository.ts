@@ -4,13 +4,14 @@ import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, Prisma
 import { PendingAction as PendingActionModel, Prisma, PrismaClient } from '../../../generated/prisma/client';
 import { allocateThreadSeq } from '../../threads/domain/chat-thread.domain';
 import {
-  ActionResolution, ActionStatusView, NewPendingAction, PendingActionRecord, PendingActionRepository, PendingActionStatus,
+  ActionResolution, ActionStatusView, DirectActionInput, NewPendingAction, PendingActionRecord, PendingActionRepository, PendingActionStatus,
 } from './pending-action.domain';
 
 const asObject = (v: Prisma.JsonValue): Record<string, unknown> =>
   v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 
-const json = (v: Record<string, unknown>): Prisma.InputJsonValue => v as Prisma.InputJsonValue;
+/** A stored input is JSON: `NewPendingAction.input` is an object, a direct action's is whatever its tool parsed. */
+const json = (v: unknown): Prisma.InputJsonValue => v as Prisma.InputJsonValue;
 
 /**
  * 2a-D3: the action rows of koda write-tool calls. Module-private (never exported): the only writer is
@@ -123,6 +124,25 @@ export class PrismaPendingActionRepository
       ...action, input: json(action.input), actorType: 'user', actorId: action.requestedById, origin: 'thread', approvalMode: 'human',
     } });
     return (await this.withSlug([row]))[0];
+  }
+
+  /**
+   * 3-D14: the terminal row of a direct action, in one insert. Every thread field stays null — the action has no
+   * thread, job, replay key or requester — `approvalMode` is `none` with no approver and no approval link, and
+   * `decidedAt` and `expiresAt` are both `now`. It is never `PENDING`, so the expiry sweeper never selects it.
+   */
+  async insertDirect(input: DirectActionInput): Promise<{ id: string }> {
+    return this.db.pendingAction.create({
+      data: {
+        projectId: input.projectId, tool: input.tool, input: json(input.input), preview: input.preview,
+        status: input.status, result: input.result,
+        actorType: input.actorType, actorId: input.actorId, origin: input.origin, approvalMode: 'none',
+        approverType: null, approverId: null, approvalId: null,
+        threadId: null, jobId: null, toolCallId: null, requestedById: null, decidedById: null,
+        decidedAt: input.now, expiresAt: input.now,
+      },
+      select: { id: true },
+    });
   }
 
   async setApprovalId(id: string, approvalId: string): Promise<void> {

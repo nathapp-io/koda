@@ -277,7 +277,11 @@ function makeWriteTool(over: Partial<AssistantTool<unknown>> = {}): AssistantToo
 }
 
 function makeProposer(result: ProposeResult = { actionId: 'a1' }) {
-  return { propose: vi.fn(async (_input: ProposeInput): Promise<ProposeResult> => result) };
+  // 3-D14: the port carries the direct-action record too; this harness serves the propose path only.
+  return {
+    propose: vi.fn(async (_input: ProposeInput): Promise<ProposeResult> => result),
+    recordDirect: vi.fn(async (): Promise<{ actionId: string }> => ({ actionId: 'a1' })),
+  };
 }
 
 /** A write-tool harness with a proposer attached, as `AssistantActionService.onModuleInit` attaches it (2a-D1). */

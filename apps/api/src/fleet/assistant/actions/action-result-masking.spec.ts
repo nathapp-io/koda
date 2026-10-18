@@ -64,7 +64,11 @@ function executorFor(tool: AssistantTool<unknown>): AssistantToolExecutor {
   const registry = new AssistantToolRegistry();
   registry.register(tool);
   const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, new KodaCaslAbilityFactory());
-  executor.attachActions({ propose: async (_input: ProposeInput): Promise<ProposeResult> => ({ actionId: 'a1' }) });
+  // 3-D14: the port carries `recordDirect` too; this harness only drives the thread propose path.
+  executor.attachActions({
+    propose: async (_input: ProposeInput): Promise<ProposeResult> => ({ actionId: 'a1' }),
+    recordDirect: async (): Promise<{ actionId: string }> => ({ actionId: 'a1' }),
+  });
   return executor;
 }
 

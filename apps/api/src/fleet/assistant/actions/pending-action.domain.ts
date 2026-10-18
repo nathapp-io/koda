@@ -85,9 +85,29 @@ export interface ProposeInput {
 
 export type ProposeResult = { actionId: string } | { refused: true };
 
+/**
+ * 3-D14: one write a `none`-mode caller ran at once. The tool has already written, so there is no thread, job,
+ * replay key, requester or approval to hang a row on: `status` is terminal (`EXECUTED` or `FAILED`), `result` is
+ * the outcome text the caller stored, and `now` is both the decision and the expiry of the row.
+ */
+export interface DirectActionInput {
+  projectId: string;
+  tool: string;
+  input: unknown;
+  preview: string;
+  actorType: 'user' | 'agent';
+  actorId: string;
+  origin: 'thread' | 'mcp';
+  status: 'EXECUTED' | 'FAILED';
+  result: string;
+  now: Date;
+}
+
 /** 2a-D1: the executor's port to the propose service, attached at init so the provider graph stays acyclic. */
 export interface ActionProposer {
   propose(input: ProposeInput): Promise<ProposeResult>;
+  /** 3-D14: the record of a write the caller already ran; one terminal row, no approval. */
+  recordDirect(input: DirectActionInput): Promise<{ actionId: string }>;
 }
 
 /**
@@ -128,6 +148,11 @@ export interface PendingActionRepository {
    */
   findDue(now: Date, limit: number): Promise<PendingActionRecord[]>;
   insert(action: NewPendingAction): Promise<PendingActionRecord>;
+  /**
+   * 3-D14: the one insert of a direct action's terminal row. The caller has already run the tool, so nothing here
+   * is derived: no `PENDING` row ever exists for a direct action and no approval is opened for one.
+   */
+  insertDirect(input: DirectActionInput): Promise<{ id: string }>;
   /** Links the approval `openAssistant` just created (2a-D4 step 6). */
   setApprovalId(id: string, approvalId: string): Promise<void>;
   /** `SELECT ... FOR UPDATE` on the action row (2a-D11: last of thread, approval, action); null when it is gone. */

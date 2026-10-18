@@ -8,7 +8,8 @@ import { Logger } from '@nestjs/common';
 import { testFleetConfig } from '../../../common/test-helpers/fleet-config';
 import type { FleetApprovalRecord } from '../../approvals/domain/approval.domain';
 import { MAX_PER_TICK, PendingActionExpirySweeper } from './pending-action-expiry.sweeper';
-import type { PendingActionRecord } from './pending-action.domain';
+import { PrismaPendingActionRepository } from './prisma-pending-action.repository';
+import type { DirectActionInput, PendingActionRecord } from './pending-action.domain';
 
 const NOW = new Date('2026-10-24T09:00:00.000Z');
 const PAST = new Date(NOW.getTime() - 60_000);
@@ -218,5 +219,89 @@ describe('PendingActionExpirySweeper timer (2a-D10)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * Fleet S5b 3 US-004 AC-10: what keeps a direct action out of the expiry path is the scan itself — `findDue` reads
+ * `origin 'thread'` rows that are still `PENDING`, and `insertDirect` writes neither. These tests drive the real
+ * query over a small in-memory `PendingAction` table that holds the row `insertDirect` wrote; the PG-backed proof is
+ * in test/integration/fleet/assistant-direct-action-record.integration.spec.ts.
+ */
+describe('PendingActionExpirySweeper and a direct action (US-004 AC-10)', () => {
+  const DAWN = new Date('2026-10-23T09:00:00.000Z');
+  const DAY_MS = 86_400_000;
+  const AFTER = new Date(DAWN.getTime() + DAY_MS);
+
+  interface DueWhere { origin?: string; status?: string; expiresAt?: { lte?: Date } }
+
+  const isDue = (row: Record<string, unknown>, where: DueWhere): boolean => {
+    if (where.origin !== undefined && row['origin'] !== where.origin) return false;
+    if (where.status !== undefined && row['status'] !== where.status) return false;
+    const lte = where.expiresAt?.lte;
+    return lte === undefined || (row['expiresAt'] as Date).getTime() <= lte.getTime();
+  };
+
+  /** The real repository over an in-memory table, so `insertDirect`'s row is what the scan reads. */
+  function directWorld() {
+    const rows: Array<Record<string, unknown>> = [];
+    const client = {
+      pendingAction: {
+        create: vi.fn(async (args: { data: Record<string, unknown>; select?: Record<string, unknown> }) => {
+          const row = { id: `row-${rows.length + 1}`, ...args.data };
+          rows.push(row);
+          return args.select ? { id: row.id } : row;
+        }),
+        findMany: vi.fn(async (args: { where: DueWhere; take: number }) =>
+          rows.filter((row) => isDue(row, args.where)).slice(0, args.take)),
+      },
+      project: { findMany: vi.fn(async () => []) },
+    };
+    const tx = { getClient: () => client, run: (fn: () => Promise<unknown>) => fn(), isInTransaction: () => false };
+    return { rows, client, repo: new PrismaPendingActionRepository(tx as never, { client } as never) };
+  }
+
+  const direct = (over: Partial<DirectActionInput> = {}): DirectActionInput => ({
+    projectId: 'p1', tool: 'koda_add_comment', input: { ref: 'WEB-1', body: 'hello' }, preview: 'Add a comment',
+    actorType: 'agent', actorId: 'claude', origin: 'mcp', status: 'EXECUTED', result: 'done', now: DAWN, ...over,
+  });
+
+  /** The sweeper over the real repository; every other collaborator is a stub, since no row may be found due. */
+  function sweeperFor(repo: PrismaPendingActionRepository) {
+    const decisions = { expireLocked: vi.fn(async () => ({ approval: approval(), live: [], noteId: 'n1' })) };
+    const live = { publish: vi.fn() };
+    const threads = { publish: vi.fn() };
+    const approvals = { lockById: vi.fn(async () => approval()) };
+    const tx = { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) };
+    const sweeper = new PendingActionExpirySweeper(tx as never, repo as never, approvals as never, decisions as never,
+      live as never, threads as never, testFleetConfig({ sweepEnabled: false, approvalSweepMs: 15_000 }) as never);
+    return { sweeper, decisions, live, threads };
+  }
+
+  /** The thread column set a `findDue` row must carry, since the scan maps them through the thread-action record. */
+  const threadRow = { id: 'thread-1', origin: 'thread', status: 'PENDING', expiresAt: new Date(0), actorType: 'user', actorId: 'u1',
+    approvalMode: 'human', approverType: null, approverId: null, projectId: 'p1', threadId: 't1', jobId: 'j1', toolCallId: 'tc1',
+    tool: 'koda_add_comment', input: {}, preview: 'p', requestedById: 'u1', approvalId: 'ap1', decidedById: null, decidedAt: null,
+    result: null, deliveredAt: null, deliveredMessageId: null, createdAt: DAWN };
+
+  it('AC-10: a direct action recorded at `now` is not due a day later and the sweep leaves it EXECUTED', async () => {
+    const { repo, rows } = directWorld();
+    const { id } = await repo.insertDirect(direct());
+    const b = sweeperFor(repo);
+
+    expect(await b.sweeper.tick(AFTER)).toEqual({ expired: 0, failed: 0 });
+
+    expect(rows[0]).toMatchObject({ id, status: 'EXECUTED', origin: 'mcp' });
+    expect(b.decisions.expireLocked).not.toHaveBeenCalled();
+    expect(b.live.publish).not.toHaveBeenCalled();
+  });
+
+  it('AC-10 boundary: the same scan still finds a due thread row, so the exclusion is the direct row\'s own shape', async () => {
+    const { repo, rows } = directWorld();
+    const { id } = await repo.insertDirect(direct());
+    rows.push(threadRow);
+
+    expect((await repo.findDue(AFTER, 100)).map((row) => row.id)).toEqual(['thread-1']);
+    expect(rows.find((row) => row['id'] === id)).toMatchObject({ status: 'EXECUTED' });
   });
 });

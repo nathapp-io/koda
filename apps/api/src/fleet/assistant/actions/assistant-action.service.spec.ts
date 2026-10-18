@@ -6,7 +6,7 @@
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { LiveFleetApprovalEvent } from '../../../live/live-event';
 import { AssistantActionService } from './assistant-action.service';
-import { ACTION_TTL_MS, MAX_PENDING_ACTIONS, type NewPendingAction, type PendingActionRecord, type ProposeInput } from './pending-action.domain';
+import { ACTION_TTL_MS, MAX_PENDING_ACTIONS, type DirectActionInput, type NewPendingAction, type PendingActionRecord, type ProposeInput } from './pending-action.domain';
 
 const NOW = new Date('2026-10-23T09:00:00.000Z');
 const LIVE: LiveFleetApprovalEvent[] = [
@@ -25,6 +25,7 @@ function fakes() {
       decidedById: null, decidedAt: null, result: null, deliveredAt: null, createdAt: NOW,
     })),
     setApprovalId: vi.fn(async () => undefined),
+    insertDirect: vi.fn(async (_input: DirectActionInput): Promise<{ id: string }> => ({ id: 'ad1' })),
   };
   const closer = { openAssistant: vi.fn(async () => ({ approval: { id: 'ap1' }, live: LIVE })) };
   const live = { publish: vi.fn() };
@@ -157,5 +158,50 @@ describe('AssistantActionService.propose', () => {
     expect(repo.findByCall).not.toHaveBeenCalled();
     expect(repo.insert).not.toHaveBeenCalled();
     expect(closer.openAssistant).not.toHaveBeenCalled();
+  });
+});
+
+/** 3-D14: one write that already ran, recorded by the caller that ran it. */
+const direct = (over: Partial<DirectActionInput> = {}): DirectActionInput => ({
+  projectId: 'p1', tool: 'koda_add_comment', input: { ref: 'KODA-1', body: 'hello' }, preview: 'Add a comment to KODA-1',
+  actorType: 'agent', actorId: 'ag1', origin: 'mcp', status: 'EXECUTED', result: 'done', now: NOW, ...over,
+});
+
+describe('AssistantActionService.recordDirect (3-D14)', () => {
+  it('AC-4: answers the id of the one row it inserted, as it was given', async () => {
+    const { service, repo } = fakes();
+
+    await expect(service.recordDirect(direct())).resolves.toEqual({ actionId: 'ad1' });
+
+    expect(repo.insertDirect).toHaveBeenCalledTimes(1);
+    expect(repo.insertDirect).toHaveBeenCalledWith(direct());
+  });
+
+  it('AC-8: opens no approval, takes no thread lock and publishes on neither bus', async () => {
+    const { service, repo, closer, live, threads } = fakes();
+
+    await service.recordDirect(direct());
+
+    expect(closer.openAssistant).not.toHaveBeenCalled();
+    expect(live.publish).not.toHaveBeenCalled();
+    expect(threads.publish).not.toHaveBeenCalled();
+    expect(repo.lockThread).not.toHaveBeenCalled();
+    expect(repo.insert).not.toHaveBeenCalled();
+    expect(repo.setApprovalId).not.toHaveBeenCalled();
+  });
+
+  it('AC-9: a failed call is stored with the caller\'s own failure text', async () => {
+    const { service, repo } = fakes();
+
+    await service.recordDirect(direct({ status: 'FAILED', result: 'not_found' }));
+
+    expect(repo.insertDirect).toHaveBeenCalledWith(expect.objectContaining({ status: 'FAILED', result: 'not_found' }));
+  });
+
+  it('a failed insert is not swallowed', async () => {
+    const { service, repo } = fakes();
+    repo.insertDirect.mockRejectedValueOnce(new Error('boom'));
+
+    await expect(service.recordDirect(direct())).rejects.toThrow('boom');
   });
 });

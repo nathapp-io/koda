@@ -48,8 +48,12 @@ function makeWriteTool(over: Partial<AssistantTool<unknown>> = {}): AssistantToo
   };
 }
 
-function makeProposer(): { propose: ReturnType<typeof vi.fn> } {
-  return { propose: vi.fn(async (_input: ProposeInput): Promise<ProposeResult> => ({ actionId: 'a1' })) };
+function makeProposer(): { propose: ReturnType<typeof vi.fn>; recordDirect: ReturnType<typeof vi.fn> } {
+  // 3-D14: the port gained the direct-action record; this harness exercises the propose path.
+  return {
+    propose: vi.fn(async (_input: ProposeInput): Promise<ProposeResult> => ({ actionId: 'a1' })),
+    recordDirect: vi.fn(async (): Promise<{ actionId: string }> => ({ actionId: 'a1' })),
+  };
 }
 
 interface Setup {
