@@ -1,8 +1,8 @@
 <template>
   <div class="space-y-2 text-sm" data-testid="fleet-approval-outcome">
     <p data-testid="fleet-approval-outcome-decision">
-      <span class="font-medium">{{ label('fleet.approvals.status', approval.status) }}</span>
-      <template v-if="approval.decision"> · {{ label('fleet.approvals.decision', approval.decision) }}</template>
+      <span class="font-medium">{{ statusLabel }}</span>
+      <template v-if="decisionLabel"> · {{ decisionLabel }}</template>
       <template v-if="approval.resolvedBy"> · {{ label('fleet.approvals.resolvedBy', approval.resolvedBy) }}</template>
     </p>
     <p class="text-muted-foreground">
@@ -62,6 +62,12 @@ const props = defineProps<{
 const { t, te } = useI18n()
 const label = (prefix: string, code: string): string => codeLabel(t, te, prefix, code)
 
+const statusLabel = computed(() => label('fleet.approvals.status', props.approval.status))
+/** #297: an assistant action's decision words ("Approved"/"Rejected") equal its status; show them once. */
+const decisionLabel = computed(() => {
+  const decision = props.approval.decision ? label('fleet.approvals.decision', props.approval.decision) : null
+  return decision === statusLabel.value ? null : decision
+})
 const raised = computed(() => resumedAmount(props.approval))
 /** `href` precomputed: `:to` must be a string, and v-if does not narrow a call expression. */
 const results = computed(() => requeueResults(props.approval)?.map((r) => ({ ...r, href: link(r.jobId) })) ?? null)

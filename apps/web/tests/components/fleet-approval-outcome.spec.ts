@@ -58,6 +58,14 @@ describe('FleetApprovalOutcome', () => {
     expect(reset.byId('fleet-approval-outcome-by')).toHaveLength(0)
   })
 
+  test('a decided assistant action does not repeat the status as its decision (#297)', () => {
+    const base = { type: 'assistant_action', policyId: null, outcome: null, comment: null } as const
+    const rejected = mount(decided({ ...base, status: 'rejected', decision: 'reject' }))
+    expect(rejected.app.textOf(rejected.byId('fleet-approval-outcome-decision')[0])).toBe('Rejected · Decided in the inbox')
+    const approved = mount(decided({ ...base, status: 'approved', decision: 'approve' }))
+    expect(approved.app.textOf(approved.byId('fleet-approval-outcome-decision')[0])).toBe('Approved · Decided in the inbox')
+  })
+
   test('a decider the page cannot name gets the fallback name', () => {
     const m = mount(decided(), () => null)
     expect(m.app.textOf(m.byId('fleet-approval-outcome-by')[0])).toBe('By an unknown user')
