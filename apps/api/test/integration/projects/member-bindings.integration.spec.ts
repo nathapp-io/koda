@@ -3,6 +3,8 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { EmailAvailability } from '../../../src/email/email-availability';
+import { MEMBERSHIP_READ_CAP } from '../../../src/permissions/legacy-membership.queries';
+import { PrismaProjectMembersRepository } from '../../../src/projects/members/prisma-project-members.repository';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -133,6 +135,38 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     const res = await request(server).patch(`${base}/${targetId}`).set(headers()).send({ role: 'DEVELOPER' }).expect(404);
     expect(res.body).toMatchObject({ ret: 404, message: 'Member not found' });
   });
+  it.each([
+    { source: 'legacy-only', legacyAt: new Date('2002-01-01'), bindingAt: null, since: new Date('2002-01-01') },
+    { source: 'binding-only', legacyAt: null, bindingAt: new Date('2002-01-01'), since: new Date('2002-01-01') },
+    { source: 'legacy-earliest', legacyAt: new Date('2001-01-01'), bindingAt: new Date('2002-01-01'), since: new Date('2001-01-01') },
+    { source: 'binding-earliest', legacyAt: new Date('2002-01-01'), bindingAt: new Date('2001-01-01'), since: new Date('2001-01-01') },
+  ])('F1: finds and mutates a $source member beyond the project listing cap', async ({ legacyAt, bindingAt, since }) => {
+    const fillerIds = Array.from({ length: MEMBERSHIP_READ_CAP }, (_, i) => `${projectId}-filler-${i}`);
+    const developerId = (await db.role.findUniqueOrThrow({ where: { key: 'developer' } })).id;
+    const fillerAt = new Date('2000-01-01');
+    await db.user.createMany({ data: fillerIds.map(id => ({ id, email: `${id}@bindings.test`, passwordHash: 'unused' })) });
+    // Fill both underlying listing sources so the target is outside either capped read.
+    await db.projectMember.createMany({ data: fillerIds.map(userId => ({ projectId, userId, role: 'VIEWER', joinedAt: fillerAt })) });
+    await db.roleBinding.createMany({ data: fillerIds.map(principalId => ({
+      projectId, principalId, principalType: 'USER', roleId: developerId,
+      grantedByType: 'SYSTEM', grantedById: 'test', createdAt: fillerAt,
+    })) });
+    if (legacyAt) await db.projectMember.create({ data: { projectId, userId: targetId, role: 'DEVELOPER', joinedAt: legacyAt } });
+    if (bindingAt) await db.roleBinding.create({ data: {
+      projectId, principalId: targetId, principalType: 'USER', roleId: developerId,
+      grantedByType: 'SYSTEM', grantedById: 'test', createdAt: bindingAt,
+    } });
+
+    expect(await app.get(PrismaProjectMembersRepository).findMember(projectId, targetId)).toMatchObject({
+      userId: targetId, role: 'DEVELOPER', joinedAt: since,
+    });
+    conflict(await post({ email: 'target@bindings.test' }), 'members');
+    await request(server).patch(`${base}/${targetId}`).set(headers()).send({ role: 'VIEWER' }).expect(200);
+    await request(server).delete(`${base}/${targetId}`).set(headers()).expect(200);
+    expect(await bindings()).toHaveLength(0);
+    expect(await legacyCount()).toBe(0);
+  });
+
   it('AC-15: concurrent member adds yield one binding and one members conflict', async () => {
     const results = (await Promise.all([post({ email: 'target@bindings.test' }), post({ email: 'target@bindings.test' })])).sort((a, b) => a.status - b.status);
     expect(results.map(r => r.status).sort()).toEqual([201, 409]);

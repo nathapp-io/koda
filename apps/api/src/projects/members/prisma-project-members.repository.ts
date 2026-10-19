@@ -57,13 +57,25 @@ export class PrismaProjectMembersRepository {
   async findMember(projectId: string, userId: string): Promise<ProjectMemberRecord | null> {
     const role = await localProjectRole(this.db, { type: 'USER', id: userId }, projectId);
     if (role === null) return null;
-    const [user, memberships] = await Promise.all([
+    // A single-member lookup must not depend on the capped project-wide listing.
+    const [user, legacy, binding] = await Promise.all([
       this.db.user.findUnique({ where: { id: userId }, select: { id: true, email: true, name: true, disabled: true } }),
-      listProjectMemberships(this.db, projectId, 'USER'),
+      this.db.projectMember.findUnique({
+        where: { projectId_userId: { projectId, userId } },
+        select: { joinedAt: true },
+      }),
+      this.db.roleBinding.aggregate({
+        where: { principalType: 'USER', principalId: userId, projectId, role: { scope: 'PROJECT' } },
+        _min: { createdAt: true },
+      }),
     ]);
-    const membership = memberships.find(m => m.principalId === userId);
-    if (!user || !membership) return null;
-    return { userId, email: user.email, name: user.name, disabled: user.disabled, role, joinedAt: membership.since };
+    const legacyAt = legacy?.joinedAt;
+    const bindingAt = binding._min.createdAt;
+    const since = legacyAt && bindingAt
+      ? new Date(Math.min(legacyAt.getTime(), bindingAt.getTime()))
+      : legacyAt ?? bindingAt;
+    if (!user || !since) return null;
+    return { userId, email: user.email, name: user.name, disabled: user.disabled, role, joinedAt: since };
   }
 
   async deleteMemberIfPresent(projectId: string, userId: string): Promise<void> {
