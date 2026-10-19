@@ -326,6 +326,41 @@ describeIntegration('roles API (US-005)', () => {
     });
   });
 
+  it.each(['name', 'description', 'permissions'])('PATCH rejects explicit null %s without changing the role', async (field) => {
+    const created = await postRole(ownerToken, {
+      key: `null-${field}`,
+      name: 'Null validation',
+      scope: 'PROJECT',
+      permissions: ['ticket.read'],
+    }).expect(201);
+    const roleId = data<RoleBody>(created).id;
+    const before = await storedRole(`null-${field}`);
+
+    const res = await patchRole(ownerToken, roleId, { [field]: null });
+
+    expect(res.status).toBe(400);
+    expect(res.body.ret).toBe(CODE.validation);
+    expect(await storedRole(`null-${field}`)).toEqual(before);
+  });
+
+  it('PATCH permits omitted fields and empty permissions', async () => {
+    const created = await postRole(ownerToken, {
+      key: 'optional-fields',
+      name: 'Optional fields',
+      description: 'Keep me',
+      scope: 'PROJECT',
+      permissions: ['ticket.read'],
+    }).expect(201);
+    const roleId = data<RoleBody>(created).id;
+
+    await patchRole(ownerToken, roleId, {}).expect(200);
+    const res = await patchRole(ownerToken, roleId, { permissions: [] }).expect(200);
+
+    expect(data<RoleBody>(res)).toEqual(expect.objectContaining({
+      name: 'Optional fields', description: 'Keep me', permissions: [],
+    }));
+  });
+
   it('AC-13: a global key on a PROJECT role answers 400 permissions.scopeMismatch', async () => {
     const developer = await storedRoleId('developer');
 

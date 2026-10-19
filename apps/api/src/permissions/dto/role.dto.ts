@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsArray, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength, ValidateIf } from 'class-validator';
 import type { RoleDomain, RoleScope } from '../permissions.types';
 
 /** `key` is the role's stable identifier: kebab-case, two to forty-nine characters. */
@@ -66,20 +66,20 @@ export class CreateRoleDto {
 /** `key` and `scope` are not accepted: they are fixed for the life of a role. */
 export class UpdateRoleDto {
   @ApiPropertyOptional({ description: 'Rejected for a system role' })
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsString({ message: '$t(common.validation.isString)' })
   @MinLength(1, { message: '$t(common.validation.minLength)' })
   @MaxLength(100, { message: '$t(common.validation.maxLength)' })
   name?: string;
 
   @ApiPropertyOptional()
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsString({ message: '$t(common.validation.isString)' })
   @MaxLength(500, { message: '$t(common.validation.maxLength)' })
   description?: string;
 
   @ApiPropertyOptional({ type: [String], description: 'Replaces the stored entry list' })
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsArray({ message: '$t(common.validation.isArray)' })
   @IsString({ each: true, message: '$t(common.validation.isString)' })
   permissions?: string[];

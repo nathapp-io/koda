@@ -4726,8 +4726,19 @@ describeIntegration('API Integration Tests', () => {
   // ─────────────────────────────────────────────────────────────────
 
   describe('Roles API (permissions P1a US-005)', () => {
-    /** The role this block creates, edits and deletes; unique so a rerun cannot collide with it. */
-    const created: { id: string } = { id: '' };
+    let roleOwnerToken: string;
+    let roleMemberToken: string;
+    beforeAll(async () => {
+      // The surrounding lifecycle normally supplies these actors. A filtered run must create its
+      // own actors: the first registration bootstraps the Owner binding through the real API.
+      const register = async (email: string): Promise<string> => {
+        const res = await request(httpServer).post('/api/auth/register')
+          .send({ email, name: 'Roles test user', password: 'Roles1234!Aa' }).expect(201);
+        return body<{ accessToken: string }>(res).accessToken;
+      };
+      roleOwnerToken = userAccessToken ?? await register('roles-owner@koda.test');
+      roleMemberToken = nonAdminUserAccessToken ?? await register('roles-member@koda.test');
+    });
     const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
     const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
     const roles = (token: string) => request(httpServer).get('/api/roles').set(auth(token));
@@ -4739,9 +4750,15 @@ describeIntegration('API Integration Tests', () => {
       request(httpServer).delete(`/api/roles/${id}`).set(auth(token));
     const storedRoleId = async (key: string): Promise<string> =>
       (await db().role.findUniqueOrThrow({ where: { key } })).id;
+    const customRole = async (key: string): Promise<string> => {
+      const res = await createRole(roleOwnerToken, {
+        key, name: 'E2E QA', scope: 'PROJECT', permissions: ['ticket.read'],
+      }).expect(201);
+      return body<{ id: string }>(res).id;
+    };
 
     it('GET /api/roles — lists the system roles for the installation owner', async () => {
-      const res = await roles(userAccessToken).expect(200);
+      const res = await roles(roleOwnerToken).expect(200);
       const list = body<Array<{ key: string; system: boolean; permissions: string[] }>>(res);
 
       expect(list.map((role) => role.key)).toContain('owner');
@@ -4751,11 +4768,11 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('GET /api/roles — 403 for a user whose only binding is member', async () => {
-      refusal(await roles(nonAdminUserAccessToken).expect(403), 'permissions.403');
+      refusal(await roles(roleMemberToken).expect(403), 'permissions.403');
     });
 
     it('POST /api/roles — 201 creates a PROJECT role', async () => {
-      const res = await createRole(userAccessToken, {
+      const res = await createRole(roleOwnerToken, {
         key: 'e2e-qa',
         name: 'E2E QA',
         scope: 'PROJECT',
@@ -4771,12 +4788,12 @@ describeIntegration('API Integration Tests', () => {
           permissions: ['ticket.read', 'comment.create'],
         }),
       );
-      created.id = role.id;
     });
 
     it('POST /api/roles — 409 for a duplicate key', async () => {
-      const res = await createRole(userAccessToken, {
-        key: 'e2e-qa',
+      await customRole('e2e-qa-duplicate');
+      const res = await createRole(roleOwnerToken, {
+        key: 'e2e-qa-duplicate',
         name: 'E2E QA again',
         scope: 'PROJECT',
         permissions: ['ticket.read'],
@@ -4786,7 +4803,7 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('POST /api/roles — 400 for a key the DTO rejects', async () => {
-      const res = await createRole(userAccessToken, {
+      const res = await createRole(roleOwnerToken, {
         key: 'Not A Key',
         name: 'Bad key',
         scope: 'PROJECT',
@@ -4798,36 +4815,38 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('PATCH /api/roles/{id} — 200 changes the custom role description', async () => {
-      const res = await patchRole(userAccessToken, created.id, { description: 'Runs the E2E QA pass' }).expect(200);
+      const id = await customRole('e2e-qa-patch');
+      const res = await patchRole(roleOwnerToken, id, { description: 'Runs the E2E QA pass' }).expect(200);
 
       expect(body<{ description: string }>(res).description).toBe('Runs the E2E QA pass');
-      expect(await db().role.findUniqueOrThrow({ where: { id: created.id } })).toEqual(
-        expect.objectContaining({ description: 'Runs the E2E QA pass', key: 'e2e-qa', scope: 'PROJECT' }),
+      expect(await db().role.findUniqueOrThrow({ where: { id } })).toEqual(
+        expect.objectContaining({ description: 'Runs the E2E QA pass', key: 'e2e-qa-patch', scope: 'PROJECT' }),
       );
     });
 
     it('PATCH /api/roles/{id} — 404 for an unknown id', async () => {
-      const res = await patchRole(userAccessToken, 'no-such-role', { description: 'x' }).expect(404);
+      const res = await patchRole(roleOwnerToken, 'no-such-role', { description: 'x' }).expect(404);
 
       refusal(res, 'permissions.roleNotFound.404');
     });
 
     it('PATCH /api/roles/{id} — 403 on the locked owner role', async () => {
-      const res = await patchRole(userAccessToken, await storedRoleId('owner'), { description: 'x' }).expect(403);
+      const res = await patchRole(roleOwnerToken, await storedRoleId('owner'), { description: 'x' }).expect(403);
 
       refusal(res, 'permissions.ownerLocked.403');
     });
 
     it('DELETE /api/roles/{id} — 403 on a system role', async () => {
-      const res = await deleteRole(userAccessToken, await storedRoleId('viewer')).expect(403);
+      const res = await deleteRole(roleOwnerToken, await storedRoleId('viewer')).expect(403);
 
       refusal(res, 'permissions.systemRole.403');
     });
 
     it('DELETE /api/roles/{id} — 204 deletes the custom role', async () => {
-      await deleteRole(userAccessToken, created.id).expect(204);
+      const id = await customRole('e2e-qa-delete');
+      await deleteRole(roleOwnerToken, id).expect(204);
 
-      expect(await db().role.findUnique({ where: { key: 'e2e-qa' } })).toBeNull();
+      expect(await db().role.findUnique({ where: { id } })).toBeNull();
     });
   });
 

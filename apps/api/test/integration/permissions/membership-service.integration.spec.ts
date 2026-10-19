@@ -188,35 +188,56 @@ describeIntegration('MembershipService (PG)', () => {
       await bindGlobal(user.id, 'member');
       const principal = { type: 'USER' as const, id: user.id };
 
-      // The barrier: whichever statement runs first widens the window, and the grant always commits
-      // before the removal takes its first lock. The user holds no owner binding, so an unlocked
-      // snapshot would find nothing to lock an owner binding for — and would delete the grant below
-      // without ever mirroring it into `User.role`.
+      // Pause at the first lock (fixed code) or after the first snapshot (the regression).
+      // The grant runs from this test's outer async context, never from a repository hook: nested
+      // txManager.run calls would otherwise join the removal and would not prove commit visibility.
       const repo = moduleRef.get<PrismaRoleBindingRepository>(PrismaRoleBindingRepository, { strict: false });
       const originalLockOwnerRole = repo.lockOwnerRole.bind(repo);
       const originalRead = repo.findPrincipalBindings.bind(repo);
-      let granted = false;
-      const grantOnce = async () => {
-        if (granted) return;
-        granted = true;
-        // A concurrent admin request that commits in the window between the snapshot and the locks.
-        await bindGlobal(user.id, 'admin');
+      let reached!: () => void;
+      let release!: () => void;
+      const paused = new Promise<void>((resolve) => { reached = resolve; });
+      const resume = new Promise<void>((resolve) => { release = resolve; });
+      let waiting = false;
+      const pauseOnce = async () => {
+        if (waiting) return;
+        waiting = true;
+        reached();
+        await resume;
       };
       repo.lockOwnerRole = async () => {
-        await grantOnce();
+        await pauseOnce();
         return originalLockOwnerRole();
       };
       repo.findPrincipalBindings = async (ref) => {
         const rows = await originalRead(ref);
-        await grantOnce();
+        await pauseOnce();
         return rows;
       };
 
+      const observer = createTestPrismaClient();
+      const removal = membership.removeAllBindings(principal);
       try {
-        await membership.removeAllBindings(principal);
+        await Promise.race([
+          paused,
+          removal.then(() => { throw new Error('Bulk removal completed without reaching the barrier'); }),
+        ]);
+        const tx = moduleRef.get<ITransactionManager>(TRANSACTION_MANAGER, { strict: false });
+        expect(tx.isInTransaction()).toBe(false);
+        const grant = await bindGlobal(user.id, 'admin');
+        // This independent client cannot see uncommitted changes from either service transaction.
+        expect(await observer.roleBinding.findUnique({ where: { id: grant.id } })).not.toBeNull();
+        expect(await observer.user.findUniqueOrThrow({ where: { id: user.id } })).toEqual(
+          expect.objectContaining({ role: 'ADMIN', tokenVersion: 1 }),
+        );
+        release();
+        await removal;
       } finally {
+        release();
+        await removal.catch(() => undefined);
         repo.lockOwnerRole = originalLockOwnerRole;
         repo.findPrincipalBindings = originalRead;
+        await observer.$disconnect();
       }
 
       expect(await prisma.roleBinding.count({ where: { principalId: user.id } })).toBe(0);
