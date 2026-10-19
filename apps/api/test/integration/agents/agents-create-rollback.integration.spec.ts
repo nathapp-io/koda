@@ -65,6 +65,19 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
     prisma = module.get(PrismaService);
     await prisma.onModuleInit();
 
+    // Permissions P1 (US-009): `POST /agents` now checks `agent.create` through `PermissionService`,
+    // which reads the caller's rows — a synthetic principal with `role: 'ADMIN'` grants nothing on its
+    // own. The principal the guard injects therefore names a real admin user.
+    await prisma.client.user.create({
+      data: {
+        id: adminUser.id,
+        email: adminUser.email,
+        name: adminUser.name,
+        passwordHash: 'not-used-by-the-injected-principal',
+        role: 'ADMIN',
+      },
+    });
+
     app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
     app.setGlobalPrefix('api');
 

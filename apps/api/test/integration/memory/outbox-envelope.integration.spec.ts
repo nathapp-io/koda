@@ -36,7 +36,6 @@ import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { PrismaOutboxStore } from '../../../src/outbox/prisma-outbox.store';
 import { PrismaEventsRepository } from '../../../src/events/prisma-events.repository';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
-import { KodaCaslAbilityFactory } from '../../../src/auth/casl/koda-casl-ability.factory';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { ExtractionService } from '../../../src/memory/extraction.service';
 import { MemoryOutboxSubscriber } from '../../../src/memory/memory-outbox.subscriber';
@@ -135,6 +134,9 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
     transitionsService = new TicketTransitionsService(
       ticketRepo,
       txManager,
+      // Permissions P1 (US-003): the required edge-check dependency; the envelope assertions below are
+      // about what a successful transition records.
+      { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
       undefined,
       undefined,
       undefined,
@@ -144,7 +146,16 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
       ticketEventService,
       packageOutbox,
     );
-    ticketsService = new TicketsService(ticketRepo, txManager, ticketEventService, packageOutbox, transitionsService, new KodaCaslAbilityFactory());
+    ticketsService = new TicketsService(
+      ticketRepo,
+      txManager,
+      ticketEventService,
+      packageOutbox,
+      transitionsService,
+      // Permissions P1 (US-004): the sixth argument is the key check, allow-all here: the envelope
+      // assertions below are about what a successful write records, not about who may write.
+      { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
+    );
 
     // Seed: project, ADMIN user (assignee), and two tickets.
     const project = await prisma.project.create({

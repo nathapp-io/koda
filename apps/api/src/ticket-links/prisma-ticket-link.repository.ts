@@ -25,6 +25,8 @@ export class PrismaTicketLinkRepository {
       linkType: m.linkType,
       source: m.source,
       jobId: m.jobId ?? null,
+      createdByUserId: m.createdByUserId ?? null,
+      createdByAgentId: m.createdByAgentId ?? null,
       createdAt: m.createdAt,
     };
   }
@@ -72,6 +74,8 @@ export class PrismaTicketLinkRepository {
     provider: string;
     externalRef: string | null;
     linkType: string;
+    createdByUserId: string | null;
+    createdByAgentId: string | null;
   }): Promise<TicketLinkDomain> {
     const m = await this.db.ticketLink.create({ data });
     return this.toDomain(m);

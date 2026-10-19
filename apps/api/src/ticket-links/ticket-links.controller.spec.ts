@@ -1,11 +1,13 @@
-import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
 import { TicketLinksController } from './ticket-links.controller';
 import { TicketLinksService } from './ticket-links.service';
-import { ProjectsService } from '../projects/projects.service';
 import { CreateTicketLinkDto } from './dto/create-ticket-link.dto';
-import type { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
+import { ProjectAccessService } from '../projects/project-access.service';
+import { PROJECT_PERMISSION_KEY } from '../projects/project-permission.decorator';
+import { PermissionService } from '../permissions/permission.service';
+import { REQUIRES_METADATA, RequiresMetadata } from '../permissions/requires.decorator';
+import type { AgentPrincipal, KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
 
 const makeUserPrincipal = (): UserPrincipal => ({
   actorType: 'user',
@@ -18,10 +20,51 @@ const makeUserPrincipal = (): UserPrincipal => ({
   email: 'test@example.com',
 });
 
+const makeAgentPrincipal = (): AgentPrincipal => ({
+  actorType: 'agent',
+  id: 'agent-1',
+  name: undefined,
+  blacklisted: false,
+  revoked: false,
+  authorities: [],
+  slug: 'agent-one',
+  status: 'ACTIVE',
+  agentRoles: ['DEVELOPER'],
+  capabilities: [],
+});
+
+describe('TicketLinksController route permission metadata (US-006)', () => {
+  /** Every route on this controller declares its catalog key with @Requires. */
+  const requiresCases: Array<[keyof TicketLinksController, string[], 'guard' | 'service']> = [
+    ['create', ['ticket.link.add'], 'guard'],
+    ['findAll', ['ticket.link.read'], 'guard'],
+    ['remove', ['ticket.link.remove'], 'service'],
+  ];
+
+  it.each(requiresCases)('%s declares @Requires(%j, enforcedBy %s)', (handler, keys, enforcedBy) => {
+    const fn = TicketLinksController.prototype[handler] as unknown as object;
+    const metadata = Reflect.getMetadata(REQUIRES_METADATA, fn) as RequiresMetadata;
+
+    expect(metadata).toEqual({ keys, mode: 'all', enforcedBy });
+    // The legacy decorators are gone from the migrated routes, so only one mechanism decides them.
+    expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
+    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeUndefined();
+  });
+
+  it.each(requiresCases)('%s runs ProjectMembershipGuard before RequiresGuard', (handler) => {
+    const fn = TicketLinksController.prototype[handler] as unknown as object;
+    const guards = (Reflect.getMetadata('__guards__', fn) ?? []) as unknown[];
+
+    expect(guards.map((guard) => (guard as { name?: string }).name)).toEqual([
+      'ProjectMembershipGuard',
+      'RequiresGuard',
+    ]);
+  });
+});
+
 describe('TicketLinksController', () => {
   let controller: TicketLinksController;
   let service: TicketLinksService;
-  let projectsService: Mocked<Partial<ProjectsService>>;
 
   const mockLink = {
     id: 'link-123',
@@ -41,16 +84,15 @@ describe('TicketLinksController', () => {
   const principal: KodaPrincipal = makeUserPrincipal();
 
   beforeEach(async () => {
-    projectsService = {
-      findProjectIdBySlug: vi.fn().mockResolvedValue('project-1'),
-      assertProjectMembership: vi.fn().mockResolvedValue(undefined),
-    };
-
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TicketLinksController],
       providers: [
         { provide: TicketLinksService, useValue: mockTicketLinksService },
-        { provide: ProjectsService, useValue: projectsService },
+        // ProjectMembershipGuard is instantiated by the DI container even though these tests call
+        // the handlers directly, so its ProjectAccessService dependency must resolve.
+        { provide: ProjectAccessService, useValue: {} },
+        // RequiresGuard is instantiated the same way and needs the global PermissionService.
+        { provide: PermissionService, useValue: { can: vi.fn() } },
       ],
     }).compile();
 
@@ -62,82 +104,51 @@ describe('TicketLinksController', () => {
     vi.clearAllMocks();
   });
 
-  describe('membership check', () => {
-    it('rejects POST when caller is not a project member', async () => {
-      (projectsService.assertProjectMembership as Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
-      const dto: CreateTicketLinkDto = { url: 'https://github.com/owner/repo/pull/1' };
-      await expect(controller.create('koda', 'KODA-1', dto, principal)).rejects.toThrow(ForbiddenAppException);
-      expect(service.create).not.toHaveBeenCalled();
-    });
-
-    it('rejects GET when caller is not a project member', async () => {
-      (projectsService.assertProjectMembership as Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
-      await expect(controller.findAll('koda', 'KODA-1', principal)).rejects.toThrow(ForbiddenAppException);
-      expect(service.findByTicket).not.toHaveBeenCalled();
-    });
-
-    it('rejects DELETE when caller is not a project member', async () => {
-      (projectsService.assertProjectMembership as Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
-      await expect(controller.remove('koda', 'KODA-1', 'link-123', principal)).rejects.toThrow(ForbiddenAppException);
-      expect(service.remove).not.toHaveBeenCalled();
-    });
-
-    it('rejects all routes when the project slug is not found', async () => {
-      (projectsService.findProjectIdBySlug as Mock).mockRejectedValue(new NotFoundAppException({}, 'projects'));
-      const dto: CreateTicketLinkDto = { url: 'https://github.com/owner/repo/pull/1' };
-      await expect(controller.create('missing', 'KODA-1', dto, principal)).rejects.toThrow(NotFoundAppException);
-      await expect(controller.findAll('missing', 'KODA-1', principal)).rejects.toThrow(NotFoundAppException);
-      await expect(controller.remove('missing', 'KODA-1', 'link-123', principal)).rejects.toThrow(NotFoundAppException);
-    });
-  });
-
   describe('POST /projects/:slug/tickets/:ref/links', () => {
-    it('calls service.create and returns the new link wrapped in JsonResponse with status 201', async () => {
-      const dto: CreateTicketLinkDto = {
-        url: 'https://github.com/owner/repo/pull/1',
-      };
-
-      mockTicketLinksService.create.mockResolvedValue({
-        status: 201,
-        link: mockLink,
-      });
+    it('passes the caller to service.create as a USER principal ref with status 201', async () => {
+      const dto: CreateTicketLinkDto = { url: 'https://github.com/owner/repo/pull/1' };
+      mockTicketLinksService.create.mockResolvedValue({ status: 201, link: mockLink });
 
       const result = await controller.create('koda', 'KODA-1', dto, principal);
 
-      expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('project-1', principal);
-      expect(service.create).toHaveBeenCalledWith('koda', 'KODA-1', dto);
+      expect(service.create).toHaveBeenCalledWith('koda', 'KODA-1', dto, { type: 'USER', id: 'user-1' });
       expect(result).toBeDefined();
     });
 
-    it('calls service.create and returns existing link when deduplication triggers status 200', async () => {
-      const dto: CreateTicketLinkDto = {
-        url: 'https://github.com/owner/repo/pull/1',
-      };
+    it('converts an agent caller into an AGENT principal ref, keeping its id', async () => {
+      const dto: CreateTicketLinkDto = { url: 'https://github.com/owner/repo/pull/1' };
+      mockTicketLinksService.create.mockResolvedValue({ status: 201, link: mockLink });
 
-      mockTicketLinksService.create.mockResolvedValue({
-        status: 200,
-        link: mockLink,
-      });
+      await controller.create('koda', 'KODA-1', dto, makeAgentPrincipal());
 
-      const result = await controller.create('koda', 'KODA-1', dto, principal);
+      expect(service.create).toHaveBeenCalledWith('koda', 'KODA-1', dto, { type: 'AGENT', id: 'agent-1' });
+    });
 
-      expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('project-1', principal);
-      expect(service.create).toHaveBeenCalledWith('koda', 'KODA-1', dto);
-      expect(result).toBeDefined();
+    it('sets the reply status to 200 when the link already existed (deduplication)', async () => {
+      const dto: CreateTicketLinkDto = { url: 'https://github.com/owner/repo/pull/1' };
+      mockTicketLinksService.create.mockResolvedValue({ status: 200, link: mockLink });
+      const res = { statusCode: 201 };
+
+      await controller.create('koda', 'KODA-1', dto, principal, res);
+
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('leaves the reply status untouched for a new link', async () => {
+      const dto: CreateTicketLinkDto = { url: 'https://github.com/owner/repo/pull/1' };
+      mockTicketLinksService.create.mockResolvedValue({ status: 201, link: mockLink });
+      const res = { statusCode: 201 };
+
+      await controller.create('koda', 'KODA-1', dto, principal, res);
+
+      expect(res.statusCode).toBe(201);
     });
 
     it('propagates NotFoundException from service when ticket not found', async () => {
-      const dto: CreateTicketLinkDto = {
-        url: 'https://github.com/owner/repo/pull/1',
-      };
+      const dto: CreateTicketLinkDto = { url: 'https://github.com/owner/repo/pull/1' };
+      mockTicketLinksService.create.mockRejectedValue(new Error('Ticket not found'));
 
-      mockTicketLinksService.create.mockRejectedValue(
-        new Error('Ticket not found'),
-      );
-
-      await expect(
-        controller.create('koda', 'KODA-999', dto, principal),
-      ).rejects.toThrow();
+      await expect(controller.create('koda', 'KODA-999', dto, principal)).rejects.toThrow();
     });
   });
 
@@ -151,14 +162,10 @@ describe('TicketLinksController', () => {
         externalRef: 'owner/repo#7',
       };
 
-      mockTicketLinksService.findByTicket.mockResolvedValue([
-        mockLink,
-        secondLink,
-      ]);
+      mockTicketLinksService.findByTicket.mockResolvedValue([mockLink, secondLink]);
 
-      const result = await controller.findAll('koda', 'KODA-1', principal);
+      const result = await controller.findAll('koda', 'KODA-1');
 
-      expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('project-1', principal);
       expect(service.findByTicket).toHaveBeenCalledWith('koda', 'KODA-1');
       expect(result).toBeDefined();
     });
@@ -166,38 +173,39 @@ describe('TicketLinksController', () => {
     it('calls service.findByTicket and returns empty array when no links', async () => {
       mockTicketLinksService.findByTicket.mockResolvedValue([]);
 
-      const result = await controller.findAll('koda', 'KODA-1', principal);
+      const result = await controller.findAll('koda', 'KODA-1');
 
-      expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('project-1', principal);
       expect(service.findByTicket).toHaveBeenCalledWith('koda', 'KODA-1');
       expect(result).toBeDefined();
     });
 
     it('propagates NotFoundException from service when ticket not found', async () => {
-      mockTicketLinksService.findByTicket.mockRejectedValue(
-        new Error('Ticket not found'),
-      );
+      mockTicketLinksService.findByTicket.mockRejectedValue(new Error('Ticket not found'));
 
-      await expect(
-        controller.findAll('koda', 'KODA-999', principal),
-      ).rejects.toThrow();
+      await expect(controller.findAll('koda', 'KODA-999')).rejects.toThrow();
     });
   });
 
   describe('DELETE /projects/:slug/tickets/:ref/links/:linkId', () => {
-    it('calls service.remove with correct params', async () => {
+    it('passes the full principal to service.remove with the correct params', async () => {
       mockTicketLinksService.remove.mockResolvedValue(undefined);
 
       await controller.remove('koda', 'KODA-1', 'link-123', principal);
 
-      expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('project-1', principal);
-      expect(service.remove).toHaveBeenCalledWith('koda', 'KODA-1', 'link-123');
+      expect(service.remove).toHaveBeenCalledWith('koda', 'KODA-1', 'link-123', principal);
+    });
+
+    it('passes an agent principal through unchanged', async () => {
+      mockTicketLinksService.remove.mockResolvedValue(undefined);
+      const agent = makeAgentPrincipal();
+
+      await controller.remove('koda', 'KODA-1', 'link-123', agent);
+
+      expect(service.remove).toHaveBeenCalledWith('koda', 'KODA-1', 'link-123', agent);
     });
 
     it('propagates NotFoundException from service when linkId not found on ticket', async () => {
-      mockTicketLinksService.remove.mockRejectedValue(
-        new Error('Link not found'),
-      );
+      mockTicketLinksService.remove.mockRejectedValue(new Error('Link not found'));
 
       await expect(
         controller.remove('koda', 'KODA-1', 'nonexistent-link', principal),

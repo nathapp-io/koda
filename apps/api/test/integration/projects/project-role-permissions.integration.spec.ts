@@ -99,10 +99,14 @@ describeIntegration('project-role permissions (#144)', () => {
     { capability: 'fix', allowed: workers, setup: async () => ({ method: 'post', url: `/api/projects/team/tickets/${await ticketIn('IN_PROGRESS')}/fix`, body: { body: 'fixed' } }) },
     { capability: 'verify-fix approve', allowed: workers, setup: async () => ({ method: 'post', url: `/api/projects/team/tickets/${await ticketIn('VERIFY_FIX')}/verify-fix?approve=true`, body: { body: 'lgtm' } }) },
     { capability: 'reject', allowed: workers, setup: async () => ({ method: 'post', url: `/api/projects/team/tickets/${await ticketIn('CREATED')}/reject`, body: { body: 'no' } }) },
-    { capability: 'close override', allowed: adminOnly, setup: async () => ({ method: 'post', url: `/api/projects/team/tickets/${await ticketIn('IN_PROGRESS')}/close`, body: { body: 'duplicate' } }) },
+    // Permissions P1 (US-003): close is guarded by ticket.transition.close, which the Developer role
+    // holds (`ticket.transition.*`); a Viewer does not.
+    { capability: 'close override', allowed: workers, setup: async () => ({ method: 'post', url: `/api/projects/team/tickets/${await ticketIn('IN_PROGRESS')}/close`, body: { body: 'duplicate' } }) },
     { capability: 'delete ticket', allowed: adminOnly, setup: async () => ({ method: 'delete', url: `/api/projects/team/tickets/${await ticketIn('CREATED')}` }) },
     { capability: 'create label', allowed: workers, setup: async () => ({ method: 'post', url: '/api/projects/team/labels', body: { name: `r${counter++}`, color: '#00ff00' } }) },
-    { capability: 'update label', allowed: adminOnly, setup: async () => ({ method: 'patch', url: `/api/projects/team/labels/${await label()}`, body: { name: `u${counter++}` } }) },
+    // Permissions P1 (US-005): the route is guarded by label.update, which Developer holds (a project
+    // DEVELOPER's role contains label.update); a Viewer does not.
+    { capability: 'update label', allowed: workers, setup: async () => ({ method: 'patch', url: `/api/projects/team/labels/${await label()}`, body: { name: `u${counter++}` } }) },
     { capability: 'delete label', allowed: adminOnly, setup: async () => ({ method: 'delete', url: `/api/projects/team/labels/${await label()}` }) },
     { capability: 'assign label to ticket', allowed: workers, setup: async () => ({ method: 'post', url: `/api/projects/team/tickets/${await ticketIn('CREATED')}/labels`, body: { labelId: await label() } }) },
     {
@@ -245,9 +249,13 @@ describeIntegration('project-role permissions (#144)', () => {
     );
   }, TIMEOUT);
 
+  // Permissions P1 (US-004): allowedActions is the intersection of the state machine and the caller's
+  // keys. On a VERIFIED ticket that is {start, reject} for a transition holder and close for a
+  // ticket.transition.close holder — which Developer has (`ticket.transition.*`) as well as Project
+  // Admin. A Viewer holds no ticket action key, so its list is empty.
   it.each([
     ['ADMIN', ['start', 'reject', 'close']],
-    ['DEVELOPER', ['start', 'reject']],
+    ['DEVELOPER', ['start', 'reject', 'close']],
     ['VIEWER', []],
   ] as const)('GET ticket returns allowedActions for project %s', async (role, expected) => {
     const ref = await ticketIn('VERIFIED');

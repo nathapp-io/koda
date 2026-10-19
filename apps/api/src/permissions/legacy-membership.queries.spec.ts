@@ -6,6 +6,7 @@ import {
   accessibleProjectIds,
   agentHasProjectAccess,
   countActiveProjectAdmins,
+  legacyRoleKeys,
   listProjectMemberships,
   localProjectRole,
   principalIdsWithAccess,
@@ -122,6 +123,7 @@ function stubClient(rows: {
     roleBinding: { findMany: findMany(rows.roleBinding), findUnique: findUnique(rows.roleBinding) },
     projectMember: { findMany: findMany(rows.projectMember), findUnique: findUnique(rows.projectMember) },
     agentProject: { findMany: findMany(rows.agentProject), findUnique: findUnique(rows.agentProject) },
+    agentRoleEntry: { findMany: findMany(rows.agentRoleEntry), findUnique: findUnique(rows.agentRoleEntry) },
     project: {
       findMany: findMany(rows.project),
       count: async (args: Row = {}) =>
@@ -149,6 +151,7 @@ interface World {
   ): void;
   addLegacyMember(projectId: string, userId: string, role: string, joinedAt?: Date): void;
   addRosterRow(agentId: string, projectId: string, addedById: string | null, createdAt?: Date): void;
+  addAgentRole(agentId: string, role: string): void;
 }
 
 const ROLES: ReadonlyArray<{ key: string; scope: 'GLOBAL' | 'PROJECT' }> = [
@@ -170,6 +173,7 @@ function world(): World {
     roleBinding: [] as Row[],
     projectMember: [] as Row[],
     agentProject: [] as Row[],
+    agentRoleEntry: [] as Row[],
     project: [] as Row[],
     user: [] as Row[],
     agent: [] as Row[],
@@ -214,6 +218,9 @@ function world(): World {
     },
     addRosterRow(agentId, projectId, addedById, createdAt) {
       rows.agentProject.push({ agentId, projectId, addedById, createdAt: createdAt ?? next() });
+    },
+    addAgentRole(agentId, role) {
+      rows.agentRoleEntry.push({ agentId, role });
     },
   };
 }
@@ -337,6 +344,96 @@ describe('legacy-membership.queries', () => {
 
       expect(await agentHasProjectAccess(db, 'ghost', 'p1')).toBe(false);
       expect(await agentHasProjectAccess(db, 'a1', 'p1')).toBe(false);
+    });
+  });
+
+  describe('legacyRoleKeys', () => {
+    const agent = (id: string) => ({ type: 'AGENT' as const, id });
+
+    it('answers no keys for the global scope', async () => {
+      fixture.addUser('u1');
+      fixture.addAgent('a1');
+      fixture.addProject('p1');
+      fixture.addLegacyMember('p1', 'u1', 'ADMIN');
+      fixture.addRosterRow('a1', 'p1', null);
+
+      expect(await legacyRoleKeys(db, user('u1'), null, true)).toEqual([]);
+      expect(await legacyRoleKeys(db, agent('a1'), null, true)).toEqual([]);
+    });
+
+    it('maps a legacy ProjectMember role to its system role key', async () => {
+      fixture.addProject('p1');
+      fixture.addUser('admin');
+      fixture.addUser('dev');
+      fixture.addUser('viewer');
+      fixture.addUser('agent-role');
+      fixture.addLegacyMember('p1', 'admin', 'ADMIN');
+      fixture.addLegacyMember('p1', 'dev', 'DEVELOPER');
+      fixture.addLegacyMember('p1', 'viewer', 'VIEWER');
+      fixture.addLegacyMember('p1', 'agent-role', 'AGENT');
+
+      expect(await legacyRoleKeys(db, user('admin'), 'p1', true)).toEqual(['project-admin']);
+      expect(await legacyRoleKeys(db, user('dev'), 'p1', true)).toEqual(['developer']);
+      // Any other stored role is the viewer role: the least-privileged legacy set.
+      expect(await legacyRoleKeys(db, user('viewer'), 'p1', true)).toEqual(['viewer']);
+      expect(await legacyRoleKeys(db, user('agent-role'), 'p1', true)).toEqual(['viewer']);
+    });
+
+    it('answers no keys for a user with no row in the project, and for unknown ids', async () => {
+      fixture.addUser('u1');
+      fixture.addProject('p1');
+      fixture.addProject('p2');
+      fixture.addLegacyMember('p1', 'u1', 'DEVELOPER');
+
+      expect(await legacyRoleKeys(db, user('u1'), 'p2', true)).toEqual([]);
+      expect(await legacyRoleKeys(db, user('ghost'), 'p1', true)).toEqual([]);
+      expect(await legacyRoleKeys(db, user('u1'), 'ghost-project', true)).toEqual([]);
+    });
+
+    it('answers the viewer role for a roster row and one key per AgentRoleEntry with access', async () => {
+      fixture.addProject('p1');
+      fixture.addAgent('a1');
+      fixture.addAgent('a2');
+      fixture.addAgent('a3');
+      fixture.addRosterRow('a1', 'p1', null);
+      fixture.addRosterRow('a2', 'p1', null);
+      fixture.addAgentRole('a2', 'DEVELOPER');
+      fixture.addAgentRole('a2', 'REVIEWER');
+      fixture.addAgentRole('a2', 'VERIFIER');
+      fixture.addAgentRole('a2', 'TRIAGER');
+      fixture.addAgentRole('a2', 'DEVELOPER');
+      fixture.addAgentRole('a3', 'DEVELOPER');
+
+      expect(await legacyRoleKeys(db, agent('a1'), 'p1', true)).toEqual(['viewer']);
+      expect(await legacyRoleKeys(db, agent('a2'), 'p1', true)).toEqual([
+        'viewer',
+        'developer',
+        'reviewer',
+        'verifier',
+        'triager',
+      ]);
+      // No roster row and no binding: the agent has no source here, so its global roles add nothing.
+      expect(await legacyRoleKeys(db, agent('a3'), 'p1', true)).toEqual([]);
+    });
+
+    it('reads an agent role through a binding-only source too', async () => {
+      fixture.addProject('p1');
+      fixture.addAgent('a1');
+      fixture.bind('AGENT', 'a1', 'viewer', 'p1');
+      fixture.addAgentRole('a1', 'DEVELOPER');
+
+      expect(await legacyRoleKeys(db, agent('a1'), 'p1', true)).toEqual(['developer']);
+    });
+
+    it('with scoping off, answers the viewer role and the agent roles in every live project', async () => {
+      fixture.addProject('p1');
+      fixture.addProject('gone', true);
+      fixture.addAgent('a1');
+      fixture.addAgentRole('a1', 'DEVELOPER');
+
+      expect(await legacyRoleKeys(db, agent('a1'), 'p1', false)).toEqual(['viewer', 'developer']);
+      expect(await legacyRoleKeys(db, agent('a1'), 'ghost-project', false)).toEqual([]);
+      expect(await legacyRoleKeys(db, agent('a1'), 'gone', false)).toEqual([]);
     });
   });
 

@@ -1,4 +1,30 @@
 import { ProjectMembersController } from './project-members.controller';
+import { REQUIRES_METADATA } from '../../permissions/requires.decorator';
+
+describe('US-008 permission keys on member routes', () => {
+  it.each([
+    ['list', 'member.read'],
+    ['add', 'member.add'],
+    ['updateRole', 'member.role.update'],
+    ['remove', 'member.remove'],
+  ] as const)('%s declares @Requires(%s)', (handler, key) => {
+    const fn = (ProjectMembersController.prototype as unknown as Record<string, object>)[handler];
+    expect(Reflect.getMetadata(REQUIRES_METADATA, fn)).toEqual({
+      keys: [key],
+      mode: 'all',
+      enforcedBy: 'guard',
+    });
+  });
+
+  it('runs ProjectMembershipGuard before RequiresGuard at the class level', () => {
+    const guards = (Reflect.getMetadata('__guards__', ProjectMembersController) ?? []) as unknown[];
+
+    expect(guards.map((guard) => (guard as { name?: string }).name)).toEqual([
+      'ProjectMembershipGuard',
+      'RequiresGuard',
+    ]);
+  });
+});
 
 describe('ProjectMembersController', () => {
   const service = { list: vi.fn(), add: vi.fn(), updateRole: vi.fn(), remove: vi.fn() };

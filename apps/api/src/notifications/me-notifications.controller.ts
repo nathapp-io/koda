@@ -1,9 +1,11 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ForbiddenAppException, JsonResponse } from '@nathapp/nestjs-common';
 import { Principal } from '@nathapp/nestjs-auth';
 import { isUserPrincipal, KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
 import { parseQuery } from '../common/dto/koda-page.query';
+import { Requires } from '../permissions/requires.decorator';
+import { RequiresGuard } from '../permissions/requires.guard';
 import { ListNotificationsQuery } from './dto/list-notifications.query';
 import { NotificationPageDto, UnreadCountDto } from './dto/notification.dto';
 import { NotificationPreferencesDto, NotificationPreferencesViewDto } from './dto/notification-preferences.dto';
@@ -15,7 +17,12 @@ function caller(principal: KodaPrincipal): UserPrincipal {
   return principal;
 }
 
-/** Fleet S4a §3: the signed-in user's inbox and preferences. Users only; never takes a user id. */
+/**
+ * Fleet S4a §3: the signed-in user's inbox and preferences. Users only; never takes a user id.
+ *
+ * Permissions P1 (US-010): every route declares an implicit key, so any authenticated principal
+ * passes `RequiresGuard` and the users-only refusal (`403 notifications`) stays in `caller`.
+ */
 @ApiTags('notifications')
 @ApiBearerAuth()
 @Controller('me')
@@ -26,6 +33,8 @@ export class MeNotificationsController {
   ) {}
 
   @Get('notifications')
+  @UseGuards(RequiresGuard)
+  @Requires('notification.read')
   @ApiOperation({ summary: 'My notifications, newest first (users only)' })
   @ApiResponse({ status: 200, type: NotificationPageDto })
   @ApiResponse({ status: 403, description: 'Agents and runners have no inbox' })
@@ -36,6 +45,8 @@ export class MeNotificationsController {
   }
 
   @Get('notifications/unread-count')
+  @UseGuards(RequiresGuard)
+  @Requires('notification.read')
   @ApiOperation({ summary: 'How many of my notifications are unread' })
   @ApiResponse({ status: 200, type: UnreadCountDto })
   async unreadCount(@Principal() principal: KodaPrincipal) {
@@ -44,6 +55,8 @@ export class MeNotificationsController {
 
   @Post('notifications/:id/read')
   @HttpCode(204)
+  @UseGuards(RequiresGuard)
+  @Requires('notification.mark-read')
   @ApiOperation({ summary: 'Mark one of my notifications read (idempotent)' })
   @ApiResponse({ status: 204, description: 'Read' })
   @ApiResponse({ status: 404, description: 'No such notification of mine' })
@@ -53,6 +66,8 @@ export class MeNotificationsController {
 
   @Post('notifications/read-all')
   @HttpCode(204)
+  @UseGuards(RequiresGuard)
+  @Requires('notification.mark-read')
   @ApiOperation({ summary: 'Mark every notification I had when this request arrived read' })
   @ApiResponse({ status: 204, description: 'Read' })
   async markAllRead(@Principal() principal: KodaPrincipal): Promise<void> {
@@ -61,6 +76,8 @@ export class MeNotificationsController {
   }
 
   @Get('notification-preferences')
+  @UseGuards(RequiresGuard)
+  @Requires('notification.preference.read')
   @ApiOperation({ summary: 'My in-app and email notification categories' })
   @ApiResponse({ status: 200, type: NotificationPreferencesViewDto })
   async getPreferences(@Principal() principal: KodaPrincipal) {
@@ -68,6 +85,8 @@ export class MeNotificationsController {
   }
 
   @Put('notification-preferences')
+  @UseGuards(RequiresGuard)
+  @Requires('notification.preference.update')
   @ApiOperation({ summary: 'Switch my notification categories and email on or off' })
   @ApiResponse({ status: 200, type: NotificationPreferencesViewDto })
   @ApiResponse({ status: 400, description: 'Unknown category or malformed body' })

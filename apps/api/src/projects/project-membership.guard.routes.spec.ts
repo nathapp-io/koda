@@ -19,6 +19,7 @@ import { TicketTransitionsService } from '../tickets/state-machine/ticket-transi
 import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
 import { ProjectAccessService } from './project-access.service';
+import { PermissionService } from '../permissions/permission.service';
 import { PrismaProjectRepository } from './prisma-project.repository';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { AgentsService } from '../agents/agents.service';
@@ -167,6 +168,11 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
         { provide: HybridRetrieverService, useValue: hybridRetriever },
         { provide: PrismaRagRepository, useValue: ragRepository },
         { provide: ProjectAccessService, useValue: accessService },
+        // US-003: PATCH :ref and the six transition routes carry RequiresGuard, which Nest instantiates
+        // with the controller even though none of these cases calls a migrated route. The key checks
+        // themselves are covered by src/tickets/tickets.controller.spec.ts and
+        // test/integration/permissions/core-ticket-transitions.integration.spec.ts.
+        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
         // #144: the guard's @ProjectPermission check builds an ability from this
         // factory; without it the check fails closed with 403.
         KodaCaslAbilityFactory,

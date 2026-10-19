@@ -25,18 +25,16 @@ import {
   ApiParam,
 } from '@nestjs/swagger';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
-import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
-import {
-  KodaPrincipal,
-  isAgentPrincipal,
-  isUserPrincipal,
-} from '../auth/principal/koda-principal.types';
+import { Principal, CaslPermissionAction } from '@nathapp/nestjs-auth';
+import { KodaPrincipal, isAgentPrincipal } from '../auth/principal/koda-principal.types';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { AgentsService } from '../agents/agents.service';
 import { AddProjectAgentDto } from '../agents/dto/add-project-agent.dto';
 import { ProjectAgentDto, ProjectAgentListDto } from '../agents/dto/project-agent.dto';
 import { UpdateAgentDto } from '../agents/dto/update-agent.dto';
-import { ActorRole } from '../common/enums';
+import { PermissionService } from '../permissions/permission.service';
+import { RequiresGuard } from '../permissions/requires.guard';
+import { Requires } from '../permissions/requires.decorator';
 import { ProjectMembershipGuard } from './project-membership.guard';
 import { ProjectPermission } from './project-permission.decorator';
 import { CurrentProject } from './current-project.decorator';
@@ -50,16 +48,18 @@ export class ProjectsController {
     private projectsService: ProjectsService,
     private impactAnalysisService: ImpactAnalysisService,
     private agentsService: AgentsService,
+    private permissions: PermissionService,
   ) {}
 
   @Post()
   @HttpCode(201)
-  @RequiredPermission('ADMIN')
-  @ApiOperation({ summary: 'Create a new project (admin only)' })
+  @UseGuards(RequiresGuard)
+  @Requires('project.create')
+  @ApiOperation({ summary: 'Create a new project' })
   @ApiResponse({ status: 201, description: 'Project created successfully' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 403, description: 'project.create is missing' })
   @ApiResponse({ status: 409, description: 'Conflict - duplicate slug or key' })
   async create(@Body() createProjectDto: CreateProjectDto) {
     const data = await this.projectsService.create(createProjectDto);
@@ -67,17 +67,23 @@ export class ProjectsController {
   }
 
   @Get()
+  @UseGuards(RequiresGuard)
+  @Requires('project.read', { enforcedBy: 'service' })
   @ApiOperation({ summary: 'List projects visible to the calling principal (excluding soft-deleted)' })
   @ApiResponse({ status: 200, description: 'List of projects' })
   async findAll(@Principal() principal: KodaPrincipal) {
+    // US-007: there is no resolved project on a global listing, so the access-filtered query below is
+    // the enforcement — the route records the key instead of asking for it.
     const data = await this.projectsService.findAllForPrincipal(principal);
     return JsonResponse.Ok(ProjectResponseDto.fromMany(data));
   }
 
   @Get(':slug')
-  @UseGuards(ProjectMembershipGuard)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('project.read')
   @ApiOperation({ summary: 'Get a project by slug' })
   @ApiResponse({ status: 200, description: 'Project found' })
+  @ApiResponse({ status: 403, description: 'Not a project member, or project.read is missing' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   async findBySlug(@Param('slug') slug: string) {
     const data = await this.projectsService.findBySlug(slug);
@@ -85,11 +91,12 @@ export class ProjectsController {
   }
 
   @Get(':slug/ci-webhook-token')
-  @RequiredPermission('ADMIN')
-  @ApiOperation({ summary: 'Get the CI webhook HMAC secret (admin only)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('project.ci-token.read')
+  @ApiOperation({ summary: 'Get the CI webhook HMAC secret' })
   @ApiResponse({ status: 200, description: 'Token value' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 403, description: 'Not a project member, or project.ci-token.read is missing' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   async getCiWebhookToken(@Param('slug') slug: string) {
     const ciWebhookToken = await this.projectsService.findCiWebhookToken(slug);
@@ -97,12 +104,13 @@ export class ProjectsController {
   }
 
   @Patch(':slug')
-  @RequiredPermission('ADMIN')
-  @ApiOperation({ summary: 'Update a project (admin only)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('project.update')
+  @ApiOperation({ summary: 'Update a project' })
   @ApiResponse({ status: 200, description: 'Project updated successfully' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 403, description: 'Not a project member, or project.update is missing' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   @ApiResponse({ status: 409, description: 'Conflict - duplicate slug or key' })
   async update(
@@ -115,11 +123,12 @@ export class ProjectsController {
 
   @Delete(':slug')
   @HttpCode(204)
-  @RequiredPermission('ADMIN')
-  @ApiOperation({ summary: 'Soft delete a project (admin only)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('project.delete')
+  @ApiOperation({ summary: 'Soft delete a project' })
   @ApiResponse({ status: 204, description: 'Project soft deleted successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 403, description: 'Not a project member, or project.delete is missing' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   async remove(@Param('slug') slug: string): Promise<void> {
     await this.projectsService.softDelete(slug);
@@ -167,75 +176,72 @@ export class ProjectsController {
   }
 
   @Get(':slug/agents')
-  @ApiOperation({ summary: 'List the project agent roster (admin or member; un-paged)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('project.agent.read')
+  @ApiOperation({ summary: 'List the project agent roster (any member; un-paged)' })
   @ApiResponse({ status: 200, type: ProjectAgentListDto, description: 'Roster retrieved successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - no project access' })
+  @ApiResponse({ status: 403, description: 'Not a project member, or project.agent.read is missing' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  async getProjectAgents(
-    @Param('slug') slug: string,
-    @Principal() principal: KodaPrincipal,
-  ) {
-    const project = await this.projectsService.findBySlug(slug);
-    await this.projectsService.assertProjectMembership(project.id, principal);
+  async getProjectAgents(@Param('slug') slug: string) {
     const data = await this.agentsService.listProjectRoster(slug);
     return JsonResponse.Ok(data);
   }
 
   @Post(':slug/agents')
   @HttpCode(201)
-  @UseGuards(ProjectMembershipGuard)
-  @ApiOperation({ summary: 'Add an agent to the project roster (project or global admin)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('project.agent.add')
+  @ApiOperation({ summary: 'Add an agent to the project roster' })
   @ApiResponse({ status: 201, type: ProjectAgentDto, description: 'Agent added to the roster' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - project admin role or global admin required' })
+  @ApiResponse({ status: 403, description: 'Not a project member, or project.agent.add is missing' })
   @ApiResponse({ status: 404, description: 'Project or agent not found' })
   @ApiResponse({ status: 409, description: 'Agent is already on the roster, or is OFFLINE' })
   async addProjectAgent(
     @Param('slug') slug: string,
     @Body() addAgentDto: AddProjectAgentDto,
-    @CurrentProject() ctx: ProjectContext,
     @Principal() principal: KodaPrincipal,
   ) {
-    await this.projectsService.assertProjectAdmin(ctx.project.id, principal);
     const data = await this.agentsService.addToProject(slug, addAgentDto.agentSlug, principal.id);
     return JsonResponse.Ok(data);
   }
 
   @Delete(':slug/agents/:agentSlug')
   @HttpCode(204)
-  @UseGuards(ProjectMembershipGuard)
-  @ApiOperation({ summary: 'Remove an agent from the project roster (project or global admin)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('project.agent.remove')
+  @ApiOperation({ summary: 'Remove an agent from the project roster' })
   @ApiResponse({ status: 204, description: 'Agent removed from the roster' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - project admin role or global admin required' })
+  @ApiResponse({ status: 403, description: 'Not a project member, or project.agent.remove is missing' })
   @ApiResponse({ status: 404, description: 'Project, agent or roster entry not found' })
   @ApiResponse({ status: 409, description: 'The agent still holds open tickets in this project' })
   async removeProjectAgent(
     @Param('slug') slug: string,
     @Param('agentSlug') agentSlug: string,
-    @CurrentProject() ctx: ProjectContext,
-    @Principal() principal: KodaPrincipal,
   ): Promise<void> {
-    await this.projectsService.assertProjectAdmin(ctx.project.id, principal);
     await this.agentsService.removeFromProject(slug, agentSlug);
   }
 
   @Patch(':slug/agents/:agentSlug')
-  @UseGuards(ProjectMembershipGuard)
-  @ApiOperation({ summary: 'Update an agent status within a project context (admin or the agent itself)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  // US-007: whose status this is (self) and what the caller holds are only known here, so the guard
+  // records the key and the handler decides.
+  @Requires('project.agent.update', { enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Update an agent status within a project context (the key, or the agent itself)' })
   @ApiResponse({ status: 200, description: 'Agent updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin or self only' })
+  @ApiResponse({ status: 403, description: 'Not a project member, project.agent.update is missing and the caller is not the agent' })
   @ApiResponse({ status: 404, description: 'Project or agent not found' })
   async updateProjectAgent(
     @Param('slug') slug: string,
     @Param('agentSlug') agentSlug: string,
     @Body() updateDto: UpdateAgentDto,
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() ctx: ProjectContext,
   ) {
-    const project = await this.projectsService.findBySlug(slug);
     // US-002: the target agent is resolved through the project roster, not the
     // ticket-derived list. An agent assigned tickets but absent from the roster
     // returns 404 — roster membership is the only thing this route mutates.
@@ -251,15 +257,13 @@ export class ProjectsController {
       throw new NotFoundAppException({}, 'projectAgents');
     }
 
-    // H4: only global or project ADMINs may change agent state; an agent may
-    // update only itself (graceful OFFLINE shutdown).
-    const isAdmin =
-      isUserPrincipal(principal) &&
-      (principal.role === 'ADMIN' ||
-        (await this.projectsService.findMembershipRole(project.id, principal.id)) === ActorRole.ADMIN);
+    // US-007: the old `isAdmin || isSelf` pair becomes one key-or-self refusal. A holder of
+    // `project.agent.update` (a project admin, a global admin) may change any rostered agent; an agent
+    // may always update itself (graceful OFFLINE shutdown).
+    const isAdmin = (await this.permissions.can(principal, 'project.agent.update', { projectId: ctx.project.id })).allowed;
     const isSelf = isAgentPrincipal(principal) && principal.slug === agentSlug;
     if (!isAdmin && !isSelf) {
-      throw new ForbiddenAppException({}, 'projects');
+      throw new ForbiddenAppException({}, 'permissions');
     }
 
     const data = await this.agentsService.update(agentSlug, updateDto);

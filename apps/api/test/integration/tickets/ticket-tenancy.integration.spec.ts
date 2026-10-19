@@ -26,6 +26,7 @@ import { TicketTransitionsService } from '../../../src/tickets/state-machine/tic
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
 import { KodaCaslAbilityFactory } from '../../../src/auth/casl/koda-casl-ability.factory';
+import { PermissionService } from '../../../src/permissions/permission.service';
 import { TicketLinksService } from '../../../src/ticket-links/ticket-links.service';
 import { PrismaTicketLinkRepository } from '../../../src/ticket-links/prisma-ticket-link.repository';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
@@ -73,6 +74,9 @@ describeIntegration('H5 ticket tenancy', () => {
         TicketsService,
         TicketTransitionsService,
         KodaCaslAbilityFactory,
+        // Permissions P1 (US-003): TicketTransitionsService's required third dependency; the tenancy
+        // assertions below are about lookups and writes, not about who may make them.
+        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
         PrismaTicketsRepository,
         { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
         TicketLinksService,
@@ -225,7 +229,7 @@ describeIntegration('H5 ticket tenancy', () => {
       }),
     ).rejects.toThrow(NotFoundAppException);
     await expect(
-      ticketLinksService.remove('proj-a', 'OTHER-5', 'link-xyz'),
+      ticketLinksService.remove('proj-a', 'OTHER-5', 'link-xyz', principal),
     ).rejects.toThrow(NotFoundAppException);
   });
 

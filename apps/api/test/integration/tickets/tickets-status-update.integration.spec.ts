@@ -23,7 +23,7 @@ import { TicketTransitionsService } from '../../../src/tickets/state-machine/tic
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { OutboxService } from '@nathapp/nestjs-outbox';
-import { KodaCaslAbilityFactory } from '../../../src/auth/casl/koda-casl-ability.factory';
+import { PermissionService } from '../../../src/permissions/permission.service';
 
 describe('US-003 (M2): TicketsService.update() — status field routes through transitions', () => {
   let service: TicketsService;
@@ -83,9 +83,9 @@ describe('US-003 (M2): TicketsService.update() — status field routes through t
   };
 
   const mockTransitionsService = {
-    // Fix-wave B: update() calls this before applyUpdate so a 403 never
-    // follows a partial field write.
-    assertTransitionPermission: vi.fn(),
+    // Permissions P1 (US-003): update() checks the edge key of the requested status before any field
+    // write (a 403 must never follow a partial write), then delegates the transition itself.
+    assertTransitionAllowed: vi.fn(),
     executeTransitionPublic: vi.fn(),
   };
 
@@ -107,7 +107,9 @@ describe('US-003 (M2): TicketsService.update() — status field routes through t
         { provide: TicketEventService, useValue: { create: vi.fn().mockResolvedValue({ id: 'evt-1' }) } },
         { provide: OutboxService, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
         { provide: TicketTransitionsService, useValue: mockTransitionsService },
-        KodaCaslAbilityFactory,
+        // Permissions P1 (US-004): the sixth constructor argument is the key check. This suite asserts the
+        // update() -> transitions delegation; the route keys are RequiresGuard's.
+        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
       ],
     }).compile();
 
@@ -132,11 +134,18 @@ describe('US-003 (M2): TicketsService.update() — status field routes through t
 
       const result = await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
 
+      expect(mockTransitionsService.assertTransitionAllowed).toHaveBeenCalledWith(
+        'koda',
+        'KODA-1',
+        TicketStatus.IN_PROGRESS,
+        mockUserPrincipal,
+      );
       expect(mockTransitionsService.executeTransitionPublic).toHaveBeenCalledWith(
         'koda',
         'KODA-1',
         TicketStatus.IN_PROGRESS,
         mockUserPrincipal,
+        undefined,
       );
       expect(result.status).toBe(TicketStatus.IN_PROGRESS);
     });
@@ -199,6 +208,7 @@ describe('US-003 (M2): TicketsService.update() — status field routes through t
       await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
 
       expect(mockTransitionsService.executeTransitionPublic).not.toHaveBeenCalled();
+      expect(mockTransitionsService.assertTransitionAllowed).not.toHaveBeenCalled();
       const updateCall = mockPrismaService.client.ticket.update.mock.calls[0][0];
       expect(updateCall.data).not.toHaveProperty('status');
     });

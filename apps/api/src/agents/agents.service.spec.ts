@@ -4,6 +4,7 @@ import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { MembershipService } from '../permissions/membership.service';
+import { PermissionService } from '../permissions/permission.service';
 import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { createHmac } from 'crypto';
 import { randomBytes } from 'crypto';
@@ -93,12 +94,20 @@ describe('AgentsService', () => {
     writeAgentAction: vi.fn().mockResolvedValue({ canonicalId: 'evt-1' }),
   };
 
+  /** Permissions P1 (US-009): pickup is authorized by the *target* agent's project keys. */
+  const mockPermissions = {
+    can: vi.fn(async () => ({ allowed: true, reason: 'granted' })),
+    effectiveKeys: vi.fn(async () => new Set<string>(['agent.pickup'])),
+  };
+
   /** Permissions P1a (US-004): AgentsService injects the permissions module's MembershipService. */
   const mockMembership = {
     bindOwnerIfFirst: vi.fn(),
     bindBaseline: vi.fn(),
     setGlobalAdmin: vi.fn(),
     removeAllBindings: vi.fn(),
+    // Permissions P1 (US-009): updateRoles invalidates the permission cache after its role write.
+    invalidatePermissions: vi.fn(),
     afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
   };
 
@@ -118,6 +127,7 @@ describe('AgentsService', () => {
         { provide: AUTH_CFG, useValue: mockAuthConfig },
         { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
         { provide: MembershipService, useValue: mockMembership },
+        { provide: PermissionService, useValue: mockPermissions },
         { provide: KodaDomainWriter, useValue: mockKodaDomainWriter },
       ],
     }).compile();
@@ -129,6 +139,7 @@ describe('AgentsService', () => {
     mockAgentRepo.createRolesAndCapabilities.mockResolvedValue(undefined);
     mockMembership.bindBaseline.mockResolvedValue(undefined);
     mockMembership.removeAllBindings.mockResolvedValue(undefined);
+    mockMembership.invalidatePermissions.mockResolvedValue(undefined);
 
     mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
     mockAgentRepo.replaceCapabilities.mockResolvedValue(undefined);
@@ -136,6 +147,8 @@ describe('AgentsService', () => {
     // rostered target agent is the default for the pickup tests.
     mockAgentRepo.findRosterProjects.mockResolvedValue([]);
     mockAgentRepo.isOnProjectRoster.mockResolvedValue(true);
+    // Permissions P1 (US-009): the pickup target holds `agent.pickup` unless a test says otherwise.
+    mockPermissions.effectiveKeys.mockResolvedValue(new Set<string>(['agent.pickup']));
   });
 
   afterEach(() => {
@@ -244,6 +257,7 @@ describe('AgentsService', () => {
             { provide: AUTH_CFG, useValue: { ...mockAuthConfig, apiKeySecret: undefined } },
             { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
             { provide: MembershipService, useValue: mockMembership },
+            { provide: PermissionService, useValue: mockPermissions },
             { provide: KodaDomainWriter, useValue: mockKodaDomainWriter },
           ],
         }).compile();
@@ -639,6 +653,28 @@ describe('AgentsService', () => {
 
       expect(agentRepo.replaceRoles).not.toHaveBeenCalled();
     });
+
+    it('invalidates the permission cache after the role write (US-009)', async () => {
+      mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
+      mockAgentRepo.findById.mockResolvedValue({ ...mockAgentWithRelations, roles: [] });
+
+      await service.updateRoles('agent-123', { roles: ['DEVELOPER'] });
+
+      // `AgentRoleEntry` is a legacy row the permission union reads but `MembershipService` does not
+      // write, so the write it does not own is the one that must drop the cache — after the role write.
+      expect(mockMembership.invalidatePermissions).toHaveBeenCalledTimes(1);
+      expect(agentRepo.replaceRoles.mock.invocationCallOrder[0]).toBeLessThan(
+        mockMembership.invalidatePermissions.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('does not invalidate the permission cache when the roles are rejected (US-009)', async () => {
+      await expect(service.updateRoles('agent-123', { roles: ['DEVLOPER'] })).rejects.toThrow(
+        ValidationAppException,
+      );
+
+      expect(mockMembership.invalidatePermissions).not.toHaveBeenCalled();
+    });
   });
 
   describe('updateCapabilities', () => {
@@ -821,6 +857,7 @@ describe('AgentsService', () => {
 
     beforeEach(() => {
       vi.clearAllMocks();
+      mockPermissions.effectiveKeys.mockResolvedValue(new Set<string>(['agent.pickup']));
     });
 
     it('should return highest-scored ticket with matchScore and matchedCapabilities', async () => {
@@ -860,35 +897,64 @@ describe('AgentsService', () => {
       await expect(service.suggestTicket('nonexistent', 'koda', authorizedPrincipal)).rejects.toThrow();
     });
 
-    it('should throw ForbiddenAppException when the target agent is not on the project roster (S4c US-001 AC13)', async () => {
+    it('throws ForbiddenAppException (permissions) when the target agent holds no agent.pickup in the project (US-009)', async () => {
       mockAgentRepo.findBySlugWithCapabilities.mockResolvedValue(mockAgentForPickup);
       mockAgentRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockAgentRepo.isOnProjectRoster.mockResolvedValue(false);
+      // Permissions P1 (US-009): the roster check is gone; the target agent's project keys decide.
+      mockPermissions.effectiveKeys.mockResolvedValue(new Set<string>());
 
       await expect(
         service.suggestTicket('test-agent', 'koda', authorizedPrincipal),
       ).rejects.toBeInstanceOf(ForbiddenAppException);
-      expect(agentRepo.isOnProjectRoster).toHaveBeenCalledWith('agent-123', 'project-1');
+      // The decision is asked for the *target* agent, in the *project's* scope.
+      expect(mockPermissions.effectiveKeys).toHaveBeenCalledWith(
+        { type: 'AGENT', id: 'agent-123' },
+        { projectId: 'project-1' },
+      );
       expect(agentRepo.findVerifiedUnassignedTickets).not.toHaveBeenCalled();
+      expect(agentRepo.isOnProjectRoster).not.toHaveBeenCalled();
     });
 
-    it('should admit an unrostered target when agent project scoping is off (S4c US-001 AC14)', async () => {
+    it('admits the target agent when it holds agent.pickup in the project (US-009)', async () => {
+      mockAgentRepo.findBySlugWithCapabilities.mockResolvedValue(mockAgentForPickup);
+      mockAgentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockAgentRepo.findVerifiedUnassignedTickets.mockResolvedValue([]);
+
+      await expect(service.suggestTicket('test-agent', 'koda', authorizedPrincipal)).resolves.toBeNull();
+      expect(mockPermissions.effectiveKeys).toHaveBeenCalledWith(
+        { type: 'AGENT', id: 'agent-123' },
+        { projectId: 'project-1' },
+      );
+      // The roster is no longer the roster-read: the permission union reads it.
+      expect(agentRepo.isOnProjectRoster).not.toHaveBeenCalled();
+    });
+
+    it('still asks the target agent keys when agent project scoping is off (US-009)', async () => {
       const unscoped = new AgentsService(
         mockAgentRepo as never,
         { ...mockAuthConfig, agentProjectScoping: false },
         mockTxManager as never,
         // Permissions P1a (US-004): MembershipService is the required fourth parameter.
         mockMembership as never,
+        // Permissions P1 (US-009): PermissionService is the required fifth, before the optional seams.
+        mockPermissions as never,
         mockKodaDomainWriter as never,
       );
 
       mockAgentRepo.findBySlugWithCapabilities.mockResolvedValue(mockAgentForPickup);
       mockAgentRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockAgentRepo.isOnProjectRoster.mockResolvedValue(false);
       mockAgentRepo.findVerifiedUnassignedTickets.mockResolvedValue([]);
+      // Scoping off widens what an agent's rows grant; it does not skip the key check.
+      mockPermissions.effectiveKeys.mockResolvedValue(new Set<string>());
 
-      await expect(unscoped.suggestTicket('test-agent', 'koda', authorizedPrincipal)).resolves.toBeNull();
-      expect(agentRepo.isOnProjectRoster).not.toHaveBeenCalled();
+      await expect(unscoped.suggestTicket('test-agent', 'koda', authorizedPrincipal)).rejects.toBeInstanceOf(
+        ForbiddenAppException,
+      );
+      expect(mockPermissions.effectiveKeys).toHaveBeenCalledWith(
+        { type: 'AGENT', id: 'agent-123' },
+        { projectId: 'project-1' },
+      );
+      expect(agentRepo.findVerifiedUnassignedTickets).not.toHaveBeenCalled();
     });
 
     it('should return highest-priority ticket when all scores are 0 (score-0 fallback)', async () => {
@@ -1050,6 +1116,7 @@ describe('AgentsService', () => {
           { provide: AUTH_CFG, useValue: { ...mockAuthConfig, agentProjectScoping: false } },
           { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
           { provide: MembershipService, useValue: mockMembership },
+          { provide: PermissionService, useValue: mockPermissions },
           { provide: KodaDomainWriter, useValue: mockKodaDomainWriter },
         ],
       }).compile();

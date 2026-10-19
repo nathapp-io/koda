@@ -15,6 +15,7 @@ import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { MembershipService } from '../permissions/membership.service';
+import { PermissionService } from '../permissions/permission.service';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import {
@@ -105,6 +106,16 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
     isOnProjectRoster: Mock;
   };
 
+  /**
+   * Permissions P1 (US-009): the pickup target's project keys are the authorization. The double
+   * answers `agent.pickup` by default — every AC here except the two refusal rows starts from a
+   * target that holds it.
+   */
+  const permissions: { can: Mock; effectiveKeys: Mock } = {
+    can: vi.fn(async () => ({ allowed: true, reason: 'granted' })),
+    effectiveKeys: vi.fn(async () => new Set<string>(['agent.pickup'])),
+  };
+
   const DEFAULT_AUTH_CONFIG: Omit<IAuthConfig, 'agentProjectScoping'> = {
     jwtSecret: 'jwt-secret',
     jwtExpiresIn: '15m',
@@ -143,6 +154,8 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
             afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
           },
         },
+        // Permissions P1 (US-009): the service's required fifth dependency, and the guard's.
+        { provide: PermissionService, useValue: permissions },
         {
           provide: KodaDomainWriter,
           useValue: { writeAgentAction: vi.fn().mockResolvedValue({ canonicalId: 'evt-1' }) },
@@ -173,8 +186,9 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
   function seedHappyPath(): void {
     agentRepo.findBySlugWithCapabilities.mockResolvedValue(AGENT_ROW);
     agentRepo.findProjectBySlug.mockResolvedValue(PROJECT);
-    // S4c US-001: the target agent is on the project roster unless a test says otherwise.
-    agentRepo.isOnProjectRoster.mockResolvedValue(true);
+    // Permissions P1 (US-009): the target agent holds `agent.pickup` in the project unless a test
+    // says otherwise. The roster row is read by the permission union, not by the pickup path.
+    permissions.effectiveKeys.mockResolvedValue(new Set<string>(['agent.pickup']));
     agentRepo.findVerifiedUnassignedTickets.mockResolvedValue([
       makeTicket('ticket-1', 1, 'HIGH', ['typescript']),
       makeTicket('ticket-2', 2, 'CRITICAL', []),
@@ -265,8 +279,8 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
     expect(res.body.data.matchScore).toBe(1);
   });
 
-  it('S4c US-001 AC13: returns 403 when the target agent is not on the project roster', async () => {
-    agentRepo.isOnProjectRoster.mockResolvedValue(false);
+  it('US-009: returns 403 permissions when the target agent holds no agent.pickup in the project', async () => {
+    permissions.effectiveKeys.mockResolvedValue(new Set<string>());
     currentPrincipal = userPrincipal('ADMIN');
 
     const res = await request(app.getHttpServer())
@@ -274,15 +288,16 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
       .query({ project: 'koda' });
 
     expect(res.status).toBe(403);
-    expect(agentRepo.isOnProjectRoster).toHaveBeenCalledWith('agent-123', 'project-1');
+    // The target's keys, in the project's scope — not the caller's.
+    expect(permissions.effectiveKeys).toHaveBeenCalledWith(
+      { type: 'AGENT', id: 'agent-123' },
+      { projectId: 'project-1' },
+    );
+    expect(agentRepo.isOnProjectRoster).not.toHaveBeenCalled();
     expect(agentRepo.findVerifiedUnassignedTickets).not.toHaveBeenCalled();
   });
 
-  it('S4c US-001 AC14: admits an unrostered target when agent project scoping is off', async () => {
-    await app.close();
-    await bootApp({ agentProjectScoping: false });
-    seedHappyPath();
-    agentRepo.isOnProjectRoster.mockResolvedValue(false);
+  it('US-009: admits the target agent when it holds agent.pickup, and never reads the roster directly', async () => {
     currentPrincipal = userPrincipal('ADMIN');
 
     const res = await request(app.getHttpServer())
@@ -291,6 +306,27 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.ticket.ref).toBe('KT-1');
+    expect(permissions.effectiveKeys).toHaveBeenCalledTimes(1);
+    expect(agentRepo.isOnProjectRoster).not.toHaveBeenCalled();
+  });
+
+  it('US-009: still asks the target agent keys when agent project scoping is off', async () => {
+    await app.close();
+    await bootApp({ agentProjectScoping: false });
+    seedHappyPath();
+    permissions.effectiveKeys.mockResolvedValue(new Set<string>());
+    currentPrincipal = userPrincipal('ADMIN');
+
+    const res = await request(app.getHttpServer())
+      .get('/api/agents/test-agent/pickup')
+      .query({ project: 'koda' });
+
+    expect(res.status).toBe(403);
+    // Scoping off changes what the rows grant, not whether the key is asked for.
+    expect(permissions.effectiveKeys).toHaveBeenCalledWith(
+      { type: 'AGENT', id: 'agent-123' },
+      { projectId: 'project-1' },
+    );
     expect(agentRepo.isOnProjectRoster).not.toHaveBeenCalled();
   });
 

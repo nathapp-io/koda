@@ -38,7 +38,7 @@ function setup(opts: SetupOptions = {}) {
     }),
     create: vi.fn(async (input: {
       projectId: string; email: string; role: 'ADMIN' | 'DEVELOPER' | 'VIEWER';
-      tokenHash: string; invitedById: string; expiresAt: Date;
+      tokenHash: string; invitedById: string | null; invitedByAgentId: string | null; expiresAt: Date;
     }): Promise<ProjectInviteRecord> => {
       const record: ProjectInviteRecord = {
         id: `i${store.length + 1}`,
@@ -47,7 +47,7 @@ function setup(opts: SetupOptions = {}) {
         role: input.role,
         status: 'PENDING',
         invitedById: input.invitedById,
-        inviterName: 'Ada',
+        inviterName: input.invitedByAgentId ? 'roster-agent' : 'Ada',
         acceptedByUserId: null,
         acceptedAt: null,
         expiresAt: input.expiresAt,
@@ -58,6 +58,8 @@ function setup(opts: SetupOptions = {}) {
     }),
     list: vi.fn(async () => [...store]),
     findById: vi.fn(),
+    // US-008: resend and cancel read the pending invite through the project-scoped lookup.
+    findByIdForProject: vi.fn(),
     rotate: vi.fn(),
     cancel: vi.fn(),
   };
@@ -131,13 +133,16 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
     vi.useRealTimers();
   });
 
-  it('AC-2: a non-admin is rejected with 403 before any invite or membership write', async () => {
+  it('US-008 AC-2: create no longer consults the legacy admin gate — the route key refuses non-admins', async () => {
     const { service, invites, membership, access } = setup({ existingUser: null });
+    // The legacy gate is rigged to refuse: a service that still called it would fail now.
     access.assertProjectAdmin.mockRejectedValueOnce(new ForbiddenAppException({}, 'members'));
 
-    await expect(service.create('p', { email: 'new@x.io', role: 'DEVELOPER' }, admin, 'en'))
-      .rejects.toBeInstanceOf(ForbiddenAppException);
-    expect(invites.create).not.toHaveBeenCalled();
+    const result = await service.create('p', { email: 'new@x.io', role: 'DEVELOPER' }, admin, 'en');
+
+    expect(access.assertProjectAdmin).not.toHaveBeenCalled();
+    expect(result.outcome).toBe('INVITED');
+    expect(invites.create).toHaveBeenCalled();
     expect(membership.createBinding).not.toHaveBeenCalled();
   });
 
@@ -199,6 +204,43 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
     expect(stored.tokenHash).toBe(hashInviteToken(raw));
     expect(stored.tokenHash).not.toBe(raw);
     expect(JSON.stringify(result.invite)).not.toContain(raw);
+  });
+
+  // Whole-branch fix B4: `invite.create` reaches a project-admin agent, so the inviter is stored per
+  // actor type. Writing the agent id into the `User`-keyed `invitedById` failed with a P2003.
+  it('B4: an agent inviter is stored in invitedByAgentId, and the user column stays null', async () => {
+    const { service, invites } = setup({ existingUser: null });
+    const agent = { actorType: 'agent', id: 'agent-1', slug: 'roster-agent' } as KodaPrincipal;
+
+    const result = await service.create('p', { email: 'new@x.io', role: 'VIEWER' }, agent, 'en');
+
+    expect(result.outcome).toBe('INVITED');
+    expect(invites.create).toHaveBeenCalledWith(
+      expect.objectContaining({ invitedById: null, invitedByAgentId: 'agent-1' }),
+    );
+    expect(result.invite).toMatchObject({ inviterName: 'roster-agent' });
+  });
+
+  it('B4: a user inviter keeps invitedByAgentId null', async () => {
+    const { service, invites } = setup({ existingUser: null });
+
+    await service.create('p', { email: 'new@x.io', role: 'VIEWER' }, admin, 'en');
+
+    expect(invites.create).toHaveBeenCalledWith(
+      expect.objectContaining({ invitedById: 'admin', invitedByAgentId: null }),
+    );
+  });
+
+  it('B4: an agent that adds an existing user records an AGENT granter, not a USER one', async () => {
+    const { service, membership } = setup({ existingUser: { id: 'u9', disabled: false } });
+    const agent = { actorType: 'agent', id: 'agent-1', slug: 'roster-agent' } as KodaPrincipal;
+
+    await service.create('p', { email: 'b@x.io', role: 'VIEWER' }, agent, 'en');
+
+    expect(membership.createBinding).toHaveBeenCalledWith(
+      expect.objectContaining({ principal: { type: 'USER', id: 'u9' } }),
+      { type: 'AGENT', id: 'agent-1' },
+    );
   });
 
   it('AC-7: creating a second invite for the same project and email cancels the earlier one', async () => {
@@ -283,5 +325,32 @@ describe('ProjectInvitesService.list (S4b US-004)', () => {
     const rows = await service.list('p', admin);
 
     expect(rows.map((row) => row.status)).toEqual(['EXPIRED']);
+  });
+});
+
+describe('ProjectInvitesService legacy admin gate removal (US-008)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('list, resend and cancel read the project and act without asking the legacy admin gate', async () => {
+    const { service, invites, access, seed } = setup({ existingUser: null });
+    // Refusing the legacy gate proves none of the four routes still depends on it.
+    access.assertProjectAdmin.mockRejectedValue(new ForbiddenAppException({}, 'members'));
+    const invite = seed({ id: 'i1', status: 'PENDING', expiresAt: plusDays(NOW, 7) });
+    invites.findByIdForProject.mockResolvedValue(invite);
+    invites.rotate.mockResolvedValue(invite);
+    invites.cancel.mockResolvedValue(true);
+
+    await expect(service.list('p', admin)).resolves.toHaveLength(1);
+    await expect(service.resend('p', 'i1', admin, 'en')).resolves.toHaveProperty('invitePath');
+    await expect(service.cancel('p', 'i1', admin)).resolves.toBeUndefined();
+
+    expect(access.assertProjectAdmin).not.toHaveBeenCalled();
+    expect(access.findProjectIdBySlug).toHaveBeenCalledTimes(3);
   });
 });

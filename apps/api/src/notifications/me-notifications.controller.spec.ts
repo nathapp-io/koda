@@ -1,5 +1,6 @@
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { REQUIRES_METADATA } from '../permissions/requires.decorator';
 import { MeNotificationsController } from './me-notifications.controller';
 import type { PreferencesView } from './notification-preferences.service';
 
@@ -32,6 +33,23 @@ function setup() {
 }
 
 describe('MeNotificationsController (S4a §3)', () => {
+  it.each([
+    ['list', 'notification.read'],
+    ['unreadCount', 'notification.read'],
+    ['markRead', 'notification.mark-read'],
+    ['markAllRead', 'notification.mark-read'],
+    ['getPreferences', 'notification.preference.read'],
+    ['updatePreferences', 'notification.preference.update'],
+  ] as const)('US-010: %s declares the implicit key %s', (handler, key) => {
+    const fn = (MeNotificationsController.prototype as unknown as Record<string, object>)[handler];
+
+    expect(Reflect.getMetadata(REQUIRES_METADATA, fn)).toEqual({
+      keys: [key],
+      mode: 'all',
+      enforcedBy: 'guard',
+    });
+  });
+
   it('refuses agents on every route (403)', async () => {
     const { controller } = setup();
     await expect(controller.list({} as never, agent)).rejects.toBeInstanceOf(ForbiddenAppException);

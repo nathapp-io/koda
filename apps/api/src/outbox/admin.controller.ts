@@ -1,25 +1,30 @@
-import { Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { OutboxAdminService } from './outbox-admin.service';
 import { OutboxStatus } from '@nathapp/nestjs-outbox';
 import { OutboxListQueryDto } from './dto/outbox-list-query.dto';
-import { JwtAuthGuard, Principal, RequiredPermission } from '@nathapp/nestjs-auth';
+import { JwtAuthGuard, Principal } from '@nathapp/nestjs-auth';
+import { Requires } from '../permissions/requires.decorator';
+import { RequiresGuard } from '../permissions/requires.guard';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
+// Permissions P1 (US-010): a global route with no project slug, so each handler states its catalog
+// key and the guard list carries `RequiresGuard` next to the JwtAuthGuard this controller already
+// had. `outbox.*` are GLOBAL-scope role keys, so a project-admin binding does not satisfy them.
 @ApiTags('admin')
 @ApiBearerAuth()
 @Controller('admin')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RequiresGuard)
 export class AdminController {
   constructor(private readonly outboxAdmin: OutboxAdminService) {}
 
   @Get('outbox')
   @HttpCode(200)
+  @Requires('outbox.read')
   @ApiOperation({ summary: 'Get outbox events by status' })
   @ApiResponse({ status: 200, description: 'Returns outbox events' })
-  @ApiResponse({ status: 403, description: 'Forbidden - requires admin role' })
+  @ApiResponse({ status: 403, description: 'Forbidden - outbox.read is missing' })
   @ApiResponse({ status: 400, description: 'Unknown status' })
-  @RequiredPermission('ADMIN')
   async getOutbox(
     @Principal() _principal: KodaPrincipal,
     @Query() query: OutboxListQueryDto,
@@ -30,12 +35,12 @@ export class AdminController {
 
   @Post('outbox/:eventId/retry')
   @HttpCode(200)
+  @Requires('outbox.retry')
   @ApiOperation({ summary: 'Retry a dead outbox event' })
   @ApiResponse({ status: 200, description: 'Event reset to pending' })
-  @ApiResponse({ status: 403, description: 'Forbidden - requires admin role' })
+  @ApiResponse({ status: 403, description: 'Forbidden - outbox.retry is missing' })
   @ApiResponse({ status: 404, description: 'Event not found' })
   @ApiResponse({ status: 409, description: 'Event is processing or already published' })
-  @RequiredPermission('ADMIN')
   async retryOutboxEvent(
     @Principal() _principal: KodaPrincipal,
     @Param('eventId') eventId: string,

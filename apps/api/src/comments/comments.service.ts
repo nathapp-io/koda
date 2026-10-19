@@ -1,6 +1,4 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { subject } from '@casl/ability';
-import { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { CommentType } from '../common/enums';
 import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateCommentDto } from './dto/create-comment.dto';
@@ -10,19 +8,19 @@ import { PrismaCommentRepository } from './prisma-comment.repository';
 import { COMMENT_REPOSITORY, CommentDomain } from './domain/comment.domain';
 import { KodaPrincipal, actorKind } from '../auth/principal/koda-principal.types';
 import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
-import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
+import { PermissionService } from '../permissions/permission.service';
+import type { PrincipalRef } from '../permissions/permissions.types';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketEventService } from '../events/ticket-event.service';
 import { buildTicketEventOutboxPayload } from '../events/outbox-envelope.util';
 import { ProjectAccessService } from '../projects/project-access.service';
-import { withProjectRole } from '../projects/project-context';
 
 @Injectable()
 export class CommentsService {
   constructor(
     @Inject(COMMENT_REPOSITORY) private readonly commentRepo: PrismaCommentRepository,
-    private readonly caslAbilityFactory: KodaCaslAbilityFactory,
+    private readonly permissions: PermissionService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly ticketEventService: TicketEventService,
     private readonly outbox: NathappOutboxService,
@@ -49,15 +47,15 @@ export class CommentsService {
 
   /**
    * US-002: resolve a comment to its owning project so the slug-less mutation
-   * paths can gate by membership before the CASL check. Returns the resolved
-   * project id and the caller's project role (throwing
+   * paths can gate by membership before the key check (Permissions P1 US-005).
+   * Returns the resolved project id and the comment itself (throwing
    * `NotFoundAppException` if the comment, ticket, or project is
    * missing/soft-deleted, or if the caller is not a project member).
    */
   private async assertCommentProjectMembership(
     commentId: string,
     principal: KodaPrincipal,
-  ): Promise<{ projectId: string; role: string | null; comment: CommentDomain }> {
+  ): Promise<{ projectId: string; comment: CommentDomain }> {
     const ownership = await this.commentRepo.findOwningProjectAndTicket(commentId);
 
     if (!ownership || ownership.ticket.deletedAt || ownership.project.deletedAt) {
@@ -67,12 +65,31 @@ export class CommentsService {
     // Agents resolve to null without a lookup; global ADMIN resolves to 'ADMIN'.
     // A non-member's 403 becomes 404 so the comment's existence stays hidden.
     try {
-      const role = await this.access.resolveMembership(ownership.project.id, principal);
-      return { projectId: ownership.project.id, role, comment: ownership.comment };
+      await this.access.resolveMembership(ownership.project.id, principal);
     } catch (err) {
       if (err instanceof ForbiddenAppException) throw new NotFoundAppException({}, 'comments');
       throw err;
     }
+    return { projectId: ownership.project.id, comment: ownership.comment };
+  }
+
+  /**
+   * US-005: the row-level half of the check. The route declares
+   * `comment.update` / `comment.delete` with `enforcedBy: 'service'` because
+   * only here is the comment's project and author known; a caller holding just
+   * `X.own` is allowed exactly on the comment it wrote.
+   */
+  private async assertCommentKey(
+    principal: KodaPrincipal,
+    key: 'comment.update' | 'comment.delete',
+    projectId: string,
+    comment: CommentDomain,
+  ): Promise<void> {
+    const decision = await this.permissions.can(principal, key, {
+      projectId,
+      resource: { createdBy: commentAuthor(comment) },
+    });
+    if (!decision.allowed) throw new ForbiddenAppException({}, 'permissions');
   }
 
   /**
@@ -175,20 +192,12 @@ export class CommentsService {
     updateCommentDto: UpdateCommentDto,
     principal: KodaPrincipal,
   ) {
-    // US-002: resolve comment → ticket → project and gate by membership before
-    // the CASL check. A non-member user gets 404 (their membership lookup is
-    // translated from ForbiddenAppException); agents resolve to role null and
-    // proceed to the CASL check unchanged.
-    // #145: the membership gate's query already returned the comment.
-    const { role, comment } = await this.assertCommentProjectMembership(commentId, principal);
-
-    // #144: the ability is built from the principal enriched with the project
-    // role, so a project ADMIN gains unconditional DELETE and everyone else is
-    // held to the author-only rules.
-    const ability = await this.caslAbilityFactory.createForUser(withProjectRole(principal, role));
-    if (!ability.can(CaslPermissionAction.UPDATE, subject('Comment', comment))) {
-      throw new ForbiddenAppException({}, 'comments');
-    }
+    // US-002: resolve comment → ticket → project and gate by membership first; a
+    // non-member user gets 404 so the comment's existence stays hidden.
+    // US-005: then the row-level key check — `comment.update` (or `.own` on this
+    // author) decides, and a refusal is 403 `permissions`.
+    const { projectId, comment } = await this.assertCommentProjectMembership(commentId, principal);
+    await this.assertCommentKey(principal, 'comment.update', projectId, comment);
 
     // Update the comment via repository
     const updatedComment = await this.commentRepo.update(commentId, {
@@ -205,17 +214,19 @@ export class CommentsService {
     // US-002: same membership gate as `update`. Global ADMINs and agents
     // proceed; non-member users get 404 (not 403) so the comment's existence
     // stays hidden.
-    // #145: the membership gate's query already returned the comment.
-    const { role, comment } = await this.assertCommentProjectMembership(commentId, principal);
-
-    // #144: a project ADMIN may delete anyone's comment in the project; other
-    // roles remain author-only.
-    const ability = await this.caslAbilityFactory.createForUser(withProjectRole(principal, role));
-    if (!ability.can(CaslPermissionAction.DELETE, subject('Comment', comment))) {
-      throw new ForbiddenAppException({}, 'comments');
-    }
+    // US-005: a project admin holds `comment.delete`; every other role is held to
+    // `comment.delete.own` and refused on someone else's comment.
+    const { projectId, comment } = await this.assertCommentProjectMembership(commentId, principal);
+    await this.assertCommentKey(principal, 'comment.delete', projectId, comment);
 
     // Delete the comment via repository
     await this.commentRepo.delete(commentId);
   }
+}
+
+/** Who wrote the comment, as `PermissionService.can` compares it for an `.own` key. */
+function commentAuthor(comment: CommentDomain): PrincipalRef | null {
+  if (comment.authorUserId) return { type: 'USER', id: comment.authorUserId };
+  if (comment.authorAgentId) return { type: 'AGENT', id: comment.authorAgentId };
+  return null;
 }

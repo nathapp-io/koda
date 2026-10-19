@@ -11,7 +11,7 @@ import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
 import { TicketEventService } from '../events/ticket-event.service';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
-import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
+import { PermissionService } from '../permissions/permission.service';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
 
 describe('TicketsService', () => {
@@ -137,8 +137,17 @@ describe('TicketsService', () => {
 
   const mockTransitionsService = {
     executeTransitionPublic: vi.fn(),
-    assertTransitionPermission: vi.fn(),
+    assertTransitionAllowed: vi.fn(),
   };
+
+  /** Permissions P1 (US-004): the sixth constructor argument, where the CASL factory used to sit. */
+  const mockPermissions = { can: vi.fn() };
+  /** Answers the key check as `PermissionService` does, from the keys the principal holds. */
+  const holdKeys = (held: readonly string[]) =>
+    mockPermissions.can.mockImplementation(async (_principal: unknown, key: string) => ({
+      allowed: held.includes(key),
+      reason: held.includes(key) ? 'granted' : 'not-granted',
+    }));
 
   beforeEach(async () => {
     // Per-test implementations (mockResolvedValue etc.) must not leak across tests.
@@ -146,6 +155,7 @@ describe('TicketsService', () => {
     Object.values(mockTransitionsService).forEach((m) => m.mockReset());
     mockTicketEventService.create.mockReset().mockResolvedValue({ id: 'evt-mock' });
     mockOutbox.record.mockReset().mockResolvedValue(undefined);
+    mockPermissions.can.mockReset().mockResolvedValue({ allowed: false, reason: 'not-granted' });
     inTx = false;
 
     const module: TestingModule = await Test.createTestingModule({
@@ -156,7 +166,7 @@ describe('TicketsService', () => {
         { provide: TicketEventService, useValue: mockTicketEventService },
         { provide: NathappOutboxService, useValue: mockOutbox },
         { provide: TicketTransitionsService, useValue: mockTransitionsService },
-        KodaCaslAbilityFactory,
+        { provide: PermissionService, useValue: mockPermissions },
       ],
     }).compile();
 
@@ -485,24 +495,89 @@ describe('TicketsService', () => {
   });
 
   describe('findByRefWithActions (M25)', () => {
-    beforeEach(() => {
+    // Permissions P1 (US-004): the actions come from the caller's keys (`TICKET_ACTION_KEYS` through
+    // PermissionService.can), not from the legacy CASL ability, so the double answers per key.
+    const TRANSITION_KEYS = [
+      'ticket.transition.verify',
+      'ticket.transition.start',
+      'ticket.transition.fix',
+      'ticket.transition.verify-fix.approve',
+      'ticket.transition.verify-fix.return',
+      'ticket.transition.reject',
+    ];
+    const DEVELOPER_KEYS = [...TRANSITION_KEYS, 'ticket.transition.close'];
+    const REVIEWER_KEYS = [
+      'ticket.transition.verify-fix.approve',
+      'ticket.transition.verify-fix.return',
+      'ticket.transition.close',
+    ];
+
+    const detail = (status: string) => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketScoped.mockResolvedValue({ ...mockTicket, status: 'VERIFIED' });
-    });
+      mockTicketRepo.findTicketScoped.mockResolvedValue({ ...mockTicket, status });
+    };
 
     it.each([
-      ['ADMIN', ['start', 'reject', 'close']],
-      ['DEVELOPER', ['start', 'reject']],
-      ['VIEWER', []],
-    ])('project %s on a VERIFIED ticket -> %j', async (projectRole, expected) => {
-      const res = await service.findByRefWithActions('koda', 'KODA-1', { ...mockUserPrincipal, projectRole });
+      ['a developer key holder', DEVELOPER_KEYS, ['verify', 'start', 'reject']],
+      ['a reviewer key holder', REVIEWER_KEYS, []],
+      ['a keyless viewer', [], []],
+    ])('%s on a CREATED ticket -> %j', async (_label, held, expected) => {
+      detail('CREATED');
+      holdKeys(held);
+
+      const res = await service.findByRefWithActions('koda', 'KODA-1', { ...mockUserPrincipal, projectRole: 'DEVELOPER' });
+
       expect(res.allowedActions).toEqual(expected);
       expect(res.ref).toBe('KODA-1');
     });
 
-    it('an agent gets transitions from its agent roles and never close', async () => {
-      const res = await service.findByRefWithActions('koda', 'KODA-1', { ...mockAgentPrincipal, agentRoles: ['REVIEWER'] });
-      expect(res.allowedActions).toEqual(['start', 'reject']);
+    it('asks PermissionService for each action key in the ticket\'s project', async () => {
+      detail('CREATED');
+      holdKeys(DEVELOPER_KEYS);
+
+      await service.findByRefWithActions('koda', 'KODA-1', mockUserPrincipal);
+
+      expect(mockPermissions.can).toHaveBeenCalledWith(
+        mockUserPrincipal, 'ticket.transition.verify', { projectId: 'proj-123' },
+      );
+      // One call per key of `TICKET_ACTION_KEYS`: six actions, and verify-fix names two outcomes.
+      expect(mockPermissions.can).toHaveBeenCalledTimes(7);
+    });
+
+    it('a reviewer on a VERIFY_FIX ticket is offered the fix review and close', async () => {
+      detail('VERIFY_FIX');
+      holdKeys(REVIEWER_KEYS);
+
+      const res = await service.findByRefWithActions('koda', 'KODA-1', mockUserPrincipal);
+
+      expect(res.allowedActions).toEqual(['verify-fix', 'close']);
+    });
+
+    it('a developer on an IN_PROGRESS ticket is offered the fix and close', async () => {
+      detail('IN_PROGRESS');
+      holdKeys(DEVELOPER_KEYS);
+
+      const res = await service.findByRefWithActions('koda', 'KODA-1', mockUserPrincipal);
+
+      expect(res.allowedActions).toEqual(['fix', 'close']);
+    });
+
+    it('an action whose keys the caller does not hold is never offered, whatever the status', async () => {
+      detail('IN_PROGRESS');
+      holdKeys(['ticket.transition.close']);
+
+      const res = await service.findByRefWithActions('koda', 'KODA-1', mockUserPrincipal);
+
+      expect(res.allowedActions).toEqual(['close']);
+    });
+
+    it('an agent gets its actions from its keys, with no project role involved', async () => {
+      detail('VERIFY_FIX');
+      holdKeys(REVIEWER_KEYS);
+
+      const res = await service.findByRefWithActions('koda', 'KODA-1', mockAgentPrincipal);
+
+      expect(res.allowedActions).toEqual(['verify-fix', 'close']);
     });
   });
 
@@ -591,8 +666,16 @@ describe('TicketsService', () => {
         'KODA-1',
         TicketStatus.IN_PROGRESS,
         mockUserPrincipal,
+        undefined,
       );
       expect(result.status).toBe(TicketStatus.IN_PROGRESS);
+      // Permissions P1 (US-003): the edge key of the requested status is checked first.
+      expect(mockTransitionsService.assertTransitionAllowed).toHaveBeenCalledWith(
+        'koda',
+        'KODA-1',
+        TicketStatus.IN_PROGRESS,
+        mockUserPrincipal,
+      );
       // No direct status write through the repo
       expect(mockTicketRepo.updateTicket).not.toHaveBeenCalled();
     });
@@ -607,10 +690,11 @@ describe('TicketsService', () => {
       await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
 
       expect(mockTransitionsService.executeTransitionPublic).not.toHaveBeenCalled();
+      expect(mockTransitionsService.assertTransitionAllowed).not.toHaveBeenCalled();
       expect(mockTicketRepo.updateTicket).toHaveBeenCalledWith(mockTicket.id, { title: 'x' });
     });
 
-    it('M2: PATCH with status and other fields applies fields first, then transitions', async () => {
+    it('M2/B3: PATCH with status and other fields hands the field write to the transition, not a separate write', async () => {
       const updateDto: UpdateTicketDto = {
         title: 'Renamed before transition',
         status: TicketStatus.IN_PROGRESS,
@@ -621,32 +705,78 @@ describe('TicketsService', () => {
       mockTicketRepo.updateTicket.mockResolvedValue({
         ...mockTicket,
         title: 'Renamed before transition',
+        status: TicketStatus.IN_PROGRESS,
       });
-      mockTransitionsService.executeTransitionPublic.mockResolvedValue({
-        ticket: { ...mockTicket, title: 'Renamed before transition', status: TicketStatus.IN_PROGRESS },
-      });
+      let patch: ((context: { ticketId: string; projectId: string; previous: unknown }) => Promise<unknown>) | undefined;
+      mockTransitionsService.executeTransitionPublic.mockImplementation(
+        async (_slug: string, _ref: string, _status: string, _principal: unknown, fields?: typeof patch) => {
+          patch = fields;
+          const ticket = await fields?.({
+            ticketId: mockTicket.id,
+            projectId: mockProject.id,
+            previous: mockTicket,
+          });
+          return { ticket: ticket ?? { ...mockTicket, status: TicketStatus.IN_PROGRESS } };
+        },
+      );
 
       const result = await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
 
-      expect(mockTicketRepo.updateTicket).toHaveBeenCalledWith(mockTicket.id, {
-        title: 'Renamed before transition',
-      });
+      // The edge check runs before the transition, which is where the field write now happens.
       expect(mockTransitionsService.executeTransitionPublic).toHaveBeenCalledWith(
         'koda',
         'KODA-1',
         TicketStatus.IN_PROGRESS,
         mockUserPrincipal,
+        expect.any(Function),
       );
-      // Field write happens before the transition
-      expect(mockTicketRepo.updateTicket.mock.invocationCallOrder[0]).toBeLessThan(
+      expect(mockTransitionsService.assertTransitionAllowed.mock.invocationCallOrder[0]).toBeLessThan(
         mockTransitionsService.executeTransitionPublic.mock.invocationCallOrder[0],
       );
+      // The patch the transition applies writes the field and records the mention-diff event.
+      expect(patch).toBeTypeOf('function');
+      expect(mockTicketRepo.updateTicket).toHaveBeenCalledWith(mockTicket.id, {
+        title: 'Renamed before transition',
+      });
+      expect(mockTicketEventService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'TICKET_UPDATED', data: { title: 'Renamed before transition' } }),
+      );
       expect(result.status).toBe(TicketStatus.IN_PROGRESS);
+      expect(result.title).toBe('Renamed before transition');
     });
 
-    // Final-review Finding B: a caller with UPDATE but no TRANSITION must be
+    it('M2/B3: a transition that refuses or loses the race never runs the field write', async () => {
+      const updateDto: UpdateTicketDto = {
+        title: 'Should never be written',
+        status: TicketStatus.IN_PROGRESS,
+      };
+
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      // The transitions service checks the edge on the ticket's live status and throws: the patch it was
+      // handed is never called, so no field is written even though the pre-check passed.
+      mockTransitionsService.executeTransitionPublic.mockRejectedValue(
+        new ForbiddenAppException({}, 'permissions'),
+      );
+
+      await expect(
+        service.update('koda', 'KODA-1', updateDto, mockUserPrincipal),
+      ).rejects.toThrow(ForbiddenAppException);
+
+      expect(mockTransitionsService.executeTransitionPublic).toHaveBeenCalledWith(
+        'koda',
+        'KODA-1',
+        TicketStatus.IN_PROGRESS,
+        mockUserPrincipal,
+        expect.any(Function),
+      );
+      expect(mockTicketRepo.updateTicket).not.toHaveBeenCalled();
+      expect(mockTicketEventService.create).not.toHaveBeenCalled();
+    });
+
+    // Final-review Finding B: a caller with UPDATE but not the edge key must be
     // rejected 403 BEFORE any field write, so the PATCH is all-or-nothing.
-    it('M2/Final-review: PATCH {status, title} with UPDATE-but-no-TRANSITION → 403 and title NOT written', async () => {
+    it('M2/Final-review: PATCH {status, title} with UPDATE-but-no-edge-key → 403 and title NOT written', async () => {
       const updateDto: UpdateTicketDto = {
         title: 'Should never be written',
         status: TicketStatus.IN_PROGRESS,
@@ -655,16 +785,21 @@ describe('TicketsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.updateTicket.mockResolvedValue({ ...mockTicket, title: 'Should never be written' });
-      mockTransitionsService.assertTransitionPermission.mockRejectedValue(
-        new ForbiddenAppException({}, 'tickets'),
+      mockTransitionsService.assertTransitionAllowed.mockRejectedValue(
+        new ForbiddenAppException({}, 'permissions'),
       );
 
       await expect(
         service.update('koda', 'KODA-1', updateDto, mockUserPrincipal),
       ).rejects.toThrow(ForbiddenAppException);
 
-      // Permission check ran before anything else
-      expect(mockTransitionsService.assertTransitionPermission).toHaveBeenCalledWith(mockUserPrincipal);
+      // The edge check ran before anything else, for the requested status
+      expect(mockTransitionsService.assertTransitionAllowed).toHaveBeenCalledWith(
+        'koda',
+        'KODA-1',
+        TicketStatus.IN_PROGRESS,
+        mockUserPrincipal,
+      );
       // The partial field write must not have happened
       expect(mockTicketRepo.updateTicket).not.toHaveBeenCalled();
       expect(mockTransitionsService.executeTransitionPublic).not.toHaveBeenCalled();

@@ -221,7 +221,7 @@
             "description": "Page of users: { total, current, size, hasNext, hasPrev, records }"
           },
           "403": {
-            "description": "Global admin role required"
+            "description": "Forbidden - user.read is missing"
           }
         },
         "security": [
@@ -257,6 +257,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Forbidden - user.create is missing"
           },
           "409": {
             "description": "Email already in use"
@@ -308,7 +311,7 @@
             }
           },
           "403": {
-            "description": "Cannot demote or disable yourself"
+            "description": "Forbidden - user.update is missing, or the caller cannot demote or disable themselves"
           },
           "404": {
             "description": "User not found"
@@ -350,7 +353,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "agent.create is missing"
           }
         },
         "security": [
@@ -358,7 +361,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create agent and generate API key (admin only)",
+        "summary": "Create agent and generate API key (agent.create)",
         "tags": [
           "agents"
         ]
@@ -369,6 +372,9 @@
         "responses": {
           "200": {
             "description": "Agents retrieved successfully"
+          },
+          "403": {
+            "description": "agent.read is missing"
           }
         },
         "security": [
@@ -392,6 +398,9 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Not an agent principal"
           }
         },
         "security": [
@@ -421,6 +430,9 @@
         "responses": {
           "200": {
             "description": "Agent retrieved successfully"
+          },
+          "403": {
+            "description": "agent.read is missing"
           },
           "404": {
             "description": "Agent not found"
@@ -466,7 +478,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "agent.update is missing"
           },
           "404": {
             "description": "Agent not found"
@@ -477,7 +489,7 @@
             "bearer": []
           }
         ],
-        "summary": "Update agent (admin only)",
+        "summary": "Update agent (agent.update)",
         "tags": [
           "agents"
         ]
@@ -502,7 +514,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "agent.delete is missing"
           },
           "404": {
             "description": "Agent not found"
@@ -597,7 +609,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "agent.roles.update is missing"
           },
           "404": {
             "description": "Agent not found"
@@ -608,7 +620,7 @@
             "bearer": []
           }
         ],
-        "summary": "Update agent roles (admin only)",
+        "summary": "Update agent roles (agent.roles.update)",
         "tags": [
           "agents"
         ]
@@ -645,7 +657,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "agent.capabilities.update is missing"
           },
           "404": {
             "description": "Agent not found"
@@ -656,7 +668,7 @@
             "bearer": []
           }
         ],
-        "summary": "Update agent capabilities (admin only)",
+        "summary": "Update agent capabilities (agent.capabilities.update)",
         "tags": [
           "agents"
         ]
@@ -683,7 +695,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "agent.key.rotate is missing"
           },
           "404": {
             "description": "Agent not found"
@@ -694,7 +706,7 @@
             "bearer": []
           }
         ],
-        "summary": "Rotate agent API key (admin only)",
+        "summary": "Rotate agent API key (agent.key.rotate)",
         "tags": [
           "agents"
         ]
@@ -1455,7 +1467,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "project.create is missing"
           },
           "409": {
             "description": "Conflict - duplicate slug or key"
@@ -1466,7 +1478,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create a new project (admin only)",
+        "summary": "Create a new project",
         "tags": [
           "projects"
         ]
@@ -1506,6 +1518,9 @@
         "responses": {
           "200": {
             "description": "Project found"
+          },
+          "403": {
+            "description": "Not a project member, or project.read is missing"
           },
           "404": {
             "description": "Project not found"
@@ -1554,7 +1569,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "Not a project member, or project.update is missing"
           },
           "404": {
             "description": "Project not found"
@@ -1568,7 +1583,7 @@
             "bearer": []
           }
         ],
-        "summary": "Update a project (admin only)",
+        "summary": "Update a project",
         "tags": [
           "projects"
         ]
@@ -1593,7 +1608,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "Not a project member, or project.delete is missing"
           },
           "404": {
             "description": "Project not found"
@@ -1604,7 +1619,7 @@
             "bearer": []
           }
         ],
-        "summary": "Soft delete a project (admin only)",
+        "summary": "Soft delete a project",
         "tags": [
           "projects"
         ]
@@ -1631,7 +1646,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "Not a project member, or project.ci-token.read is missing"
           },
           "404": {
             "description": "Project not found"
@@ -1642,7 +1657,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get the CI webhook HMAC secret (admin only)",
+        "summary": "Get the CI webhook HMAC secret",
         "tags": [
           "projects"
         ]
@@ -1749,7 +1764,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - no project access"
+            "description": "Not a project member, or project.agent.read is missing"
           },
           "404": {
             "description": "Project not found"
@@ -1760,7 +1775,7 @@
             "bearer": []
           }
         ],
-        "summary": "List the project agent roster (admin or member; un-paged)",
+        "summary": "List the project agent roster (any member; un-paged)",
         "tags": [
           "projects"
         ]
@@ -1805,7 +1820,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - project admin role or global admin required"
+            "description": "Not a project member, or project.agent.add is missing"
           },
           "404": {
             "description": "Project or agent not found"
@@ -1819,7 +1834,7 @@
             "bearer": []
           }
         ],
-        "summary": "Add an agent to the project roster (project or global admin)",
+        "summary": "Add an agent to the project roster",
         "tags": [
           "projects"
         ]
@@ -1854,7 +1869,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - project admin role or global admin required"
+            "description": "Not a project member, or project.agent.remove is missing"
           },
           "404": {
             "description": "Project, agent or roster entry not found"
@@ -1868,7 +1883,7 @@
             "bearer": []
           }
         ],
-        "summary": "Remove an agent from the project roster (project or global admin)",
+        "summary": "Remove an agent from the project roster",
         "tags": [
           "projects"
         ]
@@ -1911,7 +1926,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin or self only"
+            "description": "Not a project member, project.agent.update is missing and the caller is not the agent"
           },
           "404": {
             "description": "Project or agent not found"
@@ -1922,7 +1937,7 @@
             "bearer": []
           }
         ],
-        "summary": "Update an agent status within a project context (admin or the agent itself)",
+        "summary": "Update an agent status within a project context (the key, or the agent itself)",
         "tags": [
           "projects"
         ]
@@ -2187,7 +2202,7 @@
             "description": "SLO metrics computed"
           },
           "403": {
-            "description": "Forbidden - requires admin role"
+            "description": "Forbidden - admin.slo.read is missing"
           }
         },
         "security": [
@@ -2242,7 +2257,7 @@
             "description": "Page of members: { total, current, size, hasNext, hasPrev, records, canManage, viewerRole }"
           },
           "403": {
-            "description": "Not a project member"
+            "description": "Not a project member, or member.read is missing"
           },
           "404": {
             "description": "Project not found"
@@ -2292,7 +2307,7 @@
             }
           },
           "403": {
-            "description": "Project admin role required"
+            "description": "Not a project member, or member.add is missing"
           },
           "404": {
             "description": "Project or user not found"
@@ -2306,7 +2321,7 @@
             "bearer": []
           }
         ],
-        "summary": "Add an existing user by email (project admin)",
+        "summary": "Add an existing user by email (member.add)",
         "tags": [
           "projects"
         ]
@@ -2354,6 +2369,9 @@
               }
             }
           },
+          "403": {
+            "description": "Not a project member, or member.role.update is missing"
+          },
           "404": {
             "description": "Not a member"
           },
@@ -2366,7 +2384,7 @@
             "bearer": []
           }
         ],
-        "summary": "Change a member's project role (project admin)",
+        "summary": "Change a member's project role (member.role.update)",
         "tags": [
           "projects"
         ]
@@ -2395,6 +2413,9 @@
           "200": {
             "description": "Removed"
           },
+          "403": {
+            "description": "Not a project member, or member.remove is missing"
+          },
           "404": {
             "description": "Not a member"
           },
@@ -2407,7 +2428,7 @@
             "bearer": []
           }
         ],
-        "summary": "Remove a member (project admin)",
+        "summary": "Remove a member (member.remove)",
         "tags": [
           "projects"
         ]
@@ -2455,7 +2476,7 @@
             "description": "q longer than 100 characters, or limit outside 1..50"
           },
           "403": {
-            "description": "Not a project member"
+            "description": "Not a project member, or project.assignee.read is missing"
           },
           "404": {
             "description": "Project not found"
@@ -2508,6 +2529,9 @@
           },
           "400": {
             "description": "Invalid request data"
+          },
+          "403": {
+            "description": "ticket.create is missing"
           },
           "404": {
             "description": "Project not found"
@@ -2627,6 +2651,9 @@
           "400": {
             "description": "Invalid filter or paging parameter"
           },
+          "403": {
+            "description": "ticket.read is missing"
+          },
           "404": {
             "description": "Project not found"
           }
@@ -2673,6 +2700,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "ticket.read is missing"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -2733,7 +2763,7 @@
             "description": "Invalid request data"
           },
           "403": {
-            "description": "Project role lacks UPDATE Ticket"
+            "description": "The caller holds neither ticket.update nor the edge key of the requested status"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -2781,7 +2811,7 @@
             }
           },
           "403": {
-            "description": "Project ADMIN or global ADMIN required"
+            "description": "ticket.delete is missing"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -2792,7 +2822,7 @@
             "bearer": []
           }
         ],
-        "summary": "Soft delete a ticket (admin only)",
+        "summary": "Soft delete a ticket",
         "tags": [
           "tickets"
         ]
@@ -2842,6 +2872,9 @@
           },
           "400": {
             "description": "Cannot assign to both user and agent"
+          },
+          "403": {
+            "description": "ticket.assign is missing"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -2903,6 +2936,9 @@
           "400": {
             "description": "Invalid transition"
           },
+          "403": {
+            "description": "ticket.transition.verify, or the edge key of the ticket's status, is missing"
+          },
           "404": {
             "description": "Ticket or project not found"
           }
@@ -2952,6 +2988,9 @@
           },
           "400": {
             "description": "Invalid transition"
+          },
+          "403": {
+            "description": "ticket.transition.start, or the edge key of the ticket's status, is missing"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -3012,6 +3051,9 @@
           },
           "400": {
             "description": "Invalid transition"
+          },
+          "403": {
+            "description": "ticket.transition.fix, or the edge key of the ticket's status, is missing"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -3082,6 +3124,9 @@
           "400": {
             "description": "Invalid transition"
           },
+          "403": {
+            "description": "Neither ticket.transition.verify-fix key, or the edge key, is held"
+          },
           "404": {
             "description": "Ticket or project not found"
           }
@@ -3143,7 +3188,7 @@
             "description": "Invalid transition or blank reason"
           },
           "403": {
-            "description": "Global ADMIN or project ADMIN required"
+            "description": "ticket.transition.close is missing"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -3154,7 +3199,7 @@
             "bearer": []
           }
         ],
-        "summary": "Close a ticket (admin override; reason required, written as a GENERAL comment)",
+        "summary": "Close a ticket (reason required, written as a GENERAL comment)",
         "tags": [
           "tickets"
         ]
@@ -3204,6 +3249,9 @@
           },
           "400": {
             "description": "Invalid transition"
+          },
+          "403": {
+            "description": "ticket.transition.reject, or the edge key of the ticket's status, is missing"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -3916,7 +3964,7 @@
             "description": "Invalid URL"
           },
           "403": {
-            "description": "Not a project member"
+            "description": "Not a project member, or ticket.link.add is missing"
           },
           "404": {
             "description": "Ticket not found"
@@ -3967,7 +4015,7 @@
             }
           },
           "403": {
-            "description": "Not a project member"
+            "description": "Not a project member, or ticket.link.read is missing"
           },
           "404": {
             "description": "Ticket not found"
@@ -4018,7 +4066,7 @@
             "description": "Link deleted"
           },
           "403": {
-            "description": "Not a project member"
+            "description": "Not a project member, or ticket.link.remove is missing (or it is someone else's link and only .own is held)"
           },
           "404": {
             "description": "Link not found"
@@ -4073,6 +4121,9 @@
           "400": {
             "description": "Invalid request data"
           },
+          "403": {
+            "description": "comment.create is missing"
+          },
           "404": {
             "description": "Project or ticket not found"
           }
@@ -4110,6 +4161,9 @@
         "responses": {
           "200": {
             "description": "List of comments"
+          },
+          "403": {
+            "description": "comment.read is missing"
           },
           "404": {
             "description": "Project or ticket not found"
@@ -4154,7 +4208,7 @@
             "description": "Comment updated"
           },
           "403": {
-            "description": "Not authorized to edit this comment"
+            "description": "comment.update is missing, or the comment is someone else's and only comment.update.own is held"
           },
           "404": {
             "description": "Comment not found"
@@ -4187,7 +4241,7 @@
             "description": "Comment deleted"
           },
           "403": {
-            "description": "Not authorized to delete this comment"
+            "description": "comment.delete is missing, or the comment is someone else's and only comment.delete.own is held"
           },
           "404": {
             "description": "Comment not found"
@@ -4235,7 +4289,7 @@
             "description": "Invalid request data"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "label.create is missing"
           },
           "404": {
             "description": "Project not found"
@@ -4266,6 +4320,9 @@
         "responses": {
           "200": {
             "description": "List of labels"
+          },
+          "403": {
+            "description": "label.read is missing"
           },
           "404": {
             "description": "Project not found"
@@ -4321,7 +4378,7 @@
             "description": "Invalid request data"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "label.update is missing"
           },
           "404": {
             "description": "Label or project not found"
@@ -4362,7 +4419,7 @@
             "description": "Label deleted"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "label.delete is missing"
           },
           "404": {
             "description": "Label or project not found"
@@ -4418,7 +4475,7 @@
             "description": "Invalid request data or label already assigned"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "ticket.label.assign is missing"
           },
           "404": {
             "description": "Ticket or label not found"
@@ -4469,7 +4526,7 @@
             "description": "Label removed from ticket"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "ticket.label.remove is missing"
           },
           "404": {
             "description": "Ticket or label assignment not found"
@@ -4638,7 +4695,7 @@
             "description": "Unknown status"
           },
           "403": {
-            "description": "Forbidden - requires admin role"
+            "description": "Forbidden - outbox.read is missing"
           }
         },
         "security": [
@@ -4670,7 +4727,7 @@
             "description": "Event reset to pending"
           },
           "403": {
-            "description": "Forbidden - requires admin role"
+            "description": "Forbidden - outbox.retry is missing"
           },
           "404": {
             "description": "Event not found"
@@ -4933,6 +4990,9 @@
               }
             }
           },
+          "403": {
+            "description": "ticket.watch.read is missing, or the caller is not a user"
+          },
           "404": {
             "description": "Ticket not found"
           }
@@ -4980,6 +5040,9 @@
               }
             }
           },
+          "403": {
+            "description": "ticket.watch.set is missing, or the caller is not a user"
+          },
           "404": {
             "description": "Ticket not found"
           }
@@ -5024,6 +5087,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "ticket.watch.unset is missing, or the caller is not a user"
           },
           "404": {
             "description": "Ticket not found"
@@ -10614,6 +10680,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Agents have no home dashboard"
           }
         },
         "security": [
@@ -10655,7 +10724,7 @@
             }
           },
           "403": {
-            "description": "Project admin role required"
+            "description": "Not a project member, or invite.read is missing"
           },
           "404": {
             "description": "Project not found"
@@ -10666,7 +10735,7 @@
             "bearer": []
           }
         ],
-        "summary": "List project invites (project admin)",
+        "summary": "List project invites (invite.read)",
         "tags": [
           "projects"
         ]
@@ -10713,7 +10782,7 @@
             }
           },
           "403": {
-            "description": "Project admin role required"
+            "description": "Not a project member, or invite.create is missing"
           },
           "404": {
             "description": "Project not found"
@@ -10727,7 +10796,7 @@
             "bearer": []
           }
         ],
-        "summary": "Add an existing user or invite a new address (project admin)",
+        "summary": "Add an existing user or invite a new address (invite.create)",
         "tags": [
           "projects"
         ]
@@ -10774,7 +10843,7 @@
             }
           },
           "403": {
-            "description": "Project admin role required"
+            "description": "Not a project member, or invite.resend is missing"
           },
           "404": {
             "description": "Project or invite not found"
@@ -10788,7 +10857,7 @@
             "bearer": []
           }
         ],
-        "summary": "Rotate a pending invite token and resend the invite email (project admin)",
+        "summary": "Rotate a pending invite token and resend the invite email (invite.resend)",
         "tags": [
           "projects"
         ]
@@ -10820,7 +10889,7 @@
             "description": "Invite cancelled"
           },
           "403": {
-            "description": "Project admin role required"
+            "description": "Not a project member, or invite.cancel is missing"
           },
           "404": {
             "description": "Project or invite not found"
@@ -10834,7 +10903,7 @@
             "bearer": []
           }
         ],
-        "summary": "Cancel a pending invite (project admin)",
+        "summary": "Cancel a pending invite (invite.cancel)",
         "tags": [
           "projects"
         ]

@@ -1,9 +1,25 @@
+import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { TicketLinksService } from './ticket-links.service';
 import { CreateTicketLinkDto } from './dto/create-ticket-link.dto';
 import { TicketLinkDomain } from './domain/ticket-link.domain';
+import type { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
+import type { PermissionService } from '../permissions/permission.service';
+
+const userPrincipal: UserPrincipal = {
+  actorType: 'user',
+  id: 'user-1',
+  name: undefined,
+  role: 'MEMBER',
+  email: 'dev@example.com',
+  blacklisted: false,
+  revoked: false,
+  authorities: [],
+};
 
 describe('TicketLinksService', () => {
   let service: TicketLinksService;
+
+  const mockPermissions = { can: vi.fn() };
 
   const mockLink: TicketLinkDomain = {
     id: 'link-123',
@@ -17,6 +33,8 @@ describe('TicketLinksService', () => {
     linkType: 'url',
     source: 'vcs',
     jobId: null,
+    createdByUserId: null,
+    createdByAgentId: null,
     createdAt: new Date(),
   };
 
@@ -33,8 +51,34 @@ describe('TicketLinksService', () => {
   };
 
   beforeEach(() => {
-    service = new TicketLinksService(mockTicketLinkRepo as any);
+    service = new TicketLinksService(
+      mockTicketLinkRepo as unknown as ConstructorParameters<typeof TicketLinksService>[0],
+      mockPermissions as unknown as PermissionService,
+    );
+    mockPermissions.can.mockResolvedValue({ allowed: true, reason: 'granted' });
   });
+
+  /**
+   * The response DTO shape, unchanged by US-006: `createdByUserId` / `createdByAgentId` are internal
+   * and must not appear in the API response.
+   */
+  const expectLinkDto = (actual: unknown, link: TicketLinkDomain, title: string | null = null): void => {
+    expect(actual).toEqual({
+      id: link.id,
+      ticketId: link.ticketId,
+      url: link.url,
+      provider: link.provider,
+      externalRef: link.externalRef,
+      prState: link.prState,
+      prNumber: link.prNumber,
+      prUpdatedAt: link.prUpdatedAt,
+      linkType: link.linkType,
+      source: link.source,
+      jobId: link.jobId,
+      title,
+      createdAt: link.createdAt,
+    });
+  };
 
   afterEach(() => {
     vi.clearAllMocks();
@@ -94,10 +138,7 @@ describe('TicketLinksService', () => {
       const result = await service.create('koda', 'KODA-1', dto);
 
       expect(result.status).toBe(200);
-      expect(result.link).toEqual({
-        ...mockLink,
-        title: null,
-      });
+      expectLinkDto(result.link, mockLink);
       expect(mockTicketLinkRepo.createLink).not.toHaveBeenCalled();
     });
 
@@ -170,14 +211,8 @@ describe('TicketLinksService', () => {
       const result = await service.findByTicket('koda', 'KODA-1');
 
       expect(result).toHaveLength(2);
-      expect(result[0]).toEqual({
-        ...mockLink,
-        title: null,
-      });
-      expect(result[1]).toEqual({
-        ...secondLink,
-        title: null,
-      });
+      expectLinkDto(result[0], mockLink);
+      expectLinkDto(result[1], secondLink);
     });
 
     it('returns an empty array when ticket has no links', async () => {
@@ -218,16 +253,120 @@ describe('TicketLinksService', () => {
     });
   });
 
+  // US-006: the optional creator is written when the caller is known and left null when it is not
+  // (the assistant link tool calls `create` without one).
+  describe('creator recording', () => {
+    const dto: CreateTicketLinkDto = { url: 'https://github.com/owner/repo/pull/1' };
+
+    beforeEach(() => {
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinkByUrl.mockResolvedValue(null);
+      mockTicketLinkRepo.createLink.mockResolvedValue(mockLink);
+    });
+
+    it('records a USER creator as createdByUserId', async () => {
+      await service.create('koda', 'KODA-1', dto, { type: 'USER', id: 'user-1' });
+
+      expect(mockTicketLinkRepo.createLink).toHaveBeenCalledWith(
+        expect.objectContaining({ createdByUserId: 'user-1', createdByAgentId: null }),
+      );
+    });
+
+    it('records an AGENT creator as createdByAgentId', async () => {
+      await service.create('koda', 'KODA-1', dto, { type: 'AGENT', id: 'agent-1' });
+
+      expect(mockTicketLinkRepo.createLink).toHaveBeenCalledWith(
+        expect.objectContaining({ createdByUserId: null, createdByAgentId: 'agent-1' }),
+      );
+    });
+
+    it('records no creator when the caller passes none', async () => {
+      await service.create('koda', 'KODA-1', dto);
+
+      expect(mockTicketLinkRepo.createLink).toHaveBeenCalledWith(
+        expect.objectContaining({ createdByUserId: null, createdByAgentId: null }),
+      );
+    });
+
+    it('does not touch an existing link, so its original creator is preserved', async () => {
+      mockTicketLinkRepo.findLinkByUrl.mockResolvedValue({ ...mockLink, createdByUserId: 'user-1' });
+
+      const result = await service.create('koda', 'KODA-1', dto, { type: 'USER', id: 'user-2' });
+
+      expect(result.status).toBe(200);
+      expect(mockTicketLinkRepo.createLink).not.toHaveBeenCalled();
+    });
+
+    it('does not expose the creator in the response, which is unchanged', async () => {
+      const result = await service.create('koda', 'KODA-1', dto, { type: 'USER', id: 'user-1' });
+
+      expect(result.link).not.toHaveProperty('createdByUserId');
+      expect(result.link).not.toHaveProperty('createdByAgentId');
+      expectLinkDto(result.link, mockLink);
+    });
+  });
+
   describe('remove', () => {
+    const principal: KodaPrincipal = userPrincipal;
+
     it('deletes a link by id when it belongs to the ticket', async () => {
       mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
       mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
       mockTicketLinkRepo.findLinkByIdAndTicket.mockResolvedValue(mockLink);
       mockTicketLinkRepo.deleteLink.mockResolvedValue(undefined);
 
-      await service.remove('koda', 'KODA-1', 'link-123');
+      await service.remove('koda', 'KODA-1', 'link-123', principal);
 
       expect(mockTicketLinkRepo.deleteLink).toHaveBeenCalledWith('link-123');
+    });
+
+    // US-006: the row-level half of the check — the route declares
+    // `ticket.link.remove` with enforcedBy 'service', so the creator is compared here.
+    it('checks ticket.link.remove against the project and the link creator', async () => {
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinkByIdAndTicket.mockResolvedValue({
+        ...mockLink,
+        createdByUserId: 'user-1',
+      });
+      mockTicketLinkRepo.deleteLink.mockResolvedValue(undefined);
+
+      await service.remove('koda', 'KODA-1', 'link-123', principal);
+
+      expect(mockPermissions.can).toHaveBeenCalledWith(principal, 'ticket.link.remove', {
+        projectId: 'proj-123',
+        resource: { createdBy: { type: 'USER', id: 'user-1' } },
+      });
+    });
+
+    it('refuses with a permissions 403 and does not delete when the key is denied', async () => {
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinkByIdAndTicket.mockResolvedValue({
+        ...mockLink,
+        createdByUserId: 'someone-else',
+      });
+      mockPermissions.can.mockResolvedValue({ allowed: false, reason: 'not-owner' });
+
+      const failure = service.remove('koda', 'KODA-1', 'link-123', principal);
+
+      await expect(failure).rejects.toBeInstanceOf(ForbiddenAppException);
+      await expect(failure).rejects.toMatchObject({ code: 40003, prefix: 'permissions' });
+      expect(mockTicketLinkRepo.deleteLink).not.toHaveBeenCalled();
+    });
+
+    it('passes a null creator for a creatorless link so only the full key can remove it', async () => {
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinkByIdAndTicket.mockResolvedValue(mockLink);
+
+      await service.remove('koda', 'KODA-1', 'link-123', principal);
+
+      expect(mockPermissions.can).toHaveBeenCalledWith(principal, 'ticket.link.remove', {
+        projectId: 'proj-123',
+        resource: { createdBy: null },
+      });
     });
 
     it('throws NotFoundException when linkId does not exist on that ticket', async () => {
@@ -236,8 +375,11 @@ describe('TicketLinksService', () => {
       mockTicketLinkRepo.findLinkByIdAndTicket.mockResolvedValue(null);
 
       await expect(
-        service.remove('koda', 'KODA-1', 'nonexistent-link'),
+        service.remove('koda', 'KODA-1', 'nonexistent-link', principal),
       ).rejects.toThrow();
+
+      // The lookup comes first: an unknown link is a 404, never a 403.
+      expect(mockPermissions.can).not.toHaveBeenCalled();
     });
 
     it('does not delete when link belongs to a different ticket', async () => {
@@ -247,7 +389,7 @@ describe('TicketLinksService', () => {
       mockTicketLinkRepo.findLinkByIdAndTicket.mockResolvedValue(null);
 
       await expect(
-        service.remove('koda', 'KODA-1', 'link-other-ticket'),
+        service.remove('koda', 'KODA-1', 'link-other-ticket', principal),
       ).rejects.toThrow();
 
       expect(mockTicketLinkRepo.deleteLink).not.toHaveBeenCalled();
@@ -257,7 +399,7 @@ describe('TicketLinksService', () => {
       mockTicketLinkRepo.findProjectBySlug.mockResolvedValue(null);
 
       await expect(
-        service.remove('nonexistent', 'KODA-1', 'link-123'),
+        service.remove('nonexistent', 'KODA-1', 'link-123', principal),
       ).rejects.toThrow();
     });
 
@@ -266,7 +408,7 @@ describe('TicketLinksService', () => {
       mockTicketLinkRepo.findTicketByNumber.mockResolvedValue(null);
 
       await expect(
-        service.remove('koda', 'KODA-999', 'link-123'),
+        service.remove('koda', 'KODA-999', 'link-123', principal),
       ).rejects.toThrow();
     });
   });
@@ -300,7 +442,7 @@ describe('TicketLinksService', () => {
       mockTicketLinkRepo.findLinkByIdAndTicket.mockResolvedValue(mockLink);
       mockTicketLinkRepo.deleteLink.mockResolvedValue(undefined);
 
-      await expect(service.remove('koda', 'OTHER-5', 'link-123')).rejects.toThrow();
+      await expect(service.remove('koda', 'OTHER-5', 'link-123', userPrincipal)).rejects.toThrow();
       expect(mockTicketLinkRepo.findLinkByIdAndTicket).not.toHaveBeenCalled();
       expect(mockTicketLinkRepo.deleteLink).not.toHaveBeenCalled();
     });

@@ -3,10 +3,13 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
 import { IS_PUBLIC_KEY } from '@nathapp/nestjs-auth';
+import { PermissionService } from '../permissions/permission.service';
+import { REQUIRES_METADATA } from '../permissions/requires.decorator';
 
 describe('AuthController', () => {
   let controller: AuthController;
   let authService: AuthService;
+  let moduleRef: TestingModule;
 
 const mockUser = {
   id: 'user-123',
@@ -36,17 +39,51 @@ const mockUser = {
   };
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    moduleRef = await Test.createTestingModule({
       controllers: [AuthController],
-      providers: [{ provide: AuthService, useValue: mockAuthService }],
+      providers: [
+        { provide: AuthService, useValue: mockAuthService },
+        // Permissions P1 (US-010): every auth route runs `RequiresGuard`, whose one dependency is
+        // the decision point the global PermissionsModule exports.
+        {
+          provide: PermissionService,
+          useValue: { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) },
+        },
+      ],
     }).compile();
 
-    controller = module.get<AuthController>(AuthController);
-    authService = module.get<AuthService>(AuthService);
+    controller = moduleRef.get<AuthController>(AuthController);
+    authService = moduleRef.get<AuthService>(AuthService);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
+    await moduleRef?.close();
+  });
+
+  describe('US-010 permission keys on the auth routes', () => {
+    it.each([
+      ['register', 'auth.register'],
+      ['registrationStatus', 'auth.registration.read'],
+      ['login', 'session.login'],
+      ['refresh', 'session.refresh'],
+      ['me', 'auth.me.read'],
+      ['logout', 'session.logout'],
+    ] as const)('%s declares @Requires(%s)', (handler, key) => {
+      const fn = (AuthController.prototype as unknown as Record<string, object>)[handler];
+      expect(Reflect.getMetadata(REQUIRES_METADATA, fn)).toEqual({
+        keys: [key],
+        mode: 'all',
+        enforcedBy: 'guard',
+      });
+    });
+
+    it('keeps @Public() on the four session-starting routes', () => {
+      const proto = AuthController.prototype as unknown as Record<string, object>;
+      for (const handler of ['register', 'registrationStatus', 'login', 'refresh']) {
+        expect(Reflect.getMetadata(IS_PUBLIC_KEY, proto[handler])).toBe(true);
+      }
+    });
   });
 
   describe('POST /auth/register', () => {

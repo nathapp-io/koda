@@ -11,6 +11,7 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { MembershipService } from '../permissions/membership.service';
+import { PermissionService } from '../permissions/permission.service';
 import { IAuthConfig } from '../config/auth.config';
 import type { ProjectAgentRecord } from './dto/project-agent.dto';
 
@@ -37,6 +38,12 @@ describe('AgentsService project roster writes (S4c US-003)', () => {
   const authConfig: IAuthConfig = { apiKeySecret: 'test-secret', agentProjectScoping: true } as IAuthConfig;
   const project = { id: 'proj-1', slug: 'alpha', deletedAt: null };
 
+  /** Permissions P1 (US-009): the roster writes never check a key — the route does. */
+  const permissions = {
+    can: vi.fn(async () => ({ allowed: true, reason: 'granted' })),
+    effectiveKeys: vi.fn(async () => new Set<string>()),
+  };
+
   beforeEach(() => {
     repo = {
       findProjectBySlug: vi.fn(),
@@ -60,6 +67,9 @@ describe('AgentsService project roster writes (S4c US-003)', () => {
       authConfig,
       txManager as never,
       membership as unknown as MembershipService,
+      // Permissions P1 (US-009): PermissionService is the required fifth parameter, before the
+      // optional `KodaDomainWriter` / `AgentAuthProvider` seams.
+      permissions as unknown as PermissionService,
     );
   });
 

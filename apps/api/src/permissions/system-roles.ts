@@ -8,6 +8,11 @@ import type { RoleSeed } from './permissions.types';
  *
  * The seeded `agent` role deliberately leaves out the design's `mcp.access`: that key is implicit —
  * every authenticated principal holds it and no role can grant or remove it.
+ *
+ * The six non-admin project roles exclude `project.ci-token.read` and `invite.read` explicitly: both
+ * are project secrets, so `*.read` must not reach them and only `project-admin` holds them (through
+ * `*`). The seeder writes these entries when it creates a role; it never rewrites an unlocked role
+ * that already exists, so an existing installation keeps its stored list until it is reset.
  */
 export const SYSTEM_ROLES: readonly RoleSeed[] = [
   {
@@ -83,6 +88,8 @@ export const SYSTEM_ROLES: readonly RoleSeed[] = [
       'memory.update.own',
       'codeintel.*',
       'context.*',
+      '!project.ci-token.read',
+      '!invite.read',
     ],
   },
   {
@@ -98,6 +105,8 @@ export const SYSTEM_ROLES: readonly RoleSeed[] = [
       'ticket.transition.close',
       'agent.pickup',
       'approval.decide',
+      '!project.ci-token.read',
+      '!invite.read',
     ],
   },
   {
@@ -112,6 +121,8 @@ export const SYSTEM_ROLES: readonly RoleSeed[] = [
       'ticket.transition.verify',
       'ticket.transition.verify-fix.*',
       'agent.pickup',
+      '!project.ci-token.read',
+      '!invite.read',
     ],
   },
   {
@@ -130,13 +141,15 @@ export const SYSTEM_ROLES: readonly RoleSeed[] = [
       'ticket.label.*',
       'label.create',
       'agent.pickup',
+      '!project.ci-token.read',
+      '!invite.read',
     ],
   },
   {
     key: 'approver',
     name: 'Approver',
     scope: 'PROJECT',
-    permissions: ['*.read', 'approval.decide'],
+    permissions: ['*.read', 'approval.decide', '!project.ci-token.read', '!invite.read'],
   },
   {
     key: 'viewer',
@@ -148,6 +161,8 @@ export const SYSTEM_ROLES: readonly RoleSeed[] = [
       'comment.update.own',
       'comment.delete.own',
       'ticket.watch.*',
+      '!project.ci-token.read',
+      '!invite.read',
     ],
   },
 ];

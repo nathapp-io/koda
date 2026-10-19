@@ -1,11 +1,18 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
-import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { PermissionService } from '../permissions/permission.service';
+import { ForbiddenAppException } from '@nathapp/nestjs-common';
 
 describe('AgentsController', () => {
   let controller: AgentsController;
   let service: AgentsService;
+
+  /** Permissions P1 (US-009): `RequiresGuard` on the controller needs the one decision point. */
+  const mockPermissions = {
+    can: vi.fn(async () => ({ allowed: true, reason: 'granted' })),
+    effectiveKeys: vi.fn(async () => new Set<string>(['agent.pickup'])),
+  };
 
   const mockAdminUser = {
     actorType: 'user' as const,
@@ -76,7 +83,10 @@ describe('AgentsController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AgentsController],
-      providers: [{ provide: AgentsService, useValue: mockAgentsService }],
+      providers: [
+        { provide: AgentsService, useValue: mockAgentsService },
+        { provide: PermissionService, useValue: mockPermissions },
+      ],
     }).compile();
 
     controller = module.get<AgentsController>(AgentsController);
@@ -300,9 +310,11 @@ describe('AgentsController', () => {
       expect((result as any).apiKeyHash).not.toMatch(/^[a-f0-9]{64}$/);
     });
 
-    it('should return 404 when non-agent user calls getMe (authorization at guard level)', async () => {
-      mockAgentsService.findMe.mockRejectedValue(new NotFoundAppException({}, 'agents'));
-      await expect(controller.getMe(mockMemberUser)).rejects.toThrow();
+    it('refuses a non-agent principal with 403 agents before the service is asked (US-009)', async () => {
+      // `agent.self.read` is implicit, so the agents-only rule is the controller's: it answers the
+      // `agents` refusal the old AgentScope gate stood for, and never reaches `findMe` with a user id.
+      await expect(controller.getMe(mockMemberUser)).rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(service.findMe).not.toHaveBeenCalled();
     });
   });
 

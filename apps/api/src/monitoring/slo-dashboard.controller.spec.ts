@@ -1,4 +1,5 @@
 import type { Mocked } from 'vitest';
+import { REQUIRES_METADATA } from '../permissions/requires.decorator';
 import { SloDashboardController } from './slo-dashboard.controller';
 import { SloDashboardService, SloMetrics } from './slo-dashboard.service';
 
@@ -33,6 +34,16 @@ describe('SloDashboardController', () => {
   });
 
   describe('GET /admin/slos', () => {
+    it('US-010: declares @Requires(admin.slo.read)', () => {
+      const fn = (SloDashboardController.prototype as unknown as Record<string, object>)['getSloMetrics'];
+
+      expect(Reflect.getMetadata(REQUIRES_METADATA, fn)).toEqual({
+        keys: ['admin.slo.read'],
+        mode: 'all',
+        enforcedBy: 'guard',
+      });
+    });
+
     // AC-7: GET /admin/slos?from=X&to=Y returns the full SloMetrics object as JSON
     it('calls getSloMetrics with parsed from/to dates and returns full SloMetrics', async () => {
       service.getSloMetrics.mockResolvedValue(sampleMetrics);

@@ -6,6 +6,8 @@ import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
 import { KodaAction } from '../../auth/casl/koda-action.enum';
 import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
 import { validateTransition } from './ticket-transitions';
+import { transitionKeyFor } from './transition-keys';
+import { PermissionService } from '../../permissions/permission.service';
 import { RagService } from '../../rag/rag.service';
 import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
 import { VcsConnectionService } from '../../vcs/vcs-connection.service';
@@ -60,6 +62,29 @@ export interface TransitionResultWithoutComment {
 
 export type TransitionResult = TransitionResultWithComment | TransitionResultWithoutComment;
 
+/**
+ * Permissions P1 (whole-branch fix B3): the field writes a `PATCH /projects/:slug/tickets/:ref` sends
+ * alongside a `status`.
+ *
+ * They run inside the transition's own transaction, after the conditional status write, so the PATCH is
+ * one operation: a refused edge key, a validation failure or a lost status race rolls the fields — and
+ * the events they recorded — back with everything else, and a caller never sees a 403 or 409 that
+ * nevertheless kept the new title.
+ *
+ * `previous` is the ticket as the transition loaded it, before any write of this call (the mention
+ * diff needs the earlier description). The returned row is the ticket after the field write and becomes
+ * the response body; a patch that returns nothing answers the row of the status write.
+ */
+export interface TransitionFieldPatchContext {
+  ticketId: string;
+  projectId: string;
+  previous: TransitionTicketShape;
+}
+
+export type TransitionFieldPatch = (
+  context: TransitionFieldPatchContext,
+) => Promise<TransitionTicketShape | undefined>;
+
 @Injectable()
 export class TicketTransitionsService {
   private readonly logger = new Logger(TicketTransitionsService.name);
@@ -67,6 +92,9 @@ export class TicketTransitionsService {
   constructor(
     @Inject(TICKET_REPOSITORY) private readonly ticketRepo: ITicketRepository,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    // Permissions P1 (US-003): the edge check's one decision point. Required: no transition route is
+    // authorized without it, and an optional dependency here would silently skip the check.
+    private readonly permissions: PermissionService,
     @Optional() private readonly ragService?: RagService,
     @Optional() private readonly webhookDispatcher?: WebhookDispatcherService,
     @Optional() private readonly vcsConnectionService?: VcsConnectionService,
@@ -77,9 +105,9 @@ export class TicketTransitionsService {
     // service positionally keep working; emission is skipped when absent.
     @Optional() private readonly ticketEventService?: TicketEventService,
     @Optional() private readonly outboxService?: NathappOutboxService,
-    // M2 fix: evaluates the TRANSITION permission for the PATCH status-delegation
-    // path. Optional only so legacy test harnesses can construct the service;
-    // executeTransitionPublic fails closed when it is absent.
+    // Legacy CASL check kept for `assertTransitionPermission` (the assistant's update-ticket
+    // preview). Optional only so legacy test harnesses can construct the service; that method fails
+    // closed when it is absent.
     @Optional() private readonly caslAbilityFactory?: KodaCaslAbilityFactory,
   ) {}
 
@@ -501,19 +529,60 @@ export class TicketTransitionsService {
   }
 
   /**
-   * Final-review Finding B: exposes the TRANSITION permission check from
-   * executeTransitionPublic so callers that combine field writes with a status
-   * change (PATCH {status, title}) can verify permission BEFORE applying the
-   * field writes — a caller with UPDATE but no TRANSITION then gets a clean
-   * 403 instead of a partial write followed by 403.
-   *
-   * Same CASL logic executeTransitionPublic itself uses (single source of
-   * truth); executeTransitionPublic calls this method, so there is no
-   * duplication and no double DB work (the ability build is the only cost and
-   * it is per-call anyway).
+   * Permissions P1 (US-003): the edge check. The caller must hold the key of the edge that leads
+   * from the ticket's *current* status to `toStatus` — the route key only says the caller may make
+   * that kind of move, this says the ticket's state allows it for them. A pair with no key is not an
+   * edge (or the unreachable IN_PROGRESS -> VERIFIED rule), so nothing is checked and
+   * `validateTransition` answers for it.
+   */
+  private async assertEdgeAllowed(
+    projectId: string,
+    fromStatus: TicketStatus,
+    toStatus: TicketStatus,
+    principal: KodaPrincipal,
+  ): Promise<void> {
+    const key = transitionKeyFor(fromStatus, toStatus);
+    if (key === undefined) return;
+    const decision = await this.permissions.can(principal, key, { projectId });
+    if (!decision.allowed) {
+      throw new ForbiddenAppException({}, 'permissions');
+    }
+  }
+
+  /**
+   * Permissions P1 (US-003): the edge check for `PATCH /projects/:slug/tickets/:ref` with a
+   * `status`. It loads the project and the ticket (the 404s) and applies the same edge check as a
+   * transition, without validating the transition — so a refused edge still writes no field.
+   */
+  async assertTransitionAllowed(
+    projectSlug: string,
+    ref: string,
+    toStatus: TicketStatus,
+    principal: KodaPrincipal,
+  ): Promise<void> {
+    const project = await this.ticketRepo.findProjectBySlug(projectSlug);
+    if (!project || project.deletedAt) {
+      throw new NotFoundAppException({}, 'tickets');
+    }
+
+    const ticket = await this.findTicketByRef(projectSlug, ref);
+    if (!ticket) {
+      throw new NotFoundAppException({}, 'tickets');
+    }
+
+    await this.assertEdgeAllowed(project.id, ticket.status as TicketStatus, toStatus, principal);
+  }
+
+  /**
+   * Final-review Finding B (kept until permissions-p1-cleanup): the legacy CASL
+   * `TRANSITION` check, used by the assistant's `koda_update_ticket` preview so
+   * the user is told a status change is forbidden before approving it. The
+   * routes themselves no longer come through here: Permissions P1 (US-003)
+   * replaced it with the edge keys (`assertEdgeAllowed`), and the PATCH route's
+   * route key (`ticket.update`) is checked by `RequiresGuard`.
    *
    * Fails closed: without the ability factory there is no way to verify
-   * TRANSITION, and the PATCH route only proves UPDATE.
+   * TRANSITION.
    */
   async assertTransitionPermission(principal: KodaPrincipal): Promise<void> {
     if (!this.caslAbilityFactory) {
@@ -527,28 +596,27 @@ export class TicketTransitionsService {
 
   /**
    * M2: public entry for status changes routed from PATCH /projects/:slug/tickets/:ref.
-   * Runs the full transition pipeline (TRANSITION state-machine validation,
-   * conditional status write, activity row, webhook dispatch) instead of the
-   * direct `status` write the PATCH route used before.
+   * Runs the full transition pipeline (state-machine validation, conditional
+   * status write, activity row, webhook dispatch) instead of the direct `status`
+   * write the PATCH route used before.
    *
-   * M2 permission fix: the PATCH route only enforces UPDATE on Ticket, so the
-   * TRANSITION check is enforced here — this method is the only caller path
-   * that lacks decorator-level TRANSITION enforcement (the dedicated
-   * verify/start/fix/verify-fix/close/reject routes carry their own
-   * @RequiredPermission([TRANSITION, 'Ticket']) and never go through this
-   * wrapper). Mirrors DefaultPermissionProvider's evaluation of
-   * @RequiredPermission: build the CASL ability for the principal and check
-   * `can(TRANSITION, 'Ticket')`; failure throws the same 403-class
-   * ForbiddenAppException the permission guard raises.
+   * Permissions P1 (US-003): authorization for this caller path is the route's
+   * `@Requires('ticket.update')` plus the current-status edge key that
+   * `executeTransitionInternal` checks before validating or writing anything.
+   *
+   * Whole-branch fix B3: `fields` carries the PATCH's other field writes into that same transaction, so
+   * the status and the fields commit or roll back together.
    */
   async executeTransitionPublic(
     projectSlug: string,
     ticketRef: string,
     toStatus: TicketStatus,
     principal: KodaPrincipal,
+    fields?: TransitionFieldPatch,
   ): Promise<TransitionResult> {
-    await this.assertTransitionPermission(principal);
-    return this.executeTransitionInternal(projectSlug, ticketRef, toStatus, undefined, undefined, principal);
+    // Permissions P1 (US-003): no route key check here — the route declares its own key and
+    // `executeTransitionInternal` checks the ticket's current-status edge, for every caller.
+    return this.executeTransitionInternal(projectSlug, ticketRef, toStatus, undefined, undefined, principal, fields);
   }
 
   /**
@@ -561,6 +629,7 @@ export class TicketTransitionsService {
     commentType: CommentType | undefined,
     commentBody: string | undefined,
     principal: KodaPrincipal,
+    fields?: TransitionFieldPatch,
   ): Promise<TransitionResult> {
     const project = await this.ticketRepo.findProjectBySlug(projectSlug);
     if (!project || project.deletedAt) {
@@ -571,6 +640,10 @@ export class TicketTransitionsService {
     if (!ticket) {
       throw new NotFoundAppException({}, 'tickets');
     }
+
+    // Permissions P1 (US-003): the edge check, before validation and before any write, so a refused
+    // edge leaves no comment, no activity row and no status change behind.
+    await this.assertEdgeAllowed(project.id, ticket.status as TicketStatus, toStatus, principal);
 
     validateTransition(ticket.status as TicketStatus, toStatus, commentType);
 
@@ -602,6 +675,17 @@ export class TicketTransitionsService {
         throw new HttpException('Ticket state changed concurrently', HttpStatus.CONFLICT);
       }
 
+      // Whole-branch fix B3: the PATCH's field writes belong to this transaction and come after the
+      // conditional status write, so a lost status race has already thrown and nothing is left behind.
+      const patched = fields
+        ? await fields({
+            ticketId: ticket.id,
+            projectId: project.id,
+            previous: ticket as unknown as TransitionTicketShape,
+          })
+        : undefined;
+      const responseTicket = patched ?? (updatedTicket as unknown as TransitionTicketShape);
+
       const activity = await repo.createTicketActivity({
         ticketId: ticket.id,
         action: ActivityType.STATUS_CHANGE,
@@ -615,14 +699,14 @@ export class TicketTransitionsService {
 
       if (comment) {
         return {
-          ticket: updatedTicket as unknown as TransitionTicketShape,
+          ticket: responseTicket,
           comment: comment as unknown as TransitionCommentShape,
           activity: activity as unknown as TransitionActivityShape,
         } satisfies TransitionResultWithComment;
       }
 
       return {
-        ticket: updatedTicket as unknown as TransitionTicketShape,
+        ticket: responseTicket,
         activity: activity as unknown as TransitionActivityShape,
       } satisfies TransitionResultWithoutComment;
     });

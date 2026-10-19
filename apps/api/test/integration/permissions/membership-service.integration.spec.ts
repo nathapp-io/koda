@@ -266,6 +266,7 @@ describeIntegration('MembershipService (PG)', () => {
           new PrismaRoleRepository(tx as never, { client: outside } as never),
           new PrismaRoleBindingRepository(tx as never, { client: outside } as never),
           cache,
+          { agentProjectScoping: true } as never,
         ),
         close: () => outside.$disconnect(),
       };

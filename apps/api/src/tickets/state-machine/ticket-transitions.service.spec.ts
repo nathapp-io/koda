@@ -9,6 +9,7 @@ import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { TICKET_REPOSITORY } from '../domain/ticket.domain';
 import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
+import { PermissionService } from '../../permissions/permission.service';
 import type { AgentPrincipal, KodaPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
 
 vi.mock('../../vcs/factory', () => ({ createVcsProvider: vi.fn() }));
@@ -28,6 +29,8 @@ describe('TicketTransitionsService', () => {
   let mockTicketEventService: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockOutbox: any;
+  /** The edge check's decision point: allowed by default, per-test refusals below. */
+  let mockPermissions: { can: Mock };
 
   const mockProject = {
     id: 'proj-123',
@@ -148,6 +151,7 @@ describe('TicketTransitionsService', () => {
 
     mockTicketEventService = { create: vi.fn().mockResolvedValue({ id: 'ev-1', createdAt: new Date() }) };
     mockOutbox = { record: vi.fn().mockResolvedValue(undefined) };
+    mockPermissions = { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -160,6 +164,10 @@ describe('TicketTransitionsService', () => {
         {
           provide: TRANSACTION_MANAGER,
           useValue: mockTxManager,
+        },
+        {
+          provide: PermissionService,
+          useValue: mockPermissions,
         },
         {
           provide: TicketEventService,
@@ -719,10 +727,10 @@ describe('TicketTransitionsService', () => {
     });
   });
 
-  describe('M2: executeTransitionPublic enforces TRANSITION on Ticket (PATCH permission fix)', () => {
-    // Agent TRIAGER: has UPDATE on Ticket (koda-casl-ability.factory.ts TRIAGER
-    // case) but no TRANSITION — the escalation the M2 delegation would have
-    // allowed when the PATCH route only checks UPDATE.
+  describe('M2: the edge key gates a transition, for every caller path', () => {
+    // Agent TRIAGER: its legacy TRIAGER role holds ticket.transition.verify but not
+    // ticket.transition.start — the escalation the old PATCH delegation allowed when the route
+    // only proved UPDATE on Ticket.
     const makeTriagerAgentPrincipal = (): AgentPrincipal => ({
       id: 'agent-triager',
       sub: 'agent-triager',
@@ -774,20 +782,35 @@ describe('TicketTransitionsService', () => {
       });
     };
 
-    it('M2: principal without TRANSITION (agent TRIAGER, UPDATE-only) is rejected 403 and the transition never runs', async () => {
+    it('M2: a refused edge key is a 403 permissions and nothing is written', async () => {
       mockExecuteTransitionInternalPath();
+      mockPermissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
 
       await expect(
         service.executeTransitionPublic('koda', 'KODA-1', TicketStatus.IN_PROGRESS, makeTriagerAgentPrincipal()),
-      ).rejects.toThrow(ForbiddenAppException);
+      ).rejects.toBeInstanceOf(ForbiddenAppException);
 
-      // The transition pipeline (lookup + conditional write + activity) must not run
-      expect(mockTicketRepo.findProjectBySlug).not.toHaveBeenCalled();
+      // The lookups run (404 precedence), the edge check refuses, and the write pipeline never starts.
+      expect(mockTicketRepo.findProjectBySlug).toHaveBeenCalled();
+      expect(mockTicketRepo.findTicketByRefRaw).toHaveBeenCalled();
       expect(mockTicketRepo.updateTicketStatusIf).not.toHaveBeenCalled();
       expect(mockTicketRepo.createTicketActivity).not.toHaveBeenCalled();
+      expect(mockTicketRepo.createComment).not.toHaveBeenCalled();
     });
 
-    it('M2: ADMIN (MANAGE implies all) passes the TRANSITION check and the transition runs', async () => {
+    it('M2: the edge check asks for the key of the ticket\'s current status, in the ticket\'s project', async () => {
+      mockExecuteTransitionInternalPath();
+
+      await service.executeTransitionPublic('koda', 'KODA-1', TicketStatus.IN_PROGRESS, makeTriagerAgentPrincipal());
+
+      expect(mockPermissions.can).toHaveBeenCalledWith(
+        makeTriagerAgentPrincipal(),
+        'ticket.transition.start',
+        { projectId: mockProject.id },
+      );
+    });
+
+    it('M2: an allowed edge runs the transition', async () => {
       mockExecuteTransitionInternalPath();
 
       const result = await service.executeTransitionPublic(
@@ -805,33 +828,186 @@ describe('TicketTransitionsService', () => {
       );
     });
 
-    it('M2: agent with TRANSITION role (DEVELOPER) passes and the transition runs', async () => {
+    it('M2: a pair with no edge key skips the check and validateTransition answers (400)', async () => {
+      mockPermissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+
+      // CREATED -> CLOSED is not an edge: the refusal of the double must be irrelevant here.
+      await expect(
+        service.executeTransitionPublic('koda', 'KODA-1', TicketStatus.CLOSED, makeDeveloperAgentPrincipal()),
+      ).rejects.toMatchObject({ httpStatus: 400 });
+      expect(mockPermissions.can).not.toHaveBeenCalled();
+      expect(mockTicketRepo.updateTicketStatusIf).not.toHaveBeenCalled();
+    });
+
+    it('M2: the transition methods check the edge too (verify on a VERIFY_FIX ticket needs the approve key)', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue({ ...mockTicket, status: TicketStatus.VERIFY_FIX });
+      mockPermissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
+
+      await expect(service.verify('koda', 'KODA-1', 'lgtm', makeTriagerAgentPrincipal())).rejects.toBeInstanceOf(
+        ForbiddenAppException,
+      );
+
+      expect(mockPermissions.can).toHaveBeenCalledWith(
+        makeTriagerAgentPrincipal(),
+        'ticket.transition.verify-fix.approve',
+        { projectId: mockProject.id },
+      );
+      expect(mockTicketRepo.updateTicketStatusIf).not.toHaveBeenCalled();
+    });
+
+    it('M2: assertTransitionAllowed applies the edge check without validating the transition', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      mockPermissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
+
+      await expect(
+        service.assertTransitionAllowed('koda', 'KODA-1', TicketStatus.IN_PROGRESS, makeTriagerAgentPrincipal()),
+      ).rejects.toBeInstanceOf(ForbiddenAppException);
+
+      // The edge check runs; no transition is executed.
+      expect(mockPermissions.can).toHaveBeenCalledWith(
+        makeTriagerAgentPrincipal(),
+        'ticket.transition.start',
+        { projectId: mockProject.id },
+      );
+      expect(mockTicketRepo.updateTicketStatusIf).not.toHaveBeenCalled();
+    });
+
+    it('M2: assertTransitionAllowed keeps 404 precedence for an unknown project or ticket', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(null);
+
+      await expect(
+        service.assertTransitionAllowed('nope', 'KODA-1', TicketStatus.IN_PROGRESS, makeTriagerAgentPrincipal()),
+      ).rejects.toBeInstanceOf(AppException);
+      expect(mockPermissions.can).not.toHaveBeenCalled();
+
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(null);
+
+      await expect(
+        service.assertTransitionAllowed('koda', 'KODA-999', TicketStatus.IN_PROGRESS, makeTriagerAgentPrincipal()),
+      ).rejects.toBeInstanceOf(AppException);
+      expect(mockPermissions.can).not.toHaveBeenCalled();
+    });
+
+    it('M2: assertTransitionAllowed allows a pair with no edge key (CREATED -> CLOSED)', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      mockPermissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
+
+      await expect(
+        service.assertTransitionAllowed('koda', 'KODA-1', TicketStatus.CLOSED, makeTriagerAgentPrincipal()),
+      ).resolves.toBeUndefined();
+      expect(mockPermissions.can).not.toHaveBeenCalled();
+    });
+
+    // Whole-branch fix B3: the PATCH's field writes run inside the transition transaction.
+    it('B3: runs the field patch inside the transition transaction, after the conditional status write', async () => {
       mockExecuteTransitionInternalPath();
+      const order: string[] = [];
+      mockTicketRepo.updateTicketStatusIf.mockImplementation(async () => {
+        order.push('status');
+        return { ...mockTicket, status: TicketStatus.IN_PROGRESS };
+      });
+      mockTxManager.run.mockImplementation(async (fn: () => Promise<unknown>) => {
+        order.push('tx:start');
+        const value = await fn();
+        order.push('tx:end');
+        return value;
+      });
+      const patched = { ...mockTicket, title: 'Renamed', status: TicketStatus.IN_PROGRESS };
+      const fields = vi.fn(async () => {
+        order.push('fields');
+        return patched;
+      });
 
       const result = await service.executeTransitionPublic(
         'koda',
         'KODA-1',
         TicketStatus.IN_PROGRESS,
-        makeDeveloperAgentPrincipal(),
+        makeAdminUserPrincipal(),
+        fields,
       );
 
-      expect(result.ticket.status).toBe(TicketStatus.IN_PROGRESS);
+      expect(fields).toHaveBeenCalledWith({ ticketId: 'ticket-123', projectId: 'proj-123', previous: mockTicket });
+      expect(order).toEqual(['tx:start', 'status', 'fields', 'tx:end']);
+      // The patched row is the response body, so the PATCH reflects the fields it wrote.
+      expect(result.ticket).toMatchObject({ title: 'Renamed', status: TicketStatus.IN_PROGRESS });
     });
 
-    it('M2: fails closed with 403 when no ability factory is available', async () => {
-      // Service constructed without the optional KodaCaslAbilityFactory — the
-      // PATCH path cannot prove TRANSITION, so it must deny.
-      const bareService = new TicketTransitionsService(
-        mockTicketRepo,
-        mockTxManager,
-      );
-      mockExecuteTransitionInternalPath();
+    it('B3: a lost status race (409) never runs the field patch', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(null);
+      const fields = vi.fn(async () => ({ ...mockTicket, title: 'Renamed' }));
 
       await expect(
-        bareService.executeTransitionPublic('koda', 'KODA-1', TicketStatus.IN_PROGRESS, makeAdminUserPrincipal()),
-      ).rejects.toThrow(ForbiddenAppException);
+        service.executeTransitionPublic('koda', 'KODA-1', TicketStatus.IN_PROGRESS, makeAdminUserPrincipal(), fields),
+      ).rejects.toBeInstanceOf(HttpException);
 
+      expect(fields).not.toHaveBeenCalled();
+      expect(mockTicketRepo.createTicketActivity).not.toHaveBeenCalled();
+    });
+
+    it('B3: a refused edge key never runs the field patch', async () => {
+      mockExecuteTransitionInternalPath();
+      mockPermissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
+      const fields = vi.fn(async () => ({ ...mockTicket, title: 'Renamed' }));
+
+      await expect(
+        service.executeTransitionPublic('koda', 'KODA-1', TicketStatus.IN_PROGRESS, makeTriagerAgentPrincipal(), fields),
+      ).rejects.toBeInstanceOf(ForbiddenAppException);
+
+      expect(fields).not.toHaveBeenCalled();
       expect(mockTicketRepo.updateTicketStatusIf).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('assertTransitionPermission (legacy CASL check, still used by the assistant tool)', () => {
+    const triagerAgent = (): AgentPrincipal => ({
+      id: 'agent-triager',
+      sub: 'agent-triager',
+      actorType: 'agent',
+      slug: 'triager-agent',
+      status: 'ACTIVE',
+      agentRoles: ['TRIAGER'],
+      capabilities: [],
+      blacklisted: false,
+      revoked: false,
+      authorities: ['WORKER'],
+      name: 'Triager Agent',
+    });
+
+    const adminUser = (): UserPrincipal => ({
+      id: 'admin-1',
+      sub: 'admin-1',
+      actorType: 'user',
+      role: 'ADMIN',
+      email: 'admin@example.com',
+      blacklisted: false,
+      revoked: false,
+      authorities: ['ADMIN'],
+      name: 'Admin User',
+    });
+
+    it('refuses 403 for a principal without TRANSITION (agent TRIAGER)', async () => {
+      await expect(service.assertTransitionPermission(triagerAgent())).rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+
+    it('passes for a global ADMIN and for a TRANSITION-holding agent', async () => {
+      const developer: AgentPrincipal = { ...triagerAgent(), id: 'agent-dev', slug: 'developer-agent', agentRoles: ['DEVELOPER'] };
+
+      await expect(service.assertTransitionPermission(adminUser())).resolves.toBeUndefined();
+      await expect(service.assertTransitionPermission(developer)).resolves.toBeUndefined();
+    });
+
+    it('fails closed with 403 when no ability factory is available', async () => {
+      const bareService = new TicketTransitionsService(mockTicketRepo, mockTxManager, mockPermissions as never);
+
+      await expect(bareService.assertTransitionPermission(adminUser())).rejects.toBeInstanceOf(ForbiddenAppException);
     });
   });
 
@@ -916,6 +1092,7 @@ describe('TicketTransitionsService (H13: outbox emission)', () => {
     const service = new TicketTransitionsService(
       ticketRepo as never,
       txManager as never,
+      { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
       undefined,
       webhookDispatcher as never,
       undefined,
@@ -1097,6 +1274,7 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
     const svc = new TicketTransitionsService(
       ticketRepo as never,
       txManager as never,
+      { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
       undefined,
       undefined,
       vcsConnectionService as never,
@@ -1151,6 +1329,7 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
     const svc = new TicketTransitionsService(
       ticketRepo as never,
       txManager as never,
+      { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
       undefined,
       undefined,
       vcsConnectionService as never,

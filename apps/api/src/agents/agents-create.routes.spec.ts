@@ -29,6 +29,7 @@ import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG } from '../config/auth.config';
 import { MembershipService } from '../permissions/membership.service';
+import { PermissionService } from '../permissions/permission.service';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
@@ -241,6 +242,15 @@ describe('POST /api/agents (US-003)', () => {
             jwtRefreshExpiresIn: '7d',
             apiKeySecret: 'test-secret',
             registrationEnabled: false,
+          },
+        },
+        // Permissions P1 (US-009): the guard on POST /agents asks the one decision point; the admin
+        // caller holds `agent.create`.
+        {
+          provide: PermissionService,
+          useValue: {
+            can: vi.fn(async () => ({ allowed: true, reason: 'granted' })),
+            effectiveKeys: vi.fn(async () => new Set<string>()),
           },
         },
         {

@@ -1,29 +1,49 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
 import { LabelsController } from './labels.controller';
 import { LabelsService } from './labels.service';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { LabelResponseDto } from './dto/label-response.dto';
 import { ProjectAccessService } from '../projects/project-access.service';
-import { PERMISSION_KEY, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { PROJECT_PERMISSION_KEY } from '../projects/project-permission.decorator';
-import { KodaAction } from '../auth/casl/koda-action.enum';
+import { PermissionService } from '../permissions/permission.service';
+import { REQUIRES_METADATA, RequiresMetadata } from '../permissions/requires.decorator';
 
-describe('#144 project permissions on label routes', () => {
-  const U = KodaAction.UPDATE as CaslPermissionAction;
+describe('US-005 permission keys on label routes', () => {
   it.each([
-    ['createFromHttp', [CaslPermissionAction.CREATE, 'Label'], false],
-    ['updateFromHttp', [CaslPermissionAction.UPDATE, 'Label'], false],
-    ['deleteFromHttp', [CaslPermissionAction.DELETE, 'Label'], false],
-    ['assignLabelFromHttp', [U, 'Ticket'], true],
-    ['removeLabelFromHttp', [U, 'Ticket'], true],
-  ] as const)('%s carries @ProjectPermission(%j, exemptAgents=%s)', (handler, permission, exemptAgents) => {
+    ['createFromHttp', 'label.create'],
+    ['findByProjectFromHttp', 'label.read'],
+    ['updateFromHttp', 'label.update'],
+    ['deleteFromHttp', 'label.delete'],
+    ['assignLabelFromHttp', 'ticket.label.assign'],
+    ['removeLabelFromHttp', 'ticket.label.remove'],
+  ] as const)('%s declares @Requires(%s)', (handler, key) => {
     const fn = (LabelsController.prototype as unknown as Record<string, object>)[handler];
-    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toEqual({ permission: [...permission], exemptAgents });
+    expect(Reflect.getMetadata(REQUIRES_METADATA, fn)).toEqual({
+      keys: [key],
+      mode: 'all',
+      enforcedBy: 'guard',
+    });
+    // The legacy decorators are gone from the migrated routes, so only one mechanism decides them.
+    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeUndefined();
     expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
   });
 
-  it('findByProjectFromHttp carries no project permission (read is membership only)', () => {
-    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, LabelsController.prototype.findByProjectFromHttp)).toBeUndefined();
+  it.each([
+    'createFromHttp',
+    'findByProjectFromHttp',
+    'updateFromHttp',
+    'deleteFromHttp',
+    'assignLabelFromHttp',
+    'removeLabelFromHttp',
+  ] as const)('%s runs ProjectMembershipGuard before RequiresGuard', (handler) => {
+    const fn = (LabelsController.prototype as unknown as Record<string, object>)[handler];
+    const guards = (Reflect.getMetadata('__guards__', fn) ?? []) as unknown[];
+
+    expect(guards.map((guard) => (guard as { name?: string }).name)).toEqual([
+      'ProjectMembershipGuard',
+      'RequiresGuard',
+    ]);
   });
 });
 
@@ -105,6 +125,9 @@ describe('LabelsController', () => {
         // container even though these tests call the handlers directly, so its
         // ProjectAccessService dependency must resolve.
         { provide: ProjectAccessService, useValue: {} },
+        // US-005: RequiresGuard is instantiated the same way and needs the global
+        // PermissionService; these tests never reach it.
+        { provide: PermissionService, useValue: { can: vi.fn() } },
       ],
     }).compile();
 

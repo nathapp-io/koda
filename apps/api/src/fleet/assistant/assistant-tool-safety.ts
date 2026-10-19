@@ -30,20 +30,44 @@ const BEARER = /\bBearer\s+[^\s,;]+/gi;
 
 /** Step 4: the key names whose values are always secret. */
 const SECRET_KEY = /SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY/i;
-/**
- * One assignment: a `"`-quoted key or a bare `[A-Za-z0-9_.-]+` word, then `:` or `=`. A quoted key is matched up to
- * its next `"` without escape handling, exactly as the value scan used to run: that also finds an assignment written
- * inside an escaped string (`\"apiKey\":\"x\"`), at the cost of reading an escaped quote as the key's close. The pass
- * is a scanner rather than one replace, because a key that is not a secret must not consume its value —
- * `{"config":{"apiKey":"x"}}` still masks the nested `apiKey`. The quotes of a key stay in place.
- */
-const ASSIGNMENT = /("[^"]*"|[A-Za-z0-9_.-]+)(\s*[:=]\s*)/;
-
-/** Step 5: URL userinfo (`scheme://user:pass@host`), which the key/value pass cannot see. */
-const URL_USERINFO = /([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/@\s]+@/g;
 
 /** The characters that end an unquoted value: a whitespace, `,`, `;` or `&` (spec §1 step 4). */
 const VALUE_STOP = /[\s,;&]/;
+/** `\s`, the whitespace a key/value separator allows around its `:` or `=`. */
+const WHITESPACE = /\s/;
+
+/*
+ * The two passes below (steps 4 and 5) are hand-written scanners rather than regular expressions. Each one has to
+ * read its semantic unit — an assignment key, a URL scheme — in full, and a regular expression that does that on a
+ * line-shaped result (one long word run, no separator in sight) is quadratic: the engine retries the unbounded tail
+ * from every start position. Bounding the tail is not the answer either, because a bound truncates the unit and leaks
+ * the credential it names: `TOKEN` + 300 word characters + `=hunter2` is one key whose secret word a 256-character
+ * suffix cannot see, and `a` + 32 digits + `://user:pw@host` is a scheme that a 32-character scheme bound misses
+ * entirely. A scanner reads each run once, from its start, and stays linear without any bound.
+ */
+
+const UPPER_A = 0x41;
+const UPPER_Z = 0x5a;
+const LOWER_A = 0x61;
+const LOWER_Z = 0x7a;
+const DIGIT_0 = 0x30;
+const DIGIT_9 = 0x39;
+const QUOTE = 0x22;
+const UNDERSCORE = 0x5f;
+const DOT = 0x2e;
+const HYPHEN = 0x2d;
+const PLUS = 0x2b;
+
+const isLetter = (code: number): boolean =>
+  (code >= UPPER_A && code <= UPPER_Z) || (code >= LOWER_A && code <= LOWER_Z);
+const isDigit = (code: number): boolean => code >= DIGIT_0 && code <= DIGIT_9;
+/** `[A-Za-z0-9_.-]`: a bare assignment key character. */
+const isKeyChar = (code: number): boolean =>
+  isLetter(code) || isDigit(code) || code === UNDERSCORE || code === DOT || code === HYPHEN;
+/** `[A-Za-z0-9+.-]`: a URL scheme character after its first letter (`RFC 3986`). */
+const isSchemeChar = (code: number): boolean =>
+  isLetter(code) || isDigit(code) || code === PLUS || code === DOT || code === HYPHEN;
+const isSpace = (char: string | undefined): boolean => char !== undefined && WHITESPACE.test(char);
 
 const unquote = (key: string): string => key.replace(/^"|"$/g, '');
 
@@ -105,37 +129,136 @@ function maskValue(value: string): string {
   return value.startsWith('"') ? `"${MASKED}"` : MASKED;
 }
 
+/*
+ * Step 4: every key that names a secret loses its value. One assignment is a `"`-quoted key or a bare
+ * `[A-Za-z0-9_.-]+` word, then `:` or `=` (surrounded by any whitespace). A quoted key is matched up to its next `"`
+ * without escape handling, exactly as the value scan used to run: that also finds an assignment written inside an
+ * escaped string (`\"apiKey\":\"x\"`), at the cost of reading an escaped quote as the key's close. The quotes of a key
+ * stay in place.
+ *
+ * The pass is a scanner rather than one replace, because a key that is not a secret must not consume its value —
+ * `{"config":{"apiKey":"x"}}` still masks the nested `apiKey`.
+ */
+
+/** One assignment found by the scanner: the key `[keyStart, keyEnd)`, then its separator up to `end`. */
+interface Assignment {
+  readonly keyStart: number;
+  readonly keyEnd: number;
+  readonly end: number;
+}
+
+/** The end (exclusive) of the `\s*[:=]\s*` separator at `start`, or `-1` when the text has no separator there. */
+function separatorEnd(text: string, start: number): number {
+  let index = start;
+  while (isSpace(text[index])) index += 1;
+  if (text[index] !== ':' && text[index] !== '=') return -1;
+  index += 1;
+  while (isSpace(text[index])) index += 1;
+  return index;
+}
+
 /**
- * Step 4: every key that names a secret loses its value. The scan moves left to right; after a secret's value has
- * been masked the scan resumes past it, and after any other assignment it resumes right behind the separator, so a
- * value that holds a nested assignment (`{"config":{"apiKey":"x"}}`) is still scanned.
+ * The leftmost assignment at or after `from`, or `null` when the rest of the text holds none. The scan only starts a
+ * bare key at the start of a maximal word run, which is what keeps it linear: a run ends at `:`, `=`, whitespace or a
+ * character outside the key class, so a suffix of it fails for the same reason the whole run does and no match can
+ * begin inside one.
+ */
+function nextAssignment(text: string, from: number): Assignment | null {
+  const length = text.length;
+  let index = from;
+  while (index < length) {
+    let keyEnd = -1;
+    if (text.charCodeAt(index) === QUOTE) {
+      const close = text.indexOf('"', index + 1);
+      if (close !== -1) keyEnd = close + 1;
+    } else if (isKeyChar(text.charCodeAt(index)) && (index === from || !isKeyChar(text.charCodeAt(index - 1)))) {
+      keyEnd = index + 1;
+      while (keyEnd < length && isKeyChar(text.charCodeAt(keyEnd))) keyEnd += 1;
+    }
+    if (keyEnd !== -1) {
+      const end = separatorEnd(text, keyEnd);
+      if (end !== -1) return { keyStart: index, keyEnd, end };
+    }
+    index += 1;
+  }
+  return null;
+}
+
+/**
+ * Step 4 (continued): applies the scan. After a secret's value has been masked the scan resumes past it, and after
+ * any other assignment it resumes right behind the separator, so a value that holds a nested assignment is still
+ * scanned.
  */
 function maskKeyValues(text: string): string {
-  const pattern = new RegExp(ASSIGNMENT.source, 'g');
   let out = '';
   let cursor = 0;
-  let match = pattern.exec(text);
-  while (match !== null) {
-    const start = match.index;
-    if (start < cursor) {
-      pattern.lastIndex = cursor;   // already inside a masked value: never match there again
-    } else {
-      const key = match[1] as string;
-      const separator = match[2] as string;
-      out += text.slice(cursor, start) + key + separator;
-      cursor = start + match[0].length;
-      if (SECRET_KEY.test(unquote(key))) {
-        const end = valueEnd(text, cursor);
-        // A key with no value at all (`password: ` at the end of a line) keeps its text: there is nothing to mask.
-        if (end > cursor) {
-          out += maskValue(text.slice(cursor, end));
-          cursor = end;
-        }
+  let search = 0;
+  let assignment = nextAssignment(text, search);
+  while (assignment !== null) {
+    const { keyStart, keyEnd, end } = assignment;
+    out += text.slice(cursor, keyStart) + text.slice(keyStart, end);
+    cursor = end;
+    search = end;
+    if (SECRET_KEY.test(unquote(text.slice(keyStart, keyEnd)))) {
+      const valueStop = valueEnd(text, cursor);
+      // A key with no value at all (`password: ` at the end of a line) keeps its text: there is nothing to mask.
+      if (valueStop > cursor) {
+        out += maskValue(text.slice(cursor, valueStop));
+        cursor = valueStop;
+        search = valueStop;
       }
     }
-    match = pattern.exec(text);
+    assignment = nextAssignment(text, search);
   }
   return out + text.slice(cursor);
+}
+
+/**
+ * Step 5: URL userinfo (`scheme://user:pass@host`), which the key/value pass cannot see. The scheme is the whole
+ * `[A-Za-z][A-Za-z0-9+.-]*` run before `://`, whatever its length: only the run's first letter can start a match, and
+ * the userinfo scan stops at the first `/`, `@` or whitespace. Every `://` carries its own `/`, so two scans never
+ * read the same stretch of text — the pass is linear without bounding the scheme.
+ */
+function maskUrlUserinfo(text: string): string {
+  const length = text.length;
+  let out = '';
+  let cursor = 0;
+  let index = 0;
+  while (index < length) {
+    if (index > 0 && isSchemeChar(text.charCodeAt(index - 1))) {
+      index += 1;   // already inside a scheme run, which only starts a match at its first character
+      continue;
+    }
+    let runEnd = index;
+    let holdsLetter = false;
+    while (runEnd < length && isSchemeChar(text.charCodeAt(runEnd))) {
+      if (isLetter(text.charCodeAt(runEnd))) holdsLetter = true;
+      runEnd += 1;
+    }
+    if (holdsLetter && text.startsWith('://', runEnd)) {
+      const at = userinfoEnd(text, runEnd + 3);
+      if (at > runEnd + 3) {
+        out += text.slice(cursor, runEnd + 3) + MASKED + '@';
+        cursor = at + 1;
+        index = at + 1;
+        continue;
+      }
+    }
+    index = runEnd > index ? runEnd : index + 1;
+  }
+  return out + text.slice(cursor);
+}
+
+/** The index of the `@` closing the userinfo at `start`, or `-1` when it meets `/`, another `@` or whitespace first. */
+function userinfoEnd(text: string, start: number): number {
+  let index = start;
+  while (index < text.length) {
+    const char = text[index] as string;
+    if (char === '@') return index;
+    if (char === '/' || isSpace(char)) return -1;
+    index += 1;
+  }
+  return -1;
 }
 
 /**
@@ -148,7 +271,7 @@ export function maskSecrets(text: string): string {
   for (const shape of TOKEN_SHAPES) out = out.replace(shape, MASKED);
   out = out.replace(BEARER, `Bearer ${MASKED}`);
   out = maskKeyValues(out);
-  return out.replace(URL_USERINFO, `$1${MASKED}@`);
+  return maskUrlUserinfo(out);
 }
 
 /**

@@ -3,14 +3,16 @@ import { Global, Module } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { ProjectAccessService } from '../project-access.service';
+import { PermissionService } from '../../permissions/permission.service';
 import { PrismaProjectAssigneesRepository } from './prisma-project-assignees.repository';
 import { ProjectAssigneesController } from './project-assignees.controller';
 import { ProjectAssigneesModule } from './project-assignees.module';
 import { ProjectAssigneesService } from './project-assignees.service';
 import { PROJECT_ASSIGNEES_REPOSITORY } from './domain/project-assignee.domain';
 
-// Stand-ins for the global PrismaModule so the REAL module under test compiles
-// without a database. Mirrors src/projects/members/project-members.module.spec.ts.
+// Stand-ins for the global PrismaModule and PermissionsModule so the REAL module
+// under test compiles without a database.
+// Mirrors src/projects/members/project-members.module.spec.ts.
 @Global()
 @Module({
   providers: [
@@ -19,8 +21,10 @@ import { PROJECT_ASSIGNEES_REPOSITORY } from './domain/project-assignee.domain';
       provide: TRANSACTION_MANAGER,
       useValue: { run: <T>(fn: () => Promise<T>) => fn(), getClient: () => ({}), isInTransaction: () => false },
     },
+    // US-007: the route-level RequiresGuard on `project.assignee.read`.
+    { provide: PermissionService, useValue: { can: vi.fn() } },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER],
+  exports: [PrismaService, TRANSACTION_MANAGER, PermissionService],
 })
 class FakeGlobalsModule {}
 

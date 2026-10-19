@@ -122,6 +122,52 @@ describe('maskSecrets (US-001 AC5-AC11)', () => {
     expect(maskSecrets('{"config":{"apiKey":"abc123"}}')).toBe('{"config":{"apiKey":"[masked]"}}');
     expect(maskSecrets('{"servers":["x",{"password":"a"}],"token":"b";c')).toBe('{"servers":["x",{"password":"[masked]"}],"token":"[masked]";c');
   });
+
+  it('masks every pass over a 200 KB token-shaped result in linear time', () => {
+    // Every mask pass starts a run at its first character only, so a long run that never reaches a `:`/`=` or a `://`
+    // cannot be rescanned from every start position: quadratic, this input took ~40 s (the key/value pass) instead of
+    // milliseconds, and the 20 KB case in assistant-action-decisions.spec.ts spent ~400 ms of its 5 s budget here.
+    const text = 'x'.repeat(200_000);
+    expect(maskSecrets(text)).toBe(text);
+    // The same holds for the shapes the scanners skip through: separators that never name a secret, an unterminated
+    // quote, and a scheme whose userinfo never closes.
+    const separators = 'a:'.repeat(50_000);
+    expect(maskSecrets(separators)).toBe(separators);
+    const scheme = `${'a'.repeat(60_000)}://${'x'.repeat(60_000)}`;
+    expect(maskSecrets(scheme)).toBe(scheme);
+    const quotes = (`"${'b'.repeat(300)}`).repeat(200);
+    expect(maskSecrets(quotes)).toBe(quotes);
+  });
+
+  it('B5: masks a credential whose long key name only ends in a secret word', () => {
+    const key = `TOKEN${'x'.repeat(300)}`;
+    const out = maskSecrets(`${key}=hunter2`);
+    expect(out).toBe(`${key}=[masked]`);
+    expect(out).not.toContain('hunter2');
+  });
+
+  it('B5: masks a credential whose long key name only starts with a secret word', () => {
+    const key = `x${'y'.repeat(300)}PASSWORD`;
+    const out = maskSecrets(`{"${key}":"hunter2"}`);
+    expect(out).toBe(`{"${key}":"[masked]"}`);
+    expect(out).not.toContain('hunter2');
+  });
+
+  it('B5: masks the userinfo of a scheme that runs on past any short bound', () => {
+    const scheme = `a${'1'.repeat(32)}`;
+    const out = maskSecrets(`${scheme}://user:hunter2@host/path`);
+    expect(out).toBe(`${scheme}://[masked]@host/path`);
+    expect(out).not.toContain('hunter2');
+  });
+
+  it('B5: masks the userinfo of a long alphabetic scheme', () => {
+    const scheme = 'a'.repeat(200);
+    expect(maskSecrets(`${scheme}://user:pw@host`)).toBe(`${scheme}://[masked]@host`);
+  });
+
+  it('B5: finds a scheme that follows a leading non-letter in its run', () => {
+    expect(maskSecrets('1abc://user:pw@host')).toBe('1abc://[masked]@host');
+  });
 });
 
 describe('fenceData (US-001 AC12-AC13)', () => {

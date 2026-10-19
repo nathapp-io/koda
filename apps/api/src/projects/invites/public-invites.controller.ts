@@ -1,9 +1,11 @@
-import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { Public } from '@nathapp/nestjs-auth';
 import { Throttle } from '@nathapp/nestjs-throttler';
 import { AUTH_LOGIN_LIMIT, AUTH_LOGIN_TTL_MS } from '../../auth/auth-throttle';
+import { Requires } from '../../permissions/requires.decorator';
+import { RequiresGuard } from '../../permissions/requires.guard';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { InvitePreviewDto } from './dto/invite-preview.dto';
 import { AuthResponseDto } from '../../auth/dto/auth-response.dto';
@@ -12,6 +14,9 @@ import { InviteAcceptanceService } from './invite-acceptance.service';
 /**
  * Fleet S4b US-005: the anonymous invite routes. Both are `@Public()` and carry register's
  * brute-force throttle — an unauthenticated visitor may hold nothing but the raw token.
+ *
+ * Permissions P1 (US-010): both declare a public catalog key, so `RequiresGuard` allows a request
+ * with no principal and `@Public()` keeps opting out of the global CombinedAuthGuard.
  */
 @ApiTags('invites')
 @Controller('invites')
@@ -20,6 +25,8 @@ export class PublicInvitesController {
 
   @Get(':token')
   @Public()
+  @UseGuards(RequiresGuard)
+  @Requires('invite.preview')
   @Throttle({ default: { limit: AUTH_LOGIN_LIMIT, ttl: AUTH_LOGIN_TTL_MS } })
   @ApiOperation({ summary: 'Preview an invite token (anonymous)' })
   @ApiResponse({ status: 200, type: InvitePreviewDto })
@@ -31,6 +38,8 @@ export class PublicInvitesController {
   @Post(':token/accept')
   @HttpCode(201)
   @Public()
+  @UseGuards(RequiresGuard)
+  @Requires('invite.accept')
   @Throttle({ default: { limit: AUTH_LOGIN_LIMIT, ttl: AUTH_LOGIN_TTL_MS } })
   @ApiOperation({ summary: 'Accept an invite, creating the account and issuing a session (anonymous)' })
   @ApiResponse({ status: 201, type: AuthResponseDto })

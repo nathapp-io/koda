@@ -4,6 +4,7 @@ import { CacheManager } from '@nathapp/nestjs-cache';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { MembershipService } from '../permissions/membership.service';
+import { PermissionService } from '../permissions/permission.service';
 import { AdminUsersController } from './admin-users.controller';
 import { PrismaUsersRepository } from './prisma-users.repository';
 import { UsersAdminService } from './users-admin.service';
@@ -20,6 +21,12 @@ import { UsersModule } from './users.module';
       useValue: { run: <T>(fn: () => Promise<T>) => fn(), getClient: () => ({}), isInTransaction: () => false },
     },
     { provide: CacheManager, useValue: { get: vi.fn(), invalidate: vi.fn() } },
+    // Permissions P1 (US-010): the admin user routes run `RequiresGuard`, whose one dependency is
+    // the decision point the global PermissionsModule exports.
+    {
+      provide: PermissionService,
+      useValue: { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) },
+    },
     // Permissions P1a (US-004): UsersAdminService injects the permissions module's MembershipService.
     {
       provide: MembershipService,
@@ -31,7 +38,7 @@ import { UsersModule } from './users.module';
       },
     },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, CacheManager, MembershipService],
+  exports: [PrismaService, TRANSACTION_MANAGER, CacheManager, PermissionService, MembershipService],
 })
 class FakeGlobalsModule {}
 

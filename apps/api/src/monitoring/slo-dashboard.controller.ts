@@ -1,22 +1,26 @@
 import { Controller, Get, HttpCode, HttpStatus, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-import { JwtAuthGuard, RequiredPermission } from '@nathapp/nestjs-auth';
+import { JwtAuthGuard } from '@nathapp/nestjs-auth';
 import { JsonResponse } from '@nathapp/nestjs-common';
+import { Requires } from '../permissions/requires.decorator';
+import { RequiresGuard } from '../permissions/requires.guard';
 import { SloDashboardService, SloMetrics } from './slo-dashboard.service';
 
+// Permissions P1 (US-010): the SLO route states its GLOBAL-scope catalog key (a project-admin
+// binding does not satisfy it) and keeps the JwtAuthGuard it already had.
 @ApiTags('admin')
 @ApiBearerAuth()
 @Controller('admin')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RequiresGuard)
 export class SloDashboardController {
   constructor(private readonly sloDashboardService: SloDashboardService) {}
 
   @Get('slos')
   @HttpCode(HttpStatus.OK)
+  @Requires('admin.slo.read')
   @ApiOperation({ summary: 'Get SLO dashboard metrics (default: the last 24 hours)' })
   @ApiResponse({ status: 200, description: 'SLO metrics computed' })
-  @ApiResponse({ status: 403, description: 'Forbidden - requires admin role' })
-  @RequiredPermission('ADMIN')
+  @ApiResponse({ status: 403, description: 'Forbidden - admin.slo.read is missing' })
   async getSloMetrics(
     @Query('from') from?: string,
     @Query('to') to?: string,

@@ -19,10 +19,11 @@ import { TicketEventService } from '../events/ticket-event.service';
 import { buildTicketEventOutboxPayload } from '../events/outbox-envelope.util';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
-import { CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { KodaAction } from '../auth/casl/koda-action.enum';
-import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
-import { allowedActions, canOverrideClose } from './state-machine/allowed-actions';
+import type { TransitionFieldPatch, TransitionTicketShape } from './state-machine/ticket-transitions.service';
+import { PermissionService } from '../permissions/permission.service';
+import { allowedActions, TICKET_ACTIONS } from './state-machine/allowed-actions';
+import type { TicketAction } from './state-machine/allowed-actions';
+import { TICKET_ACTION_KEYS } from './state-machine/transition-keys';
 import { TicketDetailResponseDto } from './dto/ticket-detail-response.dto';
 
 /**
@@ -47,7 +48,9 @@ export class TicketsService {
     private readonly ticketEventService: TicketEventService,
     private readonly outbox: NathappOutboxService,
     private readonly transitionsService: TicketTransitionsService,
-    private readonly caslAbilityFactory: KodaCaslAbilityFactory,
+    // Permissions P1 (US-004): the one decision point for the detail view's `allowedActions`. Required:
+    // a route that cannot name the caller's keys must not answer an empty or guessed action list.
+    private readonly permissions: PermissionService,
   ) {}
 
   /**
@@ -176,27 +179,35 @@ export class TicketsService {
   }
 
   async findByRef(projectSlug: string, ref: string) {
+    const { project, ticket } = await this.loadTicket(projectSlug, ref);
+    return TicketResponseDto.from(
+      ticket,
+      project.key,
+      this.computeGitRefUrl(project.gitRemoteUrl, ticket.gitRefVersion, ticket.gitRefFile, ticket.gitRefLine),
+    );
+  }
+
+  /**
+   * The project and the ticket one ref names, with the two 404s.
+   *
+   * H5: a single scoped lookup — the KEY-N prefix must match the project key and CUIDs are constrained
+   * to this project; soft-deleted tickets miss. The project row comes back with the ticket because the
+   * detail view needs `project.id` for the caller's keys as well as `project.key` for the ref.
+   */
+  private async loadTicket(projectSlug: string, ref: string) {
     const project = await this.ticketRepo.findProjectBySlug(projectSlug);
 
     if (!project || project.deletedAt) {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    // H5: single scoped lookup — KEY-N prefix must match the project key and
-    // CUIDs are constrained to this project; soft-deleted tickets miss.
     const ticket = await this.ticketRepo.findTicketScoped(project.id, project.key, ref);
 
     if (!ticket || ticket.deletedAt) {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    const gitRefUrl = this.computeGitRefUrl(
-      project.gitRemoteUrl,
-      ticket.gitRefVersion,
-      ticket.gitRefFile,
-      ticket.gitRefLine,
-    );
-    return TicketResponseDto.from(ticket, project.key, gitRefUrl);
+    return { project, ticket };
   }
 
   /**
@@ -213,15 +224,38 @@ export class TicketsService {
   /**
    * M25: the detail view plus the actions the caller may take. `principal`
    * must be role-enriched (withProjectRole) by the controller.
+   *
+   * Permissions P1 (US-004): the actions come from the caller's keys in this project, not from the
+   * legacy CASL ability — an action is offered when the caller holds at least one of the keys
+   * `TICKET_ACTION_KEYS` names for it (`verify-fix` names both outcomes) and the state machine allows
+   * it from the ticket's current status.
    */
   async findByRefWithActions(projectSlug: string, ref: string, principal: KodaPrincipal): Promise<TicketDetailResponseDto> {
-    const ticket = await this.findByRef(projectSlug, ref);
-    const ability = await this.caslAbilityFactory.createForUser(principal);
-    const actions = allowedActions(ticket.status as TicketStatus, {
-      canTransition: ability.can(KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'),
-      canClose: canOverrideClose(principal),
-    });
-    return { ...ticket, allowedActions: actions };
+    const { project, ticket } = await this.loadTicket(projectSlug, ref);
+    const base = TicketResponseDto.from(
+      ticket,
+      project.key,
+      this.computeGitRefUrl(project.gitRemoteUrl, ticket.gitRefVersion, ticket.gitRefFile, ticket.gitRefLine),
+    );
+    const permitted = await this.permittedActions(project.id, principal);
+    return { ...base, allowedActions: allowedActions(ticket.status as TicketStatus, permitted) };
+  }
+
+  /** The actions the caller holds one of the keys for in `projectId`, in `TICKET_ACTIONS` order. */
+  private async permittedActions(
+    projectId: string,
+    principal: KodaPrincipal,
+  ): Promise<ReadonlySet<TicketAction>> {
+    const decisions = await Promise.all(
+      TICKET_ACTIONS.map(async (action): Promise<TicketAction | undefined> => {
+        const keys = TICKET_ACTION_KEYS[action];
+        const results = await Promise.all(
+          keys.map((key) => this.permissions.can(principal, key, { projectId })),
+        );
+        return results.some((decision) => decision.allowed) ? action : undefined;
+      }),
+    );
+    return new Set(decisions.filter((action): action is TicketAction => action !== undefined));
   }
 
   async update(
@@ -234,21 +268,72 @@ export class TicketsService {
     // (TRANSITION validation + activity row + webhook) instead of a direct
     // write that bypassed them. Other fields keep the direct update path.
     if (updateTicketDto.status !== undefined) {
-      // Final-review Finding B: verify TRANSITION permission BEFORE any field
-      // write. A caller with UPDATE but no TRANSITION must get a clean 403,
-      // not a partial field write followed by 403. executeTransitionPublic
-      // re-runs the same check (defense in depth, no extra DB work).
-      await this.transitionsService.assertTransitionPermission(principal);
+      // Permissions P1 (US-003): the edge key of the requested change is checked
+      // BEFORE any field write. A caller with ticket.update but not the edge key
+      // (ticket.transition.start for CREATED -> IN_PROGRESS) must get a clean 403,
+      // not a partial field write followed by 403. The transition itself checks the
+      // same edge again inside executeTransitionInternal.
+      await this.transitionsService.assertTransitionAllowed(
+        projectSlug,
+        ref,
+        updateTicketDto.status,
+        principal,
+      );
       const { status, ...rest } = updateTicketDto;
-      if (Object.keys(rest).length > 0) {
-        // Apply field updates first, then transition; keep it one perceived operation
-        await this.applyUpdate(projectSlug, ref, rest as UpdateTicketDto, principal);
-      }
-      const result = await this.transitionsService.executeTransitionPublic(projectSlug, ref, status, principal);
+      // Whole-branch fix B3: the field writes travel with the transition instead of committing in a
+      // transaction of their own. Both the edge check and the conditional status write now run before
+      // them, so a refusal — the pre-check here, the edge re-check on the ticket's *live* status, or a
+      // 409 from a lost race — leaves no field written, and the fields commit only with the status.
+      const fields = Object.keys(rest).length > 0 ? this.fieldPatch(rest, principal) : undefined;
+      const result = await this.transitionsService.executeTransitionPublic(
+        projectSlug,
+        ref,
+        status,
+        principal,
+        fields,
+      );
       return result.ticket;
     }
 
     return this.applyUpdate(projectSlug, ref, updateTicketDto, principal);
+  }
+
+  /**
+   * The field writes of a `PATCH …?status=` as the patch the transition applies inside its transaction.
+   * `previous` is the row the transition loaded, so the TICKET_UPDATED event still carries the earlier
+   * description the mention resolver diffs against.
+   */
+  private fieldPatch(rest: UpdateTicketDto, principal: KodaPrincipal): TransitionFieldPatch {
+    const updateData = TicketsService.toUpdateData(rest);
+    return async ({ ticketId, projectId, previous }) => {
+      const row = await this.ticketRepo.updateTicket(ticketId, updateData);
+      const previousDescription = (previous as { description?: string | null }).description ?? null;
+      await this.recordTicketEvent(
+        ticketId,
+        projectId,
+        'TICKET_UPDATED',
+        principal,
+        updateData.description !== undefined
+          ? { ...updateData, previousDescription }
+          : { ...updateData },
+      );
+      return row as unknown as TransitionTicketShape;
+    };
+  }
+
+  /** The writable columns of a PATCH body; `status` is never one of them (the transitions own it). */
+  private static toUpdateData(dto: UpdateTicketDto): UpdateTicketDto {
+    const updateData: UpdateTicketDto = {};
+    if (dto.title !== undefined) {
+      updateData.title = dto.title;
+    }
+    if (dto.description !== undefined) {
+      updateData.description = dto.description;
+    }
+    if (dto.priority !== undefined) {
+      updateData.priority = dto.priority;
+    }
+    return updateData;
   }
 
   /**
@@ -267,18 +352,7 @@ export class TicketsService {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    const updateData: UpdateTicketDto = {};
-
-    if (updateTicketDto.title !== undefined) {
-      updateData.title = updateTicketDto.title;
-    }
-    if (updateTicketDto.description !== undefined) {
-      updateData.description = updateTicketDto.description;
-    }
-    if (updateTicketDto.priority !== undefined) {
-      updateData.priority = updateTicketDto.priority;
-    }
-
+    const updateData = TicketsService.toUpdateData(updateTicketDto);
     const project = await this.ticketRepo.findProjectBySlug(projectSlug);
 
     const updated = await this.txManager.run(async () => {

@@ -76,6 +76,16 @@ export class MembershipService {
     return this.afterCommitHooks.scope(fn);
   }
 
+  /**
+   * Drops every cached effective-key set, so the next `can` call recomputes from the rows as they are
+   * now. Every binding write this service performs invalidates on its own; this is the entry point for
+   * a write it does not own — an `AgentRoleEntry` change, which is a legacy row the permission union
+   * reads but `MembershipService` does not write.
+   */
+  async invalidatePermissions(): Promise<void> {
+    await this.permissionCache.invalidate();
+  }
+
   /** Legacy `User.role = 'ADMIN'` or a global `owner`/`admin` binding. */
   async isGlobalAdmin(userId: string): Promise<boolean> {
     const state = await this.bindings.findUserState(userId);
@@ -177,6 +187,15 @@ export class MembershipService {
    * `owner`/`admin` change and this removal are decided one at a time. Nested inside a caller's
    * `txManager.run`, the delete joins that transaction; the permission cache is invalidated after it
    * commits (through `afterCommit` when the caller owns the transaction).
+   *
+   * The cache is invalidated even when no binding was removed. Every caller follows this delete with
+   * the legacy row the union also reads — `ProjectMembersService.remove`/`updateRole` delete the
+   * `ProjectMember` row, `AgentsService.removeFromProject` deletes the `AgentProject` row — and a
+   * principal whose only source in the project was that legacy row (a pre-bindings member, or a
+   * rostered agent with no binding) removes zero bindings here. Skipping the invalidation would leave
+   * its warmed effective keys alive for the full cache TTL, so a removed agent kept passing the
+   * `agent.pickup` check and a removed user kept its project keys. The deferred invalidation runs
+   * after the caller's transaction — legacy row included — has committed.
    */
   async removeProjectBindings(
     principal: PrincipalRef,
@@ -186,7 +205,7 @@ export class MembershipService {
     const outcome = await this.txManager.run(async (): Promise<WriteOutcome<number>> => {
       await this.lockUserPrincipal(principal);
       const removed = await this.bindings.deleteProjectBindings(principal, projectId, roleKeys);
-      return { value: removed, changed: removed > 0, revokedUserIds: [] };
+      return { value: removed, changed: true, revokedUserIds: [] };
     });
     await this.afterWrite(outcome);
     return outcome.value;

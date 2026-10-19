@@ -16,7 +16,7 @@
  * The routes are mounted without the `/api` global prefix here; the prefix is
  * added by `AppFactory` in the DB-backed e2e suite (`test/e2e/api-endpoint`).
  */
-import { INestApplication } from '@nestjs/common';
+import { CanActivate, ExecutionContext, INestApplication } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
@@ -25,9 +25,11 @@ import { ProjectsController } from '../../../src/projects/projects.controller';
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { ProjectAccessService } from '../../../src/projects/project-access.service';
 import { PrismaProjectRepository } from '../../../src/projects/prisma-project.repository';
+import { PermissionService } from '../../../src/permissions/permission.service';
 import { RagService } from '../../../src/rag/rag.service';
 import { ImpactAnalysisService } from '../../../src/code-intel/impact-analysis.service';
 import { AgentsService } from '../../../src/agents/agents.service';
+import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import type { ProjectDomain } from '../../../src/projects/domain/project.domain';
 
 const ALPHA_PROJECT: ProjectDomain = {
@@ -53,6 +55,19 @@ const OTHER_PROJECT: ProjectDomain = {
   name: 'Other',
   slug: 'taken-slug',
   key: 'TKEN',
+};
+
+/** The caller the migrated routes see: a global ADMIN, so every key check passes. */
+const adminPrincipal: KodaPrincipal = {
+  actorType: 'user',
+  id: 'user-admin',
+  name: 'admin@example.com',
+  email: 'admin@example.com',
+  role: 'ADMIN',
+  blacklisted: false,
+  revoked: false,
+  authorities: ['ADMIN'],
+  extra: { sub: 'user-admin' },
 };
 
 describe('US-004: project conflict responses', () => {
@@ -85,11 +100,23 @@ describe('US-004: project conflict responses', () => {
         { provide: RagService, useValue: ragService },
         { provide: ImpactAnalysisService, useValue: {} },
         { provide: AgentsService, useValue: {} },
+        // US-007: the migrated routes carry RequiresGuard and the handler asks `can`, so the key check
+        // is a double that always allows — these cases are about the conflict responses behind it.
+        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
       ],
     }).compile();
 
     app = moduleRef.createNestApplication();
     app.useGlobalFilters(new GlobalExceptionsFilter(app.get(HttpAdapterHost)));
+    // Stands in for the global CombinedAuthGuard: the migrated routes read `request.user`, which the
+    // permission keys need to resolve. Without it every case would answer 403 before the conflict.
+    const principalInjector: CanActivate = {
+      canActivate: (ctx: ExecutionContext) => {
+        ctx.switchToHttp().getRequest<{ user?: KodaPrincipal }>().user = adminPrincipal;
+        return true;
+      },
+    };
+    app.useGlobalGuards(principalInjector);
     await app.init();
     httpServer = app.getHttpServer();
   });

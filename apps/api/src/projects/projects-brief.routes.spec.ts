@@ -10,9 +10,9 @@
  *
  * The DB-backed form of the same acceptance criteria lives in
  * `test/e2e/api-endpoint/endpoint.e2e.spec.ts` (AC-7 — the 403 for a project
- * member who is not a global ADMIN — only exists there: it is the production
- * `CombinedAuthGuard` plus `@RequiredPermission('ADMIN')` on the route, which
- * this module does not wire).
+ * member who is not a project admin — only exists there: it needs the
+ * production `CombinedAuthGuard` and the real `PermissionService` behind the
+ * route's `@Requires('project.update')`, which this module stands in for).
  */
 import { CanActivate, ExecutionContext, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -22,6 +22,7 @@ import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
 import { PrismaProjectRepository } from './prisma-project.repository';
 import { ProjectAccessService } from './project-access.service';
+import { PermissionService } from '../permissions/permission.service';
 import { RagService } from '../rag/rag.service';
 import { HybridRetrieverService } from '../rag/hybrid-retriever.service';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
@@ -111,6 +112,9 @@ describe('PATCH /api/projects/:slug — the project brief (US-001)', () => {
         { provide: HybridRetrieverService, useValue: { invalidateGraphifyEnabledCache: vi.fn() } },
         { provide: ImpactAnalysisService, useValue: { getChangeImpact: vi.fn() } },
         { provide: AgentsService, useValue: { listProjectRoster: vi.fn() } },
+        // US-007: the migrated PATCH/GET routes declare `project.update` / `project.read`; this double
+        // is the key check, so the cases below still reach the handler and its validation.
+        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
       ],
     }).compile();
 

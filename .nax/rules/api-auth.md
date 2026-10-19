@@ -44,9 +44,14 @@ The wildcard subject `all` covers **everything**, including virtual subjects lik
 
 ## Guard-Level vs Service-Level Authorization
 
-- **Pure role gates** (`ADMIN`-only, `AgentScope`-only) → `@RequiredPermission` on the controller. Delete inline checks from service.
-- **Ownership checks** → `@RequiredPermission([action, subject])` on the controller as coarse gate, then `ability.can(action, subject('Subject', instance))` in the service for the precise check.
+Migrated routes (permission keys, `src/permissions/`):
+- **Route keys** → `@Requires('<key>')` checked by `RequiresGuard`, listed after `ProjectMembershipGuard` in the same `@UseGuards(...)` on project routes. Delete the inline check from the service.
+- **Ownership checks** (`comment.update.own`, `ticket.link.remove.own`) and **transition edges** → `@Requires(key, { enforcedBy: 'service' })` on the route, then `PermissionService.can(principal, key, { projectId, resource: { createdBy } })` in the service after the row lookup.
 - Do **not** duplicate authorization: if the guard handles it, remove the inline `if`-throw from the service.
+
+Legacy routes not yet migrated keep the CASL rules below:
+- **Pure role gates** (`ADMIN`-only, `AgentScope`-only) → `@RequiredPermission` on the controller.
+- **Ownership checks** → `@RequiredPermission([action, subject])` on the controller as coarse gate, then `ability.can(action, subject('Subject', instance))` in the service.
 
 ## Union Type Tightening & Test Mocks
 

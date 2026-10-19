@@ -1,16 +1,23 @@
-import { Controller, Post, Get, Patch, Delete, Body, Param, Query, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Delete, Body, Param, Query, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import { AgentsService } from './agents.service';
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { UpdateAgentDto } from './dto/update-agent.dto';
 import { UpdateRolesDto } from './dto/update-roles.dto';
 import { UpdateCapabilitiesDto } from './dto/update-capabilities.dto';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
-import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
-import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
+import { JsonResponse, ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { Principal } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { Throttle } from '@nathapp/nestjs-throttler';
+import { RequiresGuard } from '../permissions/requires.guard';
+import { Requires } from '../permissions/requires.decorator';
 
 // SEC-3: targeted throttle on agent-credential routes (10/min vs 100/min global)
+//
+// Permissions P1 (US-009): these are global routes with no project slug, so each one states its
+// catalog key with `@Requires` and lists `RequiresGuard` alone. The agent-management keys are
+// GLOBAL-scope role keys, so a project-admin binding does not satisfy them. Pickup is the one
+// service-level check: the key belongs to the *target* agent, not the caller.
 @ApiTags('agents')
 @ApiBearerAuth()
 @Controller('agents')
@@ -29,6 +36,12 @@ export class AgentsController {
   }
 
   async getMe(principal: KodaPrincipal) {
+    // `agent.self.read` is implicit — every authenticated principal holds it — so the rule that this
+    // route is for agents is enforced here, and answers the `agents` refusal the old AgentScope gate
+    // stood for.
+    if (principal.actorType !== 'agent') {
+      throw new ForbiddenAppException({}, 'agents');
+    }
     return this.agentsService.findMe(principal.id);
   }
 
@@ -67,37 +80,46 @@ export class AgentsController {
 
   // HTTP route handlers
   @Post()
-  @ApiOperation({ summary: 'Create agent and generate API key (admin only)' })
+  @UseGuards(RequiresGuard)
+  @Requires('agent.create')
+  @ApiOperation({ summary: 'Create agent and generate API key (agent.create)' })
   @ApiResponse({ status: 201, description: 'Agent created with API key' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
-  @RequiredPermission('ADMIN')
+  @ApiResponse({ status: 403, description: 'agent.create is missing' })
   async generateApiKey(@Body() createAgentDto: CreateAgentDto, @Principal() principal: KodaPrincipal) {
     const data = await this.createAgent(createAgentDto, principal);
     return JsonResponse.Ok(data);
   }
 
   @Get()
+  @UseGuards(RequiresGuard)
+  @Requires('agent.read')
   @ApiOperation({ summary: 'List all agents' })
   @ApiResponse({ status: 200, description: 'Agents retrieved successfully' })
+  @ApiResponse({ status: 403, description: 'agent.read is missing' })
   async findAll() {
     const data = await this.listAll();
     return JsonResponse.Ok(data);
   }
 
   @Get('me')
+  @UseGuards(RequiresGuard)
+  @Requires('agent.self.read')
   @ApiOperation({ summary: 'Get current agent profile (API key auth)' })
   @ApiResponse({ status: 200, description: 'Agent profile retrieved' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @RequiredPermission([CaslPermissionAction.READ, 'AgentScope'])
+  @ApiResponse({ status: 403, description: 'Not an agent principal' })
   async findMe(@Principal() principal: KodaPrincipal) {
     const data = await this.getMe(principal);
     return JsonResponse.Ok(data);
   }
 
   @Get(':slug')
+  @UseGuards(RequiresGuard)
+  @Requires('agent.read')
   @ApiOperation({ summary: 'Get agent by slug' })
   @ApiResponse({ status: 200, description: 'Agent retrieved successfully' })
+  @ApiResponse({ status: 403, description: 'agent.read is missing' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
   async findBySlug(@Param('slug') slug: string) {
     const data = await this.getBySlug(slug);
@@ -105,6 +127,10 @@ export class AgentsController {
   }
 
   @Get(':slug/pickup')
+  @UseGuards(RequiresGuard)
+  // The key belongs to the target agent, and the target is only known to the service, after its
+  // lookups: the route records `agent.pickup` and `AgentsService.suggestTicket` checks it.
+  @Requires('agent.pickup', { enforcedBy: 'service' })
   @ApiOperation({ summary: 'Suggest a ticket for the agent to pick up' })
   @ApiQuery({ name: 'project', required: true, description: 'Project slug' })
   @ApiResponse({ status: 200, description: 'Suggested ticket or null' })
@@ -121,36 +147,39 @@ export class AgentsController {
   }
 
   @Patch(':slug')
-  @ApiOperation({ summary: 'Update agent (admin only)' })
+  @UseGuards(RequiresGuard)
+  @Requires('agent.update')
+  @ApiOperation({ summary: 'Update agent (agent.update)' })
   @ApiResponse({ status: 200, description: 'Agent updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 403, description: 'agent.update is missing' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
-  @RequiredPermission('ADMIN')
   async update(@Param('slug') slug: string, @Body() updateDto: UpdateAgentDto, @Principal() principal: KodaPrincipal) {
     const data = await this.updateAgent(slug, updateDto, principal);
     return JsonResponse.Ok(data);
   }
 
   @Patch(':slug/update-roles')
-  @ApiOperation({ summary: 'Update agent roles (admin only)' })
+  @UseGuards(RequiresGuard)
+  @Requires('agent.roles.update')
+  @ApiOperation({ summary: 'Update agent roles (agent.roles.update)' })
   @ApiResponse({ status: 200, description: 'Roles updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 403, description: 'agent.roles.update is missing' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
-  @RequiredPermission('ADMIN')
   async updateRoles(@Param('slug') slug: string, @Body() updateRolesDto: UpdateRolesDto, @Principal() principal: KodaPrincipal) {
     const data = await this.updateAgentRoles(slug, updateRolesDto, principal);
     return JsonResponse.Ok(data);
   }
 
   @Patch(':slug/update-capabilities')
-  @ApiOperation({ summary: 'Update agent capabilities (admin only)' })
+  @UseGuards(RequiresGuard)
+  @Requires('agent.capabilities.update')
+  @ApiOperation({ summary: 'Update agent capabilities (agent.capabilities.update)' })
   @ApiResponse({ status: 200, description: 'Capabilities updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 403, description: 'agent.capabilities.update is missing' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
-  @RequiredPermission('ADMIN')
   async updateCapabilities(@Param('slug') slug: string, @Body() updateCapabilitiesDto: UpdateCapabilitiesDto, @Principal() principal: KodaPrincipal) {
     const data = await this.updateAgentCapabilities(slug, updateCapabilitiesDto, principal);
     return JsonResponse.Ok(data);
@@ -158,12 +187,13 @@ export class AgentsController {
 
   @Delete(':slug')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(RequiresGuard)
+  @Requires('agent.delete')
   @ApiOperation({ summary: 'Delete (soft-delete) an agent' })
   @ApiResponse({ status: 200, description: 'Agent deleted successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 403, description: 'agent.delete is missing' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
-  @RequiredPermission('ADMIN')
   async remove(@Param('slug') slug: string, @Principal() principal: KodaPrincipal) {
     const data = await this.deleteAgent(slug, principal);
     return JsonResponse.Ok(data);
@@ -171,12 +201,13 @@ export class AgentsController {
 
   @Post(':slug/rotate-key')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Rotate agent API key (admin only)' })
+  @UseGuards(RequiresGuard)
+  @Requires('agent.key.rotate')
+  @ApiOperation({ summary: 'Rotate agent API key (agent.key.rotate)' })
   @ApiResponse({ status: 200, description: 'API key rotated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 403, description: 'agent.key.rotate is missing' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
-  @RequiredPermission('ADMIN')
   async rotateApiKey(@Param('slug') slug: string, @Principal() principal: KodaPrincipal) {
     const data = await this.rotateKey(slug, principal);
     return JsonResponse.Ok(data);

@@ -1,4 +1,5 @@
 import { allowedActions, canOverrideClose, TICKET_ACTIONS } from './allowed-actions';
+import type { TicketAction } from './allowed-actions';
 import { TRANSITION_RULES, validateTransition } from './ticket-transitions';
 import { TicketStatus, CommentType } from '../../common/enums';
 import type { AgentPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
@@ -44,15 +45,24 @@ const passes = (from: TicketStatus, to: TicketStatus, c?: CommentType) => {
 };
 
 describe('allowedActions', () => {
-  const roles = [
-    ['project ADMIN', { canTransition: true, canClose: true }],
-    ['DEVELOPER', { canTransition: true, canClose: false }],
-    ['VIEWER', { canTransition: false, canClose: false }],
+  /** Every action the state machine has, i.e. a caller holding every `TICKET_ACTION_KEYS` entry. */
+  const EVERY_ACTION: ReadonlySet<TicketAction> = new Set(TICKET_ACTIONS);
+  /** A developer: every transition key, never `ticket.transition.close` in the old model. */
+  const TRANSITIONS_ONLY: ReadonlySet<TicketAction> = new Set(
+    TICKET_ACTIONS.filter((action) => action !== 'close'),
+  );
+  /** A viewer: no ticket action key at all. */
+  const NO_ACTIONS: ReadonlySet<TicketAction> = new Set();
+
+  const callers = [
+    ['every key', EVERY_ACTION],
+    ['transition keys only', TRANSITIONS_ONLY],
+    ['no action key', NO_ACTIONS],
   ] as const;
 
-  describe.each(roles)('%s', (_role, perms) => {
+  describe.each(callers)('%s', (_label, permitted) => {
     it.each(ALL_STATUSES)('from %s: every action offered passes validateTransition', (status) => {
-      for (const action of allowedActions(status, perms)) {
+      for (const action of allowedActions(status, permitted)) {
         if (action === 'close') {
           expect(CLOSE_SOURCES).toContain(status);
           continue;
@@ -61,41 +71,56 @@ describe('allowedActions', () => {
       }
     });
 
-    it.each(ALL_STATUSES)('from %s: offers exactly the permitted actions', (status) => {
-      const actions = allowedActions(status, perms);
-      if (!perms.canTransition) expect(actions.filter((a) => a !== 'close')).toEqual([]);
-      expect(actions.includes('close')).toBe(perms.canClose && CLOSE_SOURCES.includes(status));
+    it.each(ALL_STATUSES)('from %s: offers only permitted actions', (status) => {
+      const actions = allowedActions(status, permitted);
+      // The permitted set filters: an action nobody holds a key for is never offered.
+      for (const action of actions) expect(permitted.has(action)).toBe(true);
+      expect(actions.includes('close')).toBe(permitted.has('close') && CLOSE_SOURCES.includes(status));
+      if (!permitted.has('close')) expect(actions).not.toContain('close');
     });
   });
 
-  it('covers every reachable rule in TRANSITION_RULES for a transition-capable caller', () => {
-    const perms = { canTransition: true, canClose: false };
+  it('covers every reachable rule in TRANSITION_RULES for a caller holding every key', () => {
     for (const [from, targets] of Object.entries(TRANSITION_RULES) as Array<[TicketStatus, Record<string, unknown>]>) {
       for (const to of Object.keys(targets) as TicketStatus[]) {
         // IN_PROGRESS -> VERIFIED needs a GENERAL comment no route supplies: unreachable by design.
         if (from === TicketStatus.IN_PROGRESS && to === TicketStatus.VERIFIED) continue;
-        const actions = allowedActions(from, perms).filter((a): a is keyof typeof ENDPOINT_TARGETS => a !== 'close');
+        const actions = allowedActions(from, EVERY_ACTION).filter((a): a is keyof typeof ENDPOINT_TARGETS => a !== 'close');
         expect({ from, to, covered: actions.some((a) => ENDPOINT_TARGETS[a].some(([t]) => t === to)) })
           .toEqual({ from, to, covered: true });
       }
     }
   });
 
-  it('terminal statuses offer nothing, even to an admin', () => {
-    const perms = { canTransition: true, canClose: true };
-    expect(allowedActions(TicketStatus.CLOSED, perms)).toEqual([]);
-    expect(allowedActions(TicketStatus.REJECTED, perms)).toEqual([]);
+  it('terminal statuses offer nothing, even to a caller holding every key', () => {
+    expect(allowedActions(TicketStatus.CLOSED, EVERY_ACTION)).toEqual([]);
+    expect(allowedActions(TicketStatus.REJECTED, EVERY_ACTION)).toEqual([]);
   });
 
   it('never offers verify-fix outside VERIFY_FIX (regression: NONE rules ignore the comment type)', () => {
-    const perms = { canTransition: true, canClose: true };
     for (const status of [TicketStatus.CREATED, TicketStatus.VERIFIED, TicketStatus.IN_PROGRESS]) {
-      expect(allowedActions(status, perms)).not.toContain('verify-fix');
+      expect(allowedActions(status, EVERY_ACTION)).not.toContain('verify-fix');
     }
   });
 
   it('keeps a stable order for rendering', () => {
-    expect(allowedActions(TicketStatus.CREATED, { canTransition: true, canClose: true })).toEqual(['verify', 'start', 'reject']);
-    expect(allowedActions(TicketStatus.VERIFY_FIX, { canTransition: true, canClose: true })).toEqual(['verify-fix', 'close']);
+    expect(allowedActions(TicketStatus.CREATED, EVERY_ACTION)).toEqual(['verify', 'start', 'reject']);
+    expect(allowedActions(TicketStatus.VERIFY_FIX, EVERY_ACTION)).toEqual(['verify-fix', 'close']);
+  });
+
+  // AC-17: the permitted set filters the status-valid actions; it never widens them.
+  it('AC-17: CREATED with the permitted set {start, fix} offers only start', () => {
+    expect(allowedActions(TicketStatus.CREATED, new Set<TicketAction>(['start', 'fix']))).toEqual(['start']);
+  });
+
+  // AC-18: close is offered from a close source only when its key is held.
+  it('AC-18: IN_PROGRESS with the permitted set {close} offers only close', () => {
+    expect(allowedActions(TicketStatus.IN_PROGRESS, new Set<TicketAction>(['close']))).toEqual(['close']);
+  });
+
+  it('a permitted action that is invalid from the status is dropped, so fix is never offered on CREATED', () => {
+    expect(allowedActions(TicketStatus.CREATED, new Set<TicketAction>(['fix']))).toEqual([]);
+    expect(allowedActions(TicketStatus.VERIFIED, new Set<TicketAction>(['fix']))).toEqual([]);
+    expect(allowedActions(TicketStatus.IN_PROGRESS, new Set<TicketAction>(['fix']))).toEqual(['fix']);
   });
 });

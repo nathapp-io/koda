@@ -222,10 +222,12 @@ assert "koda project list"         "koda\|KODA\|Koda"  "$(koda project list)"
 assert "koda project list --json"  '"slug"'             "$(koda project list --json)"
 assert "koda project show koda"    "koda\|KODA\|Koda"  "$(koda project show koda)"
 assert "koda project show --json"  '"slug"'             "$(koda project show koda --json)"
-assert "koda project update"       "access denied\|forbidden" "$(koda project update koda --name 'Koda Smoke Updated' --desc 'Updated by smoke test')"
+assert "koda project update"       "access denied\|forbidden\|You do not have permissions" "$(koda project update koda --name 'Koda Smoke Updated' --desc 'Updated by smoke test')"
 
 # NOTE: project update is admin-only. Smoke CLI runs with agent API key,
 # so expected behavior here is authorization failure, not success.
+# Permissions P1 (enforce-core): the refusal is the `permissions` 403, which
+# the CLI renders as "You do not have permissions to perform this action".
 
 # =============================================================================
 # STEP 7: Label CRUD
@@ -330,7 +332,14 @@ fi
 log "Step 15: Ticket delete..."
 koda ticket create --project koda --type TASK --title "Delete me" > /dev/null
 assert "koda ticket delete (no --force)" "force\|confirm\|require" "$(koda ticket delete KODA-6 2>&1)"
-assert "koda ticket delete --force"      "delet\|success\|removed" "$(koda ticket delete KODA-6 --force)"
+# Permissions P1 (US-004): ticket.delete is guarded by a permission key the
+# agent's DEVELOPER role does not hold, so the agent gets the `permissions`
+# 403. The admin JWT deletes the ticket instead (as endpoint.e2e.spec.ts
+# AC-6 does).
+assert "koda ticket delete --force (agent unauthorized)" "You do not have permissions\|forbidden" "$(koda ticket delete KODA-6 --force)"
+DELETE_OUT=$(curl -sf -X DELETE "$API_URL/api/projects/koda/tickets/KODA-6" \
+  -H "Authorization: Bearer $JWT" 2>&1)
+assert "ticket delete (admin)" "delet\|success\|removed\|\"ret\"" "$DELETE_OUT"
 
 # =============================================================================
 # STEP 16: Comment & agent
@@ -384,7 +393,16 @@ assert "koda kb delete (agent unauthorized)"   "access denied\|forbidden" "$(kod
 # =============================================================================
 log "Step 18: Label delete..."
 if [[ -n "$LABEL_ID" ]]; then
-  assert "koda label delete" "delet\|success\|removed" "$(koda label delete --project koda --id "$LABEL_ID")"
+  # Permissions P1 (US-005): label.delete is project-admin only, so the agent
+  # gets the `permissions` 403; the admin JWT deletes the label (204) instead.
+  assert "koda label delete (agent unauthorized)" "You do not have permissions\|forbidden" "$(koda label delete --project koda --id "$LABEL_ID")"
+  LABEL_DELETE_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API_URL/api/projects/koda/labels/$LABEL_ID" \
+    -H "Authorization: Bearer $JWT" 2>&1)
+  if [[ "$LABEL_DELETE_CODE" == "204" ]]; then
+    ok "koda label delete (admin)"
+  else
+    fail "koda label delete (admin) — expected HTTP 204, got $LABEL_DELETE_CODE"
+  fi
 else
   fail "koda label delete — skipped (no LABEL_ID)"
 fi

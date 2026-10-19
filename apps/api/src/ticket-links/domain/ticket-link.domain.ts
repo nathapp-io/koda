@@ -12,5 +12,8 @@ export interface TicketLinkDomain {
   linkType: string;
   source?: string;
   jobId?: string | null;
+  /** Who added the link, compared for `ticket.link.remove.own`. Null for a creatorless link. */
+  createdByUserId: string | null;
+  createdByAgentId: string | null;
   createdAt: Date;
 }
