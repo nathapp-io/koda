@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { JobSchedule as ScheduleRow, Prisma, PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { FleetJobState } from '../../common/enums';
+import { userProjectRole } from '../../permissions/legacy-membership.queries';
 import type { BashMode } from '../common/protocol';
 import { ACTIVE_STATES } from '../jobs/job-state';
 import {
@@ -101,11 +102,21 @@ export class PrismaScheduleRepository implements IScheduleRepository {
     return claimed.count === 1;
   }
 
+  /**
+   * S1b §3.2 / plan D201. Existence, `disabled` and the global `User.role` are read as before; the
+   * project role comes from the **access sources** the compatibility queries union (US-004): the
+   * owner's legacy `ProjectMember` row plus its PROJECT-scope bindings, in this project and
+   * `projectId`-null. Nothing is cached.
+   */
   async findOwnerAccess(projectId: string, userId: string): Promise<OwnerAccess> {
     const user = await this.db.user.findUnique({ where: { id: userId }, select: { disabled: true, role: true } });
     if (!user) return { exists: false, disabled: false, globalRole: '', projectRole: null };
-    const member = await this.db.projectMember.findUnique({ where: { projectId_userId: { projectId, userId } }, select: { role: true } });
-    return { exists: true, disabled: user.disabled, globalRole: user.role, projectRole: member?.role ?? null };
+    return {
+      exists: true,
+      disabled: user.disabled,
+      globalRole: user.role,
+      projectRole: await userProjectRole(this.db, userId, projectId),
+    };
   }
 
   async sumCostBySchedule(ids: readonly string[]): Promise<ReadonlyMap<string, string>> {

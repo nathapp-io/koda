@@ -3,6 +3,7 @@ import { Prisma, PrismaClient } from '../../generated/prisma/client';
 import { Paginate, PrismaService } from '@nathapp/nestjs-prisma';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
+import { accessibleProjectIds } from '../../permissions/legacy-membership.queries';
 import type { FleetActivityFilters, FleetActivityRecord, IFleetActivityRepository } from './domain/fleet-activity.domain';
 
 @Injectable()
@@ -30,8 +31,12 @@ export class PrismaFleetActivityRepository implements IFleetActivityRepository {
     return rows.remap((m: FleetActivityRecord) => m);
   }
 
+  /**
+   * Project ids the user may see activity for (plan D14). The **access sources** the compatibility
+   * queries union (US-004): the user's legacy `ProjectMember` rows plus its PROJECT-scope bindings, in
+   * the project and `projectId`-null, over the non-deleted projects. Nothing is cached.
+   */
   async findMemberProjectIds(userId: string): Promise<string[]> {
-    const rows = await this.db.projectMember.findMany({ where: { userId, project: { deletedAt: null } }, select: { projectId: true } });
-    return rows.map((r) => r.projectId);
+    return accessibleProjectIds(this.db, { type: 'USER', id: userId });
   }
 }

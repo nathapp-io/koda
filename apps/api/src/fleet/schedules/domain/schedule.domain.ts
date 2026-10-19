@@ -66,7 +66,11 @@ export interface OwnerAccess {
   disabled: boolean;
   /** `User.role`: MEMBER | ADMIN (empty when the user is gone). */
   globalRole: string;
-  /** `ProjectMember.role` in the schedule's project, or null. */
+  /**
+   * The owner's project role in the schedule's project, or null. Read from the access sources the
+   * compatibility queries union: a legacy `ProjectMember` row and a PROJECT-scope `RoleBinding` in
+   * the project or with `projectId` null (US-004).
+   */
   projectRole: string | null;
 }
 
