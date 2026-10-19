@@ -50,6 +50,30 @@ const PROJECT_SCOPE = 'PROJECT';
 /** A roster row carries no role: it grants project reach, which the legacy vocabulary calls `VIEWER`. */
 const AGENT_ROSTER_ROLE = 'VIEWER';
 
+/**
+ * The system role key a legacy `ProjectMember.role` is read as. A `Map`, not a record: the stored
+ * role is database content, and `ROLE_KEY_FOR_LEGACY_ROLE['constructor']` would answer a function.
+ * Every other stored role (`AGENT`, `MEMBER`, a hand-edited value) is read as the viewer role, the
+ * least-privileged legacy set.
+ */
+const ROLE_KEY_BY_LEGACY_ROLE: ReadonlyMap<string, string> = new Map<string, string>([
+  [ActorRole.ADMIN, ROLE_KEY_FOR_LEGACY_ROLE.ADMIN],
+  [ActorRole.DEVELOPER, ROLE_KEY_FOR_LEGACY_ROLE.DEVELOPER],
+]);
+const VIEWER_ROLE_KEY = ROLE_KEY_FOR_LEGACY_ROLE.VIEWER;
+
+/**
+ * The system role key an `AgentRoleEntry.role` is read as. `TRIAGER` is one of the four values
+ * `AGENT_ROLES` declares but not one of the three `AgentRole` enum members, so it is spelled here.
+ * An unknown stored role maps to nothing: it grants no keys.
+ */
+const ROLE_KEY_BY_AGENT_ROLE: ReadonlyMap<string, string> = new Map<string, string>([
+  ['DEVELOPER', 'developer'],
+  ['REVIEWER', 'reviewer'],
+  ['VERIFIER', 'verifier'],
+  ['TRIAGER', 'triager'],
+]);
+
 const logger = new Logger('LegacyMembershipQueries');
 
 /** A binding of the principal as the client returns it: the project, the dates and the role's key. */
@@ -101,6 +125,102 @@ export async function agentHasProjectAccess(
 ): Promise<boolean> {
   const roles = await accessRoles(db, { type: 'AGENT', id: agentId }, projectId, 'agentHasProjectAccess');
   return roles.length > 0;
+}
+
+/**
+ * The system role keys the principal's legacy rows stand for in `projectId`, in the order
+ * `PermissionService` adds them: the legacy role first, then the agent role keys.
+ *
+ * These rows are virtual bindings: a `ProjectMember` row of `DEVELOPER` grants what a `developer`
+ * binding grants, and an `AgentRoleEntry` `REVIEWER` what a `reviewer` binding grants. A key with no
+ * `Role` row (an unseeded or renamed role) grants nothing, which the caller decides by loading it.
+ *
+ * - A `projectId` of null (the global scope) answers no keys: every row here is project-scoped.
+ * - A USER answers its `ProjectMember.role` mapped through `ROLE_KEY_FOR_LEGACY_ROLE` (`ADMIN` ->
+ *   `project-admin`, `DEVELOPER` -> `developer`) and the viewer role for anything else; no row, no keys.
+ * - An AGENT with project scoping on answers the viewer role for its roster row, and one key per
+ *   `AgentRoleEntry` once it has any access source in the project (`agentHasProjectAccess`), so a
+ *   global agent role never reaches a project the agent is not in.
+ * - An AGENT with project scoping off answers the viewer role plus its `AgentRoleEntry` keys in every
+ *   live project, which is the reach `AGENT_PROJECT_SCOPING=off` restores.
+ *
+ * An unknown stored role (`AgentRoleEntry.role` outside the four known values) adds nothing.
+ */
+export async function legacyRoleKeys(
+  db: PrismaClient,
+  principal: PrincipalRef,
+  projectId: string | null,
+  agentScoping: boolean,
+): Promise<string[]> {
+  if (projectId === null) return [];
+  if (principal.type === 'USER') return userLegacyRoleKeys(db, principal.id, projectId);
+  return agentLegacyRoleKeys(db, principal.id, projectId, agentScoping);
+}
+
+/** The system role key of the user's `ProjectMember` row in the project; `[]` when it has none. */
+async function userLegacyRoleKeys(db: PrismaClient, userId: string, projectId: string): Promise<string[]> {
+  const row = await db.projectMember.findUnique({
+    where: { projectId_userId: { projectId, userId } },
+    select: { role: true },
+  });
+  if (row === null) return [];
+  return [ROLE_KEY_BY_LEGACY_ROLE.get(row.role) ?? VIEWER_ROLE_KEY];
+}
+
+/** The system role keys of the agent's roster row and its `AgentRoleEntry` rows in the project. */
+async function agentLegacyRoleKeys(
+  db: PrismaClient,
+  agentId: string,
+  projectId: string,
+  agentScoping: boolean,
+): Promise<string[]> {
+  // Scoping off: every agent reaches every project, as it did before S4c, so its role keys apply
+  // there without a roster row — in the projects that exist, as `accessibleProjectIds` answers them.
+  if (!agentScoping) {
+    const roleKeys = await agentRoleEntryKeys(db, agentId);
+    return (await projectIsLive(db, projectId)) ? [VIEWER_ROLE_KEY, ...roleKeys] : [];
+  }
+
+  const [rostered, hasAccess] = await Promise.all([
+    agentOnRoster(db, agentId, projectId),
+    agentHasProjectAccess(db, agentId, projectId),
+  ]);
+  if (!rostered && !hasAccess) return [];
+
+  const keys: string[] = [];
+  if (rostered) keys.push(VIEWER_ROLE_KEY);
+  // A global agent role reaches only the projects the agent has some source in; a binding is such a
+  // source, which is why an agent can hold a role without a roster row and still use it here.
+  if (hasAccess) keys.push(...(await agentRoleEntryKeys(db, agentId)));
+  return keys;
+}
+
+/** True when the agent's legacy `AgentProject` roster row names the project. */
+async function agentOnRoster(db: PrismaClient, agentId: string, projectId: string): Promise<boolean> {
+  const row = await db.agentProject.findUnique({
+    where: { agentId_projectId: { agentId, projectId } },
+    select: { agentId: true },
+  });
+  return row !== null;
+}
+
+/** The system role keys of the agent's `AgentRoleEntry` rows, in no particular order. */
+async function agentRoleEntryKeys(db: PrismaClient, agentId: string): Promise<string[]> {
+  const rows = cap(
+    await db.agentRoleEntry.findMany({
+      where: { agentId },
+      select: { role: true },
+      take: MEMBERSHIP_READ_CAP,
+    }),
+    'agentRoleEntryKeys',
+    `AGENT:${agentId}`,
+  );
+  const keys: string[] = [];
+  for (const row of rows) {
+    const key = ROLE_KEY_BY_AGENT_ROLE.get(row.role);
+    if (key !== undefined && !keys.includes(key)) keys.push(key);
+  }
+  return keys;
 }
 
 /**

@@ -1,4 +1,5 @@
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import type { IAuthConfig } from '../config/auth.config';
 import { PermissionCache } from './permission-cache';
 import { PermissionService } from './permission.service';
 import { FakeCacheManager, InMemoryPermissionStore } from './test-helpers/in-memory-permissions';
@@ -7,6 +8,9 @@ import { FakeCacheManager, InMemoryPermissionStore } from './test-helpers/in-mem
  * US-003 — PermissionService.can rules 1-10 and the cached effective keys, without a database.
  * The integration spec covers the same acceptance criteria against Postgres.
  */
+
+/** Agent project scoping on, the installation default (`authConfig.agentProjectScoping !== false`). */
+const AUTH_CONFIG = { agentProjectScoping: true } as IAuthConfig;
 
 const user = (id: string): KodaPrincipal =>
   ({ actorType: 'user', id, role: 'MEMBER', email: `${id}@x.test` }) as KodaPrincipal;
@@ -23,7 +27,12 @@ describe('PermissionService', () => {
     store = new InMemoryPermissionStore();
     cache = new FakeCacheManager();
     permissionCache = new PermissionCache(cache as never);
-    service = new PermissionService(store.roleRepo() as never, store.bindingRepo() as never, permissionCache);
+    service = new PermissionService(
+      store.roleRepo() as never,
+      store.bindingRepo() as never,
+      permissionCache,
+      AUTH_CONFIG,
+    );
     store.addUser('u1');
     store.projects.add('p1');
     store.projects.add('p2');

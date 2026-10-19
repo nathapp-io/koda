@@ -3,7 +3,7 @@
   "feature": "permissions-p1-enforce-core",
   "branchName": "feat/permissions-p1-enforce-core",
   "createdAt": "2026-10-19T00:00:00Z",
-  "updatedAt": "2026-10-19T10:24:14.802Z",
+  "updatedAt": "2026-10-19T10:24:18.843Z",
   "userStories": [
     {
       "id": "US-001",
@@ -253,7 +253,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.8600000000000003,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-19T10:24:18.843Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
@@ -329,7 +341,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7d48c98118ca32f9d82ca7fc776e5b50fa72b9ef"
     },
     {
       "id": "US-004",

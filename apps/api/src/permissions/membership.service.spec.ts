@@ -163,7 +163,10 @@ describe('MembershipService', () => {
 
     it('invalidates the permissions cache so the next decision sees the new binding', async () => {
       const service2 = new (await import('./permission.service')).PermissionService(
-        store.roleRepo() as never, store.bindingRepo() as never, permissionCache,
+        store.roleRepo() as never,
+        store.bindingRepo() as never,
+        permissionCache,
+        { agentProjectScoping: true } as never,
       );
       const key = { type: 'USER' as const, id: 'u1' };
       expect((await service2.effectiveKeys(key, { projectId: 'p1' })).has('ticket.create')).toBe(false);
@@ -351,6 +354,7 @@ describe('MembershipService', () => {
         store.roleRepo() as never,
         store.bindingRepo() as never,
         permissionCache,
+        { agentProjectScoping: true } as never,
       );
       const principal = {
         actorType: 'user',

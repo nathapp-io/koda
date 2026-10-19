@@ -76,6 +76,16 @@ export class MembershipService {
     return this.afterCommitHooks.scope(fn);
   }
 
+  /**
+   * Drops every cached effective-key set, so the next `can` call recomputes from the rows as they are
+   * now. Every binding write this service performs invalidates on its own; this is the entry point for
+   * a write it does not own — an `AgentRoleEntry` change, which is a legacy row the permission union
+   * reads but `MembershipService` does not write.
+   */
+  async invalidatePermissions(): Promise<void> {
+    await this.permissionCache.invalidate();
+  }
+
   /** Legacy `User.role = 'ADMIN'` or a global `owner`/`admin` binding. */
   async isGlobalAdmin(userId: string): Promise<boolean> {
     const state = await this.bindings.findUserState(userId);
