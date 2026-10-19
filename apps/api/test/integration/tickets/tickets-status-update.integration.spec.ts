@@ -83,9 +83,9 @@ describe('US-003 (M2): TicketsService.update() — status field routes through t
   };
 
   const mockTransitionsService = {
-    // Fix-wave B: update() calls this before applyUpdate so a 403 never
-    // follows a partial field write.
-    assertTransitionPermission: vi.fn(),
+    // Permissions P1 (US-003): update() checks the edge key of the requested status before any field
+    // write (a 403 must never follow a partial write), then delegates the transition itself.
+    assertTransitionAllowed: vi.fn(),
     executeTransitionPublic: vi.fn(),
   };
 
@@ -132,6 +132,12 @@ describe('US-003 (M2): TicketsService.update() — status field routes through t
 
       const result = await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
 
+      expect(mockTransitionsService.assertTransitionAllowed).toHaveBeenCalledWith(
+        'koda',
+        'KODA-1',
+        TicketStatus.IN_PROGRESS,
+        mockUserPrincipal,
+      );
       expect(mockTransitionsService.executeTransitionPublic).toHaveBeenCalledWith(
         'koda',
         'KODA-1',
@@ -199,6 +205,7 @@ describe('US-003 (M2): TicketsService.update() — status field routes through t
       await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
 
       expect(mockTransitionsService.executeTransitionPublic).not.toHaveBeenCalled();
+      expect(mockTransitionsService.assertTransitionAllowed).not.toHaveBeenCalled();
       const updateCall = mockPrismaService.client.ticket.update.mock.calls[0][0];
       expect(updateCall.data).not.toHaveProperty('status');
     });

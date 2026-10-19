@@ -27,6 +27,7 @@ import { TicketStatus, TicketType } from '../../../src/common/enums';
 import { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { resetDb } from '../../helpers/reset-db';
 import { KodaCaslAbilityFactory } from '../../../src/auth/casl/koda-casl-ability.factory';
+import { PermissionService } from '../../../src/permissions/permission.service';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -63,6 +64,9 @@ describeIntegration('producers record outbox rows atomically', () => {
         TicketsService,
         TicketTransitionsService,
         KodaCaslAbilityFactory,
+        // Permissions P1 (US-003): TicketTransitionsService's required third dependency. The
+        // transitions these tests drive are their own subject, so the edge check allows them.
+        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
         PrismaTicketsRepository,
         { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
         TicketEventService,

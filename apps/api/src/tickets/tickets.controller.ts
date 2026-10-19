@@ -27,15 +27,16 @@ import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { ListTicketsQuery } from './dto/list-tickets.query';
 import { parseQuery, toPageResult } from '../common/dto/koda-page.query';
-import { JsonResponse, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { Principal, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { isAgentPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { ProjectPermission } from '../projects/project-permission.decorator';
+import { RequiresGuard } from '../permissions/requires.guard';
+import { Requires } from '../permissions/requires.decorator';
 import { CurrentProject } from '../projects/current-project.decorator';
 import { ProjectContext, withProjectRole } from '../projects/project-context';
-import { canOverrideClose } from './state-machine/allowed-actions';
 import { TicketListFilterInput } from './tickets.service';
 
 /** `assignedTo=self` means the caller: its user id, or its agent id for an agent. */
@@ -206,12 +207,13 @@ export class TicketsController {
   }
 
   @Patch(':ref')
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('ticket.update')
   @ApiOperation({ summary: 'Update a ticket' })
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
-  @ApiResponse({ status: 403, description: 'Project role lacks UPDATE Ticket' })
+  @ApiResponse({ status: 403, description: 'The caller holds neither ticket.update nor the edge key of the requested status' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @ProjectPermission([KodaAction.UPDATE as CaslPermissionAction, 'Ticket'])
   async update(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -260,11 +262,13 @@ export class TicketsController {
 
   @Post(':ref/verify')
   @HttpCode(200)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('ticket.transition.verify')
   @ApiOperation({ summary: 'Verify a ticket (CREATED → VERIFIED)' })
   @ApiResponse({ status: 200, description: 'Ticket verified', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
+  @ApiResponse({ status: 403, description: 'ticket.transition.verify, or the edge key of the ticket\'s status, is missing' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @ProjectPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async verify(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -280,11 +284,13 @@ export class TicketsController {
 
   @Post(':ref/start')
   @HttpCode(200)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('ticket.transition.start')
   @ApiOperation({ summary: 'Start work on a ticket (VERIFIED → IN_PROGRESS)' })
   @ApiResponse({ status: 200, description: 'Ticket started', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
+  @ApiResponse({ status: 403, description: 'ticket.transition.start, or the edge key of the ticket\'s status, is missing' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @ProjectPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async start(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -297,11 +303,13 @@ export class TicketsController {
 
   @Post(':ref/fix')
   @HttpCode(200)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('ticket.transition.fix')
   @ApiOperation({ summary: 'Submit fix for verification (IN_PROGRESS → VERIFY_FIX)' })
   @ApiResponse({ status: 200, description: 'Fix submitted', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
+  @ApiResponse({ status: 403, description: 'ticket.transition.fix, or the edge key of the ticket\'s status, is missing' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @ProjectPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async fix(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -317,12 +325,14 @@ export class TicketsController {
 
   @Post(':ref/verify-fix')
   @HttpCode(200)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires(['ticket.transition.verify-fix.approve', 'ticket.transition.verify-fix.return'], { mode: 'any' })
   @ApiOperation({ summary: 'Approve or reject fix (VERIFY_FIX → CLOSED or IN_PROGRESS)' })
   @ApiQuery({ name: 'approve', type: Boolean, required: false, description: 'true closes the ticket; false (default) returns it to IN_PROGRESS' })
   @ApiResponse({ status: 200, description: 'Fix reviewed', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
+  @ApiResponse({ status: 403, description: 'Neither ticket.transition.verify-fix key, or the edge key, is held' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @ProjectPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async verifyFix(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -342,12 +352,13 @@ export class TicketsController {
 
   @Post(':ref/close')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Close a ticket (admin override; reason required, written as a GENERAL comment)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('ticket.transition.close')
+  @ApiOperation({ summary: 'Close a ticket (reason required, written as a GENERAL comment)' })
   @ApiResponse({ status: 200, description: 'Ticket closed', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition or blank reason' })
-  @ApiResponse({ status: 403, description: 'Global ADMIN or project ADMIN required' })
+  @ApiResponse({ status: 403, description: 'ticket.transition.close is missing' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @ProjectPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async close(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -355,22 +366,27 @@ export class TicketsController {
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
-    const actor = withProjectRole(principal, project.role);
-    // Authorization before validation: a non-admin gets 403 whatever it sent.
-    if (!canOverrideClose(actor)) {
-      throw new ForbiddenAppException({}, 'tickets');
-    }
-    const result = await this.closeTicket(slug, ref, this.requireCommentBody(dto.body), actor);
+    // Permissions P1 (US-003): the key check is the guard's — a caller without ticket.transition.close
+    // is refused before this handler runs, and the service adds no check of its own (no other caller
+    // reaches close()).
+    const result = await this.closeTicket(
+      slug,
+      ref,
+      this.requireCommentBody(dto.body),
+      withProjectRole(principal, project.role),
+    );
     return JsonResponse.Ok(result.ticket);
   }
 
   @Post(':ref/reject')
   @HttpCode(200)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('ticket.transition.reject')
   @ApiOperation({ summary: 'Reject a ticket (CREATED or VERIFIED → REJECTED)' })
   @ApiResponse({ status: 200, description: 'Ticket rejected', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
+  @ApiResponse({ status: 403, description: 'ticket.transition.reject, or the edge key of the ticket\'s status, is missing' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @ProjectPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async reject(
     @Param('slug') slug: string,
     @Param('ref') ref: string,

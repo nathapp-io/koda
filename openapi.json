@@ -2733,7 +2733,7 @@
             "description": "Invalid request data"
           },
           "403": {
-            "description": "Project role lacks UPDATE Ticket"
+            "description": "The caller holds neither ticket.update nor the edge key of the requested status"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -2903,6 +2903,9 @@
           "400": {
             "description": "Invalid transition"
           },
+          "403": {
+            "description": "ticket.transition.verify, or the edge key of the ticket's status, is missing"
+          },
           "404": {
             "description": "Ticket or project not found"
           }
@@ -2952,6 +2955,9 @@
           },
           "400": {
             "description": "Invalid transition"
+          },
+          "403": {
+            "description": "ticket.transition.start, or the edge key of the ticket's status, is missing"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -3012,6 +3018,9 @@
           },
           "400": {
             "description": "Invalid transition"
+          },
+          "403": {
+            "description": "ticket.transition.fix, or the edge key of the ticket's status, is missing"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -3082,6 +3091,9 @@
           "400": {
             "description": "Invalid transition"
           },
+          "403": {
+            "description": "Neither ticket.transition.verify-fix key, or the edge key, is held"
+          },
           "404": {
             "description": "Ticket or project not found"
           }
@@ -3143,7 +3155,7 @@
             "description": "Invalid transition or blank reason"
           },
           "403": {
-            "description": "Global ADMIN or project ADMIN required"
+            "description": "ticket.transition.close is missing"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -3154,7 +3166,7 @@
             "bearer": []
           }
         ],
-        "summary": "Close a ticket (admin override; reason required, written as a GENERAL comment)",
+        "summary": "Close a ticket (reason required, written as a GENERAL comment)",
         "tags": [
           "tickets"
         ]
@@ -3204,6 +3216,9 @@
           },
           "400": {
             "description": "Invalid transition"
+          },
+          "403": {
+            "description": "ticket.transition.reject, or the edge key of the ticket's status, is missing"
           },
           "404": {
             "description": "Ticket or project not found"

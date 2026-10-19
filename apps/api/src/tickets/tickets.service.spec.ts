@@ -137,7 +137,7 @@ describe('TicketsService', () => {
 
   const mockTransitionsService = {
     executeTransitionPublic: vi.fn(),
-    assertTransitionPermission: vi.fn(),
+    assertTransitionAllowed: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -593,6 +593,13 @@ describe('TicketsService', () => {
         mockUserPrincipal,
       );
       expect(result.status).toBe(TicketStatus.IN_PROGRESS);
+      // Permissions P1 (US-003): the edge key of the requested status is checked first.
+      expect(mockTransitionsService.assertTransitionAllowed).toHaveBeenCalledWith(
+        'koda',
+        'KODA-1',
+        TicketStatus.IN_PROGRESS,
+        mockUserPrincipal,
+      );
       // No direct status write through the repo
       expect(mockTicketRepo.updateTicket).not.toHaveBeenCalled();
     });
@@ -607,6 +614,7 @@ describe('TicketsService', () => {
       await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
 
       expect(mockTransitionsService.executeTransitionPublic).not.toHaveBeenCalled();
+      expect(mockTransitionsService.assertTransitionAllowed).not.toHaveBeenCalled();
       expect(mockTicketRepo.updateTicket).toHaveBeenCalledWith(mockTicket.id, { title: 'x' });
     });
 
@@ -637,16 +645,19 @@ describe('TicketsService', () => {
         TicketStatus.IN_PROGRESS,
         mockUserPrincipal,
       );
-      // Field write happens before the transition
+      // Field write happens before the transition, and the edge check happens before both.
+      expect(mockTransitionsService.assertTransitionAllowed.mock.invocationCallOrder[0]).toBeLessThan(
+        mockTicketRepo.updateTicket.mock.invocationCallOrder[0],
+      );
       expect(mockTicketRepo.updateTicket.mock.invocationCallOrder[0]).toBeLessThan(
         mockTransitionsService.executeTransitionPublic.mock.invocationCallOrder[0],
       );
       expect(result.status).toBe(TicketStatus.IN_PROGRESS);
     });
 
-    // Final-review Finding B: a caller with UPDATE but no TRANSITION must be
+    // Final-review Finding B: a caller with UPDATE but not the edge key must be
     // rejected 403 BEFORE any field write, so the PATCH is all-or-nothing.
-    it('M2/Final-review: PATCH {status, title} with UPDATE-but-no-TRANSITION → 403 and title NOT written', async () => {
+    it('M2/Final-review: PATCH {status, title} with UPDATE-but-no-edge-key → 403 and title NOT written', async () => {
       const updateDto: UpdateTicketDto = {
         title: 'Should never be written',
         status: TicketStatus.IN_PROGRESS,
@@ -655,16 +666,21 @@ describe('TicketsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.updateTicket.mockResolvedValue({ ...mockTicket, title: 'Should never be written' });
-      mockTransitionsService.assertTransitionPermission.mockRejectedValue(
-        new ForbiddenAppException({}, 'tickets'),
+      mockTransitionsService.assertTransitionAllowed.mockRejectedValue(
+        new ForbiddenAppException({}, 'permissions'),
       );
 
       await expect(
         service.update('koda', 'KODA-1', updateDto, mockUserPrincipal),
       ).rejects.toThrow(ForbiddenAppException);
 
-      // Permission check ran before anything else
-      expect(mockTransitionsService.assertTransitionPermission).toHaveBeenCalledWith(mockUserPrincipal);
+      // The edge check ran before anything else, for the requested status
+      expect(mockTransitionsService.assertTransitionAllowed).toHaveBeenCalledWith(
+        'koda',
+        'KODA-1',
+        TicketStatus.IN_PROGRESS,
+        mockUserPrincipal,
+      );
       // The partial field write must not have happened
       expect(mockTicketRepo.updateTicket).not.toHaveBeenCalled();
       expect(mockTransitionsService.executeTransitionPublic).not.toHaveBeenCalled();

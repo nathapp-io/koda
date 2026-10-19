@@ -5,7 +5,15 @@ const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve
 function build(ticketRow: Record<string, unknown> | null) {
   const repo = { findTicketWithComments: vi.fn().mockResolvedValue(ticketRow) };
   const ragService = { indexDocument: vi.fn().mockResolvedValue('doc-1') };
-  const service = new TicketTransitionsService(repo as never, { run: vi.fn() } as never, ragService as never);
+  // Permissions P1 (US-003): PermissionService is the required third argument, so ragService moves
+  // to the fourth.
+  const permissions = { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) };
+  const service = new TicketTransitionsService(
+    repo as never,
+    { run: vi.fn() } as never,
+    permissions as never,
+    ragService as never,
+  );
   const autoIndex = (service as unknown as {
     autoIndexTicket: (project: { id: string; key: string; autoIndexOnClose: boolean }, ticket: { id: string }) => void;
   }).autoIndexTicket.bind(service);

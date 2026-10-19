@@ -99,7 +99,9 @@ describeIntegration('project-role permissions (#144)', () => {
     { capability: 'fix', allowed: workers, setup: async () => ({ method: 'post', url: `/api/projects/team/tickets/${await ticketIn('IN_PROGRESS')}/fix`, body: { body: 'fixed' } }) },
     { capability: 'verify-fix approve', allowed: workers, setup: async () => ({ method: 'post', url: `/api/projects/team/tickets/${await ticketIn('VERIFY_FIX')}/verify-fix?approve=true`, body: { body: 'lgtm' } }) },
     { capability: 'reject', allowed: workers, setup: async () => ({ method: 'post', url: `/api/projects/team/tickets/${await ticketIn('CREATED')}/reject`, body: { body: 'no' } }) },
-    { capability: 'close override', allowed: adminOnly, setup: async () => ({ method: 'post', url: `/api/projects/team/tickets/${await ticketIn('IN_PROGRESS')}/close`, body: { body: 'duplicate' } }) },
+    // Permissions P1 (US-003): close is guarded by ticket.transition.close, which the Developer role
+    // holds (`ticket.transition.*`); a Viewer does not.
+    { capability: 'close override', allowed: workers, setup: async () => ({ method: 'post', url: `/api/projects/team/tickets/${await ticketIn('IN_PROGRESS')}/close`, body: { body: 'duplicate' } }) },
     { capability: 'delete ticket', allowed: adminOnly, setup: async () => ({ method: 'delete', url: `/api/projects/team/tickets/${await ticketIn('CREATED')}` }) },
     { capability: 'create label', allowed: workers, setup: async () => ({ method: 'post', url: '/api/projects/team/labels', body: { name: `r${counter++}`, color: '#00ff00' } }) },
     { capability: 'update label', allowed: adminOnly, setup: async () => ({ method: 'patch', url: `/api/projects/team/labels/${await label()}`, body: { name: `u${counter++}` } }) },

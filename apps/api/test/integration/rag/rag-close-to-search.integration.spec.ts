@@ -25,6 +25,7 @@ import { VectorStore } from '../../../src/rag/vector-store.service';
 import { TicketStatus } from '../../../src/common/enums';
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
+import { PermissionService } from '../../../src/permissions/permission.service';
 import { testDatabaseUrl } from '../../helpers/test-prisma';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 import { PrismaClient } from '../../../src/generated/prisma/client';
@@ -85,6 +86,9 @@ describe('RAG close-to-search integration', () => {
         PrismaTicketsRepository,
         { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
         TicketTransitionsService,
+        // Permissions P1 (US-003): TicketTransitionsService's required third dependency. This spec is
+        // about the close -> index -> search path, so the edge check allows the close.
+        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
         // Provide RagService with a factory so we can inject FakeEmbeddingService directly
         {
           provide: RagService,

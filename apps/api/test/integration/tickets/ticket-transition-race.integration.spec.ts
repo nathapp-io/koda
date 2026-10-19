@@ -30,6 +30,7 @@ import { TicketTransitionsService } from '../../../src/tickets/state-machine/tic
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
+import { PermissionService } from '../../../src/permissions/permission.service';
 import { resetDb } from '../../helpers/reset-db';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
@@ -61,6 +62,9 @@ describeIntegration('M3 ticket transition race (verify vs reject)', () => {
       ],
       providers: [
         TicketTransitionsService,
+        // Permissions P1 (US-003): the required third dependency; this spec races two writers on the
+        // same ticket, so the edge check allows them.
+        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
         PrismaTicketsRepository,
         { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
       ],

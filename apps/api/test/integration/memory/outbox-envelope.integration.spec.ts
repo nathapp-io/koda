@@ -135,6 +135,9 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
     transitionsService = new TicketTransitionsService(
       ticketRepo,
       txManager,
+      // Permissions P1 (US-003): the required edge-check dependency; the envelope assertions below are
+      // about what a successful transition records.
+      { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
       undefined,
       undefined,
       undefined,

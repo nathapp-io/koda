@@ -9,6 +9,8 @@ import { PERMISSION_KEY, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { ValidationAppException, ForbiddenAppException, Page } from '@nathapp/nestjs-common';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { PROJECT_PERMISSION_KEY } from '../projects/project-permission.decorator';
+import { REQUIRES_METADATA, RequiresMetadata } from '../permissions/requires.decorator';
+import { PermissionService } from '../permissions/permission.service';
 import { withProjectRole } from '../projects/project-context';
 import { ProjectsService } from '../projects/projects.service';
 import { ProjectAccessService } from '../projects/project-access.service';
@@ -122,13 +124,18 @@ describe('TicketsController', () => {
     reject: vi.fn(),
   };
 
+  /** RequiresGuard resolves PermissionService when the route-level guards are instantiated. */
+  const mockPermissions = { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) };
+
   beforeEach(async () => {
+    mockPermissions.can.mockReset().mockResolvedValue({ allowed: true, reason: 'granted' });
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TicketsController],
       providers: [
         { provide: TicketsService, useValue: mockTicketsService },
         { provide: TicketTransitionsService, useValue: mockTransitionsService },
         { provide: ProjectsService, useValue: mockProjectsService },
+        { provide: PermissionService, useValue: mockPermissions },
         // US-001: the class-level ProjectMembershipGuard is instantiated by the DI
         // container even though these tests call the handlers directly, so its
         // ProjectAccessService dependency must resolve.
@@ -530,26 +537,50 @@ describe('TicketsController', () => {
     });
   });
 
-  describe('#144 project permissions on ticket routes', () => {
+  describe('route permission metadata (US-003)', () => {
     const T = KodaAction.TRANSITION as CaslPermissionAction;
     const U = KodaAction.UPDATE as CaslPermissionAction;
-    const cases: Array<[keyof TicketsController, [CaslPermissionAction, string]]> = [
+    /** The routes this story does not migrate keep their @ProjectPermission. */
+    const legacyCases: Array<[keyof TicketsController, [CaslPermissionAction, string]]> = [
       ['create', [CaslPermissionAction.CREATE, 'Ticket']],
-      ['update', [U, 'Ticket']],
       ['softDelete', [CaslPermissionAction.DELETE, 'Ticket']],
       ['assign', [U, 'Ticket']],
-      ['verify', [T, 'Ticket']],
-      ['start', [T, 'Ticket']],
-      ['fix', [T, 'Ticket']],
-      ['verifyFix', [T, 'Ticket']],
-      ['close', [T, 'Ticket']],
-      ['reject', [T, 'Ticket']],
+    ];
+    /** The migrated routes declare their catalog keys with @Requires instead. */
+    const requiresCases: Array<[keyof TicketsController, string[], 'all' | 'any']> = [
+      ['update', ['ticket.update'], 'all'],
+      ['verify', ['ticket.transition.verify'], 'all'],
+      ['start', ['ticket.transition.start'], 'all'],
+      ['fix', ['ticket.transition.fix'], 'all'],
+      ['verifyFix', ['ticket.transition.verify-fix.approve', 'ticket.transition.verify-fix.return'], 'any'],
+      ['close', ['ticket.transition.close'], 'all'],
+      ['reject', ['ticket.transition.reject'], 'all'],
     ];
 
-    it.each(cases)('%s carries @ProjectPermission(%j) and no global @RequiredPermission', (handler, permission) => {
+    it.each(legacyCases)('%s carries @ProjectPermission(%j) and no global @RequiredPermission', (handler, permission) => {
       const fn = TicketsController.prototype[handler] as unknown as object;
       expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toEqual({ permission, exemptAgents: false });
       expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
+    });
+
+    it.each(requiresCases)('%s declares @Requires(%j, mode %s)', (handler, keys, mode) => {
+      const fn = TicketsController.prototype[handler] as unknown as object;
+      const metadata = Reflect.getMetadata(REQUIRES_METADATA, fn) as RequiresMetadata;
+
+      expect(metadata).toEqual({ keys, mode, enforcedBy: 'guard' });
+      // The legacy decorators are gone from the migrated routes, so only one mechanism decides them.
+      expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeUndefined();
+      expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
+    });
+
+    it.each(requiresCases)('%s runs ProjectMembershipGuard before RequiresGuard', (handler) => {
+      const fn = TicketsController.prototype[handler] as unknown as object;
+      const guards = (Reflect.getMetadata('__guards__', fn) ?? []) as unknown[];
+
+      expect(guards.map((guard) => (guard as { name?: string }).name)).toEqual([
+        'ProjectMembershipGuard',
+        'RequiresGuard',
+      ]);
     });
 
     it('passes the principal enriched with the resolved project role to the service', async () => {
@@ -619,31 +650,30 @@ describe('TicketsController', () => {
     });
   });
 
-  describe('POST :ref/close (admin override)', () => {
+  describe('POST :ref/close (reason required, key checked by RequiresGuard)', () => {
     const project = (role: string | null) => ({ project: { id: 'p1', slug: 'koda' }, role });
 
-    it('403 for a project DEVELOPER, before any service call', async () => {
-      await expect(controller.close('koda', 'KODA-1', { body: 'why' }, mockMemberUser, project('DEVELOPER')))
-        .rejects.toBeInstanceOf(ForbiddenAppException);
-      expect(mockTransitionsService.close).not.toHaveBeenCalled();
+    // Permissions P1 (US-003): the role check moved to RequiresGuard / ticket.transition.close, which
+    // runs before this handler — so the handler answers only body validation and the service call.
+    it('lets a project DEVELOPER through to the service (the guard, not the role, decides)', async () => {
+      mockTransitionsService.close.mockResolvedValue({ ticket: { id: 't1', status: 'CLOSED' }, comment: {}, activity: {} });
+
+      await controller.close('koda', 'KODA-1', { body: 'why' }, mockMemberUser, project('DEVELOPER'));
+
+      expect(mockTransitionsService.close).toHaveBeenCalledWith(
+        'koda', 'KODA-1', 'why', { ...mockMemberUser, projectRole: 'DEVELOPER' },
+      );
     });
 
-    it('403 for an agent even with every agent role', async () => {
-      await expect(controller.close('koda', 'KODA-1', { body: 'why' }, mockAgent, project(null)))
-        .rejects.toBeInstanceOf(ForbiddenAppException);
+    it('lets an agent through to the service (the guard, not the principal type, decides)', async () => {
+      mockTransitionsService.close.mockResolvedValue({ ticket: { id: 't1', status: 'CLOSED' }, comment: {}, activity: {} });
+
+      await controller.close('koda', 'KODA-1', { body: 'why' }, mockAgent, project(null));
+
+      expect(mockTransitionsService.close).toHaveBeenCalled();
     });
 
-    // Authorization runs BEFORE body validation: a non-admin gets 403 even
-    // when their request body is malformed. Pin the ordering so a future
-    // re-order does not silently turn the 403 into a 400 (the body's
-    // validation only fires for callers who passed the admin check).
-    it.each([undefined, '', '   '])('403 for a non-admin with malformed body %j (authz runs before validation)', async (body) => {
-      await expect(controller.close('koda', 'KODA-1', { body }, mockMemberUser, project('DEVELOPER')))
-        .rejects.toBeInstanceOf(ForbiddenAppException);
-      expect(mockTransitionsService.close).not.toHaveBeenCalled();
-    });
-
-    it.each([undefined, '', '   '])('400 for a project ADMIN with reason %j', async (body) => {
+    it.each([undefined, '', '   '])('400 for a blank reason %j, without reaching the service', async (body) => {
       await expect(controller.close('koda', 'KODA-1', { body }, mockMemberUser, project('ADMIN')))
         .rejects.toBeInstanceOf(ValidationAppException);
       expect(mockTransitionsService.close).not.toHaveBeenCalled();
@@ -652,13 +682,13 @@ describe('TicketsController', () => {
     // Regression (fix round 1, #144): a request with no body at all makes Nest
     // pass undefined for @Body(), which used to TypeError on dto.body and 500.
     // The controller now defaults the dto, so the missing reason is a 400.
-    it('400 for a project ADMIN when the request carries no body at all', async () => {
+    it('400 when the request carries no body at all', async () => {
       await expect(controller.close('koda', 'KODA-1', undefined, mockMemberUser, project('ADMIN')))
         .rejects.toBeInstanceOf(ValidationAppException);
       expect(mockTransitionsService.close).not.toHaveBeenCalled();
     });
 
-    it('closes for a project ADMIN with a reason, passing the enriched principal', async () => {
+    it('closes with a reason, passing the enriched principal', async () => {
       mockTransitionsService.close.mockResolvedValue({ ticket: { id: 't1', status: 'CLOSED' }, comment: {}, activity: {} });
       const res = await controller.close('koda', 'KODA-1', { body: 'dup' }, mockMemberUser, project('ADMIN'));
       expect(mockTransitionsService.close).toHaveBeenCalledWith('koda', 'KODA-1', 'dup', { ...mockMemberUser, projectRole: 'ADMIN' });

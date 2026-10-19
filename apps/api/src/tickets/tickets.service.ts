@@ -234,11 +234,17 @@ export class TicketsService {
     // (TRANSITION validation + activity row + webhook) instead of a direct
     // write that bypassed them. Other fields keep the direct update path.
     if (updateTicketDto.status !== undefined) {
-      // Final-review Finding B: verify TRANSITION permission BEFORE any field
-      // write. A caller with UPDATE but no TRANSITION must get a clean 403,
-      // not a partial field write followed by 403. executeTransitionPublic
-      // re-runs the same check (defense in depth, no extra DB work).
-      await this.transitionsService.assertTransitionPermission(principal);
+      // Permissions P1 (US-003): the edge key of the requested change is checked
+      // BEFORE any field write. A caller with ticket.update but not the edge key
+      // (ticket.transition.start for CREATED -> IN_PROGRESS) must get a clean 403,
+      // not a partial field write followed by 403. The transition itself checks the
+      // same edge again inside executeTransitionInternal.
+      await this.transitionsService.assertTransitionAllowed(
+        projectSlug,
+        ref,
+        updateTicketDto.status,
+        principal,
+      );
       const { status, ...rest } = updateTicketDto;
       if (Object.keys(rest).length > 0) {
         // Apply field updates first, then transition; keep it one perceived operation

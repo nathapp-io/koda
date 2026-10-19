@@ -149,6 +149,9 @@ describe('Auto-create PR on VERIFIED Transition', () => {
     transitionsService = new TicketTransitionsService(
       new PrismaTicketsRepository(mockPrismaService as any),
       mockTxManager as any,
+      // Permissions P1 (US-003): the required edge-check dependency; this spec asserts the PR side
+      // effects of a VERIFIED transition, so the edge check allows it.
+      { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as any,
       undefined,
     );
   });
@@ -382,6 +385,9 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
       transitionsService = new TicketTransitionsService(
         new PrismaTicketsRepository(mockPrismaService as any),
         mockTxManager2 as any,
+        // Permissions P1 (US-003): the required edge-check dependency, inserted as the third argument
+        // (ragService and webhookDispatcher stay undefined).
+        { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as any,
         undefined,
         undefined,
         mockVcsConnectionService as any,
