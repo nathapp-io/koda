@@ -1,4 +1,5 @@
 ---
+description: "API translation files in apps/api: src/i18n/{en,zh} layout, one file per module, both locales for every new module"
 paths:
   - "apps/api/*"
 appliesTo:

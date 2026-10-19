@@ -1,8 +1,12 @@
+---
+description: "Repo-wide koda rules for all apps: Bun tooling, git and commits, TDD and stuck rule, en+zh i18n, regenerating OpenAPI clients, test naming, strict typing, error handling, review checklist"
+---
+
 # Common Rules — All Apps
 
 ## Tooling
 - Use Bun workspace commands (`bun install`, `bun run`), not `npm`/`yarn`
-- Exception: `npx jest` is allowed for targeted Jest runs
+- Exception: `npx jest` is allowed for targeted Jest runs in `apps/cli` and `apps/web`; `apps/api` uses Vitest
 - Prefer repository scripts over ad-hoc one-off command variants
 
 ## Git

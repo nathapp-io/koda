@@ -1,4 +1,5 @@
 ---
+description: "apps/web (Nuxt/Vue): Shadcn components, vee-validate + zod forms, useApi composables, semantic Tailwind tokens, en+zh locale files, auth middleware, Jest and Playwright tests"
 paths:
   - "apps/web/*"
 ---

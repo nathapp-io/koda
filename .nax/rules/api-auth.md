@@ -1,4 +1,5 @@
 ---
+description: "CASL and permissions in apps/api: caslAbilityFactory registration, enumerating subjects instead of all, guard-level vs service-level authorization, union-type tightening, assertNever in the factory"
 paths:
   - "apps/api/*"
 priority: 45
