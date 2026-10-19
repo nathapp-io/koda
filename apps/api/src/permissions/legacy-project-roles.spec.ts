@@ -27,6 +27,12 @@ describe('legacy-project-roles', () => {
       expect(legacyRoleForRoleKey('')).toBe('VIEWER');
     });
 
+    it('AC-1: maps inherited Object property names to VIEWER, not to the prototype member', () => {
+      for (const key of ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__', 'prototype']) {
+        expect(legacyRoleForRoleKey(key)).toBe('VIEWER');
+      }
+    });
+
     it('is the inverse of ROLE_KEY_FOR_LEGACY_ROLE', () => {
       expect(ROLE_KEY_FOR_LEGACY_ROLE).toEqual({
         ADMIN: 'project-admin',
@@ -59,6 +65,15 @@ describe('legacy-project-roles', () => {
     it('answers the lexicographically smallest of two unknown roles', () => {
       expect(strongestProjectRole(['zeta', 'alpha'])).toBe('alpha');
       expect(strongestProjectRole(['beta', 'alpha', 'gamma'])).toBe('alpha');
+    });
+
+    it('AC-2: ranks inherited Object property names as unknown, below every legacy role', () => {
+      expect(strongestProjectRole(['VIEWER', 'constructor'])).toBe('VIEWER');
+      expect(strongestProjectRole(['constructor', 'VIEWER'])).toBe('VIEWER');
+      expect(strongestProjectRole(['DEVELOPER', 'toString'])).toBe('DEVELOPER');
+      expect(strongestProjectRole(['toString', 'DEVELOPER'])).toBe('DEVELOPER');
+      expect(strongestProjectRole(['alpha', 'constructor'])).toBe('alpha');
+      expect(strongestProjectRole(['constructor', 'alpha'])).toBe('alpha');
     });
 
     it('does not mutate the list it is given', () => {

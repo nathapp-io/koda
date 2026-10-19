@@ -19,23 +19,33 @@ export const ROLE_KEY_FOR_LEGACY_ROLE: Readonly<Record<LegacyProjectRole, string
   VIEWER: 'viewer',
 };
 
-const LEGACY_ROLE_FOR_ROLE_KEY: Readonly<Record<string, LegacyProjectRole>> = {
-  [ROLE_KEY_FOR_LEGACY_ROLE.ADMIN]: 'ADMIN',
-  [ROLE_KEY_FOR_LEGACY_ROLE.DEVELOPER]: 'DEVELOPER',
-  [ROLE_KEY_FOR_LEGACY_ROLE.VIEWER]: 'VIEWER',
-};
+const LEGACY_ROLE_FOR_ROLE_KEY: ReadonlyMap<string, LegacyProjectRole> = new Map<string, LegacyProjectRole>([
+  [ROLE_KEY_FOR_LEGACY_ROLE.ADMIN, 'ADMIN'],
+  [ROLE_KEY_FOR_LEGACY_ROLE.DEVELOPER, 'DEVELOPER'],
+  [ROLE_KEY_FOR_LEGACY_ROLE.VIEWER, 'VIEWER'],
+]);
 
-/** `'project-admin'` -> `'ADMIN'`, `'developer'` -> `'DEVELOPER'`, every other role key -> `'VIEWER'`. */
+/**
+ * `'project-admin'` -> `'ADMIN'`, `'developer'` -> `'DEVELOPER'`, every other role key -> `'VIEWER'`.
+ *
+ * The lookup is a `Map`, not a record: a record answers an inherited `Object.prototype` member for a
+ * role key such as `constructor`, `toString` or `__proto__`. The role keys are caller input (a custom
+ * PROJECT role may use any key), and such a key must fall into the `VIEWER` fallback rather than come
+ * back as a function that no downstream role allow-list accepts.
+ */
 export function legacyRoleForRoleKey(roleKey: string): LegacyProjectRole {
-  return LEGACY_ROLE_FOR_ROLE_KEY[roleKey] ?? 'VIEWER';
+  return LEGACY_ROLE_FOR_ROLE_KEY.get(roleKey) ?? 'VIEWER';
 }
 
 /** Strongest first; a role this file does not know ranks below every legacy role. */
-const ROLE_RANK: Readonly<Record<LegacyProjectRole, number>> = { ADMIN: 0, DEVELOPER: 1, VIEWER: 2 };
+const RANK_BY_LEGACY_ROLE: Readonly<Record<LegacyProjectRole, number>> = { ADMIN: 0, DEVELOPER: 1, VIEWER: 2 };
 const UNKNOWN_ROLE_RANK = 3;
 
+/** A `Map` for the same reason as `LEGACY_ROLE_FOR_ROLE_KEY`: `ROLE_RANK['constructor']` is a function. */
+const ROLE_RANK: ReadonlyMap<string, number> = new Map(Object.entries(RANK_BY_LEGACY_ROLE));
+
 function rankOf(role: string): number {
-  return ROLE_RANK[role as LegacyProjectRole] ?? UNKNOWN_ROLE_RANK;
+  return ROLE_RANK.get(role) ?? UNKNOWN_ROLE_RANK;
 }
 
 function isStronger(candidate: string, current: string): boolean {
