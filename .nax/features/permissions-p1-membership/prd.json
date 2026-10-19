@@ -3,7 +3,7 @@
   "feature": "permissions-p1-membership",
   "branchName": "feat/permissions-p1-membership",
   "createdAt": "2026-10-19T00:00:00Z",
-  "updatedAt": "2026-10-19T05:21:28.944Z",
+  "updatedAt": "2026-10-19T05:37:47.170Z",
   "userStories": [
     {
       "id": "US-001",
@@ -340,8 +340,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -353,7 +353,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.40000000000000036,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-19T05:21:32.941Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/notifications/notification-eligibility.ts",
@@ -383,7 +395,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "a13dc352a08d63b140ee50c06e70f8814f001be6"
     },
     {
       "id": "US-006",
