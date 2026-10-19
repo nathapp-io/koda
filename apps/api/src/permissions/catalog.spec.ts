@@ -218,6 +218,24 @@ describe('PERMISSION_CATALOG', () => {
     expect(findCatalogEntry('agent.read')?.scope).toBe('any');
   });
 
+  it('US-001 AC-13: the five agent-management keys are scoped globally', () => {
+    const agentManagementKeys = [
+      'agent.update',
+      'agent.delete',
+      'agent.key.rotate',
+      'agent.capabilities.update',
+      'agent.roles.update',
+    ];
+
+    for (const key of agentManagementKeys) {
+      expect([key, findCatalogEntry(key)?.scope]).toEqual([key, 'global']);
+    }
+  });
+
+  it('US-001 AC-14: agent.pickup stays scoped to a project', () => {
+    expect(findCatalogEntry('agent.pickup')?.scope).toBe('project');
+  });
+
   it('AC-13: comment.update is scoped any', () => {
     expect(findCatalogEntry('comment.update')?.scope).toBe('any');
   });

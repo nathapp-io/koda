@@ -237,5 +237,22 @@ describe('US-002 SystemRoleSeeder.onApplicationBootstrap', () => {
         expect(() => expandEntries(entry.permissions, entry.scope)).not.toThrow();
       }
     });
+
+    it('the six non-admin project roles reach neither project secret read, and project-admin does', async () => {
+      const { expandEntries } = await import('./entry-matcher');
+      const secretReads = ['project.ci-token.read', 'invite.read'];
+      const nonAdminProjectRoles = ['developer', 'reviewer', 'verifier', 'triager', 'approver', 'viewer'];
+
+      const held = Object.fromEntries(
+        SYSTEM_ROLES.map((entry) => [
+          entry.key,
+          secretReads.filter((key) => expandEntries(entry.permissions, entry.scope).has(key)),
+        ]),
+      );
+
+      for (const key of nonAdminProjectRoles) expect([key, held[key]]).toEqual([key, []]);
+      // `project-admin` keeps both through `*`; the global roles keep them in every project.
+      expect(held['project-admin']).toEqual(secretReads);
+    });
   });
 });
