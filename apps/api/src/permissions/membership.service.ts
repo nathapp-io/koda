@@ -166,6 +166,32 @@ export class MembershipService {
     await this.afterWrite(outcome);
   }
 
+  /**
+   * Removes the principal's bindings in one project — what the membership routes do when a member or
+   * an agent is removed — restricted to the roles named by `roleKeys` when given, and answers how many
+   * rows went away.
+   *
+   * It never touches a legacy `ProjectMember`/`AgentProject` row or a `projectId`-null binding, and it
+   * never changes `User.role`: only global `owner`/`admin` bindings are mirrored. It takes the same
+   * user row lock as every other binding write of this principal, so a concurrent global
+   * `owner`/`admin` change and this removal are decided one at a time. Nested inside a caller's
+   * `txManager.run`, the delete joins that transaction; the permission cache is invalidated after it
+   * commits (through `afterCommit` when the caller owns the transaction).
+   */
+  async removeProjectBindings(
+    principal: PrincipalRef,
+    projectId: string,
+    roleKeys?: readonly string[],
+  ): Promise<number> {
+    const outcome = await this.txManager.run(async (): Promise<WriteOutcome<number>> => {
+      await this.lockUserPrincipal(principal);
+      const removed = await this.bindings.deleteProjectBindings(principal, projectId, roleKeys);
+      return { value: removed, changed: removed > 0, revokedUserIds: [] };
+    });
+    await this.afterWrite(outcome);
+    return outcome.value;
+  }
+
   async removeAllBindings(principal: PrincipalRef): Promise<void> {
     const outcome = await this.txManager.run(async (): Promise<WriteOutcome<void>> => {
       // Both locks come before the snapshot, in the order every other binding write takes them: the
