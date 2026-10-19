@@ -32,6 +32,7 @@ describe('AgentsService project roster writes (S4c US-003)', () => {
   let repo: Record<string, Mock>;
   let txManager: { run: Mock; isInTransaction: Mock };
   let service: AgentsService;
+  let membership: { createBinding: Mock; removeProjectBindings: Mock; afterCommit: Mock };
 
   const authConfig: IAuthConfig = { apiKeySecret: 'test-secret', agentProjectScoping: true } as IAuthConfig;
   const project = { id: 'proj-1', slug: 'alpha', deletedAt: null };
@@ -46,18 +47,19 @@ describe('AgentsService project roster writes (S4c US-003)', () => {
       removeFromProjectRoster: vi.fn(),
       lockProjectAgents: vi.fn(),
       isOnProjectRoster: vi.fn(),
+      hasLocalMembership: vi.fn().mockResolvedValue(false),
     };
     txManager = { run: vi.fn((fn: () => Promise<unknown>) => fn()), isInTransaction: vi.fn(() => false) };
+    membership = {
+      createBinding: vi.fn(),
+      removeProjectBindings: vi.fn(),
+      afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
+    };
     service = new AgentsService(
       repo as unknown as PrismaAgentRepository,
       authConfig,
       txManager as never,
-      // Permissions P1a (US-004): MembershipService is the required fourth parameter.
-      {
-        bindBaseline: vi.fn(),
-        removeAllBindings: vi.fn(),
-        afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
-      } as unknown as MembershipService,
+      membership as unknown as MembershipService,
     );
   });
 
@@ -65,12 +67,18 @@ describe('AgentsService project roster writes (S4c US-003)', () => {
     it('roster the agent and returns the roster row the list would serve', async () => {
       repo.findProjectBySlug.mockResolvedValue(project);
       repo.findBySlugScalar.mockResolvedValue({ id: 'agent-1', slug: 'bot', status: 'ACTIVE' });
-      repo.addToProjectRoster.mockResolvedValue('created');
       repo.findProjectRoster.mockResolvedValue([record()]);
 
       const dto = await service.addToProject('alpha', 'bot', 'user-admin');
 
-      expect(repo.addToProjectRoster).toHaveBeenCalledWith('agent-1', 'proj-1', 'user-admin');
+      expect(membership.createBinding).toHaveBeenCalledWith(
+        { principal: { type: 'AGENT', id: 'agent-1' }, roleKey: 'viewer', projectId: 'proj-1' },
+        { type: 'USER', id: 'user-admin' },
+      );
+      expect(repo.addToProjectRoster).not.toHaveBeenCalled();
+      expect(membership.afterCommit).toHaveBeenCalledOnce();
+      expect(repo.lockProjectAgents.mock.invocationCallOrder[0]).toBeLessThan(repo.hasLocalMembership.mock.invocationCallOrder[0]);
+      expect(repo.hasLocalMembership.mock.invocationCallOrder[0]).toBeLessThan(membership.createBinding.mock.invocationCallOrder[0]);
       expect(dto).toMatchObject({
         slug: 'bot',
         status: 'ACTIVE',
@@ -108,10 +116,10 @@ describe('AgentsService project roster writes (S4c US-003)', () => {
       expect(repo.addToProjectRoster).not.toHaveBeenCalled();
     });
 
-    it('409s an already rostered agent (the composite-key conflict)', async () => {
+    it('409s an agent with any local source', async () => {
       repo.findProjectBySlug.mockResolvedValue(project);
       repo.findBySlugScalar.mockResolvedValue({ id: 'agent-1', slug: 'bot', status: 'ACTIVE' });
-      repo.addToProjectRoster.mockResolvedValue('alreadyAssigned');
+      repo.hasLocalMembership.mockResolvedValue(true);
 
       const error = await service.addToProject('alpha', 'bot', 'user-admin').catch((caught: unknown) => caught);
 
@@ -126,7 +134,7 @@ describe('AgentsService project roster writes (S4c US-003)', () => {
     beforeEach(() => {
       repo.findProjectBySlug.mockResolvedValue(project);
       repo.findBySlugScalar.mockResolvedValue(rostered);
-      repo.isOnProjectRoster.mockResolvedValue(true);
+      repo.hasLocalMembership.mockResolvedValue(true);
       repo.countOpenProjectTickets.mockResolvedValue({ count: 0, refs: [] });
     });
 
@@ -136,6 +144,8 @@ describe('AgentsService project roster writes (S4c US-003)', () => {
       expect(repo.lockProjectAgents).toHaveBeenCalledWith('proj-1');
       expect(repo.countOpenProjectTickets).toHaveBeenCalledWith('agent-1', 'proj-1');
       expect(repo.removeFromProjectRoster).toHaveBeenCalledWith('agent-1', 'proj-1');
+      expect(membership.removeProjectBindings).toHaveBeenCalledWith({ type: 'AGENT', id: 'agent-1' }, 'proj-1');
+      expect(membership.afterCommit).toHaveBeenCalledOnce();
       expect(repo.lockProjectAgents.mock.invocationCallOrder[0])
         .toBeLessThan(repo.removeFromProjectRoster.mock.invocationCallOrder[0]);
     });
@@ -149,14 +159,16 @@ describe('AgentsService project roster writes (S4c US-003)', () => {
       expect((error as ConflictAppException).prefix).toBe('projectAgents.hasOpenTickets');
       expect((error as ConflictAppException).args).toEqual({ count: 2, refs: 'ALP-1, ALP-2' });
       expect(repo.removeFromProjectRoster).not.toHaveBeenCalled();
+      expect(membership.removeProjectBindings).not.toHaveBeenCalled();
     });
 
     it('404s an agent that is not on the roster, without counting tickets', async () => {
-      repo.isOnProjectRoster.mockResolvedValue(false);
+      repo.hasLocalMembership.mockResolvedValue(false);
 
       await expect(service.removeFromProject('alpha', 'bot')).rejects.toBeInstanceOf(NotFoundAppException);
       expect(repo.countOpenProjectTickets).not.toHaveBeenCalled();
       expect(repo.removeFromProjectRoster).not.toHaveBeenCalled();
+      expect(membership.removeProjectBindings).not.toHaveBeenCalled();
     });
 
     it('404s an unknown agent slug before opening a transaction', async () => {
