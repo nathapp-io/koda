@@ -110,21 +110,22 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
 
     const projectId = (await prisma.client.project.findFirstOrThrow({ where: { slug } })).id;
     const user = await prisma.client.user.findFirstOrThrow({ where: { email: userEmail } });
-    const membership = await prisma.client.projectMember.findFirstOrThrow({
-      where: { projectId, userId: user.id },
+    const membership = await prisma.client.roleBinding.findFirstOrThrow({
+      where: { projectId, principalType: 'USER', principalId: user.id, role: { key: 'developer' } },
     });
-    expect(membership.role).toBe('DEVELOPER');
+    expect(membership.grantedByType).toBe('USER');
+    expect(await prisma.client.projectMember.count({ where: { projectId, userId: user.id } })).toBe(0);
   });
 
   // ── US-004 AC-3 (already-member) ──────────────────────────────────────────
   it('US-004 AC-3: inviting an existing project member responds 409', async () => {
     const slug = (await prisma.client.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
-    const member = await prisma.client.projectMember.findFirstOrThrow({
-      where: { project: { slug }, role: 'DEVELOPER' },
-      include: { user: true },
+    const binding = await prisma.client.roleBinding.findFirstOrThrow({
+      where: { project: { slug }, principalType: 'USER', role: { key: 'developer' } },
     });
+    const member = await prisma.client.user.findUniqueOrThrow({ where: { id: binding.principalId } });
 
-    const res = await post(`/projects/${slug}/invites`, { email: member.user.email, role: 'DEVELOPER' });
+    const res = await post(`/projects/${slug}/invites`, { email: member.email, role: 'DEVELOPER' });
     expect(res.status).toBe(409);
   });
 

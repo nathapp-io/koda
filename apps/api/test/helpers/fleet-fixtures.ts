@@ -70,7 +70,11 @@ export async function seedFleetHttpWorld(server: Parameters<typeof request>[0], 
   for (const [who, role] of [['dev', 'DEVELOPER'], ['viewer', 'VIEWER'], ['outsider', null]] as const) {
     await request(server).post('/api/admin/users').set(asRoot).send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
-    if (role) await request(server).post('/api/projects/web/members').set(asRoot).send({ email: `${who}@koda.test`, role }).expect(201);
+    if (role) {
+      const user = await prisma.user.findUniqueOrThrow({ where: { email: `${who}@koda.test` } });
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: 'web' } });
+      await prisma.projectMember.create({ data: { projectId: project.id, userId: user.id, role } });
+    }
   }
   for (const who of ['root', 'dev', 'viewer', 'outsider'] as const) {
     ids[who] = (await prisma.user.findUniqueOrThrow({ where: { email: `${who}@koda.test` } })).id;
