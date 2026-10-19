@@ -3,7 +3,7 @@
   "feature": "permissions-p1-membership",
   "branchName": "feat/permissions-p1-membership",
   "createdAt": "2026-10-19T00:00:00Z",
-  "updatedAt": "2026-10-19T03:48:57.305Z",
+  "updatedAt": "2026-10-19T04:34:04.804Z",
   "userStories": [
     {
       "id": "US-001",
@@ -120,8 +120,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -133,7 +133,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.33999999999999986,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-19T03:49:01.421Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/projects/prisma-project.repository.ts",
@@ -149,7 +161,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4e7eb98cd0c59b4778db909f8cc1db8a49a2e478"
     },
     {
       "id": "US-003",
