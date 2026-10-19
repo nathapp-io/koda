@@ -1,5 +1,23 @@
 import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
+import { REQUIRES_METADATA } from '../permissions/requires.decorator';
 import { AdminUsersController } from './admin-users.controller';
+
+describe('US-010 permission keys on the admin user routes', () => {
+  it.each([
+    ['list', 'user.read'],
+    ['create', 'user.create'],
+    ['update', 'user.update'],
+  ] as const)('%s declares @Requires(%s) and no legacy ADMIN gate', (handler, key) => {
+    const fn = (AdminUsersController.prototype as unknown as Record<string, object>)[handler];
+
+    expect(Reflect.getMetadata(REQUIRES_METADATA, fn)).toEqual({
+      keys: [key],
+      mode: 'all',
+      enforcedBy: 'guard',
+    });
+    expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
+  });
+});
 
 describe('AdminUsersController', () => {
   const service = { list: vi.fn(), create: vi.fn(), update: vi.fn() };
@@ -19,10 +37,5 @@ describe('AdminUsersController', () => {
     service.update.mockResolvedValue({ id: 'u2' });
     await controller.update('u2', { disabled: true }, { id: 'u1', actorType: 'user' } as never);
     expect(service.update).toHaveBeenCalledWith('u1', 'u2', { disabled: true });
-  });
-
-  it.each(['list', 'create', 'update'] as const)('%s requires the global ADMIN permission', (method) => {
-    const perms = Reflect.getMetadata(PERMISSION_KEY, AdminUsersController.prototype[method]);
-    expect(JSON.stringify(perms)).toContain('ADMIN');
   });
 });

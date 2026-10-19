@@ -1,5 +1,7 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { PermissionService } from '../permissions/permission.service';
+import { REQUIRES_METADATA } from '../permissions/requires.decorator';
 import { AdminController } from './admin.controller';
 import { OutboxAdminService } from './outbox-admin.service';
 
@@ -54,19 +56,42 @@ function createMockOutboxAdminService() {
 
 describe('AdminController', () => {
   let controller: AdminController;
+  let moduleRef: TestingModule;
   let mockOutboxAdminService: ReturnType<typeof createMockOutboxAdminService>;
 
   beforeEach(async () => {
     mockOutboxAdminService = createMockOutboxAdminService();
 
-    const module: TestingModule = await Test.createTestingModule({
+    moduleRef = await Test.createTestingModule({
       controllers: [AdminController],
       providers: [
         { provide: OutboxAdminService, useValue: mockOutboxAdminService },
+        // Permissions P1 (US-010): the controller runs `RequiresGuard`, whose one dependency is the
+        // decision point the global PermissionsModule exports.
+        {
+          provide: PermissionService,
+          useValue: { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) },
+        },
       ],
     }).compile();
 
-    controller = module.get<AdminController>(AdminController);
+    controller = moduleRef.get<AdminController>(AdminController);
+  });
+
+  afterEach(async () => {
+    await moduleRef?.close();
+  });
+
+  it.each([
+    ['getOutbox', 'outbox.read'],
+    ['retryOutboxEvent', 'outbox.retry'],
+  ] as const)('%s declares @Requires(%s)', (handler, key) => {
+    const fn = (AdminController.prototype as unknown as Record<string, object>)[handler];
+    expect(Reflect.getMetadata(REQUIRES_METADATA, fn)).toEqual({
+      keys: [key],
+      mode: 'all',
+      enforcedBy: 'guard',
+    });
   });
 
   describe('GET /admin/outbox', () => {

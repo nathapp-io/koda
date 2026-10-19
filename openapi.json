@@ -221,7 +221,7 @@
             "description": "Page of users: { total, current, size, hasNext, hasPrev, records }"
           },
           "403": {
-            "description": "Global admin role required"
+            "description": "Forbidden - user.read is missing"
           }
         },
         "security": [
@@ -257,6 +257,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Forbidden - user.create is missing"
           },
           "409": {
             "description": "Email already in use"
@@ -308,7 +311,7 @@
             }
           },
           "403": {
-            "description": "Cannot demote or disable yourself"
+            "description": "Forbidden - user.update is missing, or the caller cannot demote or disable themselves"
           },
           "404": {
             "description": "User not found"
@@ -2199,7 +2202,7 @@
             "description": "SLO metrics computed"
           },
           "403": {
-            "description": "Forbidden - requires admin role"
+            "description": "Forbidden - admin.slo.read is missing"
           }
         },
         "security": [
@@ -4692,7 +4695,7 @@
             "description": "Unknown status"
           },
           "403": {
-            "description": "Forbidden - requires admin role"
+            "description": "Forbidden - outbox.read is missing"
           }
         },
         "security": [
@@ -4724,7 +4727,7 @@
             "description": "Event reset to pending"
           },
           "403": {
-            "description": "Forbidden - requires admin role"
+            "description": "Forbidden - outbox.retry is missing"
           },
           "404": {
             "description": "Event not found"
@@ -10677,6 +10680,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Agents have no home dashboard"
           }
         },
         "security": [
