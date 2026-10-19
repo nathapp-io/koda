@@ -8,9 +8,9 @@ export interface IProjectRepository {
   updateBySlug(slug: string, data: Partial<Omit<ProjectDomain, 'id' | 'createdAt' | 'updatedAt'>>): Promise<ProjectDomain>;
   findAllIds(): Promise<{ id: string }[]>;
   findMembershipRole(projectId: string, userId: string): Promise<string | null>;
-  /** S4c US-001: whether the agent holds an AgentProject roster row for the project. */
+  /** US-002: whether the agent has an access source in the project (roster row or binding). */
   isAgentOnRoster(projectId: string, agentId: string): Promise<boolean>;
-  /** S4c US-001: every non-deleted project on the agent's roster, in findAll order. */
+  /** US-002: every non-deleted project the agent has an access source in, ascending by id. */
   findAllForAgent(agentId: string): Promise<ProjectDomain[]>;
 }
 
