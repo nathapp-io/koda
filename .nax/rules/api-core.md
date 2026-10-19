@@ -1,4 +1,5 @@
 ---
+description: "Core apps/api rules: nathapp-nestjs-patterns first, nestjs-auth v3 with @Principal and @RequiredPermission, API key and password hashing, quality gates, async patterns, DI and response anti-patterns"
 paths:
   - "apps/api/*"
 priority: 50

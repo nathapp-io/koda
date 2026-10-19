@@ -1,4 +1,5 @@
 ---
+description: "Writing apps/api specs that pass alone, in parallel and shuffled: per-file temp dirs, port 0, restoring process.env, resetting mocks, closing Nest apps in shared-cache DB specs"
 paths:
   - "apps/api/*"
 priority: 70

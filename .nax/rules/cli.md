@@ -1,4 +1,5 @@
 ---
+description: "apps/cli commands: generated API client and ApiError, --json output and stderr, exit codes 0-3, project vs global config resolution, bare-host apiUrl, never edit src/generated"
 paths:
   - "apps/cli/*"
 ---

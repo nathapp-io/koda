@@ -1,4 +1,5 @@
 ---
+description: "Writing apps/api tests: endpoint e2e coverage in endpoint.e2e.spec.ts, module/DI specs as DB-free unit tests, test/integration for DB behavior only, TestingModule cleanup, pagination-aware mocks"
 paths:
   - "apps/api/*"
 priority: 80

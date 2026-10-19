@@ -1,4 +1,5 @@
 ---
+description: "Controller responses and exceptions in apps/api: JsonResponse.Ok envelopes, app exception classes from @nathapp/nestjs-common, ForbiddenAppException for domain 403"
 paths:
   - "apps/api/*"
 appliesTo:

@@ -1,3 +1,7 @@
+---
+description: "Repo-wide koda rules for all apps: Bun tooling, git and commits, TDD and stuck rule, en+zh i18n, regenerating OpenAPI clients, test naming, strict typing, error handling, review checklist"
+---
+
 # Common Rules — All Apps
 
 ## Tooling

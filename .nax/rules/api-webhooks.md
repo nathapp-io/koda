@@ -1,4 +1,5 @@
 ---
+description: "Webhook handlers in apps/api: a failed dedup or idempotency pre-check must reject with non-2xx so the provider retries, never fall through to processing"
 paths:
   - "apps/api/*"
 appliesTo:

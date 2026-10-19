@@ -1,4 +1,5 @@
 ---
+description: "Persistence in apps/api: soft delete and ticket numbering, repository -> service -> public layering, @prisma/client confined to repositories, txManager.run transactions, AbstractPrismaRepository, schema and pagination hygiene"
 paths:
   - "apps/api/*"
 appliesTo:
