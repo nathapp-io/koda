@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { Paginate, PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { PrismaClient, ProjectMember, User } from '../../generated/prisma/client';
-import { ActorRole } from '../../common/enums';
+import { countActiveProjectAdmins, listProjectMemberships, localProjectRole } from '../../permissions/legacy-membership.queries';
 import { lockProjectMembers } from '../../common/utils/advisory-lock';
 import { ProjectMemberRecord, ProjectMemberRole } from './domain/project-member.domain';
 
@@ -29,20 +30,56 @@ export class PrismaProjectMembersRepository {
   }
 
   async findMemberPage(projectId: string, page: IPageOption): Promise<IPageResult<ProjectMemberRecord>> {
-    const rows = await Paginate(this.db.projectMember, page, {
-      where: { projectId },
-      include: { user: true },
-      orderBy: [{ joinedAt: 'asc' }, { id: 'asc' }],
+    const memberships = await listProjectMemberships(this.db, projectId, 'USER');
+    const offset = (page.current - 1) * page.size;
+    const slice = memberships.slice(offset, offset + page.size);
+    const users = await this.db.user.findMany({
+      where: { id: { in: slice.map(m => m.principalId) } },
+      select: { id: true, email: true, name: true, disabled: true },
+      take: page.size,
     });
-    return rows.remap((m: MemberRow) => this.toRecord(m));
+    const byId = new Map(users.map(user => [user.id, user]));
+    const records = slice.map(m => {
+      const user = byId.get(m.principalId);
+      if (!user) throw new NotFoundAppException({}, 'members');
+      return { userId: user.id, email: user.email, name: user.name, disabled: user.disabled, role: m.role, joinedAt: m.since };
+    });
+    return {
+      records,
+      total: memberships.length,
+      current: page.current,
+      size: page.size,
+      hasNext: offset + page.size < memberships.length,
+      hasPrev: page.current > 1,
+    };
   }
 
   async findMember(projectId: string, userId: string): Promise<ProjectMemberRecord | null> {
-    const m = await this.db.projectMember.findUnique({
-      where: { projectId_userId: { projectId, userId } },
-      include: { user: true },
-    });
-    return m ? this.toRecord(m) : null;
+    const role = await localProjectRole(this.db, { type: 'USER', id: userId }, projectId);
+    if (role === null) return null;
+    // A single-member lookup must not depend on the capped project-wide listing.
+    const [user, legacy, binding] = await Promise.all([
+      this.db.user.findUnique({ where: { id: userId }, select: { id: true, email: true, name: true, disabled: true } }),
+      this.db.projectMember.findUnique({
+        where: { projectId_userId: { projectId, userId } },
+        select: { joinedAt: true },
+      }),
+      this.db.roleBinding.aggregate({
+        where: { principalType: 'USER', principalId: userId, projectId, role: { scope: 'PROJECT' } },
+        _min: { createdAt: true },
+      }),
+    ]);
+    const legacyAt = legacy?.joinedAt;
+    const bindingAt = binding._min.createdAt;
+    const since = legacyAt && bindingAt
+      ? new Date(Math.min(legacyAt.getTime(), bindingAt.getTime()))
+      : legacyAt ?? bindingAt;
+    if (!user || !since) return null;
+    return { userId, email: user.email, name: user.name, disabled: user.disabled, role, joinedAt: since };
+  }
+
+  async deleteMemberIfPresent(projectId: string, userId: string): Promise<void> {
+    await this.db.projectMember.deleteMany({ where: { projectId, userId } });
   }
 
   /** Case-insensitive so admins do not need the exact stored casing. */
@@ -86,9 +123,7 @@ export class PrismaProjectMembersRepository {
 
   /** Active admins only: a disabled user cannot act, so must not satisfy the guard. */
   async countProjectAdmins(projectId: string): Promise<number> {
-    return this.db.projectMember.count({
-      where: { projectId, role: ActorRole.ADMIN, user: { disabled: false } },
-    });
+    return countActiveProjectAdmins(this.db, projectId);
   }
 
   /** Serializes last-project-admin checks. Call inside txManager.run only. */

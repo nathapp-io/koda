@@ -5,7 +5,8 @@ import { EmailAvailability } from '../../email/email-availability';
 import { EmailScheduleService } from '../../email/schedule/email-schedule.service';
 import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
-import { isUniqueViolation } from '../../common/utils/prisma-errors';
+import { MembershipService } from '../../permissions/membership.service';
+import { ROLE_KEY_FOR_LEGACY_ROLE } from '../../permissions/legacy-project-roles';
 import { ProjectAccessService } from '../project-access.service';
 import { ProjectMemberDto } from '../members/dto/project-member.dto';
 import { ProjectMemberRecord, ProjectMemberRole } from '../members/domain/project-member.domain';
@@ -38,6 +39,7 @@ export class ProjectInvitesService {
     private readonly schedule: EmailScheduleService,
     private readonly email: EmailAvailability,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly membership: MembershipService,
   ) {}
 
   async create(
@@ -51,7 +53,7 @@ export class ProjectInvitesService {
 
     const email = dto.email.trim().toLowerCase();
     const userId = await this.members.findUserIdByEmail(email);
-    if (userId) return this.addExistingUser(projectId, userId, dto.role);
+    if (userId) return this.addExistingUser(projectId, userId, dto.role, principal);
 
     return this.inviteNewAddress(projectId, email, dto.role, principal, locale);
   }
@@ -110,6 +112,7 @@ export class ProjectInvitesService {
     projectId: string,
     userId: string,
     role: ProjectMemberRole,
+    principal: KodaPrincipal,
   ): Promise<InviteCreateResultDto> {
     const user: InviteUserState | null = await this.members.findUserState(userId);
     if (!user || user.disabled) throw new ConflictAppException({}, 'invites.userDisabled');
@@ -117,14 +120,16 @@ export class ProjectInvitesService {
     // Membership write and the MEMBER_ADDED schedule share one transaction: a scheduling
     // failure rolls the membership back so the admin's retry does not hit a 409 for a
     // user that was never actually emailed.
-    const member = await this.txManager.run(async () => {
-      let created: ProjectMemberRecord;
-      try {
-        created = await this.members.createMember(projectId, userId, role);
-      } catch (error) {
-        if (isUniqueViolation(error, 'userId')) throw new ConflictAppException({}, 'invites.memberExists');
-        throw error;
+    const member = await this.membership.afterCommit(() => this.txManager.run(async () => {
+      await this.members.lockMembers(projectId);
+      if ((await this.members.findLocalRole(projectId, userId)) !== null) {
+        throw new ConflictAppException({}, 'invites.memberExists');
       }
+      const binding = await this.membership.createBinding(
+        { principal: { type: 'USER', id: userId }, projectId, roleKey: ROLE_KEY_FOR_LEGACY_ROLE[role] },
+        { type: 'USER', id: principal.id },
+      );
+      const created: ProjectMemberRecord = { userId, email: user.email, name: user.name, role, joinedAt: binding.createdAt, disabled: false };
 
       if (this.email.configured) {
         await this.schedule.scheduleMemberAdded({
@@ -136,7 +141,7 @@ export class ProjectInvitesService {
         });
       }
       return created;
-    });
+    }));
 
     return { outcome: 'ADDED', member: ProjectMemberDto.from(member) };
   }

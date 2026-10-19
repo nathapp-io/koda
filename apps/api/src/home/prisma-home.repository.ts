@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../generated/prisma/client';
+import { accessibleProjectIds } from '../permissions/legacy-membership.queries';
 import {
   ACTIVE_JOB_STATES, FAILED_JOB_STATES, OPEN_TICKET_STATUSES, type HomeActivityRow, type HomeApprovalRow, type HomeApprovalScope,
   type HomeCaller, type HomeJobRow, type HomeProjectRow, type HomeTicketRow,
@@ -13,12 +14,21 @@ const JOB_NEWEST = (field: 'queuedAt' | 'finishedAt') => [{ [field]: 'desc' as c
 export class PrismaHomeRepository {
   constructor(private readonly prisma: PrismaService<PrismaClient>) {}
 
-  /** Member projects for a user; every live project for a global admin (mirrors ProjectsService.findAllForPrincipal). */
+  /**
+   * The caller's projects: every live project for a global admin (mirrors
+   * ProjectsService.findAllForPrincipal); otherwise the live projects the
+   * caller's access sources name — its legacy `ProjectMember` rows unioned with
+   * its PROJECT-scope bindings, where a `projectId`-null project binding reaches
+   * every live project (US-002).
+   */
   async findProjects(caller: HomeCaller): Promise<HomeProjectRow[]> {
+    const accessibleIds = caller.globalAdmin
+      ? null
+      : await accessibleProjectIds(this.prisma.client, { type: 'USER', id: caller.id });
     return this.prisma.client.project.findMany({
       where: {
         deletedAt: null,
-        ...(caller.globalAdmin ? {} : { members: { some: { userId: caller.id } } }),
+        ...(accessibleIds === null ? {} : { id: { in: accessibleIds } }),
       },
       select: { id: true, name: true, key: true, slug: true, description: true },
       orderBy: { name: 'asc' },

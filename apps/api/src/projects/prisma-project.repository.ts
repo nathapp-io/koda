@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Project, PrismaClient } from '../generated/prisma/client';
+import {
+  accessibleProjectIds,
+  agentHasProjectAccess,
+  userProjectRole,
+} from '../permissions/legacy-membership.queries';
+import type { PrincipalRef } from '../permissions/permissions.types';
 import { ProjectDomain, CreateProjectData } from './domain/project.domain';
 
 @Injectable()
@@ -62,49 +68,54 @@ export class PrismaProjectRepository {
   }
 
   /**
-   * US-002: list every non-deleted project the given user principal is a
-   * member of. Soft-deleted projects never appear, even for a member.
+   * US-002: list every non-deleted project the given user principal may act in.
+   * Soft-deleted projects never appear, even for a member.
    */
   async findAllForUser(userId: string): Promise<ProjectDomain[]> {
-    const models = await this.prisma.client.project.findMany({
-      where: {
-        deletedAt: null,
-        members: { some: { userId } },
-      },
-    });
-    return models.map((m) => this.toDomain(m));
+    return this.findAllAccessible({ type: 'USER', id: userId });
   }
 
+  /**
+   * The caller's legacy project role over its **access sources**: its legacy
+   * `ProjectMember` row unioned with its PROJECT-scope bindings, in this project
+   * and `projectId`-null. `null` when it has none — the same answer the legacy
+   * read gave a non-member.
+   */
   async findMembershipRole(projectId: string, userId: string): Promise<string | null> {
-    const m = await this.prisma.client.projectMember.findUnique({
-      where: { projectId_userId: { projectId, userId } },
-      select: { role: true },
-    });
-    return m?.role ?? null;
+    return userProjectRole(this.prisma.client, userId, projectId);
   }
 
   /**
    * S4c US-001: membership of the agent roster. The row carries no role — it
    * grants project reach only; permissions come from AgentRoleEntry.
+   *
+   * US-002: reach comes from the agent's access sources — its `AgentProject`
+   * row unioned with its project bindings (and its `projectId`-null PROJECT
+   * bindings, which reach every project).
    */
   async isAgentOnRoster(projectId: string, agentId: string): Promise<boolean> {
-    const row = await this.prisma.client.agentProject.findUnique({
-      where: { agentId_projectId: { agentId, projectId } },
-      select: { agentId: true },
-    });
-    return row !== null;
+    return agentHasProjectAccess(this.prisma.client, agentId, projectId);
   }
 
   /**
-   * S4c US-001: every non-deleted project on the agent's roster, in findAll
-   * order (the repository's list order).
+   * S4c US-001: every non-deleted project the agent may act in, in
+   * `accessibleProjectIds` order.
    */
   async findAllForAgent(agentId: string): Promise<ProjectDomain[]> {
+    return this.findAllAccessible({ type: 'AGENT', id: agentId });
+  }
+
+  /**
+   * US-002: the access-source read both list methods share. The ids come from
+   * the compatibility queries (legacy rows unioned with bindings; every
+   * non-deleted project for a `projectId`-null PROJECT binding), and the rows
+   * are then read in ascending id order.
+   */
+  private async findAllAccessible(principal: PrincipalRef): Promise<ProjectDomain[]> {
+    const ids = await accessibleProjectIds(this.prisma.client, principal);
     const models = await this.prisma.client.project.findMany({
-      where: {
-        deletedAt: null,
-        agents: { some: { agentId } },
-      },
+      where: { deletedAt: null, id: { in: ids } },
+      orderBy: { id: 'asc' },
     });
     return models.map((m) => this.toDomain(m));
   }

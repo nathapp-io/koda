@@ -9,7 +9,7 @@ import type { ProjectInvitePreview } from './prisma-project-invites.repository';
 
 /**
  * S4b US-005: `InviteAcceptanceService` is constructed with, in order —
- * `(invitesRepo, membersRepo, authService, txManager)`.
+ * `(invitesRepo, membersRepo, authService, txManager, membership)`.
  */
 
 const NOW = new Date('2026-10-10T10:00:00Z');
@@ -101,14 +101,20 @@ function setup(opts: SetupOptions = {}) {
     }),
   };
 
+  const membership = {
+    afterCommit: vi.fn(fn => fn()),
+    createBinding: vi.fn(async () => { calls.push('projectBinding'); }),
+    bindBaseline: vi.fn(async () => { calls.push('baseline'); }),
+  };
   const service = new InviteAcceptanceService(
     invites as never,
     members as never,
     auth as never,
     txManager as never,
+    membership as never,
   );
 
-  return { service, invites, members, auth, calls, isInTransaction: () => inTransaction };
+  return { service, invites, members, membership, auth, calls, isInTransaction: () => inTransaction };
 }
 
 const validBody = { name: 'New User', password: 'StrongPass123!' };
@@ -168,13 +174,15 @@ describe('InviteAcceptanceService.accept (S4b US-005)', () => {
   });
 
   it('AC-3/AC-4: creates the MEMBER account, the invite-role membership and issues the session after commit', async () => {
-    const { service, invites, members, calls } = setup();
+    const { service, invites, members, membership, calls } = setup();
 
     const session = await service.accept(RAW, validBody);
 
-    expect(calls).toEqual(['claim', 'createUser', 'setAcceptedBy', 'createMember', 'session']);
+    expect(calls).toEqual(['claim', 'createUser', 'setAcceptedBy', 'projectBinding', 'baseline', 'session']);
     expect(members.findUserIdByEmail).toHaveBeenCalledWith('new@x.io');
-    expect(members.createMember).toHaveBeenCalledWith('p1', 'u1', 'DEVELOPER');
+    expect(membership.createBinding).toHaveBeenCalledWith({ principal: { type: 'USER', id: 'u1' }, projectId: 'p1', roleKey: 'developer' }, { type: 'SYSTEM', id: 'invite' });
+    expect(membership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'u1' });
+    expect(members.createMember).not.toHaveBeenCalled();
     expect(invites.setAcceptedBy).toHaveBeenCalledWith('i1', 'u1', NOW);
     expect(session.user).toMatchObject({ id: 'u1', email: 'new@x.io', role: 'MEMBER' });
   });
@@ -200,20 +208,22 @@ describe('InviteAcceptanceService.accept (S4b US-005)', () => {
   });
 
   it('AC-7: losing the single-use claim is a 404 and writes nothing', async () => {
-    const { service, members, auth } = setup({ claimLost: true });
+    const { service, members, membership, auth } = setup({ claimLost: true });
 
     await expect(service.accept(RAW, validBody)).rejects.toBeInstanceOf(NotFoundAppException);
     expect(members.createInvitedUser).not.toHaveBeenCalled();
-    expect(members.createMember).not.toHaveBeenCalled();
+    expect(membership.createBinding).not.toHaveBeenCalled();
+    expect(membership.bindBaseline).not.toHaveBeenCalled();
     expect(auth.issueSession).not.toHaveBeenCalled();
   });
 
   it('AC-9: an account for the invited address is a 409 and the claim rolls back', async () => {
-    const { service, members } = setup({ existingAccount: true });
+    const { service, members, membership } = setup({ existingAccount: true });
 
     await expect(service.accept(RAW, validBody)).rejects.toBeInstanceOf(ConflictAppException);
     expect(members.createInvitedUser).not.toHaveBeenCalled();
-    expect(members.createMember).not.toHaveBeenCalled();
+    expect(membership.createBinding).not.toHaveBeenCalled();
+    expect(membership.bindBaseline).not.toHaveBeenCalled();
   });
 
   it('AC-3: a unique violation on the email is a 409, never a 500', async () => {

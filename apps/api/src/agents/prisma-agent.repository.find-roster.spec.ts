@@ -1,7 +1,7 @@
 import type { Mock } from 'vitest';
 /**
  * US-002 — PrismaAgentRepository.findProjectRoster must read the project's
- * AgentProject table (not the ticket-derived list) and group open-ticket counts
+ * local compatibility membership (not the ticket-derived list) and group open-ticket counts
  * and refs into each roster row, capped at 10 refs and ordered by ticket
  * `createdAt` ascending. The integration test
  * `test/integration/agents/agent-roster-repository.integration.spec.ts` covers
@@ -20,18 +20,29 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
   let testingModule: TestingModule;
   let repository: PrismaAgentRepository;
   let prisma: MockPrismaService;
-  let agentProjectFindMany: Mock;
+  let rosterFixtures: Mock;
+  let agentFindMany: Mock;
   let ticketFindMany: Mock;
   let projectFindUnique: Mock;
 
   beforeEach(async () => {
     prisma = createMockPrismaService({ fn: vi.fn });
 
-    agentProjectFindMany = vi.fn();
+    rosterFixtures = vi.fn();
     ticketFindMany = vi.fn();
     projectFindUnique = vi.fn();
 
-    prisma.client.agentProject = { findMany: agentProjectFindMany };
+    prisma.client.agentProject = { findMany: vi.fn(async () => (await rosterFixtures()).map(
+      (row: { createdAt: Date; addedById: string | null; agent: { slug: string } }) => ({
+        agentId: row.agent.slug, createdAt: row.createdAt, addedById: row.addedById,
+      }),
+    )) };
+    agentFindMany = vi.fn(async () => (await rosterFixtures()).map(
+      (row: { agent: object & { slug: string } }) => ({ id: row.agent.slug, ...row.agent }),
+    ));
+    prisma.client.agent = { findMany: agentFindMany };
+    prisma.client.roleBinding = { findMany: vi.fn().mockResolvedValue([]) };
+    prisma.client.user = { findMany: vi.fn().mockResolvedValue([{ id: 'user-admin', name: 'Admin' }]) };
     prisma.client.ticket = { findMany: ticketFindMany };
     prisma.client.project = { findUnique: projectFindUnique };
 
@@ -58,8 +69,8 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
     vi.clearAllMocks();
   });
 
-  it('US-002 AC1: returns a roster record per AgentProject row, ordered by agent name', async () => {
-    agentProjectFindMany.mockResolvedValue([
+  it('US-002 AC1: returns a roster record per local membership, ordered by agent name', async () => {
+    rosterFixtures.mockResolvedValue([
       {
         createdAt: new Date('2026-10-01T00:00:00.000Z'),
         addedById: 'user-admin',
@@ -91,14 +102,14 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
       addedByName: 'Admin',
     });
 
-    // Ordered by agent name ascending (Prisma: `agent: { name: 'asc' }`)
-    const where = agentProjectFindMany.mock.calls[0][0].where;
-    expect(where).toEqual({ projectId: 'proj-1' });
-    expect(agentProjectFindMany.mock.calls[0][0].orderBy).toEqual({ agent: { name: 'asc' } });
+    // Agent details, separate from membership provenance, retain name ordering.
+    const where = agentFindMany.mock.calls[0][0].where;
+    expect(where).toEqual({ id: { in: ['bot'] } });
+    expect(agentFindMany.mock.calls[0][0].orderBy).toEqual({ name: 'asc' });
   });
 
   it('US-002 AC2: surfaces the adding user id and name on each row', async () => {
-    agentProjectFindMany.mockResolvedValue([
+    rosterFixtures.mockResolvedValue([
       {
         createdAt: new Date('2026-10-01T00:00:00.000Z'),
         addedById: 'user-admin',
@@ -122,7 +133,7 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
   });
 
   it('US-002 AC3: returns null addedById / addedByName for backfilled rows', async () => {
-    agentProjectFindMany.mockResolvedValue([
+    rosterFixtures.mockResolvedValue([
       {
         createdAt: new Date('2026-10-01T00:00:00.000Z'),
         addedById: null,
@@ -145,8 +156,8 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
     expect(records[0].addedByName).toBeNull();
   });
 
-  it('US-002 AC4: only reads AgentProject rows; ticket holders without a roster row are not returned', async () => {
-    agentProjectFindMany.mockResolvedValue([
+  it('US-002 AC4: only reads local sources; ticket holders without a roster row are not returned', async () => {
+    rosterFixtures.mockResolvedValue([
       {
         createdAt: new Date('2026-10-01T00:00:00.000Z'),
         addedById: 'user-admin',
@@ -169,7 +180,7 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
   });
 
   it('US-002 AC5: open ticket count excludes CLOSED, REJECTED, and soft-deleted tickets', async () => {
-    agentProjectFindMany.mockResolvedValue([
+    rosterFixtures.mockResolvedValue([
       {
         createdAt: new Date('2026-10-01T00:00:00.000Z'),
         addedById: null,
@@ -202,7 +213,7 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
   });
 
   it('US-002 AC6: caps the open-ticket ref list at 10 but keeps the total count', async () => {
-    agentProjectFindMany.mockResolvedValue([
+    rosterFixtures.mockResolvedValue([
       {
         createdAt: new Date('2026-10-01T00:00:00.000Z'),
         addedById: null,
@@ -232,7 +243,7 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
   });
 
   it('US-002 boundary: returns an empty array when the project has no roster', async () => {
-    agentProjectFindMany.mockResolvedValue([]);
+    rosterFixtures.mockResolvedValue([]);
 
     const records = await repository.findProjectRoster('proj-1');
 

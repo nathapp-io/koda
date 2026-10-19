@@ -153,6 +153,25 @@ describe('SchedulesService.enable and disable', () => {
     expect(h.activity.record).not.toHaveBeenCalled();
   });
 
+  it('enable is refused with the structured fleet.scheduleOwnerNoAccess code, not only its message (US-004 AC-4)', async () => {
+    const h = build(schedule({ enabled: false, disabledReason: 'manual' }));
+    h.repo.findOwnerAccess.mockResolvedValue({ exists: true, disabled: false, globalRole: 'MEMBER', projectRole: 'VIEWER' });
+
+    const refusal = await h.svc.enable('admin', 'p1', 's1', true, NOW).then(
+      () => {
+        throw new Error('a viewer-only owner must not be enabled');
+      },
+      (error: unknown) => error as ConflictAppException,
+    );
+
+    // The response body's `ret` is this code and its message is the `fleet.scheduleOwnerNoAccess.409`
+    // translation, so status + code + message identify the i18n coordinate the AC names.
+    expect(refusal.code).toBe(409);
+    expect(refusal.prefix).toBe('fleet.scheduleOwnerNoAccess');
+    expect(h.repo.findOwnerAccess).toHaveBeenCalledWith('p1', 'owner');
+    expect(h.repo.update).not.toHaveBeenCalled();
+  });
+
   it('enable on an enabled schedule changes nothing', async () => {
     const h = build();
     h.repo.findOwnerAccess.mockResolvedValue({ exists: false, disabled: false, globalRole: '', projectRole: null });

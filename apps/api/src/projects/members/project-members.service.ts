@@ -6,7 +6,8 @@ import { KodaPrincipal, isUserPrincipal } from '../../auth/principal/koda-princi
 import { ActorRole } from '../../common/enums';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
-import { isUniqueViolation } from '../../common/utils/prisma-errors';
+import { MembershipService } from '../../permissions/membership.service';
+import { ROLE_KEY_FOR_LEGACY_ROLE } from '../../permissions/legacy-project-roles';
 import { ProjectAccessService } from '../project-access.service';
 import { PrismaProjectMembersRepository } from './prisma-project-members.repository';
 import { ProjectMemberRecord, ProjectMemberRole } from './domain/project-member.domain';
@@ -23,6 +24,7 @@ export class ProjectMembersService {
     private readonly membersRepo: PrismaProjectMembersRepository,
     private readonly access: ProjectAccessService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly membership: MembershipService,
   ) {}
 
   /**
@@ -49,37 +51,51 @@ export class ProjectMembersService {
     // A disabled account cannot act on the project, so it is never granted
     // membership — the S4b invite path refuses one the same way.
     if (user.disabled) throw new ConflictAppException({}, 'members.userDisabled');
-    try {
-      return ProjectMemberDto.from(await this.membersRepo.createMember(projectId, user.id, dto.role ?? ActorRole.VIEWER));
-    } catch (error) {
-      if (isUniqueViolation(error, 'userId')) throw new ConflictAppException({}, 'members');
-      throw error;
-    }
+    return this.membership.afterCommit(() => this.txManager.run(async () => {
+      await this.membersRepo.lockMembers(projectId);
+      if (await this.membersRepo.findMember(projectId, user.id)) throw new ConflictAppException({}, 'members');
+      await this.membership.createBinding(
+        { principal: { type: 'USER', id: user.id }, projectId, roleKey: ROLE_KEY_FOR_LEGACY_ROLE[dto.role ?? 'VIEWER'] },
+        { type: 'USER', id: principal.id },
+      );
+      return ProjectMemberDto.from(await this.findRequiredMember(projectId, user.id));
+    }));
   }
 
   async updateRole(slug: string, userId: string, dto: UpdateMemberRoleDto, principal: KodaPrincipal): Promise<ProjectMemberDto> {
     const projectId = await this.access.findProjectIdBySlug(slug);
     await this.access.assertProjectAdmin(projectId, principal);
-    const updated = await this.txManager.run(async () => {
+    const updated = await this.membership.afterCommit(() => this.txManager.run(async () => {
       const current = await this.lockAndFind(projectId, userId);
       await this.assertKeepsAnAdmin(projectId, current, dto.role, principal);
-      return this.membersRepo.updateMemberRole(projectId, userId, dto.role);
-    });
+      await this.membership.removeProjectBindings({ type: 'USER', id: userId }, projectId, ['project-admin', 'developer', 'viewer']);
+      await this.membersRepo.deleteMemberIfPresent(projectId, userId);
+      await this.membership.createBinding(
+        { principal: { type: 'USER', id: userId }, projectId, roleKey: ROLE_KEY_FOR_LEGACY_ROLE[dto.role] },
+        { type: 'USER', id: principal.id },
+      );
+      return this.findRequiredMember(projectId, userId);
+    }));
     return ProjectMemberDto.from(updated);
   }
 
   async remove(slug: string, userId: string, principal: KodaPrincipal): Promise<void> {
     const projectId = await this.access.findProjectIdBySlug(slug);
     await this.access.assertProjectAdmin(projectId, principal);
-    await this.txManager.run(async () => {
+    await this.membership.afterCommit(() => this.txManager.run(async () => {
       const current = await this.lockAndFind(projectId, userId);
       await this.assertKeepsAnAdmin(projectId, current, null, principal);
-      await this.membersRepo.deleteMember(projectId, userId);
-    });
+      await this.membership.removeProjectBindings({ type: 'USER', id: userId }, projectId);
+      await this.membersRepo.deleteMemberIfPresent(projectId, userId);
+    }));
   }
 
   private async lockAndFind(projectId: string, userId: string): Promise<ProjectMemberRecord> {
     await this.membersRepo.lockMembers(projectId);
+    return this.findRequiredMember(projectId, userId);
+  }
+
+  private async findRequiredMember(projectId: string, userId: string): Promise<ProjectMemberRecord> {
     const current = await this.membersRepo.findMember(projectId, userId);
     if (!current) throw new NotFoundAppException({}, 'members');
     return current;

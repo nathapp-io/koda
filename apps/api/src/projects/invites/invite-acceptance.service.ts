@@ -7,6 +7,8 @@ import { AuthResponseDto } from '../../auth/dto/auth-response.dto';
 import { UserDomain } from '../../auth/domain/auth.domain';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
+import { MembershipService } from '../../permissions/membership.service';
+import { ROLE_KEY_FOR_LEGACY_ROLE } from '../../permissions/legacy-project-roles';
 import { hashInviteToken } from './invite-token';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { InvitePreviewDto } from './dto/invite-preview.dto';
@@ -30,6 +32,7 @@ export class InviteAcceptanceService {
     private readonly members: PrismaProjectInvitesMembersRepository,
     private readonly auth: AuthService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly membership: MembershipService,
   ) {}
 
   async preview(token: string): Promise<InvitePreviewDto> {
@@ -51,7 +54,7 @@ export class InviteAcceptanceService {
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
     const now = new Date();
 
-    const user = await this.txManager.run(async () => {
+    const user = await this.membership.afterCommit(() => this.txManager.run(async () => {
       const tokenHash = hashInviteToken(token);
       const invite = await this.invites.findByTokenHash(tokenHash);
       if (!this.usable(invite, now)) throw this.notFound();
@@ -69,9 +72,13 @@ export class InviteAcceptanceService {
 
       const created = await this.createUser(invite.email, dto.name, passwordHash);
       await this.invites.setAcceptedBy(invite.id, created.id, now);
-      await this.members.createMember(invite.projectId, created.id, invite.role);
+      await this.membership.createBinding(
+        { principal: { type: 'USER', id: created.id }, projectId: invite.projectId, roleKey: ROLE_KEY_FOR_LEGACY_ROLE[invite.role] },
+        { type: 'SYSTEM', id: 'invite' },
+      );
+      await this.membership.bindBaseline({ type: 'USER', id: created.id });
       return created;
-    });
+    }));
 
     // Issued after commit: a rolled-back accept never hands out a token for a user that does not exist.
     return this.auth.issueSession(user);

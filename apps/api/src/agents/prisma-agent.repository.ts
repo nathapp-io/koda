@@ -4,6 +4,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TicketStatus } from '../common/enums';
 import { KodaError } from '../common/koda-error';
 import { lockProjectAgents } from '../common/utils/advisory-lock';
+import { accessibleProjectIds, agentHasProjectAccess, listProjectMemberships, localProjectRole } from '../permissions/legacy-membership.queries';
 import type { ProjectAgentRecord } from './dto/project-agent.dto';
 
 /** US-002: at most this many refs surface in the open-ticket list per roster row. */
@@ -122,16 +123,14 @@ export class PrismaAgentRepository {
     return this.db.project.findUnique({ where: { slug } });
   }
 
-  /**
-   * S4c US-001: whether the agent holds an AgentProject roster row for the
-   * project. The row grants project reach; it carries no role.
-   */
+  /** Access sources include project-specific and global PROJECT bindings plus legacy rows. */
   async isOnProjectRoster(agentId: string, projectId: string): Promise<boolean> {
-    const row = await this.db.agentProject.findUnique({
-      where: { agentId_projectId: { agentId, projectId } },
-      select: { agentId: true },
-    });
-    return row !== null;
+    return agentHasProjectAccess(this.prisma.client, agentId, projectId);
+  }
+
+  /** Roster writes and lists use local sources only, not global project access. */
+  async hasLocalMembership(agentId: string, projectId: string): Promise<boolean> {
+    return (await localProjectRole(this.prisma.client, { type: 'AGENT', id: agentId }, projectId)) !== null;
   }
 
   /**
@@ -210,12 +209,14 @@ export class PrismaAgentRepository {
    * Feeds GET /agents/me; soft-deleted projects never appear.
    */
   async findRosterProjects(agentId: string): Promise<{ slug: string; name: string }[]> {
-    const rows = await this.db.agentProject.findMany({
-      where: { agentId, project: { deletedAt: null } },
-      select: { project: { select: { slug: true, name: true } } },
-      orderBy: { project: { slug: 'asc' } },
+    const ids = await accessibleProjectIds(this.prisma.client, { type: 'AGENT', id: agentId });
+    if (ids.length === 0) return [];
+    return this.prisma.client.project.findMany({
+      where: { id: { in: ids }, deletedAt: null },
+      select: { slug: true, name: true },
+      orderBy: { slug: 'asc' },
+      take: ids.length,
     });
-    return rows.map((row) => row.project);
   }
 
   async findByProjectSlug(projectSlug: string) {
@@ -256,7 +257,7 @@ export class PrismaAgentRepository {
   }
 
   /**
-   * US-002: the project's explicit agent roster — one row per AgentProject,
+   * US-002: the project's local agent roster — one row per compatibility membership,
    * ordered by agent name, with roles, capabilities, the adding user's id and
    * name, and a grouped open-ticket summary. "Open" excludes CLOSED, REJECTED,
    * and soft-deleted tickets (soft-deleted rows are filtered server-side, not
@@ -267,27 +268,38 @@ export class PrismaAgentRepository {
    * total count and the ref list are consistent inside a single snapshot.
    */
   async findProjectRoster(projectId: string): Promise<ProjectAgentRecord[]> {
-    const rosterRows = await this.db.agentProject.findMany({
-      where: { projectId },
-      orderBy: { agent: { name: 'asc' } },
-      select: {
-        createdAt: true,
-        addedById: true,
-        addedBy: { select: { id: true, name: true } },
-        agent: {
-          select: {
-            slug: true,
-            name: true,
-            status: true,
-            roles: { select: { role: true } },
-            capabilities: { select: { capability: true } },
-          },
+    const memberships = await listProjectMemberships(this.prisma.client, projectId, 'AGENT');
+    if (memberships.length === 0) return [];
+    const byId = new Map(memberships.map((row) => [row.principalId, row]));
+    const userIds = [...new Set(memberships.flatMap((row) => row.addedByUserId ? [row.addedByUserId] : []))];
+    const [agents, users] = await Promise.all([
+      this.prisma.client.agent.findMany({
+        where: { id: { in: memberships.map((row) => row.principalId) } },
+        orderBy: { name: 'asc' },
+        select: {
+          id: true, slug: true, name: true, status: true,
+          roles: { select: { role: true } },
+          capabilities: { select: { capability: true } },
         },
-      },
+        take: memberships.length,
+      }),
+      userIds.length === 0 ? Promise.resolve([]) : this.prisma.client.user.findMany({
+        where: { id: { in: userIds } }, select: { id: true, name: true }, take: userIds.length,
+      }),
+    ]);
+    const userNames = new Map(users.map((user) => [user.id, user.name]));
+    const rosterRows = agents.map((agent) => {
+      const membership = byId.get(agent.id);
+      if (!membership) {
+        throw new KodaError('MEMBERSHIP_NOT_FOUND', `agent ${agent.id} has no source in project ${projectId}`);
+      }
+      return {
+        agent,
+        createdAt: membership.since,
+        addedById: membership.addedByUserId,
+        addedByName: membership.addedByUserId ? userNames.get(membership.addedByUserId) ?? null : null,
+      };
     });
-
-    if (rosterRows.length === 0) return [];
-
     const agentSlugs = rosterRows.map((row) => row.agent.slug);
 
     const openTickets = await this.db.ticket.findMany({
@@ -340,7 +352,7 @@ export class PrismaAgentRepository {
         openTicketRefs: bucket.refs,
         addedAt: row.createdAt,
         addedById: row.addedById,
-        addedByName: row.addedBy?.name ?? null,
+        addedByName: row.addedByName,
       };
     });
   }

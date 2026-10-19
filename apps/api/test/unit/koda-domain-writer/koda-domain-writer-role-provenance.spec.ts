@@ -13,8 +13,9 @@ import type { Mock } from 'vitest';
  * `PrismaKodaDomainWriterRepository` (the new
  * `findUserProjectRoles(projectId, userId)` data source) against a mocked
  * Prisma client, so the roles really are read from `User.role` /
- * `ProjectMember.role`. The second block pins that data source's contract at
- * the writer boundary.
+ * `ProjectMember.role` / the user's PROJECT-scope role bindings (permissions
+ * P1b US-003). The second block pins that data source's contract at the
+ * writer boundary.
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
@@ -68,14 +69,29 @@ describe('US-004: KodaDomainWriter role provenance', () => {
         project: { findUnique: vi.fn() },
         user: { findUnique: vi.fn(), findFirst: vi.fn() },
         projectMember: { findUnique: vi.fn(), findFirst: vi.fn() },
+        // Permissions P1b US-003: the compatibility query reads the user's PROJECT-scope bindings.
+        roleBinding: { findMany: vi.fn() },
       },
     };
 
     const ticketEventService = { create: vi.fn() };
     const outbox = { record: vi.fn() };
 
-    /** Wire the mocked Prisma client for one global role + one membership role. */
-    function givenUser(globalRole: string, membershipRole: string | null): void {
+    /** One `RoleBinding` row as `legacy-membership.queries.ts` selects it. */
+    const bindingRow = (key: string) => ({
+      projectId: PROJECT_ID,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      grantedByType: 'SYSTEM',
+      grantedById: 'test',
+      role: { key, scope: 'PROJECT' },
+    });
+
+    /** Wire the mocked Prisma client for one global role, one membership row and one binding role. */
+    function givenUser(
+      globalRole: string,
+      membershipRole: string | null,
+      bindingRoleKey: string | null = null,
+    ): void {
       const membership =
         membershipRole === null
           ? null
@@ -94,6 +110,9 @@ describe('US-004: KodaDomainWriter role provenance', () => {
       });
       prismaMock.client.projectMember.findFirst.mockResolvedValue(membership);
       prismaMock.client.projectMember.findUnique.mockResolvedValue(membership);
+      prismaMock.client.roleBinding.findMany.mockResolvedValue(
+        bindingRoleKey === null ? [] : [bindingRow(bindingRoleKey)],
+      );
     }
 
     beforeAll(async () => {
@@ -188,6 +207,15 @@ describe('US-004: KodaDomainWriter role provenance', () => {
       expect(ticketEventService.create).toHaveBeenCalled();
     });
 
+    it('AC13: succeeds for a user actor whose only source in the project is a developer binding', async () => {
+      givenUser('MEMBER', null, 'developer');
+
+      await expect(
+        writer.writeTicketEvent(ticketEvent({ actorId: USER_ID, actorType: 'user', data: {} })),
+      ).resolves.toMatchObject({ canonicalId: 'event-1' });
+      expect(ticketEventService.create).toHaveBeenCalled();
+    });
+
     it('AC14: succeeds for a global ADMIN user actor with no membership row', async () => {
       givenUser('ADMIN', null);
 
@@ -208,6 +236,7 @@ describe('US-004: KodaDomainWriter role provenance', () => {
       expect(agentAuthProvider.loadAgentRoles).toHaveBeenCalledWith('agent-1');
       expect(prismaMock.client.projectMember.findFirst).not.toHaveBeenCalled();
       expect(prismaMock.client.projectMember.findUnique).not.toHaveBeenCalled();
+      expect(prismaMock.client.roleBinding.findMany).not.toHaveBeenCalled();
     });
   });
 

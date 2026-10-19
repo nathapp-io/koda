@@ -2771,10 +2771,12 @@ describeIntegration('API Integration Tests', () => {
       const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
       const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
       const admin = await prisma.client.user.findUniqueOrThrow({ where: { email: 'admin@koda.test' } });
-      const rosterEntry = await prisma.client.agentProject.findUnique({
-        where: { agentId_projectId: { agentId: rosterAgentId, projectId: project.id } },
+      const rosterEntry = await prisma.client.roleBinding.findFirst({
+        where: { principalType: 'AGENT', principalId: rosterAgentId, projectId: project.id, role: { key: 'viewer' } },
       });
-      expect(rosterEntry?.addedById).toBe(admin.id);
+      expect(rosterEntry?.grantedById).toBe(admin.id);
+      expect(rosterEntry?.grantedByType).toBe('USER');
+      expect(await prisma.client.agentProject.count({ where: { agentId: rosterAgentId, projectId: project.id } })).toBe(0);
     });
 
     it('AC2: a global ADMIN who is not a project member can add a roster entry', async () => {
@@ -2814,8 +2816,8 @@ describeIntegration('API Integration Tests', () => {
         .send({ agentSlug: candidateSlug.slug })
         .expect(403);
 
-      const rosterEntry = await prisma.client.agentProject.findUnique({
-        where: { agentId_projectId: { agentId: candidateSlug.id, projectId: project.id } },
+      const rosterEntry = await prisma.client.roleBinding.findFirst({
+        where: { principalType: 'AGENT', principalId: candidateSlug.id, projectId: project.id, role: { key: 'viewer' } },
       });
       expect(rosterEntry).toBeNull();
 
@@ -2828,8 +2830,8 @@ describeIntegration('API Integration Tests', () => {
         .delete(`/api/projects/${projectSlug}/agents/${candidateSlug.slug}`)
         .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
         .expect(403);
-      const retainedEntry = await prisma.client.agentProject.findUnique({
-        where: { agentId_projectId: { agentId: candidateSlug.id, projectId: project.id } },
+      const retainedEntry = await prisma.client.roleBinding.findFirst({
+        where: { principalType: 'AGENT', principalId: candidateSlug.id, projectId: project.id, role: { key: 'viewer' } },
       });
       expect(retainedEntry).not.toBeNull();
     });
@@ -2852,8 +2854,8 @@ describeIntegration('API Integration Tests', () => {
       refusal(res, 'projectAgents.agentOffline.409');
 
       const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
-      const rosterEntry = await prisma.client.agentProject.findUnique({
-        where: { agentId_projectId: { agentId: candidate.id, projectId: project.id } },
+      const rosterEntry = await prisma.client.roleBinding.findFirst({
+        where: { principalType: 'AGENT', principalId: candidate.id, projectId: project.id, role: { key: 'viewer' } },
       });
       expect(rosterEntry).toBeNull();
     });
@@ -2884,8 +2886,8 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${rosterAgentApiKey}`)
         .send({ agentSlug: rosterAgentSlug })
         .expect(403);
-      const rosterEntry = await prisma.client.agentProject.findUnique({
-        where: { agentId_projectId: { agentId: rosterAgentId, projectId: project.id } },
+      const rosterEntry = await prisma.client.roleBinding.findFirst({
+        where: { principalType: 'AGENT', principalId: rosterAgentId, projectId: project.id, role: { key: 'viewer' } },
       });
       expect(rosterEntry).not.toBeNull();
     });
@@ -2897,8 +2899,8 @@ describeIntegration('API Integration Tests', () => {
         .delete(`/api/projects/${projectSlug}/agents/${rosterAgentSlug}`)
         .set('Authorization', `Bearer ${rosterAgentApiKey}`)
         .expect(403);
-      const rosterEntry = await prisma.client.agentProject.findUnique({
-        where: { agentId_projectId: { agentId: rosterAgentId, projectId: project.id } },
+      const rosterEntry = await prisma.client.roleBinding.findFirst({
+        where: { principalType: 'AGENT', principalId: rosterAgentId, projectId: project.id, role: { key: 'viewer' } },
       });
       expect(rosterEntry).not.toBeNull();
     });
@@ -2934,13 +2936,13 @@ describeIntegration('API Integration Tests', () => {
       // The refusal names the count and every open ref (AC-34), and carries them as args.
       refusal(res, 'projectAgents.hasOpenTickets.409', { count: 2, refs: refs.join(', ') });
 
-      const rosterEntry = await prisma.client.agentProject.findUnique({
-        where: { agentId_projectId: { agentId: rosterAgentId, projectId: project.id } },
+      const rosterEntry = await prisma.client.roleBinding.findFirst({
+        where: { principalType: 'AGENT', principalId: rosterAgentId, projectId: project.id, role: { key: 'viewer' } },
       });
       expect(rosterEntry).not.toBeNull();
     });
 
-    it('AC8: removes a rostered agent without open tickets and deletes its roster row', async () => {
+    it('AC8: removes a rostered agent without open tickets and deletes its viewer binding', async () => {
       const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
       const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
       await prisma.client.ticket.updateMany({
@@ -2952,8 +2954,8 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(204);
 
-      const rosterEntry = await prisma.client.agentProject.findUnique({
-        where: { agentId_projectId: { agentId: rosterAgentId, projectId: project.id } },
+      const rosterEntry = await prisma.client.roleBinding.findFirst({
+        where: { principalType: 'AGENT', principalId: rosterAgentId, projectId: project.id, role: { key: 'viewer' } },
       });
       expect(rosterEntry).toBeNull();
     });

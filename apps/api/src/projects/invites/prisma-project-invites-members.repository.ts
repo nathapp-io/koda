@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient, ProjectMember, User } from '../../generated/prisma/client';
+import { lockProjectMembers } from '../../common/utils/advisory-lock';
+import { localProjectRole } from '../../permissions/legacy-membership.queries';
 import { UserDomain } from '../../auth/domain/auth.domain';
 import { ProjectMemberRecord, ProjectMemberRole } from '../members/domain/project-member.domain';
 
@@ -9,6 +11,7 @@ type MemberRow = ProjectMember & { user: User };
 export interface InviteUserState {
   id: string;
   email: string;
+  name: string | null;
   disabled: boolean;
 }
 
@@ -54,8 +57,16 @@ export class PrismaProjectInvitesMembersRepository {
   async findUserState(userId: string): Promise<InviteUserState | null> {
     return this.db.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, disabled: true },
+      select: { id: true, email: true, name: true, disabled: true },
     });
+  }
+
+  async lockMembers(projectId: string): Promise<void> {
+    await lockProjectMembers(this.db, projectId);
+  }
+
+  async findLocalRole(projectId: string, userId: string): Promise<string | null> {
+    return localProjectRole(this.db, { type: 'USER', id: userId }, projectId);
   }
 
   async createMember(projectId: string, userId: string, role: ProjectMemberRole): Promise<ProjectMemberRecord> {

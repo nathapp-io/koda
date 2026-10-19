@@ -100,45 +100,101 @@ describe('EmailContentBuilder MEMBER_ADDED content (S4b US-004)', () => {
     toEmail: 'dev@example.com', locale: 'en', attempts: 1, dueAt: new Date('2026-10-10T12:05:00Z'), ...over,
   });
 
+  /** One PROJECT-scope binding of the user: in a project, or `projectId`-null for every project. */
+  interface Binding {
+    projectId: string | null;
+    roleKey: string;
+  }
+
   function setupMemberAdded() {
     const user = { findUnique: vi.fn(), findFirst: vi.fn() };
-    const project = { findUnique: vi.fn(), findFirst: vi.fn() };
+    const project = { findUnique: vi.fn(), findFirst: vi.fn(), count: vi.fn(async () => 1) };
     const projectMember = { findUnique: vi.fn(), findFirst: vi.fn() };
+    const roleBinding = { findMany: vi.fn().mockResolvedValue([]) };
     const preferences = { emailAllowed: vi.fn(async () => ({ allowed: true })) };
     const email = { configured: true, webUrl: vi.fn((path: string) => `${WEB}${path}`) };
     const builder = new EmailContentBuilder(
-      { client: { user, project, projectMember } } as never,
+      { client: { user, project, projectMember, roleBinding } } as never,
       preferences as never,
       email as never,
     );
     const setUser = (value: unknown) => { user.findUnique.mockResolvedValue(value); user.findFirst.mockResolvedValue(value); };
     const setProject = (value: unknown) => { project.findUnique.mockResolvedValue(value); project.findFirst.mockResolvedValue(value); };
-    const setMembership = (value: unknown) => { projectMember.findUnique.mockResolvedValue(value); projectMember.findFirst.mockResolvedValue(value); };
-    return { builder, setUser, setProject, setMembership, email };
+
+    /**
+     * The user's access sources, as the compatibility queries read them: the legacy `ProjectMember`
+     * role it holds (`null` = no row) plus the PROJECT-scope bindings it holds. The binding read
+     * answers the ones the query asked for, so a binding in another project stays out.
+     */
+    const setMembership = (legacyRole: string | null = null, bindings: readonly Binding[] = []) => {
+      projectMember.findUnique.mockResolvedValue(legacyRole === null ? null : { role: legacyRole });
+      projectMember.findFirst.mockResolvedValue(legacyRole === null ? null : { role: legacyRole });
+      roleBinding.findMany.mockImplementation(async (args: { where: { OR: Array<{ projectId: string | null }> } }) =>
+        bindings
+          .filter((binding) => args.where.OR.some((clause) => clause.projectId === binding.projectId))
+          .map((binding) => ({
+            projectId: binding.projectId,
+            createdAt: new Date('2026-01-01T00:00:00Z'),
+            grantedByType: 'USER',
+            grantedById: 'granter',
+            role: { key: binding.roleKey, scope: 'PROJECT' },
+          })));
+    };
+    return { builder, setUser, setProject, setMembership, projectMember, roleBinding, email };
   }
 
-  it('AC-14: an active user, project and membership yield { projectName, role, url } data', async () => {
+  it('AC-14: an active user, project and developer binding yield { projectName, role, url } data', async () => {
     const s = setupMemberAdded();
     s.setUser({ id: 'u1', disabled: false });
     s.setProject({ id: 'p1', name: 'Koda', slug: 's4b', deletedAt: null });
-    s.setMembership({ role: 'DEVELOPER' });
+    s.setMembership(null, [{ projectId: 'p1', roleKey: 'developer' }]);
 
     const result = await s.builder.build(memberRow());
 
     expect(result).not.toHaveProperty('skip');
     expect((result as { data: unknown }).data).toEqual({ projectName: 'Koda', role: 'DEVELOPER', url: `${WEB}/s4b` });
     expect(s.email.webUrl).toHaveBeenCalledWith('/s4b');
+    // The role comes from the compatibility union: the user's legacy row and its own bindings.
+    expect(s.projectMember.findUnique).toHaveBeenCalledWith({
+      where: { projectId_userId: { projectId: 'p1', userId: 'u1' } },
+      select: { role: true },
+    });
+    expect(s.roleBinding.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ principalType: 'USER', principalId: 'u1' }),
+    }));
   });
 
-  it('AC-14: the membership role and project slug drive the data (VIEWER on another project)', async () => {
+  it('AC-14: the binding role and project slug drive the data (VIEWER on another project)', async () => {
     const s = setupMemberAdded();
     s.setUser({ id: 'u2', disabled: false });
     s.setProject({ id: 'p2', name: 'Other', slug: 'other', deletedAt: null });
-    s.setMembership({ role: 'VIEWER' });
+    s.setMembership(null, [{ projectId: 'p2', roleKey: 'viewer' }]);
 
     const result = await s.builder.build(memberRow({ userId: 'u2', projectId: 'p2' }));
 
     expect((result as { data: unknown }).data).toEqual({ projectName: 'Other', role: 'VIEWER', url: `${WEB}/other` });
+  });
+
+  it('AC-14: a user whose binding is only the projectId-null one is a member of the project', async () => {
+    const s = setupMemberAdded();
+    s.setUser({ id: 'u1', disabled: false });
+    s.setProject({ id: 'p1', name: 'Koda', slug: 's4b', deletedAt: null });
+    s.setMembership(null, [{ projectId: null, roleKey: 'viewer' }]);
+
+    const result = await s.builder.build(memberRow());
+
+    expect((result as { data: unknown }).data).toEqual({ projectName: 'Koda', role: 'VIEWER', url: `${WEB}/s4b` });
+  });
+
+  it('AC-14: a legacy ProjectMember row still answers its own role', async () => {
+    const s = setupMemberAdded();
+    s.setUser({ id: 'u1', disabled: false });
+    s.setProject({ id: 'p1', name: 'Koda', slug: 's4b', deletedAt: null });
+    s.setMembership('ADMIN');
+
+    const result = await s.builder.build(memberRow());
+
+    expect((result as { data: unknown }).data).toEqual({ projectName: 'Koda', role: 'ADMIN', url: `${WEB}/s4b` });
   });
 
   it('AC-15: a soft-deleted project yields { skip: SOURCE_GONE }', async () => {
@@ -149,7 +205,7 @@ describe('EmailContentBuilder MEMBER_ADDED content (S4b US-004)', () => {
     await expect(s.builder.build(memberRow())).resolves.toEqual({ skip: 'SOURCE_GONE' });
   });
 
-  it('AC-15: a missing project or missing membership yields { skip: SOURCE_GONE }', async () => {
+  it('AC-15: a missing project or a user with no source in it yields { skip: SOURCE_GONE }', async () => {
     const s = setupMemberAdded();
     s.setUser({ id: 'u1', disabled: false });
 
@@ -157,14 +213,14 @@ describe('EmailContentBuilder MEMBER_ADDED content (S4b US-004)', () => {
     await expect(s.builder.build(memberRow())).resolves.toEqual({ skip: 'SOURCE_GONE' });
 
     s.setProject({ id: 'p1', name: 'Koda', slug: 's4b', deletedAt: null });
-    s.setMembership(null);
+    s.setMembership();
     await expect(s.builder.build(memberRow())).resolves.toEqual({ skip: 'SOURCE_GONE' });
   });
 
   it('AC-15: a missing or disabled user yields { skip: USER_DISABLED }', async () => {
     const s = setupMemberAdded();
     s.setProject({ id: 'p1', name: 'Koda', slug: 's4b', deletedAt: null });
-    s.setMembership({ role: 'DEVELOPER' });
+    s.setMembership(null, [{ projectId: 'p1', roleKey: 'developer' }]);
 
     s.setUser(null);
     await expect(s.builder.build(memberRow())).resolves.toEqual({ skip: 'USER_DISABLED' });

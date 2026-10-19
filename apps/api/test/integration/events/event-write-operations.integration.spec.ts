@@ -144,6 +144,12 @@ describe('Event Write Operations and Actor Resolution', () => {
         findUnique: vi.fn(),
         findFirst: vi.fn(),
       },
+      // Permissions P1b US-003: a user actor's project roles are the union of `User.role`, the legacy
+      // `ProjectMember` row and the user's PROJECT-scope bindings, which the compatibility queries read
+      // here. No binding is stubbed as a source, so the event assertions below keep their meaning.
+      roleBinding: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
       $transaction: vi.fn(),
     },
   };

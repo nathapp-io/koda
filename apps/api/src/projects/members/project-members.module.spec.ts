@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { MembershipService } from '../../permissions/membership.service';
 import { ProjectAccessService } from '../project-access.service';
 import { PrismaProjectMembersRepository } from './prisma-project-members.repository';
 import { ProjectMembersController } from './project-members.controller';
@@ -13,13 +14,14 @@ import { ProjectMembersService } from './project-members.service';
 @Global()
 @Module({
   providers: [
+    { provide: MembershipService, useValue: {} },
     { provide: PrismaService, useValue: { client: {} } },
     {
       provide: TRANSACTION_MANAGER,
       useValue: { run: <T>(fn: () => Promise<T>) => fn(), getClient: () => ({}), isInTransaction: () => false },
     },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER],
+  exports: [PrismaService, TRANSACTION_MANAGER, MembershipService],
 })
 class FakeGlobalsModule {}
 

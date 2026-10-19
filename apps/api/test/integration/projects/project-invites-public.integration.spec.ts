@@ -134,8 +134,10 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     await post('/projects', { name: 'S5 Project', slug: 's4b', key: 'SPV' }).expect(201);
   });
 
-  beforeEach(() => {
+  let bindingCount: number;
+  beforeEach(async () => {
     resetThrottle();
+    bindingCount = await prisma.client.roleBinding.count();
   });
 
   afterAll(async () => {
@@ -217,24 +219,30 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
   it('US-005 AC-3: replaying an accepted token creates no second account', async () => {
     const { token, row } = await freshInvite();
     await accept(token).expect(201);
+    const beforeReplay = await prisma.client.roleBinding.count();
 
     expect((await accept(token)).status).toBe(404);
+    expect(await prisma.client.roleBinding.count()).toBe(beforeReplay);
     expect(await prisma.client.user.count({ where: { email: { equals: row.email, mode: 'insensitive' } } })).toBe(1);
   });
 
   // ── US-005 AC-4 ───────────────────────────────────────────────────────────
-  it('US-005 AC-4: accept creates a ProjectMember for the new user with the invite role', async () => {
-    const { token, row } = await freshInvite(`${unique()}@example.com`, 'VIEWER');
+  it('US-005 AC-4: AC-13: accept creates project and baseline bindings for the new user', async () => {
+    const { token, row } = await freshInvite(`${unique()}@example.com`, 'DEVELOPER');
 
     await accept(token).expect(201);
     const accepted = await inviteRow(row.id);
     expect(accepted.status).toBe('ACCEPTED');
     expect(accepted.acceptedByUserId).toEqual(expect.any(String));
 
-    const membership = await prisma.client.projectMember.findFirstOrThrow({
-      where: { projectId: row.projectId, userId: accepted.acceptedByUserId ?? '' },
-    });
-    expect(membership.role).toBe('VIEWER');
+    const userId = accepted.acceptedByUserId ?? '';
+    const bindings = await prisma.client.roleBinding.findMany({ where: { principalType: 'USER', principalId: userId }, include: { role: true } });
+    expect(bindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ projectId: row.projectId, role: expect.objectContaining({ key: 'developer' }), grantedByType: 'SYSTEM', grantedById: 'invite' }),
+      expect.objectContaining({ projectId: null, role: expect.objectContaining({ key: 'member' }) }),
+    ]));
+    expect(bindings).toHaveLength(2);
+    expect(await prisma.client.projectMember.count({ where: { projectId: row.projectId, userId } })).toBe(0);
   });
 
   it('US-005 AC-4: no membership is written when acceptance is rejected', async () => {
@@ -244,6 +252,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     });
 
     expect((await accept(token)).status).toBe(409);
+    expect(await prisma.client.roleBinding.count()).toBe(bindingCount);
     expect(await prisma.client.projectMember.count({
       where: { projectId: row.projectId, user: { email: { equals: row.email, mode: 'insensitive' } } },
     })).toBe(0);
@@ -282,6 +291,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     // Positive control: a live token still previews, so the 404 below is expiry, not a missing route.
     expect((await preview(live.token)).status).toBe(200);
     expect((await accept(expired.token)).status).toBe(404);
+    expect(await prisma.client.roleBinding.count()).toBe(bindingCount);
     expect(await prisma.client.user.count({ where: { email: expired.row.email } })).toBe(0);
     expect((await inviteRow(expired.row.id)).status).toBe('PENDING');
     // Scoped to the invited address: the earlier accepts in this file already put members in this
@@ -305,7 +315,8 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
       where: { email: { equals: row.email, mode: 'insensitive' } },
     });
     expect(users).toHaveLength(1);
-    expect(await prisma.client.projectMember.count({ where: { projectId: row.projectId, userId: users[0].id } })).toBe(1);
+    expect(await prisma.client.projectMember.count({ where: { projectId: row.projectId, userId: users[0].id } })).toBe(0);
+    expect(await prisma.client.roleBinding.count({ where: { projectId: row.projectId, principalId: users[0].id, role: { key: 'developer' } } })).toBe(1);
     expect((await inviteRow(row.id)).status).toBe('ACCEPTED');
   });
 
@@ -320,6 +331,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     expect(await prisma.client.projectInvite.findUniqueOrThrow({ where: { id: row.id } }))
       .toMatchObject({ status: 'PENDING' });
     expect((await accept(token)).status).toBe(404);
+    expect(await prisma.client.roleBinding.count()).toBe(bindingCount);
   });
 
   // ── US-005 AC-9 ───────────────────────────────────────────────────────────
@@ -329,8 +341,10 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
       email: row.email.toUpperCase(), name: 'Taken', password: TEST_PASSWORD, role: 'MEMBER',
     }).expect(201);
     const newUserId = data<{ id: string }>(created).id;
+    bindingCount = await prisma.client.roleBinding.count();
 
     expect((await accept(token)).status).toBe(409);
+    expect(await prisma.client.roleBinding.count()).toBe(bindingCount);
     expect(await prisma.client.user.count({ where: { email: { equals: row.email, mode: 'insensitive' } } })).toBe(1);
     expect(await prisma.client.projectMember.count({ where: { projectId: row.projectId, userId: newUserId } })).toBe(0);
     expect((await inviteRow(row.id)).status).toBe('PENDING');
@@ -361,6 +375,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     const { token, row } = await freshInvite();
 
     expect((await accept(token, { name: 'Valid Name', password: 'short' })).status).toBe(400);
+    expect(await prisma.client.roleBinding.count()).toBe(bindingCount);
     expect(await prisma.client.user.count({ where: { email: row.email } })).toBe(0);
     expect((await inviteRow(row.id)).status).toBe('PENDING');
   });

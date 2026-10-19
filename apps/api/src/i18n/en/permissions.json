@@ -1,5 +1,6 @@
 {
   "404": "Role not found",
+  "500": "The project list is larger than this endpoint can read safely",
   "-2": "Validation error",
   "403": "You do not have permissions to perform this action",
   "40003": "You do not have permissions to perform this action",

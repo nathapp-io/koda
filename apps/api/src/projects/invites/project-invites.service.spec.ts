@@ -1,5 +1,4 @@
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
-import { Prisma } from '../../generated/prisma/client';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { hashInviteToken } from './invite-token';
@@ -8,7 +7,7 @@ import type { ProjectInviteRecord } from './domain/project-invite.domain';
 
 /**
  * S4b US-004: `ProjectInvitesService` is constructed with, in order —
- * `(invitesRepo, membersRepo, access, mailer, emailSchedule, emailAvailability, txManager)`.
+ * `(invitesRepo, membersRepo, access, mailer, emailSchedule, emailAvailability, txManager, membership)`.
  */
 
 const NOW = new Date('2026-10-10T10:00:00Z');
@@ -66,15 +65,10 @@ function setup(opts: SetupOptions = {}) {
   const members = {
     findUserIdByEmail: vi.fn(async () => (opts.existingUser ? opts.existingUser.id : null)),
     findUserState: vi.fn(async () =>
-      opts.existingUser ? { id: opts.existingUser.id, email: 'b@x.io', disabled: opts.existingUser.disabled } : null),
-    createMember: vi.fn(async (_projectId: string, userId: string, role: string) => {
-      if (opts.memberExists) {
-        throw new Prisma.PrismaClientKnownRequestError('duplicate', {
-          code: 'P2002', clientVersion: 'test', meta: { target: ['projectId', 'userId'] },
-        });
-      }
-      return { userId, email: `${userId}@k.t`, name: null, role, disabled: false, joinedAt: NOW };
-    }),
+      opts.existingUser ? { id: opts.existingUser.id, email: 'b@x.io', name: 'New User', disabled: opts.existingUser.disabled } : null),
+    lockMembers: vi.fn(),
+    findLocalRole: vi.fn(async () => opts.memberExists ? 'VIEWER' : null),
+    createMember: vi.fn(),
   };
 
   const access = {
@@ -91,6 +85,10 @@ function setup(opts: SetupOptions = {}) {
     isInTransaction: vi.fn(() => false),
   };
 
+  const membership = {
+    afterCommit: vi.fn(fn => fn()),
+    createBinding: vi.fn(async () => ({ createdAt: NOW })),
+  };
   const service = new ProjectInvitesService(
     invites as never,
     members as never,
@@ -99,6 +97,7 @@ function setup(opts: SetupOptions = {}) {
     schedule as never,
     email as never,
     txManager as never,
+    membership as never,
   );
 
   const seed = (over: Partial<ProjectInviteRecord> = {}) => {
@@ -120,7 +119,7 @@ function setup(opts: SetupOptions = {}) {
     return record;
   };
 
-  return { service, invites, members, access, mailer, schedule, email, store, seed };
+  return { service, invites, membership, members, access, mailer, schedule, email, store, seed };
 }
 
 describe('ProjectInvitesService.create (S4b US-004)', () => {
@@ -133,24 +132,26 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
   });
 
   it('AC-2: a non-admin is rejected with 403 before any invite or membership write', async () => {
-    const { service, invites, members, access } = setup({ existingUser: null });
+    const { service, invites, membership, access } = setup({ existingUser: null });
     access.assertProjectAdmin.mockRejectedValueOnce(new ForbiddenAppException({}, 'members'));
 
     await expect(service.create('p', { email: 'new@x.io', role: 'DEVELOPER' }, admin, 'en'))
       .rejects.toBeInstanceOf(ForbiddenAppException);
     expect(invites.create).not.toHaveBeenCalled();
-    expect(members.createMember).not.toHaveBeenCalled();
+    expect(membership.createBinding).not.toHaveBeenCalled();
   });
 
   it('AC-3: normalises the email and adds an existing active user as DEVELOPER', async () => {
-    const { service, members } = setup({ existingUser: { id: 'u9', disabled: false } });
+    const { service, members, membership } = setup({ existingUser: { id: 'u9', disabled: false } });
 
     const result = await service.create('p', { email: ' New@X.io ', role: 'DEVELOPER' }, admin, 'en');
 
     expect(members.findUserIdByEmail).toHaveBeenCalledWith('new@x.io');
     expect(result.outcome).toBe('ADDED');
     expect(result.member?.role).toBe('DEVELOPER');
-    expect(members.createMember).toHaveBeenCalledWith('p1', 'u9', 'DEVELOPER');
+    expect(membership.createBinding).toHaveBeenCalledWith({ principal: { type: 'USER', id: 'u9' }, projectId: 'p1', roleKey: 'developer' }, { type: 'USER', id: 'admin' });
+    expect(result.member).toMatchObject({ email: 'b@x.io', name: 'New User', joinedAt: NOW });
+    expect(members.lockMembers.mock.invocationCallOrder[0]).toBeLessThan(members.findLocalRole.mock.invocationCallOrder[0]);
   });
 
   it('AC-13: adding an existing active user schedules exactly one MEMBER_ADDED and no INVITE', async () => {
@@ -166,19 +167,22 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
   });
 
   it('AC-4: an address that is already a project member is a 409 conflict', async () => {
-    const { service, members } = setup({ existingUser: { id: 'u9', disabled: false }, memberExists: true });
+    const { service, members, membership } = setup({ existingUser: { id: 'u9', disabled: false }, memberExists: true });
 
     await expect(service.create('p', { email: 'b@x.io', role: 'VIEWER' }, admin, 'en'))
       .rejects.toBeInstanceOf(ConflictAppException);
-    expect(members.createMember).toHaveBeenCalledTimes(1);
+    await expect(service.create('p', { email: 'b@x.io', role: 'VIEWER' }, admin, 'en'))
+      .rejects.toMatchObject({ prefix: 'invites.memberExists', httpStatus: 409 });
+    expect(members.findLocalRole).toHaveBeenCalledWith('p1', 'u9');
+    expect(membership.createBinding).not.toHaveBeenCalled();
   });
 
   it('AC-5: a disabled account is a 409 conflict and writes nothing else', async () => {
-    const { service, invites, members } = setup({ existingUser: { id: 'u9', disabled: true } });
+    const { service, invites, membership } = setup({ existingUser: { id: 'u9', disabled: true } });
 
     await expect(service.create('p', { email: 'b@x.io', role: 'VIEWER' }, admin, 'en'))
       .rejects.toBeInstanceOf(ConflictAppException);
-    expect(members.createMember).not.toHaveBeenCalled();
+    expect(membership.createBinding).not.toHaveBeenCalled();
     expect(invites.create).not.toHaveBeenCalled();
   });
 

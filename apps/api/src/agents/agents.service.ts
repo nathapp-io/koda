@@ -194,8 +194,8 @@ export class AgentsService {
   }
 
   /**
-   * US-002 (D530): the project's explicit agent roster. Reads the AgentProject
-   * table — rostered agents without tickets appear; ticket holders without a
+   * US-002 (D530): the project's explicit agent roster. Reads local compatibility
+   * membership sources — rostered agents without tickets appear; ticket holders without a
    * roster row do not. Throws 404 when the project is missing or soft-deleted
    * so callers can surface a stable error without guessing from an empty list.
    *
@@ -237,14 +237,19 @@ export class AgentsService {
     if (!agent) throw new NotFoundAppException({}, 'agents');
     if (agent.status === 'OFFLINE') throw new ConflictAppException({}, 'projectAgents.agentOffline');
 
-    const record = await this.txManager.run(async () => {
+    const record = await this.membership.afterCommit(() => this.txManager.run(async () => {
       await this.agentRepo.lockProjectAgents(project.id);
 
-      const added = await this.agentRepo.addToProjectRoster(agent.id, project.id, addedById);
-      if (added === 'alreadyAssigned') throw new ConflictAppException({}, 'projectAgents.alreadyAssigned');
+      if (await this.agentRepo.hasLocalMembership(agent.id, project.id)) {
+        throw new ConflictAppException({}, 'projectAgents.alreadyAssigned');
+      }
+      await this.membership.createBinding(
+        { principal: { type: 'AGENT', id: agent.id }, roleKey: 'viewer', projectId: project.id },
+        { type: 'USER', id: addedById },
+      );
 
       return (await this.agentRepo.findProjectRoster(project.id)).find((row) => row.slug === agent.slug) ?? null;
-    });
+    }));
 
     if (!record) throw new NotFoundAppException({}, 'projectAgents');
     return ProjectAgentDto.from(record);
@@ -276,10 +281,10 @@ export class AgentsService {
     const agent = await this.agentRepo.findBySlugScalar(agentSlug);
     if (!agent) throw new NotFoundAppException({}, 'projectAgents');
 
-    await this.txManager.run(async () => {
+    await this.membership.afterCommit(() => this.txManager.run(async () => {
       await this.agentRepo.lockProjectAgents(project.id);
 
-      if (!(await this.agentRepo.isOnProjectRoster(agent.id, project.id))) {
+      if (!(await this.agentRepo.hasLocalMembership(agent.id, project.id))) {
         throw new NotFoundAppException({}, 'projectAgents');
       }
 
@@ -291,8 +296,9 @@ export class AgentsService {
         );
       }
 
+      await this.membership.removeProjectBindings({ type: 'AGENT', id: agent.id }, project.id);
       await this.agentRepo.removeFromProjectRoster(agent.id, project.id);
-    });
+    }));
   }
 
   async update(slug: string, updateData: UpdateAgentDto): Promise<AgentResponseDto> {

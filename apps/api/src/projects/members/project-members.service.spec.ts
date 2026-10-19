@@ -1,6 +1,5 @@
 import type { Mock } from 'vitest';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
-import { Prisma } from '../../generated/prisma/client';
 import { ProjectMembersService } from './project-members.service';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
@@ -14,6 +13,7 @@ describe('ProjectMembersService', () => {
   let repo: Record<string, Mock>;
   let access: Record<string, Mock>;
   let service: ProjectMembersService;
+  let membership: Record<string, Mock>;
 
   beforeEach(() => {
     repo = {
@@ -24,6 +24,7 @@ describe('ProjectMembersService', () => {
       createMember: vi.fn(async (_p: string, userId: string, role: string) => member(userId, role)),
       updateMemberRole: vi.fn(async (_p: string, userId: string, role: string) => member(userId, role)),
       deleteMember: vi.fn(),
+      deleteMemberIfPresent: vi.fn(),
       countProjectAdmins: vi.fn(),
       lockMembers: vi.fn(),
     };
@@ -35,7 +36,12 @@ describe('ProjectMembersService', () => {
       resolveMembership: vi.fn(),
     };
     const txManager = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
-    service = new ProjectMembersService(repo as never, access as never, txManager as never);
+    membership = {
+      afterCommit: vi.fn(fn => fn()),
+      createBinding: vi.fn(),
+      removeProjectBindings: vi.fn(),
+    };
+    service = new ProjectMembersService(repo as never, access as never, txManager as never, membership as never);
   });
 
   it('list resolves membership once and derives canManage and viewerRole from it', async () => {
@@ -74,7 +80,7 @@ describe('ProjectMembersService', () => {
     await expect(service.add('proj', { email: 'x@k.t', role: 'VIEWER' }, projectAdmin)).rejects.toBeInstanceOf(ForbiddenAppException);
     await expect(service.updateRole('proj', 'u1', { role: 'VIEWER' }, projectAdmin)).rejects.toBeInstanceOf(ForbiddenAppException);
     await expect(service.remove('proj', 'u1', projectAdmin)).rejects.toBeInstanceOf(ForbiddenAppException);
-    expect(repo.createMember).not.toHaveBeenCalled();
+    expect(membership.createBinding).not.toHaveBeenCalled();
   });
 
   it('add: unknown email is 404, duplicate member is 409', async () => {
@@ -84,10 +90,15 @@ describe('ProjectMembersService', () => {
 
     repo.findUserByEmail.mockResolvedValueOnce({ id: 'u1', disabled: false });
     repo.findUserIdByEmail.mockResolvedValueOnce('u1');
-    repo.createMember.mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError('dup', {
-      code: 'P2002', clientVersion: 'test', meta: { target: ['projectId', 'userId'] },
-    }));
-    await expect(service.add('proj', { email: 'u1@k.t', role: 'VIEWER' }, globalAdmin)).rejects.toBeInstanceOf(ConflictAppException);
+    repo.findMember.mockResolvedValueOnce(member('u1', 'VIEWER'));
+    await expect(service.add('proj', { email: 'u1@k.t', role: 'VIEWER' }, globalAdmin)).rejects.toMatchObject({ prefix: 'members', httpStatus: 409 });
+  });
+
+  it('add maps DEVELOPER to developer and reads the written member', async () => {
+    repo.findUserByEmail.mockResolvedValue({ id: 'u1', disabled: false });
+    repo.findMember.mockResolvedValueOnce(null).mockResolvedValueOnce(member('u1', 'DEVELOPER'));
+    expect(await service.add('proj', { email: 'u1@k.t', role: 'DEVELOPER' }, projectAdmin)).toMatchObject({ role: 'DEVELOPER' });
+    expect(membership.createBinding).toHaveBeenCalledWith({ principal: { type: 'USER', id: 'u1' }, projectId: 'p1', roleKey: 'developer' }, { type: 'USER', id: 'pa' });
   });
 
   it('AC14: refuses to add a disabled user without creating membership', async () => {
@@ -103,7 +114,7 @@ describe('ProjectMembersService', () => {
     expect((error as ConflictAppException).prefix).toBe('members.userDisabled');
     expect((error as ConflictAppException).httpStatus).toBe(409);
 
-    expect(repo.createMember).not.toHaveBeenCalled();
+    expect(membership.createBinding).not.toHaveBeenCalled();
   });
 
   it('AC15: lists each member disabled state', async () => {
@@ -127,19 +138,20 @@ describe('ProjectMembersService', () => {
 
   it('updateRole/remove 404 a non-member', async () => {
     repo.findMember.mockResolvedValue(null);
-    await expect(service.updateRole('proj', 'nobody', { role: 'VIEWER' }, globalAdmin)).rejects.toBeInstanceOf(NotFoundAppException);
-    await expect(service.remove('proj', 'nobody', globalAdmin)).rejects.toBeInstanceOf(NotFoundAppException);
+    await expect(service.updateRole('proj', 'nobody', { role: 'VIEWER' }, globalAdmin)).rejects.toMatchObject({ prefix: 'members', httpStatus: 404 });
+    await expect(service.remove('proj', 'nobody', globalAdmin)).rejects.toMatchObject({ prefix: 'members', httpStatus: 404 });
   });
 
   it('a project admin cannot demote or remove the last project ADMIN', async () => {
     repo.findMember.mockResolvedValue(member('pa', 'ADMIN'));
     repo.countProjectAdmins.mockResolvedValue(1);
 
-    await expect(service.updateRole('proj', 'pa', { role: 'DEVELOPER' }, projectAdmin)).rejects.toBeInstanceOf(ConflictAppException);
+    await expect(service.updateRole('proj', 'pa', { role: 'DEVELOPER' }, projectAdmin)).rejects.toMatchObject({ prefix: 'members.lastAdmin', httpStatus: 409 });
     await expect(service.remove('proj', 'pa', projectAdmin)).rejects.toBeInstanceOf(ConflictAppException);
     expect(repo.lockMembers.mock.invocationCallOrder[0]).toBeLessThan(repo.countProjectAdmins.mock.invocationCallOrder[0]);
-    expect(repo.updateMemberRole).not.toHaveBeenCalled();
-    expect(repo.deleteMember).not.toHaveBeenCalled();
+    expect(membership.createBinding).not.toHaveBeenCalled();
+    expect(membership.removeProjectBindings).not.toHaveBeenCalled();
+    expect(repo.deleteMemberIfPresent).not.toHaveBeenCalled();
   });
 
   it('a global ADMIN may remove the last project ADMIN', async () => {
@@ -148,7 +160,8 @@ describe('ProjectMembersService', () => {
 
     await service.remove('proj', 'pa', globalAdmin);
 
-    expect(repo.deleteMember).toHaveBeenCalledWith('p1', 'pa');
+    expect(repo.deleteMemberIfPresent).toHaveBeenCalledWith('p1', 'pa');
+    expect(membership.removeProjectBindings).toHaveBeenCalledWith({ type: 'USER', id: 'pa' }, 'p1');
     expect(repo.countProjectAdmins).not.toHaveBeenCalled();
   });
 
@@ -156,6 +169,9 @@ describe('ProjectMembersService', () => {
     repo.findMember.mockResolvedValue(member('d1', 'DEVELOPER'));
     await service.updateRole('proj', 'd1', { role: 'VIEWER' }, projectAdmin);
     expect(repo.countProjectAdmins).not.toHaveBeenCalled();
+    expect(membership.removeProjectBindings).toHaveBeenCalledWith({ type: 'USER', id: 'd1' }, 'p1', ['project-admin', 'developer', 'viewer']);
+    expect(repo.deleteMemberIfPresent).toHaveBeenCalledWith('p1', 'd1');
+    expect(membership.createBinding).toHaveBeenCalledWith({ principal: { type: 'USER', id: 'd1' }, projectId: 'p1', roleKey: 'viewer' }, { type: 'USER', id: 'pa' });
   });
 
   it('a disabled ADMIN does not trigger the last-admin guard', async () => {
@@ -163,7 +179,7 @@ describe('ProjectMembersService', () => {
 
     await service.remove('proj', 'dis', projectAdmin);
 
-    expect(repo.deleteMember).toHaveBeenCalledWith('p1', 'dis');
+    expect(repo.deleteMemberIfPresent).toHaveBeenCalledWith('p1', 'dis');
     expect(repo.countProjectAdmins).not.toHaveBeenCalled();
   });
 });
