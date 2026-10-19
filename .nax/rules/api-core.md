@@ -17,7 +17,7 @@ priority: 50
 - Password hashing: bcrypt (rounds 12)
 - Register `CombinedAuthGuard` globally; mark public routes with `@Public()` from `@nathapp/nestjs-auth` (no custom `@IsPublic()`)
 - Inject the actor with `@Principal() principal: KodaPrincipal` (typed `UserPrincipal | AgentPrincipal` discriminated union); do not use `@CurrentUser()` / `@CurrentActor()` (removed) or `request.agent` / `request.user` directly
-- Authorize with `@RequiredPermission('ADMIN')` (or `[action, subject]` for CASL) on the route; do not duplicate the check inline
+- Authorize with a permission key from `src/permissions/catalog.ts`: `@Requires('<key>')` plus `@UseGuards(ProjectMembershipGuard, RequiresGuard)` on project routes (`RequiresGuard` alone on global routes). Row-level checks (`X.own` ownership, a ticket transition edge) call `PermissionService.can(principal, key, { projectId, resource })` in the service and mark the route `@Requires(key, { enforcedBy: 'service' })`. A refused key is `new ForbiddenAppException({}, 'permissions')`. Do not add new `@RequiredPermission`, `@ProjectPermission` or `@ProjectRoles` uses: they remain only on routes not yet migrated (fleet, vcs, webhooks, skills, code-intel, context) and are removed by the permissions P1 cleanup
 
 ## Quality Gates
 - `bun run --cwd apps/api lint`
