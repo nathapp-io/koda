@@ -118,6 +118,21 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
   const offeredKeys = async (): Promise<string[]> =>
     (await assignees()).map((item) => `${item.type}:${item.id}`);
 
+  /**
+   * The principal's **access sources from bindings**, which is what every AC below claims to be the
+   * only source: the PROJECT-scope bindings it holds, `projectId`-null ones included. A GLOBAL-scope
+   * binding (`member`, `owner`, `admin`, `agent`) is never a source — the admin and agent create
+   * routes write one as a baseline for every principal, and
+   * `src/permissions/legacy-membership.queries.spec.ts` pins that it is no source ("a GLOBAL-scope
+   * binding is never a source").
+   */
+  const projectBindingsOf = async (type: 'USER' | 'AGENT', id: string) =>
+    prisma.roleBinding.findMany({
+      where: { principalType: type, principalId: id, role: { scope: 'PROJECT' } },
+      select: { projectId: true, role: { select: { key: true } } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
@@ -168,6 +183,9 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
 
   it('AC-1: a developer binding is enough to assign the ticket to that user', async () => {
     expect(await prisma.projectMember.count({ where: { projectId, userId: ids.devBind } })).toBe(0);
+    expect(await projectBindingsOf('USER', ids.devBind)).toEqual([
+      { projectId, role: { key: 'developer' } },
+    ]);
     const ticket = await createTicket('Assigned through a developer binding');
 
     const res = await assignTicket(ticket.ref, { userId: ids.devBind }).expect(200);
@@ -179,6 +197,8 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
 
   it('AC-2: an enabled user with no source in the project gets 403', async () => {
     expect((await prisma.user.findUniqueOrThrow({ where: { id: ids.noSource } })).disabled).toBe(false);
+    expect(await projectBindingsOf('USER', ids.noSource)).toEqual([]);
+    expect(await prisma.projectMember.count({ where: { projectId, userId: ids.noSource } })).toBe(0);
     const ticket = await createTicket('Refused assignee');
 
     const res = await assignTicket(ticket.ref, { userId: ids.noSource });
@@ -190,6 +210,9 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
 
   it('AC-3: a viewer binding is enough to assign the ticket to that agent', async () => {
     expect(await prisma.agentProject.count({ where: { projectId, agentId: agentIds.agViewer } })).toBe(0);
+    expect(await projectBindingsOf('AGENT', agentIds.agViewer)).toEqual([
+      { projectId, role: { key: 'viewer' } },
+    ]);
     const ticket = await createTicket('Assigned through a viewer binding');
 
     const res = await assignTicket(ticket.ref, { agentId: agentIds.agViewer }).expect(200);
@@ -201,6 +224,8 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
 
   it('AC-4: an ACTIVE agent with no source in the project gets 409 tickets.agentNotInProject', async () => {
     expect((await prisma.agent.findUniqueOrThrow({ where: { id: agentIds.agNone } })).status).toBe('ACTIVE');
+    expect(await prisma.agentProject.count({ where: { projectId, agentId: agentIds.agNone } })).toBe(0);
+    expect(await projectBindingsOf('AGENT', agentIds.agNone)).toEqual([]);
     const ticket = await createTicket('Refused agent assignee');
 
     const res = await assignTicket(ticket.ref, { agentId: agentIds.agNone });
@@ -221,7 +246,17 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
 
   it('AC-6: a projectId-null binding is offered, a disabled developer-bound user is not', async () => {
     expect((await prisma.user.findUniqueOrThrow({ where: { id: ids.disabledDev } })).disabled).toBe(true);
-    expect(await prisma.roleBinding.count({ where: { principalType: 'USER', principalId: ids.disabledDev } })).toBe(1);
+    // Both users also hold the admin route's GLOBAL-scope `member` baseline, which is never a source:
+    // the list below is their access sources from bindings.
+    expect(await prisma.roleBinding.count({
+      where: { principalType: 'USER', principalId: ids.disabledDev, role: { scope: 'GLOBAL' } },
+    })).toBe(1);
+    expect(await projectBindingsOf('USER', ids.globalViewer)).toEqual([
+      { projectId: null, role: { key: 'viewer' } },
+    ]);
+    expect(await projectBindingsOf('USER', ids.disabledDev)).toEqual([
+      { projectId, role: { key: 'developer' } },
+    ]);
 
     const offered = await offeredKeys();
 
@@ -230,7 +265,8 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
   }, TEST_TIMEOUT_MS);
 
   it('AC-7: a user whose only source is a legacy ProjectMember row is still offered', async () => {
-    expect(await prisma.roleBinding.count({ where: { principalType: 'USER', principalId: ids.legacyMember } })).toBe(0);
+    expect(await projectBindingsOf('USER', ids.legacyMember)).toEqual([]);
+    expect(await prisma.projectMember.count({ where: { projectId, userId: ids.legacyMember } })).toBe(1);
 
     const offered = await offeredKeys();
 
@@ -239,6 +275,9 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
 
   it('AC-8: the writer records the event for a user whose only source is a developer binding', async () => {
     expect(await prisma.projectMember.count({ where: { projectId, userId: ids.devBind } })).toBe(0);
+    expect(await projectBindingsOf('USER', ids.devBind)).toEqual([
+      { projectId, role: { key: 'developer' } },
+    ]);
     const ticket = await createTicket('Written through a developer binding');
 
     const result = await writer.writeTicketEvent({
@@ -257,6 +296,9 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
 
   it('AC-9: the writer refuses a user whose only source is a viewer binding and records no event', async () => {
     expect(await prisma.projectMember.count({ where: { projectId, userId: ids.viewerBind } })).toBe(0);
+    expect(await projectBindingsOf('USER', ids.viewerBind)).toEqual([
+      { projectId, role: { key: 'viewer' } },
+    ]);
     const ticket = await createTicket('Refused through a viewer binding');
 
     await expect(
