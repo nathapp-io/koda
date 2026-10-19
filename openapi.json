@@ -350,7 +350,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "agent.create is missing"
           }
         },
         "security": [
@@ -358,7 +358,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create agent and generate API key (admin only)",
+        "summary": "Create agent and generate API key (agent.create)",
         "tags": [
           "agents"
         ]
@@ -369,6 +369,9 @@
         "responses": {
           "200": {
             "description": "Agents retrieved successfully"
+          },
+          "403": {
+            "description": "agent.read is missing"
           }
         },
         "security": [
@@ -392,6 +395,9 @@
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Not an agent principal"
           }
         },
         "security": [
@@ -421,6 +427,9 @@
         "responses": {
           "200": {
             "description": "Agent retrieved successfully"
+          },
+          "403": {
+            "description": "agent.read is missing"
           },
           "404": {
             "description": "Agent not found"
@@ -466,7 +475,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "agent.update is missing"
           },
           "404": {
             "description": "Agent not found"
@@ -477,7 +486,7 @@
             "bearer": []
           }
         ],
-        "summary": "Update agent (admin only)",
+        "summary": "Update agent (agent.update)",
         "tags": [
           "agents"
         ]
@@ -502,7 +511,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "agent.delete is missing"
           },
           "404": {
             "description": "Agent not found"
@@ -597,7 +606,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "agent.roles.update is missing"
           },
           "404": {
             "description": "Agent not found"
@@ -608,7 +617,7 @@
             "bearer": []
           }
         ],
-        "summary": "Update agent roles (admin only)",
+        "summary": "Update agent roles (agent.roles.update)",
         "tags": [
           "agents"
         ]
@@ -645,7 +654,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "agent.capabilities.update is missing"
           },
           "404": {
             "description": "Agent not found"
@@ -656,7 +665,7 @@
             "bearer": []
           }
         ],
-        "summary": "Update agent capabilities (admin only)",
+        "summary": "Update agent capabilities (agent.capabilities.update)",
         "tags": [
           "agents"
         ]
@@ -683,7 +692,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "agent.key.rotate is missing"
           },
           "404": {
             "description": "Agent not found"
@@ -694,7 +703,7 @@
             "bearer": []
           }
         ],
-        "summary": "Rotate agent API key (admin only)",
+        "summary": "Rotate agent API key (agent.key.rotate)",
         "tags": [
           "agents"
         ]

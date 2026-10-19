@@ -15,6 +15,7 @@ import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { MembershipService } from '../permissions/membership.service';
+import { PermissionService } from '../permissions/permission.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
 import { CreateAgentDto } from './dto/create-agent.dto';
@@ -42,6 +43,9 @@ export class AgentsService {
     @Inject(AUTH_CFG) private readonly authConfig: IAuthConfig,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly membership: MembershipService,
+    // Permissions P1 (US-009): pickup is authorized by the *target* agent's project keys, so the
+    // service asks the one permission decision point. Required, and before the two optional seams.
+    private readonly permissions: PermissionService,
     @Optional() private readonly kodaDomainWriter?: KodaDomainWriter,
     @Optional() private readonly agentAuthProvider?: AgentAuthProvider,
   ) {}
@@ -319,6 +323,11 @@ export class AgentsService {
     const validatedRoles = AgentsService.validateAgentRoles(updateData.roles);
 
     await this.agentRepo.replaceRoles(agentId, validatedRoles);
+    // Permissions P1 (US-009): `AgentRoleEntry` is a legacy row the permission union reads but
+    // `MembershipService` does not write, so the role change invalidates the cached effective keys
+    // itself. Without it, the change stays invisible until the entry ages out — the AC's "the agent's
+    // next ticket.create answers 201" is the observable consequence.
+    await this.membership.invalidatePermissions();
 
     // Return updated agent with roles
     const updated = await this.agentRepo.findById(agentId);
@@ -368,8 +377,11 @@ export class AgentsService {
    * US-003: ticket pickup is gated to the agent itself, or to a global ADMIN
    * user. 403 for everyone else; 404 when the project is missing or soft-deleted.
    *
-   * S4c US-001: while project scoping is on, the target agent must also be on
-   * the project's roster — a pickup is an act inside that project.
+   * S4c US-001: a pickup is the target agent's act inside the project, so the
+   * target agent must hold `agent.pickup` there. Permissions P1 (US-009): that is
+   * the target agent's effective project keys, not the caller's — a global ADMIN
+   * cannot pick up on behalf of an agent that has no source in the project (with
+   * scoping on, such an agent holds no project key at all).
    */
   async suggestTicket(
     agentSlug: string,
@@ -393,8 +405,12 @@ export class AgentsService {
       throw new NotFoundAppException({}, 'agents');
     }
 
-    if (this.agentScopingEnabled() && !(await this.agentRepo.isOnProjectRoster(agent.id, project.id))) {
-      throw new ForbiddenAppException({}, 'projects');
+    const targetKeys = await this.permissions.effectiveKeys(
+      { type: 'AGENT', id: agent.id },
+      { projectId: project.id },
+    );
+    if (!targetKeys.has('agent.pickup')) {
+      throw new ForbiddenAppException({}, 'permissions');
     }
 
     const tickets = await this.agentRepo.findVerifiedUnassignedTickets(project.id);

@@ -18,6 +18,7 @@ import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { MembershipService } from '../permissions/membership.service';
+import { PermissionService } from '../permissions/permission.service';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
@@ -86,6 +87,14 @@ describe('POST /api/agents with the canonical CreateAgentDto (US-005 AC3)', () =
             bindBaseline: vi.fn().mockResolvedValue(undefined),
             // B3: the baseline write joins the create transaction; the stub runs the callback as-is.
             afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
+          },
+        },
+        // Permissions P1 (US-009): the guard on POST /agents asks the one decision point.
+        {
+          provide: PermissionService,
+          useValue: {
+            can: vi.fn(async () => ({ allowed: true, reason: 'granted' })),
+            effectiveKeys: vi.fn(async () => new Set<string>()),
           },
         },
         {

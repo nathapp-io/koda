@@ -14,6 +14,7 @@ import { CreateAgentDto } from './dto/create-agent.dto';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { MembershipService } from '../permissions/membership.service';
+import { PermissionService } from '../permissions/permission.service';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 
@@ -28,6 +29,12 @@ describe('AgentsService create path (US-003)', () => {
 
   /** Permissions P1a (US-004): the create path binds the new agent to the baseline. */
   let membership: { bindBaseline: Mock; afterCommit: Mock };
+
+  /** Permissions P1 (US-009): the service's required fifth dependency. */
+  const permissions = {
+    can: vi.fn(async () => ({ allowed: true, reason: 'granted' })),
+    effectiveKeys: vi.fn(async () => new Set<string>()),
+  };
 
   // Records which txManager.run callback was active while a repository call ran.
   let activeRunId: number | null = null;
@@ -100,6 +107,7 @@ describe('AgentsService create path (US-003)', () => {
         { provide: AUTH_CFG, useValue: authConfig },
         { provide: TRANSACTION_MANAGER, useValue: txManager },
         { provide: MembershipService, useValue: membership },
+        { provide: PermissionService, useValue: permissions },
         {
           provide: KodaDomainWriter,
           useValue: { writeAgentAction: vi.fn().mockResolvedValue({ canonicalId: 'evt-1' }) },
