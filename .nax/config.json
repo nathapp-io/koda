@@ -69,6 +69,11 @@
     "execution": {
         "smartTestRunner": {
             "testFilePatterns": ["**/*.spec.ts"]
+        },
+        "sandbox": {
+            "network": {
+                "allowLocalBinding": true
+            }
         }
     },
     "mcp": {
