@@ -51,6 +51,12 @@ const OWNER_NO_ACCESS = (
   }
 ).scheduleOwnerNoAccess['409'];
 
+/**
+ * The envelope's error-code field (`ret`) of that refusal: `SchedulesService.enable` throws the 409
+ * `ConflictAppException`, whose code is 409 and whose i18n coordinate is `fleet.scheduleOwnerNoAccess`.
+ */
+const SCHEDULE_OWNER_NO_ACCESS_CODE = 409;
+
 /** The ticker's fixed clock: a minute past the top of the hour the cron below fires on. */
 const NOW = new Date('2026-10-02T03:00:30.000Z');
 const DUE = new Date('2026-10-02T03:00:00.000Z');
@@ -252,7 +258,12 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
       .post(`/api/projects/${P1_SLUG}/fleet/schedules/${disabled.id}/enable`)
       .set(as(rootToken)).expect(409);
 
-    expect((res.body as { message: string }).message).toBe(OWNER_NO_ACCESS);
+    // The structured code, not only the prose: `fleet.scheduleOwnerNoAccess` is the i18n coordinate the
+    // service throws, `ConflictAppException` carries code 409 (the envelope's `ret`) and the body's
+    // message is the translation of `fleet.scheduleOwnerNoAccess.409` — read from the catalog above.
+    const body = res.body as { ret: number; message: string };
+    expect(body.ret).toBe(SCHEDULE_OWNER_NO_ACCESS_CODE);
+    expect(body.message).toBe(OWNER_NO_ACCESS);
     expect(await reload(disabled.id)).toEqual(expect.objectContaining({ enabled: false, disabledReason: 'manual' }));
   }, TEST_TIMEOUT_MS);
 
