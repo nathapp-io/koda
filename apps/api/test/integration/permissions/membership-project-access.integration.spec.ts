@@ -19,8 +19,9 @@
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { InternalAppException } from '@nathapp/nestjs-common';
 import { PrismaClient } from '../../../src/generated/prisma/client';
-import { MEMBERSHIP_READ_CAP } from '../../../src/permissions/legacy-membership.queries';
+import { MEMBERSHIP_READ_CAP, readAccessibleProjectIds } from '../../../src/permissions/legacy-membership.queries';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import type { PrincipalRef } from '../../../src/permissions/permissions.types';
 import { resetDb } from '../../helpers/reset-db';
@@ -381,5 +382,16 @@ describeIntegration('project lists past the membership read cap (US-002 AC-11, P
     const listed = data<{ slug: string }[]>(res).map((project) => project.slug);
     expect(listed).toHaveLength(TOTAL);
     expect([...listed].sort()).toEqual([...slugs].sort());
+  }, 120_000);
+
+  it('AC-11: the paging read finishes on a short page, and fails loudly if its bound stops it first', async () => {
+    // The production bound (10,000 pages) cannot be reached with real rows, so the read is driven with
+    // small ones: 5005 projects is one full page plus a short one.
+    const projectIds = await readAccessibleProjectIds(prisma, undefined, 'USER:cap', 2);
+    expect(projectIds).toHaveLength(TOTAL);
+
+    await expect(readAccessibleProjectIds(prisma, undefined, 'USER:cap', 1)).rejects.toBeInstanceOf(
+      InternalAppException,
+    );
   }, 120_000);
 });

@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { InternalAppException } from '@nathapp/nestjs-common';
 import type { PrismaClient } from '../generated/prisma/client';
 import { ActorRole } from '../common/enums';
 import { ROLE_KEY_FOR_LEGACY_ROLE, legacyRoleForRoleKey, strongestProjectRole } from './legacy-project-roles';
@@ -40,8 +41,8 @@ export const MEMBERSHIP_READ_CAP = 5000;
 
 /**
  * The safety bound of a read that pages until it is exhausted (`.nax/rules/api-data.md`: an unbounded
- * loop needs a hard iteration cap and a warning on overflow). Ten thousand pages of
- * `MEMBERSHIP_READ_CAP` rows is far past any installation, so reaching it is a defect, not a size.
+ * loop needs a hard iteration cap). Reaching it is a defect, not a size: the read fails loudly rather
+ * than answering a partial list, so "every non-deleted project" is never quietly wrong (US-002 AC-11).
  */
 const MAX_READ_PAGES = 10_000;
 
@@ -121,7 +122,7 @@ export async function accessibleProjectIds(db: PrismaClient, principal: Principa
   for (const source of sources) if (source.projectId !== null) candidateIds.add(source.projectId);
   const everywhere = sources.some((source) => source.projectId === null);
 
-  return readAccessibleProjectIds(db, everywhere ? undefined : [...candidateIds], context);
+  return readAccessibleProjectIds(db, everywhere ? undefined : [...candidateIds], context, MAX_READ_PAGES);
 }
 
 /**
@@ -129,15 +130,23 @@ export async function accessibleProjectIds(db: PrismaClient, principal: Principa
  *
  * A single capped read would answer the first `MEMBERSHIP_READ_CAP` rows and stop; a principal with a
  * global project binding is entitled to all of them, so the read continues from the last id it saw
- * until a page comes back short. `MAX_READ_PAGES` bounds the loop.
+ * until a page comes back short. `maxPages` is the caller's bound on that loop, and reaching it while
+ * pages are still full is a defect: the read fails instead of answering a partial list, because an
+ * incomplete answer to "every non-deleted project" is silently wrong (US-002 AC-11).
+ *
+ * Exported as the paging seam US-002's unit spec drives: the production bound cannot be reached with
+ * real rows (ten thousand full pages), so the spec passes it a small `maxPages` and a stub that
+ * always answers a full page. `accessibleProjectIds` is the contract; production always passes
+ * `MAX_READ_PAGES`.
  */
-async function readAccessibleProjectIds(
+export async function readAccessibleProjectIds(
   db: PrismaClient,
   candidateIds: string[] | undefined,
   context: string,
+  maxPages: number,
 ): Promise<string[]> {
   const ids: string[] = [];
-  for (let page = 1; page <= MAX_READ_PAGES; page += 1) {
+  for (let page = 1; page <= maxPages; page += 1) {
     const rows = await db.project.findMany({
       where: { deletedAt: null, id: projectIdPageFilter(candidateIds, ids[ids.length - 1]) },
       select: { id: true },
@@ -146,10 +155,11 @@ async function readAccessibleProjectIds(
     });
     ids.push(...rows.map((row) => row.id));
     if (rows.length < MEMBERSHIP_READ_CAP) return ids;
-    if (page === MAX_READ_PAGES) {
-      logger.warn(
-        `accessibleProjectIds read its ${MAX_READ_PAGES}-page bound for ${context} and answered ${ids.length} projects`,
+    if (page === maxPages) {
+      logger.error(
+        `accessibleProjectIds reached its ${maxPages}-page bound for ${context} after ${ids.length} projects; refusing to answer a partial project list`,
       );
+      throw new InternalAppException({ count: ids.length }, 'permissions');
     }
   }
   return ids;

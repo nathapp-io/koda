@@ -1,3 +1,4 @@
+import { InternalAppException } from '@nathapp/nestjs-common';
 import type { PrismaClient } from '../generated/prisma/client';
 import type { ProjectMembership } from './permissions.types';
 import {
@@ -8,6 +9,7 @@ import {
   listProjectMemberships,
   localProjectRole,
   principalIdsWithAccess,
+  readAccessibleProjectIds,
   userProjectRole,
 } from './legacy-membership.queries';
 
@@ -25,6 +27,27 @@ import {
 type Row = Record<string, unknown>;
 
 const COMPOUND_KEYS = ['projectId_userId', 'agentId_projectId'];
+
+/** The id of the n-th project of the paging fixture; fixed width, so string order is numeric order. */
+const idAt = (index: number): string => `p${String(index).padStart(8, '0')}`;
+
+/**
+ * A client whose `project.findMany` answers `fullPages` full `MEMBERSHIP_READ_CAP`-sized pages and then
+ * a `tail`-row page, honouring the keyset cursor (`where.id.gt`) the way Postgres does. A read cannot
+ * finish before `fullPages` pages, which is what lets a spec reach the page bound with a small one.
+ */
+function pagedProjects(fullPages: number, tail: number): PrismaClient {
+  const total = fullPages * MEMBERSHIP_READ_CAP + tail;
+  return {
+    project: {
+      findMany: async (args: { where: { id?: { gt?: string } } }): Promise<Array<{ id: string }>> => {
+        const read = args.where.id?.gt === undefined ? 0 : Number(args.where.id.gt.slice(1)) + 1;
+        const remaining = Math.max(0, Math.min(MEMBERSHIP_READ_CAP, total - read));
+        return Array.from({ length: remaining }, (_, offset) => ({ id: idAt(read + offset) }));
+      },
+    },
+  } as unknown as PrismaClient;
+}
 
 function matches(row: Row, where: Row): boolean {
   return Object.entries(where).every(([key, expected]) => {
@@ -377,6 +400,26 @@ describe('legacy-membership.queries', () => {
       expect(ids).toHaveLength(total);
       expect(ids[0]).toBe('p00000');
       expect(ids[ids.length - 1]).toBe(`p${String(total - 1).padStart(5, '0')}`);
+    });
+
+    it('US-002 AC-11: pages past the read cap until a page comes back short', async () => {
+      const fullPages = 2;
+      const tail = 3;
+
+      const ids = await readAccessibleProjectIds(pagedProjects(fullPages, tail), undefined, 'USER:u1', 3);
+
+      expect(ids).toHaveLength(fullPages * MEMBERSHIP_READ_CAP + tail);
+      expect(ids[0]).toBe(idAt(0));
+      expect(ids[ids.length - 1]).toBe(idAt(fullPages * MEMBERSHIP_READ_CAP + tail - 1));
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it('US-002 AC-11: fails loudly at the page bound instead of answering a partial project list', async () => {
+      // Five full pages, with the bound set to three: the read cannot finish, and a short answer of
+      // "every project" would be silently wrong.
+      await expect(
+        readAccessibleProjectIds(pagedProjects(5, 0), undefined, 'USER:greedy', 3),
+      ).rejects.toBeInstanceOf(InternalAppException);
     });
   });
 
