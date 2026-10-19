@@ -3,7 +3,7 @@
   "feature": "permissions-p1-enforce-core",
   "branchName": "feat/permissions-p1-enforce-core",
   "createdAt": "2026-10-19T00:00:00Z",
-  "updatedAt": "2026-10-19T13:45:40.441Z",
+  "updatedAt": "2026-10-19T14:26:59.694Z",
   "userStories": [
     {
       "id": "US-001",
@@ -868,8 +868,8 @@
         "US-002",
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -881,7 +881,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.5,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-19T13:45:44.544Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/agents/agents.controller.ts",
@@ -935,7 +947,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f278ad88610577df67a19f9bfbbffe582687d72c"
     },
     {
       "id": "US-010",
