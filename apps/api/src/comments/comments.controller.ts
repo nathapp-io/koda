@@ -19,9 +19,11 @@ import { CommentsService } from './comments.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
-import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
+import { Principal } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
+import { RequiresGuard } from '../permissions/requires.guard';
+import { Requires } from '../permissions/requires.decorator';
 
 @ApiTags('comments')
 @ApiBearerAuth()
@@ -63,11 +65,13 @@ export class CommentsController {
 
   // HTTP route handlers
   @Post('projects/:slug/tickets/:ref/comments')
-  @UseGuards(ProjectMembershipGuard)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('comment.create')
   @HttpCode(201)
   @ApiOperation({ summary: 'Create a comment on a ticket' })
   @ApiResponse({ status: 201, description: 'Comment created' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
+  @ApiResponse({ status: 403, description: 'comment.create is missing' })
   @ApiResponse({ status: 404, description: 'Project or ticket not found' })
   async createFromHttp(
     @Param('slug') slug: string,
@@ -80,9 +84,11 @@ export class CommentsController {
   }
 
   @Get('projects/:slug/tickets/:ref/comments')
-  @UseGuards(ProjectMembershipGuard)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('comment.read')
   @ApiOperation({ summary: 'List all comments for a ticket' })
   @ApiResponse({ status: 200, description: 'List of comments' })
+  @ApiResponse({ status: 403, description: 'comment.read is missing' })
   @ApiResponse({ status: 404, description: 'Project or ticket not found' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async listByTicketFromHttp(
@@ -95,11 +101,13 @@ export class CommentsController {
   }
 
   @Patch('comments/:id')
+  // US-005: slug-less mutation — the project and the comment's author are only
+  // known after the row lookup, so `CommentsService.update` makes the check.
+  @Requires('comment.update', { enforcedBy: 'service' })
   @ApiOperation({ summary: 'Update a comment' })
   @ApiResponse({ status: 200, description: 'Comment updated' })
-  @ApiResponse({ status: 403, description: 'Not authorized to edit this comment' })
+  @ApiResponse({ status: 403, description: 'comment.update is missing, or the comment is someone else\'s and only comment.update.own is held' })
   @ApiResponse({ status: 404, description: 'Comment not found' })
-  @RequiredPermission([CaslPermissionAction.UPDATE, 'Comment'])
   async updateFromHttp(
     @Param('id') id: string,
     @Body() updateCommentDto: UpdateCommentDto,
@@ -111,11 +119,12 @@ export class CommentsController {
 
   @Delete('comments/:id')
   @HttpCode(204)
+  // US-005: same as PATCH — the service checks comment.delete on the row's author.
+  @Requires('comment.delete', { enforcedBy: 'service' })
   @ApiOperation({ summary: 'Delete a comment' })
   @ApiResponse({ status: 204, description: 'Comment deleted' })
-  @ApiResponse({ status: 403, description: 'Not authorized to delete this comment' })
+  @ApiResponse({ status: 403, description: 'comment.delete is missing, or the comment is someone else\'s and only comment.delete.own is held' })
   @ApiResponse({ status: 404, description: 'Comment not found' })
-  @RequiredPermission([CaslPermissionAction.DELETE, 'Comment'])
   async deleteFromHttp(
     @Param('id') id: string,
     @Principal() principal: KodaPrincipal,

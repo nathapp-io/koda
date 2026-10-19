@@ -4100,6 +4100,9 @@
           "400": {
             "description": "Invalid request data"
           },
+          "403": {
+            "description": "comment.create is missing"
+          },
           "404": {
             "description": "Project or ticket not found"
           }
@@ -4137,6 +4140,9 @@
         "responses": {
           "200": {
             "description": "List of comments"
+          },
+          "403": {
+            "description": "comment.read is missing"
           },
           "404": {
             "description": "Project or ticket not found"
@@ -4181,7 +4187,7 @@
             "description": "Comment updated"
           },
           "403": {
-            "description": "Not authorized to edit this comment"
+            "description": "comment.update is missing, or the comment is someone else's and only comment.update.own is held"
           },
           "404": {
             "description": "Comment not found"
@@ -4214,7 +4220,7 @@
             "description": "Comment deleted"
           },
           "403": {
-            "description": "Not authorized to delete this comment"
+            "description": "comment.delete is missing, or the comment is someone else's and only comment.delete.own is held"
           },
           "404": {
             "description": "Comment not found"
@@ -4262,7 +4268,7 @@
             "description": "Invalid request data"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "label.create is missing"
           },
           "404": {
             "description": "Project not found"
@@ -4293,6 +4299,9 @@
         "responses": {
           "200": {
             "description": "List of labels"
+          },
+          "403": {
+            "description": "label.read is missing"
           },
           "404": {
             "description": "Project not found"
@@ -4348,7 +4357,7 @@
             "description": "Invalid request data"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "label.update is missing"
           },
           "404": {
             "description": "Label or project not found"
@@ -4389,7 +4398,7 @@
             "description": "Label deleted"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "label.delete is missing"
           },
           "404": {
             "description": "Label or project not found"
@@ -4445,7 +4454,7 @@
             "description": "Invalid request data or label already assigned"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "ticket.label.assign is missing"
           },
           "404": {
             "description": "Ticket or label not found"
@@ -4496,7 +4505,7 @@
             "description": "Label removed from ticket"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "ticket.label.remove is missing"
           },
           "404": {
             "description": "Ticket or label assignment not found"
@@ -4960,6 +4969,9 @@
               }
             }
           },
+          "403": {
+            "description": "ticket.watch.read is missing, or the caller is not a user"
+          },
           "404": {
             "description": "Ticket not found"
           }
@@ -5007,6 +5019,9 @@
               }
             }
           },
+          "403": {
+            "description": "ticket.watch.set is missing, or the caller is not a user"
+          },
           "404": {
             "description": "Ticket not found"
           }
@@ -5051,6 +5066,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "ticket.watch.unset is missing, or the caller is not a user"
           },
           "404": {
             "description": "Ticket not found"

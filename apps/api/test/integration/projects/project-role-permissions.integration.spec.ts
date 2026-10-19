@@ -104,7 +104,9 @@ describeIntegration('project-role permissions (#144)', () => {
     { capability: 'close override', allowed: workers, setup: async () => ({ method: 'post', url: `/api/projects/team/tickets/${await ticketIn('IN_PROGRESS')}/close`, body: { body: 'duplicate' } }) },
     { capability: 'delete ticket', allowed: adminOnly, setup: async () => ({ method: 'delete', url: `/api/projects/team/tickets/${await ticketIn('CREATED')}` }) },
     { capability: 'create label', allowed: workers, setup: async () => ({ method: 'post', url: '/api/projects/team/labels', body: { name: `r${counter++}`, color: '#00ff00' } }) },
-    { capability: 'update label', allowed: adminOnly, setup: async () => ({ method: 'patch', url: `/api/projects/team/labels/${await label()}`, body: { name: `u${counter++}` } }) },
+    // Permissions P1 (US-005): the route is guarded by label.update, which Developer holds (a project
+    // DEVELOPER's role contains label.update); a Viewer does not.
+    { capability: 'update label', allowed: workers, setup: async () => ({ method: 'patch', url: `/api/projects/team/labels/${await label()}`, body: { name: `u${counter++}` } }) },
     { capability: 'delete label', allowed: adminOnly, setup: async () => ({ method: 'delete', url: `/api/projects/team/labels/${await label()}` }) },
     { capability: 'assign label to ticket', allowed: workers, setup: async () => ({ method: 'post', url: `/api/projects/team/tickets/${await ticketIn('CREATED')}/labels`, body: { labelId: await label() } }) },
     {

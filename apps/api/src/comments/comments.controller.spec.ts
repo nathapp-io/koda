@@ -1,9 +1,54 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
 import { CommentsController } from './comments.controller';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto, CommentTypeEnum } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { ProjectAccessService } from '../projects/project-access.service';
+import { PROJECT_PERMISSION_KEY } from '../projects/project-permission.decorator';
+import { PermissionService } from '../permissions/permission.service';
+import { REQUIRES_METADATA, RequiresMetadata } from '../permissions/requires.decorator';
+
+describe('CommentsController route permission metadata (US-005)', () => {
+  /** Every route on this controller declares its catalog key with @Requires. */
+  const requiresCases: Array<[keyof CommentsController, string[], 'guard' | 'service']> = [
+    ['createFromHttp', ['comment.create'], 'guard'],
+    ['listByTicketFromHttp', ['comment.read'], 'guard'],
+    ['updateFromHttp', ['comment.update'], 'service'],
+    ['deleteFromHttp', ['comment.delete'], 'service'],
+  ];
+
+  it.each(requiresCases)('%s declares @Requires(%j, enforcedBy %s)', (handler, keys, enforcedBy) => {
+    const fn = CommentsController.prototype[handler] as unknown as object;
+    const metadata = Reflect.getMetadata(REQUIRES_METADATA, fn) as RequiresMetadata;
+
+    expect(metadata).toEqual({ keys, mode: 'all', enforcedBy });
+    // The legacy decorators are gone from the migrated routes, so only one mechanism decides them.
+    expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
+    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeUndefined();
+  });
+
+  it.each([['createFromHttp'], ['listByTicketFromHttp']] as const)(
+    '%s runs ProjectMembershipGuard before RequiresGuard',
+    (handler) => {
+      const fn = CommentsController.prototype[handler] as unknown as object;
+      const guards = (Reflect.getMetadata('__guards__', fn) ?? []) as unknown[];
+
+      expect(guards.map((guard) => (guard as { name?: string }).name)).toEqual([
+        'ProjectMembershipGuard',
+        'RequiresGuard',
+      ]);
+    },
+  );
+
+  it.each([['updateFromHttp'], ['deleteFromHttp']] as const)(
+    '%s runs no guard: the service checks the row',
+    (handler) => {
+      const fn = CommentsController.prototype[handler] as unknown as object;
+      expect(Reflect.getMetadata('__guards__', fn)).toBeUndefined();
+    },
+  );
+});
 
 describe('CommentsController', () => {
   let controller: CommentsController;
@@ -86,6 +131,9 @@ describe('CommentsController', () => {
         // container even though these tests call the handlers directly, so its
         // ProjectAccessService dependency must resolve.
         { provide: ProjectAccessService, useValue: {} },
+        // US-005: RequiresGuard is instantiated the same way and needs the global
+        // PermissionService; these tests never reach it.
+        { provide: PermissionService, useValue: { can: vi.fn() } },
       ],
     }).compile();
 

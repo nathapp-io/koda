@@ -6,8 +6,10 @@ import { CreateCommentDto, CommentTypeEnum } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { PrismaCommentRepository } from './prisma-comment.repository';
 import { COMMENT_REPOSITORY } from './domain/comment.domain';
-import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 import type { KodaAgentRole, KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { PermissionService } from '../permissions/permission.service';
+import type { PermissionContext } from '../permissions/permission.service';
+import type { PermissionDecision } from '../permissions/permissions.types';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { PrismaProjectRepository } from '../projects/prisma-project.repository';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -239,8 +241,36 @@ describe('CommentsService', () => {
     findProjectIdBySlug: vi.fn(async () => OWNING_PROJECT.id),
   };
 
-  let mockCaslCan: Mock;
-  let mockCaslFactory: { createForUser: Mock };
+  /**
+   * Permissions P1 (US-005): the second constructor argument, where the CASL factory used to sit.
+   * `holdKeys` answers the way `PermissionService.can` does: a held key grants, and a held `X.own`
+   * key grants only the caller's own row (`not-owner` otherwise).
+   */
+  const mockPermissions = { can: vi.fn() };
+  const ownKeyCheck = (
+    principal: KodaPrincipal,
+    key: string,
+    held: readonly string[],
+    ctx: PermissionContext,
+  ): PermissionDecision => {
+    if (held.includes(key)) return { allowed: true, reason: 'granted' };
+    if (held.includes(`${key}.own`)) {
+      const createdBy = ctx.resource?.createdBy ?? null;
+      const self = principal.actorType === 'user' ? 'USER' : 'AGENT';
+      const own = createdBy !== null && createdBy.type === self && createdBy.id === principal.id;
+      return own ? { allowed: true, reason: 'granted' } : { allowed: false, reason: 'not-owner' };
+    }
+    return { allowed: false, reason: 'not-granted' };
+  };
+  const holdKeys = (held: readonly string[]) =>
+    mockPermissions.can.mockImplementation(
+      async (principal: KodaPrincipal, key: string, ctx: PermissionContext = {}) =>
+        ownKeyCheck(principal, key, held, ctx),
+    );
+  /** A developer's keys: the author-only comment rights. */
+  const DEVELOPER_COMMENT_KEYS = ['comment.update.own', 'comment.delete.own'] as const;
+  /** A project admin's keys: the any-row comment rights, which `*` expands to. */
+  const ADMIN_COMMENT_KEYS = ['comment.update', 'comment.delete'] as const;
 
   const callOrder: string[] = [];
   const mockTxManager = {
@@ -268,19 +298,20 @@ describe('CommentsService', () => {
   beforeEach(async () => {
     // Tests below override this per case; reset so order cannot matter.
     mockAccessService.resolveMembership.mockReset().mockImplementation(defaultResolveMembership);
-    mockCaslCan = vi.fn().mockReturnValue(true);
-    mockCaslFactory = { createForUser: vi.fn().mockResolvedValue({ can: mockCaslCan }) };
+    mockPermissions.can.mockReset();
+    // The default principal is a project DEVELOPER: the author-only comment keys.
+    holdKeys(DEVELOPER_COMMENT_KEYS);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CommentsService,
         { provide: COMMENT_REPOSITORY, useValue: mockCommentRepo },
-        { provide: KodaCaslAbilityFactory, useValue: mockCaslFactory },
+        { provide: PermissionService, useValue: mockPermissions },
         { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
         { provide: TicketEventService, useValue: mockTicketEventService },
         { provide: NathappOutboxService, useValue: mockOutbox },
         // US-002: update/delete resolve the owning project and check membership
-        // before the CASL check.
+        // before the key check.
         { provide: ProjectAccessService, useValue: mockAccessService },
         {
           provide: PrismaProjectRepository,
@@ -620,7 +651,7 @@ describe('CommentsService', () => {
         body: 'Unauthorized edit',
       };
 
-      mockCaslCan.mockReturnValue(false);
+      holdKeys([]);
       givenComment(mockComment);
 
       await expect(
@@ -633,7 +664,7 @@ describe('CommentsService', () => {
         body: 'Unauthorized edit',
       };
 
-      mockCaslCan.mockReturnValue(false);
+      holdKeys([]);
       givenComment(mockComment);
 
       await expect(
@@ -646,6 +677,7 @@ describe('CommentsService', () => {
         body: 'Admin edited',
       };
 
+      holdKeys(ADMIN_COMMENT_KEYS);
       givenComment(mockComment);
       mockCommentRepo.update.mockResolvedValue({
         ...mockComment,
@@ -741,7 +773,7 @@ describe('CommentsService', () => {
     });
 
     it('should return 403 when non-author user tries to delete comment', async () => {
-      mockCaslCan.mockReturnValue(false);
+      holdKeys([]);
       givenComment(mockComment);
 
       await expect(
@@ -750,7 +782,7 @@ describe('CommentsService', () => {
     });
 
     it('should return 403 when non-author agent tries to delete comment', async () => {
-      mockCaslCan.mockReturnValue(false);
+      holdKeys([]);
       givenComment(mockComment);
 
       await expect(
@@ -759,6 +791,7 @@ describe('CommentsService', () => {
     });
 
     it('should allow ADMIN user to delete any comment', async () => {
+      holdKeys(ADMIN_COMMENT_KEYS);
       givenComment(mockComment);
       mockCommentRepo.delete.mockResolvedValue(undefined);
 
@@ -776,7 +809,7 @@ describe('CommentsService', () => {
     });
 
     it('should not allow MEMBER users to delete others\' comments', async () => {
-      mockCaslCan.mockReturnValue(false);
+      holdKeys([]);
       givenComment(mockComment);
 
       await expect(
@@ -851,7 +884,7 @@ describe('CommentsService', () => {
       expect(mockCommentRepo.update).not.toHaveBeenCalled();
     });
 
-    it('AC1: refuses a non-member before building the CASL ability', async () => {
+    it('AC1: refuses a non-member before asking for any key', async () => {
       givenComment(mockComment);
       mockCommentRepo.update.mockResolvedValue({ ...mockComment, body: 'hijacked' });
 
@@ -859,21 +892,22 @@ describe('CommentsService', () => {
         service.update('comment-123', { body: 'hijacked' }, outsiderPrincipal)
       ).rejects.toBeInstanceOf(NotFoundAppException);
 
-      expect(mockCaslFactory.createForUser).not.toHaveBeenCalled();
+      expect(mockPermissions.can).not.toHaveBeenCalled();
     });
 
-    it('AC1 boundary: a member user reaches the CASL check and the repository update', async () => {
+    it('AC1 boundary: a member user passes comment.update for its own comment and reaches the repository update', async () => {
       givenComment(mockComment);
       mockCommentRepo.update.mockResolvedValue({ ...mockComment, body: 'member edit' });
 
       const result = await service.update('comment-123', { body: 'member edit' }, mockUserPrincipal);
 
       expect(result.body).toBe('member edit');
-      // #144: the ability is built from the principal enriched with the
-      // resolved project role.
-      expect(mockCaslFactory.createForUser).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'user-123', projectRole: 'DEVELOPER' })
-      );
+      // US-005: the key, the resolved project and the row's author are all passed
+      // to `PermissionService.can`, which is what makes `comment.update.own` decide.
+      expect(mockPermissions.can).toHaveBeenCalledWith(mockUserPrincipal, 'comment.update', {
+        projectId: OWNING_PROJECT.id,
+        resource: { createdBy: { type: 'USER', id: 'user-123' } },
+      });
       expect(mockCommentRepo.update).toHaveBeenCalledWith('comment-123', { body: 'member edit' });
     });
 
@@ -897,7 +931,7 @@ describe('CommentsService', () => {
       expect(mockCommentRepo.delete).toHaveBeenCalledWith('comment-123');
     });
 
-    it('AC3: an agent principal proceeds to the CASL check without a membership lookup', async () => {
+    it('AC3: an agent principal is decided by the key check without a membership lookup', async () => {
       const agentComment = { ...mockComment, authorUserId: null, authorAgentId: 'agent-123' };
       givenComment(agentComment);
       mockCommentRepo.update.mockResolvedValue({ ...agentComment, body: 'agent edit' });
@@ -905,13 +939,17 @@ describe('CommentsService', () => {
       const result = await service.update('comment-123', { body: 'agent edit' }, mockAgentPrincipal);
 
       expect(result.body).toBe('agent edit');
-      expect(mockCaslFactory.createForUser).toHaveBeenCalledWith(mockAgentPrincipal);
+      expect(mockPermissions.can).toHaveBeenCalledWith(mockAgentPrincipal, 'comment.update', {
+        projectId: OWNING_PROJECT.id,
+        resource: { createdBy: { type: 'AGENT', id: 'agent-123' } },
+      });
       // Agents are cross-project: no ProjectMember row may be looked up.
       expect(mockAccessService.findMembershipRole).not.toHaveBeenCalled();
       expect(mockCommentRepo.findMembershipRole).not.toHaveBeenCalled();
     });
 
     it('AC5 boundary: a global ADMIN who is not a member deletes without a membership row', async () => {
+      holdKeys(ADMIN_COMMENT_KEYS);
       givenComment(mockComment);
       mockCommentRepo.delete.mockResolvedValue(undefined);
 
@@ -922,12 +960,13 @@ describe('CommentsService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // #144 — update/delete decide by the comment's PROJECT role: a project ADMIN
-  // may delete anyone's comment, editing stays author-only, and a non-member
-  // still sees 404 so the comment's existence stays hidden.
+  // US-005 — update/delete ask `comment.update` / `comment.delete` about the
+  // comment's author, so a caller holding only the `.own` key is refused on
+  // someone else's comment, and a non-member still sees 404 so the comment's
+  // existence stays hidden.
   // ---------------------------------------------------------------------------
 
-  describe('#144 project-role comment rights', () => {
+  describe('US-005 comment key checks on the row', () => {
     const ownership = {
       project: { id: 'p1', slug: 'koda', key: 'KODA', deletedAt: null },
       ticket: { id: 't1', deletedAt: null },
@@ -943,54 +982,73 @@ describe('CommentsService', () => {
 
     beforeEach(() => {
       mockCommentRepo.findOwningProjectAndTicket.mockResolvedValue({ ...ownership, comment: othersComment });
-      // Mirror the real factory's Comment rules: UPDATE is author-only, DELETE
-      // is author-only or unconditional for a project/global ADMIN. The suite
-      // default `mockCaslCan` always grants, which would make these tests
-      // vacuous.
-      mockCaslFactory.createForUser.mockImplementation(async (principal: KodaPrincipal) => {
-        const isUser = principal.actorType === 'user';
-        const globalRole = isUser ? principal.role : null;
-        const projectRole = isUser ? principal.projectRole : null;
-        return {
-          can: (
-            action: string,
-            subj: {
-              __caslSubjectType__?: string;
-              authorUserId?: string | null;
-              authorAgentId?: string | null;
-            },
-          ) => {
-            if (subj.__caslSubjectType__ !== 'Comment') return false;
-            const isAuthor =
-              subj.authorUserId === principal.id || subj.authorAgentId === principal.id;
-            if (action === 'delete') {
-              return isAuthor || globalRole === 'ADMIN' || projectRole === 'ADMIN';
-            }
-            return action === 'update' && isAuthor;
-          },
-        };
-      });
     });
 
-    it("a project ADMIN may delete another user's comment", async () => {
-      mockAccessService.resolveMembership.mockResolvedValue('ADMIN');
+    it('asks for comment.delete with the comment\'s project and author', async () => {
+      holdKeys(ADMIN_COMMENT_KEYS);
+
+      await service.delete('c1', mockUserPrincipal);
+
+      expect(mockPermissions.can).toHaveBeenCalledWith(mockUserPrincipal, 'comment.delete', {
+        projectId: 'p1',
+        resource: { createdBy: { type: 'USER', id: 'someone-else' } },
+      });
+      expect(mockCommentRepo.delete).toHaveBeenCalledWith('c1');
+    });
+
+    it("a caller holding the any-row key may delete another user's comment", async () => {
+      holdKeys(ADMIN_COMMENT_KEYS);
       await expect(service.delete('c1', mockUserPrincipal)).resolves.toBeUndefined();
       expect(mockCommentRepo.delete).toHaveBeenCalledWith('c1');
     });
 
-    it("a project DEVELOPER may not delete another user's comment", async () => {
-      mockAccessService.resolveMembership.mockResolvedValue('DEVELOPER');
+    it("a caller holding only comment.delete.own may not delete another user's comment", async () => {
+      holdKeys(DEVELOPER_COMMENT_KEYS);
       await expect(service.delete('c1', mockUserPrincipal)).rejects.toBeInstanceOf(
         ForbiddenAppException
       );
       expect(mockCommentRepo.delete).not.toHaveBeenCalled();
     });
 
-    it("a project ADMIN may not edit another user's comment", async () => {
-      mockAccessService.resolveMembership.mockResolvedValue('ADMIN');
+    it('a refusal is 403 with the permissions error code, not the comments one', async () => {
+      holdKeys(DEVELOPER_COMMENT_KEYS);
+
+      const error = await service.update('c1', { body: 'x' }, mockUserPrincipal).catch((e: unknown) => e);
+      expect((error as ForbiddenAppException).prefix).toBe('permissions');
+      expect(mockCommentRepo.update).not.toHaveBeenCalled();
+    });
+
+    it("a caller holding only comment.update.own may not edit another user's comment", async () => {
+      holdKeys(DEVELOPER_COMMENT_KEYS);
       await expect(
         service.update('c1', { body: 'x' }, mockUserPrincipal)
       ).rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(mockCommentRepo.update).not.toHaveBeenCalled();
+    });
+
+    it("a caller holding comment.update may edit another user's comment", async () => {
+      holdKeys(ADMIN_COMMENT_KEYS);
+      mockCommentRepo.update.mockResolvedValue({ ...othersComment, body: 'x' });
+
+      await expect(service.update('c1', { body: 'x' }, mockUserPrincipal)).resolves.toEqual(
+        expect.objectContaining({ body: 'x' })
+      );
+    });
+
+    it('a comment with no author is never the caller\'s own row', async () => {
+      holdKeys(DEVELOPER_COMMENT_KEYS);
+      mockCommentRepo.findOwningProjectAndTicket.mockResolvedValue({
+        ...ownership,
+        comment: { ...othersComment, authorUserId: null, authorAgentId: null },
+      });
+
+      await expect(service.delete('c1', mockUserPrincipal)).rejects.toBeInstanceOf(
+        ForbiddenAppException
+      );
+      expect(mockPermissions.can).toHaveBeenCalledWith(mockUserPrincipal, 'comment.delete', {
+        projectId: 'p1',
+        resource: { createdBy: null },
+      });
     });
 
     it('a non-member still gets 404, not 403', async () => {
