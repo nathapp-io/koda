@@ -1,14 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaClient } from '../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { principalIdsWithAccess } from '../permissions/legacy-membership.queries';
 import type { NotificationDraft } from './notification.types';
 
 const unique = (values: readonly string[]): string[] => [...new Set(values)];
 
 /**
  * Fleet S4a §2.1 step 1: who may receive a draft. Never the actor; never a disabled or unknown user
- * (agents are not users, so agent ids fall out here too); for a project-scoped draft, only a
- * project member or a global ADMIN. Two queries per call at most.
+ * (agents are not users, so agent ids fall out here too); for a project-scoped draft, only a project
+ * member or a global ADMIN.
+ *
+ * Permissions P1b US-005: "a project member" is the compatibility union over the **access sources** —
+ * the legacy `ProjectMember` row and the PROJECT-scope bindings of the user, in the project and
+ * `projectId`-null — read once per distinct draft project through `principalIdsWithAccess`. Nothing
+ * is cached; a draft with no project consults none of them.
  */
 @Injectable()
 export class NotificationEligibility {
@@ -25,13 +31,11 @@ export class NotificationEligibility {
     const users = await this.db.user.findMany({ where: { id: { in: userIds }, disabled: false }, select: { id: true, role: true } });
     const roleOf = new Map(users.map((u) => [u.id, u.role]));
     const projectIds = unique(candidates.flatMap((d) => (d.projectId ? [d.projectId] : [])));
-    const memberships = projectIds.length === 0
-      ? []
-      : await this.db.projectMember.findMany({
-        where: { projectId: { in: projectIds }, userId: { in: userIds } },
-        select: { projectId: true, userId: true },
-      });
-    const isMember = new Set(memberships.map((m) => `${m.projectId}:${m.userId}`));
+    const access = await Promise.all(projectIds.map(
+      async (projectId) => [projectId, await principalIdsWithAccess(this.db, projectId, 'USER')] as const,
+    ));
+    // A disabled user is dropped by the `disabled: false` read above, so the access ids need no filter.
+    const isMember = new Set(access.flatMap(([projectId, ids]) => ids.map((id) => `${projectId}:${id}`)));
     return candidates.filter((d) => {
       const role = roleOf.get(d.userId);
       if (role === undefined) return false;

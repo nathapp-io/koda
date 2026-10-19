@@ -4,6 +4,7 @@ import { PrismaClient } from '../generated/prisma/client';
 import { EmailAvailability } from './email-availability';
 import { EmailScheduleRow, SkipReason } from './schedule/email-schedule.types';
 import { NotificationPreferencesService } from '../notifications/notification-preferences.service';
+import { userProjectRole } from '../permissions/legacy-membership.queries';
 import type { NotificationCategory } from '../notifications/notification.types';
 
 /**
@@ -59,7 +60,13 @@ export class EmailContentBuilder {
 
   /**
    * Fleet S4b US-004 build order: user missing or disabled → USER_DISABLED; project missing or
-   * soft-deleted → SOURCE_GONE; membership missing → SOURCE_GONE; otherwise the member data.
+   * soft-deleted → SOURCE_GONE; no access source in the project → SOURCE_GONE; otherwise the member
+   * data.
+   *
+   * Permissions P1b US-005: the role comes from `userProjectRole`, the compatibility union over the
+   * user's legacy `ProjectMember` row and its PROJECT-scope bindings — in the project and
+   * `projectId`-null — so a membership that lives only in a binding answers its own legacy role
+   * (`ADMIN`/`DEVELOPER`/`VIEWER`) instead of falling through to SOURCE_GONE.
    */
   private async buildMemberAdded(row: EmailScheduleRow): Promise<EmailContent> {
     const user = row.userId
@@ -75,14 +82,11 @@ export class EmailContentBuilder {
     });
     if (!project || project.deletedAt) return { skip: 'SOURCE_GONE' };
 
-    const membership = await this.prisma.client.projectMember.findUnique({
-      where: { projectId_userId: { projectId, userId: user.id } },
-      select: { role: true },
-    });
-    if (!membership) return { skip: 'SOURCE_GONE' };
+    const role = await userProjectRole(this.prisma.client, user.id, projectId);
+    if (role === null) return { skip: 'SOURCE_GONE' };
 
     return {
-      data: { projectName: project.name, role: membership.role, url: this.email.webUrl(`/${project.slug}`) },
+      data: { projectName: project.name, role, url: this.email.webUrl(`/${project.slug}`) },
       userId: user.id,
     };
   }
