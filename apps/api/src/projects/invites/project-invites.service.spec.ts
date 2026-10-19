@@ -38,7 +38,7 @@ function setup(opts: SetupOptions = {}) {
     }),
     create: vi.fn(async (input: {
       projectId: string; email: string; role: 'ADMIN' | 'DEVELOPER' | 'VIEWER';
-      tokenHash: string; invitedById: string; expiresAt: Date;
+      tokenHash: string; invitedById: string | null; invitedByAgentId: string | null; expiresAt: Date;
     }): Promise<ProjectInviteRecord> => {
       const record: ProjectInviteRecord = {
         id: `i${store.length + 1}`,
@@ -47,7 +47,7 @@ function setup(opts: SetupOptions = {}) {
         role: input.role,
         status: 'PENDING',
         invitedById: input.invitedById,
-        inviterName: 'Ada',
+        inviterName: input.invitedByAgentId ? 'roster-agent' : 'Ada',
         acceptedByUserId: null,
         acceptedAt: null,
         expiresAt: input.expiresAt,
@@ -204,6 +204,43 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
     expect(stored.tokenHash).toBe(hashInviteToken(raw));
     expect(stored.tokenHash).not.toBe(raw);
     expect(JSON.stringify(result.invite)).not.toContain(raw);
+  });
+
+  // Whole-branch fix B4: `invite.create` reaches a project-admin agent, so the inviter is stored per
+  // actor type. Writing the agent id into the `User`-keyed `invitedById` failed with a P2003.
+  it('B4: an agent inviter is stored in invitedByAgentId, and the user column stays null', async () => {
+    const { service, invites } = setup({ existingUser: null });
+    const agent = { actorType: 'agent', id: 'agent-1', slug: 'roster-agent' } as KodaPrincipal;
+
+    const result = await service.create('p', { email: 'new@x.io', role: 'VIEWER' }, agent, 'en');
+
+    expect(result.outcome).toBe('INVITED');
+    expect(invites.create).toHaveBeenCalledWith(
+      expect.objectContaining({ invitedById: null, invitedByAgentId: 'agent-1' }),
+    );
+    expect(result.invite).toMatchObject({ inviterName: 'roster-agent' });
+  });
+
+  it('B4: a user inviter keeps invitedByAgentId null', async () => {
+    const { service, invites } = setup({ existingUser: null });
+
+    await service.create('p', { email: 'new@x.io', role: 'VIEWER' }, admin, 'en');
+
+    expect(invites.create).toHaveBeenCalledWith(
+      expect.objectContaining({ invitedById: 'admin', invitedByAgentId: null }),
+    );
+  });
+
+  it('B4: an agent that adds an existing user records an AGENT granter, not a USER one', async () => {
+    const { service, membership } = setup({ existingUser: { id: 'u9', disabled: false } });
+    const agent = { actorType: 'agent', id: 'agent-1', slug: 'roster-agent' } as KodaPrincipal;
+
+    await service.create('p', { email: 'b@x.io', role: 'VIEWER' }, agent, 'en');
+
+    expect(membership.createBinding).toHaveBeenCalledWith(
+      expect.objectContaining({ principal: { type: 'USER', id: 'u9' } }),
+      { type: 'AGENT', id: 'agent-1' },
+    );
   });
 
   it('AC-7: creating a second invite for the same project and email cancels the earlier one', async () => {

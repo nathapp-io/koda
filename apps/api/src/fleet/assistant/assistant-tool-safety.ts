@@ -36,11 +36,23 @@ const SECRET_KEY = /SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY/i;
  * inside an escaped string (`\"apiKey\":\"x\"`), at the cost of reading an escaped quote as the key's close. The pass
  * is a scanner rather than one replace, because a key that is not a secret must not consume its value —
  * `{"config":{"apiKey":"x"}}` still masks the nested `apiKey`. The quotes of a key stay in place.
+ *
+ * The bare key is bounded to 256 characters. Unbounded, a word that never reaches `:` or `=` (a token-shaped run,
+ * which is exactly what a tool result often holds) makes every start position scan to the end of the text: quadratic,
+ * and ~330 ms of the ~400 ms a 20 KB result spent in masking. No key that names a secret comes anywhere near 256
+ * characters.
  */
-const ASSIGNMENT = /("[^"]*"|[A-Za-z0-9_.-]+)(\s*[:=]\s*)/;
+const ASSIGNMENT = /("[^"]*"|[A-Za-z0-9_.-]{1,256})(\s*[:=]\s*)/;
 
-/** Step 5: URL userinfo (`scheme://user:pass@host`), which the key/value pass cannot see. */
-const URL_USERINFO = /([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/@\s]+@/g;
+/**
+ * Step 5: URL userinfo (`scheme://user:pass@host`), which the key/value pass cannot see.
+ *
+ * The scheme is bounded to the 32 characters a registered scheme may use (`RFC 3986` `scheme` has no length, but no
+ * real one approaches it). Without the bound the scheme tail scans to the end of the text from every start position
+ * that holds a letter, which is quadratic on the line-shaped results a tool returns: a 20 KB single-token result
+ * spent ~400 ms in this pass alone.
+ */
+const URL_USERINFO = /([A-Za-z][A-Za-z0-9+.-]{0,31}:\/\/)[^/@\s]+@/g;
 
 /** The characters that end an unquoted value: a whitespace, `,`, `;` or `&` (spec §1 step 4). */
 const VALUE_STOP = /[\s,;&]/;

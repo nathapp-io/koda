@@ -12,7 +12,8 @@ type InviteRow = {
   role: string;
   tokenHash: string;
   status: string;
-  invitedById: string;
+  invitedById: string | null;
+  invitedByAgentId: string | null;
   acceptedByUserId: string | null;
   acceptedAt: Date | null;
   expiresAt: Date;
@@ -56,7 +57,9 @@ export interface CreateProjectInviteInput {
   email: string;
   role: ProjectMemberRole;
   tokenHash: string;
-  invitedById: string;
+  /** The inviting user, or null when `invitedByAgentId` names an agent (Permissions P1 US-008). */
+  invitedById: string | null;
+  invitedByAgentId: string | null;
   expiresAt: Date;
 }
 
@@ -89,11 +92,13 @@ export class PrismaProjectInvitesRepository {
         role: input.role,
         tokenHash: input.tokenHash,
         invitedById: input.invitedById,
+        invitedByAgentId: input.invitedByAgentId,
         expiresAt: input.expiresAt,
       },
       include: INCLUDE_CONTEXT,
     });
-    return this.toContext(model as InviteRow);
+    const [created] = await this.toContexts([model as InviteRow]);
+    return created;
   }
 
   /** Newest first, so an admin sees the invite they just sent at the top. */
@@ -104,13 +109,16 @@ export class PrismaProjectInvitesRepository {
       include: INCLUDE_CONTEXT,
       take: LIST_LIMIT,
     });
-    return (rows as InviteRow[]).map((row) => this.toRecord(row));
+    return this.toRecords(rows as InviteRow[]);
   }
 
   /** US-005: the only lookup the anonymous preview/accept path may use — the raw token never reaches SQL. */
   async findByTokenHash(tokenHash: string): Promise<ProjectInvitePreview | null> {
     const row = await this.db.projectInvite.findUnique({ where: { tokenHash }, include: INCLUDE_PREVIEW });
-    return row ? this.toPreview(row as InvitePreviewRow) : null;
+    if (!row) return null;
+    const preview = row as InvitePreviewRow;
+    const [context] = await this.toContexts([preview]);
+    return { ...context, projectSlug: preview.project.slug };
   }
 
   /** US-005: admin resend/cancel scope an invite to its project, so another project's id is a 404. */
@@ -119,7 +127,9 @@ export class PrismaProjectInvitesRepository {
       where: { id, projectId },
       include: INCLUDE_CONTEXT,
     });
-    return row ? this.toContext(row as InviteRow) : null;
+    if (!row) return null;
+    const [context] = await this.toContexts([row as InviteRow]);
+    return context;
   }
 
   /**
@@ -181,7 +191,9 @@ export class PrismaProjectInvitesRepository {
     if (result.count !== 1) return null;
 
     const row = await this.db.projectInvite.findUnique({ where: { id: input.id }, include: INCLUDE_CONTEXT });
-    return row ? this.toContext(row as InviteRow) : null;
+    if (!row) return null;
+    const [rotated] = await this.toContexts([row as InviteRow]);
+    return rotated;
   }
 
   /** US-005: cancel is final and only ever moves a PENDING row; anything else left untouched. */
@@ -193,15 +205,36 @@ export class PrismaProjectInvitesRepository {
     return result.count === 1;
   }
 
-  private toContext(row: InviteRow): ProjectInviteWithContext {
-    return { ...this.toRecord(row), projectName: row.project.name };
+  private async toContexts(rows: readonly InviteRow[]): Promise<ProjectInviteWithContext[]> {
+    const names = await this.inviterNames(rows);
+    return rows.map((row) => ({
+      ...this.toRecord(row, names.get(row.invitedByAgentId ?? '') ?? null),
+      projectName: row.project.name,
+    }));
   }
 
-  private toPreview(row: InvitePreviewRow): ProjectInvitePreview {
-    return { ...this.toContext(row), projectSlug: row.project.slug };
+  private async toRecords(rows: readonly InviteRow[]): Promise<ProjectInviteRecord[]> {
+    const names = await this.inviterNames(rows);
+    return rows.map((row) => this.toRecord(row, names.get(row.invitedByAgentId ?? '') ?? null));
   }
 
-  private toRecord(row: InviteRow): ProjectInviteRecord {
+  /**
+   * The agent inviters' names, in one read for the whole page. A user inviter's name comes with the row
+   * (`invitedBy`); an agent's cannot be joined, because `invitedByAgentId` has no foreign key, so it is
+   * looked up by id instead. Bounded by the page the caller already read.
+   */
+  private async inviterNames(rows: readonly InviteRow[]): Promise<Map<string, string>> {
+    const ids = [...new Set(rows.map((row) => row.invitedByAgentId).filter((id): id is string => id !== null))];
+    if (ids.length === 0) return new Map();
+    const agents = await this.db.agent.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true },
+      take: ids.length,
+    });
+    return new Map(agents.map((agent) => [agent.id, agent.name]));
+  }
+
+  private toRecord(row: InviteRow, agentInviterName: string | null): ProjectInviteRecord {
     return {
       id: row.id,
       projectId: row.projectId,
@@ -209,7 +242,7 @@ export class PrismaProjectInvitesRepository {
       role: row.role as ProjectMemberRole,
       status: row.status as InviteStatus,
       invitedById: row.invitedById,
-      inviterName: row.invitedBy?.name ?? null,
+      inviterName: row.invitedBy?.name ?? agentInviterName,
       acceptedByUserId: row.acceptedByUserId,
       acceptedAt: row.acceptedAt,
       expiresAt: row.expiresAt,

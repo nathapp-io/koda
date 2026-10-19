@@ -460,4 +460,38 @@ describeIntegration('agent route keys (US-009)', () => {
 
     expect(res.body).toHaveProperty('data');
   }, TIMEOUT);
+
+  // -------------------------------------------------------------------------
+  // B2 (whole-branch review) — removing a legacy-only agent ends its pickup at once
+  // -------------------------------------------------------------------------
+
+  it('B2: a warmed-up rostered agent is refused its own pickup right after a legacy-only roster removal', async () => {
+    // Its only sources in p1 are the legacy rows — no RoleBinding — so the removal deletes zero bindings
+    // and the roster row is what ends its access. AC-14's cache gap was exactly this: the removal skipped
+    // the invalidation, so the pickup kept answering 200 from the warmed entry for the whole TTL.
+    const agent = await createAgent('b2-removed-agent', { roster: 'p1', legacyRole: 'DEVELOPER' });
+
+    await request(server)
+      .get('/api/agents/b2-removed-agent/pickup')
+      .query({ project: P1_SLUG })
+      .set(agentAuth('b2-removed-agent'))
+      .expect(200);
+
+    await request(server)
+      .delete(`/api/projects/${P1_SLUG}/agents/b2-removed-agent`)
+      .set(auth('padmin'))
+      .expect(204);
+
+    await expect(db.agentProject.count({ where: { agentId: agent.id, projectId: p1Id } })).resolves.toBe(0);
+    await expect(
+      db.roleBinding.count({ where: { principalType: 'AGENT', principalId: agent.id, projectId: p1Id } }),
+    ).resolves.toBe(0);
+
+    const refused = await request(server)
+      .get('/api/agents/b2-removed-agent/pickup')
+      .query({ project: P1_SLUG })
+      .set(agentAuth('b2-removed-agent'));
+
+    expectPermissionsRefusal(refused);
+  }, TIMEOUT);
 });

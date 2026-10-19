@@ -16,6 +16,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -320,4 +321,63 @@ describeIntegration('ticket transition edge keys (US-003)', () => {
     expect(res.body.message).toBe(INVALID_TRANSITION);
     await expect(ticketState(ref)).resolves.toEqual(expect.objectContaining({ status: 'IN_PROGRESS' }));
   }, TIMEOUT);
+
+  // -------------------------------------------------------------------------
+  // B3 (whole-branch review) — the field write and the checked transition are one operation
+  // -------------------------------------------------------------------------
+
+  it('B3: a status move that outraces the PATCH between the pre-check and the transition writes no field', async () => {
+    // A caller holding ticket.update and ticket.transition.start but not verify-fix.return: the pair it
+    // asks for (CREATED -> IN_PROGRESS) is allowed on the ticket it read, and refused on the ticket the
+    // concurrent writer left behind (VERIFY_FIX -> IN_PROGRESS needs verify-fix.return).
+    await createUser('interleaved');
+    const role = await db.role.create({
+      data: {
+        key: 'b3-starter',
+        name: 'B3 Starter',
+        scope: 'PROJECT',
+        permissions: ['ticket.read', 'ticket.update', 'ticket.transition.start'],
+      },
+    });
+    await db.roleBinding.create({
+      data: {
+        principalType: 'USER',
+        principalId: userIds.interleaved,
+        roleId: role.id,
+        projectId: p1Id,
+        grantedByType: 'SYSTEM',
+        grantedById: 'test',
+      },
+    });
+    await membership.invalidatePermissions();
+
+    const ref = await ticketIn('CREATED');
+    const before = await ticketState(ref);
+    expect(before.status).toBe('CREATED');
+
+    const transitions = app.get(TicketTransitionsService);
+    const precheck = transitions.assertTransitionAllowed.bind(transitions);
+    const spy = vi.spyOn(transitions, 'assertTransitionAllowed').mockImplementation(async (...args) => {
+      await precheck(...args);
+      // The other actor walks the ticket to VERIFY_FIX through the real routes, between the PATCH's
+      // pre-check and its transition.
+      await asRoot('post', `/api/projects/${P1_SLUG}/tickets/${ref}/start`).expect(200);
+      await asRoot('post', `/api/projects/${P1_SLUG}/tickets/${ref}/fix`, { body: 'fixed meanwhile' }).expect(200);
+    });
+    try {
+      const res = await request(server)
+        .patch(`/api/projects/${P1_SLUG}/tickets/${ref}`)
+        .set(auth('interleaved'))
+        .send({ status: 'IN_PROGRESS', title: 'Renamed by a refused PATCH' });
+
+      expectPermissionsRefusal(res);
+    } finally {
+      spy.mockRestore();
+    }
+
+    // The refusal wrote nothing: no new title, and the concurrent writer's status stands.
+    await expect(ticketState(ref)).resolves.toEqual(
+      expect.objectContaining({ status: 'VERIFY_FIX', title: before.title }),
+    );
+     }, TIMEOUT);
 });

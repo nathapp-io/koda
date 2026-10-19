@@ -371,12 +371,42 @@ describe('MembershipService', () => {
       expect(cache.invalidations).toContain('permissions#tag');
     });
 
-    it('invalidates nothing when there was nothing to delete', async () => {
+    it('invalidates the cache even when no binding was removed, because the caller deletes the legacy row next', async () => {
       cache.invalidations.length = 0;
 
       expect(await service.removeProjectBindings(USER('u1'), 'p1')).toBe(0);
 
-      expect(cache.invalidations).toEqual([]);
+      expect(cache.invalidations).toContain('permissions#tag');
+    });
+
+    it('B2: a legacy-only removal leaves the next decision without access', async () => {
+      // A member whose only source in the project is a legacy `ProjectMember` row: `removeProjectBindings`
+      // deletes nothing, and the caller's legacy delete is what ends their access.
+      let legacy: string[] = ['developer'];
+      bindingRepo.findLegacyRoleKeys = async () => legacy;
+      const permissionService = new (await import('./permission.service')).PermissionService(
+        store.roleRepo() as never,
+        bindingRepo as never,
+        permissionCache,
+        { agentProjectScoping: true } as never,
+      );
+      const principal = {
+        actorType: 'user',
+        id: 'u1',
+        role: 'MEMBER',
+        email: 'u1@koda.test',
+      } as unknown as KodaPrincipal;
+      expect((await permissionService.can(principal, 'ticket.create', { projectId: 'p1' })).allowed).toBe(true);
+
+      // The caller's transaction: the binding delete (nothing), then the legacy row goes away.
+      await service.afterCommit(async () => {
+        expect(await service.removeProjectBindings(USER('u1'), 'p1')).toBe(0);
+        legacy = [];
+        expect(cache.invalidations).toEqual([]);
+      });
+
+      expect(cache.invalidations).toContain('permissions#tag');
+      expect((await permissionService.can(principal, 'ticket.create', { projectId: 'p1' })).allowed).toBe(false);
     });
 
     it('locks the user row and runs inside a transaction', async () => {

@@ -666,6 +666,7 @@ describe('TicketsService', () => {
         'KODA-1',
         TicketStatus.IN_PROGRESS,
         mockUserPrincipal,
+        undefined,
       );
       expect(result.status).toBe(TicketStatus.IN_PROGRESS);
       // Permissions P1 (US-003): the edge key of the requested status is checked first.
@@ -693,7 +694,7 @@ describe('TicketsService', () => {
       expect(mockTicketRepo.updateTicket).toHaveBeenCalledWith(mockTicket.id, { title: 'x' });
     });
 
-    it('M2: PATCH with status and other fields applies fields first, then transitions', async () => {
+    it('M2/B3: PATCH with status and other fields hands the field write to the transition, not a separate write', async () => {
       const updateDto: UpdateTicketDto = {
         title: 'Renamed before transition',
         status: TicketStatus.IN_PROGRESS,
@@ -704,30 +705,73 @@ describe('TicketsService', () => {
       mockTicketRepo.updateTicket.mockResolvedValue({
         ...mockTicket,
         title: 'Renamed before transition',
+        status: TicketStatus.IN_PROGRESS,
       });
-      mockTransitionsService.executeTransitionPublic.mockResolvedValue({
-        ticket: { ...mockTicket, title: 'Renamed before transition', status: TicketStatus.IN_PROGRESS },
-      });
+      let patch: ((context: { ticketId: string; projectId: string; previous: unknown }) => Promise<unknown>) | undefined;
+      mockTransitionsService.executeTransitionPublic.mockImplementation(
+        async (_slug: string, _ref: string, _status: string, _principal: unknown, fields?: typeof patch) => {
+          patch = fields;
+          const ticket = await fields?.({
+            ticketId: mockTicket.id,
+            projectId: mockProject.id,
+            previous: mockTicket,
+          });
+          return { ticket: ticket ?? { ...mockTicket, status: TicketStatus.IN_PROGRESS } };
+        },
+      );
 
       const result = await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
 
-      expect(mockTicketRepo.updateTicket).toHaveBeenCalledWith(mockTicket.id, {
-        title: 'Renamed before transition',
-      });
+      // The edge check runs before the transition, which is where the field write now happens.
       expect(mockTransitionsService.executeTransitionPublic).toHaveBeenCalledWith(
         'koda',
         'KODA-1',
         TicketStatus.IN_PROGRESS,
         mockUserPrincipal,
+        expect.any(Function),
       );
-      // Field write happens before the transition, and the edge check happens before both.
       expect(mockTransitionsService.assertTransitionAllowed.mock.invocationCallOrder[0]).toBeLessThan(
-        mockTicketRepo.updateTicket.mock.invocationCallOrder[0],
-      );
-      expect(mockTicketRepo.updateTicket.mock.invocationCallOrder[0]).toBeLessThan(
         mockTransitionsService.executeTransitionPublic.mock.invocationCallOrder[0],
       );
+      // The patch the transition applies writes the field and records the mention-diff event.
+      expect(patch).toBeTypeOf('function');
+      expect(mockTicketRepo.updateTicket).toHaveBeenCalledWith(mockTicket.id, {
+        title: 'Renamed before transition',
+      });
+      expect(mockTicketEventService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'TICKET_UPDATED', data: { title: 'Renamed before transition' } }),
+      );
       expect(result.status).toBe(TicketStatus.IN_PROGRESS);
+      expect(result.title).toBe('Renamed before transition');
+    });
+
+    it('M2/B3: a transition that refuses or loses the race never runs the field write', async () => {
+      const updateDto: UpdateTicketDto = {
+        title: 'Should never be written',
+        status: TicketStatus.IN_PROGRESS,
+      };
+
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      // The transitions service checks the edge on the ticket's live status and throws: the patch it was
+      // handed is never called, so no field is written even though the pre-check passed.
+      mockTransitionsService.executeTransitionPublic.mockRejectedValue(
+        new ForbiddenAppException({}, 'permissions'),
+      );
+
+      await expect(
+        service.update('koda', 'KODA-1', updateDto, mockUserPrincipal),
+      ).rejects.toThrow(ForbiddenAppException);
+
+      expect(mockTransitionsService.executeTransitionPublic).toHaveBeenCalledWith(
+        'koda',
+        'KODA-1',
+        TicketStatus.IN_PROGRESS,
+        mockUserPrincipal,
+        expect.any(Function),
+      );
+      expect(mockTicketRepo.updateTicket).not.toHaveBeenCalled();
+      expect(mockTicketEventService.create).not.toHaveBeenCalled();
     });
 
     // Final-review Finding B: a caller with UPDATE but not the edge key must be

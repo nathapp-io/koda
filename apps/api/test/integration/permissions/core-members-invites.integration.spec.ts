@@ -19,6 +19,9 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { ProjectMembersService } from '../../../src/projects/members/project-members.service';
+import { PermissionService } from '../../../src/permissions/permission.service';
+import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -323,5 +326,81 @@ describeIntegration('member and invite route keys (US-008)', () => {
 
     expectPermissionsRefusal(res);
     await expect(bindingsFor('target')).resolves.toEqual([]);
+  }, TIMEOUT);
+
+  // -------------------------------------------------------------------------
+  // B4 (whole-branch review) — a project-admin agent may invite
+  // -------------------------------------------------------------------------
+
+  it('B4: an agent with a project-admin binding invites an unknown address with 201, and is named as the inviter', async () => {
+    await membership.createBinding(
+      { principal: { type: 'AGENT', id: agent.id }, roleKey: 'project-admin', projectId: p1Id },
+      { type: 'SYSTEM', id: 'test' },
+    );
+
+    const created = await request(server)
+      .post(invitesUrl)
+      .set({ Authorization: `Bearer ${agent.apiKey}` })
+      .send({ email: 'agent-invited@koda.test', role: 'VIEWER' })
+      .expect(201);
+
+    const body = data<{ outcome: string; invite?: { id: string; email: string; status: string; inviterName: string | null } }>(created);
+    expect(body.outcome).toBe('INVITED');
+    expect(body.invite).toMatchObject({
+      email: 'agent-invited@koda.test',
+      status: 'PENDING',
+      inviterName: 'legacy-agent',
+    });
+
+    // The inviter goes in the agent column; `invitedById` — a required foreign key to `User` before this
+    // fix, which is what made this permitted operation a P2003 — stays null.
+    const row = await db.projectInvite.findUniqueOrThrow({
+      where: { id: body.invite?.id ?? '' },
+      select: { invitedById: true, invitedByAgentId: true },
+    });
+    expect(row).toEqual({ invitedById: null, invitedByAgentId: agent.id });
+
+    // The listing resolves the same name from the agent id, without a relation to join.
+    const listed = await request(server).get(invitesUrl).set(auth('padmin')).expect(200);
+    expect(data<{ email: string; inviterName: string | null }[]>(listed)).toContainEqual(
+      expect.objectContaining({ email: 'agent-invited@koda.test', inviterName: 'legacy-agent' }),
+    );
+  }, TIMEOUT);
+
+  // -------------------------------------------------------------------------
+  // B2 (whole-branch review) — a legacy-only member removal invalidates the cache
+  // -------------------------------------------------------------------------
+  it('B2: removing a member whose only source is a legacy ProjectMember row ends its warmed project keys', async () => {
+    // No RoleBinding at all, so the route's binding delete removes nothing: the legacy row is the whole
+    // source, and before this fix the warmed effective keys survived the removal for the full cache TTL.
+    await createUser('legacymember');
+    await db.projectMember.create({ data: { projectId: p1Id, userId: userIds.legacymember, role: 'DEVELOPER' } });
+    const permissions = app.get(PermissionService);
+    const members = app.get(ProjectMembersService);
+    const principal = {
+      actorType: 'user',
+      id: userIds.legacymember,
+      role: 'MEMBER',
+      email: 'legacymember@koda.test',
+    } as KodaPrincipal;
+    const padmin = {
+      actorType: 'user',
+      id: userIds.padmin,
+      role: 'MEMBER',
+      email: 'padmin@koda.test',
+    } as KodaPrincipal;
+    await membership.invalidatePermissions();
+    await expect(permissions.can(principal, 'ticket.create', { projectId: p1Id })).resolves.toEqual(
+      expect.objectContaining({ allowed: true }),
+    );
+
+    // The DELETE route's own service call: no explicit invalidation follows it here.
+    await members.remove(P1_SLUG, userIds.legacymember, padmin);
+
+    await expect(db.projectMember.count({ where: { projectId: p1Id, userId: userIds.legacymember } })).resolves.toBe(0);
+    await expect(bindingsFor('legacymember')).resolves.toEqual([]);
+    await expect(permissions.can(principal, 'ticket.create', { projectId: p1Id })).resolves.toEqual(
+      expect.objectContaining({ allowed: false }),
+    );
   }, TIMEOUT);
 });

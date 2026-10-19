@@ -128,7 +128,7 @@ export class ProjectInvitesService {
       }
       const binding = await this.membership.createBinding(
         { principal: { type: 'USER', id: userId }, projectId, roleKey: ROLE_KEY_FOR_LEGACY_ROLE[role] },
-        { type: 'USER', id: principal.id },
+        granterOf(principal),
       );
       const created: ProjectMemberRecord = { userId, email: user.email, name: user.name, role, joinedAt: binding.createdAt, disabled: false };
 
@@ -157,6 +157,7 @@ export class ProjectInvitesService {
     const now = new Date();
     const { raw, hash } = generateInviteToken();
     const expiresAt = new Date(now.getTime() + this.email.config().inviteTtlDays * DAY_MS);
+    const inviter = inviteeOf(principal);
 
     // Cancel any earlier pending invite and mint the replacement in one transaction (AC-7).
     const invite = await this.txManager.run(async () => {
@@ -166,7 +167,8 @@ export class ProjectInvitesService {
         email,
         role,
         tokenHash: hash,
-        invitedById: principal.id,
+        invitedById: inviter.invitedById,
+        invitedByAgentId: inviter.invitedByAgentId,
         expiresAt,
       });
     });
@@ -213,4 +215,20 @@ export class ProjectInvitesService {
       createdAt: record.createdAt,
     };
   }
+}
+
+/**
+ * Permissions P1 (US-008): `invite.create` reaches a project-admin agent too, so the inviter is stored in
+ * the column of its own actor type. `ProjectInvite.invitedById` is a foreign key to `User`; writing an
+ * agent id there failed with a P2003 instead of creating the invite.
+ */
+function inviteeOf(principal: KodaPrincipal): { invitedById: string | null; invitedByAgentId: string | null } {
+  return principal.actorType === 'agent'
+    ? { invitedById: null, invitedByAgentId: principal.id }
+    : { invitedById: principal.id, invitedByAgentId: null };
+}
+
+/** The `RoleBinding` granter of the same actor type as the caller that made the write. */
+function granterOf(principal: KodaPrincipal): { type: 'USER' | 'AGENT'; id: string } {
+  return { type: principal.actorType === 'agent' ? 'AGENT' : 'USER', id: principal.id };
 }

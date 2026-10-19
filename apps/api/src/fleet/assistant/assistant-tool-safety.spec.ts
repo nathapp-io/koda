@@ -122,6 +122,20 @@ describe('maskSecrets (US-001 AC5-AC11)', () => {
     expect(maskSecrets('{"config":{"apiKey":"abc123"}}')).toBe('{"config":{"apiKey":"[masked]"}}');
     expect(maskSecrets('{"servers":["x",{"password":"a"}],"token":"b";c')).toBe('{"servers":["x",{"password":"[masked]"}],"token":"[masked]";c');
   });
+
+  it('masks every pass over a 200 KB token-shaped result in linear time', () => {
+    // The mask passes are bounded so a long run that never reaches a `:`/`=` or `://` cannot be rescanned from every
+    // start position: unbounded, this input took ~40 s (the key/value pass) instead of milliseconds, and the 20 KB
+    // case in assistant-action-decisions.spec.ts spent ~400 ms of its 5 s budget here.
+    const text = 'x'.repeat(200_000);
+    expect(maskSecrets(text)).toBe(text);
+  });
+
+  it('B5: masks the userinfo of a scheme at the 32-character bound', () => {
+    expect(maskSecrets(`${'a'.repeat(32)}://user:pw@host`)).toBe(`${'a'.repeat(32)}://[masked]@host`);
+    // A longer pseudo-scheme is still found from the first position inside the bound, so the bound never leaks it.
+    expect(maskSecrets(`${'a'.repeat(33)}://user:pw@host`)).toBe(`${'a'.repeat(33)}://[masked]@host`);
+  });
 });
 
 describe('fenceData (US-001 AC12-AC13)', () => {

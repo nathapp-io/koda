@@ -19,6 +19,7 @@ import { TicketEventService } from '../events/ticket-event.service';
 import { buildTicketEventOutboxPayload } from '../events/outbox-envelope.util';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
+import type { TransitionFieldPatch, TransitionTicketShape } from './state-machine/ticket-transitions.service';
 import { PermissionService } from '../permissions/permission.service';
 import { allowedActions, TICKET_ACTIONS } from './state-machine/allowed-actions';
 import type { TicketAction } from './state-machine/allowed-actions';
@@ -279,15 +280,60 @@ export class TicketsService {
         principal,
       );
       const { status, ...rest } = updateTicketDto;
-      if (Object.keys(rest).length > 0) {
-        // Apply field updates first, then transition; keep it one perceived operation
-        await this.applyUpdate(projectSlug, ref, rest as UpdateTicketDto, principal);
-      }
-      const result = await this.transitionsService.executeTransitionPublic(projectSlug, ref, status, principal);
+      // Whole-branch fix B3: the field writes travel with the transition instead of committing in a
+      // transaction of their own. Both the edge check and the conditional status write now run before
+      // them, so a refusal — the pre-check here, the edge re-check on the ticket's *live* status, or a
+      // 409 from a lost race — leaves no field written, and the fields commit only with the status.
+      const fields = Object.keys(rest).length > 0 ? this.fieldPatch(rest, principal) : undefined;
+      const result = await this.transitionsService.executeTransitionPublic(
+        projectSlug,
+        ref,
+        status,
+        principal,
+        fields,
+      );
       return result.ticket;
     }
 
     return this.applyUpdate(projectSlug, ref, updateTicketDto, principal);
+  }
+
+  /**
+   * The field writes of a `PATCH …?status=` as the patch the transition applies inside its transaction.
+   * `previous` is the row the transition loaded, so the TICKET_UPDATED event still carries the earlier
+   * description the mention resolver diffs against.
+   */
+  private fieldPatch(rest: UpdateTicketDto, principal: KodaPrincipal): TransitionFieldPatch {
+    const updateData = TicketsService.toUpdateData(rest);
+    return async ({ ticketId, projectId, previous }) => {
+      const row = await this.ticketRepo.updateTicket(ticketId, updateData);
+      const previousDescription = (previous as { description?: string | null }).description ?? null;
+      await this.recordTicketEvent(
+        ticketId,
+        projectId,
+        'TICKET_UPDATED',
+        principal,
+        updateData.description !== undefined
+          ? { ...updateData, previousDescription }
+          : { ...updateData },
+      );
+      return row as unknown as TransitionTicketShape;
+    };
+  }
+
+  /** The writable columns of a PATCH body; `status` is never one of them (the transitions own it). */
+  private static toUpdateData(dto: UpdateTicketDto): UpdateTicketDto {
+    const updateData: UpdateTicketDto = {};
+    if (dto.title !== undefined) {
+      updateData.title = dto.title;
+    }
+    if (dto.description !== undefined) {
+      updateData.description = dto.description;
+    }
+    if (dto.priority !== undefined) {
+      updateData.priority = dto.priority;
+    }
+    return updateData;
   }
 
   /**
@@ -306,18 +352,7 @@ export class TicketsService {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    const updateData: UpdateTicketDto = {};
-
-    if (updateTicketDto.title !== undefined) {
-      updateData.title = updateTicketDto.title;
-    }
-    if (updateTicketDto.description !== undefined) {
-      updateData.description = updateTicketDto.description;
-    }
-    if (updateTicketDto.priority !== undefined) {
-      updateData.priority = updateTicketDto.priority;
-    }
-
+    const updateData = TicketsService.toUpdateData(updateTicketDto);
     const project = await this.ticketRepo.findProjectBySlug(projectSlug);
 
     const updated = await this.txManager.run(async () => {

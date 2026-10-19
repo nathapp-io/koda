@@ -62,6 +62,29 @@ export interface TransitionResultWithoutComment {
 
 export type TransitionResult = TransitionResultWithComment | TransitionResultWithoutComment;
 
+/**
+ * Permissions P1 (whole-branch fix B3): the field writes a `PATCH /projects/:slug/tickets/:ref` sends
+ * alongside a `status`.
+ *
+ * They run inside the transition's own transaction, after the conditional status write, so the PATCH is
+ * one operation: a refused edge key, a validation failure or a lost status race rolls the fields — and
+ * the events they recorded — back with everything else, and a caller never sees a 403 or 409 that
+ * nevertheless kept the new title.
+ *
+ * `previous` is the ticket as the transition loaded it, before any write of this call (the mention
+ * diff needs the earlier description). The returned row is the ticket after the field write and becomes
+ * the response body; a patch that returns nothing answers the row of the status write.
+ */
+export interface TransitionFieldPatchContext {
+  ticketId: string;
+  projectId: string;
+  previous: TransitionTicketShape;
+}
+
+export type TransitionFieldPatch = (
+  context: TransitionFieldPatchContext,
+) => Promise<TransitionTicketShape | undefined>;
+
 @Injectable()
 export class TicketTransitionsService {
   private readonly logger = new Logger(TicketTransitionsService.name);
@@ -580,16 +603,20 @@ export class TicketTransitionsService {
    * Permissions P1 (US-003): authorization for this caller path is the route's
    * `@Requires('ticket.update')` plus the current-status edge key that
    * `executeTransitionInternal` checks before validating or writing anything.
+   *
+   * Whole-branch fix B3: `fields` carries the PATCH's other field writes into that same transaction, so
+   * the status and the fields commit or roll back together.
    */
   async executeTransitionPublic(
     projectSlug: string,
     ticketRef: string,
     toStatus: TicketStatus,
     principal: KodaPrincipal,
+    fields?: TransitionFieldPatch,
   ): Promise<TransitionResult> {
     // Permissions P1 (US-003): no route key check here — the route declares its own key and
     // `executeTransitionInternal` checks the ticket's current-status edge, for every caller.
-    return this.executeTransitionInternal(projectSlug, ticketRef, toStatus, undefined, undefined, principal);
+    return this.executeTransitionInternal(projectSlug, ticketRef, toStatus, undefined, undefined, principal, fields);
   }
 
   /**
@@ -602,6 +629,7 @@ export class TicketTransitionsService {
     commentType: CommentType | undefined,
     commentBody: string | undefined,
     principal: KodaPrincipal,
+    fields?: TransitionFieldPatch,
   ): Promise<TransitionResult> {
     const project = await this.ticketRepo.findProjectBySlug(projectSlug);
     if (!project || project.deletedAt) {
@@ -647,6 +675,17 @@ export class TicketTransitionsService {
         throw new HttpException('Ticket state changed concurrently', HttpStatus.CONFLICT);
       }
 
+      // Whole-branch fix B3: the PATCH's field writes belong to this transaction and come after the
+      // conditional status write, so a lost status race has already thrown and nothing is left behind.
+      const patched = fields
+        ? await fields({
+            ticketId: ticket.id,
+            projectId: project.id,
+            previous: ticket as unknown as TransitionTicketShape,
+          })
+        : undefined;
+      const responseTicket = patched ?? (updatedTicket as unknown as TransitionTicketShape);
+
       const activity = await repo.createTicketActivity({
         ticketId: ticket.id,
         action: ActivityType.STATUS_CHANGE,
@@ -660,14 +699,14 @@ export class TicketTransitionsService {
 
       if (comment) {
         return {
-          ticket: updatedTicket as unknown as TransitionTicketShape,
+          ticket: responseTicket,
           comment: comment as unknown as TransitionCommentShape,
           activity: activity as unknown as TransitionActivityShape,
         } satisfies TransitionResultWithComment;
       }
 
       return {
-        ticket: updatedTicket as unknown as TransitionTicketShape,
+        ticket: responseTicket,
         activity: activity as unknown as TransitionActivityShape,
       } satisfies TransitionResultWithoutComment;
     });

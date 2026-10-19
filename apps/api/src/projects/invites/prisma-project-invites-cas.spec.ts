@@ -23,7 +23,8 @@ interface FakeRow {
   role: string;
   tokenHash: string;
   status: string;
-  invitedById: string;
+  invitedById: string | null;
+  invitedByAgentId?: string | null;
   acceptedByUserId: string | null;
   acceptedAt: Date | null;
   expiresAt: Date;
@@ -38,6 +39,7 @@ const startRow = (over: Partial<FakeRow> = {}): FakeRow => ({
   tokenHash: OLD_HASH,
   status: 'PENDING',
   invitedById: 'admin',
+  invitedByAgentId: null,
   acceptedByUserId: null,
   acceptedAt: null,
   expiresAt: new Date(NOW.getTime() + 86_400_000),
@@ -77,7 +79,11 @@ function delegate(start: FakeRow = startRow()) {
 
   return {
     repo: new PrismaProjectInvitesRepository({
-      client: { projectInvite: { findFirst, updateMany, findUnique } },
+      client: {
+        projectInvite: { findFirst, updateMany, findUnique },
+        // Permissions P1 (US-008): the inviter name of an agent inviter is read by id (no relation).
+        agent: { findMany: vi.fn(async () => []) },
+      },
     } as never),
     findFirst,
     updateMany,

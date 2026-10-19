@@ -12,7 +12,8 @@ export interface ProjectInviteRecord {
   email: string;
   role: ProjectMemberRole;
   status: InviteStatus;
-  invitedById: string;
+  /** The inviting user, or null when the inviter is an agent (Permissions P1 US-008). */
+  invitedById: string | null;
   inviterName: string | null;
   acceptedByUserId: string | null;
   acceptedAt: Date | null;

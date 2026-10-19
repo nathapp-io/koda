@@ -21,6 +21,7 @@ const row = (over: Record<string, unknown> = {}) => ({
   tokenHash: TOKEN_HASH,
   status: 'PENDING',
   invitedById: 'admin',
+  invitedByAgentId: null,
   acceptedByUserId: null,
   acceptedAt: null,
   expiresAt: EXPIRES_AT,
@@ -48,10 +49,11 @@ function setup() {
   const findMany = vi.fn().mockResolvedValue([]);
   const create = vi.fn().mockResolvedValue(row());
   const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+  const findAgents = vi.fn().mockResolvedValue([]);
   const repo = new PrismaProjectInvitesRepository({
-    client: { projectInvite: { findMany, create, updateMany } },
+    client: { projectInvite: { findMany, create, updateMany }, agent: { findMany: findAgents } },
   } as never);
-  return { repo, findMany, create, updateMany };
+  return { repo, findMany, create, updateMany, findAgents };
 }
 
 describe('PrismaProjectInvitesRepository.list (S4b US-004)', () => {
@@ -122,6 +124,7 @@ describe('PrismaProjectInvitesRepository writes (S4b US-004)', () => {
       role: 'DEVELOPER',
       tokenHash: TOKEN_HASH,
       invitedById: 'admin',
+      invitedByAgentId: null,
       expiresAt: EXPIRES_AT,
     });
 
@@ -132,11 +135,66 @@ describe('PrismaProjectInvitesRepository writes (S4b US-004)', () => {
         role: 'DEVELOPER',
         tokenHash: TOKEN_HASH,
         invitedById: 'admin',
+        invitedByAgentId: null,
         expiresAt: EXPIRES_AT,
       },
       include: { invitedBy: { select: { name: true } }, project: { select: { name: true } } },
     });
     expect(created).toMatchObject({ id: 'i9', projectName: 'Koda' });
     expect(Object.keys(created)).not.toContain('tokenHash');
+  });
+
+  it('B4: an agent inviter is stored in invitedByAgentId, with invitedById null', async () => {
+    const { repo, create, findAgents } = setup();
+    create.mockResolvedValueOnce(
+      row({ id: 'i9', invitedById: null, invitedByAgentId: 'agent-1', invitedBy: null }),
+    );
+    findAgents.mockResolvedValueOnce([{ id: 'agent-1', name: 'roster-agent' }]);
+
+    const created = await repo.create({
+      projectId: 'p1',
+      email: 'new@x.io',
+      role: 'VIEWER',
+      tokenHash: TOKEN_HASH,
+      invitedById: null,
+      invitedByAgentId: 'agent-1',
+      expiresAt: EXPIRES_AT,
+    });
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ invitedById: null, invitedByAgentId: 'agent-1' }),
+      }),
+    );
+    // The name comes from the agent row, because `invitedByAgentId` has no relation to include.
+    expect(findAgents).toHaveBeenCalledWith({
+      where: { id: { in: ['agent-1'] } },
+      select: { id: true, name: true },
+      take: 1,
+    });
+    expect(created).toMatchObject({ invitedById: null, inviterName: 'roster-agent' });
+  });
+
+  it('B4: a page of agent invites resolves the agent names in one read, skipping user inviters', async () => {
+    const { repo, findMany, findAgents } = setup();
+    findMany.mockResolvedValueOnce([
+      row({ id: 'i1', invitedBy: null, invitedById: null, invitedByAgentId: 'agent-1' }),
+      row({ id: 'i2', invitedBy: null, invitedById: null, invitedByAgentId: 'agent-2' }),
+      row({ id: 'i3' }),
+    ]);
+    findAgents.mockResolvedValueOnce([
+      { id: 'agent-1', name: 'first-agent' },
+      { id: 'agent-2', name: 'second-agent' },
+    ]);
+
+    const records = await repo.list('p1');
+
+    expect(findAgents).toHaveBeenCalledTimes(1);
+    expect(findAgents).toHaveBeenCalledWith({
+      where: { id: { in: ['agent-1', 'agent-2'] } },
+      select: { id: true, name: true },
+      take: 2,
+    });
+    expect(records.map((record) => record.inviterName)).toEqual(['first-agent', 'second-agent', 'Ada']);
   });
 });

@@ -903,6 +903,67 @@ describe('TicketTransitionsService', () => {
       ).resolves.toBeUndefined();
       expect(mockPermissions.can).not.toHaveBeenCalled();
     });
+
+    // Whole-branch fix B3: the PATCH's field writes run inside the transition transaction.
+    it('B3: runs the field patch inside the transition transaction, after the conditional status write', async () => {
+      mockExecuteTransitionInternalPath();
+      const order: string[] = [];
+      mockTicketRepo.updateTicketStatusIf.mockImplementation(async () => {
+        order.push('status');
+        return { ...mockTicket, status: TicketStatus.IN_PROGRESS };
+      });
+      mockTxManager.run.mockImplementation(async (fn: () => Promise<unknown>) => {
+        order.push('tx:start');
+        const value = await fn();
+        order.push('tx:end');
+        return value;
+      });
+      const patched = { ...mockTicket, title: 'Renamed', status: TicketStatus.IN_PROGRESS };
+      const fields = vi.fn(async () => {
+        order.push('fields');
+        return patched;
+      });
+
+      const result = await service.executeTransitionPublic(
+        'koda',
+        'KODA-1',
+        TicketStatus.IN_PROGRESS,
+        makeAdminUserPrincipal(),
+        fields,
+      );
+
+      expect(fields).toHaveBeenCalledWith({ ticketId: 'ticket-123', projectId: 'proj-123', previous: mockTicket });
+      expect(order).toEqual(['tx:start', 'status', 'fields', 'tx:end']);
+      // The patched row is the response body, so the PATCH reflects the fields it wrote.
+      expect(result.ticket).toMatchObject({ title: 'Renamed', status: TicketStatus.IN_PROGRESS });
+    });
+
+    it('B3: a lost status race (409) never runs the field patch', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(null);
+      const fields = vi.fn(async () => ({ ...mockTicket, title: 'Renamed' }));
+
+      await expect(
+        service.executeTransitionPublic('koda', 'KODA-1', TicketStatus.IN_PROGRESS, makeAdminUserPrincipal(), fields),
+      ).rejects.toBeInstanceOf(HttpException);
+
+      expect(fields).not.toHaveBeenCalled();
+      expect(mockTicketRepo.createTicketActivity).not.toHaveBeenCalled();
+    });
+
+    it('B3: a refused edge key never runs the field patch', async () => {
+      mockExecuteTransitionInternalPath();
+      mockPermissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
+      const fields = vi.fn(async () => ({ ...mockTicket, title: 'Renamed' }));
+
+      await expect(
+        service.executeTransitionPublic('koda', 'KODA-1', TicketStatus.IN_PROGRESS, makeTriagerAgentPrincipal(), fields),
+      ).rejects.toBeInstanceOf(ForbiddenAppException);
+
+      expect(fields).not.toHaveBeenCalled();
+      expect(mockTicketRepo.updateTicketStatusIf).not.toHaveBeenCalled();
+    });
   });
 
   describe('assertTransitionPermission (legacy CASL check, still used by the assistant tool)', () => {

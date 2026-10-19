@@ -222,7 +222,11 @@ model ProjectInvite {
   role             String // ADMIN | DEVELOPER | VIEWER
   tokenHash        String    @unique
   status           String    @default("PENDING") // PENDING | ACCEPTED | EXPIRED | CANCELLED
-  invitedById      String
+  /// The inviter: a user id, or null when an agent invited (see `invitedByAgentId`).
+  invitedById      String?
+  /// Permissions P1: the agent that invited, when the inviter is an agent. No foreign key, like the other
+  /// creator columns a deleted principal may leave behind; the name is read when the invite is rendered.
+  invitedByAgentId String?
   acceptedByUserId String?
   acceptedAt       DateTime?
   expiresAt        DateTime
@@ -230,7 +234,7 @@ model ProjectInvite {
   updatedAt        DateTime  @updatedAt
 
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  invitedBy User    @relation("ProjectInviteInvitedBy", fields: [invitedById], references: [id], onDelete: Cascade)
+  invitedBy User?   @relation("ProjectInviteInvitedBy", fields: [invitedById], references: [id], onDelete: Cascade)
 
   @@index([projectId, email, status])
 }

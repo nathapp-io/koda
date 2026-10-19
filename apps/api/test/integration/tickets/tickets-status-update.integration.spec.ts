@@ -145,6 +145,7 @@ describe('US-003 (M2): TicketsService.update() — status field routes through t
         'KODA-1',
         TicketStatus.IN_PROGRESS,
         mockUserPrincipal,
+        undefined,
       );
       expect(result.status).toBe(TicketStatus.IN_PROGRESS);
     });
