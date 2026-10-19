@@ -1988,18 +1988,16 @@ describeIntegration('API Integration Tests', () => {
       expect(data.id).toBeTruthy();
     });
 
-    it('AC-6: DELETE /api/projects/:slug/tickets/:ref — 403 permissions with agent API key', async () => {
-      // Permissions P1 (US-004): the route is guarded by ticket.delete, which Developer does not hold.
-      // (Bug #19's any-agent delete was the hole this closes.)
-      const res = await request(httpServer)
+    it('AC-6: DELETE /api/projects/:slug/tickets/:ref — 403 permissions for the agent, 200 for the project admin', async () => {
+      // Permissions P1 (US-004): the route is guarded by ticket.delete, which Developer does not hold
+      // (Bug #19's any-agent delete was the hole this closes), so the project admin deletes instead.
+      const denied = await request(httpServer)
         .delete(`/api/projects/${projectSlug}/tickets/${agentDeleteTicketRef}`)
         .set('Authorization', `Bearer ${agentApiKey}`)
         .expect(403);
 
-      refusal(res, 'permissions.40003');
-    });
+      refusal(denied, 'permissions.40003');
 
-    it('AC-6: DELETE /api/projects/:slug/tickets/:ref — the project admin deletes the ticket', async () => {
       const res = await request(httpServer)
         .delete(`/api/projects/${projectSlug}/tickets/${agentDeleteTicketRef}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
