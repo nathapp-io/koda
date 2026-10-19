@@ -15,7 +15,7 @@ import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.t
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { OutboxService } from '@nathapp/nestjs-outbox';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
-import { KodaCaslAbilityFactory } from '../../../src/auth/casl/koda-casl-ability.factory';
+import { PermissionService } from '../../../src/permissions/permission.service';
 
 describe('TicketsService — agent permissions', () => {
   let service: TicketsService;
@@ -88,7 +88,9 @@ describe('TicketsService — agent permissions', () => {
         { provide: TicketEventService, useValue: { create: vi.fn().mockResolvedValue({ id: 'evt-1' }) } },
         { provide: OutboxService, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
         { provide: TicketTransitionsService, useValue: { executeTransitionPublic: vi.fn() } },
-        KodaCaslAbilityFactory,
+        // Permissions P1 (US-004): the sixth constructor argument is the key check. This suite asserts the
+        // service writes a soft delete for either actor; route authorization lives in RequiresGuard.
+        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
       ],
     }).compile();
 

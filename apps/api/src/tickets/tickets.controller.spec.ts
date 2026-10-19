@@ -5,9 +5,8 @@ import { TicketTransitionsService } from './state-machine/ticket-transitions.ser
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
-import { PERMISSION_KEY, CaslPermissionAction } from '@nathapp/nestjs-auth';
+import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
 import { ValidationAppException, ForbiddenAppException, Page } from '@nathapp/nestjs-common';
-import { KodaAction } from '../auth/casl/koda-action.enum';
 import { PROJECT_PERMISSION_KEY } from '../projects/project-permission.decorator';
 import { REQUIRES_METADATA, RequiresMetadata } from '../permissions/requires.decorator';
 import { PermissionService } from '../permissions/permission.service';
@@ -136,9 +135,8 @@ describe('TicketsController', () => {
         { provide: TicketTransitionsService, useValue: mockTransitionsService },
         { provide: ProjectsService, useValue: mockProjectsService },
         { provide: PermissionService, useValue: mockPermissions },
-        // US-001: the class-level ProjectMembershipGuard is instantiated by the DI
-        // container even though these tests call the handlers directly, so its
-        // ProjectAccessService dependency must resolve.
+        // US-004: every route carries `@UseGuards(ProjectMembershipGuard, RequiresGuard)`, and Nest
+        // instantiates both at bootstrap even though these tests call the handlers directly.
         { provide: ProjectAccessService, useValue: {} },
       ],
     }).compile();
@@ -537,18 +535,15 @@ describe('TicketsController', () => {
     });
   });
 
-  describe('route permission metadata (US-003)', () => {
-    const T = KodaAction.TRANSITION as CaslPermissionAction;
-    const U = KodaAction.UPDATE as CaslPermissionAction;
-    /** The routes this story does not migrate keep their @ProjectPermission. */
-    const legacyCases: Array<[keyof TicketsController, [CaslPermissionAction, string]]> = [
-      ['create', [CaslPermissionAction.CREATE, 'Ticket']],
-      ['softDelete', [CaslPermissionAction.DELETE, 'Ticket']],
-      ['assign', [U, 'Ticket']],
-    ];
-    /** The migrated routes declare their catalog keys with @Requires instead. */
+  describe('route permission metadata (US-003, US-004)', () => {
+    /** Every route on this controller declares its catalog key with @Requires. */
     const requiresCases: Array<[keyof TicketsController, string[], 'all' | 'any']> = [
+      ['create', ['ticket.create'], 'all'],
+      ['findAll', ['ticket.read'], 'all'],
+      ['findByRef', ['ticket.read'], 'all'],
       ['update', ['ticket.update'], 'all'],
+      ['softDelete', ['ticket.delete'], 'all'],
+      ['assign', ['ticket.assign'], 'all'],
       ['verify', ['ticket.transition.verify'], 'all'],
       ['start', ['ticket.transition.start'], 'all'],
       ['fix', ['ticket.transition.fix'], 'all'],
@@ -556,12 +551,6 @@ describe('TicketsController', () => {
       ['close', ['ticket.transition.close'], 'all'],
       ['reject', ['ticket.transition.reject'], 'all'],
     ];
-
-    it.each(legacyCases)('%s carries @ProjectPermission(%j) and no global @RequiredPermission', (handler, permission) => {
-      const fn = TicketsController.prototype[handler] as unknown as object;
-      expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toEqual({ permission, exemptAgents: false });
-      expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
-    });
 
     it.each(requiresCases)('%s declares @Requires(%j, mode %s)', (handler, keys, mode) => {
       const fn = TicketsController.prototype[handler] as unknown as object;
@@ -581,6 +570,17 @@ describe('TicketsController', () => {
         'ProjectMembershipGuard',
         'RequiresGuard',
       ]);
+    });
+
+    it('keeps no legacy decorator on any handler, and no class-level membership guard to run twice', () => {
+      // The set above is the whole surface: a route added without a key would otherwise slip through.
+      expect(requiresCases.map(([handler]) => handler).sort()).toEqual(
+        [
+          'assign', 'close', 'create', 'findAll', 'findByRef', 'fix',
+          'reject', 'softDelete', 'start', 'update', 'verify', 'verifyFix',
+        ].sort(),
+      );
+      expect(Reflect.getMetadata('__guards__', TicketsController)).toBeUndefined();
     });
 
     it('passes the principal enriched with the resolved project role to the service', async () => {

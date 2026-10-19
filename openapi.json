@@ -2509,6 +2509,9 @@
           "400": {
             "description": "Invalid request data"
           },
+          "403": {
+            "description": "ticket.create is missing"
+          },
           "404": {
             "description": "Project not found"
           }
@@ -2627,6 +2630,9 @@
           "400": {
             "description": "Invalid filter or paging parameter"
           },
+          "403": {
+            "description": "ticket.read is missing"
+          },
           "404": {
             "description": "Project not found"
           }
@@ -2673,6 +2679,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "ticket.read is missing"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -2781,7 +2790,7 @@
             }
           },
           "403": {
-            "description": "Project ADMIN or global ADMIN required"
+            "description": "ticket.delete is missing"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -2792,7 +2801,7 @@
             "bearer": []
           }
         ],
-        "summary": "Soft delete a ticket (admin only)",
+        "summary": "Soft delete a ticket",
         "tags": [
           "tickets"
         ]
@@ -2842,6 +2851,9 @@
           },
           "400": {
             "description": "Cannot assign to both user and agent"
+          },
+          "403": {
+            "description": "ticket.assign is missing"
           },
           "404": {
             "description": "Ticket or project not found"

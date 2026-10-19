@@ -28,11 +28,9 @@ import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { ListTicketsQuery } from './dto/list-tickets.query';
 import { parseQuery, toPageResult } from '../common/dto/koda-page.query';
 import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
-import { Principal, CaslPermissionAction } from '@nathapp/nestjs-auth';
+import { Principal } from '@nathapp/nestjs-auth';
 import { isAgentPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
-import { KodaAction } from '../auth/casl/koda-action.enum';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
-import { ProjectPermission } from '../projects/project-permission.decorator';
 import { RequiresGuard } from '../permissions/requires.guard';
 import { Requires } from '../permissions/requires.decorator';
 import { CurrentProject } from '../projects/current-project.decorator';
@@ -54,7 +52,9 @@ export function resolveSelfAssignee(
 @ApiTags('tickets')
 @ApiBearerAuth()
 @Controller('projects/:slug/tickets')
-@UseGuards(ProjectMembershipGuard)
+// Permissions P1 (US-004): every route declares `ProjectMembershipGuard, RequiresGuard` in one
+// `@UseGuards`, so the membership guard resolves `request.projectContext` before the key check and
+// runs exactly once per request. A class-level membership guard would run it a second time.
 export class TicketsController {
   constructor(
     private ticketsService: TicketsService,
@@ -162,11 +162,13 @@ export class TicketsController {
   // HTTP route handlers
   @Post()
   @HttpCode(201)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('ticket.create')
   @ApiOperation({ summary: 'Create a new ticket' })
   @ApiResponse({ status: 201, type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
+  @ApiResponse({ status: 403, description: 'ticket.create is missing' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  @ProjectPermission([CaslPermissionAction.CREATE, 'Ticket'])
   async create(
     @Param('slug') slug: string,
     @Body() createTicketDto: CreateTicketDto,
@@ -178,9 +180,12 @@ export class TicketsController {
   }
 
   @Get()
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('ticket.read')
   @ApiOperation({ summary: 'List tickets for a project (paginated)' })
   @ApiResponse({ status: 200, description: 'Page of tickets: { total, current, size, hasNext, hasPrev, records }' })
   @ApiResponse({ status: 400, description: 'Invalid filter or paging parameter' })
+  @ApiResponse({ status: 403, description: 'ticket.read is missing' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   async findAll(
     @Param('slug') slug: string,
@@ -193,8 +198,11 @@ export class TicketsController {
   }
 
   @Get(':ref')
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('ticket.read')
   @ApiOperation({ summary: 'Get a ticket by reference (KODA-42 or CUID), with the caller\'s allowedActions' })
   @ApiResponse({ status: 200, type: TicketDetailResponseDto })
+  @ApiResponse({ status: 403, description: 'ticket.read is missing' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
   async findByRef(
     @Param('slug') slug: string,
@@ -226,11 +234,12 @@ export class TicketsController {
   }
 
   @Delete(':ref')
-  @ApiOperation({ summary: 'Soft delete a ticket (admin only)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('ticket.delete')
+  @ApiOperation({ summary: 'Soft delete a ticket' })
   @ApiResponse({ status: 200, type: TicketResponseDto })
-  @ApiResponse({ status: 403, description: 'Project ADMIN or global ADMIN required' })
+  @ApiResponse({ status: 403, description: 'ticket.delete is missing' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @ProjectPermission([CaslPermissionAction.DELETE, 'Ticket'])
   async softDelete(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -243,11 +252,13 @@ export class TicketsController {
 
   @Post(':ref/assign')
   @HttpCode(200)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('ticket.assign')
   @ApiOperation({ summary: 'Assign or unassign a ticket' })
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Cannot assign to both user and agent' })
+  @ApiResponse({ status: 403, description: 'ticket.assign is missing' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @ProjectPermission([KodaAction.UPDATE as CaslPermissionAction, 'Ticket'])
   async assign(
     @Param('slug') slug: string,
     @Param('ref') ref: string,

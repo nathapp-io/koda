@@ -11,7 +11,7 @@ import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
 import { TicketEventService } from '../events/ticket-event.service';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
-import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
+import { PermissionService } from '../permissions/permission.service';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
 
 describe('TicketsService', () => {
@@ -140,12 +140,22 @@ describe('TicketsService', () => {
     assertTransitionAllowed: vi.fn(),
   };
 
+  /** Permissions P1 (US-004): the sixth constructor argument, where the CASL factory used to sit. */
+  const mockPermissions = { can: vi.fn() };
+  /** Answers the key check as `PermissionService` does, from the keys the principal holds. */
+  const holdKeys = (held: readonly string[]) =>
+    mockPermissions.can.mockImplementation(async (_principal: unknown, key: string) => ({
+      allowed: held.includes(key),
+      reason: held.includes(key) ? 'granted' : 'not-granted',
+    }));
+
   beforeEach(async () => {
     // Per-test implementations (mockResolvedValue etc.) must not leak across tests.
     Object.values(mockTicketRepo).forEach((m) => m.mockReset());
     Object.values(mockTransitionsService).forEach((m) => m.mockReset());
     mockTicketEventService.create.mockReset().mockResolvedValue({ id: 'evt-mock' });
     mockOutbox.record.mockReset().mockResolvedValue(undefined);
+    mockPermissions.can.mockReset().mockResolvedValue({ allowed: false, reason: 'not-granted' });
     inTx = false;
 
     const module: TestingModule = await Test.createTestingModule({
@@ -156,7 +166,7 @@ describe('TicketsService', () => {
         { provide: TicketEventService, useValue: mockTicketEventService },
         { provide: NathappOutboxService, useValue: mockOutbox },
         { provide: TicketTransitionsService, useValue: mockTransitionsService },
-        KodaCaslAbilityFactory,
+        { provide: PermissionService, useValue: mockPermissions },
       ],
     }).compile();
 
@@ -485,24 +495,89 @@ describe('TicketsService', () => {
   });
 
   describe('findByRefWithActions (M25)', () => {
-    beforeEach(() => {
+    // Permissions P1 (US-004): the actions come from the caller's keys (`TICKET_ACTION_KEYS` through
+    // PermissionService.can), not from the legacy CASL ability, so the double answers per key.
+    const TRANSITION_KEYS = [
+      'ticket.transition.verify',
+      'ticket.transition.start',
+      'ticket.transition.fix',
+      'ticket.transition.verify-fix.approve',
+      'ticket.transition.verify-fix.return',
+      'ticket.transition.reject',
+    ];
+    const DEVELOPER_KEYS = [...TRANSITION_KEYS, 'ticket.transition.close'];
+    const REVIEWER_KEYS = [
+      'ticket.transition.verify-fix.approve',
+      'ticket.transition.verify-fix.return',
+      'ticket.transition.close',
+    ];
+
+    const detail = (status: string) => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketScoped.mockResolvedValue({ ...mockTicket, status: 'VERIFIED' });
-    });
+      mockTicketRepo.findTicketScoped.mockResolvedValue({ ...mockTicket, status });
+    };
 
     it.each([
-      ['ADMIN', ['start', 'reject', 'close']],
-      ['DEVELOPER', ['start', 'reject']],
-      ['VIEWER', []],
-    ])('project %s on a VERIFIED ticket -> %j', async (projectRole, expected) => {
-      const res = await service.findByRefWithActions('koda', 'KODA-1', { ...mockUserPrincipal, projectRole });
+      ['a developer key holder', DEVELOPER_KEYS, ['verify', 'start', 'reject']],
+      ['a reviewer key holder', REVIEWER_KEYS, []],
+      ['a keyless viewer', [], []],
+    ])('%s on a CREATED ticket -> %j', async (_label, held, expected) => {
+      detail('CREATED');
+      holdKeys(held);
+
+      const res = await service.findByRefWithActions('koda', 'KODA-1', { ...mockUserPrincipal, projectRole: 'DEVELOPER' });
+
       expect(res.allowedActions).toEqual(expected);
       expect(res.ref).toBe('KODA-1');
     });
 
-    it('an agent gets transitions from its agent roles and never close', async () => {
-      const res = await service.findByRefWithActions('koda', 'KODA-1', { ...mockAgentPrincipal, agentRoles: ['REVIEWER'] });
-      expect(res.allowedActions).toEqual(['start', 'reject']);
+    it('asks PermissionService for each action key in the ticket\'s project', async () => {
+      detail('CREATED');
+      holdKeys(DEVELOPER_KEYS);
+
+      await service.findByRefWithActions('koda', 'KODA-1', mockUserPrincipal);
+
+      expect(mockPermissions.can).toHaveBeenCalledWith(
+        mockUserPrincipal, 'ticket.transition.verify', { projectId: 'proj-123' },
+      );
+      // One call per key of `TICKET_ACTION_KEYS`: six actions, and verify-fix names two outcomes.
+      expect(mockPermissions.can).toHaveBeenCalledTimes(7);
+    });
+
+    it('a reviewer on a VERIFY_FIX ticket is offered the fix review and close', async () => {
+      detail('VERIFY_FIX');
+      holdKeys(REVIEWER_KEYS);
+
+      const res = await service.findByRefWithActions('koda', 'KODA-1', mockUserPrincipal);
+
+      expect(res.allowedActions).toEqual(['verify-fix', 'close']);
+    });
+
+    it('a developer on an IN_PROGRESS ticket is offered the fix and close', async () => {
+      detail('IN_PROGRESS');
+      holdKeys(DEVELOPER_KEYS);
+
+      const res = await service.findByRefWithActions('koda', 'KODA-1', mockUserPrincipal);
+
+      expect(res.allowedActions).toEqual(['fix', 'close']);
+    });
+
+    it('an action whose keys the caller does not hold is never offered, whatever the status', async () => {
+      detail('IN_PROGRESS');
+      holdKeys(['ticket.transition.close']);
+
+      const res = await service.findByRefWithActions('koda', 'KODA-1', mockUserPrincipal);
+
+      expect(res.allowedActions).toEqual(['close']);
+    });
+
+    it('an agent gets its actions from its keys, with no project role involved', async () => {
+      detail('VERIFY_FIX');
+      holdKeys(REVIEWER_KEYS);
+
+      const res = await service.findByRefWithActions('koda', 'KODA-1', mockAgentPrincipal);
+
+      expect(res.allowedActions).toEqual(['verify-fix', 'close']);
     });
   });
 

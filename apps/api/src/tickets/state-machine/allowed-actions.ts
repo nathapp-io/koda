@@ -38,19 +38,21 @@ function isValid(from: TicketStatus, to: TicketStatus, comment: CommentType | un
 }
 
 /**
- * M25: endpoint-level actions the caller may take on a ticket in `status`,
- * derived from the state machine and filtered by the caller's permissions
- * (TRANSITION from the project-role ability; close via canOverrideClose).
+ * M25: endpoint-level actions the caller may take on a ticket in `status`.
+ *
+ * Two rules, both required: the action has to be valid from `status` (the state machine below), and
+ * the caller has to hold one of its keys (`permitted`, built by `TicketsService` from
+ * `TICKET_ACTION_KEYS` and the project's effective keys). `permitted` only ever filters — a set
+ * containing `fix` does not offer `fix` on a CREATED ticket.
  */
 export function allowedActions(
   status: TicketStatus,
-  perms: { canTransition: boolean; canClose: boolean },
+  permitted: ReadonlySet<TicketAction>,
 ): TicketAction[] {
-  const transitions = perms.canTransition
-    ? (Object.keys(ACTION_TARGETS) as Array<Exclude<TicketAction, 'close'>>).filter((action) =>
-        ACTION_TARGETS[action].some(([to, comment]) => isValid(status, to, comment)),
-      )
-    : [];
-  const close = perms.canClose && CLOSE_SOURCES.includes(status) ? (['close'] as const) : [];
+  const transitions = (Object.keys(ACTION_TARGETS) as Array<Exclude<TicketAction, 'close'>>).filter(
+    (action) =>
+      permitted.has(action) && ACTION_TARGETS[action].some(([to, comment]) => isValid(status, to, comment)),
+  );
+  const close = permitted.has('close') && CLOSE_SOURCES.includes(status) ? (['close'] as const) : [];
   return [...transitions, ...close];
 }

@@ -1947,14 +1947,24 @@ describeIntegration('API Integration Tests', () => {
   // ─────────────────────────────────────────────────────────────────
   // Agent Permissions — Bug #18 (labels) & Bug #19 (ticket delete)
   // AC-5: POST /api/projects/:slug/labels returns 201 with agent API key
-  // AC-6: DELETE /api/projects/:slug/tickets/:ref returns 200 with agent API key
+  // AC-6: DELETE /api/projects/:slug/tickets/:ref refuses an agent (permissions)
   // ─────────────────────────────────────────────────────────────────
 
   describe('Agent Permissions (AC-5 & AC-6)', () => {
     let agentDeleteTicketRef: string;
 
     beforeAll(async () => {
-      // Create a ticket that the agent will soft-delete (AC-6)
+      // Permissions P1 (US-004): an agent now acts with the keys of its AgentRoleEntry rows, and an
+      // earlier case (`update-roles`) left this one with REVIEWER only. The block restores the
+      // DEVELOPER role the two ACs were written for: label.create yes, ticket.delete no.
+      const roles = await request(httpServer)
+        .patch(`/api/agents/${agentSlug}/update-roles`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ roles: ['DEVELOPER'] })
+        .expect(200);
+      expect(body<{ roles: { role: string }[] }>(roles).roles.map((r) => r.role)).toEqual(['DEVELOPER']);
+
+      // Create a ticket that the agent will try to soft-delete (AC-6)
       const res = await request(httpServer)
         .post(`/api/projects/${projectSlug}/tickets`)
         .set('Authorization', `Bearer ${userAccessToken}`)
@@ -1965,8 +1975,8 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('AC-5: POST /api/projects/:slug/labels — returns 201 with agent API key', async () => {
-      // Bug #18: agents should be allowed to create labels.
-      // Current code in labels.service.ts only blocks MEMBER users, so agents pass through.
+      // Bug #18: agents should be allowed to create labels. Developer holds label.create, so the
+      // route lets it through; the label service blocks MEMBER users only.
       const res = await request(httpServer)
         .post(`/api/projects/${projectSlug}/labels`)
         .set('Authorization', `Bearer ${agentApiKey}`)
@@ -1978,12 +1988,21 @@ describeIntegration('API Integration Tests', () => {
       expect(data.id).toBeTruthy();
     });
 
-    it('AC-6: DELETE /api/projects/:slug/tickets/:ref — returns 200 with agent API key', async () => {
-      // Preserves pre-CASL behavior: agents can soft-delete tickets.
-      // Authorization is enforced by @RequiredPermission([DELETE, 'Ticket']) + KodaCaslAbilityFactory.
+    it('AC-6: DELETE /api/projects/:slug/tickets/:ref — 403 permissions with agent API key', async () => {
+      // Permissions P1 (US-004): the route is guarded by ticket.delete, which Developer does not hold.
+      // (Bug #19's any-agent delete was the hole this closes.)
       const res = await request(httpServer)
         .delete(`/api/projects/${projectSlug}/tickets/${agentDeleteTicketRef}`)
         .set('Authorization', `Bearer ${agentApiKey}`)
+        .expect(403);
+
+      refusal(res, 'permissions.40003');
+    });
+
+    it('AC-6: DELETE /api/projects/:slug/tickets/:ref — the project admin deletes the ticket', async () => {
+      const res = await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/tickets/${agentDeleteTicketRef}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
       const data = body<{ deletedAt: string | null }>(res);

@@ -247,9 +247,13 @@ describeIntegration('project-role permissions (#144)', () => {
     );
   }, TIMEOUT);
 
+  // Permissions P1 (US-004): allowedActions is the intersection of the state machine and the caller's
+  // keys. On a VERIFIED ticket that is {start, reject} for a transition holder and close for a
+  // ticket.transition.close holder — which Developer has (`ticket.transition.*`) as well as Project
+  // Admin. A Viewer holds no ticket action key, so its list is empty.
   it.each([
     ['ADMIN', ['start', 'reject', 'close']],
-    ['DEVELOPER', ['start', 'reject']],
+    ['DEVELOPER', ['start', 'reject', 'close']],
     ['VIEWER', []],
   ] as const)('GET ticket returns allowedActions for project %s', async (role, expected) => {
     const ref = await ticketIn('VERIFIED');
