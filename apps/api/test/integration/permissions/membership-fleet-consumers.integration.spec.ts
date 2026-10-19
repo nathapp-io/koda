@@ -40,6 +40,9 @@ const TEST_TIMEOUT_MS = 30_000;
 
 const P1_SLUG = 'p1';
 const P2_SLUG = 'p2';
+/** `CreateProjectDto.key` is `^[A-Z]{2,6}$` — letters only, so a slug-derived `P1` would be a 400. */
+const P1_KEY = 'PONE';
+const P2_KEY = 'PTWO';
 
 /** The English sentence of `fleet.scheduleOwnerNoAccess` at HTTP 409, read from the catalog. */
 const OWNER_NO_ACCESS = (
@@ -154,7 +157,7 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
     rootToken = data<{ accessToken: string }>(root).accessToken;
     ids.root = (await prisma.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
 
-    for (const [slug, key] of [[P1_SLUG, 'P1K'], [P2_SLUG, 'P2K']] as const) {
+    for (const [slug, key] of [[P1_SLUG, P1_KEY], [P2_SLUG, P2_KEY]] as const) {
       await request(server).post('/api/projects').set(as(rootToken))
         .send({ name: `Project ${slug}`, slug, key }).expect(201);
     }
@@ -187,6 +190,10 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
   });
 
   beforeEach(async () => {
+    // The tick tests need an empty fleet world: no other due schedule, no job in an active state and no
+    // paused budget (which would skip the tick instead of dispatching).
+    await prisma.budgetPolicy.deleteMany();
+    await prisma.fleetCommand.deleteMany();
     await prisma.fleetJob.deleteMany();
     await prisma.jobSchedule.deleteMany();
     await prisma.fleetActivity.deleteMany();
