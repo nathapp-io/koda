@@ -229,7 +229,7 @@ describeIntegration('H5 ticket tenancy', () => {
       }),
     ).rejects.toThrow(NotFoundAppException);
     await expect(
-      ticketLinksService.remove('proj-a', 'OTHER-5', 'link-xyz'),
+      ticketLinksService.remove('proj-a', 'OTHER-5', 'link-xyz', principal),
     ).rejects.toThrow(NotFoundAppException);
   });
 

@@ -3943,7 +3943,7 @@
             "description": "Invalid URL"
           },
           "403": {
-            "description": "Not a project member"
+            "description": "Not a project member, or ticket.link.add is missing"
           },
           "404": {
             "description": "Ticket not found"
@@ -3994,7 +3994,7 @@
             }
           },
           "403": {
-            "description": "Not a project member"
+            "description": "Not a project member, or ticket.link.read is missing"
           },
           "404": {
             "description": "Ticket not found"
@@ -4045,7 +4045,7 @@
             "description": "Link deleted"
           },
           "403": {
-            "description": "Not a project member"
+            "description": "Not a project member, or ticket.link.remove is missing (or it is someone else's link and only .own is held)"
           },
           "404": {
             "description": "Link not found"

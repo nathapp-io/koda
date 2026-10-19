@@ -350,18 +350,24 @@ model Webhook {
 }
 
 model TicketLink {
-  id          String    @id @default(cuid())
-  ticketId    String
-  url         String
-  provider    String // github | gitlab | bitbucket | other
-  externalRef String? // provider-specific reference e.g. 'owner/repo#42'
-  prState     String? // draft | open | merged | closed
-  prNumber    Int? // direct PR lookup
-  prUpdatedAt DateTime? // tracking last sync time
-  linkType    String    @default("url") // url | pr | commit | branch
-  source      String    @default("vcs") // vcs | fleet (fleet C9 §1)
-  jobId       String? // fleet job that produced the link (fleet C9 §1)
-  createdAt   DateTime  @default(now())
+  id               String    @id @default(cuid())
+  ticketId         String
+  url              String
+  provider         String // github | gitlab | bitbucket | other
+  externalRef      String? // provider-specific reference e.g. 'owner/repo#42'
+  prState          String? // draft | open | merged | closed
+  prNumber         Int? // direct PR lookup
+  prUpdatedAt      DateTime? // tracking last sync time
+  linkType         String    @default("url") // url | pr | commit | branch
+  source           String    @default("vcs") // vcs | fleet (fleet C9 §1)
+  jobId            String? // fleet job that produced the link (fleet C9 §1)
+  // Permissions P1 US-006: who added the link, compared for `ticket.link.remove.own`. No foreign key
+  // and no index: the value is compared, never joined (like JobSchedule.repoId). A row whose creator
+  // is null — every pre-existing link, and the assistant, VCS and fleet writers — is removable only
+  // by the full `ticket.link.remove` key.
+  createdByUserId  String?
+  createdByAgentId String?
+  createdAt        DateTime  @default(now())
 
   ticket Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   job    FleetJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
