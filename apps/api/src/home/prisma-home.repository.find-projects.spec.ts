@@ -1,5 +1,6 @@
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../generated/prisma/client';
+import { MEMBERSHIP_READ_CAP } from '../permissions/legacy-membership.queries';
 import { PrismaHomeRepository } from './prisma-home.repository';
 
 /**
@@ -52,12 +53,19 @@ interface StubArgs {
   take?: number;
 }
 
-function stubClient(bindings: BindingRow[], members: Array<{ projectId: string; userId: string }> = []) {
+function stubClient(
+  bindings: BindingRow[],
+  members: Array<{ projectId: string; userId: string }> = [],
+  projects: ProjectRow[] = PROJECTS,
+) {
   const projectFindMany = vi.fn(async (args: StubArgs = {}) => {
     const where = args.where ?? {};
-    const ids = (where['id'] as { in: string[] } | undefined)?.in;
-    const live = PROJECTS.filter((row) => row.deletedAt === null);
-    const found = ids === undefined ? live : live.filter((row) => ids.includes(row.id));
+    const idFilter = where['id'] as { in?: string[]; gt?: string } | undefined;
+    const live = projects.filter((row) => row.deletedAt === null);
+    // `{ in, gt }` is one filter: the id set, then everything after the last id of the previous page.
+    let found = live;
+    if (idFilter?.in !== undefined) found = found.filter((row) => (idFilter.in as string[]).includes(row.id));
+    if (idFilter?.gt !== undefined) found = found.filter((row) => row.id > (idFilter.gt as string));
     const orderBy = args.orderBy ?? {};
     const ordered = [...found].sort((left, right) => {
       for (const [field, direction] of Object.entries(orderBy)) {
@@ -111,8 +119,9 @@ function stubClient(bindings: BindingRow[], members: Array<{ projectId: string; 
 function repositoryFor(
   bindings: BindingRow[],
   members: Array<{ projectId: string; userId: string }> = [],
+  projects: ProjectRow[] = PROJECTS,
 ): { repository: PrismaHomeRepository; client: ReturnType<typeof stubClient> } {
-  const client = stubClient(bindings, members);
+  const client = stubClient(bindings, members, projects);
   const prisma = { client: client as unknown as PrismaClient };
   return { repository: new PrismaHomeRepository(prisma as unknown as PrismaService<PrismaClient>), client };
 }
@@ -175,5 +184,22 @@ describe('PrismaHomeRepository.findProjects — membership reads (US-002)', () =
 
     expect(projects.map((project) => project.slug)).toEqual(['p1', 'p2']);
     expect(client.roleBinding.findMany).not.toHaveBeenCalled();
+  });
+
+  it('US-002 AC-11: a projectId-null project binding lists every live project past the read cap', async () => {
+    const total = MEMBERSHIP_READ_CAP + 5;
+    const bulk: ProjectRow[] = Array.from({ length: total }, (_, index) => ({
+      id: `p${String(index).padStart(5, '0')}`,
+      name: `Bulk ${String(index).padStart(5, '0')}`,
+      key: 'BULK',
+      slug: `p${String(index).padStart(5, '0')}`,
+      description: null,
+      deletedAt: null,
+    }));
+    const { repository } = repositoryFor([bind('u1', 'developer', null)], [], bulk);
+
+    const projects = await repository.findProjects({ id: 'u1', globalAdmin: false });
+
+    expect(projects).toHaveLength(total);
   });
 });

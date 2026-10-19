@@ -20,6 +20,7 @@ import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
+import { MEMBERSHIP_READ_CAP } from '../../../src/permissions/legacy-membership.queries';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import type { PrincipalRef } from '../../../src/permissions/permissions.types';
 import { resetDb } from '../../helpers/reset-db';
@@ -316,4 +317,69 @@ describeIntegration('project lists with agent project scoping off (US-002 AC-12,
     expect(res.status).toBe(200);
     expect(data<{ slug: string }[]>(res).map((project) => project.slug).sort()).toEqual(['p1', 'p2']);
   }, TEST_TIMEOUT_MS);
+});
+
+/**
+ * US-002 AC-11 past the compatibility queries' read cap: a `projectId`-null PROJECT binding means
+ * **every** non-deleted project, so neither `accessibleProjectIds` nor the project and home lists
+ * built on it may stop at `MEMBERSHIP_READ_CAP` rows. Its own world, because the projects past the
+ * cap are live and would be part of every other describe's list.
+ */
+describeIntegration('project lists past the membership read cap (US-002 AC-11, PG)', () => {
+  /** Five past the cap, so the truncated answer differs from the complete one. */
+  const TOTAL = MEMBERSHIP_READ_CAP + 5;
+  /** 2-6 uppercase letters, unique for every index below 26^3 (the `CreateProjectDto` key shape). */
+  const bulkKey = (index: number): string => {
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    return `${letters[Math.floor(index / 676) % 26]}${letters[Math.floor(index / 26) % 26]}${letters[index % 26]}`;
+  };
+
+  let app: NathApplication;
+  let server: ReturnType<NathApplication['getHttpServer']>;
+  let prisma: PrismaClient;
+  let agentKey = '';
+  let slugs: string[] = [];
+
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: false });
+    server = app.getHttpServer();
+    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    const membership = app.get(MembershipService);
+
+    const root = await request(server).post('/api/auth/register')
+      .send({ email: 'cap-root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
+    const accessToken = data<{ accessToken: string }>(root).accessToken;
+    const rootId = (await prisma.user.findUniqueOrThrow({ where: { email: 'cap-root@koda.test' } })).id;
+
+    // Inserted through Prisma: 5005 projects over the create route would be 5005 HTTP calls.
+    slugs = Array.from({ length: TOTAL }, (_, index) => `cap-${String(index).padStart(4, '0')}`);
+    await prisma.project.createMany({
+      data: slugs.map((slug, index) => ({ name: `Cap ${String(index).padStart(4, '0')}`, slug, key: bulkKey(index) })),
+    });
+
+    const created = await request(server).post('/api/agents').set({ Authorization: `Bearer ${accessToken}` })
+      .send({ name: 'Cap Agent', slug: 'cap-agent', roles: ['DEVELOPER'] }).expect(201);
+    const agent = data<{ apiKey: string; agent: { id: string } }>(created);
+    agentKey = agent.apiKey;
+    // The only source: a projectId-null PROJECT binding, which applies in every project.
+    await membership.createBinding(
+      { principal: { type: 'AGENT', id: agent.agent.id }, roleKey: 'developer', projectId: null },
+      { type: 'USER', id: rootId },
+    );
+    expect(await prisma.agentProject.count()).toBe(0);
+  }, 180_000);
+
+  afterAll(async () => {
+    await app?.close();
+  });
+
+  it('AC-11: GET /projects lists all 5005 live projects, not the first read-cap page', async () => {
+    const res = await request(server).get('/api/projects').set({ Authorization: `Bearer ${agentKey}` });
+
+    expect(res.status).toBe(200);
+    const listed = data<{ slug: string }[]>(res).map((project) => project.slug);
+    expect(listed).toHaveLength(TOTAL);
+    expect([...listed].sort()).toEqual([...slugs].sort());
+  }, 120_000);
 });

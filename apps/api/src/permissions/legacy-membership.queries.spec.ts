@@ -1,6 +1,7 @@
 import type { PrismaClient } from '../generated/prisma/client';
 import type { ProjectMembership } from './permissions.types';
 import {
+  MEMBERSHIP_READ_CAP,
   accessibleProjectIds,
   agentHasProjectAccess,
   countActiveProjectAdmins,
@@ -35,8 +36,13 @@ function matches(row: Row, where: Row): boolean {
     if (typeof expected !== 'object' || expected instanceof Date) return actual === expected;
     if (Array.isArray(expected)) return (expected as unknown[]).includes(actual);
     const clause = expected as Row;
-    if ('in' in clause) return (clause['in'] as unknown[]).includes(actual);
-    if ('not' in clause) return actual !== clause['not'];
+    let matched = true;
+    if ('in' in clause) matched = (clause['in'] as unknown[]).includes(actual);
+    // A keyset page reads `{ in, gt }` together: the id set, and everything after the last id read.
+    if (matched && 'gt' in clause) matched = (actual as string) > (clause['gt'] as string);
+    if (matched && 'lt' in clause) matched = (actual as string) < (clause['lt'] as string);
+    if (matched && 'not' in clause) matched = actual !== clause['not'];
+    if ('in' in clause || 'gt' in clause || 'lt' in clause || 'not' in clause) return matched;
     return matches((actual ?? {}) as Row, clause);
   });
 }
@@ -356,6 +362,21 @@ describe('legacy-membership.queries', () => {
       fixture.bind('USER', 'u1', 'viewer', 'p1');
 
       expect(await accessibleProjectIds(db, user('u1'))).toEqual(['p1']);
+    });
+
+    it('US-002 AC-11: a projectId-null project binding reaches every live project past the read cap', async () => {
+      fixture.addUser('u1');
+      const total = MEMBERSHIP_READ_CAP + 5;
+      for (let index = 0; index < total; index += 1) {
+        fixture.addProject(`p${String(index).padStart(5, '0')}`);
+      }
+      fixture.bind('USER', 'u1', 'developer', null);
+
+      const ids = await accessibleProjectIds(db, user('u1'));
+
+      expect(ids).toHaveLength(total);
+      expect(ids[0]).toBe('p00000');
+      expect(ids[ids.length - 1]).toBe(`p${String(total - 1).padStart(5, '0')}`);
     });
   });
 

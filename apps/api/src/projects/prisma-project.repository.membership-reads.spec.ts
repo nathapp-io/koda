@@ -1,5 +1,6 @@
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../generated/prisma/client';
+import { MEMBERSHIP_READ_CAP } from '../permissions/legacy-membership.queries';
 import { PrismaProjectRepository } from './prisma-project.repository';
 
 /**
@@ -108,9 +109,12 @@ function stubClient(rows: {
 
   const projectFindMany = vi.fn(async (args: FindManyArgs = {}) => {
     const where = args.where ?? {};
-    const ids = (where['id'] as { in: string[] } | undefined)?.in;
+    const idFilter = where['id'] as { in?: string[]; gt?: string } | undefined;
     const live = rows.projects.filter((row) => row.deletedAt === null);
-    const found = ids === undefined ? live : live.filter((row) => ids.includes(row.id));
+    // `{ in, gt }` is one filter: the id set, then everything after the last id of the previous page.
+    let found = live;
+    if (idFilter?.in !== undefined) found = found.filter((row) => (idFilter.in as string[]).includes(row.id));
+    if (idFilter?.gt !== undefined) found = found.filter((row) => row.id > (idFilter.gt as string));
     const ordered = [...found].sort((left, right) => {
       const orderBy = args.orderBy ?? {};
       for (const [field, direction] of Object.entries(orderBy)) {
@@ -408,6 +412,43 @@ describe('PrismaProjectRepository — membership reads (US-002)', () => {
       const { repository } = repositoryFor({ projects, members: [], roster: [], bindings: [] });
 
       await expect(repository.findAllForAgent('a1')).resolves.toEqual([]);
+    });
+
+    it('US-002 AC-11: a projectId-null project binding lists every live project past the read cap', async () => {
+      const total = MEMBERSHIP_READ_CAP + 5;
+      const bulk = Array.from({ length: total }, (_, index) =>
+        projectRow(`p${String(index).padStart(5, '0')}`, `Bulk ${index}`),
+      );
+      const { repository } = repositoryFor({
+        projects: bulk,
+        members: [],
+        roster: [],
+        bindings: [bind('AGENT', 'a1', 'developer', null)],
+      });
+
+      const found = await repository.findAllForAgent('a1');
+
+      expect(found).toHaveLength(total);
+      expect(found[0]?.id).toBe('p00000');
+      expect(found[found.length - 1]?.id).toBe(`p${String(total - 1).padStart(5, '0')}`);
+    });
+
+    it('US-002 AC-11: the same holds for a user project list, and excludes a soft-deleted project past the cap', async () => {
+      const total = MEMBERSHIP_READ_CAP + 5;
+      const bulk = Array.from({ length: total }, (_, index) =>
+        projectRow(`p${String(index).padStart(5, '0')}`, `Bulk ${index}`),
+      );
+      bulk[total - 1] = projectRow(`p${String(total - 1).padStart(5, '0')}`, 'Gone', new Date('2026-01-01T00:00:00.000Z'));
+      const { repository } = repositoryFor({
+        projects: bulk,
+        members: [],
+        roster: [],
+        bindings: [bind('USER', 'u1', 'reviewer', null)],
+      });
+
+      const found = await repository.findAllForUser('u1');
+
+      expect(found).toHaveLength(total - 1);
     });
   });
 });
