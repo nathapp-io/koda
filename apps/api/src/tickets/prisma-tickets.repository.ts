@@ -5,6 +5,7 @@ import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { parseTicketRef } from '../common/utils/ticket-ref.util';
 import { lockProjectAgents } from '../common/utils/advisory-lock';
+import { agentHasProjectAccess, userProjectRole } from '../permissions/legacy-membership.queries';
 import { TicketLinkSource } from '../common/enums';
 import { ACTIVE_STATES } from '../fleet/jobs/job-state';
 import type {
@@ -250,13 +251,12 @@ export class PrismaTicketsRepository implements ITicketRepository {
   /**
    * S4c US-004: read under the project's roster lock so the answer cannot flip
    * between the check and the assignment write.
+   *
+   * Permissions P1b US-003: the roster row is one source among the agent's access sources, so a
+   * PROJECT-scope (`projectId`-null included) binding of the agent also puts it on the project.
    */
   async isAgentOnProjectRoster(projectId: string, agentId: string): Promise<boolean> {
-    const row = await this.db.agentProject.findUnique({
-      where: { agentId_projectId: { agentId, projectId } },
-      select: { agentId: true },
-    });
-    return row !== null;
+    return agentHasProjectAccess(this.db, agentId, projectId);
   }
 
   /** S4c US-004: the same lock `AgentsService.removeFromProject` holds. */
@@ -264,12 +264,13 @@ export class PrismaTicketsRepository implements ITicketRepository {
     await lockProjectAgents(this.db, projectId);
   }
 
+  /**
+   * Permissions P1b US-003: the caller's legacy project role over its access sources — its legacy
+   * `ProjectMember` row unioned with its PROJECT-scope bindings (and its `projectId`-null ones).
+   * `null` when it has no source, which is what `TicketsService.assign` refuses.
+   */
   async findProjectMemberRole(projectId: string, userId: string): Promise<string | null> {
-    const member = await this.db.projectMember.findUnique({
-      where: { projectId_userId: { projectId, userId } },
-      select: { role: true },
-    });
-    return member?.role ?? null;
+    return userProjectRole(this.db, userId, projectId);
   }
 
   /**

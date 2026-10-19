@@ -7,6 +7,7 @@ import {
 } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaClient, ProjectMember } from '../../generated/prisma/client';
+import { principalIdsWithAccess } from '../../permissions/legacy-membership.queries';
 import {
   AssigneeDomain,
   IProjectAssigneesRepository,
@@ -55,17 +56,25 @@ export class PrismaProjectAssigneesRepository
   }
 
   /**
-   * Two bounded reads rather than one union: users come from the project's
-   * memberships, agents from its roster, and `contains` keeps `%` and `_`
-   * literal (Prisma escapes them), so q is a plain substring, not a pattern.
+   * Two bounded reads per principal type (users, then agents) over the ids that have an **access**
+   * source in the project — their legacy `ProjectMember` / `AgentProject` row unioned with their
+   * PROJECT-scope bindings, `projectId`-null ones included (permissions P1b US-003). The filters are
+   * unchanged: enabled users, assignable agent statuses, and `contains` keeps `%` and `_` literal
+   * (Prisma escapes them), so q is a plain substring, not a pattern.
    */
   async search(projectId: string, q: string, limit: number): Promise<AssigneeDomain[]> {
     const needle = q.length > 0 ? q : undefined;
+    const db = this.prisma.client;
 
-    const members = await this.prisma.client.projectMember.findMany({
-      where: {
-        projectId,
-        user: {
+    const [userIds, agentIds] = await Promise.all([
+      principalIdsWithAccess(db, projectId, 'USER'),
+      principalIdsWithAccess(db, projectId, 'AGENT'),
+    ]);
+
+    const [users, agents] = await Promise.all([
+      db.user.findMany({
+        where: {
+          id: { in: userIds },
           disabled: false,
           ...(needle && {
             OR: [
@@ -74,16 +83,13 @@ export class PrismaProjectAssigneesRepository
             ],
           }),
         },
-      },
-      select: { userId: true, user: { select: { name: true, email: true } } },
-      orderBy: [{ user: { name: 'asc' } }, { userId: 'asc' }],
-      take: limit,
-    });
-
-    const roster = await this.prisma.client.agentProject.findMany({
-      where: {
-        projectId,
-        agent: {
+        select: { id: true, name: true, email: true },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        take: limit,
+      }),
+      db.agent.findMany({
+        where: {
+          id: { in: agentIds },
           status: { in: [...ASSIGNABLE_AGENT_STATUSES] },
           ...(needle && {
             OR: [
@@ -92,27 +98,27 @@ export class PrismaProjectAssigneesRepository
             ],
           }),
         },
-      },
-      select: { agentId: true, agent: { select: { name: true, slug: true, status: true } } },
-      orderBy: [{ agent: { name: 'asc' } }, { agentId: 'asc' }],
-      take: limit,
-    });
+        select: { id: true, name: true, slug: true, status: true },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        take: limit,
+      }),
+    ]);
 
     // Users first, then agents; `limit` caps the combined list, so a page of
     // matching users can fill it without an agent being offered.
     return [
-      ...members.map((member) => ({
+      ...users.map((user) => ({
         type: 'user' as const,
-        id: member.userId,
-        name: member.user.name ?? member.user.email,
-        secondary: member.user.email,
+        id: user.id,
+        name: user.name ?? user.email,
+        secondary: user.email,
       })),
-      ...roster.map((entry) => ({
+      ...agents.map((agent) => ({
         type: 'agent' as const,
-        id: entry.agentId,
-        name: entry.agent.name,
-        secondary: entry.agent.slug,
-        status: entry.agent.status,
+        id: agent.id,
+        name: agent.name,
+        secondary: agent.slug,
+        status: agent.status,
       })),
     ].slice(0, limit);
   }

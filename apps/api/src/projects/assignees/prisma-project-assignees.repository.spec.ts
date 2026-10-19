@@ -9,61 +9,177 @@ const transactionManager = {
   isInTransaction: () => false,
 } as unknown as ITransactionManager;
 
-const repositoryWith = (members: unknown[], roster: unknown[]) => {
-  const memberFindMany = vi.fn().mockResolvedValue(members);
-  const rosterFindMany = vi.fn().mockResolvedValue(roster);
+const PROJECT_ID = 'proj-1';
+
+interface UserRow {
+  id: string;
+  name: string | null;
+  email: string;
+  disabled?: boolean;
+}
+
+interface AgentRow {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+}
+
+/** The rows the fake database holds, and which of them the project reaches. */
+interface Fixtures {
+  /** Every user row; `user.findMany` answers the requested ids from it. */
+  users?: UserRow[];
+  /** Every agent row. */
+  agents?: AgentRow[];
+  /** `ProjectMember.userId` rows of the project. */
+  members?: string[];
+  /** `AgentProject.agentId` rows of the project. */
+  roster?: string[];
+  /** PROJECT-scope bindings in the project, by principal type. */
+  bindings?: { user?: string[]; agent?: string[] };
+  /** `projectId`-null PROJECT-scope bindings, by principal type. */
+  globalBindings?: { user?: string[]; agent?: string[] };
+}
+
+interface FindManyArgs {
+  where: {
+    id: { in: string[] };
+    disabled?: boolean;
+    principalType?: string;
+    projectId?: string | null;
+    OR?: unknown;
+  };
+  take?: number;
+  orderBy?: unknown;
+  select?: unknown;
+}
+
+/**
+ * Permissions P1b US-003: `search` reads the compatibility queries, so the stubs below answer the
+ * query file's reads — `projectMember.findMany` / `agentProject.findMany` (the legacy rows),
+ * `roleBinding.findMany` (the project's bindings and the `projectId`-null ones) and `project.count`
+ * (a global binding only reaches a live project) — and only then the `user.findMany` /
+ * `agent.findMany` rows the assignees come from.
+ */
+const repositoryWith = (fixtures: Fixtures) => {
+  const memberFindMany = vi.fn(async () => (fixtures.members ?? []).map((userId) => ({ userId })));
+  const rosterFindMany = vi.fn(async () => (fixtures.roster ?? []).map((agentId) => ({ agentId })));
+  const bindingFindMany = vi.fn(async (args: FindManyArgs) => {
+    const { principalType, projectId } = args.where;
+    const table = projectId === null ? fixtures.globalBindings : fixtures.bindings;
+    const ids = (principalType === 'USER' ? table?.user : table?.agent) ?? [];
+    return ids.map((principalId) => ({ principalId }));
+  });
+  const userFindMany = vi.fn(async (args: FindManyArgs) =>
+    (fixtures.users ?? [])
+      .filter((user) => args.where.id.in.includes(user.id))
+      .filter((user) => args.where.disabled !== false || user.disabled !== true)
+      .map(({ id, name, email }) => ({ id, name, email })),
+  );
+  const agentFindMany = vi.fn(async (args: FindManyArgs) =>
+    (fixtures.agents ?? [])
+      .filter((agent) => args.where.id.in.includes(agent.id))
+      .map(({ id, name, slug, status }) => ({ id, name, slug, status })),
+  );
+
   const prisma = {
     client: {
       projectMember: { findMany: memberFindMany },
       agentProject: { findMany: rosterFindMany },
+      roleBinding: { findMany: bindingFindMany },
+      user: { findMany: userFindMany },
+      agent: { findMany: agentFindMany },
+      project: { count: vi.fn(async () => 1) },
     },
   };
+
   return {
-    repository: new PrismaProjectAssigneesRepository(transactionManager, prisma as unknown as PrismaService<PrismaClient>),
+    repository: new PrismaProjectAssigneesRepository(
+      transactionManager,
+      prisma as unknown as PrismaService<PrismaClient>,
+    ),
     memberFindMany,
     rosterFindMany,
+    bindingFindMany,
+    userFindMany,
+    agentFindMany,
   };
 };
 
 describe('PrismaProjectAssigneesRepository.search', () => {
-  it('reads non-disabled project members only', async () => {
-    const { repository, memberFindMany } = repositoryWith(
-      [{ userId: 'u1', user: { name: 'Alice', email: 'alice@koda.test' } }],
-      [],
-    );
-
-    const items = await repository.search('proj-1', '', 20);
-
-    expect(memberFindMany.mock.calls[0][0].where).toEqual({
-      projectId: 'proj-1',
-      user: { disabled: false },
+  it('reads non-disabled users whose id has access to the project only', async () => {
+    const { repository, userFindMany } = repositoryWith({
+      members: ['u1'],
+      users: [{ id: 'u1', name: 'Alice', email: 'alice@koda.test' }],
     });
-    expect(memberFindMany.mock.calls[0][0].take).toBe(20);
+
+    const items = await repository.search(PROJECT_ID, '', 20);
+
+    expect(userFindMany.mock.calls[0][0].where).toEqual({ id: { in: ['u1'] }, disabled: false });
+    expect(userFindMany.mock.calls[0][0].take).toBe(20);
     expect(items).toEqual([{ type: 'user', id: 'u1', name: 'Alice', secondary: 'alice@koda.test' }]);
   });
 
-  it('falls back to the email when a member has no name', async () => {
-    const { repository } = repositoryWith(
-      [{ userId: 'u1', user: { name: null, email: 'alice@koda.test' } }],
-      [],
-    );
+  it('falls back to the email when a user has no name', async () => {
+    const { repository } = repositoryWith({
+      members: ['u1'],
+      users: [{ id: 'u1', name: null, email: 'alice@koda.test' }],
+    });
 
-    const [user] = await repository.search('proj-1', '', 20);
+    const [user] = await repository.search(PROJECT_ID, '', 20);
 
     expect(user.name).toBe('alice@koda.test');
   });
 
-  it('offers only rostered ACTIVE or PAUSED agents, carrying the status', async () => {
-    const { repository, rosterFindMany } = repositoryWith(
-      [],
-      [{ agentId: 'a1', agent: { name: 'alias-bot', slug: 'alias-bot', status: 'PAUSED' } }],
-    );
+  it('offers a user whose only source in the project is a PROJECT-scope binding', async () => {
+    const { repository, bindingFindMany } = repositoryWith({
+      users: [{ id: 'u1', name: 'Bound', email: 'bound@koda.test' }],
+      bindings: { user: ['u1'] },
+    });
 
-    const items = await repository.search('proj-1', '', 20);
+    const items = await repository.search(PROJECT_ID, '', 20);
 
-    expect(rosterFindMany.mock.calls[0][0].where).toEqual({
-      projectId: 'proj-1',
-      agent: { status: { in: ['ACTIVE', 'PAUSED'] } },
+    expect(bindingFindMany.mock.calls.some(([args]) => args.where.projectId === PROJECT_ID)).toBe(true);
+    expect(items).toEqual([{ type: 'user', id: 'u1', name: 'Bound', secondary: 'bound@koda.test' }]);
+  });
+
+  it('offers a user whose only source is a projectId-null binding', async () => {
+    const { repository, userFindMany } = repositoryWith({
+      users: [{ id: 'u1', name: 'Everywhere', email: 'everywhere@koda.test' }],
+      globalBindings: { user: ['u1'] },
+    });
+
+    const items = await repository.search(PROJECT_ID, '', 20);
+
+    expect(userFindMany.mock.calls[0][0].where).toEqual({ id: { in: ['u1'] }, disabled: false });
+    expect(items).toEqual([
+      { type: 'user', id: 'u1', name: 'Everywhere', secondary: 'everywhere@koda.test' },
+    ]);
+  });
+
+  it('never offers a disabled user, even when a binding is its source', async () => {
+    const { repository, userFindMany } = repositoryWith({
+      users: [{ id: 'u1', name: 'Disabled', email: 'disabled@koda.test', disabled: true }],
+      bindings: { user: ['u1'] },
+    });
+
+    const items = await repository.search(PROJECT_ID, '', 20);
+
+    expect(userFindMany.mock.calls[0][0].where.disabled).toBe(false);
+    expect(items).toEqual([]);
+  });
+
+  it('offers only agents with an access source and an ACTIVE or PAUSED status, carrying the status', async () => {
+    const { repository, agentFindMany } = repositoryWith({
+      agents: [{ id: 'a1', name: 'alias-bot', slug: 'alias-bot', status: 'PAUSED' }],
+      bindings: { agent: ['a1'] },
+    });
+
+    const items = await repository.search(PROJECT_ID, '', 20);
+
+    expect(agentFindMany.mock.calls[0][0].where).toEqual({
+      id: { in: ['a1'] },
+      status: { in: ['ACTIVE', 'PAUSED'] },
     });
     expect(items).toEqual([
       { type: 'agent', id: 'a1', name: 'alias-bot', secondary: 'alias-bot', status: 'PAUSED' },
@@ -71,18 +187,20 @@ describe('PrismaProjectAssigneesRepository.search', () => {
   });
 
   it('matches q case-insensitively on name or email (users) and name or slug (agents)', async () => {
-    const { repository, memberFindMany, rosterFindMany } = repositoryWith([], []);
+    const { repository, userFindMany, agentFindMany } = repositoryWith({});
 
-    await repository.search('proj-1', 'ALI', 20);
+    await repository.search(PROJECT_ID, 'ALI', 20);
 
-    expect(memberFindMany.mock.calls[0][0].where.user).toEqual({
+    expect(userFindMany.mock.calls[0][0].where).toEqual({
+      id: { in: [] },
       disabled: false,
       OR: [
         { name: { contains: 'ALI', mode: 'insensitive' } },
         { email: { contains: 'ALI', mode: 'insensitive' } },
       ],
     });
-    expect(rosterFindMany.mock.calls[0][0].where.agent).toEqual({
+    expect(agentFindMany.mock.calls[0][0].where).toEqual({
+      id: { in: [] },
       status: { in: ['ACTIVE', 'PAUSED'] },
       OR: [
         { name: { contains: 'ALI', mode: 'insensitive' } },
@@ -92,35 +210,37 @@ describe('PrismaProjectAssigneesRepository.search', () => {
   });
 
   it('adds no name filter for an empty q', async () => {
-    const { repository, memberFindMany, rosterFindMany } = repositoryWith([], []);
+    const { repository, userFindMany, agentFindMany } = repositoryWith({});
 
-    await repository.search('proj-1', '', 20);
+    await repository.search(PROJECT_ID, '', 20);
 
-    expect(memberFindMany.mock.calls[0][0].where.user.OR).toBeUndefined();
-    expect(rosterFindMany.mock.calls[0][0].where.agent.OR).toBeUndefined();
+    expect(userFindMany.mock.calls[0][0].where.OR).toBeUndefined();
+    expect(agentFindMany.mock.calls[0][0].where.OR).toBeUndefined();
   });
 
   it('puts every user before every agent and caps the combined list at limit', async () => {
-    const { repository } = repositoryWith(
-      [{ userId: 'u1', user: { name: 'Alice', email: 'alice@koda.test' } }],
-      [{ agentId: 'a1', agent: { name: 'a-bot', slug: 'a-bot', status: 'ACTIVE' } }],
-    );
+    const { repository } = repositoryWith({
+      members: ['u1'],
+      roster: ['a1'],
+      users: [{ id: 'u1', name: 'Alice', email: 'alice@koda.test' }],
+      agents: [{ id: 'a1', name: 'a-bot', slug: 'a-bot', status: 'ACTIVE' }],
+    });
 
-    const items = await repository.search('proj-1', '', 2);
+    const items = await repository.search(PROJECT_ID, '', 2);
 
     expect(items.map((item) => item.type)).toEqual(['user', 'agent']);
 
-    const capped = await repository.search('proj-1', '', 1);
+    const capped = await repository.search(PROJECT_ID, '', 1);
     expect(capped).toHaveLength(1);
     expect(capped[0].type).toBe('user');
   });
 
   it('orders each group by name', async () => {
-    const { repository, memberFindMany, rosterFindMany } = repositoryWith([], []);
+    const { repository, userFindMany, agentFindMany } = repositoryWith({});
 
-    await repository.search('proj-1', '', 20);
+    await repository.search(PROJECT_ID, '', 20);
 
-    expect(memberFindMany.mock.calls[0][0].orderBy).toEqual([{ user: { name: 'asc' } }, { userId: 'asc' }]);
-    expect(rosterFindMany.mock.calls[0][0].orderBy).toEqual([{ agent: { name: 'asc' } }, { agentId: 'asc' }]);
+    expect(userFindMany.mock.calls[0][0].orderBy).toEqual([{ name: 'asc' }, { id: 'asc' }]);
+    expect(agentFindMany.mock.calls[0][0].orderBy).toEqual([{ name: 'asc' }, { id: 'asc' }]);
   });
 });
