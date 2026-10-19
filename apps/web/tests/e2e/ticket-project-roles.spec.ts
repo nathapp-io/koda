@@ -15,7 +15,7 @@ const DEV = { email: 'roles-dev@koda-e2e.test', name: 'Roles Developer', passwor
  * worker, so introducing a fresh user per test pushes the cumulative count
  * over the limit (see PR-run logs for the original 429 spike). The tests
  * here therefore cover:
- *   - DEVELOPER UI flow (Verify/Start/Submit Fix; no Close/Delete)
+ *   - DEVELOPER UI flow (Verify/Start/Submit Fix; Close but no Delete)
  *   - Admin close dialog (Close button, blank-reason guard, submit). The
  *     close permission path is exercised through a global ADMIN (E2E_ADMIN
  *     is already a global ADMIN with implicit project access), which costs
@@ -41,7 +41,7 @@ test.describe('Ticket actions follow the project role (#144, M25)', () => {
     await addProjectMember(token, slug, DEV.email, 'DEVELOPER');
   });
 
-  test('a DEVELOPER moves a ticket through the flow and never sees Close or Delete', async ({ page }) => {
+  test('a DEVELOPER moves a ticket through the flow and sees Close but never Delete', async ({ page }) => {
     const ticket = await createTicket(token, slug, { title: 'Dev flow', type: 'BUG' });
     await webLogin(page, DEV.email, DEV.password);
     await page.goto(`/${slug}/tickets/${ticket.ref}`);
@@ -54,7 +54,10 @@ test.describe('Ticket actions follow the project role (#144, M25)', () => {
     await confirmTransitionDialog(page, 'fixed by dev');
     await expect(page.getByRole('button', { name: 'Approve Fix' })).toBeVisible({ timeout: 5000 });
 
-    await expect(page.getByRole('button', { name: /^Close$/ })).toHaveCount(0);
+    // Permissions P1 (enforce-core, Appendix A): Developer holds
+    // ticket.transition.close, so Close is offered on VERIFY_FIX; Delete
+    // stays hidden (ticket.delete is project-admin only).
+    await expect(page.getByRole('button', { name: /^Close$/ })).toBeVisible();
     await expect(page.getByRole('button', { name: /Submit Fix/i })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Delete Ticket/i })).toHaveCount(0);
   });
