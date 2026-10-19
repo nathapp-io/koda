@@ -4720,4 +4720,229 @@ describeIntegration('API Integration Tests', () => {
       }
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────
+  // Permissions P1a US-005 — the roles lifecycle
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Roles API (permissions P1a US-005)', () => {
+    let roleOwnerToken: string;
+    let roleMemberToken: string;
+    beforeAll(async () => {
+      // The surrounding lifecycle normally supplies these actors. A filtered run must create its
+      // own actors: the first registration bootstraps the Owner binding through the real API.
+      const register = async (email: string): Promise<string> => {
+        const res = await request(httpServer).post('/api/auth/register')
+          .send({ email, name: 'Roles test user', password: 'Roles1234!Aa' }).expect(201);
+        return body<{ accessToken: string }>(res).accessToken;
+      };
+      roleOwnerToken = userAccessToken ?? await register('roles-owner@koda.test');
+      roleMemberToken = nonAdminUserAccessToken ?? await register('roles-member@koda.test');
+    });
+    const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+    const roles = (token: string) => request(httpServer).get('/api/roles').set(auth(token));
+    const createRole = (token: string, payload: Record<string, unknown>) =>
+      request(httpServer).post('/api/roles').set(auth(token)).send(payload);
+    const patchRole = (token: string, id: string, payload: Record<string, unknown>) =>
+      request(httpServer).patch(`/api/roles/${id}`).set(auth(token)).send(payload);
+    const deleteRole = (token: string, id: string) =>
+      request(httpServer).delete(`/api/roles/${id}`).set(auth(token));
+    const storedRoleId = async (key: string): Promise<string> =>
+      (await db().role.findUniqueOrThrow({ where: { key } })).id;
+    const customRole = async (key: string): Promise<string> => {
+      const res = await createRole(roleOwnerToken, {
+        key, name: 'E2E QA', scope: 'PROJECT', permissions: ['ticket.read'],
+      }).expect(201);
+      return body<{ id: string }>(res).id;
+    };
+
+    it('GET /api/roles — lists the system roles for the installation owner', async () => {
+      const res = await roles(roleOwnerToken).expect(200);
+      const list = body<Array<{ key: string; system: boolean; permissions: string[] }>>(res);
+
+      expect(list.map((role) => role.key)).toContain('owner');
+      expect(list.find((role) => role.key === 'owner')).toEqual(
+        expect.objectContaining({ system: true, permissions: ['*'] }),
+      );
+    });
+
+    it('GET /api/roles — 403 for a user whose only binding is member', async () => {
+      refusal(await roles(roleMemberToken).expect(403), 'permissions.403');
+    });
+
+    it('POST /api/roles — 201 creates a PROJECT role', async () => {
+      const res = await createRole(roleOwnerToken, {
+        key: 'e2e-qa',
+        name: 'E2E QA',
+        scope: 'PROJECT',
+        permissions: ['ticket.read', 'comment.create'],
+      }).expect(201);
+
+      const role = body<{ id: string; key: string; scope: string; system: boolean; permissions: string[] }>(res);
+      expect(role).toEqual(
+        expect.objectContaining({
+          key: 'e2e-qa',
+          scope: 'PROJECT',
+          system: false,
+          permissions: ['ticket.read', 'comment.create'],
+        }),
+      );
+    });
+
+    it('POST /api/roles — 409 for a duplicate key', async () => {
+      await customRole('e2e-qa-duplicate');
+      const res = await createRole(roleOwnerToken, {
+        key: 'e2e-qa-duplicate',
+        name: 'E2E QA again',
+        scope: 'PROJECT',
+        permissions: ['ticket.read'],
+      }).expect(409);
+
+      refusal(res, 'permissions.roleKeyTaken.409');
+    });
+
+    it('POST /api/roles — 400 for a key the DTO rejects', async () => {
+      const res = await createRole(roleOwnerToken, {
+        key: 'Not A Key',
+        name: 'Bad key',
+        scope: 'PROJECT',
+        permissions: [],
+      }).expect(400);
+
+      expect(res.body.ret).toBe(-2);
+      expect(await db().role.count({ where: { name: 'Bad key' } })).toBe(0);
+    });
+
+    it('PATCH /api/roles/{id} — 200 changes the custom role description', async () => {
+      const id = await customRole('e2e-qa-patch');
+      const res = await patchRole(roleOwnerToken, id, { description: 'Runs the E2E QA pass' }).expect(200);
+
+      expect(body<{ description: string }>(res).description).toBe('Runs the E2E QA pass');
+      expect(await db().role.findUniqueOrThrow({ where: { id } })).toEqual(
+        expect.objectContaining({ description: 'Runs the E2E QA pass', key: 'e2e-qa-patch', scope: 'PROJECT' }),
+      );
+    });
+
+    it('PATCH /api/roles/{id} — 404 for an unknown id', async () => {
+      const res = await patchRole(roleOwnerToken, 'no-such-role', { description: 'x' }).expect(404);
+
+      refusal(res, 'permissions.roleNotFound.404');
+    });
+
+    it('PATCH /api/roles/{id} — 403 on the locked owner role', async () => {
+      const res = await patchRole(roleOwnerToken, await storedRoleId('owner'), { description: 'x' }).expect(403);
+
+      refusal(res, 'permissions.ownerLocked.403');
+    });
+
+    it('DELETE /api/roles/{id} — 403 on a system role', async () => {
+      const res = await deleteRole(roleOwnerToken, await storedRoleId('viewer')).expect(403);
+
+      refusal(res, 'permissions.systemRole.403');
+    });
+
+    it('DELETE /api/roles/{id} — 204 deletes the custom role', async () => {
+      const id = await customRole('e2e-qa-delete');
+      await deleteRole(roleOwnerToken, id).expect(204);
+
+      expect(await db().role.findUnique({ where: { id } })).toBeNull();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // Permissions P1a US-006 — the role bindings lifecycle
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Role bindings API (permissions P1a US-006)', () => {
+    const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+    const bindings = (token: string, query: Record<string, string> = {}) =>
+      request(httpServer).get('/api/role-bindings').query(query).set(auth(token));
+    const createBinding = (token: string, payload: Record<string, unknown>) =>
+      request(httpServer).post('/api/role-bindings').set(auth(token)).send(payload);
+    const deleteBinding = (token: string, id: string) =>
+      request(httpServer).delete(`/api/role-bindings/${id}`).set(auth(token));
+    const projectIdOf = async (slug: string): Promise<string> =>
+      (await db().project.findUniqueOrThrow({ where: { slug } })).id;
+    const userIdOf = async (email: string): Promise<string> =>
+      (await db().user.findFirstOrThrow({ where: { email } })).id;
+
+    it('GET /api/role-bindings — pages one principal\'s bindings', async () => {
+      const ownerId = await userIdOf('admin@koda.test');
+
+      const res = await bindings(userAccessToken, { principalType: 'USER', principalId: ownerId }).expect(200);
+      const page = body<{ size: number; records: Array<{ principalId: string; roleKey: string }> }>(res);
+
+      expect(page.size).toBe(50);
+      expect(page.records).toEqual(
+        expect.arrayContaining([expect.objectContaining({ principalId: ownerId })]),
+      );
+    });
+
+    it('GET /api/role-bindings — 403 for a user whose only binding is member', async () => {
+      const res = await bindings(nonAdminUserAccessToken, { principalType: 'AGENT', principalId: agentId }).expect(403);
+
+      refusal(res, 'permissions.403');
+    });
+
+    it('POST /api/role-bindings — 201 grants developer in the project to the agent', async () => {
+      const projectId = await projectIdOf(projectSlug);
+
+      const res = await createBinding(userAccessToken, {
+        principalType: 'AGENT',
+        principalId: agentId,
+        roleKey: 'developer',
+        projectId,
+      }).expect(201);
+
+      const binding = body<{ id: string; roleKey: string; projectId: string | null; principalId: string }>(res);
+      expect(binding).toEqual(
+        expect.objectContaining({ roleKey: 'developer', projectId, principalId: agentId }),
+      );
+      expect(await db().roleBinding.findUnique({ where: { id: binding.id } })).toEqual(
+        expect.objectContaining({ principalId: agentId, projectId }),
+      );
+    });
+
+    it('POST /api/role-bindings — 404 for an unknown role key', async () => {
+      const projectId = await projectIdOf(projectSlug);
+      const before = await db().roleBinding.count({ where: { principalId: agentId } });
+
+      const res = await createBinding(userAccessToken, {
+        principalType: 'AGENT',
+        principalId: agentId,
+        roleKey: 'no-such-role',
+        projectId,
+      }).expect(404);
+
+      refusal(res, 'permissions.roleNotFound.404');
+      expect(await db().roleBinding.count({ where: { principalId: agentId } })).toBe(before);
+    });
+
+    it('DELETE /api/role-bindings/{id} — 204 removes a project binding', async () => {
+      const projectId = await projectIdOf(projectSlug);
+      const viewer = await db().role.findUniqueOrThrow({ where: { key: 'viewer' } });
+      const binding = await db().roleBinding.create({
+        data: {
+          principalType: 'AGENT',
+          principalId: agentId,
+          roleId: viewer.id,
+          projectId,
+          grantedByType: 'USER',
+          grantedById: agentId,
+        },
+      });
+
+      await deleteBinding(userAccessToken, binding.id).expect(204);
+
+      expect(await db().roleBinding.findUnique({ where: { id: binding.id } })).toBeNull();
+    });
+
+    it('DELETE /api/role-bindings/{id} — 404 for an unknown id', async () => {
+      const res = await deleteBinding(userAccessToken, 'no-such-binding').expect(404);
+
+      refusal(res, 'permissions.bindingNotFound.404');
+    });
+  });
 });

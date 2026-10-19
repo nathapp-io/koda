@@ -1,0 +1,43 @@
+{
+  "404": "Role not found",
+  "-2": "Validation error",
+  "403": "You do not have permissions to perform this action",
+  "40003": "You do not have permissions to perform this action",
+  "409": "Conflict",
+  "roleNotFound": { "404": "Role not found" },
+  "bindingNotFound": { "404": "Role binding not found" },
+  "principalNotFound": { "404": "The principal does not exist" },
+  "unknownEntry": {
+    "-2": "Unknown permission entry: {entry}",
+    "400": "Unknown permission entry: {entry}"
+  },
+  "scopeMismatch": {
+    "-2": "Permission entry {entry} cannot be granted by a role of this scope",
+    "400": "Permission entry {entry} cannot be granted by a role of this scope"
+  },
+  "principalType": {
+    "-2": "This role holds a permission the principal type cannot have",
+    "400": "This role holds a permission the principal type cannot have"
+  },
+  "systemRole": {
+    "-2": "A system role can change only its permissions and description",
+    "400": "A system role can change only its permissions and description",
+    "403": "A system role cannot be deleted",
+    "40003": "A system role cannot be deleted"
+  },
+  "escalation": {
+    "403": "You cannot grant permissions you do not hold yourself",
+    "40003": "You cannot grant permissions you do not hold yourself"
+  },
+  "ownerLocked": {
+    "403": "The owner role is locked and cannot be edited or deleted",
+    "40003": "The owner role is locked and cannot be edited or deleted"
+  },
+  "roleKeyTaken": { "409": "A role with that key already exists" },
+  "roleInUse": { "409": "This role is still assigned and cannot be deleted" },
+  "selfBinding": {
+    "403": "You cannot bind or unbind a role for yourself",
+    "40003": "You cannot bind or unbind a role for yourself"
+  },
+  "ownerEmailRequired": { "500": "KODA_OWNER_EMAIL must be set in production" }
+}

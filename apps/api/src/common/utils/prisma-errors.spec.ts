@@ -1,9 +1,15 @@
 import { Prisma } from '../../generated/prisma/client';
-import { isUniqueViolation } from './prisma-errors';
+import { isForeignKeyViolation, isRecordNotFound, isUniqueViolation } from './prisma-errors';
 
 function p2002(target: unknown) {
   return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
     code: 'P2002', clientVersion: 'test', meta: { target },
+  });
+}
+
+function p2003(meta: Record<string, unknown>) {
+  return new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
+    code: 'P2003', clientVersion: 'test', meta,
   });
 }
 
@@ -55,5 +61,42 @@ describe('isUniqueViolation', () => {
     it('is false when the adapter names no constraint', () => {
       expect(isUniqueViolation(adapterError({}), 'email')).toBe(false);
     });
+  });
+});
+
+describe('isForeignKeyViolation', () => {
+  it('matches P2003 on the named constraint', () => {
+    expect(isForeignKeyViolation(p2003({ field_name: 'RoleBinding_roleId_fkey' }), 'roleId')).toBe(true);
+    expect(isForeignKeyViolation(p2003({ field_name: 'TicketLink_ticketId_fkey' }), 'roleId')).toBe(false);
+  });
+
+  it('matches the index inside the driver-adapter shape', () => {
+    const error = p2003({
+      driverAdapterError: { cause: { constraint: { index: 'RoleBinding_roleId_fkey' } } },
+    });
+
+    expect(isForeignKeyViolation(error, 'roleId')).toBe(true);
+  });
+
+  it('counts a nameless violation, because the caller names the only relation its statement can break', () => {
+    expect(isForeignKeyViolation(p2003({}), 'roleId')).toBe(true);
+    expect(isForeignKeyViolation(p2003({ driverAdapterError: { cause: { kind: 'ForeignKeyConstraintViolation' } } }), 'roleId')).toBe(true);
+  });
+
+  it('ignores other codes and non-Prisma errors', () => {
+    expect(isForeignKeyViolation(p2002('Role_key_key'), 'roleId')).toBe(false);
+    expect(isForeignKeyViolation(new Error('boom'), 'roleId')).toBe(false);
+  });
+});
+
+describe('isRecordNotFound', () => {
+  it('matches P2025 only', () => {
+    const missing = new Prisma.PrismaClientKnownRequestError('Record not found', {
+      code: 'P2025', clientVersion: 'test',
+    });
+
+    expect(isRecordNotFound(missing)).toBe(true);
+    expect(isRecordNotFound(p2002('Role_key_key'))).toBe(false);
+    expect(isRecordNotFound(new Error('boom'))).toBe(false);
   });
 });

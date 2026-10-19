@@ -1,0 +1,317 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import {
+  findCatalogEntry,
+  IMPLICIT_KEYS,
+  OWNABLE_KEYS,
+  PERMISSION_CATALOG,
+  PUBLIC_KEYS,
+  type PermissionCatalogEntry,
+} from './catalog';
+
+/**
+ * The catalog is derived from `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv`.
+ * This spec re-reads that file and re-derives every entry from the rules in the design
+ * (`docs/superpowers/specs/2026-10-18-permission-approval-redesign-design.md` §1, Appendix A), so a
+ * rule that only lives in prose — or a hand-copied key/scope that drifts from the TSV — fails here.
+ */
+type RawScope = 'global' | 'project' | 'runner' | 'system' | 'public' | 'implicit' | 'own';
+type CatalogScope = 'global' | 'project' | 'any';
+type CatalogAccess = 'role' | 'implicit' | 'public' | 'runner' | 'system';
+type CatalogRisk = 'low' | 'medium' | 'high' | 'critical';
+
+const INVENTORY_PATH = join(
+  __dirname,
+  '../../../../docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv',
+);
+const OWN_ROW = 'own (see design §1)';
+
+const PUBLIC_KEY_LIST = [
+  'session.login',
+  'session.refresh',
+  'auth.register',
+  'auth.registration.read',
+  'health.read',
+  'invite.preview',
+  'invite.accept',
+];
+
+const IMPLICIT_KEY_LIST = [
+  'auth.me.read',
+  'session.logout',
+  'home.read',
+  'notification.read',
+  'notification.mark-read',
+  'notification.preference.read',
+  'notification.preference.update',
+  'agent.self.read',
+  'assistant.action.read',
+  'mcp.access',
+];
+
+const OWNABLE_KEY_LIST = [
+  'comment.update',
+  'comment.delete',
+  'ticket.link.remove',
+  'memory.update',
+  'kb.document.delete',
+  'thread.cap.update',
+  'thread.plan',
+  'thread.run',
+  'thread.stop',
+  'thread.end-session',
+  'thread.answer',
+  'thread.archive',
+  'thread.publish',
+  'thread.discard',
+  'thread.message.send',
+  'thread.workspace.read',
+  'thread.workspace.message.send',
+  'thread.workspace.archive',
+];
+
+/** Keys the design adds on top of the TSV (Appendix A), with the scope it gives them. */
+const NEW_KEY_SCOPES: Readonly<Record<string, CatalogScope>> = {
+  'role.read': 'global',
+  'role.manage': 'global',
+  'role.binding.manage': 'project',
+  'role.binding.global': 'global',
+  'role.binding.owner': 'global',
+  'approval.decide': 'project',
+  'approval.policy.read': 'project',
+  'approval.policy.manage': 'any',
+  'audit.read': 'global',
+  'memory.update': 'any',
+};
+const NEW_KEY_LIST = Object.keys(NEW_KEY_SCOPES);
+
+/** Prefixes the design marks as high-risk writes. */
+const HIGH_RISK_PREFIXES = [
+  'vcs.connection.',
+  'vcs.webhook-secret.',
+  'webhook.',
+  'fleet.repo.',
+  'fleet.runner.',
+  'fleet.budget.',
+  'fleet.enrollment.',
+  'fleet.credential.',
+];
+
+/** `[key, catalog_scope]` in file order, with cells holding several keys split on `;`. */
+function readInventory(): { keys: string[]; scope: RawScope }[] {
+  const lines = readFileSync(INVENTORY_PATH, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim() !== '');
+  const header = lines[0].split('\t');
+  const keyIndex = header.indexOf('proposed_key');
+  const scopeIndex = header.indexOf('catalog_scope');
+
+  return lines.slice(1).map((line) => {
+    const cells = line.split('\t');
+    const raw = cells[scopeIndex];
+    return {
+      keys: cells[keyIndex]
+        .split(';')
+        .map((key) => key.trim())
+        .filter(Boolean),
+      scope: (raw === OWN_ROW ? 'own' : raw) as RawScope,
+    };
+  });
+}
+
+const INVENTORY = readInventory();
+const INVENTORY_KEYS = [...new Set(INVENTORY.flatMap((row) => row.keys))];
+
+const SCOPES_BY_KEY = new Map<string, Set<RawScope>>();
+for (const row of INVENTORY) {
+  for (const key of row.keys) {
+    const scopes = SCOPES_BY_KEY.get(key) ?? new Set<RawScope>();
+    scopes.add(row.scope);
+    SCOPES_BY_KEY.set(key, scopes);
+  }
+}
+
+function expectedAccess(key: string): CatalogAccess {
+  if (key.startsWith('runner.')) return 'runner';
+  if (key.startsWith('system.')) return 'system';
+  if (PUBLIC_KEY_LIST.includes(key)) return 'public';
+  if (IMPLICIT_KEY_LIST.includes(key)) return 'implicit';
+  return 'role';
+}
+
+function expectedScope(key: string, access: CatalogAccess, ownable: boolean): CatalogScope {
+  if (access !== 'role' || ownable) return 'any';
+  if (NEW_KEY_SCOPES[key] !== undefined) return NEW_KEY_SCOPES[key];
+
+  const scopes = SCOPES_BY_KEY.get(key) ?? new Set<RawScope>();
+  const global = scopes.has('global') || scopes.has('runner');
+  const project = scopes.has('project');
+  if (scopes.has('own') || (global && project)) return 'any';
+  if (project) return 'project';
+  if (global) return 'global';
+  return 'any';
+}
+
+function expectedRisk(key: string): CatalogRisk {
+  if (key.startsWith('role.') || key.startsWith('approval.policy.')) return 'critical';
+  const last = key.slice(key.lastIndexOf('.') + 1);
+  if (last === 'read') return 'low';
+  if (last === 'delete' || last === 'remove') return 'high';
+  if (HIGH_RISK_PREFIXES.some((prefix) => key.startsWith(prefix))) return 'high';
+  return 'medium';
+}
+
+describe('PERMISSION_CATALOG', () => {
+  it('AC-1: every proposed_key in the action inventory resolves to an entry with that key', () => {
+    expect(INVENTORY_KEYS.length).toBeGreaterThan(200);
+
+    const missing = INVENTORY_KEYS.filter((key) => findCatalogEntry(key)?.key !== key);
+
+    expect(missing).toEqual([]);
+  });
+
+  it('AC-2: resolves every key the design adds on top of the inventory', () => {
+    const missing = NEW_KEY_LIST.filter((key) => findCatalogEntry(key)?.key !== key);
+
+    expect(missing).toEqual([]);
+  });
+
+  it('AC-3: returns undefined for a key that is in no catalog', () => {
+    expect(findCatalogEntry('no.such.key')).toBeUndefined();
+  });
+
+  it('AC-4: runner.sync is runner access', () => {
+    expect(findCatalogEntry('runner.sync')?.access).toBe('runner');
+  });
+
+  it('AC-5: system.schedule.dispatch is system access', () => {
+    expect(findCatalogEntry('system.schedule.dispatch')?.access).toBe('system');
+  });
+
+  it('AC-6: notification.read is implicit access', () => {
+    expect(findCatalogEntry('notification.read')?.access).toBe('implicit');
+  });
+
+  it('AC-7: mcp.access is implicit access', () => {
+    expect(findCatalogEntry('mcp.access')?.access).toBe('implicit');
+  });
+
+  it('AC-8: session.login is public access', () => {
+    expect(findCatalogEntry('session.login')?.access).toBe('public');
+  });
+
+  it('AC-9: ticket.delete is a role key scoped to a project', () => {
+    expect(findCatalogEntry('ticket.delete')?.access).toBe('role');
+    expect(findCatalogEntry('ticket.delete')?.scope).toBe('project');
+  });
+
+  it('AC-10: user.create is scoped globally', () => {
+    expect(findCatalogEntry('user.create')?.scope).toBe('global');
+  });
+
+  it('AC-11: fleet.runner.update is scoped globally', () => {
+    // Its inventory rows are the admin runner routes (`catalog_scope` runner counts as global).
+    expect(findCatalogEntry('fleet.runner.update')?.scope).toBe('global');
+  });
+
+  it('AC-12: agent.read is scoped any', () => {
+    expect(findCatalogEntry('agent.read')?.scope).toBe('any');
+  });
+
+  it('AC-13: comment.update is scoped any', () => {
+    expect(findCatalogEntry('comment.update')?.scope).toBe('any');
+  });
+
+  it('AC-14: comment.update is ownable', () => {
+    expect(findCatalogEntry('comment.update')?.ownable).toBe(true);
+  });
+
+  it('AC-15: thread.stop is ownable', () => {
+    expect(findCatalogEntry('thread.stop')?.ownable).toBe(true);
+  });
+
+  it('AC-16: ticket.delete is not ownable', () => {
+    expect(findCatalogEntry('ticket.delete')?.ownable).toBe(false);
+  });
+
+  it('AC-17: thread.create is not ownable', () => {
+    expect(findCatalogEntry('thread.create')?.ownable).toBe(false);
+  });
+
+  it('AC-18: ticket.delete is high risk', () => {
+    expect(findCatalogEntry('ticket.delete')?.risk).toBe('high');
+  });
+
+  it('AC-19: ticket.read is low risk', () => {
+    expect(findCatalogEntry('ticket.read')?.risk).toBe('low');
+  });
+
+  it('AC-20: role.read is critical risk', () => {
+    expect(findCatalogEntry('role.read')?.risk).toBe('critical');
+  });
+
+  it('AC-21: ticket.create is medium risk', () => {
+    expect(findCatalogEntry('ticket.create')?.risk).toBe('medium');
+  });
+
+  it('AC-22: only a user can hold role.binding.owner', () => {
+    expect(findCatalogEntry('role.binding.owner')?.principals).toEqual(['user']);
+  });
+
+  it('AC-23: ticket.create is open to users and agents', () => {
+    expect(findCatalogEntry('ticket.create')?.principals).toEqual(['user', 'agent']);
+  });
+
+  it('holds exactly the inventory keys plus the keys the design adds, with no duplicates', () => {
+    const keys = PERMISSION_CATALOG.map((entry) => entry.key);
+
+    expect(new Set(keys).size).toBe(keys.length);
+    expect([...keys].sort()).toEqual([...INVENTORY_KEYS, ...NEW_KEY_LIST].sort());
+  });
+
+  it('exports the public, implicit and ownable key sets the entry grammar depends on', () => {
+    expect([...PUBLIC_KEYS].sort()).toEqual([...PUBLIC_KEY_LIST].sort());
+    expect([...IMPLICIT_KEYS].sort()).toEqual([...IMPLICIT_KEY_LIST].sort());
+    expect([...OWNABLE_KEYS].sort()).toEqual([...OWNABLE_KEY_LIST].sort());
+    for (const key of OWNABLE_KEY_LIST) {
+      expect(findCatalogEntry(key)?.ownable).toBe(true);
+    }
+  });
+
+  it('derives access, scope, ownable, risk, principals and approval for every catalog key', () => {
+    const derive = (key: string): Partial<PermissionCatalogEntry> => {
+      const access = expectedAccess(key);
+      const ownable = access === 'role' && OWNABLE_KEY_LIST.includes(key);
+      const risk = expectedRisk(key);
+      return {
+        access,
+        scope: expectedScope(key, access, ownable),
+        ownable,
+        risk,
+        principals: key === 'role.binding.owner' ? ['user'] : ['user', 'agent'],
+        approval: {
+          approvable: access === 'role' && risk !== 'low',
+          floor: 'none',
+          default: 'none',
+        },
+      };
+    };
+
+    const mismatches = [...INVENTORY_KEYS, ...NEW_KEY_LIST].flatMap((key) => {
+      const actual = findCatalogEntry(key);
+      const expected = derive(key);
+      return (Object.keys(expected) as (keyof PermissionCatalogEntry)[]).flatMap((field) =>
+        JSON.stringify(actual?.[field]) === JSON.stringify(expected[field])
+          ? []
+          : [
+              `${key}.${field}: expected ${JSON.stringify(expected[field])}, got ${JSON.stringify(
+                actual?.[field],
+              )}`,
+            ],
+      );
+    });
+
+    expect(mismatches).toEqual([]);
+    expect(PERMISSION_CATALOG).toHaveLength(INVENTORY_KEYS.length + NEW_KEY_LIST.length);
+  });
+});

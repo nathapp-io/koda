@@ -10923,6 +10923,331 @@
           "invites"
         ]
       }
+    },
+    "/api/roles": {
+      "get": {
+        "operationId": "RolesController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RoleDto"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "role.read permission required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List every role, system roles first",
+        "tags": [
+          "roles"
+        ]
+      },
+      "post": {
+        "operationId": "RolesController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRoleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown or out-of-scope permission entry"
+          },
+          "403": {
+            "description": "role.manage missing, or a grant above the caller's own keys"
+          },
+          "409": {
+            "description": "A role with that key already exists"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a role (role.manage)",
+        "tags": [
+          "roles"
+        ]
+      }
+    },
+    "/api/roles/{id}": {
+      "patch": {
+        "operationId": "RolesController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRoleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown or out-of-scope permission entry, or a system-role rename"
+          },
+          "403": {
+            "description": "A grant above the caller's own keys, or the locked owner role"
+          },
+          "404": {
+            "description": "Role not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change a role's name, description or permissions (role.manage)",
+        "tags": [
+          "roles"
+        ]
+      },
+      "delete": {
+        "operationId": "RolesController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "A system or locked role"
+          },
+          "404": {
+            "description": "Role not found"
+          },
+          "409": {
+            "description": "A binding still uses this role"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a role no binding uses (role.manage)",
+        "tags": [
+          "roles"
+        ]
+      }
+    },
+    "/api/role-bindings": {
+      "get": {
+        "operationId": "RoleBindingsController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "principalType",
+            "required": false,
+            "in": "query",
+            "description": "Requires principalId",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "USER",
+                "AGENT"
+              ]
+            }
+          },
+          {
+            "name": "principalId",
+            "required": false,
+            "in": "query",
+            "description": "Requires principalType",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectId",
+            "required": false,
+            "in": "query",
+            "description": "Only bindings of this project; omit to list every project",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of bindings: { total, current, size, hasNext, hasPrev, records }"
+          },
+          "403": {
+            "description": "role.read permission required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List role bindings, optionally for one principal or one project (role.read)",
+        "tags": [
+          "role-bindings"
+        ]
+      },
+      "post": {
+        "operationId": "RoleBindingsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRoleBindingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleBindingDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A GLOBAL role with a project id, or a principal type the role cannot serve"
+          },
+          "403": {
+            "description": "A missing key, a self-binding, or a grant above the caller's own keys"
+          },
+          "404": {
+            "description": "Unknown role, project or principal"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Grant a role to a principal (role.binding.global or role.binding.manage, plus role.binding.owner for the owner role)",
+        "tags": [
+          "role-bindings"
+        ]
+      }
+    },
+    "/api/role-bindings/{id}": {
+      "delete": {
+        "operationId": "RoleBindingsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "403": {
+            "description": "A missing key, a self-binding, a grant above the caller's own keys, or the last owner"
+          },
+          "404": {
+            "description": "Binding not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove a binding, authorised from the stored row (role.binding.global or role.binding.manage, plus role.binding.owner for the owner role)",
+        "tags": [
+          "role-bindings"
+        ]
+      }
     }
   },
   "info": {
@@ -19391,6 +19716,209 @@
         },
         "required": [
           "password"
+        ]
+      },
+      "RoleDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string",
+            "description": "Stable kebab-case identifier",
+            "example": "project-admin"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "description": "Empty string when the role has no description"
+          },
+          "scope": {
+            "enum": [
+              "GLOBAL",
+              "PROJECT"
+            ],
+            "type": "string"
+          },
+          "system": {
+            "type": "boolean",
+            "description": "Seeded system role"
+          },
+          "locked": {
+            "type": "boolean",
+            "description": "The owner role: no write may change or delete it"
+          },
+          "permissions": {
+            "description": "Catalog entries, in the order they were stored",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "name",
+          "description",
+          "scope",
+          "system",
+          "locked",
+          "permissions"
+        ]
+      },
+      "CreateRoleDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "example": "qa",
+            "description": "kebab-case; cannot change after creation"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "QA"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "example": "Runs the QA pass"
+          },
+          "scope": {
+            "enum": [
+              "GLOBAL",
+              "PROJECT"
+            ],
+            "type": "string",
+            "description": "Cannot change after creation"
+          },
+          "permissions": {
+            "example": [
+              "ticket.read",
+              "comment.create"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "scope",
+          "permissions"
+        ]
+      },
+      "UpdateRoleDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Rejected for a system role"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "permissions": {
+            "description": "Replaces the stored entry list",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "CreateRoleBindingDto": {
+        "type": "object",
+        "properties": {
+          "principalType": {
+            "enum": [
+              "USER",
+              "AGENT"
+            ],
+            "type": "string"
+          },
+          "principalId": {
+            "type": "string",
+            "description": "The user or agent the binding names"
+          },
+          "roleKey": {
+            "type": "string",
+            "example": "developer"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Omit or null for a global binding"
+          }
+        },
+        "required": [
+          "principalType",
+          "principalId",
+          "roleKey"
+        ]
+      },
+      "RoleBindingDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "principalType": {
+            "enum": [
+              "USER",
+              "AGENT"
+            ],
+            "type": "string"
+          },
+          "principalId": {
+            "type": "string",
+            "description": "A `User.id` or an `Agent.id`; the column has no foreign key"
+          },
+          "roleId": {
+            "type": "string"
+          },
+          "roleKey": {
+            "type": "string",
+            "description": "The role's stable key",
+            "example": "developer"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Null for a GLOBAL binding"
+          },
+          "grantedByType": {
+            "type": "string",
+            "description": "USER, AGENT or SYSTEM"
+          },
+          "grantedById": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "principalType",
+          "principalId",
+          "roleId",
+          "roleKey",
+          "projectId",
+          "grantedByType",
+          "grantedById",
+          "createdAt"
         ]
       }
     }

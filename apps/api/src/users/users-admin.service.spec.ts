@@ -2,6 +2,7 @@ import type { Mock } from 'vitest';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { Prisma } from '../generated/prisma/client';
 import { UsersAdminService } from './users-admin.service';
+import { MembershipService } from '../permissions/membership.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { UserAdminRecord } from './domain/user-admin.domain';
 
@@ -13,21 +14,33 @@ const user = (over: Partial<UserAdminRecord> = {}): UserAdminRecord => ({
 describe('UsersAdminService', () => {
   let repo: Record<string, Mock>;
   let cache: { invalidate: Mock };
+  let membership: { bindBaseline: Mock; setGlobalAdmin: Mock; afterCommit: Mock };
   let service: UsersAdminService;
+  /** The row `findById`/`updateUser` serve, so the service's reads reflect what was stored. */
+  let stored: UserAdminRecord;
 
   beforeEach(() => {
+    stored = user();
     repo = {
       findUserPage: vi.fn(),
-      findById: vi.fn(),
+      findById: vi.fn(async () => stored),
       findByEmail: vi.fn(),
       createUser: vi.fn(),
       countActiveAdmins: vi.fn(),
-      updateUser: vi.fn(async (id: string, w: { role?: string; disabled?: boolean }) => user({ id, ...w })),
+      updateUser: vi.fn(async (id: string, w: { disabled?: boolean }) => ({ ...stored, id, ...w })),
       lockUserAdministration: vi.fn(),
     };
     cache = { invalidate: vi.fn() };
+    membership = {
+      bindBaseline: vi.fn(),
+      setGlobalAdmin: vi.fn(),
+      // B3/B4: the writes run inside `update`'s transaction and `create`'s own one; the stub runs the
+      // callback and flushes nothing, exactly as the real service does when it defers nothing.
+      afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
+    };
     const txManager = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
-    service = new UsersAdminService(repo as never, txManager as never, cache as never);
+    // Permissions P1a (US-004): MembershipService is the required fourth parameter.
+    service = new UsersAdminService(repo as never, txManager as never, cache as never, membership as never);
   });
 
   describe('create', () => {
@@ -66,6 +79,45 @@ describe('UsersAdminService', () => {
 
       expect(repo.createUser).not.toHaveBeenCalled();
     });
+
+    it('binds the new member to the baseline and grants no admin binding', async () => {
+      repo.createUser.mockResolvedValue(user({ id: 'new-member' }));
+
+      await service.create({ email: 'm@k.t', name: 'M', password: 'Admin1234!Aa', role: 'MEMBER' });
+
+      expect(membership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'new-member' });
+      expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
+    });
+
+    it('grants a global admin binding through setGlobalAdmin when the DTO asks for ADMIN', async () => {
+      repo.createUser.mockResolvedValue(user({ id: 'new-admin', role: 'ADMIN' }));
+
+      await service.create({ email: 'a@k.t', name: 'A', password: 'Admin1234!Aa', role: 'ADMIN' });
+
+      expect(membership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'new-admin' });
+      expect(membership.setGlobalAdmin).toHaveBeenCalledWith('new-admin', true, { type: 'SYSTEM', id: 'admin-users' });
+    });
+
+    it('B4: runs the user row and its bindings in one commit-aware transaction', async () => {
+      repo.createUser.mockResolvedValue(user({ id: 'new-member' }));
+
+      await service.create({ email: 'm@k.t', name: 'M', password: 'Admin1234!Aa', role: 'MEMBER' });
+
+      // The binding write is nested inside the create transaction; only the outer scope may invalidate
+      // the permission cache, and only once that transaction committed.
+      expect(membership.afterCommit).toHaveBeenCalled();
+    });
+
+    it('B4: a failed baseline binding rejects instead of returning a user', async () => {
+      repo.createUser.mockResolvedValue(user({ id: 'new-member' }));
+      membership.bindBaseline.mockRejectedValueOnce(new NotFoundAppException({}, 'permissions.roleNotFound'));
+
+      await expect(
+        service.create({ email: 'm@k.t', name: 'M', password: 'Admin1234!Aa', role: 'MEMBER' }),
+      ).rejects.toBeInstanceOf(NotFoundAppException);
+
+      expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
+    });
   });
 
   describe('update', () => {
@@ -88,6 +140,8 @@ describe('UsersAdminService', () => {
       expect(repo.lockUserAdministration).toHaveBeenCalled();
       expect(repo.lockUserAdministration.mock.invocationCallOrder[0]).toBeLessThan(repo.countActiveAdmins.mock.invocationCallOrder[0]);
       expect(repo.updateUser).not.toHaveBeenCalled();
+      // The refusal must not have touched any binding either.
+      expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
     });
 
     it('disables an admin when another active admin remains, bumping tokenVersion', async () => {
@@ -96,20 +150,53 @@ describe('UsersAdminService', () => {
 
       await service.update('u1', 'u2', { disabled: true });
 
-      expect(repo.updateUser).toHaveBeenCalledWith('u2', { role: undefined, disabled: true, bumpTokenVersion: true });
+      expect(repo.updateUser).toHaveBeenCalledWith('u2', { disabled: true, bumpTokenVersion: true });
+      expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
       expect(cache.invalidate).toHaveBeenCalledWith('USER:u2', { mode: 'tag' });
       // MEMORY-strategy fallback: evict the 60 s auth-state entry directly.
       expect(cache.invalidate).toHaveBeenCalledWith(['user-auth-state', 'u2']);
     });
 
-    it('bumps tokenVersion on a role change, not on re-enable', async () => {
-      repo.findById.mockResolvedValueOnce(user({ role: 'MEMBER' }));
-      await service.update('u1', 'u2', { role: 'ADMIN' });
-      expect(repo.updateUser).toHaveBeenLastCalledWith('u2', expect.objectContaining({ bumpTokenVersion: true }));
+    it('grants the admin binding through setGlobalAdmin and leaves the role to it', async () => {
+      stored = user({ role: 'MEMBER' });
 
-      repo.findById.mockResolvedValueOnce(user({ disabled: true }));
+      const updated = await service.update('u1', 'u2', { role: 'ADMIN' });
+
+      expect(membership.setGlobalAdmin).toHaveBeenCalledWith('u2', true, { type: 'USER', id: 'u1' });
+      // The role column belongs to setGlobalAdmin's mirror: `update` must not write it itself.
+      expect(repo.updateUser).toHaveBeenCalledWith('u2', { disabled: undefined, bumpTokenVersion: false });
+      expect(updated.role).toBe('MEMBER');
+    });
+
+    it('removes the admin binding through setGlobalAdmin on a demotion', async () => {
+      stored = user({ role: 'ADMIN' });
+      repo.countActiveAdmins.mockResolvedValue(2);
+
+      await service.update('u1', 'u2', { role: 'MEMBER' });
+
+      expect(membership.setGlobalAdmin).toHaveBeenCalledWith('u2', false, { type: 'USER', id: 'u1' });
+      expect(repo.updateUser).toHaveBeenCalledWith('u2', { disabled: undefined, bumpTokenVersion: false });
+    });
+
+    it('returns the stored role after a requested demotion of an Owner', async () => {
+      // setGlobalAdmin refuses to touch an owner's binding, so `User.role` stays ADMIN.
+      stored = user({ role: 'ADMIN' });
+      repo.countActiveAdmins.mockResolvedValue(2);
+
+      const updated = await service.update('u1', 'u2', { role: 'MEMBER' });
+
+      expect(updated.role).toBe('ADMIN');
+    });
+
+    it('bumps tokenVersion on re-enable, not on a role change', async () => {
+      stored = user({ role: 'ADMIN' });
+      repo.countActiveAdmins.mockResolvedValue(2);
+      await service.update('u1', 'u2', { role: 'MEMBER' });
+      expect(repo.updateUser).toHaveBeenLastCalledWith('u2', { disabled: undefined, bumpTokenVersion: false });
+
+      stored = user({ disabled: true });
       await service.update('u1', 'u2', { disabled: false });
-      expect(repo.updateUser).toHaveBeenLastCalledWith('u2', expect.objectContaining({ bumpTokenVersion: false }));
+      expect(repo.updateUser).toHaveBeenLastCalledWith('u2', { disabled: false, bumpTokenVersion: false });
     });
 
     it('does not count admins for a MEMBER target', async () => {

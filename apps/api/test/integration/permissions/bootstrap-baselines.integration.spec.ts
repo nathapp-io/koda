@@ -1,0 +1,485 @@
+/**
+ * Permissions P1a US-004 — owner bootstrap and baseline bindings over real HTTP + Postgres
+ * (AC-5 .. AC-23, AC-26).
+ *
+ * Three describes, because each needs its own `KODA_OWNER_EMAIL` / `REGISTRATION_ENABLED` pair, which
+ * is read once at `AppFactory.create`:
+ *  - no owner email configured;
+ *  - an owner email that refuses the first non-owner registration;
+ *  - the installation's Owner running the admin user and agent routes.
+ *
+ * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/permissions/bootstrap-baselines.integration.spec.ts
+ */
+import request from 'supertest';
+import { CommonExceptionCode } from '@nathapp/nestjs-common';
+import { NathApplication } from '@nathapp/nestjs-app';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
+import { resetDb } from '../../helpers/reset-db';
+import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+
+const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+
+const OWNER_EMAIL = 'owner@koda.test';
+/** Booting `AppModule` runs the system-role seeder, so the first hook needs a generous budget. */
+const BOOT_TIMEOUT_MS = 30_000;
+
+interface UserRow {
+  id: string;
+  email: string;
+  role: string;
+  disabled: boolean;
+}
+
+/** One binding of a principal, with the role key it grants. */
+interface BoundRole {
+  roleKey: string;
+  projectId: string | null;
+}
+
+/** A booted app plus the reads and calls these ACs share. */
+function harness(app: NathApplication) {
+  const server: ReturnType<NathApplication['getHttpServer']> = app.getHttpServer();
+  const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+  const db = prisma.client as PrismaClient;
+
+  const register = (email: string) =>
+    request(server)
+      .post('/api/auth/register')
+      .send({ email, name: email.split('@')[0], password: TEST_PASSWORD });
+
+  /** Every binding the principal holds, project-scoped or not. */
+  const boundRoles = async (principalType: 'USER' | 'AGENT', principalId: string): Promise<BoundRole[]> => {
+    const rows = await db.roleBinding.findMany({
+      where: { principalType, principalId },
+      include: { role: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map((row) => ({ roleKey: row.role.key, projectId: row.projectId }));
+  };
+
+  const storedRole = async (id: string): Promise<string> =>
+    (await db.user.findUniqueOrThrow({ where: { id } })).role;
+
+  const userByEmail = (email: string) => db.user.findFirstOrThrow({ where: { email } });
+
+  /**
+   * Empty the user-facing tables without touching the seeded `Role` rows, so a test that needs the
+   * empty-table bootstrap starts from it whatever ran before. `RoleBinding.principalId` has no foreign
+   * key, so bindings are cleared first.
+   */
+  const emptyPrincipalTables = async (): Promise<void> => {
+    await db.roleBinding.deleteMany({});
+    await db.user.deleteMany({});
+  };
+
+  return { server, db, register, boundRoles, storedRole, userByEmail, emptyPrincipalTables };
+}
+
+describeIntegration('registration with no owner email configured (US-004)', () => {
+  let app: NathApplication;
+  let h: ReturnType<typeof harness>;
+
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    h = harness(app);
+  }, BOOT_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => {
+    resetThrottle(app);
+  });
+
+  it('AC-5: the first registration gets a projectId-null owner binding and a projectId-null member binding', async () => {
+    // The Owner seat is only free on an empty table, so the test clears it rather than relying on
+    // whatever another test left behind.
+    await h.emptyPrincipalTables();
+
+    const res = await h.register('first@koda.test');
+
+    expect(res.status).toBe(201);
+    const created = data<{ user: UserRow }>(res);
+
+    const bindings = await h.boundRoles('USER', created.user.id);
+    expect(bindings).toHaveLength(2);
+    expect(bindings).toEqual(
+      expect.arrayContaining([
+        { roleKey: 'owner', projectId: null },
+        { roleKey: 'member', projectId: null },
+      ]),
+    );
+  });
+
+  it('AC-6: with users already present a new registration gets a member binding and no owner binding', async () => {
+    await h.emptyPrincipalTables();
+    await h.register('second@koda.test').expect(201);
+
+    const res = await h.register('third@koda.test');
+
+    expect(res.status).toBe(201);
+    const created = data<{ user: UserRow }>(res);
+    expect(await h.boundRoles('USER', created.user.id)).toEqual([{ roleKey: 'member', projectId: null }]);
+  });
+
+  it('B4: a failed Owner binding rolls the registration back instead of spending the Owner seat', async () => {
+    await h.emptyPrincipalTables();
+    // No `owner` role row: the first user's Owner binding cannot be written. Leaving the user committed
+    // would answer an error and consume the only seat an Owner can ever take (firstUser is then false).
+    const owner = await h.db.role.findUniqueOrThrow({ where: { key: 'owner' } });
+    await h.db.role.delete({ where: { key: 'owner' } });
+
+    try {
+      const res = await h.register('bootstrap@koda.test');
+
+      expect(res.status).toBe(404);
+      expect(await h.db.user.count()).toBe(0);
+    } finally {
+      await h.db.role.create({
+        data: {
+          id: owner.id,
+          key: owner.key,
+          name: owner.name,
+          description: owner.description,
+          scope: owner.scope,
+          system: owner.system,
+          locked: owner.locked,
+          permissions: owner.permissions as Prisma.InputJsonValue,
+        },
+      });
+    }
+
+    // The seat is still free: the next registration bootstraps the Owner as it would on a fresh install.
+    const retry = await h.register('first@koda.test');
+
+    expect(retry.status).toBe(201);
+    const created = data<{ user: UserRow }>(retry);
+    expect(await h.boundRoles('USER', created.user.id)).toContainEqual({ roleKey: 'owner', projectId: null });
+    expect(await h.storedRole(created.user.id)).toBe('ADMIN');
+  });
+});
+
+describeIntegration('KODA_OWNER_EMAIL gates the first registration (US-004)', () => {
+  let app: NathApplication;
+  let h: ReturnType<typeof harness>;
+
+  beforeAll(async () => {
+    await resetDb();
+    // Closed registration: the bootstrap path, where exactly one user is admitted.
+    app = await bootHttpApp({ registrationEnabled: false, ownerEmail: OWNER_EMAIL });
+    h = harness(app);
+  }, BOOT_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => {
+    resetThrottle(app);
+  });
+
+  /**
+   * The state every case in this describe needs: an empty users table, then the Owner's registration
+   * attempt, which is the only one the gate lets through. Each case builds it itself so the assertions
+   * do not depend on another test having run.
+   */
+  const registerOwnerFromEmptyTable = () => h.emptyPrincipalTables().then(() => h.register(OWNER_EMAIL));
+
+  it('AC-8: a refused first registration leaves the users table empty', async () => {
+    await h.emptyPrincipalTables();
+
+    await h.register('other@koda.test').expect(403);
+
+    expect(await h.db.user.count()).toBe(0);
+  });
+
+  it('AC-7: the refusal answers 403 with the registration gate', async () => {
+    await h.emptyPrincipalTables();
+
+    const res = await h.register('other@koda.test');
+
+    expect(res.status).toBe(403);
+    // `ForbiddenAppException({}, 'registration')` translates `registration.40003`.
+    expect(res.body.ret).toBe(CommonExceptionCode.FORBIDDEN);
+    expect(String(res.body.message)).toContain('Registration is closed');
+  });
+
+  it("AC-9: the configured owner email registers with the route's existing 201", async () => {
+    const res = await registerOwnerFromEmptyTable();
+
+    expect(res.status).toBe(201);
+    expect(data<{ user: UserRow }>(res).user.email).toBe(OWNER_EMAIL);
+  });
+
+  it('AC-10: the owner registration gives the created user an owner binding', async () => {
+    const res = await registerOwnerFromEmptyTable();
+    // Precondition of this AC: the owner's registration is the one the gate lets through.
+    expect(res.status).toBe(201);
+
+    const owner = await h.userByEmail(OWNER_EMAIL);
+
+    expect(await h.boundRoles('USER', owner.id)).toContainEqual({ roleKey: 'owner', projectId: null });
+  });
+});
+
+describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
+  let app: NathApplication;
+  let h: ReturnType<typeof harness>;
+  let rootToken: string;
+
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+
+  const createUser = async (email: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<UserRow> =>
+    data<UserRow>(
+      await request(h.server)
+        .post('/api/admin/users')
+        .set(auth(rootToken))
+        .send({ email, name: email.split('@')[0], password: TEST_PASSWORD, role })
+        .expect(201),
+    );
+
+  const patchUser = (id: string, patch: Record<string, unknown>) =>
+    request(h.server).patch(`/api/admin/users/${id}`).set(auth(rootToken)).send(patch);
+
+  /**
+   * What the last-admin guard counts (`PrismaUsersRepository.countActiveAdmins`):
+   * `user.count({ where: { role: 'ADMIN', disabled: false } })`. Asserted, not assumed, so a test
+   * whose premise is "exactly one active admin" cannot pass while the table holds more.
+   */
+  const activeAdminCount = (): Promise<number> => h.db.user.count({ where: { role: 'ADMIN', disabled: false } });
+
+  /**
+   * Runs `fn` with `targetId` as the installation's only active admin: the other tests in this
+   * describe leave their own ADMIN users behind, and the guard counts every one of them. The other
+   * admins are demoted with a direct write (their `tokenVersion` is untouched, so their tokens stay
+   * valid) and restored afterwards.
+   */
+  const withOnlyActiveAdmin = async (targetId: string, fn: () => Promise<void>): Promise<void> => {
+    const others = await h.db.user.findMany({
+      where: { role: 'ADMIN', id: { not: targetId } },
+      select: { id: true },
+    });
+    const ids = others.map((user) => user.id);
+    await h.db.user.updateMany({ where: { id: { in: ids } }, data: { role: 'MEMBER' } });
+    try {
+      await fn();
+    } finally {
+      await h.db.user.updateMany({ where: { id: { in: ids } }, data: { role: 'ADMIN' } });
+    }
+  };
+
+  /** Gives the user a projectId-null `owner` binding, as an installation Owner holds. */
+  const grantOwner = async (userId: string): Promise<void> => {
+    const ownerRole = await h.db.role.findUniqueOrThrow({ where: { key: 'owner' } });
+    await h.db.roleBinding.create({
+      data: {
+        principalType: 'USER',
+        principalId: userId,
+        roleId: ownerRole.id,
+        projectId: null,
+        grantedByType: 'SYSTEM',
+        grantedById: 'test',
+      },
+    });
+  };
+
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: false, ownerEmail: OWNER_EMAIL });
+    h = harness(app);
+    // Setup, not an assertion: the whole describe acts as the installation's Owner.
+    const res = await h.register(OWNER_EMAIL).expect(201);
+    rootToken = data<{ accessToken: string }>(res).accessToken;
+  }, BOOT_TIMEOUT_MS);
+
+  beforeEach(() => {
+    resetThrottle(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('AC-11: an admin-created MEMBER gets a member binding and no admin binding', async () => {
+    const created = await createUser('member@koda.test');
+
+    expect(await h.boundRoles('USER', created.id)).toEqual([{ roleKey: 'member', projectId: null }]);
+  });
+
+  it('AC-12: an admin-created ADMIN gets a projectId-null admin binding', async () => {
+    const created = await createUser('admin@koda.test', 'ADMIN');
+
+    expect(await h.boundRoles('USER', created.id)).toContainEqual({ roleKey: 'admin', projectId: null });
+  });
+
+  it('AC-13: an admin-created ADMIN stores User.role ADMIN', async () => {
+    const created = await createUser('admin2@koda.test', 'ADMIN');
+
+    expect(await h.storedRole(created.id)).toBe('ADMIN');
+  });
+
+  it('AC-14: demoting an admin removes the admin binding (a second active admin exists)', async () => {
+    const target = await createUser('demoted@koda.test', 'ADMIN');
+
+    await patchUser(target.id, { role: 'MEMBER' }).expect(200);
+
+    expect(await h.boundRoles('USER', target.id)).toEqual([{ roleKey: 'member', projectId: null }]);
+  });
+
+  it('AC-15: demoting an admin stores User.role MEMBER', async () => {
+    const target = await createUser('demoted2@koda.test', 'ADMIN');
+    await patchUser(target.id, { role: 'MEMBER' }).expect(200);
+
+    expect(await h.storedRole(target.id)).toBe('MEMBER');
+  });
+
+  it('AC-16: demoting the last active admin answers the existing last-admin error', async () => {
+    const target = await createUser('last-admin@koda.test', 'ADMIN');
+    await withOnlyActiveAdmin(target.id, async () => {
+      // The premise of the AC, checked rather than assumed: the guard counts `User.role`.
+      expect(await activeAdminCount()).toBe(1);
+
+      const res = await patchUser(target.id, { role: 'MEMBER' });
+
+      expect(res.status).toBe(409);
+      // `ConflictAppException({}, 'users.lastAdmin')` translates `users.lastAdmin.409`.
+      expect(String(res.body.message)).toContain('At least one active administrator must remain');
+    });
+  });
+
+  it("AC-17: the refused demotion leaves the target's admin binding in place", async () => {
+    const target = await createUser('last-admin2@koda.test', 'ADMIN');
+    await withOnlyActiveAdmin(target.id, async () => {
+      expect(await activeAdminCount()).toBe(1);
+
+      await patchUser(target.id, { role: 'MEMBER' }).expect(409);
+    });
+
+    expect(await h.boundRoles('USER', target.id)).toContainEqual({ roleKey: 'admin', projectId: null });
+  });
+
+  it('AC-18: POST /agents gives the new agent a projectId-null agent binding', async () => {
+    const res = await request(h.server)
+      .post('/api/agents')
+      .set(auth(rootToken))
+      .send({ name: 'Bound Agent', slug: 'bound-agent', roles: ['DEVELOPER'], capabilities: ['typescript'] });
+
+    expect(res.status).toBe(201);
+    const created = data<{ agent: { id: string } }>(res);
+
+    expect(await h.boundRoles('AGENT', created.agent.id)).toEqual([{ roleKey: 'agent', projectId: null }]);
+  });
+
+  it('AC-19: DELETE /agents/:slug leaves no AGENT binding for that agent', async () => {
+    const res = await request(h.server)
+      .post('/api/agents')
+      .set(auth(rootToken))
+      .send({ name: 'Doomed Agent', slug: 'doomed-agent', roles: ['DEVELOPER'] });
+    expect(res.status).toBe(201);
+    const agentId = data<{ agent: { id: string } }>(res).agent.id;
+
+    await request(h.server).delete('/api/agents/doomed-agent').set(auth(rootToken)).expect(200);
+
+    expect(await h.db.roleBinding.count({ where: { principalType: 'AGENT', principalId: agentId } })).toBe(0);
+  });
+
+  it('AC-20: demoting an admin revokes their earlier access token', async () => {
+    const target = await createUser('token-user@koda.test', 'ADMIN');
+    const token = await loginToken(h.server, 'token-user@koda.test');
+    await request(h.server).get('/api/auth/me').set(auth(token)).expect(200);
+
+    await patchUser(target.id, { role: 'MEMBER' }).expect(200);
+
+    await request(h.server).get('/api/auth/me').set(auth(token)).expect(401);
+  });
+
+  it('AC-21: demoting a user who holds owner and admin bindings leaves only the owner binding', async () => {
+    const target = await createUser('owner-admin@koda.test', 'ADMIN');
+    await grantOwner(target.id);
+
+    await patchUser(target.id, { role: 'MEMBER' }).expect(200);
+
+    // Of the two global admin roles, only `owner` survives; the baseline `member` is untouched.
+    const bindings = await h.boundRoles('USER', target.id);
+    expect(bindings).toHaveLength(2);
+    expect(bindings).toContainEqual({ roleKey: 'owner', projectId: null });
+    expect(bindings).toContainEqual({ roleKey: 'member', projectId: null });
+  });
+
+  it('AC-22: an Owner keeps User.role ADMIN after the admin binding is removed', async () => {
+    const target = await createUser('owner-admin2@koda.test', 'ADMIN');
+    await grantOwner(target.id);
+
+    await patchUser(target.id, { role: 'MEMBER' }).expect(200);
+
+    expect(await h.storedRole(target.id)).toBe('ADMIN');
+  });
+
+  it('AC-23: demoting a legacy ADMIN that holds no binding stores User.role MEMBER', async () => {
+    const legacy = await h.db.user.create({
+      data: { email: 'legacy-admin@koda.test', name: 'Legacy', passwordHash: 'not-a-real-hash', role: 'ADMIN' },
+    });
+    expect(await h.boundRoles('USER', legacy.id)).toEqual([]);
+
+    await patchUser(legacy.id, { role: 'MEMBER' }).expect(200);
+
+    expect(await h.storedRole(legacy.id)).toBe('MEMBER');
+  });
+
+  it('AC-26: disabling a user without a role change still revokes their session', async () => {
+    const target = await createUser('disabled-user@koda.test');
+    const token = await loginToken(h.server, 'disabled-user@koda.test');
+    await request(h.server).get('/api/auth/me').set(auth(token)).expect(200);
+
+    await patchUser(target.id, { disabled: true }).expect(200);
+
+    await request(h.server).get('/api/auth/me').set(auth(token)).expect(401);
+  });
+
+  it('B4: a failed baseline binding rolls the admin-created user back', async () => {
+    // No `member` role row: the baseline binding cannot be written, so the user row must not survive.
+    // The role's bindings are removed first (the relation is RESTRICT) and put back afterwards.
+    const member = await h.db.role.findUniqueOrThrow({ where: { key: 'member' } });
+    const memberBindings = await h.db.roleBinding.findMany({ where: { roleId: member.id } });
+    await h.db.roleBinding.deleteMany({ where: { roleId: member.id } });
+    await h.db.role.delete({ where: { key: 'member' } });
+
+    try {
+      const res = await request(h.server)
+        .post('/api/admin/users')
+        .set(auth(rootToken))
+        .send({
+          email: 'no-baseline@koda.test',
+          name: 'No baseline',
+          password: TEST_PASSWORD,
+          role: 'MEMBER',
+        });
+
+      expect(res.status).toBe(404);
+      expect(await h.db.user.count({ where: { email: 'no-baseline@koda.test' } })).toBe(0);
+    } finally {
+      await h.db.role.create({
+        data: {
+          id: member.id,
+          key: member.key,
+          name: member.name,
+          description: member.description,
+          scope: member.scope,
+          system: member.system,
+          locked: member.locked,
+          permissions: member.permissions as Prisma.InputJsonValue,
+        },
+      });
+      await h.db.roleBinding.createMany({ data: memberBindings });
+    }
+
+    // With the baseline writable again the same request succeeds, and nothing of the failed attempt
+    // is left behind.
+    const retry = await createUser('no-baseline@koda.test');
+
+    expect(await h.boundRoles('USER', retry.id)).toEqual([{ roleKey: 'member', projectId: null }]);
+  });
+});

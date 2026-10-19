@@ -44,6 +44,7 @@ import { MonitoringModule } from './monitoring/monitoring.module';
 import { FleetModule } from './fleet/fleet.module';
 import { HomeModule } from './home/home.module';
 import { SkillsModule } from './skills/skills.module';
+import { PermissionsModule } from './permissions/permissions.module';
 import { appConfig } from './config/app.config';
 import { authConfig } from './config/auth.config';
 import { DATABASE_CFG, IDatabaseConfig, databaseConfig } from './config/database.config';
@@ -136,6 +137,8 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     HomeModule,
     ProjectInvitesModule,
     SkillsModule,
+    // Permissions P1a: imports the module so SystemRoleSeeder seeds the system roles at bootstrap.
+    PermissionsModule,
   ],
   providers: [
     // H2: register the throttler guard globally so @Throttle decorators are enforced.

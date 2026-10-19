@@ -13,6 +13,7 @@ import { AgentsService } from './agents.service';
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
+import { MembershipService } from '../permissions/membership.service';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 
@@ -24,6 +25,9 @@ describe('AgentsService create path (US-003)', () => {
     create: Mock;
     createRolesAndCapabilities: Mock;
   };
+
+  /** Permissions P1a (US-004): the create path binds the new agent to the baseline. */
+  let membership: { bindBaseline: Mock; afterCommit: Mock };
 
   // Records which txManager.run callback was active while a repository call ran.
   let activeRunId: number | null = null;
@@ -67,6 +71,13 @@ describe('AgentsService create path (US-003)', () => {
       createRolesAndCapabilities: vi.fn().mockResolvedValue(undefined),
     };
 
+    membership = {
+      bindBaseline: vi.fn().mockResolvedValue(undefined),
+      // B3: the baseline write joins the create transaction; the stub resolves the callback and has
+      // nothing of its own to invalidate.
+      afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
+    };
+
     txManager = {
       run: vi.fn(async (fn: () => Promise<unknown>) => {
         const runId = ++runCounter;
@@ -88,6 +99,7 @@ describe('AgentsService create path (US-003)', () => {
         { provide: PrismaAgentRepository, useValue: agentRepo },
         { provide: AUTH_CFG, useValue: authConfig },
         { provide: TRANSACTION_MANAGER, useValue: txManager },
+        { provide: MembershipService, useValue: membership },
         {
           provide: KodaDomainWriter,
           useValue: { writeAgentAction: vi.fn().mockResolvedValue({ canonicalId: 'evt-1' }) },
@@ -199,5 +211,20 @@ describe('AgentsService create path (US-003)', () => {
     expect(writes[0].runId).not.toBeNull();
     expect(writes[0].runId).toBe(writes[1].runId);
     expect(txManager.run).toHaveBeenCalledTimes(1);
+  });
+
+  it('US-004: binds the created agent to the baseline once, inside the create transaction', async () => {
+    const bindings: Array<{ principal: unknown; runId: number | null }> = [];
+    membership.bindBaseline.mockImplementation(async (principal: unknown) => {
+      bindings.push({ principal, runId: activeRunId });
+    });
+
+    await service.generateApiKey({
+      name: 'Subrina Coder',
+      slug: 'subrina-coder',
+      roles: ['DEVELOPER'],
+    });
+
+    expect(bindings).toEqual([{ principal: { type: 'AGENT', id: mockAgent.id }, runId: 1 }]);
   });
 });

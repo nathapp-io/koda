@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
+import { MembershipService } from '../permissions/membership.service';
 import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { createHmac } from 'crypto';
 import { randomBytes } from 'crypto';
@@ -92,6 +93,15 @@ describe('AgentsService', () => {
     writeAgentAction: vi.fn().mockResolvedValue({ canonicalId: 'evt-1' }),
   };
 
+  /** Permissions P1a (US-004): AgentsService injects the permissions module's MembershipService. */
+  const mockMembership = {
+    bindOwnerIfFirst: vi.fn(),
+    bindBaseline: vi.fn(),
+    setGlobalAdmin: vi.fn(),
+    removeAllBindings: vi.fn(),
+    afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
+  };
+
   // US-003: AgentsService wraps the agent create in txManager.run — the provider
   // must exist or the module cannot be compiled.
   const mockTxManager = {
@@ -107,6 +117,7 @@ describe('AgentsService', () => {
         { provide: PrismaAgentRepository, useValue: mockAgentRepo },
         { provide: AUTH_CFG, useValue: mockAuthConfig },
         { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
+        { provide: MembershipService, useValue: mockMembership },
         { provide: KodaDomainWriter, useValue: mockKodaDomainWriter },
       ],
     }).compile();
@@ -116,6 +127,8 @@ describe('AgentsService', () => {
     kodaDomainWriter = module.get(KodaDomainWriter);
 
     mockAgentRepo.createRolesAndCapabilities.mockResolvedValue(undefined);
+    mockMembership.bindBaseline.mockResolvedValue(undefined);
+    mockMembership.removeAllBindings.mockResolvedValue(undefined);
 
     mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
     mockAgentRepo.replaceCapabilities.mockResolvedValue(undefined);
@@ -230,6 +243,7 @@ describe('AgentsService', () => {
             { provide: PrismaAgentRepository, useValue: mockAgentRepo },
             { provide: AUTH_CFG, useValue: { ...mockAuthConfig, apiKeySecret: undefined } },
             { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
+            { provide: MembershipService, useValue: mockMembership },
             { provide: KodaDomainWriter, useValue: mockKodaDomainWriter },
           ],
         }).compile();
@@ -268,6 +282,44 @@ describe('AgentsService', () => {
         expect(result.agent.slug).toBe(mockAgent.slug);
         expect(result.agent.status).toBe(mockAgent.status);
         expect('apiKeyHash' in result.agent).toBe(false);
+      });
+
+      it('binds the new agent to the baseline inside the create transaction (US-004)', async () => {
+        mockAgentRepo.create.mockResolvedValue(mockAgent);
+        // Track nesting depth so the assertion can tell "inside txManager.run" from "after it".
+        let activeRuns = 0;
+        let boundInsideRun = false;
+        mockTxManager.run.mockImplementation(async (fn: () => Promise<unknown>) => {
+          activeRuns += 1;
+          try {
+            return await fn();
+          } finally {
+            activeRuns -= 1;
+          }
+        });
+        mockMembership.bindBaseline.mockImplementation(async () => {
+          boundInsideRun = activeRuns > 0;
+        });
+
+        try {
+          await service.generateApiKey({ name: 'Test Agent', slug: 'test-agent', roles: ['DEVELOPER'] });
+        } finally {
+          mockTxManager.run.mockImplementation((fn: () => Promise<unknown>) => fn());
+        }
+
+        expect(mockMembership.bindBaseline).toHaveBeenCalledTimes(1);
+        expect(mockMembership.bindBaseline).toHaveBeenCalledWith({ type: 'AGENT', id: mockAgent.id });
+        // The binding is part of the create: it commits with the agent row or not at all.
+        expect(boundInsideRun).toBe(true);
+        expect(mockTxManager.run).toHaveBeenCalledTimes(1);
+      });
+
+      it('does not bind a baseline when the caller only rotates an existing key', async () => {
+        mockAgentRepo.updateApiKeyHash.mockResolvedValue(mockAgent);
+
+        await service.generateApiKey(mockAgent.id);
+
+        expect(mockMembership.bindBaseline).not.toHaveBeenCalled();
       });
     });
 
@@ -708,6 +760,29 @@ describe('AgentsService', () => {
     });
   });
 
+  describe('remove', () => {
+    it('drops the agent and every binding it held (US-004)', async () => {
+      mockAgentRepo.findBySlug.mockResolvedValue(mockAgent);
+      mockAgentRepo.deleteBySlug.mockResolvedValue(undefined);
+
+      const removed = await service.remove('test-agent');
+
+      expect(agentRepo.deleteBySlug).toHaveBeenCalledWith('test-agent');
+      // `RoleBinding.principalId` has no foreign key, so the rows outlive the agent row.
+      expect(mockMembership.removeAllBindings).toHaveBeenCalledWith({ type: 'AGENT', id: mockAgent.id });
+      expect(removed.slug).toBe(mockAgent.slug);
+    });
+
+    it('404s an unknown slug without touching bindings', async () => {
+      mockAgentRepo.findBySlug.mockResolvedValue(null);
+
+      await expect(service.remove('nonexistent')).rejects.toBeInstanceOf(NotFoundAppException);
+
+      expect(agentRepo.deleteBySlug).not.toHaveBeenCalled();
+      expect(mockMembership.removeAllBindings).not.toHaveBeenCalled();
+    });
+  });
+
   describe('suggestTicket', () => {
     const mockProject = { id: 'project-1', slug: 'koda', key: 'KT' };
 
@@ -802,6 +877,8 @@ describe('AgentsService', () => {
         mockAgentRepo as never,
         { ...mockAuthConfig, agentProjectScoping: false },
         mockTxManager as never,
+        // Permissions P1a (US-004): MembershipService is the required fourth parameter.
+        mockMembership as never,
         mockKodaDomainWriter as never,
       );
 
@@ -972,6 +1049,7 @@ describe('AgentsService', () => {
           { provide: PrismaAgentRepository, useValue: mockAgentRepo },
           { provide: AUTH_CFG, useValue: { ...mockAuthConfig, agentProjectScoping: false } },
           { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
+          { provide: MembershipService, useValue: mockMembership },
           { provide: KodaDomainWriter, useValue: mockKodaDomainWriter },
         ],
       }).compile();

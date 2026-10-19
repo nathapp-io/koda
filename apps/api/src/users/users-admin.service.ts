@@ -8,11 +8,15 @@ import { ConflictAppException } from '../common/exceptions/conflict-app.exceptio
 import { remapPage } from '../common/dto/koda-page.query';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
 import { userAuthStateCacheKey, userTokenVersionCacheTag } from '../auth/token-version.cache';
+import { MembershipService } from '../permissions/membership.service';
 import { PrismaUsersRepository } from './prisma-users.repository';
 import { UserListFilters } from './domain/user-admin.domain';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserAdminDto } from './dto/user-admin.dto';
+
+/** Who the admin routes record as the granter of a global admin binding they created. */
+const ADMIN_USERS_GRANTER = { type: 'SYSTEM', id: 'admin-users' } as const;
 
 @Injectable()
 export class UsersAdminService {
@@ -20,6 +24,7 @@ export class UsersAdminService {
     private readonly usersRepo: PrismaUsersRepository,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly cache: CacheManager,
+    private readonly membership: MembershipService,
   ) {}
 
   async list(filters: UserListFilters, page: IPageOption): Promise<IPageResult<UserAdminDto>> {
@@ -36,7 +41,26 @@ export class UsersAdminService {
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
     try {
-      const user = await this.usersRepo.createUser({ email, name: dto.name, passwordHash, role: dto.role });
+      // The user row and its baseline binding are one unit (B4): a user whose binding write failed must
+      // not stay behind. `setGlobalAdmin` keeps `User.role` in step with the binding model, and the
+      // cache invalidation it defers lands only after the commit.
+      const user = await this.membership.afterCommit(() =>
+        this.txManager.run(async () => {
+          const created = await this.usersRepo.createUser({
+            email,
+            name: dto.name,
+            passwordHash,
+            role: dto.role,
+          });
+          // Permissions P1a (US-004): every user starts at the member baseline; an ADMIN also gets the
+          // global admin binding.
+          await this.membership.bindBaseline({ type: 'USER', id: created.id });
+          if (dto.role === 'ADMIN') {
+            await this.membership.setGlobalAdmin(created.id, true, ADMIN_USERS_GRANTER);
+          }
+          return created;
+        }),
+      );
       return UserAdminDto.from(user);
     } catch (error) {
       if (isUniqueViolation(error, 'email')) throw new ConflictAppException({}, 'users');
@@ -51,25 +75,36 @@ export class UsersAdminService {
       throw new ForbiddenAppException({}, 'users.self');
     }
 
-    const updated = await this.txManager.run(async () => {
-      await this.usersRepo.lockUserAdministration();
-      const target = await this.usersRepo.findById(userId);
-      if (!target) throw new NotFoundAppException({}, 'users');
+    // `setGlobalAdmin` runs inside this transaction (B3): its cache invalidation is deferred to the
+    // `afterCommit` scope, so no request can recompute the user's permissions from the pre-commit state.
+    const updated = await this.membership.afterCommit(() =>
+      this.txManager.run(async () => {
+        await this.usersRepo.lockUserAdministration();
+        const target = await this.usersRepo.findById(userId);
+        if (!target) throw new NotFoundAppException({}, 'users');
 
-      const removesActiveAdmin = target.role === 'ADMIN' && !target.disabled && (demotes || disables);
-      if (removesActiveAdmin && (await this.usersRepo.countActiveAdmins()) <= 1) {
-        throw new ConflictAppException({}, 'users.lastAdmin');
-      }
+        const removesActiveAdmin = target.role === 'ADMIN' && !target.disabled && (demotes || disables);
+        if (removesActiveAdmin && (await this.usersRepo.countActiveAdmins()) <= 1) {
+          throw new ConflictAppException({}, 'users.lastAdmin');
+        }
 
-      // The access token carries `role`, so a role change revokes it as well.
-      const roleChanged = patch.role !== undefined && patch.role !== target.role;
-      const newlyDisabled = disables && !target.disabled;
-      return this.usersRepo.updateUser(userId, {
-        role: patch.role,
-        disabled: patch.disabled,
-        bumpTokenVersion: roleChanged || newlyDisabled,
-      });
-    });
+        const newlyDisabled = disables && !target.disabled;
+
+        // Permissions P1a (US-004): the role column belongs to the binding model. `setGlobalAdmin`
+        // removes only a global `admin` binding (an Owner keeps `ADMIN`) and revokes the user's tokens
+        // when the role changed, so `update` no longer writes `role` and no longer bumps for it.
+        if (patch.role !== undefined) {
+          await this.membership.setGlobalAdmin(userId, patch.role === 'ADMIN', { type: 'USER', id: actorId });
+        }
+
+        // Read back through the update so the response carries the stored role — after a requested
+        // demotion of an Owner that is still `ADMIN`, not the `MEMBER` the patch asked for.
+        return this.usersRepo.updateUser(userId, {
+          disabled: patch.disabled,
+          bumpTokenVersion: newlyDisabled,
+        });
+      }),
+    );
 
     // Tag invalidation covers Redis deployments (tag registry); under the
     // MEMORY strategy there is no registry and tag mode is a no-op, so the

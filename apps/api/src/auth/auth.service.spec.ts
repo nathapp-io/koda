@@ -5,9 +5,11 @@ import { CacheManager } from '@nathapp/nestjs-cache';
 import { AuthService } from './auth.service';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import { ConfigService } from '@nestjs/config';
-import { AppException, AuthException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { AppException, AuthException, ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { Prisma } from '../generated/prisma/client';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AUTH_CFG } from '../config/auth.config';
+import { MembershipService } from '../permissions/membership.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { IPrincipal } from './types';
 // Default (not `import * as`): the interop namespace object has
@@ -43,7 +45,24 @@ describe('AuthService', () => {
     get: vi.fn(),
   };
 
-  const mockAuthConfig = { registrationEnabled: false };
+  const mockAuthConfig = {
+    registrationEnabled: false,
+    ownerEmail: undefined as string | undefined,
+  };
+
+  const mockMembership = {
+    bindOwnerIfFirst: vi.fn(),
+    bindBaseline: vi.fn(),
+    // B3/B4: the registration transaction is handed to MembershipService, which flushes its deferred
+    // cache invalidations when the callback resolves.
+    afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
+  };
+
+  const mockTxManager = {
+    run: vi.fn((fn: () => Promise<unknown>) => fn()),
+    getClient: vi.fn(),
+    isInTransaction: vi.fn(() => false),
+  };
 
   const mockJwtStrategyProvider = {
     sign: vi.fn(),
@@ -64,6 +83,7 @@ describe('AuthService', () => {
     mockJwtStrategyProvider.sign.mockReset();
     mockJwtRefreshStrategyProvider.sign.mockReset();
     mockCacheManager.invalidate.mockReset();
+    Object.values(mockMembership).forEach((m) => m.mockReset());
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -71,6 +91,8 @@ describe('AuthService', () => {
         { provide: PrismaAuthRepository, useValue: mockAuthRepository },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: AUTH_CFG, useValue: mockAuthConfig },
+        { provide: MembershipService, useValue: mockMembership },
+        { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
         { provide: JwtStrategyProvider, useValue: mockJwtStrategyProvider },
         { provide: JwtRefreshStrategyProvider, useValue: mockJwtRefreshStrategyProvider },
         { provide: CacheManager, useValue: mockCacheManager },
@@ -85,7 +107,10 @@ describe('AuthService', () => {
     mockJwtRefreshStrategyProvider.sign.mockReturnValue('mock-token');
     mockAuthRepository.findAnyUser.mockResolvedValue(null);
     mockAuthRepository.findAnyUserAndCreate.mockImplementation(async (data) => ({ user: { ...mockUser, ...data, role: 'ADMIN' }, firstUser: true }));
+    mockMembership.bindOwnerIfFirst.mockResolvedValue(undefined);
+    mockMembership.bindBaseline.mockResolvedValue(undefined);
     mockAuthConfig.registrationEnabled = false;
+    mockAuthConfig.ownerEmail = undefined;
   });
 
   afterEach(() => {
@@ -164,6 +189,118 @@ describe('AuthService', () => {
       // (refuse before bcrypt when registration is closed), not a write path.
       expect(authRepo.createUser).not.toHaveBeenCalled();
       expect(authRepo.findAnyUserAndCreate).toHaveBeenCalledTimes(1);
+    });
+
+    it('binds the first user as Owner and every new user to the baseline', async () => {
+      mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({
+        user: { ...mockUser, id: 'first-user', role: 'ADMIN' },
+        firstUser: true,
+      });
+
+      await service.register({ email: 'first@example.com', name: 'First', password: 'Password123!' });
+
+      expect(mockMembership.bindOwnerIfFirst).toHaveBeenCalledWith('first-user', true);
+      expect(mockMembership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'first-user' });
+    });
+
+    it('does not bind Owner for a user that is not the first', async () => {
+      mockAuthConfig.registrationEnabled = true;
+      mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({
+        user: { ...mockUser, id: 'second-user' },
+        firstUser: false,
+      });
+
+      await service.register({ email: 'second@example.com', name: 'Second', password: 'Password123!' });
+
+      expect(mockMembership.bindOwnerIfFirst).toHaveBeenCalledWith('second-user', false);
+      expect(mockMembership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'second-user' });
+    });
+
+    it('B4: a failed Owner binding rejects and issues no session', async () => {
+      mockAuthConfig.registrationEnabled = true;
+      mockAuthRepository.findUserByEmail.mockResolvedValueOnce(null);
+      mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({
+        user: { ...mockUser, id: 'first-user', role: 'ADMIN' },
+        firstUser: true,
+      });
+      mockMembership.bindOwnerIfFirst.mockRejectedValueOnce(
+        new NotFoundAppException({}, 'permissions.roleNotFound'),
+      );
+
+      await expect(
+        service.register({ email: 'first@example.com', name: 'First', password: 'Password123!' }),
+      ).rejects.toBeInstanceOf(NotFoundAppException);
+
+      // The user row and its bindings are one transaction, so the failed binding takes the row with it
+      // and the Owner seat stays free. The response is the failure, never a session.
+      expect(mockMembership.bindBaseline).not.toHaveBeenCalled();
+      expect(mockJwtStrategyProvider.sign).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('owner bootstrap (KODA_OWNER_EMAIL)', () => {
+    const dto = { email: 'other@koda.test', name: 'Other', password: 'Password123!' };
+
+    it('refuses the first registration when the email is not the configured owner', async () => {
+      mockAuthConfig.ownerEmail = 'owner@koda.test';
+      mockAuthRepository.findAnyUser.mockResolvedValue(null);
+      const hashSpy = vi.spyOn(bcrypt, 'hash');
+
+      await expect(service.register(dto)).rejects.toBeInstanceOf(ForbiddenAppException);
+
+      // Refused before creating anything, and before paying for bcrypt.
+      expect(mockAuthRepository.findAnyUserAndCreate).not.toHaveBeenCalled();
+      expect(hashSpy).not.toHaveBeenCalled();
+      expect(mockMembership.bindBaseline).not.toHaveBeenCalled();
+      hashSpy.mockRestore();
+    });
+
+    it('accepts the first registration when the canonical email is the configured owner', async () => {
+      mockAuthConfig.ownerEmail = 'owner@koda.test';
+      mockAuthRepository.findAnyUser.mockResolvedValue(null);
+      mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({
+        user: { ...mockUser, id: 'owner-user', email: 'owner@koda.test', role: 'ADMIN' },
+        firstUser: true,
+      });
+
+      // The whitespace and casing are the DTO's, not the owner email's: both sides are canonicalised.
+      await service.register({ ...dto, email: ' Owner@Koda.test ' });
+
+      expect(mockAuthRepository.findAnyUserAndCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'owner@koda.test' }),
+        { allowWhenUsersExist: false },
+      );
+      expect(mockMembership.bindOwnerIfFirst).toHaveBeenCalledWith('owner-user', true);
+    });
+
+    it('applies the owner rule only while the users table is empty', async () => {
+      mockAuthConfig.ownerEmail = 'owner@koda.test';
+      mockAuthConfig.registrationEnabled = true;
+      // One user already exists, so the Owner seat is taken and the gate is open.
+      mockAuthRepository.findAnyUser.mockResolvedValue({ id: 'owner-user' });
+      mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({
+        user: { ...mockUser, id: 'late-user' },
+        firstUser: false,
+      });
+
+      await service.register(dto);
+
+      expect(mockAuthRepository.findAnyUserAndCreate).toHaveBeenCalled();
+      expect(mockMembership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'late-user' });
+    });
+
+    it('lets any email take the first registration when no owner email is configured', async () => {
+      mockAuthConfig.ownerEmail = undefined;
+      mockAuthRepository.findAnyUser.mockResolvedValue(null);
+      mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({
+        user: { ...mockUser, id: 'first-user', role: 'ADMIN' },
+        firstUser: true,
+      });
+
+      await service.register(dto);
+
+      expect(mockAuthRepository.findAnyUserAndCreate).toHaveBeenCalled();
+      expect(mockMembership.bindOwnerIfFirst).toHaveBeenCalledWith('first-user', true);
     });
   });
 

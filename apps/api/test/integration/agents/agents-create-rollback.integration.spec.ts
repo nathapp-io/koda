@@ -38,6 +38,15 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
   let app: NestFastifyApplication;
   let prisma: PrismaService<PrismaClient>;
 
+  /** The `AGENT` bindings that exist right now, as an order-independent id set. */
+  async function agentBindingIds(): Promise<string[]> {
+    const rows = await prisma.client.roleBinding.findMany({
+      where: { principalType: 'AGENT' },
+      select: { id: true },
+    });
+    return rows.map((row) => row.id).sort();
+  }
+
   beforeAll(async () => {
     if (!DATABASE_URL) return;
 
@@ -97,6 +106,8 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
   }
 
   it('AC7: a failing agentRoleEntry.createMany rolls back the agent row (real Prisma transaction)', async () => {
+    const bindingsBefore = await agentBindingIds();
+
     await withAgentRoleEntryUnavailable(async () => {
       const res = await request(app.getHttpServer())
         .post('/api/agents')
@@ -124,9 +135,14 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
 
     const remainingCapabilityEntries = await prisma.client.agentCapabilityEntry.count();
     expect(remainingCapabilityEntries).toBe(0);
+
+    // AC25: the rollback takes the new agent's baseline binding with it.
+    expect(await agentBindingIds()).toEqual(bindingsBefore);
   });
 
   it('AC7 boundary: a failing agentCapabilityEntry.createMany also rolls back the agent row', async () => {
+    const bindingsBefore = await agentBindingIds();
+
     await prisma.client.$executeRawUnsafe(
       'ALTER TABLE "AgentCapabilityEntry" RENAME TO "AgentCapabilityEntry_disabled"',
     );
@@ -155,6 +171,39 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
 
     const remainingCapabilityEntries = await prisma.client.agentCapabilityEntry.count();
     expect(remainingCapabilityEntries).toBe(0);
+
+    // AC25: the rollback takes the new agent's baseline binding with it.
+    expect(await agentBindingIds()).toEqual(bindingsBefore);
+  });
+
+  /**
+   * US-004 AC25 — the third rollback source: the baseline binding itself. The binding is written last
+   * inside the create transaction, so this also proves it is *inside* that transaction rather than a
+   * separate write that would survive a rollback.
+   */
+  it('AC25: a failing baseline-binding write rolls back the agent row and leaves no binding', async () => {
+    const bindingsBefore = await agentBindingIds();
+
+    await prisma.client.$executeRawUnsafe('ALTER TABLE "RoleBinding" RENAME TO "RoleBinding_disabled"');
+    try {
+      const res = await request(app.getHttpServer())
+        .post('/api/agents')
+        .send({
+          name: 'Binding Failure Agent',
+          slug: 'binding-failure-agent',
+          roles: ['DEVELOPER'],
+          capabilities: ['typescript'],
+        });
+
+      expect(res.status).toBe(500);
+    } finally {
+      await prisma.client.$executeRawUnsafe('ALTER TABLE "RoleBinding_disabled" RENAME TO "RoleBinding"');
+    }
+
+    expect(await prisma.client.agent.findUnique({ where: { slug: 'binding-failure-agent' } })).toBeNull();
+    expect(await prisma.client.agentRoleEntry.count()).toBe(0);
+    expect(await prisma.client.agentCapabilityEntry.count()).toBe(0);
+    expect(await agentBindingIds()).toEqual(bindingsBefore);
   });
 
   it('AC7 smoke: a successful create after rollback leaves the agent row intact', async () => {
@@ -171,5 +220,7 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
     const persisted = await prisma.client.agent.findUnique({ where: { slug: 'healthy-agent' } });
     expect(persisted).not.toBeNull();
     expect(persisted?.name).toBe('Healthy Agent');
+    // US-004: the successful create committed exactly one new AGENT baseline binding.
+    expect(await agentBindingIds()).toHaveLength(1);
   });
 });
