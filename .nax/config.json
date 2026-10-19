@@ -89,7 +89,8 @@
                     "search_code",
                     "detect_changes",
                     "check_index_coverage",
-                    "list_projects"
+                    "list_projects",
+                    "index_project"
                 ]
             }
         }
