@@ -3,7 +3,7 @@
   "feature": "permissions-p1-membership",
   "branchName": "feat/permissions-p1-membership",
   "createdAt": "2026-10-19T00:00:00Z",
-  "updatedAt": "2026-10-19T04:34:04.804Z",
+  "updatedAt": "2026-10-19T04:59:48.125Z",
   "userStories": [
     {
       "id": "US-001",
@@ -189,8 +189,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -202,7 +202,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.2400000000000002,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-19T04:34:08.786Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/tickets/prisma-tickets.repository.ts",
@@ -236,7 +248,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4174f69da5f6ecbca4d12c7820b9c32fb2a8e535"
     },
     {
       "id": "US-004",
