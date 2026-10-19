@@ -2245,7 +2245,7 @@
             "description": "Page of members: { total, current, size, hasNext, hasPrev, records, canManage, viewerRole }"
           },
           "403": {
-            "description": "Not a project member"
+            "description": "Not a project member, or member.read is missing"
           },
           "404": {
             "description": "Project not found"
@@ -2295,7 +2295,7 @@
             }
           },
           "403": {
-            "description": "Project admin role required"
+            "description": "Not a project member, or member.add is missing"
           },
           "404": {
             "description": "Project or user not found"
@@ -2309,7 +2309,7 @@
             "bearer": []
           }
         ],
-        "summary": "Add an existing user by email (project admin)",
+        "summary": "Add an existing user by email (member.add)",
         "tags": [
           "projects"
         ]
@@ -2357,6 +2357,9 @@
               }
             }
           },
+          "403": {
+            "description": "Not a project member, or member.role.update is missing"
+          },
           "404": {
             "description": "Not a member"
           },
@@ -2369,7 +2372,7 @@
             "bearer": []
           }
         ],
-        "summary": "Change a member's project role (project admin)",
+        "summary": "Change a member's project role (member.role.update)",
         "tags": [
           "projects"
         ]
@@ -2398,6 +2401,9 @@
           "200": {
             "description": "Removed"
           },
+          "403": {
+            "description": "Not a project member, or member.remove is missing"
+          },
           "404": {
             "description": "Not a member"
           },
@@ -2410,7 +2416,7 @@
             "bearer": []
           }
         ],
-        "summary": "Remove a member (project admin)",
+        "summary": "Remove a member (member.remove)",
         "tags": [
           "projects"
         ]
@@ -10703,7 +10709,7 @@
             }
           },
           "403": {
-            "description": "Project admin role required"
+            "description": "Not a project member, or invite.read is missing"
           },
           "404": {
             "description": "Project not found"
@@ -10714,7 +10720,7 @@
             "bearer": []
           }
         ],
-        "summary": "List project invites (project admin)",
+        "summary": "List project invites (invite.read)",
         "tags": [
           "projects"
         ]
@@ -10761,7 +10767,7 @@
             }
           },
           "403": {
-            "description": "Project admin role required"
+            "description": "Not a project member, or invite.create is missing"
           },
           "404": {
             "description": "Project not found"
@@ -10775,7 +10781,7 @@
             "bearer": []
           }
         ],
-        "summary": "Add an existing user or invite a new address (project admin)",
+        "summary": "Add an existing user or invite a new address (invite.create)",
         "tags": [
           "projects"
         ]
@@ -10822,7 +10828,7 @@
             }
           },
           "403": {
-            "description": "Project admin role required"
+            "description": "Not a project member, or invite.resend is missing"
           },
           "404": {
             "description": "Project or invite not found"
@@ -10836,7 +10842,7 @@
             "bearer": []
           }
         ],
-        "summary": "Rotate a pending invite token and resend the invite email (project admin)",
+        "summary": "Rotate a pending invite token and resend the invite email (invite.resend)",
         "tags": [
           "projects"
         ]
@@ -10868,7 +10874,7 @@
             "description": "Invite cancelled"
           },
           "403": {
-            "description": "Project admin role required"
+            "description": "Not a project member, or invite.cancel is missing"
           },
           "404": {
             "description": "Project or invite not found"
@@ -10882,7 +10888,7 @@
             "bearer": []
           }
         ],
-        "summary": "Cancel a pending invite (project admin)",
+        "summary": "Cancel a pending invite (invite.cancel)",
         "tags": [
           "projects"
         ]

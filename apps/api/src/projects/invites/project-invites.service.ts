@@ -26,6 +26,11 @@ const MEMBER_ADDED_LOCALE = 'en';
  * Fleet S4b US-004: project invites. `create` either adds an existing active user directly or mints a
  * one-time invite for an unknown address (raw token returned once, hash stored); `list` reports the
  * effective status and never exposes token material.
+ *
+ * Permissions P1 (US-008): the four routes carry `invite.read`/`invite.create`/`invite.resend`/
+ * `invite.cancel`, so this service keeps no admin assertion — the seeded non-admin project roles
+ * exclude `invite.read`, which keeps the listing (and the whole invite surface) project-admin only.
+ * The invite lifecycle rules (a PENDING row only, final rows answer 409) are unchanged.
  */
 @Injectable()
 export class ProjectInvitesService {
@@ -49,7 +54,6 @@ export class ProjectInvitesService {
     locale: string,
   ): Promise<InviteCreateResultDto> {
     const projectId = await this.access.findProjectIdBySlug(slug);
-    await this.access.assertProjectAdmin(projectId, principal);
 
     const email = dto.email.trim().toLowerCase();
     const userId = await this.members.findUserIdByEmail(email);
@@ -60,7 +64,6 @@ export class ProjectInvitesService {
 
   async list(slug: string, principal: KodaPrincipal): Promise<InviteDto[]> {
     const projectId = await this.access.findProjectIdBySlug(slug);
-    await this.access.assertProjectAdmin(projectId, principal);
 
     const now = new Date();
     const records = await this.invites.list(projectId);
@@ -79,7 +82,6 @@ export class ProjectInvitesService {
     locale: string,
   ): Promise<InviteResendResultDto> {
     const projectId = await this.access.findProjectIdBySlug(slug);
-    await this.access.assertProjectAdmin(projectId, principal);
 
     const invite = await this.invites.findByIdForProject(projectId, id);
     if (!invite) throw new NotFoundAppException({}, 'invites');
@@ -99,7 +101,6 @@ export class ProjectInvitesService {
   /** US-005: cancel is final. A PENDING invite becomes CANCELLED; anything already final answers 409. */
   async cancel(slug: string, id: string, principal: KodaPrincipal): Promise<void> {
     const projectId = await this.access.findProjectIdBySlug(slug);
-    await this.access.assertProjectAdmin(projectId, principal);
 
     const invite = await this.invites.findByIdForProject(projectId, id);
     if (!invite) throw new NotFoundAppException({}, 'invites');

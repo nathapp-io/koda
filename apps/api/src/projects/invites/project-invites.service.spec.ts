@@ -58,6 +58,8 @@ function setup(opts: SetupOptions = {}) {
     }),
     list: vi.fn(async () => [...store]),
     findById: vi.fn(),
+    // US-008: resend and cancel read the pending invite through the project-scoped lookup.
+    findByIdForProject: vi.fn(),
     rotate: vi.fn(),
     cancel: vi.fn(),
   };
@@ -131,13 +133,16 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
     vi.useRealTimers();
   });
 
-  it('AC-2: a non-admin is rejected with 403 before any invite or membership write', async () => {
+  it('US-008 AC-2: create no longer consults the legacy admin gate — the route key refuses non-admins', async () => {
     const { service, invites, membership, access } = setup({ existingUser: null });
+    // The legacy gate is rigged to refuse: a service that still called it would fail now.
     access.assertProjectAdmin.mockRejectedValueOnce(new ForbiddenAppException({}, 'members'));
 
-    await expect(service.create('p', { email: 'new@x.io', role: 'DEVELOPER' }, admin, 'en'))
-      .rejects.toBeInstanceOf(ForbiddenAppException);
-    expect(invites.create).not.toHaveBeenCalled();
+    const result = await service.create('p', { email: 'new@x.io', role: 'DEVELOPER' }, admin, 'en');
+
+    expect(access.assertProjectAdmin).not.toHaveBeenCalled();
+    expect(result.outcome).toBe('INVITED');
+    expect(invites.create).toHaveBeenCalled();
     expect(membership.createBinding).not.toHaveBeenCalled();
   });
 
@@ -283,5 +288,32 @@ describe('ProjectInvitesService.list (S4b US-004)', () => {
     const rows = await service.list('p', admin);
 
     expect(rows.map((row) => row.status)).toEqual(['EXPIRED']);
+  });
+});
+
+describe('ProjectInvitesService legacy admin gate removal (US-008)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('list, resend and cancel read the project and act without asking the legacy admin gate', async () => {
+    const { service, invites, access, seed } = setup({ existingUser: null });
+    // Refusing the legacy gate proves none of the four routes still depends on it.
+    access.assertProjectAdmin.mockRejectedValue(new ForbiddenAppException({}, 'members'));
+    const invite = seed({ id: 'i1', status: 'PENDING', expiresAt: plusDays(NOW, 7) });
+    invites.findByIdForProject.mockResolvedValue(invite);
+    invites.rotate.mockResolvedValue(invite);
+    invites.cancel.mockResolvedValue(true);
+
+    await expect(service.list('p', admin)).resolves.toHaveLength(1);
+    await expect(service.resend('p', 'i1', admin, 'en')).resolves.toHaveProperty('invitePath');
+    await expect(service.cancel('p', 'i1', admin)).resolves.toBeUndefined();
+
+    expect(access.assertProjectAdmin).not.toHaveBeenCalled();
+    expect(access.findProjectIdBySlug).toHaveBeenCalledTimes(3);
   });
 });

@@ -14,6 +14,7 @@ describe('ProjectMembersService', () => {
   let access: Record<string, Mock>;
   let service: ProjectMembersService;
   let membership: Record<string, Mock>;
+  let permissions: Record<string, Mock>;
 
   beforeEach(() => {
     repo = {
@@ -41,25 +42,47 @@ describe('ProjectMembersService', () => {
       createBinding: vi.fn(),
       removeProjectBindings: vi.fn(),
     };
-    service = new ProjectMembersService(repo as never, access as never, txManager as never, membership as never);
+    permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) };
+    service = new ProjectMembersService(
+      repo as never,
+      access as never,
+      txManager as never,
+      membership as never,
+      permissions as never,
+    );
   });
 
-  it('list resolves membership once and derives canManage and viewerRole from it', async () => {
+  it('list resolves membership once for viewerRole and asks member.add for canManage', async () => {
     repo.findMemberPage.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
     access.resolveMembership.mockResolvedValue('ADMIN');
+    permissions.can.mockResolvedValue({ allowed: true, reason: 'granted' });
 
     const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
 
     expect(access.resolveMembership).toHaveBeenCalledTimes(1);
     expect(access.canManageMembers).not.toHaveBeenCalled();
+    // US-008: canManage is the member.add key, asked for the project the slug resolved to.
+    expect(permissions.can).toHaveBeenCalledWith(projectAdmin, 'member.add', { projectId: 'p1' });
     expect(result.canManage).toBe(true);
     expect(result.viewerRole).toBe('ADMIN');
     expect(result.page.total).toBe(0);
   });
 
-  it('list reports viewerRole DEVELOPER and canManage false for a developer', async () => {
+  it('list reports canManage false when member.add is refused, whatever the viewer role is', async () => {
+    repo.findMemberPage.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
+    access.resolveMembership.mockResolvedValue('ADMIN');
+    permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
+
+    const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
+
+    // The legacy role says ADMIN, the key does not: the key decides.
+    expect(result).toEqual(expect.objectContaining({ canManage: false, viewerRole: 'ADMIN' }));
+  });
+
+  it('list reports viewerRole DEVELOPER and canManage false for a developer binding', async () => {
     repo.findMemberPage.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
     access.resolveMembership.mockResolvedValue('DEVELOPER');
+    permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
 
     const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
 
@@ -69,18 +92,25 @@ describe('ProjectMembersService', () => {
   it('list reports viewerRole null and canManage false for an agent', async () => {
     repo.findMemberPage.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
     access.resolveMembership.mockResolvedValue(null);
+    permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
 
     const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
 
     expect(result).toEqual(expect.objectContaining({ canManage: false, viewerRole: null }));
   });
 
-  it('writes are gated by assertProjectAdmin', async () => {
+  it('writes no longer call access.assertProjectAdmin — the route key is the gate', async () => {
     access.assertProjectAdmin.mockRejectedValue(new ForbiddenAppException({}, 'members'));
-    await expect(service.add('proj', { email: 'x@k.t', role: 'VIEWER' }, projectAdmin)).rejects.toBeInstanceOf(ForbiddenAppException);
-    await expect(service.updateRole('proj', 'u1', { role: 'VIEWER' }, projectAdmin)).rejects.toBeInstanceOf(ForbiddenAppException);
-    await expect(service.remove('proj', 'u1', projectAdmin)).rejects.toBeInstanceOf(ForbiddenAppException);
-    expect(membership.createBinding).not.toHaveBeenCalled();
+    repo.findUserByEmail.mockResolvedValue({ id: 'u1', disabled: false });
+    // add reads the member once to refuse a duplicate and once to return the written row.
+    repo.findMember.mockResolvedValueOnce(null).mockResolvedValueOnce(member('u1', 'DEVELOPER'));
+
+    await expect(service.add('proj', { email: 'u1@k.t', role: 'DEVELOPER' }, projectAdmin)).resolves.toMatchObject({ role: 'DEVELOPER' });
+    repo.findMember.mockResolvedValue(member('d1', 'DEVELOPER'));
+    await expect(service.updateRole('proj', 'd1', { role: 'VIEWER' }, projectAdmin)).resolves.toMatchObject({ role: 'DEVELOPER' });
+    await expect(service.remove('proj', 'd1', projectAdmin)).resolves.toBeUndefined();
+
+    expect(access.assertProjectAdmin).not.toHaveBeenCalled();
   });
 
   it('add: unknown email is 404, duplicate member is 409', async () => {

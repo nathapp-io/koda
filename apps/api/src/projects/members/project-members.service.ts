@@ -7,6 +7,7 @@ import { ActorRole } from '../../common/enums';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { MembershipService } from '../../permissions/membership.service';
+import { PermissionService } from '../../permissions/permission.service';
 import { ROLE_KEY_FOR_LEGACY_ROLE } from '../../permissions/legacy-project-roles';
 import { ProjectAccessService } from '../project-access.service';
 import { PrismaProjectMembersRepository } from './prisma-project-members.repository';
@@ -18,6 +19,14 @@ import { ProjectMemberDto } from './dto/project-member.dto';
 const isGlobalAdmin = (principal: KodaPrincipal): boolean =>
   isUserPrincipal(principal) && principal.role === 'ADMIN';
 
+/**
+ * Project membership management over the role bindings (Permissions P1a US-004).
+ *
+ * US-008: the routes carry the `member.*` keys, so this service keeps no admin assertion. `list` still
+ * resolves the caller's membership (its `viewerRole`, and the 403 `projects` a non-member gets), and it
+ * derives `canManage` from `member.add` so the button the UI renders and the write the API accepts
+ * answer to the same key.
+ */
 @Injectable()
 export class ProjectMembersService {
   constructor(
@@ -25,6 +34,7 @@ export class ProjectMembersService {
     private readonly access: ProjectAccessService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly membership: MembershipService,
+    private readonly permissions: PermissionService,
   ) {}
 
   /**
@@ -37,15 +47,19 @@ export class ProjectMembersService {
     page: IPageOption,
   ): Promise<{ page: IPageResult<ProjectMemberDto>; canManage: boolean; viewerRole: string | null }> {
     const projectId = await this.access.findProjectIdBySlug(slug);
-    // One membership read serves the gate, canManage and viewerRole.
+    // One membership read serves the gate and viewerRole; the key decides canManage, so a role
+    // binding that grants `member.read` without `member.add` lists members without managing them.
     const viewerRole = await this.access.resolveMembership(projectId, principal);
-    const mapped = remapPage(await this.membersRepo.findMemberPage(projectId, page), ProjectMemberDto.from);
-    return { page: mapped, canManage: viewerRole === ActorRole.ADMIN, viewerRole };
+    const [memberPage, decision] = await Promise.all([
+      this.membersRepo.findMemberPage(projectId, page),
+      this.permissions.can(principal, 'member.add', { projectId }),
+    ]);
+    return { page: remapPage(memberPage, ProjectMemberDto.from), canManage: decision.allowed, viewerRole };
   }
 
+  /** The route's `member.add` key is the gate: the caller may add anyone the project can hold. */
   async add(slug: string, dto: AddMemberDto, principal: KodaPrincipal): Promise<ProjectMemberDto> {
     const projectId = await this.access.findProjectIdBySlug(slug);
-    await this.access.assertProjectAdmin(projectId, principal);
     const user = await this.membersRepo.findUserByEmail(dto.email);
     if (!user) throw new NotFoundAppException({}, 'members.user');
     // A disabled account cannot act on the project, so it is never granted
@@ -62,9 +76,9 @@ export class ProjectMembersService {
     }));
   }
 
+  /** The route's `member.role.update` key is the gate; the last-admin rule still applies. */
   async updateRole(slug: string, userId: string, dto: UpdateMemberRoleDto, principal: KodaPrincipal): Promise<ProjectMemberDto> {
     const projectId = await this.access.findProjectIdBySlug(slug);
-    await this.access.assertProjectAdmin(projectId, principal);
     const updated = await this.membership.afterCommit(() => this.txManager.run(async () => {
       const current = await this.lockAndFind(projectId, userId);
       await this.assertKeepsAnAdmin(projectId, current, dto.role, principal);
@@ -79,9 +93,9 @@ export class ProjectMembersService {
     return ProjectMemberDto.from(updated);
   }
 
+  /** The route's `member.remove` key is the gate; the last-admin rule still applies. */
   async remove(slug: string, userId: string, principal: KodaPrincipal): Promise<void> {
     const projectId = await this.access.findProjectIdBySlug(slug);
-    await this.access.assertProjectAdmin(projectId, principal);
     await this.membership.afterCommit(() => this.txManager.run(async () => {
       const current = await this.lockAndFind(projectId, userId);
       await this.assertKeepsAnAdmin(projectId, current, null, principal);
