@@ -1455,7 +1455,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "project.create is missing"
           },
           "409": {
             "description": "Conflict - duplicate slug or key"
@@ -1466,7 +1466,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create a new project (admin only)",
+        "summary": "Create a new project",
         "tags": [
           "projects"
         ]
@@ -1506,6 +1506,9 @@
         "responses": {
           "200": {
             "description": "Project found"
+          },
+          "403": {
+            "description": "Not a project member, or project.read is missing"
           },
           "404": {
             "description": "Project not found"
@@ -1554,7 +1557,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "Not a project member, or project.update is missing"
           },
           "404": {
             "description": "Project not found"
@@ -1568,7 +1571,7 @@
             "bearer": []
           }
         ],
-        "summary": "Update a project (admin only)",
+        "summary": "Update a project",
         "tags": [
           "projects"
         ]
@@ -1593,7 +1596,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "Not a project member, or project.delete is missing"
           },
           "404": {
             "description": "Project not found"
@@ -1604,7 +1607,7 @@
             "bearer": []
           }
         ],
-        "summary": "Soft delete a project (admin only)",
+        "summary": "Soft delete a project",
         "tags": [
           "projects"
         ]
@@ -1631,7 +1634,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "Not a project member, or project.ci-token.read is missing"
           },
           "404": {
             "description": "Project not found"
@@ -1642,7 +1645,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get the CI webhook HMAC secret (admin only)",
+        "summary": "Get the CI webhook HMAC secret",
         "tags": [
           "projects"
         ]
@@ -1749,7 +1752,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - no project access"
+            "description": "Not a project member, or project.agent.read is missing"
           },
           "404": {
             "description": "Project not found"
@@ -1760,7 +1763,7 @@
             "bearer": []
           }
         ],
-        "summary": "List the project agent roster (admin or member; un-paged)",
+        "summary": "List the project agent roster (any member; un-paged)",
         "tags": [
           "projects"
         ]
@@ -1805,7 +1808,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - project admin role or global admin required"
+            "description": "Not a project member, or project.agent.add is missing"
           },
           "404": {
             "description": "Project or agent not found"
@@ -1819,7 +1822,7 @@
             "bearer": []
           }
         ],
-        "summary": "Add an agent to the project roster (project or global admin)",
+        "summary": "Add an agent to the project roster",
         "tags": [
           "projects"
         ]
@@ -1854,7 +1857,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - project admin role or global admin required"
+            "description": "Not a project member, or project.agent.remove is missing"
           },
           "404": {
             "description": "Project, agent or roster entry not found"
@@ -1868,7 +1871,7 @@
             "bearer": []
           }
         ],
-        "summary": "Remove an agent from the project roster (project or global admin)",
+        "summary": "Remove an agent from the project roster",
         "tags": [
           "projects"
         ]
@@ -1911,7 +1914,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin or self only"
+            "description": "Not a project member, project.agent.update is missing and the caller is not the agent"
           },
           "404": {
             "description": "Project or agent not found"
@@ -1922,7 +1925,7 @@
             "bearer": []
           }
         ],
-        "summary": "Update an agent status within a project context (admin or the agent itself)",
+        "summary": "Update an agent status within a project context (the key, or the agent itself)",
         "tags": [
           "projects"
         ]
@@ -2455,7 +2458,7 @@
             "description": "q longer than 100 characters, or limit outside 1..50"
           },
           "403": {
-            "description": "Not a project member"
+            "description": "Not a project member, or project.assignee.read is missing"
           },
           "404": {
             "description": "Project not found"

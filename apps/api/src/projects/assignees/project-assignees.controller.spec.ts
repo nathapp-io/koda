@@ -2,8 +2,30 @@ import { ProjectAssigneesController } from './project-assignees.controller';
 import { ProjectAssigneesService } from './project-assignees.service';
 import { AssigneeQuery } from './dto/assignee.query';
 import { ProjectContext } from '../project-context';
+import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
+import { PROJECT_PERMISSION_KEY } from '../project-permission.decorator';
+import { REQUIRES_METADATA, RequiresMetadata } from '../../permissions/requires.decorator';
 
 const PROJECT: ProjectContext = { project: { id: 'proj-1', slug: 'koda' }, role: 'ADMIN' };
+
+describe('ProjectAssigneesController route permission metadata (US-007)', () => {
+  it('search declares @Requires project.assignee.read and runs ProjectMembershipGuard first', () => {
+    const fn = ProjectAssigneesController.prototype.search as unknown as object;
+
+    expect(Reflect.getMetadata(REQUIRES_METADATA, fn) as RequiresMetadata).toEqual({
+      keys: ['project.assignee.read'],
+      mode: 'all',
+      enforcedBy: 'guard',
+    });
+    const guards = (Reflect.getMetadata('__guards__', fn) ?? []) as unknown[];
+    expect(guards.map((guard) => (guard as { name?: string }).name)).toEqual([
+      'ProjectMembershipGuard',
+      'RequiresGuard',
+    ]);
+    expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
+    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeUndefined();
+  });
+});
 
 describe('ProjectAssigneesController', () => {
   const serviceWith = (items: unknown[]) => {

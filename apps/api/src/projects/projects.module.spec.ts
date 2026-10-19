@@ -5,6 +5,7 @@ import { AgentsService } from '../agents/agents.service';
 import { MemoryGovernanceService } from '../memory/memory-governance.service';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { ProjectAccessService } from './project-access.service';
+import { PermissionService } from '../permissions/permission.service';
 
 describe('ProjectsModule — DI wiring', () => {
   let module: TestingModule;
@@ -21,6 +22,8 @@ describe('ProjectsModule — DI wiring', () => {
         // container even though these tests check controller wiring only, so its
         // ProjectAccessService dependency must resolve.
         { provide: ProjectAccessService, useValue: {} },
+        // US-007: the controller's required fourth dependency, and the route-level RequiresGuard.
+        { provide: PermissionService, useValue: { can: vi.fn() } },
       ],
     }).compile();
   });
