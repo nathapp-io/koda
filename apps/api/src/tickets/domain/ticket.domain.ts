@@ -148,8 +148,12 @@ export interface ITicketRepository {
    */
   findAgentById(id: string): Promise<{ id: string; status: string } | null>;
   /**
-   * S4c US-004: whether the agent holds an `AgentProject` roster row for the
-   * project. Assignment requires the roster in both scoping modes.
+   * S4c US-004: whether the agent may be assigned a ticket in the project.
+   * Assignment requires a source in both scoping modes.
+   *
+   * Permissions P1b US-003: the source is the agent's access sources — its
+   * `AgentProject` roster row unioned with its PROJECT-scope bindings — not the
+   * roster row alone.
    */
   isAgentOnProjectRoster(projectId: string, agentId: string): Promise<boolean>;
   /**
@@ -158,6 +162,13 @@ export interface ITicketRepository {
    * inside `txManager.run`: the advisory lock is released at COMMIT/ROLLBACK.
    */
   lockProjectAgents(projectId: string): Promise<void>;
+  /**
+   * S4c US-004: the user's legacy project role, or `null` when it has no source
+   * in the project. Permissions P1b US-003: the sources are the user's
+   * `ProjectMember` row unioned with its PROJECT-scope bindings, so a binding
+   * alone is enough. A global `ADMIN` user is exempted by the caller, which
+   * never asks this.
+   */
   findProjectMemberRole(projectId: string, userId: string): Promise<string | null>;
   /**
    * S5b US-005: the ref (`KEY-N`) of every named ticket that lives in `projectId` and is not
