@@ -173,17 +173,17 @@ async findByTicketId(ticketId: string): Promise<CommentDomain[]> {
 
 ## Testing
 - In tests, prefer `createMockPrismaService()` / `createMockPrismaClient()` from `@nathapp/nestjs-prisma`
-- Mock `TRANSACTION_MANAGER` as `{ run: jest.fn(fn => fn()), getClient: jest.fn(), isInTransaction: jest.fn(() => false) }`
+- Mock `TRANSACTION_MANAGER` as `{ run: vi.fn(fn => fn()), getClient: vi.fn(), isInTransaction: vi.fn(() => false) }`
 - The `run` mock MUST call the callback immediately — this makes the transaction a no-op in unit tests while still exercising the service logic
-- Mock `IRepository<TDomain>` by providing a plain object with jest.fn() on all methods, or use `createMock<IRepository<TDomain>>()` from `@golevelup/ts-jest`
+- Mock `IRepository<TDomain>` by providing a plain object with vi.fn() on all methods, or use `createMock<IRepository<TDomain>>()` from `@golevelup/ts-vitest`
 - Provide `TRANSACTION_MANAGER` in every test module that uses a service which injects it
 
 ```typescript
 // Standard txManager mock:
 const mockTxManager = {
-  run: jest.fn((fn: () => Promise<unknown>) => fn()),
-  getClient: jest.fn(),
-  isInTransaction: jest.fn(() => false),
+  run: vi.fn((fn: () => Promise<unknown>) => fn()),
+  getClient: vi.fn(),
+  isInTransaction: vi.fn(() => false),
 };
 
 // In beforeEach providers:
