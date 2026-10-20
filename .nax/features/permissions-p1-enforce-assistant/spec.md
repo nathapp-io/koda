@@ -71,12 +71,13 @@ Following Appendix A, these principals change behaviour. This is accepted and no
 **Schema.** One Prisma migration, `apps/api/prisma/migrations/20261031090000_thread_creator_type/migration.sql`:
 - `ChatThread` gains `createdByType String @default("USER")`.
 - Its `createdBy User @relation("ChatThreadCreatedBy", ...)` and `User.chatThreadsCreated` are removed, so the foreign key `ChatThread_createdById_fkey` is dropped.
-- Existing rows default to `USER`. The index `[createdById, kind, lastActivityAt]` stays.
+- `ChatMessage` gains `authorType String?`; its `author User? @relation("ChatMessageAuthor", ...)` and `User.chatMessagesAuthored` are removed, so the foreign key `ChatMessage_authorUserId_fkey` is dropped (an agent sends messages too). No code reads either relation.
+- Existing rows default to `USER` (`ChatThread`) and stay null (`ChatMessage.authorType`). The index `[createdById, kind, lastActivityAt]` stays. The column `authorUserId` keeps its name.
 
 **Writes and reads.**
 - `ChatThreadRecord` gains an optional `createdByType?: 'USER' | 'AGENT'`. An absent value means a user, so existing fixtures stay valid. The row mapper always sets it.
-- The repository `create` input gains an optional `createdByType`, stored as `'USER'` when absent.
-- `ThreadsService.create` and `WorkspaceThreadsService.create` set `createdByType: actorTypeFor(<creator id>)`, using the action context from `apps/api/src/action-context/action-context.ts`.
+- `PrismaChatThreadRepository.create` stores `createdByType: actorTypeFor(input.createdById)`, using the action context from `apps/api/src/action-context/action-context.ts`. The repository `create` input and the two service `create` calls are unchanged, so an agent's request (whose context the global interceptor sets) creates an `AGENT` thread.
+- `PrismaChatThreadRepository.sendMessage` stores the user message with `authorUserId: input.userId` (the sender, as today) and `authorType: actorTypeFor(input.userId)`.
 - The thread job insert in `PrismaChatThreadRepository` (the `requestedById: thread.createdById` site) also sets `requestedByType: thread.createdByType`. So an agent's thread job is an agent-requested job, and enforce-fleet's readers already handle that: no outcome notification, PR attribution by agent name, and `responsibleUserOf` answering null.
 
 **Tool calls of an agent's thread.**
@@ -85,7 +86,8 @@ Following Appendix A, these principals change behaviour. This is accepted and no
   - `{ type: 'AGENT'; id; slug; status }`.
 - `PrismaAssistantToolCallRepository.findCallContext` selects the thread's `createdById` and `createdByType`, then reads the `User` row or the `Agent` row. It answers null when the creator row is gone.
 - `AssistantToolExecutor.execute` builds the caller from the creator: the `userPrincipal(creator)` it builds today for a user, or a new `agentPrincipal(creator)` for an agent. `agentPrincipal` has `actorType: 'agent'`, `id`, `name` and `slug` (the slug), `status`, `agentRoles: []`, `capabilities: []`, `blacklisted: status === 'PAUSED'`, `revoked: false`, `authorities: []` and `extra: { slug }`. An agent caller has `disabled: false`, because an agent's status is liveness, not access (enforce-fleet ruling).
-- `approvalModeFor(origin, tool, actor: 'user' | 'agent')` (`apps/api/src/fleet/assistant/actions/approval-policy.ts`) answers `'human'` when `origin.kind === 'thread' && actor === 'user'`, and `'none'` otherwise. The executor passes the caller principal's type. So a write tool in an agent's thread runs at once through the existing `directWrite` path, recorded with `actorType: 'agent'` and `origin: 'thread'`.
+- **The tool runs inside the creator's action context.** Thread tool calls arrive on the runner route, which the interceptor leaves outside any context, so `execute` runs `run` inside `runWithActor({ type: <'USER' or 'AGENT'>, id: creator.id }, ...)`. `executeAction` (the approve path) runs the tool inside `runWithActor` for the action's requester the same way. So `actorTypeFor` in the services a tool calls (for example `FleetJobsService.dispatch`) records the creator's type.
+- `approvalModeFor(origin, tool, actor: 'user' | 'agent')` (`apps/api/src/fleet/assistant/actions/approval-policy.ts`) answers `'human'` when `origin.kind === 'thread' && actor === 'user'`, and `'none'` otherwise. The executor passes the caller principal's type. So a write tool in an agent's thread runs at once through the existing `directWrite` path, recorded with `actorType: 'agent'` and `origin: 'thread'` (and, as for MCP today, no `threadId`).
 
 ### Thread route keys
 
@@ -109,14 +111,15 @@ Following Appendix A, these principals change behaviour. This is accepted and no
 | `POST …/:id/messages` | `thread.message.send` | G + S |
 
 - **Repository and service signatures** (the creator-compare sites):
-  - `ChatThreadRepository.updateCap`, `command`, `publish` and `discard` gain a last parameter `canOperate: boolean`.
-  - `sendMessage`'s input gains `canOperate: boolean`.
+  - `ChatThreadRepository.updateCap`, `command`, `publish` and `discard` gain an optional last parameter `canOperate = false`.
+  - `sendMessage`'s input gains an optional `canOperate?: boolean` (absent is false).
+  - The workspace call sites in `WorkspaceThreadsService` are not changed by this: they pass no flag, so the creator compare applies there (the workspace fence already limits them to the caller's own thread).
   - `archive` keeps its `canArchive` parameter, now computed from `thread.archive`.
   - `ThreadsService.updateCap`, `stop`, `endSession`, `answer`, `publish`, `discard`, `sendMessage`, `plan` and `run` gain `canOperate: boolean` as their last parameter.
   - `plan` and `run` replace `thread.createdById !== userId` with `!canOperate && thread.createdById !== userId`.
   - Each repository compare `x.createdById !== userId` becomes `!canOperate && x.createdById !== userId`, and its refusal becomes `new ForbiddenAppException({}, 'permissions')`.
-- **A thread acted on by someone other than its creator** still runs as its creator: its jobs keep `requestedById` the creator, and its tools run as the creator. The message author is not recorded (P2's action context records the actor).
-- **Thread events (SSE).** `ThreadEventsGuard` (`thread-events.controller.ts`) removes its `isUserPrincipal` refusal. After the membership check, it refuses with 403 `permissions` when `can(principal, 'thread.read', { projectId })` is not allowed. The JWT check that follows is unchanged, so an agent (no JWT) is still refused with `live`.
+- **A thread acted on by someone other than its creator.** Its turns run as its creator: a message's THREAD job keeps `requestedById` the creator, and its tools run as the creator. The message itself records its sender (`authorUserId`, `authorType`). A `plan` or `run` dispatches through `FleetJobsService.dispatch(<caller id>, ...)` as today, so the PLAN or RUN job's requester is the caller who planned or ran it.
+- **Thread events (SSE).** `ThreadEventsGuard` (`thread-events.controller.ts`) removes its `isUserPrincipal` refusal, and `WorkspaceThreadEventsGuard` (`workspace-thread-events.controller.ts`) removes its own; both keep their JWT check. After the membership check, it refuses with 403 `permissions` when `can(principal, 'thread.read', { projectId })` is not allowed. The JWT check that follows is unchanged, so an agent (no JWT) is still refused with `live`.
 
 **Workspace threads.** `WorkspaceThreadsController`: its `user(principal)` helper (the `threads.principal` refusal) is removed, and the handlers take `UserPrincipal | AgentPrincipal`. The workspace scope (`{ kind: 'workspace', userId }`, matched on `createdById`) still fences every workspace read and write to the caller's own threads: catalog scope `own`, 404 for anyone else's thread.
 
@@ -129,11 +132,11 @@ Following Appendix A, these principals change behaviour. This is accepted and no
 | `PATCH /threads/:id` | `thread.cap.update` | S: `can(principal, key, { projectId: thread.projectId, resource: { createdBy: { type: thread.createdByType ?? 'USER', id: thread.createdById } } })` |
 | `POST /threads/:id/stop`, `/end-session`, `/answer` | `thread.stop`, `thread.end-session`, `thread.answer` | S, as above |
 
-- The four S routes check the key in the thread's **home project**: Member, a global role, does not hold `thread.cap.update`, `thread.stop`, `thread.end-session` or `thread.answer`, and a Developer of the home project holds their `.own` forms. A refusal is 403 `permissions`. They pass `canOperate: false` to the repository, because the workspace fence already limits them to the caller's own thread.
+- The four S routes check the key in the thread's **home project**: Member, a global role, does not hold `thread.cap.update`, `thread.stop`, `thread.end-session` or `thread.answer`, and a Developer of the home project holds their `.own` forms. A refusal is 403 `permissions`. They pass no `canOperate` to the repository (false), because the workspace fence already limits them to the caller's own thread.
 - **Hosting.** `WorkspaceThreadsService.canHost(projectId, principal)` answers `(await permissions.can(principal, 'thread.create', { projectId })).allowed`. It replaces the CASL `CREATE FleetJob` check, and `WorkspaceThreadsService` gains `PermissionService` in place of `KodaCaslAbilityFactory` (same constructor position). The `threads.homeProjectAccess` refusals of `create` and `sendMessage` become 403 `permissions`.
 - `WorkspaceThreadsService.create`, `sendMessage` and `archive` take `UserPrincipal | AgentPrincipal`. `ProjectsService.findAllForPrincipal` already takes `KodaPrincipal`.
+- **Default home for an agent.** `create` with no `homeProject` skips projects the caller only reaches as a global admin. For a user it keeps today's test (`access.findMembershipRole(project.id, principal.id)` not null). For an agent it uses `access.resolveMembership(project.id, principal)` and skips a project where it throws 403 (not on the roster). Then `canHost` and the anchor check apply as today.
 - The seeded `agent` role holds no workspace thread key (Appendix A), so an agent gets 403 `permissions` from `POST /threads` unless a role grants it the keys.
-- The workspace thread event stream is unchanged.
 
 ### Assistant tool keys
 
@@ -163,11 +166,11 @@ Following Appendix A, these principals change behaviour. This is accepted and no
 | `koda_requeue_job` | `fleet.job.requeue` |
 | `koda_cancel_job` | `fleet.job.cancel` |
 
-**Executor.** `AssistantToolExecutor` gains `PermissionService` as a required last constructor parameter.
+**Executor.** `AssistantToolExecutor`'s fourth constructor parameter, `KodaCaslAbilityFactory`, is replaced by `PermissionService` (the CASL blocks are its only use).
 - **Call path.** In `execParsed`, after membership resolves, the CASL block is replaced: `const decision = await permissions.can(scope.actor, tool.key, { projectId: scope.id })`. A decision that is not allowed answers the refusal `forbidden: <tool> needs <key> on <slug>`, outcome `forbidden`, with `projectId` the project. Implicit keys pass (`can` answers `implicit`). Workspace-scope tools (`koda_my_projects`) take no key check.
 - **Approve re-check.** `actionScope`, used by `checkAction` and `executeAction`, replaces its CASL block with the same `can(actor, tool.key, { projectId: action.projectId })`. A refusal answers null (`forbidden`).
 - **`koda_update_ticket`.** The preview's status check calls `permissions.can(ctx.actor, 'ticket.transition.start', { projectId: ctx.projectId })` through a new `ToolContext.can(key): Promise<boolean>` that the executor fills from `PermissionService`. A refusal throws `new ToolForbiddenError('ticket.transition.start')`, which the executor words as `forbidden: koda_update_ticket needs ticket.transition.start on <slug>`. `TicketTransitionsService.assertTransitionPermission` is no longer called (cleanup removes it). The execute path's `ForbiddenAppException` text becomes `forbidden: <ref> needs ticket.transition.start`.
-- `ToolContext` gains `can(key: string): Promise<boolean>`, answering `(await permissions.can(actor, key, { projectId })).allowed` for the context's actor and project. The memory tools use it too (below).
+- `ToolContext` gains `can(key: string): Promise<boolean>`, answering `(await permissions.can(actor, key, { projectId })).allowed` for the context's actor and project. Both context builders fill it: `execTool` (a call) and `actionContext` (an approved action).
 
 ### MCP `tools/list`
 
@@ -185,8 +188,8 @@ Following Appendix A, these principals change behaviour. This is accepted and no
   - `KbTicketLifecycleSubscriber` passes `'ticket'`;
   - `IncrementalGraphDiffService` passes `'code'`;
   - the REST delete passes the requested source (below).
-- `IndexDocumentInput` (`apps/api/src/rag/rag.service.ts`) gains an optional `createdBy?: { type: 'USER' | 'AGENT'; id: string }`. `VectorStoreService.indexDocument` stores it as `metadata.kodaCreatedBy` and always overwrites a caller-supplied `kodaCreatedBy`. An absent `createdBy` stores no `kodaCreatedBy`, so the row has no creator: it is a system row.
-- New `VectorStoreService.findSourceCreators(projectId, source, sourceId): Promise<Array<{ type: 'USER' | 'AGENT'; id: string } | null>>`, also exposed as `RagService.findSourceCreators`. It answers one entry per matching row (null for a row with no `kodaCreatedBy`) and an empty array when nothing matches. It reads through the table query the existing reads use.
+- `IndexDocumentInput` (`apps/api/src/rag/rag.service.ts`) gains an optional `createdBy?: { type: 'USER' | 'AGENT'; id: string }`. `VectorStoreService.indexDocument` first removes any caller-supplied `metadata.kodaCreatedBy`, then stores `createdBy` there when it is given. An absent `createdBy` stores no `kodaCreatedBy`, so the row has no creator: it is a system row.
+- New `VectorStoreService.findSourceCreators(projectId, source, sourceId): Promise<Array<{ type: 'USER' | 'AGENT'; id: string } | null>>`, also exposed as `RagService.findSourceCreators`. It answers one entry per matching row (null for a row with no `kodaCreatedBy`) and an empty array when nothing matches. It reads through the table query the existing reads use. A `source` or `sourceId` that fails `isSafeFilterValue` throws `ValidationAppException`, before any read; so the add and delete routes answer 400 for such an id before any write.
 
 **REST routes.** `RagController` (`apps/api/src/rag/rag.controller.ts`) and `RetrievalController` (`apps/api/src/retrieval/retrieval.controller.ts`) use `@UseGuards(ProjectMembershipGuard, RequiresGuard)`. `RagController`'s `@ProjectRoles` and `@RequiredPermission` decorators are removed; `RetrievalController` has neither and only gains `RequiresGuard`. `addDocument` and `deleteDocument` take `@Principal() principal: KodaPrincipal` (they now read it for `createdBy` and ownership), so they leave the #145 no-principal list.
 
@@ -203,7 +206,7 @@ Following Appendix A, these principals change behaviour. This is accepted and no
 - **Add.**
   - `AddDocumentDto.source` accepts only `'doc'` and `'manual'`; `'ticket'` and `'code'` answer 400 (class-validator).
   - The controller passes `createdBy` from the principal (`USER` or `AGENT`).
-  - **Replace check:** before indexing, it reads `findSourceCreators(project, source, sourceId)`. When any matching row's creator is not the caller (including a null creator), the caller must hold the any-row `kb.document.delete`, `can(principal, 'kb.document.delete', { projectId })` allowed with no resource; otherwise 403 `permissions` and nothing is written.
+  - **Replace check:** before indexing, it reads `findSourceCreators(project, source, sourceId)`. When any matching row's creator is not the caller (including a null creator), the caller must hold the any-row `kb.document.delete`, `can(principal, 'kb.document.delete', { projectId })` allowed with no resource; otherwise 403 `permissions` and nothing is written. When every matching row is the caller's own, or none exists, no delete key is needed.
 - **Delete.**
   - `DELETE …/kb/documents/:sourceId` takes an optional query `source`, `doc` or `manual`; any other value answers 400.
   - With no `source`, the route deletes both user sources.
@@ -216,16 +219,25 @@ Following Appendix A, these principals change behaviour. This is accepted and no
 **Schema.** One Prisma migration, `apps/api/prisma/migrations/20261031090100_memory_owner_type/migration.sql`: `MemoryItem` gains `ownerType String?`. Null means a system owner or an unknown one. Existing rows stay null.
 - `MemoryItem` and `MemoryItemInput` (`apps/api/src/memory/memory-item-repository.ts`) gain an optional `ownerType?: 'USER' | 'AGENT' | null`, which `upsert` stores and the mapper reads.
 
-**The replace rule.** New `MemoryWriteGuard` (`apps/api/src/memory/memory-write.guard.ts`, `@Injectable()`, provided and exported by `MemoryModule`), with one method:
+**The replace rule.** New `MemoryWriteGuard` (`apps/api/src/memory/memory-write.guard.ts`, `@Injectable()`, provided and exported by `MemoryModule`):
 
 ```ts
-/** Throws ForbiddenAppException('permissions') when writing this key would supersede an active item the principal may not replace. */
+export class MemoryReplaceRefusedError extends Error {
+  constructor(readonly itemId: string) { super(`memory:${itemId}`); this.name = 'MemoryReplaceRefusedError'; }
+}
+
+/** Whether the principal may supersede this active item: `memory.update` with the item's owner as the resource. */
+mayReplace(principal: KodaPrincipal, projectId: string, existing: MemoryItem): Promise<boolean>;
+/** The check `upsert` runs inside its transaction: throws MemoryReplaceRefusedError(existing.id) when mayReplace answers false. */
+replaceCheck(principal: KodaPrincipal, projectId: string): (existing: MemoryItem) => Promise<void>;
+/** For previews and pre-checks: reads findActive and throws MemoryReplaceRefusedError when an active item exists that the principal may not replace. */
 assertMayReplace(principal: KodaPrincipal, projectId: string, key: { kind: string; subject: string; predicate: string }): Promise<void>;
 ```
 
-- It reads `PrismaMemoryItemRepository.findActive(projectId, kind, subject, predicate)`. With no active item it returns.
-- Otherwise it checks `PermissionService.can(principal, 'memory.update', { projectId, resource: { createdBy } })`, where `createdBy` is `{ type: item.ownerType, id: item.ownerId }` when both are set and null otherwise. A refusal throws 403 `permissions`.
+- `mayReplace` checks `PermissionService.can(principal, 'memory.update', { projectId, resource: { createdBy } })`, where `createdBy` is `{ type: existing.ownerType, id: existing.ownerId }` when both are set and null otherwise.
 - So Developer (`memory.update.own`) replaces only its own items, Project Admin (`memory.update`) any item, and a system item (null owner) only an any-row holder.
+- **Atomic.** `PrismaMemoryItemRepository.upsert(item, options?: { beforeSupersede?: (existing: MemoryItem) => Promise<void> })` calls `beforeSupersede` inside its existing transaction, after reading the active item and before superseding it (not on the identical-restatement no-op path). A throw rolls the transaction back, so nothing is written. Every principal-driven memory write passes `replaceCheck`; system writers pass nothing.
+- The REST routes map `MemoryReplaceRefusedError` to 403 `permissions`.
 
 **Routes.** `MemoryController` and `MemoryReadController` gain `PermissionService`; `MemoryController` also gains `MemoryWriteGuard`.
 
@@ -233,18 +245,19 @@ assertMayReplace(principal: KodaPrincipal, projectId: string, key: { kind: strin
 |:--|:--|:--|
 | `GET /projects/:slug/memory` | `memory.read` | G (`@UseGuards(ProjectMembershipGuard, RequiresGuard)` replaces `assertProjectMembership`) |
 | `GET /projects/:slug/timeline` | `timeline.read` | G (same) |
-| `POST /memory` | `memory.create` | S: after `assertProjectMembership(input.projectId)`, `can(principal, 'memory.create', { projectId })`, then `assertMayReplace` |
-| `POST /memory/decisions` | `memory.decision.record` | S: same order, then `assertMayReplace` for the decision's key |
-| `POST /memory/extract` | `memory.extract` | S: same order; the ticket check; then `assertMayReplace` per extracted item |
+| `POST /memory` | `memory.create` | S: after `assertProjectMembership(input.projectId)`, `can(principal, 'memory.create', { projectId })`, then `upsert` with `replaceCheck` |
+| `POST /memory/decisions` | `memory.decision.record` | S: same order, then `ExtractionService.recordDecision` with `replaceCheck` |
+| `POST /memory/extract` | `memory.extract` | S: same order; the ticket check; then `assertMayReplace` for **every** extracted item before any is written (all or nothing), then each `upsert` with `replaceCheck` |
 
 - **Owner attribution.**
   - Today's global-admin override (`input.ownerId` on `POST /memory`, `decision.actorId` on `POST /memory/decisions`) is allowed when `can(principal, 'memory.update')` with no project is allowed, which needs a global grant. It replaces `principal.role === 'ADMIN'`.
   - An attributed owner other than the caller is stored with `ownerType` null. Every other write stores the caller's type (`USER` or `AGENT`).
+  - `ExtractionService.recordDecision(input, repository, options?)` gains `input.ownerType?: 'USER' | 'AGENT' | null` (stored on the item) and an optional third `options: { beforeSupersede? }` it passes to `upsert`; with no `options` it calls `repository.upsert(item)` with one argument, as today. The decisions route passes `ownerType` (the caller's type when `actorId` is the caller's id, null otherwise) and `replaceCheck`.
 - **Extract ticket check.** When `event.ticketId` is set, `POST /memory/extract` answers 404 (`new NotFoundAppException({}, 'tickets')`) unless a non-deleted ticket with that id belongs to `event.projectId`. It reads through a new `PrismaMemoryItemRepository.ticketInProject(projectId: string, ticketId: string): Promise<boolean>` (a non-deleted `Ticket` row with that id and project), because `MemoryModule` does not import the tickets module.
-- **Tools.**
-  - `koda_add_memory`'s preview and execute call `assertMayReplace(ctx.actor, ctx.projectId, …)` through `ToolContext`. The tool's deps gain `MemoryWriteGuard`. A refusal in the preview throws `new ToolForbiddenError('memory.update')`, and in execute `ToolActionError('forbidden: memory:<id> needs memory.update')`.
-  - `koda_record_decision` does the same for the decision's key.
-  - Both store `ownerType` from the actor.
+- **Tools.** `addMemoryTool` and `recordDecisionTool` take `MemoryWriteGuard` in their deps (`{ memory, guard }` and `{ memory, extraction, guard }`).
+  - The preview calls `guard.assertMayReplace(ctx.actor, ctx.projectId, <key>)` and maps `MemoryReplaceRefusedError` to `new ToolForbiddenError('memory.update')`, which the executor words `forbidden: <tool> needs memory.update on <slug>`.
+  - Execute writes with `guard.replaceCheck(ctx.actor, ctx.projectId)` and maps `MemoryReplaceRefusedError` to `new ToolActionError('forbidden: memory:<itemId> needs memory.update')`.
+  - Both store `ownerType` from the actor (`'USER'` or `'AGENT'`).
 - The outbox subscriber and the governance processor are system writers: they keep writing with no key check and store `ownerType` null.
 
 ### Failure Handling
@@ -266,6 +279,8 @@ assertMayReplace(principal: KodaPrincipal, projectId: string, key: { kind: strin
 | KB delete of a row the caller did not create, with only `.own` | 403 `permissions`; nothing is deleted |
 | A memory write that would supersede an item the caller may not replace | 403 `permissions`; nothing is written |
 | Memory extract for a ticket of another project | 404 `tickets`; nothing is written |
+| Memory extract where one extracted item would supersede an item the caller may not replace | 403 `permissions`; no item of that request is written |
+| KB add, delete or creator read with a `sourceId` that fails `isSafeFilterValue` | 400 (`ValidationAppException`); nothing is written or deleted |
 
 ### Integration
 
@@ -295,7 +310,7 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 | `approvalModeFor(origin, tool)` | origin only | `(origin, tool, actor)` |
 | `AssistantTool` | `permission` | plus `key` |
 | `ToolContext` | no `can` | `can(key)` |
-| `AssistantToolExecutor` | CASL checks | `PermissionService` appended; key checks |
+| `AssistantToolExecutor` | `KodaCaslAbilityFactory` (4th parameter), CASL checks | `PermissionService` in its place; key checks; `runWithActor` around tool runs |
 | `kodaMcpToolRegistrations(executor, principal)`, `McpController.serve` | every tool | `visible` set |
 | `LanceTableManager.addRecord`, `deleteBySource` (vector store, rag service) | by `source_id` | by `(source, source_id)` |
 | `IndexDocumentInput` | no creator | optional `createdBy` |
@@ -306,13 +321,21 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 | `PrismaMemoryItemRepository` | memory reads and writes | plus `ticketInProject(projectId, ticketId)` |
 | `MemoryController`, `MemoryReadController`, `TimelineController` | membership only | keys, `MemoryWriteGuard` |
 | `addMemoryTool`, `recordDecisionTool` deps | repository only | plus `MemoryWriteGuard` |
+| `PrismaMemoryItemRepository.upsert(item)` | no hook | `upsert(item, { beforeSupersede? })` |
+| `ExtractionService.recordDecision(input, repository)` | no owner type | `input.ownerType`, optional `options` |
+| `ChatMessage` (schema) | `author` relation to `User` | `authorType`, no relation |
+| `WorkspaceThreadEventsGuard` | user-only | JWT only |
 
 ## Out of Scope
 
 - Any approval change is out of scope (P3). This includes a stored approval policy, a non-creator decide path for `assistant_action` approvals, and checking `fleet.approval.decide.assistant`. `approvalModeFor` gains only the actor input.
-- Recording who sent a message in a thread acted on by someone other than its creator is out of scope (P2 action context).
-- Exposing `createdByType` or `ownerType` in `ThreadDto`, `MemoryItem` responses or any other response is out of scope (`permissions-p1-web`).
-- Opening the thread event streams (SSE) to agents is out of scope; they keep their JWT requirement.
+- Recording the acting principal on thread commands (stop, end-session, answer, archive, publish, discard, cap) other than through the fleet activity rows is out of scope (P2 action context).
+- A holder of an any-row thread key who sends a message to another principal's thread drives a turn that runs with the creator's keys (and, for an agent creator, approval mode `none`); limiting that delegation is out of scope (P3 policies).
+- `koda_get_action` in an agent's thread cannot read the direct actions of that thread, because direct actions are stored with no `threadId` (as MCP's are); linking them is out of scope.
+- Making the KB replace and delete checks atomic with the LanceDB write is out of scope; a concurrent write between the creator read and the write can still replace a row (LanceDB has no transaction here).
+- `createdByType` appears in thread responses because the controllers return the record; documenting it in the DTOs and OpenAPI is out of scope (`permissions-p1-web`).
+- Regenerating the CLI client (`bun run generate`) for the KB source enum and the DELETE `source` query is out of scope (a CLI follow-up); this feature regenerates `openapi.json` only.
+- Opening the thread event streams (SSE) to agents is out of scope; they keep their JWT requirement, so an agent is refused with `live`.
 - Letting an any-row holder read or act on another principal's workspace thread is out of scope; workspace threads stay fenced to their creator.
 - Removing `AssistantTool.permission`, `ToolPermission`, `TicketTransitionsService.assertTransitionPermission`, `KodaCaslAbilityFactory` and the other legacy mechanisms is out of scope (`permissions-p1-cleanup`).
 - Migrating the vcs, webhook, skills, code-intel, context and ci-webhook routes is out of scope (`permissions-p1-enforce-integrations`).
@@ -326,7 +349,7 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 
 ## Stories
 
-1. **US-001: Threads record their creator's type, and an agent's thread runs its tools as the agent** — `Workdir: apps/api` — No dependencies. Adds the `thread_creator_type` migration, `createdByType` on the record and the create input, `actorTypeFor` at the two thread creates, `requestedByType` at the thread job insert, the creator union in `findCallContext`, `agentPrincipal` in the executor, and the actor input of `approvalModeFor`.
+1. **US-001: Threads record their creator's type, and an agent's thread runs its tools as the agent** — `Workdir: apps/api` — No dependencies. Adds the `thread_creator_type` migration (`ChatThread.createdByType`, `ChatMessage.authorType`, both user foreign keys dropped), `actorTypeFor` at the repository's thread create and message insert, `requestedByType` at the thread job insert, the creator union in `findCallContext`, `agentPrincipal` and `runWithActor` in the executor, and the actor input of `approvalModeFor`.
 2. **US-002: Project thread routes check keys, and ownership comes from the keys** — `Workdir: apps/api` — Depends on US-001. Moves the fourteen project thread routes onto `@Requires`, removes `assertUser` and the CASL checks, adds `canOperate` to the repository and service writes, and checks `thread.read` in `ThreadEventsGuard`.
 3. **US-003: Workspace thread routes check keys** — `Workdir: apps/api` — Depends on US-001, US-002. Moves the ten workspace thread routes onto keys, checks the four home-project keys in the service, replaces `canHost` with `thread.create`, and accepts agent principals.
 4. **US-004: Assistant tools check their key** — `Workdir: apps/api` — Depends on US-001. Adds `key` to the 23 tools, `can` to `ToolContext`, and `PermissionService` to the executor; replaces the CASL checks in the call path, in `actionScope` and in `koda_update_ticket`'s preview.
@@ -405,11 +428,10 @@ This is one capability, enforcing keys on the assistant surface, at eight storie
 
 **US-001**
 - `apps/api/src/fleet/assistant/actions/approval-policy.spec.ts` — its thread and WORKSPACE-thread cases call approvalModeFor(origin, 'koda_add_comment') with two arguments and expect 'human'. The replacing invariant: approvalModeFor(origin, tool, 'user') answers 'human' for a thread origin, a thread origin with actor 'agent' and an MCP origin answer 'none', and every other case is unchanged.
-- `apps/api/src/fleet/assistant/assistant-tool.executor.direct.spec.ts` — it asserts approvalModeFor is called once with (caller.origin, call.name) and constructs the executor with four arguments. The replacing invariant: approvalModeFor is called once, before the preview, with (caller.origin, call.name, <the caller principal's type>), the executor gets a PermissionService double as its fifth argument (US-004), and every other assertion is unchanged.
-- `apps/api/src/fleet/threads/threads.service.spec.ts` — its "creates a PROJECT thread" case asserts the exact repo.create object (which gains createdByType); under US-002 its non-creator run case expects threads.notCreator and its discard case asserts exactly three call arguments. The replacing invariant: create passes the same object plus createdByType 'USER'; a non-creator run with canOperate false answers 403 permissions; discard forwards (projectId, threadId, userId, canOperate); every other case is unchanged.
-- `apps/api/src/fleet/threads/workspace-threads.service.spec.ts` — its "chooses oldest home" case asserts the exact create object (which gains createdByType); under US-003 it constructs the service with KodaCaslAbilityFactory where PermissionService now goes, its explicit VIEWER home case expects threads.homeProjectAccess, and its updateCap and command cases assert exact argument lists that gain canOperate false. The replacing invariant: create stores createdByType 'USER'; canHost asks a PermissionService double for thread.create; a refused explicit home answers 403 permissions; the repository calls receive canOperate false as their last argument; every other case is unchanged.
+- `apps/api/src/fleet/assistant/assistant-tool.executor.direct.spec.ts` — it asserts approvalModeFor is called once with (caller.origin, call.name). The replacing invariant: approvalModeFor is called once, before the preview, with (caller.origin, call.name, <the caller principal's type>), and every other assertion is unchanged.
 
 **US-002**
+- `apps/api/src/fleet/threads/threads.service.spec.ts` — its non-creator run case expects threads.notCreator, and its discard case asserts exactly three call arguments. The replacing invariant: a non-creator run with canOperate false answers 403 permissions; discard forwards (projectId, threadId, userId, canOperate); every other case is unchanged.
 - `apps/api/src/fleet/threads/prisma-chat-thread.discard.spec.ts` — its AC-7 case expects threads.notCreator when a non-creator discards. The replacing invariant: a non-creator discard with canOperate false answers 403 permissions and creates no job; the creator discard and the threads.notFound fence are unchanged.
 - `apps/api/test/integration/fleet/thread-publish.integration.spec.ts` — its AC-13 case expects a viewer's publish to answer 403 with the "Only the thread creator" message. The replacing invariant: the viewer's publish answers 403 with error code permissions (route key thread.publish) and creates no job or command.
 - `apps/api/test/integration/fleet/thread-discard.integration.spec.ts` — its AC-7 case expects a viewer's discard to answer 403 with the "Only the thread creator" message. The replacing invariant: the viewer's discard answers 403 with error code permissions and creates no job.
@@ -417,28 +439,32 @@ This is one capability, enforcing keys on the assistant surface, at eight storie
 - `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` — its thread cases expect threads.principal for an agent POST /projects/:slug/threads, projects for the developer-downgraded plan, threads.notCreator for non-creator run, stop and archive, and (US-003) threads.principal for an agent POST and GET /api/threads. The replacing invariant: each of those refusals answers 403 with error code permissions (an agent with a developer binding in the project gets 201 from the project thread create); every other case and status code is unchanged.
 
 **US-003**
+- `apps/api/src/fleet/threads/workspace-threads.service.spec.ts` — it passes a KodaCaslAbilityFactory double where PermissionService now goes, and its explicit VIEWER home case expects threads.homeProjectAccess. The replacing invariant: canHost asks a PermissionService double for thread.create; a refused explicit home answers 403 permissions; the repository call arguments and every other case are unchanged.
+- `apps/api/src/fleet/threads/workspace-thread-events.controller.spec.ts` — its "refuses a non-user principal with 403 threads.principal" case expects that refusal. The replacing invariant: the case is removed (the guard refuses no principal type; an agent without a JWT is refused with live); every other case is unchanged.
 - `apps/api/src/fleet/threads/workspace-threads.controller.spec.ts` — its testing module provides only WorkspaceThreadsService, and the controller's RequiresGuard now needs PermissionService. The replacing invariant: the module also provides a PermissionService stub; the repoId 400 validation case is unchanged.
-- `apps/api/src/fleet/threads/workspace-turns.spec.ts` — its membership-refusal case expects threads.homeProjectAccess, and its "send passes no repository context" case asserts the exact sendMessage input. The replacing invariant: a refusal during send answers 403 permissions and writes nothing; the workspace send input also carries canOperate false; every other field is unchanged.
+- `apps/api/src/fleet/threads/workspace-turns.spec.ts` — its membership-refusal case expects threads.homeProjectAccess. The replacing invariant: a refusal during send answers 403 permissions and writes nothing; every other case is unchanged.
 - `apps/api/test/integration/fleet/workspace-read.integration.spec.ts` — its agent GET /api/threads and POST /api/threads cases expect the "Only users can access chat threads" message. The replacing invariant: both answer 403 with error code permissions for an agent with no workspace thread key; the user cases are unchanged.
 - `apps/api/test/integration/fleet/workspace-turns.integration.spec.ts` — its VIEWER and null-membership cases and its soft-deleted-home case expect the threads.homeProjectAccess message. The replacing invariant: both answer 403 with error code permissions and store no chat message.
 - `apps/api/test/integration/fleet/workspace-create.integration.spec.ts` — its AC-11 case expects the threads.homeProjectAccess message for an explicit VIEWER home. The replacing invariant: the explicit VIEWER home answers 403 with error code permissions and creates no thread.
 
 **US-004**
-- `apps/api/src/fleet/assistant/assistant-tool.executor.spec.ts` — it constructs the executor with four arguments and its AC-13 cases assert the CASL createForUser and can calls. The replacing invariant: the executor gets a PermissionService double as its fifth argument; checkAction answers 'forbidden' when can(requester, tool.key, { projectId }) is refused; CASL is not consulted; every other assertion is unchanged.
-- `apps/api/src/fleet/assistant/assistant-tool.executor.actor.spec.ts` — it constructs the executor with four arguments. The replacing invariant: a PermissionService double that allows the tool keys is the fifth argument; the actor and origin assertions are unchanged.
-- `apps/api/src/fleet/assistant/assistant-tool.executor.caller.spec.ts` — it constructs the executor with four arguments. The replacing invariant: a PermissionService double that allows the tool keys is the fifth argument; the caller assertions are unchanged.
-- `apps/api/src/fleet/assistant/assistant-tool.executor.workspace.spec.ts` — it constructs the executor with four arguments. The replacing invariant: a PermissionService double that allows the tool keys is the fifth argument; the workspace-scope assertions are unchanged.
-- `apps/api/src/fleet/assistant/tools/kb-tools.spec.ts` — it constructs the executor with four arguments. The replacing invariant: a PermissionService double allowing kb.search and kb.read is the fifth argument; the KB answers are unchanged.
-- `apps/api/src/fleet/assistant/tools/workspace-tools.spec.ts` — it constructs the executor with four arguments. The replacing invariant: a PermissionService double is the fifth argument; koda_my_projects answers the same list.
-- `apps/api/src/fleet/assistant/write-tool-errors.spec.ts` — it constructs the executor with four arguments. The replacing invariant: a PermissionService double that allows the tool keys is the fifth argument; the error wording of non-key refusals is unchanged.
-- `apps/api/src/fleet/assistant/actions/action-result-masking.spec.ts` — it constructs the executor with four arguments. The replacing invariant: a PermissionService double that allows the tool keys is the fifth argument; the masking assertions are unchanged.
-- `apps/api/src/fleet/assistant/actions/assistant-action-decisions.spec.ts` — its realExecutor constructs the executor with four arguments, so the executeAction cases fail in actionScope. The replacing invariant: realExecutor passes a PermissionService double as the fifth argument and the approve re-checks the action's key through it; the threads.notCreator decide case and the other refusal codes are unchanged.
+- `apps/api/src/fleet/assistant/assistant-tool.executor.direct.spec.ts` — it passes a KodaCaslAbilityFactory double as the executor's fourth argument. The replacing invariant: a PermissionService double that allows the tool keys is the fourth argument; every other assertion (including the US-001 approvalModeFor call) is unchanged.
+- `apps/api/src/fleet/assistant/assistant-tool.executor.spec.ts` — it passes a KodaCaslAbilityFactory double as the executor's fourth argument and its AC-13 cases assert the CASL createForUser and can calls. The replacing invariant: the executor gets a PermissionService double as its fourth argument, in place of the KodaCaslAbilityFactory double; checkAction answers 'forbidden' when can(requester, tool.key, { projectId }) is refused; CASL is not consulted; every other assertion is unchanged.
+- `apps/api/src/fleet/assistant/assistant-tool.executor.actor.spec.ts` — it passes a KodaCaslAbilityFactory double as the executor's fourth argument. The replacing invariant: a PermissionService double that allows the tool keys is the fourth argument, in place of the KodaCaslAbilityFactory double; the actor and origin assertions are unchanged.
+- `apps/api/src/fleet/assistant/assistant-tool.executor.caller.spec.ts` — it passes a KodaCaslAbilityFactory double as the executor's fourth argument. The replacing invariant: a PermissionService double that allows the tool keys is the fourth argument, in place of the KodaCaslAbilityFactory double; the caller assertions are unchanged.
+- `apps/api/src/fleet/assistant/assistant-tool.executor.workspace.spec.ts` — it passes a KodaCaslAbilityFactory double as the executor's fourth argument. The replacing invariant: a PermissionService double that allows the tool keys is the fourth argument, in place of the KodaCaslAbilityFactory double; the workspace-scope assertions are unchanged.
+- `apps/api/src/fleet/assistant/tools/kb-tools.spec.ts` — it passes a KodaCaslAbilityFactory double as the executor's fourth argument. The replacing invariant: a PermissionService double allowing kb.search and kb.read is the fourth argument, in place of the KodaCaslAbilityFactory double; the KB answers are unchanged.
+- `apps/api/src/fleet/assistant/tools/workspace-tools.spec.ts` — it passes a KodaCaslAbilityFactory double as the executor's fourth argument. The replacing invariant: a PermissionService double is the fourth argument, in place of the KodaCaslAbilityFactory double; koda_my_projects answers the same list.
+- `apps/api/src/fleet/assistant/write-tool-errors.spec.ts` — it passes a KodaCaslAbilityFactory double as the executor's fourth argument. The replacing invariant: a PermissionService double that allows the tool keys is the fourth argument, in place of the KodaCaslAbilityFactory double; the error wording of non-key refusals is unchanged.
+- `apps/api/src/fleet/assistant/actions/action-result-masking.spec.ts` — it passes a KodaCaslAbilityFactory double as the executor's fourth argument. The replacing invariant: a PermissionService double that allows the tool keys is the fourth argument, in place of the KodaCaslAbilityFactory double; the masking assertions are unchanged.
+- `apps/api/src/fleet/assistant/actions/assistant-action-decisions.spec.ts` — its realExecutor passes a KodaCaslAbilityFactory double as the executor's fourth argument, so the executeAction cases fail in actionScope. The replacing invariant: realExecutor passes a PermissionService double as the fourth argument, in place of the KodaCaslAbilityFactory double and the approve re-checks the action's key through it; the threads.notCreator decide case and the other refusal codes are unchanged.
 - `apps/api/src/fleet/assistant/tools/update-ticket-tool.spec.ts` — its fixture ctx has no can, its AC-6 case expects need 'transition Ticket', and its AC-12 case expects the text 'forbidden: KODA-1 needs transition Ticket'. The replacing invariant: the fixture ctx has can; ctx.can('ticket.transition.start') answering false drives the refusal with ToolForbiddenError need 'ticket.transition.start' and the execute text 'forbidden: KODA-1 needs ticket.transition.start'; the AC-5 case (assertTransitionPermission not called) is unchanged.
 - `apps/api/test/integration/fleet/assistant-tool-executor.integration.spec.ts` — its fake tool declares permission only and no key, and AC-12 expects the first run to answer ok. The replacing invariant: the fake tool declares a key the test principal holds, so the first run answers ok and the replay cases are unchanged; the AC-16 membership refusal is unchanged.
 - `apps/api/test/integration/fleet/assistant-link-tickets-tool.integration.spec.ts` — its AC-15 case has a viewer-created thread propose koda_link_tickets and expects a PENDING action. The replacing invariant: that call answers 'forbidden: koda_link_tickets needs ticket.link.add on web' and stores no action; the developer-created cases are unchanged.
-- `apps/api/test/integration/fleet/mcp-route.integration.spec.ts` — its AC-10/11 case expects 'forbidden: koda_dispatch_job needs create FleetJob on web', and (US-005) its AC-5 case expects tools/list to equal every descriptor name for a viewer-roster agent. The replacing invariant: the dispatch refusal reads 'forbidden: koda_dispatch_job needs fleet.job.dispatch on web', and tools/list lists only the tools whose key that agent holds in some project; the koda_add_comment cases are unchanged.
+- `apps/api/test/integration/fleet/mcp-route.integration.spec.ts` — its AC-10/11 case expects 'forbidden: koda_dispatch_job needs create FleetJob on web'. The replacing invariant: the refusal reads 'forbidden: koda_dispatch_job needs fleet.job.dispatch on web'; every other case is unchanged.
 
 **US-005**
+- `apps/api/test/integration/fleet/mcp-route.integration.spec.ts` — its AC-5 case expects tools/list to equal every descriptor name for a roster-only agent, and its AC-10/11 dispatch case uses that roster-only agent, for which koda_dispatch_job is no longer listed. The replacing invariant: tools/list lists only the tools whose key the agent holds in some project; the AC-10/11 agent also holds a developer binding in a second project, so the tool is listed and the call for web still answers 'forbidden: koda_dispatch_job needs fleet.job.dispatch on web'; the koda_add_comment cases are unchanged.
 - `apps/api/src/fleet/assistant/mcp/mcp-server.factory.spec.ts` — its kodaMcpToolRegistrations(executor, principal) calls pass no visible set. The replacing invariant: kodaMcpToolRegistrations(executor, principal, visible) registers only the descriptors in visible, in catalog order; with the full name set every existing assertion holds.
 - `apps/api/src/fleet/assistant/mcp/mcp.controller.routes.spec.ts` — its module provides only AssistantToolExecutor, and its AC-5 and Express-shaped cases expect every descriptor from tools/list. The replacing invariant: the module also provides a PermissionService stub; tools/list answers the visible set the stub produces; the 409, 403, initialize and 405 cases are unchanged.
 
@@ -447,6 +473,9 @@ This is one capability, enforcing keys on the assistant surface, at eight storie
 - `apps/api/src/rag/vector-store.service.spec.ts` — its write-serialisation case calls deleteBySource('test-project', 'ticket-001'). The replacing invariant: the call is deleteBySource('test-project', 'ticket', 'ticket-001'), with the same one-write-in-flight and delete counts.
 - `apps/api/src/rag/kb-ticket-lifecycle.subscriber.spec.ts` — it expects deleteBySource('proj-1', 'tick-1'). The replacing invariant: it expects deleteBySource('proj-1', 'ticket', 'tick-1'); the call counts are unchanged.
 - `apps/api/src/rag/incremental-graph-diff.service.spec.ts` — it expects deleteBySource(projectId, 'node-2'). The replacing invariant: it expects deleteBySource(projectId, 'code', 'node-2'); the call counts and order are unchanged.
+- `apps/api/test/integration/rag/lance-table-manager.integration.spec.ts` — it calls vectorStore.deleteBySource(projectId, 'doc-b') and deleteBySource(projectId, 'doc-d') with two arguments. The replacing invariant: each call passes the indexed row's source as the second argument and the id third; the row-count assertions are unchanged.
+- `apps/api/test/integration/rag/rag.integration.spec.ts` — its "deleteBySource removes documents by sourceId" case calls ragService.deleteBySource(projectId, 'ticket-to-delete'). The replacing invariant: it calls deleteBySource(projectId, <the indexed row's source>, 'ticket-to-delete') and the row is gone.
+- `apps/api/test/integration/rag/rag-project-id-validation.integration.spec.ts` — its deleteBySource projectId-validation cases call ragService.deleteBySource(projectId, 'source-id') with two arguments. The replacing invariant: they call deleteBySource(projectId, 'manual', 'source-id') and still expect ForbiddenAppException for the empty, malformed and unknown project ids.
 
 **US-007**
 - `apps/api/src/rag/rag.controller.spec.ts` — its module provides no PermissionService, and its "deletes by sourceId" case expects deleteBySource('proj-1', 'doc-1') from a two-argument deleteDocument. The replacing invariant: the module provides a PermissionService stub; a delete with no source query deletes the doc and manual rows through deleteBySource(projectId, source, id) and never the ticket or code rows.
@@ -461,20 +490,21 @@ This is one capability, enforcing keys on the assistant surface, at eight storie
 - `apps/api/test/integration/projects/project-membership-gate.integration.spec.ts` — its matrix row for POST /api/projects/:slug/kb/import/graphify uses a DEVELOPER member and expects a status other than 403. The replacing invariant: that row's member is a project admin (Developer does not hold kb.graphify.import); the other matrix rows are unchanged.
 
 **US-008**
-- `apps/api/src/memory/memory.controller.spec.ts` — its module provides MemoryController without PermissionService or MemoryWriteGuard. The replacing invariant: the module provides both as stubs that allow; the upsert assertions and the membership 403 cases are unchanged.
+- `apps/api/src/memory/memory.controller.spec.ts` — its module provides MemoryController without PermissionService or MemoryWriteGuard; its upsert assertions expect a single argument; its recordDecision assertion expects an exact two-argument call. The replacing invariant: the module provides a PermissionService stub that allows every key except the global (no-project) memory.update, and a MemoryWriteGuard stub whose replaceCheck answers a function; upsert is called with the same item (plus ownerType) and a second argument holding beforeSupersede; recordDecision is called with the same input plus ownerType and a third options argument; the H12 attribution cases and the membership 403 cases are unchanged.
 - `apps/api/src/memory/memory-read.controller.spec.ts` — its AC8 cases expect getMemory to call assertProjectMembership and throw projects. The replacing invariant: the handler no longer calls assertProjectMembership (ProjectMembershipGuard and RequiresGuard decide access); the AC1 page cases are unchanged.
 - `apps/api/src/memory/timeline.controller.spec.ts` — its module provides no PermissionService and its membership cases expect the handler to call assertProjectMembership. The replacing invariant: the module provides a PermissionService stub; an admitted caller gets events; the non-member refusal belongs to the guard.
-- `apps/api/src/fleet/assistant/tools/add-memory-tool.spec.ts` — addMemoryTool({ memory }) has no MemoryWriteGuard dependency and its AC-7 case asserts the exact upsert object. The replacing invariant: the deps are { memory, guard } with a guard that allows; the upsert input is the same fields plus ownerType 'USER'; every other case is unchanged.
-- `apps/api/src/fleet/assistant/tools/record-decision-tool.spec.ts` — recordDecisionTool has no guard dependency and its AC-6 case asserts the exact recordDecision input. The replacing invariant: the deps include a guard that allows; the recorded input also carries ownerType 'USER' for a user actor; every other case is unchanged.
+- `apps/api/src/fleet/assistant/tools/add-memory-tool.spec.ts` — addMemoryTool({ memory }) has no MemoryWriteGuard dependency and its AC-7 case asserts the exact single-argument upsert call. The replacing invariant: the deps are { memory, guard } with a guard that allows; upsert is called with the same fields plus ownerType 'USER' and a second argument holding beforeSupersede; every other case is unchanged.
+- `apps/api/src/fleet/assistant/tools/origin-tools.spec.ts` — its AC-10 and AC-11 cases build addMemoryTool({ memory }) and recordDecisionTool({ memory, extraction }) with no guard, so execute calls a missing guard. The replacing invariant: both deps also carry a MemoryWriteGuard stub that allows; the origin assertions are unchanged.
+- `apps/api/src/fleet/assistant/tools/record-decision-tool.spec.ts` — recordDecisionTool has no guard dependency and its AC-6 case asserts the exact recordDecision call. The replacing invariant: the deps include a guard that allows; recordDecision is called with the same input plus ownerType 'USER' for a user actor and a third options argument holding beforeSupersede; every other case is unchanged.
 - `openapi.json` — it records the route descriptions, the KB DELETE query and the KB source enum this feature's stories change. The replacing invariant: it is regenerated with bun run api:export-spec, and the contract tests still find the thread and KB paths.
 
 ### Seams
 
-- **US-001 → US-002, US-004:** `createdByType` and the agent caller are reached from real routes and the runner tool route. An agent's `POST /projects/p1/threads` stores `createdByType` `'AGENT'` (US-002 AC 3), and a tool call of that thread's job through `POST /fleet/runner/jobs/<jobId>/tools/<name>` runs as the agent (US-004 AC 9).
-- **US-002 → US-003:** the repository's `canOperate` flag is passed by the workspace routes as false (US-003 ACs 6 and 7).
-- **US-004 → US-005, US-008:** `AssistantTool.key` is read by `tools/list` (US-005 ACs 1-3), and the executor's `forbidden: <tool> needs <key> on <slug>` wording carries the memory tools' `ToolForbiddenError('memory.update')` (US-008 AC 14). `ToolContext.can` is reached from `koda_update_ticket`'s preview through a real tool call (US-004 AC 7 at the unit level; the executor fills it).
+- **US-001 → US-002, US-004:** `createdByType` and the agent caller are reached from real routes and the runner tool route. An agent's `POST /projects/p1/threads` stores `createdByType` `'AGENT'` (US-002 AC 3), a tool call of that thread's job through `POST /fleet/runner/jobs/<jobId>/tools/<name>` runs as the agent (US-004 AC 9), and its dispatch is recorded as the agent's (US-004 AC 14, through `runWithActor`).
+- **US-002 → US-003:** the repository's `canOperate` flag defaults to false at the workspace call sites (US-003 ACs 6-8).
+- **US-004 → US-005, US-008:** `AssistantTool.key` is read by `tools/list` (US-005 ACs 1-3), and the executor's `forbidden: <tool> needs <key> on <slug>` wording carries the memory tools' `ToolForbiddenError('memory.update')` (US-008 AC 14). `ToolContext.can` is reached from `koda_update_ticket`'s preview through a real thread tool call (US-004 AC 13).
 - **US-006 → US-007:** `findSourceCreators`, `createdBy` and the `(source, source_id)` delete are reached from `POST` and `DELETE /projects/p1/kb/documents` (US-007 ACs 3-8).
-- **US-008:** `MemoryWriteGuard.assertMayReplace` is reached from `POST /memory` (AC 6) and from `koda_add_memory` through the executor (AC 14).
+- **US-008:** `MemoryWriteGuard.replaceCheck` is reached from `POST /memory` (ACs 4-7) and `POST /memory/extract` (AC 15), and `assertMayReplace` from `koda_add_memory` through the executor (AC 14).
 - **Every route story** has, at the HTTP route, a refusal AC with error code `permissions` and an allow AC for a principal the legacy check refused or a binding-only principal.
 
 ## Acceptance Criteria
@@ -490,7 +520,7 @@ DB-backed tests seed the system roles first. Agent project scoping is on. Thread
 
 1. [integration] `ThreadsService.create(p1, agentId, <valid PROJECT thread input>)` called inside `runWithActor({ type: 'AGENT', id: agentId }, ...)` stores a `ChatThread` row with `createdById` the agent's id and `createdByType` `'AGENT'`.
 2. [integration] `ThreadsService.create(p1, userId, <valid PROJECT thread input>)` called outside any context stores `createdByType` `'USER'`.
-3. [integration] Sending the first message of a thread whose `createdByType` is `'AGENT'` creates a THREAD `FleetJob` with `requestedById` the agent's id and `requestedByType` `'AGENT'`.
+3. [integration] `ThreadsService.sendMessage(p1, <thread created by the agent>, agentId, <valid message>)` called inside `runWithActor({ type: 'AGENT', id: agentId }, ...)` creates a THREAD `FleetJob` with `requestedById` the agent's id and `requestedByType` `'AGENT'`.
 4. [integration] `PrismaAssistantToolCallRepository.findCallContext(<jobId of an agent's thread>)` answers `creator` `{ type: 'AGENT', id, slug, status }` with the agent's values.
 5. [integration] `findCallContext(<jobId of a user's thread>)` answers `creator` with `type` `'USER'` and the user's `id`, `email`, `role` and `disabled`.
 6. [integration] `findCallContext` for a THREAD job whose thread has `createdByType` `'AGENT'` and whose `Agent` row was deleted answers null.
@@ -498,6 +528,8 @@ DB-backed tests seed the system roles first. Agent project scoping is on. Thread
 8. [unit] `AssistantToolExecutor.execute` for a call whose `findCallContext` answers an `AGENT` creator runs the tool with `ctx.actor.actorType` `'agent'` and `ctx.actor.id` the agent's id.
 9. [unit] `AssistantToolExecutor.execute` of the write tool `koda_add_comment` for an `AGENT` creator in a PROJECT thread calls the action proposer's `recordDirect` with `actorType` `'agent'` and `origin` `'thread'`, and never calls `propose`.
 10. [unit] `AssistantToolExecutor.execute` of `koda_add_comment` for a `USER` creator in a PROJECT thread calls `propose` and never calls `recordDirect`.
+11. [unit] `AssistantToolExecutor.execute` for a call whose `findCallContext` answers an `AGENT` creator with id `a1` runs the tool's `execute` with `currentActor()` returning `{ type: 'AGENT', id: 'a1' }`.
+12. [integration] That same agent's `sendMessage` stores the user `ChatMessage` with `authorUserId` the agent's id and `authorType` `'AGENT'`.
 
 ### US-002: Project thread routes check keys, and ownership comes from the keys (`Workdir: apps/api`)
 
@@ -505,7 +537,7 @@ DB-backed tests seed the system roles first. Agent project scoping is on. Thread
 2. [integration] A user whose only source in `p1` is a `developer` binding gets 201 from `POST /projects/p1/threads` with a valid PROJECT thread body.
 3. [integration] An agent whose only source in `p1` is a `developer` binding gets 201 from `POST /projects/p1/threads` with a valid PROJECT thread body, and the row has `createdByType` `'AGENT'`.
 4. [integration] A user whose only source in `p1` is a `viewer` binding gets 200 from `GET /projects/p1/threads`, from `GET /projects/p1/threads/<id>` and from `GET /projects/p1/threads/<id>/messages` for a thread another user created.
-5. [integration] A user whose only source in `p1` is a binding of a custom role holding only `ticket.read` gets 403 with error code `permissions` from `GET /projects/p1/threads`.
+5. [integration] An agent whose only source in `p1` is a `developer` binding gets 201 from `POST /projects/p1/threads/<id>/messages` with a valid message on a PROJECT thread it created.
 6. [integration] A user whose only source in `p1` is a `developer` binding gets 200 from `PATCH /projects/p1/threads/<id>` with `{ maxCostUsd: 3 }` on a thread it created.
 7. [integration] A user whose only source in `p1` is a `developer` binding gets 403 with error code `permissions` from `PATCH /projects/p1/threads/<id>` with `{ maxCostUsd: 3 }` on a thread another user created, and the cap is unchanged.
 8. [integration] A user whose only source in `p1` is a `developer` binding gets 403 with error code `permissions` from `POST /projects/p1/threads/<id>/messages` with a valid message on a thread another user created, and no message is stored.
@@ -515,13 +547,13 @@ DB-backed tests seed the system roles first. Agent project scoping is on. Thread
 12. [integration] A user who created a thread in `p1` and whose only source in `p1` is now a `viewer` binding gets 403 with error code `permissions` from `POST /projects/p1/threads/<id>/messages` with a valid message on that thread.
 13. [integration] A user whose only source in `p1` is a binding of a custom role holding `thread.plan.own` and `thread.read` (and no `fleet.job.dispatch`) gets 403 with error code `permissions` from `POST /projects/p1/threads/<id>/plan` on its own REPO thread, and no job is created.
 14. [unit] `ThreadEventsGuard.canActivate` for a project member whose `PermissionService.can(principal, 'thread.read', { projectId })` is refused throws a 403 with error code `permissions` before reading the JWT.
-15. [unit] `PrismaChatThreadRepository.command(scope, threadId, '<not the creator>', THREAD_STOP_TURN, {}, true)` passes the creator check, and the same call with `canOperate` false throws a 403 with error code `permissions`.
+15. [integration] A user whose only source in `p1` is a `project-admin` binding gets 201 from `POST /projects/p1/threads/<id>/plan` on another user's REPO thread whose spec is published and whose runner is set, and the created PLAN job has `requestedById` the admin's id.
 
 ### US-003: Workspace thread routes check keys (`Workdir: apps/api`)
 
 1. [integration] A user whose only source in `p1` is a `developer` binding (and who holds the baseline `member` role) gets 201 from `POST /threads` with a valid body naming `homeProject` `p1`.
 2. [integration] A user whose only source in `p1` is a `viewer` binding gets 403 with error code `permissions` from `POST /threads` with a valid body naming `homeProject` `p1`, and no thread is created.
-3. [integration] An agent whose only source in `p1` is a `developer` binding and that has no workspace thread key gets 403 with error code `permissions` from `POST /threads` with a valid body.
+3. [integration] An agent whose only source in `p1` is a `developer` binding (so it holds no `thread.workspace.create`) gets 403 with error code `permissions` from `POST /threads` with a valid body.
 4. [integration] An agent bound globally to a custom GLOBAL role holding `thread.workspace.create`, `thread.workspace.read.own` and `thread.workspace.message.send.own`, and whose only source in `p1` is a `developer` binding, gets 201 from `POST /threads` naming `homeProject` `p1`, and the row has `createdByType` `'AGENT'`.
 5. [integration] The thread creator of a workspace thread homed in `p1`, whose only source in `p1` is a `developer` binding, gets 200 from `GET /threads/<id>` and from `GET /threads/<id>/messages`.
 6. [integration] The creator of a workspace thread homed in `p1`, whose only source in `p1` is a `developer` binding and whose thread has a RUNNING thread job, gets 200 from `POST /threads/<id>/stop`, and a `THREAD_STOP_TURN` command is created.
@@ -529,6 +561,7 @@ DB-backed tests seed the system roles first. Agent project scoping is on. Thread
 8. [integration] The creator of a workspace thread homed in `p1`, whose only source in `p1` is now a `viewer` binding, gets 403 with error code `permissions` from `POST /threads/<id>/messages` with a valid message, and no message is stored.
 9. [integration] A global admin gets 404 with error code `threads.notFound` from `GET /threads/<id>` for another user's workspace thread.
 10. [unit] `WorkspaceThreadsService.create` with no `homeProject`, for a principal whose reachable projects are `p1` (where `PermissionService.can(…, 'thread.create', { projectId: p1 })` is refused) and `p2` (where it is allowed), both with an anchor repo, homes the thread in `p2`.
+11. [integration] An agent bound globally to a custom GLOBAL role holding `thread.workspace.create`, `thread.workspace.read.own` and `thread.workspace.message.send.own`, rostered with a `developer` binding in `p2` only, gets 201 from `POST /threads` with no `homeProject`, and the thread is homed in `p2`.
 
 ### US-004: Assistant tools check their key (`Workdir: apps/api`)
 
@@ -536,14 +569,16 @@ DB-backed tests seed the system roles first. Agent project scoping is on. Thread
 2. [integration] A tool call of `koda_search_tickets` from the thread job of a user whose only source in `p1` is a `viewer` binding answers content that lists the project's tickets and is not an error.
 3. [integration] A tool call of `koda_add_comment` from the thread job of a user whose only source in `p1` is a binding of a custom role holding `thread.message.send.own`, `thread.read` and `ticket.read` (and no `comment.create`) answers `forbidden: koda_add_comment needs comment.create on p1` with `isError` true, and no `PendingAction` is created.
 4. [integration] A tool call of `koda_create_tickets` from the thread job of a user whose only source in `p1` is a `developer` binding answers `pending <actionId>: awaiting user approval; do not retry`.
-5. [integration] An MCP `tools/call` of `koda_dispatch_job` naming `project` `p1` by an agent whose only source in `p1` is a `viewer` binding answers `forbidden: koda_dispatch_job needs fleet.job.dispatch on p1`, and no job is created.
+5. [integration] An MCP `tools/call` of `koda_dispatch_job` naming `project` `p1`, by an agent whose only source in `p1` is a `viewer` binding and that has a `developer` binding in `p2` (so the tool is listed), answers `forbidden: koda_dispatch_job needs fleet.job.dispatch on p1`, and no job is created.
 6. [integration] An MCP `tools/call` of `koda_dispatch_job` naming `project` `p1` with a valid input by an agent whose only source in `p1` is a `developer` binding creates a QUEUED job with `requestedById` the agent's id.
 7. [unit] `koda_update_ticket`'s preview with `status` `IN_PROGRESS`, for a context whose `can('ticket.transition.start')` answers false, throws `ToolForbiddenError` with `need` `'ticket.transition.start'`.
 8. [unit] `AssistantToolExecutor.checkAction` for a pending action whose requester's `PermissionService.can(actor, '<tool key>', { projectId: action.projectId })` is refused answers `'forbidden'`.
 9. [integration] A tool call of `koda_get_ticket` through `POST /fleet/runner/jobs/<jobId>/tools/koda_get_ticket` from the thread job of an agent whose only source in `p1` is a `viewer` binding answers the ticket, and its `AssistantToolCall` row has `actorType` `'agent'` and `actorId` the agent's id.
 10. [integration] A tool call of `koda_add_comment` with a valid input from the thread job of an agent whose only source in `p1` is a `developer` binding adds the comment at once, and a `PendingAction` row with `status` `EXECUTED`, `actorType` `'agent'` and `origin` `'thread'` is stored.
 11. [integration] `POST /projects/p1/fleet/approvals/<id>/decide` with `{ decision: 'approve' }` by the thread's creator on a pending `assistant_action` approval of `koda_add_comment`, after the creator's only source in `p1` became a binding of a custom role holding `thread.read`, `ticket.read` and `fleet.approval.read` (no `comment.create`), answers 403 with error code `projects`, and no comment is created.
-12. [unit] `AssistantToolExecutor` running `koda_get_action` (implicit key `assistant.action.read`) for a caller whose `PermissionService` double refuses every non-implicit key returns the tool's answer, not a `forbidden` refusal.
+12. [integration] An MCP `tools/call` of `koda_get_action` naming `project` `p1` with an unknown action id, by an agent whose only source in `p1` is a roster row with no role entry, answers `not_found`, not a `forbidden` refusal (its key `assistant.action.read` is implicit).
+13. [integration] A tool call of `koda_update_ticket` with `status` `IN_PROGRESS` from the thread job of a user whose only source in `p1` is a binding of a custom role holding `ticket.read`, `ticket.update`, `thread.read` and `thread.message.send.own` (no `ticket.transition.start`) answers `forbidden: koda_update_ticket needs ticket.transition.start on p1`, and no `PendingAction` is created.
+14. [integration] A tool call of `koda_dispatch_job` with a valid input from the thread job of an agent whose only source in `p1` is a `developer` binding creates a QUEUED job with `requestedById` the agent's id and `requestedByType` `'AGENT'`.
 
 ### US-005: MCP `tools/list` lists only the tools whose key the agent holds (`Workdir: apps/api`)
 
@@ -564,11 +599,13 @@ DB-backed tests seed the system roles first. Agent project scoping is on. Thread
 6. [unit] `VectorStoreService.deleteBySource(p1, 'manual', "x' OR 1=1")` throws `ValidationAppException` and deletes nothing.
 7. [unit] `KbTicketLifecycleSubscriber` handling a ticket deletion event for ticket `t1` in `p1` calls `RagService.deleteBySource(p1, 'ticket', 't1')`.
 8. [unit] `IncrementalGraphDiffService` removing node `n1` of `p1` calls `VectorStoreService.deleteBySource(p1, 'code', 'n1')`.
+9. [integration] `indexDocument(p1, { source: 'doc', sourceId: 'd3', ..., metadata: { kodaCreatedBy: { type: 'USER', id: 'u9' } } })` with no `createdBy` followed by `findSourceCreators(p1, 'doc', 'd3')` answers `[null]`.
+10. [unit] `VectorStoreService.findSourceCreators(p1, 'doc', "x' OR 1=1")` throws `ValidationAppException` without querying the table.
 
 ### US-007: KB routes check keys and ownership (`Workdir: apps/api`)
 
 1. [integration] A user whose only source in `p1` is a `viewer` binding gets 403 with error code `permissions` from `POST /projects/p1/kb/documents` with `{ source: 'manual', sourceId: 'm1', content: 'x' }`, and gets 200 from `GET /projects/p1/kb/documents`.
-2. [integration] A user whose only source in `p1` is a `developer` binding gets 400 from `POST /projects/p1/kb/documents` with `{ source: 'ticket', sourceId: 't1', content: 'x' }`, and nothing is indexed.
+2. [integration] A user whose only source in `p1` is a `developer` binding gets 400 from `POST /projects/p1/kb/documents` with `{ source: 'ticket', sourceId: 't1', content: 'x' }` and with `{ source: 'code', sourceId: 'c1', content: 'x' }`, and nothing is indexed.
 3. [integration] A user whose only source in `p1` is a `developer` binding gets 201 from `POST /projects/p1/kb/documents` with `{ source: 'doc', sourceId: 'd1', content: 'x' }`, and `findSourceCreators(p1, 'doc', 'd1')` answers that user.
 4. [integration] A second user whose only source in `p1` is a `developer` binding gets 403 with error code `permissions` from `POST /projects/p1/kb/documents` with `{ source: 'doc', sourceId: 'd1', content: 'y' }` over the first user's row, and the row keeps content `x`.
 5. [integration] A user whose only source in `p1` is a `project-admin` binding gets 201 from that same replacing `POST`, and the row's content becomes `y`.
@@ -579,6 +616,7 @@ DB-backed tests seed the system roles first. Agent project scoping is on. Thread
 10. [integration] A user whose only source in `p1` is a `viewer` binding gets 403 with error code `permissions` from `POST /projects/p1/kb/search` with `{ query: 'x' }`, and a user whose only source in `p1` is a `developer` binding gets 200 from it.
 11. [integration] A user whose only source in `p1` is a `developer` binding gets 403 with error code `permissions` from `POST /projects/p1/kb/optimize`, and a user whose only source in `p1` is a `project-admin` binding gets 200 from it.
 12. [integration] A user whose only source in `p1` is a `developer` binding gets 403 with error code `permissions` from `POST /projects/p1/kb/evaluate/retrieval` with a valid body.
+13. [integration] The developer who created `doc` `d1` gets 201 from `POST /projects/p1/kb/documents` with `{ source: 'doc', sourceId: 'd1', content: 'z' }`, and the row's content becomes `z`.
 
 ### US-008: Memory routes check keys, and memory items have owners (`Workdir: apps/api`)
 
@@ -596,4 +634,4 @@ DB-backed tests seed the system roles first. Agent project scoping is on. Thread
 12. [integration] A user whose only source in `p1` is a `viewer` binding gets 200 from `GET /projects/p1/memory` and from `GET /projects/p1/timeline`.
 13. [integration] A user whose only source in `p1` is a binding of a custom role holding only `ticket.read` gets 403 with error code `permissions` from `GET /projects/p1/memory` and from `GET /projects/p1/timeline`.
 14. [integration] An MCP `tools/call` of `koda_add_memory` naming `project` `p1` by an agent whose only source in `p1` is a `developer` binding, with a key matching an active item another principal owns, answers `forbidden: koda_add_memory needs memory.update on p1`, and the item stays active.
-15. [integration] An MCP `tools/call` of `koda_add_memory` naming `project` `p1` with a new key by an agent whose only source in `p1` is a `developer` binding stores the item with `ownerId` the agent's id and `ownerType` `'AGENT'`.
+15. [integration] A user whose only source in `p1` is a `developer` binding gets 403 with error code `permissions` from `POST /memory/extract` with a `ticket_event` for a ticket of `p1` whose extracted items include one that would supersede an active item another user owns, and no item of that request is stored.
