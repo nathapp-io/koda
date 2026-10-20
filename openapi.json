@@ -5211,6 +5211,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.budget.read is missing globally"
           }
         },
         "security": [
@@ -5218,7 +5221,7 @@
             "bearer": []
           }
         ],
-        "summary": "Every budget policy with its current window spend (global admin)",
+        "summary": "Every budget policy with its current window spend (fleet.budget.read, global)",
         "tags": [
           "fleet"
         ]
@@ -5250,6 +5253,9 @@
           "400": {
             "description": "fleet.budgetInput: wrong scope for this route"
           },
+          "403": {
+            "description": "fleet.budget.create is missing globally"
+          },
           "404": {
             "description": "Runner not found"
           },
@@ -5262,7 +5268,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create a global or runner budget policy (global admin)",
+        "summary": "Create a global or runner budget policy (fleet.budget.create, global)",
         "tags": [
           "fleet"
         ]
@@ -5301,6 +5307,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.budget.update is missing globally"
+          },
+          "404": {
+            "description": "fleet.budgets: no such global or runner policy"
           }
         },
         "security": [
@@ -5308,7 +5320,7 @@
             "bearer": []
           }
         ],
-        "summary": "Change the amount, warn, hard stop or running-jobs rule of a global or runner policy (global admin)",
+        "summary": "Change the amount, warn, hard stop or running-jobs rule of a global or runner policy (fleet.budget.update, global)",
         "tags": [
           "fleet"
         ]
@@ -5327,7 +5339,13 @@
         ],
         "responses": {
           "204": {
-            "description": ""
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "fleet.budget.delete is missing globally"
+          },
+          "404": {
+            "description": "fleet.budgets: no such global or runner policy"
           }
         },
         "security": [
@@ -5335,7 +5353,7 @@
             "bearer": []
           }
         ],
-        "summary": "Delete a global or runner policy; lifts its pause (global admin)",
+        "summary": "Delete a global or runner policy; lifts its pause (fleet.budget.delete, global)",
         "tags": [
           "fleet"
         ]
@@ -5378,6 +5396,12 @@
           "400": {
             "description": "fleet.budgetAmountNotAboveSpend"
           },
+          "403": {
+            "description": "fleet.budget.resume is missing globally"
+          },
+          "404": {
+            "description": "fleet.budgets: no such global or runner policy"
+          },
           "409": {
             "description": "fleet.budgetNotPaused"
           }
@@ -5387,7 +5411,7 @@
             "bearer": []
           }
         ],
-        "summary": "Resume a paused global or runner policy, optionally raising the amount (global admin)",
+        "summary": "Resume a paused global or runner policy, optionally raising the amount (fleet.budget.resume, global)",
         "tags": [
           "fleet"
         ]
@@ -5419,6 +5443,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.budget.read is missing"
           }
         },
         "security": [
@@ -5426,7 +5453,7 @@
             "bearer": []
           }
         ],
-        "summary": "The project's project and repo policies plus the global ones, read-only (project member)",
+        "summary": "The project's project and repo policies plus the global ones, read-only (fleet.budget.read)",
         "tags": [
           "fleet"
         ]
@@ -5464,6 +5491,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.budget.create is missing"
+          },
           "404": {
             "description": "Repo not in this project"
           },
@@ -5476,7 +5506,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create a project or repo budget policy (project ADMIN)",
+        "summary": "Create a project or repo budget policy (fleet.budget.create)",
         "tags": [
           "fleet"
         ]
@@ -5523,6 +5553,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.budget.update is missing"
+          },
+          "404": {
+            "description": "fleet.budgets: no such project policy"
           }
         },
         "security": [
@@ -5530,7 +5566,7 @@
             "bearer": []
           }
         ],
-        "summary": "Change a project or repo policy (project ADMIN)",
+        "summary": "Change a project or repo policy (fleet.budget.update)",
         "tags": [
           "fleet"
         ]
@@ -5557,7 +5593,13 @@
         ],
         "responses": {
           "204": {
-            "description": ""
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "fleet.budget.delete is missing"
+          },
+          "404": {
+            "description": "fleet.budgets: no such project policy"
           }
         },
         "security": [
@@ -5565,7 +5607,7 @@
             "bearer": []
           }
         ],
-        "summary": "Delete a project or repo policy; lifts its pause (project ADMIN)",
+        "summary": "Delete a project or repo policy; lifts its pause (fleet.budget.delete)",
         "tags": [
           "fleet"
         ]
@@ -5616,6 +5658,12 @@
           "400": {
             "description": "fleet.budgetAmountNotAboveSpend"
           },
+          "403": {
+            "description": "fleet.budget.resume is missing"
+          },
+          "404": {
+            "description": "fleet.budgets: no such project policy"
+          },
           "409": {
             "description": "fleet.budgetNotPaused"
           }
@@ -5625,7 +5673,7 @@
             "bearer": []
           }
         ],
-        "summary": "Resume a paused project or repo policy, optionally raising the amount (project ADMIN)",
+        "summary": "Resume a paused project or repo policy, optionally raising the amount (fleet.budget.resume)",
         "tags": [
           "fleet"
         ]
@@ -6192,6 +6240,9 @@
         "responses": {
           "200": {
             "description": "Page of FleetApprovalDto"
+          },
+          "403": {
+            "description": "fleet.approval.read is missing"
           }
         },
         "security": [
@@ -6199,7 +6250,7 @@
             "bearer": []
           }
         ],
-        "summary": "This project's approvals, newest first (project member)",
+        "summary": "This project's approvals, newest first (fleet.approval.read)",
         "tags": [
           "fleet"
         ]
@@ -6236,6 +6287,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.approval.read is missing"
+          },
+          "404": {
+            "description": "fleet.approvals: no such approval in this project"
           }
         },
         "security": [
@@ -6243,7 +6300,7 @@
             "bearer": []
           }
         ],
-        "summary": "One approval; a pending budget override includes its re-queue candidates (project member)",
+        "summary": "One approval; a pending budget override includes its re-queue candidates (fleet.approval.read)",
         "tags": [
           "fleet"
         ]
@@ -6294,6 +6351,12 @@
           "400": {
             "description": "fleet.approvalDecisionInvalid, fleet.budgetAmountNotAboveSpend"
           },
+          "403": {
+            "description": "The type's decide key is missing, fleet.approvalSelfDecide, or threads.notCreator"
+          },
+          "404": {
+            "description": "fleet.approvals: no such approval in this project"
+          },
           "409": {
             "description": "fleet.approvalNotPending, fleet.budgetNotPaused"
           }
@@ -6303,7 +6366,7 @@
             "bearer": []
           }
         ],
-        "summary": "Decide a pending approval (budget overrides: project ADMIN)",
+        "summary": "Decide a pending approval (the key of its type: fleet.approval.decide.bash or .budget)",
         "tags": [
           "fleet"
         ]
@@ -6376,6 +6439,9 @@
         "responses": {
           "200": {
             "description": "Page of FleetApprovalDto"
+          },
+          "403": {
+            "description": "fleet.approval.read is missing globally"
           }
         },
         "security": [
@@ -6383,7 +6449,7 @@
             "bearer": []
           }
         ],
-        "summary": "Every approval, newest first (global admin)",
+        "summary": "Every approval, newest first (fleet.approval.read, global)",
         "tags": [
           "fleet"
         ]
@@ -6412,6 +6478,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.approval.read is missing globally"
+          },
+          "404": {
+            "description": "fleet.approvals: no such approval"
           }
         },
         "security": [
@@ -6419,7 +6491,7 @@
             "bearer": []
           }
         ],
-        "summary": "One approval with re-queue candidates when pending (global admin)",
+        "summary": "One approval with re-queue candidates when pending (fleet.approval.read, global)",
         "tags": [
           "fleet"
         ]
@@ -6462,6 +6534,12 @@
           "400": {
             "description": "fleet.approvalDecisionInvalid, fleet.budgetAmountNotAboveSpend"
           },
+          "403": {
+            "description": "fleet.approval.read globally, the type's decide key, or threads.notCreator"
+          },
+          "404": {
+            "description": "fleet.approvals: no such approval"
+          },
           "409": {
             "description": "fleet.approvalNotPending, fleet.budgetNotPaused"
           }
@@ -6471,7 +6549,7 @@
             "bearer": []
           }
         ],
-        "summary": "Decide a pending approval (global admin)",
+        "summary": "Decide a pending approval (fleet.approval.read globally, then the key of its type)",
         "tags": [
           "fleet"
         ]
@@ -6498,7 +6576,7 @@
             "bearer": []
           }
         ],
-        "summary": "Pending approvals per member project; no-project ones for a global admin",
+        "summary": "Pending approvals per project where the caller holds fleet.approval.read",
         "tags": [
           "fleet"
         ]

@@ -36,6 +36,11 @@ describeIntegration('fleet approvals API (PG)', () => {
   let n = 0;
   const as = (token: string) => ({ Authorization: `Bearer ${token}` });
   const tok = (who: keyof FleetHttpWorld['tokens']) => as(world.tokens[who]);
+  /** The root user as the API authenticates it: a global ADMIN principal. */
+  const rootPrincipal = () => ({
+    actorType: 'user' as const, id: world.ids.root, role: 'ADMIN' as const, email: 'root@koda.test',
+    name: 'Root', blacklisted: false, revoked: false, authorities: [],
+  });
   const PROJECT = '/api/projects/web/fleet/approvals';
   const ADMIN = '/api/fleet/approvals';
 
@@ -110,25 +115,22 @@ describeIntegration('fleet approvals API (PG)', () => {
     await request(server).get(`/api/projects/ops/fleet/approvals/${approvalId}`).set(tok('root')).expect(404);
   });
 
-  it.each(['list', 'get'] as const)('an authenticated project agent cannot %s approvals', async (endpoint) => {
+  it.each(['list', 'get'] as const)('an authenticated project agent reads approvals (%s)', async (endpoint) => {
     const { approvalId } = await stopped();
     const url = endpoint === 'list' ? PROJECT : `${PROJECT}/${approvalId}`;
     await request(server).get(url).set(tok('viewer')).expect(200);
-    await request(server).get(url).set(as(agent.apiKey)).expect(403);
+    // Permissions P1d US-006 (R10 retired for approvals): the agent's roster row and legacy roles hold
+    // `fleet.approval.read` in this project, so the route key admits it like a member.
+    const res = await request(server).get(url).set(as(agent.apiKey)).expect(200);
+    if (endpoint === 'get') expect(data<Approval>(res).id).toBe(approvalId);
   });
 
   it('an authenticated project agent cannot decide a budget override', async () => {
     const { approvalId, policy, queued } = await stopped();
     const decision = { decision: 'raise_budget_and_resume', amountUsd: 25, requeueJobIds: [queued.id] };
-    // Agents have a null project role, so the service also returns 403. Check that the controller's
-    // user-only gate rejects before delegation; otherwise deleting that gate could leave this test green.
-    const decide = vi.spyOn(approvals, 'decide');
-    try {
-      await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(agent.apiKey)).send(decision).expect(403);
-      expect(decide).not.toHaveBeenCalled();
-    } finally {
-      decide.mockRestore();
-    }
+    // US-006: the refusal is now `ApprovalsService.decide`'s key check (`fleet.approval.decide.budget`),
+    // which no agent role grants; the decision below is never reached, so the ask keeps its state.
+    await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(agent.apiKey)).send(decision).expect(403);
     expect(await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approvalId } }))
       .toEqual(expect.objectContaining({ status: 'pending', decision: null, decidedById: null }));
     expect((await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } })).pausedAt).not.toBeNull();
@@ -136,30 +138,28 @@ describeIntegration('fleet approvals API (PG)', () => {
     await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send(decision).expect(200);
   });
 
-  it('an authenticated project agent cannot decide a bash approval', async () => {
+  it('an authenticated project agent allows a bash approval of a user\'s job', async () => {
     const running = await job({ state: 'RUNNING', runnerId: runner.id, leaseEpoch: 1, bashMode: 'escalate' });
     const approval = await prisma.fleetApproval.create({ data: {
       type: 'nax_bash_escalate', projectId: world.projectId, jobId: running.id, leaseEpoch: running.leaseEpoch,
       naxAskId: 'agent-guard-ask', requestedAt: new Date(), expiresAt: new Date(Date.now() + 300_000),
       payload: { command: 'bun run test', commandTruncated: false, options: ['allow', 'deny'] },
     } });
-    const decide = vi.spyOn(approvals, 'decide');
-    try {
-      await request(server).post(`${PROJECT}/${approval.id}/decide`).set(as(agent.apiKey)).send({ decision: 'allow' }).expect(403);
-      expect(decide).not.toHaveBeenCalled();
-    } finally {
-      decide.mockRestore();
-    }
+    // US-006: a Developer agent holds `fleet.approval.decide.bash`, and the job's requester is a user, so
+    // the self-decide rule does not apply.
+    await request(server).post(`${PROJECT}/${approval.id}/decide`).set(as(agent.apiKey)).send({ decision: 'allow' }).expect(200);
     expect(await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approval.id } }))
-      .toEqual(expect.objectContaining({ status: 'pending', decision: null, decidedById: null }));
-    expect(await prisma.fleetCommand.count({ where: { jobId: running.id, type: 'APPROVAL_ANSWER' } })).toBe(0);
-    await request(server).post(`${PROJECT}/${approval.id}/decide`).set(tok('dev')).send({ decision: 'allow' }).expect(200);
+      .toEqual(expect.objectContaining({ status: 'approved', decision: 'allow', decidedById: agent.id }));
+    expect(await prisma.fleetCommand.count({ where: { jobId: running.id, type: 'APPROVAL_ANSWER' } })).toBe(1);
   });
 
-  it('an authenticated project agent cannot read approval counts', async () => {
+  it('an authenticated project agent reads approval counts', async () => {
     await stopped();
     expect(data<{ total: number }>(await request(server).get('/api/fleet/approval-counts').set(tok('dev')).expect(200)).total).toBe(1);
-    await request(server).get('/api/fleet/approval-counts').set(as(agent.apiKey)).expect(403);
+    // US-006: `projectIdsWithKey` gives the rostered agent its project, so it counts what it may read.
+    expect(data<{ total: number; projects: Array<{ slug: string; pending: number }> }>(
+      await request(server).get('/api/fleet/approval-counts').set(as(agent.apiKey)).expect(200)))
+      .toEqual(expect.objectContaining({ total: 1, projects: [expect.objectContaining({ slug: 'web', pending: 1 })] }));
   });
 
   it('a global policy approval is on the admin routes only', async () => {
@@ -293,7 +293,7 @@ describeIntegration('fleet approvals API (PG)', () => {
     // Same D228 shape as the HTTP case above: clear the pause so `evaluate` reaches the approval row.
     await prisma.budgetPolicy.update({ where: { id: policy.id }, data: { pausedAt: null, pausedWindowStart: null } });
     const [decideResult, evaluateResult] = await Promise.allSettled([
-      approvals.decide({ id: world.ids.root, globalAdmin: true }, { kind: 'admin' }, approvalId, { decision: 'raise_budget_and_resume', amountUsd: 40 }),
+      approvals.decide({ id: world.ids.root, globalAdmin: true, principal: rootPrincipal() }, { kind: 'admin' }, approvalId, { decision: 'raise_budget_and_resume', amountUsd: 40 }),
       evaluator.evaluate(policy.id),
     ]);
     // The only rejection allowed is the decided-conflict, which is the same 409 the HTTP case sees. With a

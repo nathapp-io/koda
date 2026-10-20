@@ -117,11 +117,35 @@ export class PrismaApprovalRepository implements IApprovalRepository {
     const groups = await this.db.fleetApproval.groupBy({
       by: ['projectId'], where: { status: 'pending', projectId: { in: [...projectIds] } }, _count: { _all: true },
     });
+    return this.toPendingCounts(groups);
+  }
+
+  /**
+   * US-006: every project's pending approvals for a caller with a global `fleet.approval.read` grant.
+   * A soft-deleted project is excluded, so a project that is gone never shows a badge.
+   */
+  async countPendingAllProjects(): Promise<PendingCount[]> {
+    const groups = await this.db.fleetApproval.groupBy({
+      by: ['projectId'], where: { status: 'pending', projectId: { not: null } }, _count: { _all: true },
+    });
+    return this.toPendingCounts(groups, true);
+  }
+
+  /**
+   * The rows of a `groupBy` read, with their slugs, in slug order. `liveOnly` drops a soft-deleted
+   * project: `countPending` keeps today's behaviour and only the unfiltered read needs it.
+   */
+  private async toPendingCounts(
+    groups: Array<{ projectId: string | null; _count: { _all: number } }>,
+    liveOnly = false,
+  ): Promise<PendingCount[]> {
     const ids = groups.map((g) => g.projectId).filter((id): id is string => id !== null);
-    // The badge polls every 60 s and no member project holding a pending approval is the common case;
-    // without this it would still ask Postgres for `id IN ()`.
+    // A caller with a global grant and no pending ask anywhere is the common case; without this it
+    // would still ask Postgres for `id IN ()`.
     if (ids.length === 0) return [];
-    const projects = await this.db.project.findMany({ where: { id: { in: ids } }, select: { id: true, slug: true } });
+    const projects = await this.db.project.findMany({
+      where: { id: { in: ids }, ...(liveOnly ? { deletedAt: null } : {}) }, select: { id: true, slug: true },
+    });
     const slugOf = new Map(projects.map((p) => [p.id, p.slug]));
     return groups
       .filter((g) => g.projectId !== null && slugOf.has(g.projectId))

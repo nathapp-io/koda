@@ -1,7 +1,8 @@
-import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { ApprovalCloser } from './approval-closer';
-import { ApprovalsService } from './approvals.service';
+import { ApprovalsService, type ApprovalCaller } from './approvals.service';
 import { MAX_REQUEUE_CANDIDATES, type FleetApprovalRecord } from './domain/approval.domain';
 
 const NOW = new Date('2026-10-02T10:00:00.000Z');
@@ -9,6 +10,23 @@ const pendingBudget = (over: Partial<FleetApprovalRecord> = {}): FleetApprovalRe
   id: 'a1', type: 'budget_override_required', status: 'pending', projectId: 'p1', jobId: null, leaseEpoch: null, naxAskId: null,
   policyId: 'pol', payload: {}, outcome: null, requestedAt: NOW, expiresAt: null, decision: null, decidedById: null, decidedAt: null,
   resolvedBy: null, comment: null, createdAt: NOW, updatedAt: NOW, ...over,
+});
+
+const userPrincipal = (id: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): KodaPrincipal =>
+  ({ actorType: 'user', id, role, email: `${id}@koda.test`, name: id, blacklisted: false, revoked: false, authorities: [] });
+const agentPrincipal = (id: string): KodaPrincipal =>
+  ({
+    actorType: 'agent', id, slug: id, status: 'ACTIVE', agentRoles: [], capabilities: [],
+    name: id, blacklisted: false, revoked: false, authorities: [],
+  });
+
+/**
+ * US-006: the decide key is `PermissionService.can`'s answer, never the route's `role`. The double
+ * allows every key unless a case denies one, so the cases that are not about permissions keep
+ * asserting the rest of the decision path.
+ */
+const allowAllPermissions = () => ({
+  can: vi.fn(async (_principal: KodaPrincipal, _key: string, _ctx?: unknown) => ({ allowed: true, reason: 'granted' })),
 });
 
 function build(approval: FleetApprovalRecord | null, policyScope: 'project' | 'project-orphan' | 'global' = 'project') {
@@ -23,6 +41,8 @@ function build(approval: FleetApprovalRecord | null, policyScope: 'project' | 'p
       { jobId: 'j2', projectId: 'p2', feature: 'f2', queuedAt: NOW },
     ]),
     countPending: vi.fn(async () => [{ projectId: 'p1', slug: 'web', pending: 2 }]),
+    // US-006: `{ all: true }` reads every project's pending asks through this one, never `countPending`.
+    countPendingAllProjects: vi.fn(async () => [{ projectId: 'p1', slug: 'web', pending: 2 }]),
     countPendingUnscoped: vi.fn(async () => 3),
   };
   const policy = policyScope === 'project'
@@ -44,13 +64,17 @@ function build(approval: FleetApprovalRecord | null, policyScope: 'project' | 'p
   };
   const closer = { recordResolved: vi.fn(async () => []) };
   const live = { publish: vi.fn() };
-  const activity = { memberProjectIds: vi.fn(async () => ['p1']) };
   const tx = { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) };
   const jobRepo = { lockById: vi.fn(), createCommand: vi.fn() };
   const notifier = { notify: vi.fn() };
   const assistantActions = { decide: vi.fn() };
-  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, activity as never, tx as never, jobRepo as never, notifier as never, assistantActions as never);
-  return { service, repo, budgets, jobs, budgetRepo, jobRepo, notifier, assistantActions };
+  // US-006 no longer reads the caller's memberships (`counts` takes the key-filtered scope), but the
+  // dependency stays in place: the double is appended last, so a shifted argument list cannot pass for
+  // a behaviour change.
+  const activity = { memberProjectIds: vi.fn(async () => ['p1']) };
+  const permissions = allowAllPermissions();
+  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, activity as never, tx as never, jobRepo as never, notifier as never, assistantActions as never, permissions as never);
+  return { service, repo, budgets, jobs, budgetRepo, jobRepo, notifier, assistantActions, permissions };
 }
 
 /**
@@ -87,7 +111,8 @@ function buildBash() {
   const jobRepo = { lockById: vi.fn(), createCommand: vi.fn() };
   const notifier = { notify: vi.fn() };
   const assistantActions = { decide: vi.fn() };
-  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, activity as never, tx as never, jobRepo as never, notifier as never, assistantActions as never);
+  const permissions = allowAllPermissions();
+  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, activity as never, tx as never, jobRepo as never, notifier as never, assistantActions as never, permissions as never);
   // Defaults the brief's row literals leave out but the service/DTO touch (e.g. requestedAt).
   const seed = (a: Record<string, unknown> & { id: string }) => {
     rows.set(a.id, {
@@ -95,12 +120,13 @@ function buildBash() {
       resolvedBy: null, comment: null, createdAt: NOW, updatedAt: NOW, ...a,
     } as FleetApprovalRecord);
   };
-  return { service, rows, seed, jobRepo, notifier };
+  return { service, rows, seed, jobRepo, notifier, permissions };
 }
 
 /** AppException carries its HTTP status in the `httpStatus` getter; 0 = resolved. */
 const statusOf = (p: Promise<unknown>): Promise<number> => p.then(() => 0, (e: { httpStatus?: number }) => e.httpStatus ?? -1);
-const ADMIN_CALLER = { id: 'root', globalAdmin: true };
+const ADMIN_CALLER: ApprovalCaller & { principal: KodaPrincipal } = { id: 'root', globalAdmin: true, principal: userPrincipal('root', 'ADMIN') };
+const DEV_CALLER: ApprovalCaller & { principal: KodaPrincipal } = { id: 'dev', globalAdmin: false, principal: userPrincipal('dev') };
 const PROJECT_ADMIN = { kind: 'project' as const, projectId: 'p1', role: 'ADMIN' };
 const PROJECT_DEV = { kind: 'project' as const, projectId: 'p1', role: 'DEVELOPER' };
 
@@ -162,10 +188,9 @@ describe('ApprovalsService.decide (budget)', () => {
     expect(budgets.resume).toHaveBeenCalledWith('root', { kind: 'project', projectId: 'p1' }, 'pol', 20.5, NOW, { approvalId: 'a1' });
   });
 
-  it('refuses: amount missing, foreign re-queue id, project developer, not pending, other project, bash with no job', async () => {
+  it('refuses: amount missing, foreign re-queue id, not pending, other project, bash with no job', async () => {
     expect(await statusOf(build(pendingBudget()).service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'raise_budget_and_resume' }, NOW))).toBe(400);
     expect(await statusOf(build(pendingBudget()).service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'raise_budget_and_resume', amountUsd: 20, requeueJobIds: ['zzz'] }, NOW))).toBe(400);
-    expect(await statusOf(build(pendingBudget()).service.decide({ id: 'dev', globalAdmin: false }, PROJECT_DEV, 'a1', { decision: 'keep_paused' }, NOW))).toBe(403);
     expect(await statusOf(build(pendingBudget({ status: 'approved' })).service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'keep_paused' }, NOW))).toBe(409);
     expect(await statusOf(build(pendingBudget({ projectId: 'p9' })).service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'keep_paused' }, NOW))).toBe(404);
     expect(await statusOf(build(pendingBudget({ type: 'nax_bash_escalate' })).service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'deny' }, NOW))).toBe(400);
@@ -179,31 +204,46 @@ describe('ApprovalsService.decide (budget)', () => {
     expect(budgetRepo.lockById.mock.invocationCallOrder[0]).toBeLessThan(repo.lockById.mock.invocationCallOrder[0]);
   });
 
-  it('refuses an unauthorized caller before validating the decision, and takes no lock (spec §2.3)', async () => {
-    const { service, repo, budgetRepo, budgets } = build(pendingBudget());
-    // `allow` does not apply to a budget approval, but role is answered first: the status must not
+  it('asks for fleet.approval.decide.budget in the approval\'s project, and refuses before validating (spec §2.3)', async () => {
+    const { service, permissions, repo, budgetRepo, budgets } = build(pendingBudget());
+    permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
+    // `allow` does not apply to a budget approval, but the key is answered first: the status must not
     // depend on the request body.
-    expect(await statusOf(service.decide({ id: 'dev', globalAdmin: false }, PROJECT_DEV, 'a1', { decision: 'allow' }, NOW))).toBe(403);
-    expect(await statusOf(service.decide({ id: 'dev', globalAdmin: false }, PROJECT_DEV, 'a1', { decision: 'raise_budget_and_resume', amountUsd: 20 }, NOW))).toBe(403);
+    expect(await statusOf(service.decide(DEV_CALLER, PROJECT_DEV, 'a1', { decision: 'allow' }, NOW))).toBe(403);
+    expect(await statusOf(service.decide(DEV_CALLER, PROJECT_DEV, 'a1', { decision: 'raise_budget_and_resume', amountUsd: 20 }, NOW))).toBe(403);
+    expect(permissions.can).toHaveBeenCalledWith(DEV_CALLER.principal, 'fleet.approval.decide.budget', { projectId: 'p1' });
     expect(budgetRepo.lockById).not.toHaveBeenCalled();
     expect(repo.lockById).not.toHaveBeenCalled();
     expect(budgets.resume).not.toHaveBeenCalled();
   });
+
+  it('asks for the budget key with no project on a global approval (US-006)', async () => {
+    const { service, permissions } = build(pendingBudget({ projectId: null }), 'global');
+    await service.decide(ADMIN_CALLER, { kind: 'admin' }, 'a1', { decision: 'keep_paused' }, NOW);
+    expect(permissions.can).toHaveBeenCalledWith(ADMIN_CALLER.principal, 'fleet.approval.decide.budget', {});
+  });
 });
 
 describe('ApprovalsService.counts', () => {
-  it('sums member projects, plus unscoped for a global admin only (D235)', async () => {
-    expect(await build(null).service.counts({ id: 'root', globalAdmin: true })).toEqual({ total: 5, unscoped: 3, projects: [{ projectId: 'p1', slug: 'web', pending: 2 }] });
-    expect(await build(null).service.counts({ id: 'dev', globalAdmin: false })).toEqual({ total: 2, unscoped: 0, projects: [{ projectId: 'p1', slug: 'web', pending: 2 }] });
+  it('counts every project plus unscoped for { all: true }, and only the given projects otherwise (D235, US-006)', async () => {
+    const all = build(null);
+    expect(await all.service.counts({ all: true })).toEqual({ total: 5, unscoped: 3, projects: [{ projectId: 'p1', slug: 'web', pending: 2 }] });
+    expect(all.repo.countPendingAllProjects).toHaveBeenCalledTimes(1);
+    expect(all.repo.countPending).not.toHaveBeenCalled();
+
+    const scoped = build(null);
+    expect(await scoped.service.counts({ all: false, projectIds: ['p1'] })).toEqual({ total: 2, unscoped: 0, projects: [{ projectId: 'p1', slug: 'web', pending: 2 }] });
+    expect(scoped.repo.countPending).toHaveBeenCalledWith(['p1']);
+    expect(scoped.repo.countPendingAllProjects).not.toHaveBeenCalled();
+    expect(scoped.repo.countPendingUnscoped).not.toHaveBeenCalled();
   });
 });
 
 describe('bash decide (S1.5 §2.3, plan D265-D267)', () => {
   const pending = { id: 'a1', type: 'nax_bash_escalate', status: 'pending', projectId: 'p1', jobId: 'j1', leaseEpoch: 2,
     naxAskId: 'ask-1f2e3d4c', expiresAt: new Date(NOW.getTime() + 60_000), payload: { command: 'ls', commandTruncated: false, options: ['allow', 'deny'] } };
-  const running = { id: 'j1', state: 'RUNNING', leaseEpoch: 2, runnerId: 'r1', requestedById: 'u9' };
+  const running = { id: 'j1', state: 'RUNNING', leaseEpoch: 2, runnerId: 'r1', requestedById: 'u9', requestedByType: 'USER' };
   const dev = { kind: 'project', projectId: 'p1', role: 'DEVELOPER' } as const;
-  const DEV_CALLER = { id: 'dev', globalAdmin: false };
 
   it('a DEVELOPER allows: approved, APPROVAL_ANSWER for the job runner and epoch, notify after commit', async () => {
     const { service, seed, jobRepo, notifier } = buildBash();
@@ -222,10 +262,41 @@ describe('bash decide (S1.5 §2.3, plan D265-D267)', () => {
     expect(jobRepo.createCommand).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ choice: 'deny' }) }));
   });
 
-  it.each(['VIEWER', 'MEMBER', 'AGENT', null])('role %p is forbidden (D266)', async (role) => {
-    const { service, seed } = buildBash();
+  it('is refused with the permissions code when the double denies fleet.approval.decide.bash (US-006)', async () => {
+    const { service, seed, permissions, jobRepo } = buildBash();
     seed(pending);
-    await expect(service.decide(DEV_CALLER, { ...dev, role }, 'a1', { decision: 'deny' }, NOW)).rejects.toThrow(ForbiddenAppException);
+    permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
+    await expect(service.decide(DEV_CALLER, { ...dev, role: null }, 'a1', { decision: 'deny' }, NOW)).rejects.toThrow(ForbiddenAppException);
+    expect(permissions.can).toHaveBeenCalledWith(DEV_CALLER.principal, 'fleet.approval.decide.bash', { projectId: 'p1' });
+    // The key is answered before every lock and every write (spec §2.3).
+    expect(jobRepo.lockById).not.toHaveBeenCalled();
+  });
+
+  it('ignores the route role: a null role whose keys allow it decides (US-006)', async () => {
+    const { service, seed, jobRepo } = buildBash();
+    seed(pending); jobRepo.lockById.mockResolvedValue(running);
+    await expect(service.decide(DEV_CALLER, { ...dev, role: null }, 'a1', { decision: 'deny' }, NOW)).resolves
+      .toEqual(expect.objectContaining({ status: 'rejected' }));
+  });
+
+  it('refuses an agent deciding the ask of the job it requested (US-006 security ruling)', async () => {
+    const { service, rows, seed, jobRepo } = buildBash();
+    seed(pending); jobRepo.lockById.mockResolvedValue({ ...running, requestedById: 'a1', requestedByType: 'AGENT' });
+    const agentCaller: ApprovalCaller & { principal: KodaPrincipal } = { id: 'a1', globalAdmin: false, principal: agentPrincipal('a1') };
+
+    const error = await service.decide(agentCaller, dev, 'a1', { decision: 'allow' }, NOW).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ForbiddenAppException);
+    expect(error).toMatchObject({ prefix: 'fleet.approvalSelfDecide', httpStatus: 403 });
+    expect(rows.get('a1')).toEqual(expect.objectContaining({ status: 'pending' }));
+    expect(jobRepo.createCommand).not.toHaveBeenCalled();
+  });
+
+  it('lets a user decide the ask of the job it requested (the rule is agents-only)', async () => {
+    const { service, seed, jobRepo } = buildBash();
+    seed(pending); jobRepo.lockById.mockResolvedValue({ ...running, requestedById: 'dev', requestedByType: 'USER' });
+    await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'allow' }, NOW)).resolves
+      .toEqual(expect.objectContaining({ status: 'approved' }));
   });
 
   it('expired at decide commits the expiry, then answers 409 (D265)', async () => {
@@ -284,7 +355,7 @@ describe('ApprovalsService.get re-queue candidates', () => {
 
 describe('ApprovalsService.decide (assistant_action, 2a-D8)', () => {
   const assistant = (over: Partial<FleetApprovalRecord> = {}) => pendingBudget({ type: 'assistant_action', policyId: null, payload: { actionId: 'act1', requestedById: 'u1' }, ...over });
-  const REQUESTER = { id: 'u1', globalAdmin: false };
+  const REQUESTER: ApprovalCaller & { principal: KodaPrincipal } = { id: 'u1', globalAdmin: false, principal: userPrincipal('u1') };
 
   it('AC-20: calls AssistantActionPort.decide with the caller, the approval and the dto, and answers its approval', async () => {
     const approval = assistant();
@@ -323,6 +394,50 @@ describe('ApprovalsService.decide keeps the branch-local decision allowlists (AC
     const err = await service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision }, NOW).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ValidationAppException);
     expect(err).toMatchObject({ prefix: 'fleet.approvalDecisionInvalid', args: { reason: `${decision} does not apply to a budget approval` } });
+    expect(budgets.resume).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * US-006's two failure contracts, at the service. `decide` must not reach the key while the row is
+ * invisible (AC-24), and must not take a lock or write while the key is refused (AC-25).
+ */
+describe('ApprovalsService.decide failure contracts (US-006)', () => {
+  it('AC-24: an approval outside the route is 404 fleet.approvals before any key is evaluated', async () => {
+    const { service, permissions } = build(pendingBudget({ projectId: 'p9' }));
+
+    const error = await service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'keep_paused' }, NOW).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(NotFoundAppException);
+    expect(error).toMatchObject({ prefix: 'fleet.approvals', httpStatus: 404 });
+    expect(permissions.can).not.toHaveBeenCalled();
+  });
+
+  it('AC-25: a held-visible bash ask without its decide key is 403 permissions before any lock or write', async () => {
+    const { service, seed, permissions, jobRepo } = buildBash();
+    seed({ id: 'a1', type: 'nax_bash_escalate', status: 'pending', projectId: 'p1', jobId: 'j1', leaseEpoch: 2,
+      naxAskId: 'ask-1f2e3d4c', expiresAt: new Date(NOW.getTime() + 60_000), payload: { command: 'ls', commandTruncated: false, options: ['allow', 'deny'] } });
+    permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
+
+    const error = await service.decide(DEV_CALLER, PROJECT_ADMIN, 'a1', { decision: 'allow' }, NOW).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ForbiddenAppException);
+    expect(error).toMatchObject({ prefix: 'permissions', httpStatus: 403 });
+    expect(jobRepo.lockById).not.toHaveBeenCalled();
+    expect(jobRepo.createCommand).not.toHaveBeenCalled();
+  });
+
+  it('AC-25: a held-visible budget ask without its decide key is 403 permissions before any lock or write', async () => {
+    const { service, permissions, repo, budgetRepo, budgets } = build(pendingBudget());
+    permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
+
+    const error = await service.decide(DEV_CALLER, PROJECT_ADMIN, 'a1', { decision: 'keep_paused' }, NOW).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ForbiddenAppException);
+    expect(error).toMatchObject({ prefix: 'permissions', httpStatus: 403 });
+    expect(budgetRepo.lockById).not.toHaveBeenCalled();
+    expect(repo.lockById).not.toHaveBeenCalled();
+    expect(repo.resolve).not.toHaveBeenCalled();
     expect(budgets.resume).not.toHaveBeenCalled();
   });
 });
