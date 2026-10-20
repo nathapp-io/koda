@@ -1,5 +1,8 @@
 import { MemoryKind } from '../common/enums';
 
+/** Permissions P1 US-008: the two tables `MemoryItem.ownerId` may name. */
+export type MemoryOwnerType = 'USER' | 'AGENT';
+
 export interface MemoryQuery {
   projectId: string;
   kind?: MemoryKind;
@@ -29,6 +32,11 @@ export interface MemoryItemInput {
   object?: string;
   activeKey?: string | null;
   ownerId?: string;
+  /**
+   * Permissions P1 US-008: which table `ownerId` names. `null` (and absent) means a system writer or an
+   * owner that is not a `User`/`Agent` row, and only an any-row `memory.update` may supersede it.
+   */
+  ownerType?: MemoryOwnerType | null;
   sourceType?: string;
   sourceId?: string;
   status?: string;
@@ -47,6 +55,8 @@ export interface MemoryItem {
   object?: string;
   activeKey?: string;
   ownerId?: string;
+  /** Permissions P1 US-008: which table `ownerId` names; null for a system item or an unknown owner. */
+  ownerType?: MemoryOwnerType | null;
   sourceType?: string;
   sourceId?: string;
   status: string;

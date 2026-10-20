@@ -11,6 +11,7 @@ import { MemoryGovernanceService } from './memory-governance.service';
 import { MemoryGovernanceProcessor } from './memory-governance.processor';
 import { ExtractionService } from './extraction.service';
 import { MemoryController } from './memory.controller';
+import { MemoryWriteGuard } from './memory-write.guard';
 import { MemoryReadController } from './memory-read.controller';
 import { CanonicalStateService } from './canonical-state.service';
 import { PrismaCanonicalStateRepository } from './prisma-canonical-state.repository';
@@ -37,6 +38,9 @@ import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
     CanonicalStateService,
     PrismaMemoryItemRepository,
     { provide: MEMORY_ITEM_REPOSITORY, useExisting: PrismaMemoryItemRepository },
+    // Permissions P1 US-008: the replace check every principal-driven write runs (the routes and both memory
+    // tools). It reads the repository and the global PermissionService, so it adds no import edge.
+    MemoryWriteGuard,
     MemoryGovernanceService,
     MemoryGovernanceProcessor,
     ExtractionService,
@@ -49,6 +53,7 @@ import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
     { provide: MEMORY_ITEM_REPOSITORY, useExisting: PrismaMemoryItemRepository },
     MemoryGovernanceService,
     ExtractionService,
+    MemoryWriteGuard,
   ],
 })
 export class MemoryModule {}

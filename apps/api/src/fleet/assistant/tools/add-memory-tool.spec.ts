@@ -1,6 +1,7 @@
 import type { MemoryItem } from '../../../memory/memory-item-repository';
 import { PrismaMemoryItemRepository } from '../../../memory/prisma-memory-item.repository';
-import { ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
+import { MemoryReplaceRefusedError, MemoryWriteGuard } from '../../../memory/memory-write.guard';
+import { ToolActionError, ToolForbiddenError, ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
 import { KODA_ADD_MEMORY } from '../koda-tool-descriptors';
 import { addMemoryTool, type AddMemoryInput } from './add-memory-tool';
 
@@ -31,13 +32,35 @@ const item = (over: Partial<MemoryItem>): MemoryItem =>
 const TOKEN = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
 
 type UpsertArgs = Parameters<PrismaMemoryItemRepository['upsert']>[0];
+type UpsertOptions = NonNullable<Parameters<PrismaMemoryItemRepository['upsert']>[1]>;
 
-/** The tool over its one collaborator; the two defaults answer "no active item" and "saved as m3". */
-function toolDeps(over: { active?: MemoryItem | null; saved?: MemoryItem } = {}) {
+/**
+ * The tool over its collaborators; the defaults answer "no active item" and "saved as m3". `US-008` added the
+ * guard: `replaceCheck` answers a spy the upsert would run inside its transaction, and `refusesReplace` makes both
+ * halves of the check refuse (the preview's `assertMayReplace` and the in-transaction callback).
+ */
+function toolDeps(over: {
+  active?: MemoryItem | null;
+  saved?: MemoryItem;
+  refusesReplace?: boolean;
+  failsReplace?: boolean;
+} = {}) {
   const findActive = vi.fn(async () => over.active ?? null);
-  const upsert = vi.fn(async () => over.saved ?? item({ id: 'm3' }));
+  const beforeSupersede = vi.fn(async (): Promise<void> => {
+    if (over.refusesReplace) throw new MemoryReplaceRefusedError('m1');
+  });
+  const upsert = vi.fn(async (_item: UpsertArgs, _options?: UpsertOptions) => {
+    if (over.failsReplace) throw new MemoryReplaceRefusedError('m1');
+    return over.saved ?? item({ id: 'm3' });
+  });
+  const guard = {
+    assertMayReplace: vi.fn(async () => {
+      if (over.refusesReplace) throw new MemoryReplaceRefusedError('m1');
+    }),
+    replaceCheck: vi.fn(() => beforeSupersede),
+  };
   const memory = { findActive, upsert } as unknown as PrismaMemoryItemRepository;
-  return { findActive, upsert, tool: addMemoryTool({ memory }) };
+  return { findActive, upsert, guard, beforeSupersede, tool: addMemoryTool({ memory, guard: guard as unknown as MemoryWriteGuard }) };
 }
 
 /** The `reason` a parser refuses with; fails loudly when it accepts or throws something else. */
@@ -180,6 +203,29 @@ describe('koda_add_memory preview (US-006)', () => {
     expect(preview).toContain('token=[masked]');
     expect(upsert).not.toHaveBeenCalled();
   });
+
+  // -------------------------------------------------------------------------
+  // Permissions P1 US-008 — the preview refuses a supersede it may not make
+  // -------------------------------------------------------------------------
+
+  it('US-008: the preview asks the guard about the item\'s own key before anything is proposed', async () => {
+    const { guard, tool } = toolDeps();
+
+    await previewOf(tool, tool.parse(draft({ object: 'bun' })));
+
+    expect(guard.assertMayReplace).toHaveBeenCalledWith(ctx.actor, 'project-1', {
+      kind: 'FACT', subject: 'api', predicate: 'runs on',
+    });
+  });
+
+  it('US-008: a refused replace is a forbidden refusal naming memory.update, not a proposal', async () => {
+    const { guard, upsert, tool } = toolDeps({ refusesReplace: true });
+
+    await expect(previewOf(tool, tool.parse(draft()))).rejects.toThrow(ToolForbiddenError);
+    await expect(previewOf(tool, tool.parse(draft()))).rejects.toMatchObject({ need: 'memory.update' });
+    expect(guard.replaceCheck).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+  });
 });
 
 describe('koda_add_memory execute (US-006)', () => {
@@ -189,17 +235,22 @@ describe('koda_add_memory execute (US-006)', () => {
     await tool.execute(ctx, tool.parse(draft({ object: 'bun' })));
 
     expect(upsert).toHaveBeenCalledTimes(1);
-    expect(upsert).toHaveBeenCalledWith({
-      projectId: 'project-1',
-      kind: 'FACT',
-      subject: 'api',
-      predicate: 'runs on',
-      object: 'bun',
-      sourceType: 'thread',
-      sourceId: 'thread-1',
-      confidence: 0.8,
-      ownerId: 'dev-1',
-    });
+    expect(upsert).toHaveBeenCalledWith(
+      {
+        projectId: 'project-1',
+        kind: 'FACT',
+        subject: 'api',
+        predicate: 'runs on',
+        object: 'bun',
+        sourceType: 'thread',
+        sourceId: 'thread-1',
+        confidence: 0.8,
+        ownerId: 'dev-1',
+        // US-008: every principal-driven write records which table its owner names.
+        ownerType: 'USER',
+      },
+      { beforeSupersede: expect.any(Function) },
+    );
   });
 
   it('AC-8: the stored item answers memory:<id> saved', async () => {
@@ -215,7 +266,7 @@ describe('koda_add_memory execute (US-006)', () => {
 
     const input = upsert.mock.calls[0]?.[0] as UpsertArgs;
     expect(Object.keys(input)).toEqual([
-      'projectId', 'kind', 'subject', 'predicate', 'sourceType', 'sourceId', 'confidence', 'ownerId',
+      'projectId', 'kind', 'subject', 'predicate', 'sourceType', 'sourceId', 'confidence', 'ownerId', 'ownerType',
     ]);
   });
 
@@ -225,5 +276,36 @@ describe('koda_add_memory execute (US-006)', () => {
     await tool.execute(ctx, tool.parse(draft({ ownerId: 'someone' })));
 
     expect(upsert.mock.calls[0]?.[0]).toMatchObject({ ownerId: 'dev-1' });
+  });
+
+  // -------------------------------------------------------------------------
+  // Permissions P1 US-008 — the replace check and the owner type
+  // -------------------------------------------------------------------------
+
+  it('US-008: hands the upsert the guard\'s replace check for its own transaction', async () => {
+    const { upsert, guard, beforeSupersede, tool } = toolDeps();
+
+    await tool.execute(ctx, tool.parse(draft()));
+
+    expect(guard.replaceCheck).toHaveBeenCalledWith(ctx.actor, 'project-1');
+    expect(upsert.mock.calls[0]?.[1]).toEqual({ beforeSupersede });
+  });
+
+  it('US-008: an agent stores its item with ownerType AGENT', async () => {
+    const { upsert, tool } = toolDeps();
+    const agentCtx = { ...ctx, actor: { ...ctx.actor, actorType: 'agent', id: 'agent-1' } } as unknown as ToolContext;
+
+    await tool.execute(agentCtx, tool.parse(draft()));
+
+    expect(upsert.mock.calls[0]?.[0]).toMatchObject({ ownerId: 'agent-1', ownerType: 'AGENT' });
+  });
+
+  it('US-008: a supersede the store refuses is a forbidden action, never a generic failure', async () => {
+    const { tool } = toolDeps({ failsReplace: true });
+
+    await expect(tool.execute(ctx, tool.parse(draft()))).rejects.toThrow(ToolActionError);
+    await expect(tool.execute(ctx, tool.parse(draft()))).rejects.toMatchObject({
+      text: 'forbidden: memory:m1 needs memory.update',
+    });
   });
 });

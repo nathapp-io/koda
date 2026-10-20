@@ -692,6 +692,7 @@ model MemoryItem {
   confidence   Float     @default(0.8) // 0.0 - 1.0
   ttlAt        DateTime? // null = never expires
   ownerId      String? // agent or user who created it
+  ownerType    String? // USER | AGENT (which table ownerId names); null = system or unknown
   sourceType   String? // ticket_event | agent_event | decision_event | manual
   sourceId     String? // ID of canonical record/source
   status       String    @default("active") // active | superseded | rejected

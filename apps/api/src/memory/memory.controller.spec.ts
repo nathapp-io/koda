@@ -1,10 +1,12 @@
 import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { MemoryController } from './memory.controller';
 import { ExtractionService } from './extraction.service';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 import { ProjectAccessService } from '../projects/project-access.service';
+import { PermissionService } from '../permissions/permission.service';
+import { MemoryReplaceRefusedError, MemoryWriteGuard } from './memory-write.guard';
 import { MemoryKind, ActorRole } from '../common/enums';
 import { MemoryItem } from './memory-item-repository';
 import type { KodaPrincipal, UserPrincipal, AgentPrincipal } from '../auth/principal/koda-principal.types';
@@ -53,6 +55,9 @@ const makeAgentPrincipal = (): AgentPrincipal => ({
   capabilities: [],
 });
 
+const ALLOWED = { allowed: true, reason: 'granted' } as const;
+const DENIED = { allowed: false, reason: 'not-granted' } as const;
+
 describe('makeMemoryItem', () => {
   // Guards the CI flake at memory.controller.spec.ts "allows a MEMBER-role …":
   // two independent calls (the mock's resolved value and the expected value)
@@ -75,8 +80,20 @@ describe('MemoryController', () => {
   let extractionService: Mocked<Partial<ExtractionService>>;
   let repository: Mocked<Partial<PrismaMemoryItemRepository>>;
   let projectAccess: Mocked<Partial<ProjectAccessService>>;
+  let can: Mock;
+
+  /**
+   * Permissions P1 US-008 fixture: every project-scoped key is allowed, and the one global check the
+   * controller makes (`memory.update` with no project, the attribution grant) is refused unless a case
+   * asks for it — a project-level grant must not be mistaken for a global one.
+   */
+  let globalAttributionGranted: boolean;
+
+  const granted = (): { allowed: boolean; reason: string } => ({ ...ALLOWED });
 
   beforeEach(async () => {
+    globalAttributionGranted = false;
+
     extractionService = {
       extractFromEvent: vi.fn().mockReturnValue([]),
       recordDecision: vi.fn(),
@@ -84,11 +101,20 @@ describe('MemoryController', () => {
 
     repository = {
       upsert: vi.fn(),
+      findActive: vi.fn().mockResolvedValue(null),
+      ticketInProject: vi.fn().mockResolvedValue(true),
     };
 
     projectAccess = {
       assertProjectMembership: vi.fn().mockResolvedValue(undefined),
     };
+
+    can = vi.fn(async (_principal: unknown, key: string, ctx?: { projectId?: string }) => {
+      if (ctx?.projectId !== undefined) return granted();
+      return key === 'memory.update' && !globalAttributionGranted ? { ...DENIED } : granted();
+    });
+
+    const permissions = { can } as unknown as PermissionService;
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -96,6 +122,9 @@ describe('MemoryController', () => {
         { provide: ExtractionService, useValue: extractionService },
         { provide: PrismaMemoryItemRepository, useValue: repository },
         { provide: ProjectAccessService, useValue: projectAccess },
+        { provide: PermissionService, useValue: permissions },
+        // The real guard over the two mocks, so the cases exercise its decision rather than a stub.
+        { provide: MemoryWriteGuard, useValue: new MemoryWriteGuard(permissions, repository as PrismaMemoryItemRepository) },
       ],
     }).compile();
 
@@ -103,13 +132,24 @@ describe('MemoryController', () => {
 
     vi.clearAllMocks();
     (projectAccess.assertProjectMembership as Mock).mockResolvedValue(undefined);
+    (repository.findActive as Mock).mockResolvedValue(null);
+    (repository.ticketInProject as Mock).mockResolvedValue(true);
   });
+
+  /** Refuse one project key for the rest of the case. */
+  const refuseKey = (refused: string): void => {
+    can.mockImplementation(async (_principal: unknown, key: string, ctx?: { projectId?: string }) => {
+      if (ctx?.projectId !== undefined) return key === refused ? { ...DENIED } : granted();
+      return key === 'memory.update' && !globalAttributionGranted ? { ...DENIED } : granted();
+    });
+  };
 
   describe('extractFromEvent', () => {
     it('returns empty items when projectId is missing', async () => {
       const principal = makeUserPrincipal(ActorRole.ADMIN);
       const result = await controller.extractFromEvent({ action: 'x', data: {} } as any, principal);
       expect(result).toEqual({ items: [] });
+      expect(can).not.toHaveBeenCalled();
     });
 
     it('throws ForbiddenAppException for a MEMBER user without project membership', async () => {
@@ -134,6 +174,42 @@ describe('MemoryController', () => {
         controller.extractFromEvent({ projectId: 'project-123', action: 'x', data: {} }, principal),
       ).rejects.toThrow(ForbiddenAppException);
       expect(extractionService.extractFromEvent).not.toHaveBeenCalled();
+    });
+
+    it('throws the permissions 403 when the caller does not hold memory.extract', async () => {
+      const principal = makeUserPrincipal(ActorRole.VIEWER);
+      refuseKey('memory.extract');
+
+      await expect(
+        controller.extractFromEvent({ projectId: 'project-123', action: 'status_changed', data: {} }, principal),
+      ).rejects.toThrow(ForbiddenAppException);
+      expect(can).toHaveBeenCalledWith(principal, 'memory.extract', { projectId: 'project-123' });
+      expect(extractionService.extractFromEvent).not.toHaveBeenCalled();
+      expect(repository.upsert).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 tickets when the event names a ticket of another project, and stores nothing', async () => {
+      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
+      (repository.ticketInProject as Mock).mockResolvedValue(false);
+
+      await expect(
+        controller.extractFromEvent(
+          { projectId: 'project-123', ticketId: 'ticket-of-other-project', action: 'status_changed', data: {} },
+          principal,
+        ),
+      ).rejects.toThrow(NotFoundAppException);
+
+      expect(repository.ticketInProject).toHaveBeenCalledWith('project-123', 'ticket-of-other-project');
+      expect(extractionService.extractFromEvent).not.toHaveBeenCalled();
+      expect(repository.upsert).not.toHaveBeenCalled();
+    });
+
+    it('does not read a ticket when the event names none', async () => {
+      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
+
+      await controller.extractFromEvent({ projectId: 'project-123', action: 'x', data: {} }, principal);
+
+      expect(repository.ticketInProject).not.toHaveBeenCalled();
     });
 
     it('allows a MEMBER-role global user who holds a project membership (any role)', async () => {
@@ -321,7 +397,8 @@ describe('MemoryController', () => {
       expect(result.items).toEqual([factItem]);
       expect(repository.upsert).toHaveBeenCalledTimes(1);
       expect(repository.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ kind: MemoryKind.FACT, ownerId: 'user-1' }),
+        expect.objectContaining({ kind: MemoryKind.FACT, ownerId: 'user-1', ownerType: 'USER' }),
+        expect.objectContaining({ beforeSupersede: expect.any(Function) }),
       );
     });
 
@@ -352,10 +429,47 @@ describe('MemoryController', () => {
 
       expect(repository.upsert).toHaveBeenCalledWith(
         expect.objectContaining({ ownerId: 'user-1' }),
+        expect.anything(),
       );
       expect(repository.upsert).not.toHaveBeenCalledWith(
         expect.objectContaining({ ownerId: 'victim' }),
+        expect.anything(),
       );
+    });
+
+    it('US-008: an agent records its own items with ownerType AGENT', async () => {
+      const principal = makeAgentPrincipal();
+      (extractionService.extractFromEvent as Mock).mockReturnValue([
+        { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status', confidence: 0.9 },
+      ]);
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
+
+      await controller.extractFromEvent({ projectId: 'project-123', action: 'status_changed', data: {} }, principal);
+
+      expect(repository.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ ownerId: 'agent-1', ownerType: 'AGENT' }),
+        expect.anything(),
+      );
+    });
+
+    it('US-008: refuses the whole request (403 permissions) when an extracted item may not supersede its active item', async () => {
+      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
+      (extractionService.extractFromEvent as Mock).mockReturnValue([
+        { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status', confidence: 0.9 },
+      ]);
+      (repository.findActive as Mock).mockResolvedValue(makeMemoryItem({ ownerType: 'USER', ownerId: 'user-2' }));
+      can.mockImplementation(async (_principal: unknown, key: string, ctx?: { projectId?: string; resource?: unknown }) => {
+        if (ctx?.projectId !== undefined) {
+          return key === 'memory.update' && ctx.resource !== undefined ? { ...DENIED } : granted();
+        }
+        return { ...DENIED };
+      });
+
+      await expect(
+        controller.extractFromEvent({ projectId: 'project-123', action: 'status_changed', data: {} }, principal),
+      ).rejects.toThrow(ForbiddenAppException);
+      expect(repository.findActive).toHaveBeenCalledWith('project-123', MemoryKind.FACT, 'ticket:1', 'status');
+      expect(repository.upsert).not.toHaveBeenCalled();
     });
   });
 
@@ -380,13 +494,15 @@ describe('MemoryController', () => {
       expect(extractionService.recordDecision).toHaveBeenCalledWith(
         {
           projectId: 'project-123',
-          actorId: 'actor-1',
+          actorId: 'user-1',
           topic: 'architecture',
           decision: 'use microservices',
           rationale: 'scalability',
           sourceId: 'src-1',
+          ownerType: 'USER',
         },
         repository,
+        { beforeSupersede: expect.any(Function) },
       );
       expect(result).toEqual(writeResult);
     });
@@ -405,6 +521,17 @@ describe('MemoryController', () => {
       ).rejects.toThrow(ForbiddenAppException);
       expect(extractionService.recordDecision).not.toHaveBeenCalled();
       expect(projectAccess.assertProjectMembership).toHaveBeenCalledWith('project-123', principal);
+    });
+
+    it('throws the permissions 403 when the caller does not hold memory.decision.record', async () => {
+      const principal = makeUserPrincipal(ActorRole.VIEWER);
+      refuseKey('memory.decision.record');
+
+      await expect(
+        controller.recordDecision({ projectId: 'project-123', topic: 't', decision: 'd' }, principal),
+      ).rejects.toThrow(ForbiddenAppException);
+      expect(can).toHaveBeenCalledWith(principal, 'memory.decision.record', { projectId: 'project-123' });
+      expect(extractionService.recordDecision).not.toHaveBeenCalled();
     });
 
     it('throws ForbiddenAppException when the caller is not a member of the named project', async () => {
@@ -430,13 +557,15 @@ describe('MemoryController', () => {
       );
 
       expect(extractionService.recordDecision).toHaveBeenCalledWith(
-        expect.objectContaining({ actorId: 'user-1' }),
+        expect.objectContaining({ actorId: 'user-1', ownerType: 'USER' }),
         repository,
+        { beforeSupersede: expect.any(Function) },
       );
     });
 
-    it('honors an admin-supplied actorId', async () => {
+    it('honors an actorId for a caller holding the global memory.update grant, stored with no owner type', async () => {
       const principal = makeUserPrincipal(ActorRole.ADMIN);
+      globalAttributionGranted = true;
       (extractionService.recordDecision as Mock).mockResolvedValue({ canonicalId: 'x', memoryId: 'y' });
 
       await controller.recordDecision(
@@ -444,10 +573,21 @@ describe('MemoryController', () => {
         principal,
       );
 
+      expect(can).toHaveBeenCalledWith(principal, 'memory.update');
       expect(extractionService.recordDecision).toHaveBeenCalledWith(
-        expect.objectContaining({ actorId: 'attributed-actor' }),
+        expect.objectContaining({ actorId: 'attributed-actor', ownerType: null }),
         repository,
+        { beforeSupersede: expect.any(Function) },
       );
+    });
+
+    it('US-008: answers the permissions 403 when the store refuses the supersede', async () => {
+      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
+      (extractionService.recordDecision as Mock).mockRejectedValue(new MemoryReplaceRefusedError('mem-9'));
+
+      await expect(
+        controller.recordDecision({ projectId: 'project-123', topic: 't', decision: 'd' }, principal),
+      ).rejects.toThrow(ForbiddenAppException);
     });
   });
 
@@ -478,9 +618,25 @@ describe('MemoryController', () => {
           sourceType: 'manual',
           confidence: 0.8,
           ownerId: 'user-1',
+          ownerType: 'USER',
         }),
+        { beforeSupersede: expect.any(Function) },
       );
       expect(result).toEqual(created);
+    });
+
+    it('throws the permissions 403 when the caller does not hold memory.create', async () => {
+      const principal = makeUserPrincipal(ActorRole.VIEWER);
+      refuseKey('memory.create');
+
+      await expect(
+        controller.createMemory(
+          { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status' },
+          principal,
+        ),
+      ).rejects.toThrow(ForbiddenAppException);
+      expect(can).toHaveBeenCalledWith(principal, 'memory.create', { projectId: 'project-123' });
+      expect(repository.upsert).not.toHaveBeenCalled();
     });
 
     it('throws ForbiddenAppException for MEMBER user without project membership', async () => {
@@ -562,8 +718,9 @@ describe('MemoryController', () => {
       expect(repository.upsert).not.toHaveBeenCalled();
     });
 
-    it('uses provided ownerId over principal id', async () => {
+    it('uses provided ownerId for a caller holding the global memory.update grant, with no owner type', async () => {
       const principal = makeUserPrincipal(ActorRole.ADMIN);
+      globalAttributionGranted = true;
       (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
 
       await controller.createMemory(
@@ -577,8 +734,10 @@ describe('MemoryController', () => {
         principal,
       );
 
+      expect(can).toHaveBeenCalledWith(principal, 'memory.update');
       expect(repository.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ ownerId: 'custom-owner' }),
+        expect.objectContaining({ ownerId: 'custom-owner', ownerType: null }),
+        expect.anything(),
       );
     });
 
@@ -598,10 +757,12 @@ describe('MemoryController', () => {
       );
 
       expect(repository.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ ownerId: principal.id }),
+        expect.objectContaining({ ownerId: principal.id, ownerType: 'USER' }),
+        expect.anything(),
       );
       expect(repository.upsert).not.toHaveBeenCalledWith(
         expect.objectContaining({ ownerId: 'victim' }),
+        expect.anything(),
       );
     });
 
@@ -621,7 +782,8 @@ describe('MemoryController', () => {
       );
 
       expect(repository.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ ownerId: 'agent-1' }),
+        expect.objectContaining({ ownerId: 'agent-1', ownerType: 'AGENT' }),
+        expect.anything(),
       );
     });
 
@@ -660,6 +822,7 @@ describe('MemoryController', () => {
 
       expect(repository.upsert).toHaveBeenCalledWith(
         expect.objectContaining({ confidence: 0.5 }),
+        expect.anything(),
       );
     });
 
@@ -679,6 +842,41 @@ describe('MemoryController', () => {
       );
 
       expect(result).toEqual(created);
+    });
+
+    it('US-008: answers the permissions 403 when the store refuses the supersede', async () => {
+      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
+      (repository.upsert as Mock).mockRejectedValue(new MemoryReplaceRefusedError('mem-9'));
+
+      await expect(
+        controller.createMemory(
+          { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status' },
+          principal,
+        ),
+      ).rejects.toThrow(ForbiddenAppException);
+    });
+
+    it('US-008: hands the upsert the guard\'s replace check for its own transaction', async () => {
+      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
+
+      await controller.createMemory(
+        { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status' },
+        principal,
+      );
+
+      const options = (repository.upsert as Mock).mock.calls[0][1] as { beforeSupersede: (item: MemoryItem) => Promise<void> };
+      // The check reads the same key the guard reads: another principal's item is refused.
+      can.mockImplementation(async (_principal: unknown, key: string, ctx?: { resource?: { createdBy?: { id: string } | null } }) => {
+        if (key !== 'memory.update') return granted();
+        const creator = ctx?.resource?.createdBy;
+        return creator && creator.id !== 'user-1' ? { ...DENIED } : granted();
+      });
+
+      await expect(options.beforeSupersede(makeMemoryItem({ ownerType: 'USER', ownerId: 'user-2' })))
+        .rejects.toBeInstanceOf(MemoryReplaceRefusedError);
+      await expect(options.beforeSupersede(makeMemoryItem({ ownerType: 'USER', ownerId: 'user-1' })))
+        .resolves.toBeUndefined();
     });
   });
 });

@@ -248,7 +248,8 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
 
       expect(result).toEqual(
         expect.objectContaining({
-          records: mockItems,
+          // US-008: the mapper reads `ownerType` too; a model row without one is a system item (null).
+          records: [expect.objectContaining({ ...mockItems[0], ownerType: null })],
           total: 1,
           current: 1,
           size: 10,

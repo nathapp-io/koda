@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import { MemoryKind } from '../common/enums';
-import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
+import { PrismaMemoryItemRepository, type MemoryUpsertOptions } from './prisma-memory-item.repository';
 import { MemoryItemInput } from './memory-item-repository';
 
 export interface MemoryExtractedItem {
@@ -207,10 +207,24 @@ export class ExtractionService {
    * inserts the new one (its serializable `$transaction`), so the two either both happen or neither does. A
    * separately committed pre-update left the topic with no active decision at all whenever the insert failed
    * (fleet S5b 2b1 branch review B1).
+   *
+   * Permissions P1 US-008: `input.ownerType` is stored on the item (a decision recorded as the caller is a USER or
+   * AGENT row; one attributed to another actor is neither known, so it is null), and `options` is passed straight
+   * through to `upsert` — the caller's replace check rides in it. A system caller (the outbox subscriber) passes
+   * neither and keeps the one-argument `upsert` it always made.
    */
   async recordDecision(
-    input: { projectId: string; actorId: string; topic: string; decision: string; rationale?: string; sourceId?: string },
+    input: {
+      projectId: string;
+      actorId: string;
+      topic: string;
+      decision: string;
+      rationale?: string;
+      sourceId?: string;
+      ownerType?: 'USER' | 'AGENT' | null;
+    },
     repository: PrismaMemoryItemRepository,
+    options?: MemoryUpsertOptions,
   ): Promise<WriteResult> {
     const memoryInput: MemoryItemInput = {
       projectId: input.projectId,
@@ -222,9 +236,12 @@ export class ExtractionService {
       sourceId: input.sourceId,
       confidence: 1.0,
       ownerId: input.actorId,
+      ownerType: input.ownerType ?? null,
     };
 
-    const memory = await repository.upsert(memoryInput);
+    const memory = options === undefined
+      ? await repository.upsert(memoryInput)
+      : await repository.upsert(memoryInput, options);
 
     return { canonicalId: input.sourceId ?? memory.id, memoryId: memory.id };
   }

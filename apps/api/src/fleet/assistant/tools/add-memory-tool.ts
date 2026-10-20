@@ -1,8 +1,14 @@
 import { MemoryKind } from '../../../common/enums';
+import type { MemoryItem } from '../../../memory/memory-item-repository';
 import type { PrismaMemoryItemRepository } from '../../../memory/prisma-memory-item.repository';
+import {
+  MemoryReplaceRefusedError,
+  ownerTypeFor,
+  type MemoryWriteGuard,
+} from '../../../memory/memory-write.guard';
 import { maskSecrets } from '../assistant-tool-safety';
 import { KODA_ADD_MEMORY } from '../koda-tool-descriptors';
-import { ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
+import { ToolActionError, ToolForbiddenError, ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
 import { asRecord } from './tool-input';
 
 /**
@@ -45,7 +51,7 @@ const isMemoryWriteKind = (value: unknown): value is MemoryWriteKind =>
  * it upserts through `PrismaMemoryItemRepository`, so the usual active-key supersession happens and the item is
  * readable by `koda_memory_search`.
  */
-export function addMemoryTool(deps: { memory: PrismaMemoryItemRepository }): AssistantTool<AddMemoryInput> {
+export function addMemoryTool(deps: { memory: PrismaMemoryItemRepository; guard: MemoryWriteGuard }): AssistantTool<AddMemoryInput> {
   return {
     descriptor: KODA_ADD_MEMORY,
     key: 'memory.create',
@@ -74,8 +80,22 @@ export function addMemoryTool(deps: { memory: PrismaMemoryItemRepository }): Ass
      * 2b1-D6: the text the user approves — the project slug, the key and then the object. When the project already
      * holds an active item of that key, the last line shows the item this approval replaces, so the user can see
      * what changes. The whole text is masked, because the key and the object are user-written.
+     *
+     * Permissions P1 US-008: the preview of a write that would supersede another principal's item is refused here,
+     * before a proposal exists — `memory.update` with that item's owner is what an approval would need. The refusal is
+     * a `forbidden` answer naming the key, not a proposal the user could approve into a failed action.
      */
     async preview(ctx: ToolContext, input: AddMemoryInput): Promise<string> {
+      try {
+        await deps.guard.assertMayReplace(ctx.actor, ctx.projectId, {
+          kind: input.kind,
+          subject: input.subject,
+          predicate: input.predicate,
+        });
+      } catch (error) {
+        if (error instanceof MemoryReplaceRefusedError) throw new ToolForbiddenError('memory.update');
+        throw error;
+      }
       const lines = [`Remember in ${ctx.projectSlug}: ${input.kind} ${input.subject} / ${input.predicate}`];
       if (input.object !== undefined) lines.push(input.object);
       const active = await deps.memory.findActive(ctx.projectId, input.kind, input.subject, input.predicate);
@@ -89,19 +109,32 @@ export function addMemoryTool(deps: { memory: PrismaMemoryItemRepository }): Ass
      * 2b1-D7, 2b-R5: the item is stored in the action's project — never the thread's home project — as the requester,
      * from this thread, with the confidence a proposal carries. Task 2b-R2 keeps `koda_add_kb_doc` out of the catalog:
      * this table, not the legacy RAG table, is what `koda_memory_search` reads back.
+     *
+     * Permissions P1 US-008: the write runs the same in-transaction replace check the REST route runs, and records the
+     * actor's owner type. A supersede the check refuses is the action's failure, not an exception the executor logs: a
+     * concurrent write can forbid between the preview and the approve.
      */
     async execute(ctx: ToolContext, input: AddMemoryInput): Promise<string> {
-      const item = await deps.memory.upsert({
-        projectId: ctx.projectId,
-        kind: input.kind,
-        subject: input.subject,
-        predicate: input.predicate,
-        ...(input.object === undefined ? {} : { object: input.object }),
-        sourceType: ctx.threadId === null ? 'mcp' : 'thread',
-        sourceId: ctx.threadId ?? ctx.actor.id,
-        confidence: THREAD_CONFIDENCE,
-        ownerId: ctx.actor.id,
-      });
+      let item: MemoryItem;
+      try {
+        item = await deps.memory.upsert({
+          projectId: ctx.projectId,
+          kind: input.kind,
+          subject: input.subject,
+          predicate: input.predicate,
+          ...(input.object === undefined ? {} : { object: input.object }),
+          sourceType: ctx.threadId === null ? 'mcp' : 'thread',
+          sourceId: ctx.threadId ?? ctx.actor.id,
+          confidence: THREAD_CONFIDENCE,
+          ownerId: ctx.actor.id,
+          ownerType: ownerTypeFor(ctx.actor),
+        }, { beforeSupersede: deps.guard.replaceCheck(ctx.actor, ctx.projectId) });
+      } catch (error) {
+        if (error instanceof MemoryReplaceRefusedError) {
+          throw new ToolActionError(`forbidden: memory:${error.itemId} needs memory.update`);
+        }
+        throw error;
+      }
       return `memory:${item.id} saved`;
     },
   };

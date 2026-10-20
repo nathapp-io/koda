@@ -1,23 +1,37 @@
-import { Controller, Post, Get, Body, Query, Param, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
-import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ExtractionService, WriteResult } from './extraction.service';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 import { MemoryItemInput } from './memory-item-repository';
-import { ActorRole, MemoryKind } from '../common/enums';
-import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
+import { MemoryKind } from '../common/enums';
+import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { ProjectAccessService } from '../projects/project-access.service';
+import { PermissionService } from '../permissions/permission.service';
+import { Requires } from '../permissions/requires.decorator';
+import { MemoryReplaceRefusedError, MemoryWriteGuard, ownerTypeFor } from './memory-write.guard';
 import { RecordDecisionDto } from './dto/record-decision.dto';
 import { CreateMemoryDto } from './dto/create-memory.dto';
 import { ExtractEventDto } from './dto/extract-event.dto';
 
-function principalRole(principal: KodaPrincipal): string | null {
-  return isAgentPrincipal(principal)
-    ? ActorRole.AGENT
-    : (isUserPrincipal(principal) ? principal.role : null);
-}
+/** `memory.update`: holding it without a project is the global grant that lets a caller attribute a write. */
+const ATTRIBUTE_KEY = 'memory.update';
 
+/**
+ * The three memory write routes (permissions P1 US-008).
+ *
+ * Each one is a service-mode key: the handler first keeps the membership check it has always made
+ * (`assertProjectMembership`, which is what refuses a runner and a non-member), then asks
+ * `PermissionService` for its catalog key in the named project. The reads live in `MemoryReadController`
+ * and `TimelineController`, whose keys the guard checks.
+ *
+ * No write supersedes silently: every principal-driven `upsert` passes `MemoryWriteGuard.replaceCheck`,
+ * which runs inside the repository's transaction and refuses (`MemoryReplaceRefusedError` → 403
+ * `permissions`) when the active item belongs to a principal this caller may not replace. `extract`
+ * pre-checks every extracted item before the first write, so one forbidden key leaves the whole request
+ * unwritten.
+ */
 @ApiTags('memory')
 @ApiBearerAuth()
 @Controller('memory')
@@ -26,36 +40,76 @@ export class MemoryController {
     private readonly extractionService: ExtractionService,
     private readonly repository: PrismaMemoryItemRepository,
     private readonly projectAccess: ProjectAccessService,
+    private readonly permissions: PermissionService,
+    private readonly writeGuard: MemoryWriteGuard,
   ) {}
 
-  private async assertWriteAuthorized(
-    projectId: string,
+  /**
+   * S mode: membership first (the check this route has always made, and the one that keeps the cross-project
+   * write path closed), then the catalog key in that project. `can` is what refuses a runner (a runner holds
+   * no role key) and a caller whose only grant is another project's.
+   */
+  private async assertMayWrite(
     principal: KodaPrincipal,
+    key: string,
+    projectId: string,
   ): Promise<void> {
-    if (!isUserPrincipal(principal) && !isAgentPrincipal(principal)) {
-      throw new ForbiddenAppException({}, 'memory');
-    }
-    // Agents need an AgentProject roster row for the project (S4c US-001);
-    // AGENT_PROJECT_SCOPING=off restores the previous pass-through. For users,
-    // assertProjectMembership lets global admins through and requires a
-    // ProjectMember row (any role) for everyone else — the previous
-    // MEMORY_WRITE_ROLES check compared the GLOBAL role,
-    // locking out users whose write access was only granted at project level.
-    // It also closes the cross-project write path (member of project A writing
-    // to project B).
     await this.projectAccess.assertProjectMembership(projectId, principal);
+    const decision = await this.permissions.can(principal, key, { projectId });
+    if (!decision.allowed) throw new ForbiddenAppException({}, 'permissions');
+  }
+
+  /**
+   * Though a write is always made as the caller, a caller holding `memory.update` *globally* may attribute
+   * it to another principal (H12). That grant needs a global role — a project-admin binding alone does
+   * not reach this check, which is given no project.
+   */
+  private async mayAttribute(principal: KodaPrincipal): Promise<boolean> {
+    return (await this.permissions.can(principal, ATTRIBUTE_KEY)).allowed;
+  }
+
+  /**
+   * The one principal-driven write path: the item, plus the replace check the repository runs inside its
+   * transaction. A refusal is the `permissions` 403 — by then the transaction has rolled back, so nothing
+   * of the refused write exists.
+   */
+  private async write(
+    principal: KodaPrincipal,
+    projectId: string,
+    data: { ownerId: string; ownerType: 'USER' | 'AGENT' | null },
+    rest: Omit<MemoryItemInput, 'ownerId' | 'ownerType'>,
+  ) {
+    try {
+      return await this.repository.upsert(
+        { ...rest, ownerId: data.ownerId, ownerType: data.ownerType },
+        { beforeSupersede: this.writeGuard.replaceCheck(principal, projectId) },
+      );
+    } catch (error) {
+      if (error instanceof MemoryReplaceRefusedError) throw new ForbiddenAppException({}, 'permissions');
+      throw error;
+    }
   }
 
   @Post('extract')
-  @ApiOperation({ summary: 'Extract memory items from a canonical event (internal)' })
+  @Requires('memory.extract', { enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Extract memory items from a canonical event (memory.extract)' })
   @ApiResponse({ status: 201, description: 'Memory items extracted' })
+  @ApiResponse({ status: 403, description: 'memory.extract is missing, or an extracted item may not replace its active item' })
+  @ApiResponse({ status: 404, description: 'A named ticket does not belong to the event\'s project' })
   async extractFromEvent(@Body() event: ExtractEventDto, @Principal() principal: KodaPrincipal) {
     const projectId = event.projectId;
     if (!projectId) {
       return { items: [] };
     }
 
-    await this.assertWriteAuthorized(projectId, principal);
+    await this.assertMayWrite(principal, 'memory.extract', projectId);
+
+    // The event's ticket must be a live ticket of the same project: extraction turns `ticketId` into the
+    // item's subject, so a foreign id would plant a fact about another project's ticket here. MemoryModule
+    // does not import the tickets module, so the read goes through the repository.
+    if (event.ticketId && !(await this.repository.ticketInProject(projectId, event.ticketId))) {
+      throw new NotFoundAppException({}, 'tickets');
+    }
 
     const items = this.extractionService.extractFromEvent(event as unknown as Parameters<typeof this.extractionService.extractFromEvent>[0]);
 
@@ -69,8 +123,25 @@ export class MemoryController {
     // subscriber calls ExtractionService directly and is unaffected.
     const persisted = items.filter((item) => item.kind !== MemoryKind.DECISION);
 
+    // All or nothing: every key is checked before the first item is written, so a request that may not
+    // supersede one of its items writes none. Best effort by design — an upsert's own in-transaction
+    // `replaceCheck` still refuses a supersede a concurrent write made forbidden.
     for (const item of persisted) {
-      const input: MemoryItemInput = {
+      try {
+        await this.writeGuard.assertMayReplace(principal, projectId, {
+          kind: item.kind,
+          subject: item.subject,
+          predicate: item.predicate,
+        });
+      } catch (error) {
+        if (error instanceof MemoryReplaceRefusedError) throw new ForbiddenAppException({}, 'permissions');
+        throw error;
+      }
+    }
+
+    const ownerType = ownerTypeFor(principal);
+    for (const item of persisted) {
+      await this.write(principal, projectId, { ownerId: principal.id, ownerType }, {
         projectId: item.projectId,
         kind: item.kind,
         subject: item.subject,
@@ -82,49 +153,55 @@ export class MemoryController {
         // H12: attribution is always the authenticated caller. The raw event
         // used to carry actorId, letting a caller forge another agent's or
         // user's memory ownership — that field is no longer trusted.
-        ownerId: principal.id,
-      };
-      await this.repository.upsert(input);
+      });
     }
 
     return { items: persisted };
   }
 
   @Post('decisions')
-  @ApiOperation({ summary: 'Record a decision' })
+  @Requires('memory.decision.record', { enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Record a decision (memory.decision.record)' })
   @ApiResponse({ status: 201, description: 'Decision recorded' })
-  @ApiResponse({ status: 403, description: 'Not a project member' })
+  @ApiResponse({ status: 403, description: 'memory.decision.record is missing, or it may not replace its active decision' })
   async recordDecision(
     @Body() decision: RecordDecisionDto,
     @Principal() principal: KodaPrincipal,
   ): Promise<WriteResult> {
-    await this.assertWriteAuthorized(decision.projectId, principal);
+    await this.assertMayWrite(principal, 'memory.decision.record', decision.projectId);
 
-    // Only admins may attribute a decision to an arbitrary actor; every other
-    // caller can only record decisions as themselves, so a non-admin can't
-    // spoof another user/agent's decision history.
-    const role = principalRole(principal);
-    const actorId = role === ActorRole.ADMIN && decision.actorId ? decision.actorId : principal.id;
+    // Only a caller holding `memory.update` globally may attribute a decision to an arbitrary actor; every
+    // other caller can only record decisions as themselves, so a non-admin can't spoof another
+    // user/agent's decision history. An attributed owner is not the caller, so its type is unknown (null).
+    const actorId = (await this.mayAttribute(principal)) && decision.actorId ? decision.actorId : principal.id;
 
-    return this.extractionService.recordDecision(
-      {
-        projectId: decision.projectId,
-        actorId,
-        topic: decision.topic,
-        decision: decision.decision,
-        rationale: decision.rationale,
-        sourceId: decision.sourceId,
-      },
-      this.repository,
-    );
+    try {
+      return await this.extractionService.recordDecision(
+        {
+          projectId: decision.projectId,
+          actorId,
+          topic: decision.topic,
+          decision: decision.decision,
+          rationale: decision.rationale,
+          sourceId: decision.sourceId,
+          ownerType: actorId === principal.id ? ownerTypeFor(principal) : null,
+        },
+        this.repository,
+        { beforeSupersede: this.writeGuard.replaceCheck(principal, decision.projectId) },
+      );
+    } catch (error) {
+      if (error instanceof MemoryReplaceRefusedError) throw new ForbiddenAppException({}, 'permissions');
+      throw error;
+    }
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a memory item' })
+  @Requires('memory.create', { enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Create a memory item (memory.create)' })
   @ApiResponse({ status: 201, description: 'Memory item created' })
-  @ApiResponse({ status: 403, description: 'Not a project member' })
+  @ApiResponse({ status: 403, description: 'memory.create is missing, or the item may not replace its active item' })
   async createMemory(@Body() input: CreateMemoryDto, @Principal() principal: KodaPrincipal) {
-    await this.assertWriteAuthorized(input.projectId, principal);
+    await this.assertMayWrite(principal, 'memory.create', input.projectId);
 
     // H12: DECISION items carry agent attribution in their subject; they must
     // go through recordDecision, which forces non-admin callers to record as
@@ -136,13 +213,16 @@ export class MemoryController {
       );
     }
 
-    // H12: only global admins may attribute a memory item to an arbitrary
-    // owner; every other caller always owns what they write, so a compromised
-    // agent/user cannot plant memories under someone else's identity.
-    const isGlobalAdmin = isUserPrincipal(principal) && principal.role === ActorRole.ADMIN;
-    const ownerId = isGlobalAdmin ? (input.ownerId ?? principal.id) : principal.id;
+    // H12: only a global-grant holder may attribute a memory item to an arbitrary owner; every other caller
+    // always owns what they write, so a compromised agent/user cannot plant memories under someone else's
+    // identity. An item attributed to someone else records no owner type: which table that id names is
+    // unknown, so it stays an any-row holder's to replace.
+    const ownerId = (await this.mayAttribute(principal)) && input.ownerId ? input.ownerId : principal.id;
 
-    const memory = await this.repository.upsert({
+    return this.write(principal, input.projectId, {
+      ownerId,
+      ownerType: ownerId === principal.id ? ownerTypeFor(principal) : null,
+    }, {
       projectId: input.projectId,
       kind: input.kind,
       subject: input.subject,
@@ -151,9 +231,6 @@ export class MemoryController {
       sourceType: input.sourceType ?? 'manual',
       sourceId: input.sourceId,
       confidence: input.confidence ?? 0.8,
-      ownerId,
     });
-
-    return memory;
   }
 }

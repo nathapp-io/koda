@@ -1235,7 +1235,7 @@
             "description": "Project timeline"
           },
           "403": {
-            "description": "Not a project member"
+            "description": "timeline.read is missing, or the caller is not a member"
           },
           "404": {
             "description": "Project not found"
@@ -1246,7 +1246,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get a project timeline",
+        "summary": "Get a project timeline (timeline.read)",
         "tags": [
           "memory"
         ]
@@ -1269,6 +1269,12 @@
         "responses": {
           "201": {
             "description": "Memory items extracted"
+          },
+          "403": {
+            "description": "memory.extract is missing, or an extracted item may not replace its active item"
+          },
+          "404": {
+            "description": "A named ticket does not belong to the event's project"
           }
         },
         "security": [
@@ -1276,7 +1282,7 @@
             "bearer": []
           }
         ],
-        "summary": "Extract memory items from a canonical event (internal)",
+        "summary": "Extract memory items from a canonical event (memory.extract)",
         "tags": [
           "memory"
         ]
@@ -1301,7 +1307,7 @@
             "description": "Decision recorded"
           },
           "403": {
-            "description": "Not a project member"
+            "description": "memory.decision.record is missing, or it may not replace its active decision"
           }
         },
         "security": [
@@ -1309,7 +1315,7 @@
             "bearer": []
           }
         ],
-        "summary": "Record a decision",
+        "summary": "Record a decision (memory.decision.record)",
         "tags": [
           "memory"
         ]
@@ -1334,7 +1340,7 @@
             "description": "Memory item created"
           },
           "403": {
-            "description": "Not a project member"
+            "description": "memory.create is missing, or the item may not replace its active item"
           }
         },
         "security": [
@@ -1342,7 +1348,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create a memory item",
+        "summary": "Create a memory item (memory.create)",
         "tags": [
           "memory"
         ]
@@ -1444,7 +1450,7 @@
             "description": "Invalid filter or paging parameter"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "memory.read is missing, or the caller is not a member"
           },
           "404": {
             "description": "Project not found"
@@ -1455,7 +1461,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get project memory items (paginated)",
+        "summary": "Get project memory items (paginated) (memory.read)",
         "tags": [
           "memory"
         ]
