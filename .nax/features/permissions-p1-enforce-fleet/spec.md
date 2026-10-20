@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Permissions P1d — Enforce Permission Keys on the Fleet Routes
 
 ## Summary
