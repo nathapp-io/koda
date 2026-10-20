@@ -184,13 +184,13 @@ Following Appendix A, these principals change behaviour. This is accepted and no
 
 **Store.**
 - `LanceTableManager.addRecord` deletes the rows matching `source = '<source>' AND source_id = '<sourceId>'` before adding, when both values pass `isSafeFilterValue`. It no longer matches `source_id` alone.
-- `VectorStoreService.deleteBySource(projectId, source, sourceId)` and `RagService.deleteBySource(projectId, source, sourceId)` gain `source` as their second parameter and delete only `source = … AND source_id = …`. An unsafe value in either throws `ValidationAppException`, as today.
+- `VectorStore.deleteBySource(projectId, source, sourceId)` and `RagService.deleteBySource(projectId, source, sourceId)` gain `source` as their second parameter and delete only `source = … AND source_id = …`. An unsafe value in either throws `ValidationAppException`, as today.
 - Callers:
   - `KbTicketLifecycleSubscriber` passes `'ticket'`;
   - `IncrementalGraphDiffService` passes `'code'`;
   - `RagController.deleteDocument` (US-006) calls `deleteBySource(project.id, 'doc', sourceId)` then `deleteBySource(project.id, 'manual', sourceId)`, so the route keeps deleting the user rows of that id and still answers 200; US-007 adds the `source` query, the key and the ownership check on top.
-- `IndexDocumentInput` (`apps/api/src/rag/rag.service.ts`) gains an optional `createdBy?: { type: 'USER' | 'AGENT'; id: string }`. `VectorStoreService.indexDocument` first removes any caller-supplied `metadata.kodaCreatedBy`, then stores `createdBy` there when it is given. An absent `createdBy` stores no `kodaCreatedBy`, so the row has no creator: it is a system row.
-- New `VectorStoreService.findSourceCreators(projectId, source, sourceId): Promise<Array<{ type: 'USER' | 'AGENT'; id: string } | null>>`, also exposed as `RagService.findSourceCreators`. It answers one entry per matching row (null for a row with no `kodaCreatedBy`) and an empty array when nothing matches. It reads through the table query the existing reads use. A `source` or `sourceId` that fails `isSafeFilterValue` throws `ValidationAppException`, before any read; so the add and delete routes answer 400 for such an id before any write.
+- `IndexDocumentInput` (`apps/api/src/rag/rag.service.ts`) gains an optional `createdBy?: { type: 'USER' | 'AGENT'; id: string }`. `VectorStore.indexDocument` first removes any caller-supplied `metadata.kodaCreatedBy`, then stores `createdBy` there when it is given. An absent `createdBy` stores no `kodaCreatedBy`, so the row has no creator: it is a system row.
+- New `VectorStore.findSourceCreators(projectId, source, sourceId): Promise<Array<{ type: 'USER' | 'AGENT'; id: string } | null>>`, also exposed as `RagService.findSourceCreators`. It answers one entry per matching row (null for a row with no `kodaCreatedBy`) and an empty array when nothing matches. It reads through the table query the existing reads use. A `source` or `sourceId` that fails `isSafeFilterValue` throws `ValidationAppException`, before any read; so the add and delete routes answer 400 for such an id before any write.
 
 **REST routes.** `RagController` (`apps/api/src/rag/rag.controller.ts`) and `RetrievalController` (`apps/api/src/retrieval/retrieval.controller.ts`) use `@UseGuards(ProjectMembershipGuard, RequiresGuard)`. `RagController`'s `@ProjectRoles` and `@RequiredPermission` decorators are removed; `RetrievalController` has neither and only gains `RequiresGuard`. `addDocument` and `deleteDocument` take `@Principal() principal: KodaPrincipal` (they now read it for `createdBy` and ownership), so they leave the #145 no-principal list.
 
@@ -316,7 +316,7 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 | `kodaMcpToolRegistrations(executor, principal)`, `McpController.serve` | every tool | `visible` set |
 | `LanceTableManager.addRecord`, `deleteBySource` (vector store, rag service) | by `source_id` | by `(source, source_id)` |
 | `IndexDocumentInput` | no creator | optional `createdBy` |
-| `VectorStoreService`, `RagService` | no creator read | plus `findSourceCreators` |
+| `VectorStore`, `RagService` | no creator read | plus `findSourceCreators` |
 | `AddDocumentDto.source` | four sources | `doc`, `manual` |
 | `RagController`, `RetrievalController` | `@ProjectRoles`, `@RequiredPermission` | `@Requires` |
 | `MemoryItem` (schema), `MemoryItemInput` | no owner type | `ownerType` |
@@ -596,16 +596,16 @@ DB-backed tests seed the system roles first. Agent project scoping is on. Thread
 
 ### US-006: KB rows are replaced and deleted by `(source, source_id)` and record their creator (`Workdir: apps/api`)
 
-1. [integration] After `VectorStoreService.indexDocument(p1, { source: 'ticket', sourceId: 's1', ... })` and `indexDocument(p1, { source: 'manual', sourceId: 's1', ... })`, `listDocuments(p1)` holds two rows with `sourceId` `s1`, one of each source.
+1. [integration] After `VectorStore.indexDocument(p1, { source: 'ticket', sourceId: 's1', ... })` and `indexDocument(p1, { source: 'manual', sourceId: 's1', ... })`, `listDocuments(p1)` holds two rows with `sourceId` `s1`, one of each source.
 2. [integration] Indexing `{ source: 'manual', sourceId: 's1', content: 'v2' }` over an existing `manual` `s1` row leaves one `manual` `s1` row with content `v2` and keeps the `ticket` `s1` row.
-3. [integration] `VectorStoreService.deleteBySource(p1, 'manual', 's1')` removes the `manual` `s1` row and keeps the `ticket` `s1` row.
+3. [integration] `VectorStore.deleteBySource(p1, 'manual', 's1')` removes the `manual` `s1` row and keeps the `ticket` `s1` row.
 4. [integration] `indexDocument(p1, { source: 'doc', sourceId: 'd1', ..., createdBy: { type: 'AGENT', id: 'a1' }, metadata: { kodaCreatedBy: { type: 'USER', id: 'u9' } } })` followed by `findSourceCreators(p1, 'doc', 'd1')` answers `[{ type: 'AGENT', id: 'a1' }]`.
 5. [integration] `findSourceCreators(p1, 'doc', 'd2')` for a row indexed with no `createdBy` answers `[null]`, and for a `(source, sourceId)` with no row answers `[]`.
-6. [unit] `VectorStoreService.deleteBySource(p1, 'manual', "x' OR 1=1")` throws `ValidationAppException` and deletes nothing.
+6. [unit] `VectorStore.deleteBySource(p1, 'manual', "x' OR 1=1")` throws `ValidationAppException` and deletes nothing.
 7. [unit] `KbTicketLifecycleSubscriber` handling a ticket deletion event for ticket `t1` in `p1` calls `RagService.deleteBySource(p1, 'ticket', 't1')`.
-8. [unit] `IncrementalGraphDiffService` removing node `n1` of `p1` calls `VectorStoreService.deleteBySource(p1, 'code', 'n1')`.
+8. [unit] `IncrementalGraphDiffService` removing node `n1` of `p1` calls `VectorStore.deleteBySource(p1, 'code', 'n1')`.
 9. [integration] `indexDocument(p1, { source: 'doc', sourceId: 'd3', ..., metadata: { kodaCreatedBy: { type: 'USER', id: 'u9' } } })` with no `createdBy` followed by `findSourceCreators(p1, 'doc', 'd3')` answers `[null]`.
-10. [unit] `VectorStoreService.findSourceCreators(p1, 'doc', "x' OR 1=1")` throws `ValidationAppException` without querying the table.
+10. [unit] `VectorStore.findSourceCreators(p1, 'doc', "x' OR 1=1")` throws `ValidationAppException` without querying the table.
 
 ### US-007: KB routes check keys and ownership (`Workdir: apps/api`)
 
