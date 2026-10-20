@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Permissions P1e — Enforce Permission Keys on Threads, Assistant Tools, the Knowledge Base and Memory
 
 ## Summary
