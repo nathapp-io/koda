@@ -3,7 +3,7 @@
   "feature": "permissions-p1-enforce-assistant",
   "branchName": "feat/permissions-p1-enforce-assistant",
   "createdAt": "2026-10-20T00:00:00.000Z",
-  "updatedAt": "2026-10-20T14:55:37.619Z",
+  "updatedAt": "2026-10-20T15:18:52.301Z",
   "userStories": [
     {
       "id": "US-001",
@@ -557,8 +557,8 @@
         "data"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -570,7 +570,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.7999999999999998,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-20T14:55:41.630Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/rag/lance-table-manager.ts",
@@ -629,7 +641,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "bc7352ef3f6d4afe746be1dfa0758477e7b8034d"
     },
     {
       "id": "US-007",
