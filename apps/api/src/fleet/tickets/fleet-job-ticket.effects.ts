@@ -32,11 +32,15 @@ export class FleetJobTicketEffects {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
-  /** D452: a RUN dispatch starts each CREATED/VERIFIED ticket as the requester; PLAN callers never call this. */
+  /**
+   * D452: a RUN dispatch starts each CREATED/VERIFIED ticket as the requester; PLAN callers never call
+   * this. Permissions P1d (US-003): it goes through `startForDispatch`, because the caller was
+   * authorized for `fleet.job.dispatch` and not for the ticket's edge key.
+   */
   async onRunDispatched(actor: TicketActor, tickets: readonly DispatchTicket[]): Promise<void> {
     for (const ticket of tickets.filter((t) => STARTABLE.has(t.status))) {
       try {
-        await this.transitions.start(actor.projectSlug, ticket.ref, actor.principal);
+        await this.transitions.startForDispatch(actor.projectSlug, ticket.ref, actor.principal);
       } catch (error) {
         this.logger.warn(`Fleet ticket ${ticket.ref}: start failed: ${error instanceof Error ? error.message : String(error)}`);
       }

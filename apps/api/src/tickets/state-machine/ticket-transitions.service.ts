@@ -386,6 +386,35 @@ export class TicketTransitionsService {
   }
 
   /**
+   * Permissions P1d (US-003): the dispatch-only `start`.
+   *
+   * A RUN dispatch starts each CREATED/VERIFIED ticket it names as a consequence of a request the
+   * caller was already allowed to make with `fleet.job.dispatch` — so the caller is not asked for the
+   * ticket's edge key, which a fleet-dispatch-only role does not hold. Everything else is exactly
+   * `start`: the state-machine validation, the conditional status write, the STATUS_CHANGE activity
+   * row with the dispatcher as actor, the webhook and the ticket event.
+   *
+   * Only `FleetJobTicketEffects.onRunDispatched` may call this; a route or tool that moves a ticket on
+   * a user's behalf must go through `start`, which checks `ticket.transition.start`.
+   */
+  async startForDispatch(
+    projectSlug: string,
+    ticketRef: string,
+    principal: KodaPrincipal,
+  ): Promise<TransitionResultWithoutComment> {
+    return this.executeTransitionInternal(
+      projectSlug,
+      ticketRef,
+      TicketStatus.IN_PROGRESS,
+      undefined,
+      undefined,
+      principal,
+      undefined,
+      { skipEdgeCheck: true },
+    ) as Promise<TransitionResultWithoutComment>;
+  }
+
+  /**
    * Transition IN_PROGRESS → VERIFY_FIX
    */
   async fix(
@@ -621,6 +650,10 @@ export class TicketTransitionsService {
 
   /**
    * Core transition execution logic with validation and transaction handling
+   *
+   * `options.skipEdgeCheck` is the dispatch's one exemption (`startForDispatch`): the caller was
+   * authorized for the fleet request that starts the ticket, not for the ticket's edge key. Every
+   * other caller path leaves it unset.
    */
   private async executeTransitionInternal(
     projectSlug: string,
@@ -630,6 +663,7 @@ export class TicketTransitionsService {
     commentBody: string | undefined,
     principal: KodaPrincipal,
     fields?: TransitionFieldPatch,
+    options: { skipEdgeCheck?: boolean } = {},
   ): Promise<TransitionResult> {
     const project = await this.ticketRepo.findProjectBySlug(projectSlug);
     if (!project || project.deletedAt) {
@@ -643,7 +677,9 @@ export class TicketTransitionsService {
 
     // Permissions P1 (US-003): the edge check, before validation and before any write, so a refused
     // edge leaves no comment, no activity row and no status change behind.
-    await this.assertEdgeAllowed(project.id, ticket.status as TicketStatus, toStatus, principal);
+    if (!options.skipEdgeCheck) {
+      await this.assertEdgeAllowed(project.id, ticket.status as TicketStatus, toStatus, principal);
+    }
 
     validateTransition(ticket.status as TicketStatus, toStatus, commentType);
 

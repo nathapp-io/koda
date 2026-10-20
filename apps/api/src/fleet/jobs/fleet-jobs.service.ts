@@ -149,7 +149,9 @@ export class FleetJobsService {
     const { job, live, wake } = await this.txManager.run(async () => {
       const current = await this.repo.lockById(jobId);
       if (!current || current.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.jobs');
-      if (!canOperate && current.requestedById !== actorId) throw new ForbiddenAppException({}, 'projects');
+      // Permissions P1d (US-003): the route's key is `fleet.job.cancel`, so a caller who holds neither
+      // it nor the job is refused with the permission code the route family uses.
+      if (!canOperate && current.requestedById !== actorId) throw new ForbiddenAppException({}, 'permissions');
       if (isTerminal(current.state)) throw new ConflictAppException({ state: current.state }, 'fleet.jobState');
 
       if (current.state === FleetJobState.QUEUED) {
