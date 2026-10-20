@@ -125,9 +125,9 @@ async projectIdsWithKey(principal: KodaPrincipal, key: string): Promise<{ all: t
 - Requeue keeps the job row, so its requester is unchanged.
 
 **Readers that assumed a user:**
-- `JobOutcomeRecorder` (`apps/api/src/fleet/jobs/job-outcome.recorder.ts`) enqueues no `FLEET_JOB_OUTCOME` event, from `onTerminal` or `onIngestCorrection`, for a job whose `requestedByType` is `'AGENT'`: notifications are for users.
+- `FleetJobOutcomeRecorder` (`apps/api/src/fleet/jobs/job-outcome.recorder.ts`) enqueues no `FLEET_JOB_OUTCOME` event, from `onTerminal` or `onIngestCorrection`, for a job whose `requestedByType` is `'AGENT'`: notifications are for users.
 - `PrAttributionService` names an agent requester: `findAgentDisplayName(agentId)` (new on the fleet job repository; the agent's `name`) when `requestedByType` is `'AGENT'`, falling back to `'a koda agent'`; the user path and its `'a koda user'` fallback are unchanged.
-- `responsibleUserOf(job: { requestedById: string; requestedByType?: string }): string | null` (new, `apps/api/src/fleet/common/responsible-user.ts`) answers null for `'AGENT'` and `requestedById` otherwise (an absent type is a user's). Every site that passes `job.requestedById` as `responsibleUserId` uses it instead: `bundle.service.ts`, `bundle-ingest.service.ts`, `job-report.processor.ts`, `job-transitions.service.ts`, `fence.service.ts`, `fleet-jobs.service.ts` (cancel), and `approval-closer.ts` (`runnerActor`, `jobSystemActor`). The selects that feed them carry `requestedByType`.
+- `responsibleUserOf(job: { requestedById: string; requestedByType?: string }): string | null` (new, `apps/api/src/fleet/common/responsible-user.ts`) answers null for `'AGENT'` and `requestedById` otherwise (an absent type is a user's). Every site that passes `job.requestedById` as `responsibleUserId` uses it instead: `bundle.service.ts`, `bundle-ingest.service.ts`, `job-report.processor.ts`, `job-transitions.service.ts`, `fence.service.ts`, `fleet-jobs.service.ts` (cancel), and `approval-closer.ts` (`runnerActor`, `jobSystemActor`). The selects that feed them carry `requestedByType`, and `ApprovalActor.responsibleUserId` becomes `string | null`. Sites that set `responsibleUserId` from the acting principal rather than the job's requester (`userActor`, the dispatch, config-job, schedule and budget activity rows) keep the actor's id: an agent's id there is intended until P2 replaces the column with on-behalf-of.
 - `FleetTicketEventRecorder.record` takes an optional `actorType: 'user' | 'agent'`. When it is absent, the recorder uses `actorTypeFor(actorId)` (lower-cased), so an agent unlinking a job is recorded as `agent`. `FleetJobTicketEffects` runs after commit, often outside any request, so it passes `actorType: 'agent'` for a job whose `requestedByType` is `'AGENT'` and passes no `actorType` otherwise; the ticket events of its PR link and failure comment then name the agent.
 
 ### Route keys
@@ -155,7 +155,7 @@ async projectIdsWithKey(principal: KodaPrincipal, key: string): Promise<{ all: t
 | `GET …/fleet/approvals`, `…/:id` | `fleet.approval.read` | G | user-only |
 | `POST …/fleet/approvals/:id/decide` | `fleet.approval.decide.bash`, `.budget`, `.assistant`, `mode: 'any'` | S (`ApprovalsService.decide`, per approval type) | user-only + `mayDecideBash` / `mayDecideBudget` on `ctx.role` |
 | `GET /fleet/approvals`, `/:id` | `fleet.approval.read` | G | `@RequiredPermission('ADMIN')` |
-| `POST /fleet/approvals/:id/decide` | `fleet.approval.decide.budget`, `.bash`, `mode: 'any'` | S (per type) | `@RequiredPermission('ADMIN')` |
+| `POST /fleet/approvals/:id/decide` | `fleet.approval.read` (G, global, so only a global grant reaches it, as today), then the type's decide key | G + S (per type) | `@RequiredPermission('ADMIN')` |
 | `GET /fleet/approval-counts` | `fleet.approval.read` | S (`projectIdsWithKey`) | user-only, member projects |
 | `GET /projects/:slug/fleet/budgets` | `fleet.budget.read` | G | user-only |
 | `POST`, `PATCH …/:id`, `DELETE …/:id`, `POST …/:id/resume` on `/projects/:slug/fleet/budgets` | `fleet.budget.create`, `.update`, `.delete`, `.resume` | G | user-only + `ctx.role === 'ADMIN'` |
@@ -186,15 +186,16 @@ A key with scope `any` on a global route is checked with no project (`can(princi
 ### Schedules
 
 - **Ownership.** The four mutating routes compute `canAdminister = (await permissions.can(principal, '<route key>', { projectId })).allowed` and pass it to the unchanged `SchedulesService` methods. A Developer holds only the `.own` key, so `can` answers `not-owner` without a resource, `canAdminister` is false, and `assertManaged` keeps today's owner rule (`schedule.createdById === actorId`). `assertManaged`'s refusal becomes 403 `permissions`.
-- **Owner access.** `IScheduleRepository.findOwnerAccess(projectId, owner: PrincipalRef): Promise<OwnerAccess>` replaces the user-only read, and `OwnerAccess` becomes `{ exists: boolean; disabled: boolean }`: a USER owner exists when its `User` row exists and is disabled when `User.disabled`; an AGENT owner exists when its `Agent` row exists and is never disabled. `mayDispatch(access, keys: ReadonlySet<string>)` (`apps/api/src/fleet/schedules/schedule-access.ts`) answers `access.exists && !access.disabled && keys.has('fleet.job.dispatch')`, where `keys = await permissions.effectiveKeys({ type: schedule.createdByType, id: schedule.createdById }, { projectId: schedule.projectId })`.
+- **Owner access.** `IScheduleRepository.findOwnerAccess(projectId, owner: PrincipalRef): Promise<OwnerAccess>` replaces the user-only read, and `OwnerAccess` becomes `{ exists: boolean; disabled: boolean }`: a USER owner exists when its `User` row exists and is disabled when `User.disabled`; an AGENT owner exists when its `Agent` row exists and is never disabled (a PAUSED agent keeps its schedules; status is liveness, not access). `mayDispatch(access, keys: ReadonlySet<string>)` (`apps/api/src/fleet/schedules/schedule-access.ts`) answers `access.exists && !access.disabled && keys.has('fleet.job.dispatch')`, where `keys = await permissions.effectiveKeys({ type: schedule.createdByType ?? 'USER', id: schedule.createdById }, { projectId: schedule.projectId })`. The optional record fields are always read with `?? 'USER'`.
 - `ScheduleTicker.dispatchFresh` and `SchedulesService.enable` read owner access that way. `SchedulesService` and `ScheduleTicker` each gain `PermissionService` as a required last constructor parameter.
-- **The fire runs as the owner.** `ScheduleTicker.dispatchFresh` calls `FleetJobsService.dispatch` inside `runWithActor({ type: schedule.createdByType, id: schedule.createdById }, ...)`, so the job's `requestedByType` and its activity rows name the owner's type. The ticker's own activity rows (`SYSTEM_ACTOR_ID`) are unaffected.
+- **The fire runs as the owner.** `ScheduleTicker.dispatchFresh` calls `FleetJobsService.dispatch` inside `runWithActor({ type: schedule.createdByType ?? 'USER', id: schedule.createdById }, ...)`, so the job's `requestedByType` and its activity rows name the owner's type. The ticker's own activity rows (`SYSTEM_ACTOR_ID`) are unaffected.
 
 ### Approvals
 
-- **`ApprovalRoute`** loses `role`: `{ kind: 'admin' } | { kind: 'project'; projectId: string }`. **`ApprovalCaller`** (`{ id, globalAdmin }`) is unchanged, because `AssistantActionPort.decide` shares it; `ApprovalsService.decide` takes `caller: ApprovalCaller & { principal: KodaPrincipal }`, and both decide controllers pass the request principal.
+- **`ApprovalRoute`** is unchanged (the assistant's `koda_list_approvals` tool builds one with `role`), but `decide` no longer reads `role`. **`ApprovalCaller`** (`{ id, globalAdmin }`) is unchanged, because `AssistantActionPort.decide` shares it; `ApprovalsService.decide` takes `caller: ApprovalCaller & { principal: KodaPrincipal }`, and both decide controllers pass the request principal.
 - **Decide.** `ApprovalsService.decide` checks, after `findVisible` and before any lock or write, `permissions.can(caller.principal, key, scope)`: `fleet.approval.decide.bash` for `nax_bash_escalate`, `fleet.approval.decide.budget` for `budget_override_required`, with `scope = { projectId: approval.projectId }` when the approval has a project and no project otherwise. A refusal is 403 `permissions`. `assistant_action` approvals keep their creator-only handler (`AssistantActionPort.decide`, 403 `threads.notCreator`) with no key check; their key belongs to `permissions-p1-enforce-assistant`. `mayDecideBash` and `mayDecideBudget` are deleted. `ApprovalsService` gains `PermissionService` as a required last constructor parameter.
-- **Counts.** `ApprovalsService.counts(scope: { projectIds: string[]; unscoped: boolean })` replaces `counts(caller)`. The controller passes `projectIdsWithKey(principal, 'fleet.approval.read')`: `{ all: true }` becomes every project with a pending approval plus `unscoped: true`; otherwise the listed projects and `unscoped: false`.
+- **Counts.** `ApprovalsService.counts(scope: { all: true } | { all: false; projectIds: string[] })` replaces `counts(caller)`; the controller passes `projectIdsWithKey(principal, 'fleet.approval.read')`. `{ all: true }` counts every project's pending approvals through a new `IApprovalRepository.countPendingAllProjects(): Promise<PendingCount[]>` (pending approvals grouped by non-null `projectId`, the same row shape as `countPending`) and adds `countPendingUnscoped()`; `{ all: false }` calls `countPending(projectIds)` with `unscoped` 0, as a non-admin gets today.
+- The global decide controller keeps passing `globalAdmin: true`: only a principal with a global `fleet.approval.read` grant passes its guard. The project controller passes `globalAdmin` as `(await permissions.can(principal, 'fleet.approval.read')).allowed`.
 - `decidedById` keeps the caller's id; for an agent it is the agent's id (the activity row records the type).
 
 ### Fleet activity listing
@@ -206,7 +207,7 @@ A key with scope `any` on a global route is checked with no project (`can(princi
 | Situation | Behaviour |
 |:--|:--|
 | A route key the caller does not hold | 403 `permissions`; the handler does not run |
-| A runner principal on a migrated route | 403 `permissions` (`can` refuses runners) |
+| A runner principal on a migrated route | Refused with 403 `permissions` on the guard-checked routes (`can` refuses runners); `GET /fleet/activity` and `GET /fleet/approval-counts` answer it an empty list (`projectIdsWithKey` gives it no project) |
 | Cancelling a job the caller did not request, without `fleet.job.cancel` | 403 `permissions`; the job is unchanged |
 | Editing, enabling, disabling or deleting another principal's schedule with only the `.own` key | 403 `permissions`; the schedule is unchanged |
 | A schedule whose owner no longer holds `fleet.job.dispatch` in the project, or is gone or disabled, comes due | The tick disables it with reason `owner_lost_access` and dispatches nothing (as today) |
@@ -243,18 +244,18 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 | `SYSTEM_ROLES` developer | `fleet.schedule.*` | `fleet.schedule.read`, `.create`, `.update.own`, `.delete.own`, plus `fleet.repo.drift.check` |
 | `FleetJob`, `JobSchedule` (schema) | `requestedBy` / `createdBy` relations to `User` | `requestedByType` / `createdByType`, no relation |
 | `FleetJobRecord`, `NewFleetJob`, `ScheduleRecord`, `NewSchedule` | no requester type | `requestedByType` / `createdByType` |
-| `JobOutcomeRecorder` | enqueues for every requester | skips an agent requester |
+| `FleetJobOutcomeRecorder` | enqueues for every requester | skips an agent requester |
 | `PrAttributionService` | user display name | agent name for an agent requester |
 | `FleetTicketEventRecorder.record` | `actorType: 'user'` | optional `actorType` |
 | `TicketTransitionsService` | `start` | plus `startForDispatch` |
 | `FleetJobTicketEffects.onRunDispatched` | calls `start` | calls `startForDispatch` |
 | `IScheduleRepository.findOwnerAccess`, `OwnerAccess`, `mayDispatch` | user id; `globalRole`, `projectRole` | `PrincipalRef`; `{ exists, disabled }`; keys |
 | `SchedulesService`, `ScheduleTicker` | no `PermissionService` | `PermissionService` appended |
-| `ApprovalsService` | `decide(caller: ApprovalCaller, ...)`, `ApprovalRoute.role`, `counts(caller)` | `decide(caller: ApprovalCaller & { principal }, ...)`, no `role`, `counts(scope)`, `PermissionService` appended |
+| `ApprovalsService` | `decide(caller: ApprovalCaller, ...)`, `ApprovalRoute.role`, `counts(caller)` | `decide(caller: ApprovalCaller & { principal }, ...)` (keys, not `route.role`), `counts(scope)`, `PermissionService` appended |
+| `IApprovalRepository`, `PrismaApprovalRepository` | `countPending(projectIds)`, `countPendingUnscoped()` | plus `countPendingAllProjects()` |
+| `ApprovalActor.responsibleUserId` (`approval-closer.ts`) | `string` | `string \| null` |
 | `FleetJobsController`, `ProjectFleetSchedulesController` | CASL ability / `ctx.role` | `PermissionService` constructor parameter for `canOperate` / `canAdminister` |
 | The controllers in "Route keys" | legacy checks | `@Requires` + guards |
-</content>
-</invoke>
 
 ## Out of Scope
 
@@ -272,14 +273,14 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 - Approval of any action (`ApprovalRequest`, policies) is out of scope (P3). A permitted request runs immediately.
 - New `endpoint.e2e.spec.ts` cases for the migrated routes are out of scope; the integration ACs pin the allow and refuse cases, and only the existing knowledge reindex case changes (see Modifies).
 - Web changes are out of scope (`permissions-p1-web`).
-- A runner principal on a migrated fleet route stays refused (`PermissionService.can` refuses runners, and the project routes' guard refuses them first); a dedicated test for it is out of scope.
+- A runner principal on a migrated fleet route stays refused, or gets an empty list from the two filtered listings (`PermissionService.can` and `projectIdsWithKey` give it nothing); a dedicated test for it is out of scope.
 - US-003 only: a requester cancelling its own job without `fleet.job.cancel` stays allowed (today's rule); narrowing it is out of scope.
 - US-005 only: a schedule owned by an agent is checked against the agent's keys at fire time; a per-agent dispatch quota or cost cap is out of scope.
 
 ## Stories
 
 1. **US-001: The action context, fleet activity labels and the catalog changes** — `Workdir: apps/api` — No dependencies. Adds `apps/api/src/action-context/` (`runWithActor`, `currentActor`, `actorTypeFor`, `ActionContextInterceptor`, `ActionContextModule`) and imports the module in `AppModule`; `FleetActorType` gains `AGENT` and `FleetActivityService.record` relabels the current actor; adds `PermissionService.projectIdsWithKey` with `PrismaRoleBindingRepository.findAccessibleProjectIds`; re-scopes `fleet.activity.read` (catalog and TSV), makes `fleet.schedule.update` and `fleet.schedule.delete` ownable, and changes the seeded `developer` entries.
-2. **US-002: Fleet jobs and schedules record an agent requester** — `Workdir: apps/api` — Depends on US-001. Adds the migration (`requestedByType`, `createdByType`, the two foreign keys dropped), the record fields, `actorTypeFor` at the job and schedule inserts, `responsibleUserOf` at its call sites, the agent branch in `JobOutcomeRecorder`, `PrAttributionService` and `FleetTicketEventRecorder`, and the conditional `actorType` in `FleetJobTicketEffects`.
+2. **US-002: Fleet jobs and schedules record an agent requester** — `Workdir: apps/api` — Depends on US-001. Adds the migration (`requestedByType`, `createdByType`, the two foreign keys dropped), the record fields, `actorTypeFor` at the job and schedule inserts, `responsibleUserOf` at its call sites, the agent branch in `FleetJobOutcomeRecorder`, `PrAttributionService` and `FleetTicketEventRecorder`, and the conditional `actorType` in `FleetJobTicketEffects`.
 3. **US-003: Job and ticket fleet-job routes check keys, and the dispatch effect starts tickets without an edge key** — `Workdir: apps/api` — Depends on US-001, US-002. Moves the job and ticket fleet-job routes onto `@Requires`, computes `canOperate` with `can`, adds `TicketTransitionsService.startForDispatch` and calls it from `FleetJobTicketEffects.onRunDispatched`.
 4. **US-004: Fleet project reads check keys (R10 retired)** — `Workdir: apps/api` — Depends on US-001. Moves the log, bundle, project analytics, project dashboard, project runner and project repo routes onto `@Requires` and removes their user-only refusals; the log throttle stays.
 5. **US-005: Schedules check keys, ownership and the owner's dispatch key** — `Workdir: apps/api` — Depends on US-001, US-002. Moves the schedule routes onto `@Requires`, computes `canAdminister` with `can`, changes `findOwnerAccess`, `OwnerAccess` and `mayDispatch` to the owner's keys, adds `PermissionService` to `SchedulesService` and `ScheduleTicker`, and runs the fire inside `runWithActor` for the owner.
@@ -360,12 +361,14 @@ This is one capability, enforcing keys on the fleet surface, at eight stories; t
 ### Modifies
 
 **US-001**
+- `apps/api/src/permissions/catalog.spec.ts` — its OWNABLE_KEY_LIST pins the ownable keys and is compared for set equality with OWNABLE_KEYS. The replacing invariant: the list gains fleet.schedule.update and fleet.schedule.delete, and every other assertion is unchanged.
 - `apps/api/src/app.module.ts` — it does not import ActionContextModule. The replacing invariant: AppModule imports ActionContextModule, which registers ActionContextInterceptor as APP_INTERCEPTOR, and no other import changes.
 - `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv` — the catalog_scope cell of the GET /fleet/activity row (proposed_key fleet.activity.read) changes from global to project. The replacing invariant: catalog.spec.ts still proves the TSV and INVENTORY_SCOPE_ROWS agree, and no other cell or row changes.
-- `openapi.json` — FleetActivityDto.actorType's enum lists USER, RUNNER and SYSTEM. The replacing invariant: the enum also lists AGENT, regenerated with bun run api:export-spec, and nothing else in the file changes.
+- `openapi.json` — it records the route descriptions this feature edits (for example the user-only notes on the fleet routes). The replacing invariant: it is regenerated with bun run api:export-spec, and only operation summaries and response descriptions change.
 
 **US-002**
-None. The new record fields are optional and the new `FleetTicketEventRecorder` parameter is optional, so existing fixtures and call assertions stay valid; no test pins the two dropped foreign keys.
+- `apps/api/src/fleet/repo-config/config-jobs.service.spec.ts` — its submitEdit case asserts the exact createJob argument object, which now gains requestedByType. The replacing invariant: the expected object also has requestedByType 'USER' (no context in the unit test), and every other assertion is unchanged.
+- `apps/api/src/fleet/schedules/schedules.service.spec.ts` — its create case asserts the exact repo.create argument object, which now gains createdByType. The replacing invariant: the expected object also has createdByType 'USER', and every other assertion is unchanged.
 
 **US-003**
 - `apps/api/src/fleet/tickets/fleet-job-ticket.effects.spec.ts` — its transitions double has only start, and the "starts CREATED and VERIFIED tickets only, as the requester" case asserts start's calls. The replacing invariant: the double has startForDispatch, onRunDispatched calls startForDispatch with the same arguments in the same order, and the failure-tolerance case is unchanged.
@@ -376,12 +379,12 @@ None. The new record fields are optional and the new `FleetTicketEventRecorder` 
 **US-005**
 - `apps/api/src/fleet/schedules/schedules.service.spec.ts` — it constructs SchedulesService with five arguments and stubs findOwnerAccess with globalRole and projectRole. The replacing invariant: a PermissionService double is appended as the sixth argument, findOwnerAccess answers { exists, disabled }, the enable cases decide on the double's effectiveKeys holding fleet.job.dispatch, and every ownership assertion is unchanged.
 - `apps/api/src/fleet/schedules/schedule-ticker.spec.ts` — it constructs ScheduleTicker with six arguments and stubs findOwnerAccess with globalRole and projectRole. The replacing invariant: a PermissionService double is appended as the seventh argument, findOwnerAccess answers { exists, disabled }, the owner_lost_access cases decide on the double's effectiveKeys, and every tick-outcome assertion is unchanged.
-- `apps/api/src/fleet/schedules/prisma-schedule.repository.spec.ts` — it calls findOwnerAccess(projectId, userId) and asserts globalRole and projectRole. The replacing invariant: it calls findOwnerAccess(projectId, { type: 'USER', id }) and asserts { exists, disabled } only.
+- `apps/api/src/fleet/schedules/prisma-schedule.repository.spec.ts` — it calls findOwnerAccess(projectId, userId), asserts globalRole and projectRole, and its AC-5/AC-6 cases call mayDispatch with one argument. The replacing invariant: it calls findOwnerAccess(projectId, { type: 'USER', id }) and asserts { exists, disabled } only; the mayDispatch cases pass the owner's key set (a set with fleet.job.dispatch for the developer owner, an empty set for the viewer owner) and expect the same results.
 - `apps/api/test/integration/fleet/fleet-schedule-repository.integration.spec.ts` — it calls findOwnerAccess(projectId, userId) and asserts globalRole and projectRole. The replacing invariant: it calls findOwnerAccess(projectId, { type: 'USER', id }) and asserts { exists, disabled }; an AGENT owner case is not required here.
 - `apps/api/test/integration/permissions/membership-fleet-consumers.integration.spec.ts` — its AC-5 and AC-6 call mayDispatch(await repo.findOwnerAccess(p1Id, userId)). The replacing invariant: they call mayDispatch with findOwnerAccess(p1Id, { type: 'USER', id }) and the owner's effectiveKeys in p1, expecting the same true and false; every HTTP assertion is unchanged.
 
 **US-006**
-- `apps/api/src/fleet/approvals/approvals.service.spec.ts` — it constructs ApprovalsService without PermissionService, uses ApprovalRoute values with role, passes decide callers without principal, and calls counts(caller). The replacing invariant: a PermissionService double is appended to the construction; the routes carry no role; decide callers carry a principal and the bash and budget refusals come from the double refusing the type's key; counts takes { projectIds, unscoped } with the same totals.
+- `apps/api/src/fleet/approvals/approvals.service.spec.ts` — it constructs ApprovalsService without PermissionService, passes decide callers without principal, decides bash and budget asks from route.role, and calls counts(caller). The replacing invariant: a PermissionService double is appended to the construction; the ApprovalRoute values may keep role, which decide ignores; decide callers carry a principal and the bash and budget refusals come from the double refusing the type's key; counts takes { projectIds, unscoped } with the same totals.
 - `apps/api/test/integration/fleet/fleet-approvals-api.integration.spec.ts` — its agent cases expect 403 for an agent (with all four legacy roles and a roster row) on list, get, bash decide and approval-counts, assert the decide service is never called for the budget decide, and its direct approvals.decide call near line 296 passes no principal. The replacing invariant: that agent gets 200 from list, get and approval-counts and 200 from the bash decide (Developer holds fleet.approval.decide.bash); the budget decide still answers 403 (no fleet.approval.decide.budget) with the approval pending, without the not-called assertion; the direct call passes the root principal.
 
 **US-007**
@@ -429,7 +432,7 @@ Fixture wording, as in enforce-core: "a user whose only source in `p1` is a `<ro
 2. [integration] `FleetJobsService.dispatch(userId, p1, <valid DTO>)` called outside any context stores `requestedByType` `'USER'`.
 3. [integration] `SchedulesService.create(agentId, p1, <valid DTO>)` called inside `runWithActor({ type: 'AGENT', id: agentId }, ...)` stores a `JobSchedule` row with `createdById` the agent's id and `createdByType` `'AGENT'`.
 4. [integration] `ConfigJobsService.submitDrift(agentId, p1, repoId)` called inside `runWithActor({ type: 'AGENT', id: agentId }, ...)` stores a job with `requestedByType` `'AGENT'`.
-5. [integration] `JobOutcomeRecorder.onTerminal` for a FAILED job with `requestedByType` `'AGENT'` writes no outbox row of type `FLEET_JOB_OUTCOME`, while the same call for a FAILED job with `requestedByType` `'USER'` writes one.
+5. [integration] `FleetJobOutcomeRecorder.onTerminal` for a FAILED job with `requestedByType` `'AGENT'` writes no outbox row of type `FLEET_JOB_OUTCOME`, while the same call for a FAILED job with `requestedByType` `'USER'` writes one.
 6. [unit] `PrAttributionService.attribute` for a job with `requestedByType` `'AGENT'` and an agent named `Builder` posts the body `Dispatched by Builder via koda job <id>`, and never calls `findUserDisplayName`.
 7. [unit] `PrAttributionService.attribute` for a job with `requestedByType` `'AGENT'` whose `findAgentDisplayName` answers null posts the body `Dispatched by a koda agent via koda job <id>`.
 8. [unit] `responsibleUserOf({ requestedById: 'a1', requestedByType: 'AGENT' })` returns `null`, `responsibleUserOf({ requestedById: 'u1', requestedByType: 'USER' })` returns `'u1'`, and `responsibleUserOf({ requestedById: 'u1' })` returns `'u1'`.
@@ -467,7 +470,7 @@ Fixture wording, as in enforce-core: "a user whose only source in `p1` is a `<ro
 8. [integration] The same custom-role user gets 403 with error code `permissions` from `GET /projects/p1/fleet/dashboard`.
 9. [integration] A user whose only source in `p1` is a `viewer` binding gets 200 from `GET /projects/p1/fleet/runners` and from `GET /projects/p1/fleet/repos`.
 10. [integration] The same custom-role user gets 403 with error code `permissions` from `GET /projects/p1/fleet/runners` and from `GET /projects/p1/fleet/repos`.
-11. [unit] The log list, entries and raw handlers still carry the throttle metadata `{ default: { limit: 600, ttl: 60000 } }` and carry `REQUIRES_METADATA` with `fleet.job.logs.read`.
+11. [unit] `FleetJobLogsController` still carries the class-level throttle of limit 600 per 60000 ms, and its list, entries and raw handlers each carry `REQUIRES_METADATA` with `fleet.job.logs.read`.
 
 ### US-005: Schedules check keys, ownership and the owner's dispatch key (`Workdir: apps/api`)
 
@@ -493,10 +496,10 @@ Fixture wording, as in enforce-core: "a user whose only source in `p1` is a `<ro
 4. [integration] A user whose only source in `p1` is a `developer` binding gets 403 with error code `permissions` from `POST /projects/p1/fleet/approvals/<id>/decide` with `{ decision: 'keep_paused' }` on a pending budget approval of a `p1` policy, which stays pending.
 5. [integration] A user whose only source in `p1` is a `project-admin` binding gets 200 from the same decide with `{ decision: 'keep_paused' }`, and the approval becomes rejected.
 6. [integration] A global admin gets 200 from `POST /fleet/approvals/<id>/decide` with `{ decision: 'allow' }` on a pending bash approval in `p1`.
-7. [integration] A non-admin user gets 403 with error code `permissions` from `GET /fleet/approvals`.
+7. [integration] A non-admin user gets 403 with error code `permissions` from `GET /fleet/approvals`, and a user whose only source in `p1` is a `project-admin` binding gets 403 with error code `permissions` from `POST /fleet/approvals/<id>/decide` on a pending budget approval of a `p1` policy, which stays pending.
 8. [integration] A user who is not the thread's creator gets 403 with error code `threads.notCreator` from `POST /projects/p1/fleet/approvals/<id>/decide` on a pending `assistant_action` approval, which stays pending.
 9. [integration] For a user whose only source in `p1` is a `developer` binding and with no source in `p2`, with one pending approval in each, `GET /fleet/approval-counts` answers `projects` with `p1` only, `unscoped` 0 and `total` 1.
-10. [integration] An agent rostered in `p1` gets 200 from `GET /fleet/approval-counts`, listing `p1`.
+10. [integration] An agent rostered in `p1`, with one pending approval in `p1`, gets 200 from `GET /fleet/approval-counts` listing `p1` with 1 pending.
 11. [integration] A global admin gets `GET /fleet/approval-counts` with both projects and the pending approvals of global policies in `unscoped`.
 12. [integration] A user whose only source in `p1` is a `developer` binding gets 403 with error code `permissions` from `POST /projects/p1/fleet/budgets` with a valid project budget, and a user whose only source in `p1` is a `project-admin` binding gets 201 from it.
 13. [integration] A user whose only source in `p1` is a `viewer` binding gets 200 from `GET /projects/p1/fleet/budgets`.
