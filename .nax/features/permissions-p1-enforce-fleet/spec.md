@@ -23,7 +23,7 @@ Agents could not be let in before, because two fleet rows store their requester 
 - **Schedule edits stay owner-or-admin.** `fleet.schedule.update` and `fleet.schedule.delete` become ownable; Developer holds the `.own` keys and Project Admin the any-row keys.
 - **Developer gains `fleet.repo.drift.check`**, which DEVELOPER+ holds today and Appendix A left out.
 - **`fleet.activity.read` is re-scoped so project roles hold it** (to scope `project`; global admins keep it everywhere), and `GET /fleet/activity` and `GET /fleet/approval-counts` list only the projects where the caller holds the read key.
-- **Agents may make fleet writes now**, through an early slice of P2's `ActionContext` (an `AsyncLocalStorage` actor set from the principal), plus a requester-type column on `FleetJob` and `JobSchedule` with the two user foreign keys dropped. No fleet service signature changes.
+- **Agents may make fleet writes now**, through an early slice of P2's `ActionContext` (an `AsyncLocalStorage` actor set from the principal), plus a requester-type column on `FleetJob` and `JobSchedule` with the two user foreign keys dropped. No fleet service signature changes except those Design lists.
 
 ## Design
 
@@ -102,7 +102,7 @@ async projectIdsWithKey(principal: KodaPrincipal, key: string): Promise<{ all: t
 
 - A runner principal: `{ all: false, projectIds: [] }`.
 - `effectiveKeys(ref, 'global')` holds `key` (global Owner, Admin, a legacy `User.role = 'ADMIN'`): `{ all: true }`.
-- Otherwise the candidate projects are `accessibleProjectIds(db, ref)` (`apps/api/src/permissions/legacy-membership.queries.ts`), read through a new `PrismaRoleBindingRepository.findAccessibleProjectIds(principal: PrincipalRef): Promise<string[]>`, and a project is kept when `effectiveKeys(ref, { projectId })` holds `key`.
+- Otherwise the candidate projects are `accessibleProjectIds(db, ref)` (`apps/api/src/permissions/legacy-membership.queries.ts`), read through a new `PrismaRoleBindingRepository.findAccessibleProjectIds(principal: PrincipalRef): Promise<string[]>`, and a project is kept when `effectiveKeys(ref, { projectId })` holds `key`. The candidates are the roster and binding projects; with `AGENT_PROJECT_SCOPING=off` an agent's listing still covers only those (accepted).
 
 ### Catalog and seeded role changes
 
@@ -153,7 +153,7 @@ async projectIdsWithKey(principal: KodaPrincipal, key: string): Promise<{ all: t
 | `PATCH …/:id`, `POST …/:id/enable`, `POST …/:id/disable` | `fleet.schedule.update` | G + S (ownership in `SchedulesService`) | `@ProjectPermission(UPDATE FleetJob)` + `ctx.role === 'ADMIN'` |
 | `DELETE …/fleet/schedules/:id` | `fleet.schedule.delete` | G + S (ownership) | same |
 | `GET …/fleet/approvals`, `…/:id` | `fleet.approval.read` | G | user-only |
-| `POST …/fleet/approvals/:id/decide` | `fleet.approval.decide.bash`, `.budget`, `.assistant`, `mode: 'any'` | S (`ApprovalsService.decide`, per approval type) | user-only + `mayDecideBash` / `mayDecideBudget` on `ctx.role` |
+| `POST …/fleet/approvals/:id/decide` | `fleet.approval.decide.bash`, `.budget`, `mode: 'any'` (metadata only) | S (`ApprovalsService.decide`, per approval type; `assistant_action` keeps its creator-only check) | user-only + `mayDecideBash` / `mayDecideBudget` on `ctx.role` |
 | `GET /fleet/approvals`, `/:id` | `fleet.approval.read` | G | `@RequiredPermission('ADMIN')` |
 | `POST /fleet/approvals/:id/decide` | `fleet.approval.read` (G, global, so only a global grant reaches it, as today), then the type's decide key | G + S (per type) | `@RequiredPermission('ADMIN')` |
 | `GET /fleet/approval-counts` | `fleet.approval.read` | S (`projectIdsWithKey`) | user-only, member projects |
@@ -194,8 +194,8 @@ A key with scope `any` on a global route is checked with no project (`can(princi
 
 - **`ApprovalRoute`** is unchanged (the assistant's `koda_list_approvals` tool builds one with `role`), but `decide` no longer reads `role`. **`ApprovalCaller`** (`{ id, globalAdmin }`) is unchanged, because `AssistantActionPort.decide` shares it; `ApprovalsService.decide` takes `caller: ApprovalCaller & { principal: KodaPrincipal }`, and both decide controllers pass the request principal.
 - **Decide.** `ApprovalsService.decide` checks, after `findVisible` and before any lock or write, `permissions.can(caller.principal, key, scope)`: `fleet.approval.decide.bash` for `nax_bash_escalate`, `fleet.approval.decide.budget` for `budget_override_required`, with `scope = { projectId: approval.projectId }` when the approval has a project and no project otherwise. A refusal is 403 `permissions`. `assistant_action` approvals keep their creator-only handler (`AssistantActionPort.decide`, 403 `threads.notCreator`) with no key check; their key belongs to `permissions-p1-enforce-assistant`. `mayDecideBash` and `mayDecideBudget` are deleted. `ApprovalsService` gains `PermissionService` as a required last constructor parameter.
-- **Counts.** `ApprovalsService.counts(scope: { all: true } | { all: false; projectIds: string[] })` replaces `counts(caller)`; the controller passes `projectIdsWithKey(principal, 'fleet.approval.read')`. `{ all: true }` counts every project's pending approvals through a new `IApprovalRepository.countPendingAllProjects(): Promise<PendingCount[]>` (pending approvals grouped by non-null `projectId`, the same row shape as `countPending`) and adds `countPendingUnscoped()`; `{ all: false }` calls `countPending(projectIds)` with `unscoped` 0, as a non-admin gets today.
-- The global decide controller keeps passing `globalAdmin: true`: only a principal with a global `fleet.approval.read` grant passes its guard. The project controller passes `globalAdmin` as `(await permissions.can(principal, 'fleet.approval.read')).allowed`.
+- **Counts.** `ApprovalsService.counts(scope: { all: true } | { all: false; projectIds: string[] })` replaces `counts(caller)`; the controller passes `projectIdsWithKey(principal, 'fleet.approval.read')`. `{ all: true }` counts every project's pending approvals through a new `IApprovalRepository.countPendingAllProjects(): Promise<PendingCount[]>` (pending approvals of non-deleted projects grouped by `projectId`, the same row shape as `countPending`) and adds `countPendingUnscoped()`; `{ all: false }` calls `countPending(projectIds)` with `unscoped` 0, as a non-admin gets today.
+- The global decide controller keeps passing `globalAdmin: true`: only a principal with a global `fleet.approval.read` grant passes its guard. The project controller keeps passing `globalAdmin: principal.role === 'ADMIN'` as today (no reader decides on it after this feature).
 - `decidedById` keeps the caller's id; for an agent it is the agent's id (the activity row records the type).
 
 ### Fleet activity listing
@@ -207,7 +207,7 @@ A key with scope `any` on a global route is checked with no project (`can(princi
 | Situation | Behaviour |
 |:--|:--|
 | A route key the caller does not hold | 403 `permissions`; the handler does not run |
-| A runner principal on a migrated route | Refused with 403 `permissions` on the guard-checked routes (`can` refuses runners); `GET /fleet/activity` and `GET /fleet/approval-counts` answer it an empty list (`projectIdsWithKey` gives it no project) |
+| A runner principal on a migrated route | Refused with 403 (`projects` from `ProjectMembershipGuard` on project routes, `permissions` on global routes); `GET /fleet/activity` and `GET /fleet/approval-counts` answer it an empty list (`projectIdsWithKey` gives it no project) |
 | Cancelling a job the caller did not request, without `fleet.job.cancel` | 403 `permissions`; the job is unchanged |
 | Editing, enabling, disabling or deleting another principal's schedule with only the `.own` key | 403 `permissions`; the schedule is unchanged |
 | A schedule whose owner no longer holds `fleet.job.dispatch` in the project, or is gone or disabled, comes due | The tick disables it with reason `owner_lost_access` and dispatches nothing (as today) |
@@ -254,7 +254,7 @@ Symbols this feature **changes**. The baseline only locates the code; implement 
 | `ApprovalsService` | `decide(caller: ApprovalCaller, ...)`, `ApprovalRoute.role`, `counts(caller)` | `decide(caller: ApprovalCaller & { principal }, ...)` (keys, not `route.role`), `counts(scope)`, `PermissionService` appended |
 | `IApprovalRepository`, `PrismaApprovalRepository` | `countPending(projectIds)`, `countPendingUnscoped()` | plus `countPendingAllProjects()` |
 | `ApprovalActor.responsibleUserId` (`approval-closer.ts`) | `string` | `string \| null` |
-| `FleetJobsController`, `ProjectFleetSchedulesController` | CASL ability / `ctx.role` | `PermissionService` constructor parameter for `canOperate` / `canAdminister` |
+| `FleetJobsController`, `ProjectFleetSchedulesController`, `ProjectFleetApprovalsController`, `FleetApprovalCountsController`, `FleetActivityController` | CASL ability / `ctx.role` / `principal.role` | `PermissionService` constructor parameter (`canOperate`, `canAdminister`, the decide principal, `projectIdsWithKey`) |
 | The controllers in "Route keys" | legacy checks | `@Requires` + guards |
 
 ## Out of Scope
@@ -364,7 +364,6 @@ This is one capability, enforcing keys on the fleet surface, at eight stories; t
 - `apps/api/src/permissions/catalog.spec.ts` — its OWNABLE_KEY_LIST pins the ownable keys and is compared for set equality with OWNABLE_KEYS. The replacing invariant: the list gains fleet.schedule.update and fleet.schedule.delete, and every other assertion is unchanged.
 - `apps/api/src/app.module.ts` — it does not import ActionContextModule. The replacing invariant: AppModule imports ActionContextModule, which registers ActionContextInterceptor as APP_INTERCEPTOR, and no other import changes.
 - `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv` — the catalog_scope cell of the GET /fleet/activity row (proposed_key fleet.activity.read) changes from global to project. The replacing invariant: catalog.spec.ts still proves the TSV and INVENTORY_SCOPE_ROWS agree, and no other cell or row changes.
-- `openapi.json` — it records the route descriptions this feature edits (for example the user-only notes on the fleet routes). The replacing invariant: it is regenerated with bun run api:export-spec, and only operation summaries and response descriptions change.
 
 **US-002**
 - `apps/api/src/fleet/repo-config/config-jobs.service.spec.ts` — its submitEdit case asserts the exact createJob argument object, which now gains requestedByType. The replacing invariant: the expected object also has requestedByType 'USER' (no context in the unit test), and every other assertion is unchanged.
@@ -377,22 +376,23 @@ This is one capability, enforcing keys on the fleet surface, at eight stories; t
 - `apps/api/src/fleet/logs/fleet-job-logs.controller.spec.ts` — its "refuses agent principals on every route (R10)" case expects 403 from the controller for an agent. The replacing invariant: that case is removed (the controller no longer refuses by principal type; the key is RequiresGuard's), and the defaults and throttle cases are unchanged.
 
 **US-005**
-- `apps/api/src/fleet/schedules/schedules.service.spec.ts` — it constructs SchedulesService with five arguments and stubs findOwnerAccess with globalRole and projectRole. The replacing invariant: a PermissionService double is appended as the sixth argument, findOwnerAccess answers { exists, disabled }, the enable cases decide on the double's effectiveKeys holding fleet.job.dispatch, and every ownership assertion is unchanged.
-- `apps/api/src/fleet/schedules/schedule-ticker.spec.ts` — it constructs ScheduleTicker with six arguments and stubs findOwnerAccess with globalRole and projectRole. The replacing invariant: a PermissionService double is appended as the seventh argument, findOwnerAccess answers { exists, disabled }, the owner_lost_access cases decide on the double's effectiveKeys, and every tick-outcome assertion is unchanged.
+- `apps/api/src/fleet/schedules/schedules.service.spec.ts` — it constructs SchedulesService with five arguments and stubs findOwnerAccess with globalRole and projectRole. The replacing invariant: a PermissionService double is appended as the sixth argument, findOwnerAccess answers { exists, disabled }, the enable cases decide on the double's effectiveKeys holding fleet.job.dispatch, the findOwnerAccess call assertion expects ('p1', { type: 'USER', id: 'owner' }), and every ownership assertion is unchanged.
+- `apps/api/src/fleet/schedules/schedule-ticker.spec.ts` — it constructs ScheduleTicker with six arguments and stubs findOwnerAccess with globalRole and projectRole. The replacing invariant: a PermissionService double is appended as the seventh argument, findOwnerAccess answers { exists, disabled }, the owner_lost_access cases decide on the double's effectiveKeys, the direct mayDispatch(access) cases pass { exists, disabled } with a key set, and every tick-outcome assertion is unchanged.
 - `apps/api/src/fleet/schedules/prisma-schedule.repository.spec.ts` — it calls findOwnerAccess(projectId, userId), asserts globalRole and projectRole, and its AC-5/AC-6 cases call mayDispatch with one argument. The replacing invariant: it calls findOwnerAccess(projectId, { type: 'USER', id }) and asserts { exists, disabled } only; the mayDispatch cases pass the owner's key set (a set with fleet.job.dispatch for the developer owner, an empty set for the viewer owner) and expect the same results.
 - `apps/api/test/integration/fleet/fleet-schedule-repository.integration.spec.ts` — it calls findOwnerAccess(projectId, userId) and asserts globalRole and projectRole. The replacing invariant: it calls findOwnerAccess(projectId, { type: 'USER', id }) and asserts { exists, disabled }; an AGENT owner case is not required here.
 - `apps/api/test/integration/permissions/membership-fleet-consumers.integration.spec.ts` — its AC-5 and AC-6 call mayDispatch(await repo.findOwnerAccess(p1Id, userId)). The replacing invariant: they call mayDispatch with findOwnerAccess(p1Id, { type: 'USER', id }) and the owner's effectiveKeys in p1, expecting the same true and false; every HTTP assertion is unchanged.
 
 **US-006**
-- `apps/api/src/fleet/approvals/approvals.service.spec.ts` — it constructs ApprovalsService without PermissionService, passes decide callers without principal, decides bash and budget asks from route.role, and calls counts(caller). The replacing invariant: a PermissionService double is appended to the construction; the ApprovalRoute values may keep role, which decide ignores; decide callers carry a principal and the bash and budget refusals come from the double refusing the type's key; counts takes { projectIds, unscoped } with the same totals.
+- `apps/api/src/fleet/approvals/approvals.service.spec.ts` — it constructs ApprovalsService without PermissionService, passes decide callers without principal, decides bash and budget asks from route.role, and calls counts(caller). The replacing invariant: a PermissionService double is appended to the construction; the ApprovalRoute values may keep role, which decide ignores; decide callers carry a principal and the bash and budget refusals come from the double refusing the type's key; counts takes { all: true } or { all: false, projectIds }; the repository double gains countPendingAllProjects, and the totals are unchanged.
 - `apps/api/test/integration/fleet/fleet-approvals-api.integration.spec.ts` — its agent cases expect 403 for an agent (with all four legacy roles and a roster row) on list, get, bash decide and approval-counts, assert the decide service is never called for the budget decide, and its direct approvals.decide call near line 296 passes no principal. The replacing invariant: that agent gets 200 from list, get and approval-counts and 200 from the bash decide (Developer holds fleet.approval.decide.bash); the budget decide still answers 403 (no fleet.approval.decide.budget) with the approval pending, without the not-called assertion; the direct call passes the root principal.
 
 **US-007**
-- `apps/api/src/fleet/knowledge/project-knowledge.controller.spec.ts` — its cases "reindex is a global ADMIN route" and "patterns is a global ADMIN route like reindex" assert PERMISSION_KEY 'ADMIN' metadata. The replacing invariant: reindex carries REQUIRES_METADATA with fleet.knowledge.repo.reindex, patterns with fleet.knowledge.patterns.update, repos and search with fleet.knowledge.read; every other case is unchanged.
+- `apps/api/src/fleet/knowledge/project-knowledge.controller.spec.ts` — its cases "reindex is a global ADMIN route" and "patterns is a global ADMIN route like reindex" assert PERMISSION_KEY 'ADMIN' metadata. Its first describe also builds a TestingModule with only four stub providers and overrides ProjectMembershipGuard only, so RequiresGuard fails DI at compile. The replacing invariant: that module also provides a PermissionService stub (or overrides RequiresGuard); reindex carries REQUIRES_METADATA with fleet.knowledge.repo.reindex, patterns with fleet.knowledge.patterns.update, repos and search with fleet.knowledge.read; every other case body is unchanged.
 - `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` — its knowledge case "AC-12: POST reindex answers 403 for a project DEVELOPER and enqueues nothing" assumes reindex is global-admin only. The replacing invariant: a project DEVELOPER gets 202 and one admin pass is enqueued (Developer holds fleet.knowledge.repo.reindex), and the PUT patterns refusal for the same DEVELOPER (403) is unchanged.
 
 **US-008**
-None. The global admin route tests assert only the status of non-admin refusals (403), which the keys keep; the activity and counts tests that pin filtering (`membership-fleet-consumers.integration.spec.ts` AC-1, AC-2) keep their outcomes.
+- `openapi.json` — it records the route descriptions this feature's stories edit (US-003 to US-008) (for example the user-only notes on the fleet routes). The replacing invariant: it is regenerated with bun run api:export-spec, and only operation summaries and response descriptions change.
+No test changes: the global admin route tests assert only the status of non-admin refusals (403), which the keys keep; the activity and counts tests that pin filtering (`membership-fleet-consumers.integration.spec.ts` AC-1, AC-2) keep their outcomes.
 
 ### Seams
 
@@ -500,7 +500,7 @@ Fixture wording, as in enforce-core: "a user whose only source in `p1` is a `<ro
 8. [integration] A user who is not the thread's creator gets 403 with error code `threads.notCreator` from `POST /projects/p1/fleet/approvals/<id>/decide` on a pending `assistant_action` approval, which stays pending.
 9. [integration] For a user whose only source in `p1` is a `developer` binding and with no source in `p2`, with one pending approval in each, `GET /fleet/approval-counts` answers `projects` with `p1` only, `unscoped` 0 and `total` 1.
 10. [integration] An agent rostered in `p1`, with one pending approval in `p1`, gets 200 from `GET /fleet/approval-counts` listing `p1` with 1 pending.
-11. [integration] A global admin gets `GET /fleet/approval-counts` with both projects and the pending approvals of global policies in `unscoped`.
+11. [integration] A global admin gets `GET /fleet/approval-counts` with both projects and the pending approvals of global policies in `unscoped`, and without a soft-deleted project's pending approval.
 12. [integration] A user whose only source in `p1` is a `developer` binding gets 403 with error code `permissions` from `POST /projects/p1/fleet/budgets` with a valid project budget, and a user whose only source in `p1` is a `project-admin` binding gets 201 from it.
 13. [integration] A user whose only source in `p1` is a `viewer` binding gets 200 from `GET /projects/p1/fleet/budgets`.
 14. [integration] A non-admin user gets 403 with error code `permissions` from `POST /fleet/budgets` with a valid global budget, and a global admin gets 201 from it.
