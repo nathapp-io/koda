@@ -18,6 +18,8 @@ import { ForbiddenAppException, NotFoundAppException, ValidationAppException } f
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FLEET_CFG } from '../../config/fleet.config';
 import type { fleetConfig } from '../../config/fleet.config';
+import { PermissionService } from '../../permissions/permission.service';
+import { REQUIRES_METADATA } from '../../permissions/requires.decorator';
 import { ProjectAccessModule } from '../../projects/project-access.module';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import { ProjectMembershipGuard } from '../../projects/project-membership.guard';
@@ -354,17 +356,25 @@ describe('ProjectKnowledgeController reindex (US-005, 1c-c-D12)', () => {
     expect(index.resolveProjectRepo).not.toHaveBeenCalled();
   });
 
-  it('AC-11/AC-12: reindex is a global ADMIN route, so a developer is refused by the permission guard', () => {
-    const permissions = Reflect.getMetadata(PERMISSION_KEY, ProjectKnowledgeController.prototype.reindex) as unknown;
-    expect(JSON.stringify(permissions)).toContain('ADMIN');
-    // The member-facing reads carry a membership guard, not an admin permission.
-    expect(Reflect.getMetadata(PERMISSION_KEY, ProjectKnowledgeController.prototype.repos)).toBeUndefined();
-  });
+  it('US-007 AC-9/AC-10: reindex declares fleet.knowledge.repo.reindex behind the membership guard', () => {
+    const handlers: Array<[keyof ProjectKnowledgeController, string]> = [
+      ['repos', 'fleet.knowledge.read'],
+      ['search', 'fleet.knowledge.read'],
+      ['reindex', 'fleet.knowledge.repo.reindex'],
+      ['patterns', 'fleet.knowledge.patterns.update'],
+    ];
 
-  it('AC-14: patterns is a global ADMIN route like reindex, and a read of it is not', () => {
-    expect(JSON.stringify(Reflect.getMetadata(PERMISSION_KEY, ProjectKnowledgeController.prototype.patterns))).toContain('ADMIN');
-    expect(JSON.stringify(Reflect.getMetadata(PERMISSION_KEY, ProjectKnowledgeController.prototype.patterns)))
-      .toBe(JSON.stringify(Reflect.getMetadata(PERMISSION_KEY, ProjectKnowledgeController.prototype.reindex)));
+    for (const [handler, key] of handlers) {
+      const fn = ProjectKnowledgeController.prototype[handler] as unknown as object;
+      expect(Reflect.getMetadata(REQUIRES_METADATA, fn)).toEqual({ keys: [key], mode: 'all', enforcedBy: 'guard' });
+      // The legacy decorators are gone from the migrated routes, so only one mechanism decides them.
+      expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
+      const guards = (Reflect.getMetadata('__guards__', fn) ?? []) as unknown[];
+      expect(guards.map((guard) => (guard as { name?: string }).name)).toEqual([
+        'ProjectMembershipGuard',
+        'RequiresGuard',
+      ]);
+    }
   });
 });
 
@@ -456,6 +466,7 @@ describe('POST /projects/:slug/knowledge/search', () => {
     savePatterns: ReturnType<typeof vi.fn>;
   };
   let queue: { enqueue: ReturnType<typeof vi.fn> };
+  let permissions: { can: ReturnType<typeof vi.fn> };
   let stored: string[] | null = null;
   const config = { knowledgeIndexEnabled: true };
 
@@ -472,6 +483,7 @@ describe('POST /projects/:slug/knowledge/search', () => {
       }),
     };
     queue = { enqueue: vi.fn() };
+    permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) };
     const module = await Test.createTestingModule({
       controllers: [ProjectKnowledgeController],
       providers: [
@@ -479,12 +491,17 @@ describe('POST /projects/:slug/knowledge/search', () => {
         { provide: KnowledgeIndexService, useValue: index },
         { provide: FLEET_CFG, useValue: config },
         { provide: KnowledgeIndexQueue, useValue: queue },
+        // US-007: `RequiresGuard` resolves the global PermissionService when the route's guards are instantiated.
+        { provide: PermissionService, useValue: permissions },
       ],
     })
       .overrideGuard(ProjectMembershipGuard)
       .useValue({
         canActivate: (ctx: { switchToHttp: () => { getRequest: () => Record<string, unknown> } }): boolean => {
-          ctx.switchToHttp().getRequest().projectContext = PROJECT;
+          const request = ctx.switchToHttp().getRequest();
+          request.projectContext = PROJECT;
+          // The real API authenticates before the guards run; `RequiresGuard` reads the principal from here.
+          request.user = { actorType: 'user', id: 'user-1', role: 'MEMBER', email: 'user@koda.test' };
           return true;
         },
       })
@@ -509,6 +526,8 @@ describe('POST /projects/:slug/knowledge/search', () => {
     index.listProjectRepos.mockClear();
     stored = null;
     queue.enqueue.mockClear();
+    permissions.can.mockReset();
+    permissions.can.mockResolvedValue({ allowed: true, reason: 'granted' });
     config.knowledgeIndexEnabled = true;
   });
 
@@ -525,6 +544,16 @@ describe('POST /projects/:slug/knowledge/search', () => {
     expect(res.statusCode).toBe(200);
     expect(search.search).toHaveBeenCalledWith({ projectId: PROJECT_ID, query: 'broker', repoId: 'repo-1', limit: 5 });
     expect(res.json()).toEqual({ ret: 0, data: RESULT });
+  });
+
+  it('US-007 AC-14: answers 403 permissions for a refused fleet.knowledge.read and never searches', async () => {
+    permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
+
+    const res = await post({ query: 'broker' });
+
+    expect(res.statusCode).toBe(403);
+    expect(permissions.can).toHaveBeenCalledWith(expect.anything(), 'fleet.knowledge.read', { projectId: PROJECT_ID });
+    expect(search.search).not.toHaveBeenCalled();
   });
 
   it('answers 200 and searches the whole project for a body without repo or limit', async () => {

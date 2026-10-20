@@ -4549,11 +4549,12 @@ describeIntegration('API Integration Tests', () => {
       expect(enqueueSpy).toHaveBeenCalledWith(repoId, 'admin');
     });
 
-    it('AC-12: POST reindex answers 403 for a project DEVELOPER and enqueues nothing', async () => {
-      const res = await reindex(nonAdminUserAccessToken, repoId).expect(403);
+    it('AC-12: POST reindex answers 202 for a project DEVELOPER and enqueues one admin pass', async () => {
+      const res = await reindex(nonAdminUserAccessToken, repoId).expect(202);
 
-      expect(res.body.ret).not.toBe(0);
-      expect(enqueueSpy).not.toHaveBeenCalled();
+      expect(body(res)).toEqual({ queued: true });
+      expect(enqueueSpy).toHaveBeenCalledTimes(1);
+      expect(enqueueSpy).toHaveBeenCalledWith(repoId, 'admin');
     });
 
     it('AC-12: POST reindex answers 404 for a repository of another project', async () => {

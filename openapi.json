@@ -7172,6 +7172,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.repo.config.read is missing"
+          },
           "409": {
             "description": "koda cannot read the repo (fleet.repoUnreachable)"
           },
@@ -7184,7 +7187,7 @@
             "bearer": []
           }
         ],
-        "summary": "The repo's allowlisted .nax files at the default-branch head (project member)",
+        "summary": "The repo's allowlisted .nax files at the default-branch head (fleet.repo.config.read)",
         "tags": [
           "fleet"
         ]
@@ -7239,6 +7242,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.repo.config.read is missing"
+          },
           "422": {
             "description": "Over 256 KiB or not UTF-8 text (fleet.naxFile)"
           }
@@ -7248,7 +7254,7 @@
             "bearer": []
           }
         ],
-        "summary": "One allowlisted .nax file at a commit (project member)",
+        "summary": "One allowlisted .nax file at a commit (fleet.repo.config.read)",
         "tags": [
           "fleet"
         ]
@@ -7296,6 +7302,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.job.config.edit is missing"
+          },
           "409": {
             "description": "A config job is already active for this repo (fleet.configJobActive)"
           }
@@ -7305,7 +7314,7 @@
             "bearer": []
           }
         ],
-        "summary": "Queue a CONFIG_EDIT job: a runner applies the edits, regenerates, validates and opens a PR (project DEVELOPER+)",
+        "summary": "Queue a CONFIG_EDIT job: a runner applies the edits, regenerates, validates and opens a PR (fleet.job.config.edit)",
         "tags": [
           "fleet"
         ]
@@ -7352,6 +7361,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.job.config.edit is missing"
           }
         },
         "security": [
@@ -7359,7 +7371,7 @@
             "bearer": []
           }
         ],
-        "summary": "Queue a regenerate PR (CONFIG_EDIT with no file edits) (project DEVELOPER+)",
+        "summary": "Queue a regenerate PR (CONFIG_EDIT with no file edits) (fleet.job.config.edit)",
         "tags": [
           "fleet"
         ]
@@ -7396,6 +7408,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.repo.drift.check is missing"
           }
         },
         "security": [
@@ -7403,7 +7418,7 @@
             "bearer": []
           }
         ],
-        "summary": "Queue a read-only CONFIG_DRIFT job (project DEVELOPER+)",
+        "summary": "Queue a read-only CONFIG_DRIFT job (fleet.repo.drift.check)",
         "tags": [
           "fleet"
         ]
@@ -7440,6 +7455,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.job.config.read is missing"
+          },
+          "404": {
+            "description": "No config job of this project with that id"
           }
         },
         "security": [
@@ -7447,7 +7468,7 @@
             "bearer": []
           }
         ],
-        "summary": "A config job's full edit set, for Reopen edits (project member)",
+        "summary": "A config job's full edit set, for Reopen edits (fleet.job.config.read)",
         "tags": [
           "fleet"
         ]
@@ -10670,6 +10691,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.knowledge.read is missing"
           }
         },
         "security": [
@@ -10677,7 +10701,7 @@
             "bearer": []
           }
         ],
-        "summary": "Index state of the project's repositories (project member)",
+        "summary": "Index state of the project's repositories (fleet.knowledge.read)",
         "tags": [
           "fleet knowledge"
         ]
@@ -10719,6 +10743,9 @@
           },
           "400": {
             "description": "Invalid patterns body (knowledge.input)"
+          },
+          "403": {
+            "description": "fleet.knowledge.patterns.update is missing"
           }
         },
         "security": [
@@ -10726,7 +10753,7 @@
             "bearer": []
           }
         ],
-        "summary": "Replace the project's Markdown corpus patterns (global admin)",
+        "summary": "Replace the project's Markdown corpus patterns (fleet.knowledge.patterns.update)",
         "tags": [
           "fleet knowledge"
         ]
@@ -10764,6 +10791,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.knowledge.repo.reindex is missing"
+          },
           "404": {
             "description": "knowledge.repoNotFound"
           },
@@ -10776,7 +10806,7 @@
             "bearer": []
           }
         ],
-        "summary": "Queue an index pass for one of the project's repositories (global admin)",
+        "summary": "Queue an index pass for one of the project's repositories (fleet.knowledge.repo.reindex)",
         "tags": [
           "fleet knowledge"
         ]
@@ -10819,6 +10849,9 @@
           "400": {
             "description": "Invalid search body (knowledge.input)"
           },
+          "403": {
+            "description": "fleet.knowledge.read is missing"
+          },
           "404": {
             "description": "knowledge.repoNotFound"
           },
@@ -10831,7 +10864,7 @@
             "bearer": []
           }
         ],
-        "summary": "Search the project's indexed repository docs (project member)",
+        "summary": "Search the project's indexed repository docs (fleet.knowledge.read)",
         "tags": [
           "fleet knowledge"
         ]
