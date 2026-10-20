@@ -13,13 +13,31 @@ import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify
 import { mcpConfig } from '../../../config/mcp.config';
 import { restoreEnvAfterEach } from '../../../common/test-helpers/restore-env';
 import type { AgentPrincipal, KodaPrincipal, UserPrincipal } from '../../../auth/principal/koda-principal.types';
+import { PermissionService } from '../../../permissions/permission.service';
 import { AssistantToolExecutor } from '../assistant-tool.executor';
+import { AssistantToolRegistry } from '../assistant-tool.registry';
+import type { AssistantTool } from '../assistant-tool.types';
 import { McpController } from './mcp.controller';
 import { mcpToolDescriptors } from './mcp-tool-catalog';
 
 const agent = { actorType: 'agent', id: 'agent-claude', slug: 'claude' } as unknown as AgentPrincipal;
 const user = { actorType: 'user', id: 'user-1' } as unknown as UserPrincipal;
 const ACCEPT = 'application/json, text/event-stream';
+
+/**
+ * US-005: the two tool shapes that bypass a project key — the workspace-scope tool and the implicit key — spelled
+ * as the real registry holds them; every other MCP name answers a project key, which the permission stub decides.
+ */
+const TOOLS_WITHOUT_PROJECT_KEY: Readonly<Record<string, { key: string; scope?: 'project' | 'workspace' }>> = {
+  koda_my_projects: { key: 'project.read', scope: 'workspace' },
+  koda_get_action: { key: 'assistant.action.read' },
+};
+const registry = {
+  get: (name: string) => (TOOLS_WITHOUT_PROJECT_KEY[name] ?? { key: 'ticket.read' }) as unknown as AssistantTool,
+};
+/** Objects a tool no agent holds: every project key is answered as held nowhere. */
+const HOLDS_NOTHING = { all: false as const, projectIds: [] as string[] };
+const HOLDS_EVERYWHERE = { all: true as const };
 
 /** Fastify's in-process `inject`: no socket, so it runs where local port binding is off. */
 const send = (app: NestFastifyApplication, method: 'POST' | 'GET' | 'DELETE', payload?: unknown) =>
@@ -41,6 +59,7 @@ describe('McpController routes', () => {
   let app: NestFastifyApplication;
   let currentPrincipal: KodaPrincipal | undefined;
   const executeFor = vi.fn();
+  const projectIdsWithKey = vi.fn();
 
   async function boot(enabled: boolean): Promise<void> {
     if (enabled) process.env.MCP_ENABLED = 'true';
@@ -48,7 +67,13 @@ describe('McpController routes', () => {
     module = await Test.createTestingModule({
       imports: [ConfigModule.forFeature(mcpConfig)],
       controllers: [McpController],
-      providers: [{ provide: AssistantToolExecutor, useValue: { executeFor } }],
+      providers: [
+        { provide: AssistantToolExecutor, useValue: { executeFor } },
+        // US-005: the controller reads each tool's key from the registry and the agent's projects from the
+        // permission service, so its isolated module provides both instead of the whole assistant graph.
+        { provide: AssistantToolRegistry, useValue: registry },
+        { provide: PermissionService, useValue: { projectIdsWithKey } },
+      ],
     }).compile();
     app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
     app.setGlobalPrefix('api');
@@ -67,6 +92,9 @@ describe('McpController routes', () => {
     currentPrincipal = agent;
     executeFor.mockReset();
     executeFor.mockResolvedValue({ content: 'found WEB-1', isError: false });
+    // The default: this agent holds every project key everywhere, so the listing is the whole catalog.
+    projectIdsWithKey.mockReset();
+    projectIdsWithKey.mockResolvedValue(HOLDS_EVERYWHERE);
   });
 
   afterEach(async () => {
@@ -102,6 +130,32 @@ describe('McpController routes', () => {
 
     expect(res.statusCode).toBe(200);
     expect(rpcBody(res).result.tools.map((t: { name: string }) => t.name)).toEqual(mcpToolDescriptors().map((d) => d.name));
+  });
+
+  it('US-005: tools/list answers only the tools an agent holding no project key may see', async () => {
+    projectIdsWithKey.mockResolvedValue(HOLDS_NOTHING);
+    await boot(true);
+
+    const res = await send(app, 'POST', rpc('tools/list'));
+
+    expect(res.statusCode).toBe(200);
+    expect(rpcBody(res).result.tools.map((t: { name: string }) => t.name)).toEqual(['koda_my_projects', 'koda_get_action']);
+    // One read per distinct key: the workspace tool and the implicit key take no project at all.
+    const keysAsked = projectIdsWithKey.mock.calls.map(([, key]) => key as string);
+    expect(keysAsked).not.toContain('project.read');
+    expect(keysAsked).not.toContain('assistant.action.read');
+    expect(new Set(keysAsked).size).toBe(keysAsked.length);
+  });
+
+  it('US-005: a call to a tool the agent does not hold answers the SDK unknown-tool error, never the executor', async () => {
+    projectIdsWithKey.mockResolvedValue(HOLDS_NOTHING);
+    await boot(true);
+
+    const res = await send(app, 'POST', rpc('tools/call', { name: 'koda_dispatch_job', arguments: { project: 'web' } }));
+
+    expect(res.statusCode).toBe(200);
+    expect(rpcBody(res).error).toMatchObject({ code: -32602, message: 'Tool koda_dispatch_job not found' });
+    expect(executeFor).not.toHaveBeenCalled();
   });
 
   it('AC-12: tools/call reaches executeFor with the agent principal and an mcp origin, and answers its result', async () => {
