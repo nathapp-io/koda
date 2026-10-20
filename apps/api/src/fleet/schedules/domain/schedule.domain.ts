@@ -41,6 +41,8 @@ export interface ScheduleRecord {
   noProgressLimit: number;
   disabledReason: ScheduleDisabledReason | null;
   createdById: string;
+  /** US-002: who created the schedule — a user, or an agent. Absent on records written before agents could schedule. */
+  createdByType?: 'USER' | 'AGENT';
   updatedById: string;
   createdAt: Date;
   updatedAt: Date;
@@ -50,7 +52,7 @@ export type NewSchedule = Pick<
   ScheduleRecord,
   'projectId' | 'repoId' | 'name' | 'cron' | 'timezone' | 'feature' | 'ref' | 'profiles' | 'maxCostUsd' | 'selectorLabels'
   | 'bashMode' | 'approvalTimeoutSec' | 'pinnedRunnerId' | 'noProgressLimit' | 'nextFireAt' | 'createdById'
->;
+> & Pick<ScheduleRecord, 'createdByType'>;
 
 export type SchedulePatch = Partial<Pick<
   ScheduleRecord,

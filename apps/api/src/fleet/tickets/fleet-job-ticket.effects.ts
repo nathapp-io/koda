@@ -13,6 +13,13 @@ export type { TicketActor } from './fleet-tickets.service';
 
 const STARTABLE: ReadonlySet<string> = new Set([TicketStatus.CREATED, TicketStatus.VERIFIED]);
 
+/**
+ * US-002: these effects run after commit, often outside any request, so the action context cannot say who the
+ * requester was. An agent-requested job's ticket events name the agent; a user's leave it to the recorder.
+ */
+const agentTypeOf = (job: { requestedByType?: 'USER' | 'AGENT' }): { actorType?: 'agent' } =>
+  job.requestedByType === 'AGENT' ? { actorType: 'agent' } : {};
+
 /** Fleet C9 §3: ticket-side effects of fleet jobs. After commit, best-effort per ticket, never throws (D451). */
 @Injectable()
 export class FleetJobTicketEffects {
@@ -84,7 +91,10 @@ export class FleetJobTicketEffects {
           externalRef: `${job.repo.owner}/${job.repo.name}#${prNumber}`, now: new Date(),
         });
         if (!created) return;
-        await this.events.record({ projectId: job.projectId, ticketId: ticket.ticketId, action: 'TICKET_UPDATED', actorId: job.requestedById, data: { fleetPrLinked: url, jobId: job.id } });
+        await this.events.record({
+          projectId: job.projectId, ticketId: ticket.ticketId, action: 'TICKET_UPDATED', actorId: job.requestedById,
+          ...agentTypeOf(job), data: { fleetPrLinked: url, jobId: job.id },
+        });
       });
     } catch (error) {
       this.logger.warn(`Fleet job ${job.id}: PR link on ticket ${ticket.ref} failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -96,7 +106,10 @@ export class FleetJobTicketEffects {
       await this.txManager.run(async () => {
         if (!(await this.repo.claimNotified(job.id, ticket.ticketId, job.leaseEpoch))) return;
         const comment = await this.repo.createSystemComment(ticket.ticketId, body);
-        await this.events.record({ projectId: job.projectId, ticketId: ticket.ticketId, action: 'COMMENT_ADDED', actorId: job.requestedById, data: { commentId: comment.id } });
+        await this.events.record({
+          projectId: job.projectId, ticketId: ticket.ticketId, action: 'COMMENT_ADDED', actorId: job.requestedById,
+          ...agentTypeOf(job), data: { commentId: comment.id },
+        });
       });
     } catch (error) {
       this.logger.warn(`Fleet job ${job.id}: comment on ticket ${ticket.ref} failed: ${error instanceof Error ? error.message : String(error)}`);

@@ -52,6 +52,7 @@ describe('ConfigJobsService (fleet S3 §4)', () => {
     expect(jobs.createJob).toHaveBeenCalledWith({
       projectId: 'p1', repoId: 'repo-1', ref: 'trunk', command: 'CONFIG_EDIT', feature: 'nax-config', planFrom: null, profiles: [],
       maxCostUsd: '0', bashMode: 'raw', approvalTimeoutSec: 600, selectorLabels: [], pinnedRunnerId: null, requestedById: 'u1',
+      requestedByType: 'USER', // US-002: no action context in a unit test, so the requester is a user's
     });
     expect(edits.create).toHaveBeenCalledWith({ jobId: 'job-1', mode: 'edit', edits: body.edits, prTitle: 'Tighten', prBody: null, baseSha: SHA });
     expect(jobs.appendEvent).toHaveBeenCalledWith('job-1', { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });

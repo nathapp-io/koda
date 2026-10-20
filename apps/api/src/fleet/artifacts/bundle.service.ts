@@ -7,6 +7,7 @@ import { FleetJobState } from '../../common/enums';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import { responsibleUserOf } from '../common/responsible-user';
 import { LogFallbackService } from '../logs/log-fallback.service';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { BundleIngestService } from '../ingest/bundle-ingest.service';
@@ -80,7 +81,7 @@ export class BundleService {
       await this.ingestRepo.enqueue(artifact.id, job.id, leaseEpoch, INGEST_PARSER_VERSION); // S2b §2.1: same transaction
       await this.activity.record({
         actorType: 'RUNNER', actorId: u.runnerId, action: 'job.bundle_uploaded', entityType: 'job', entityId: job.id, jobId: job.id,
-        projectId: job.projectId, responsibleUserId: job.requestedById, payload: { leaseEpoch, sizeBytes: stored.sizeBytes, sha256: stored.sha256 },
+        projectId: job.projectId, responsibleUserId: responsibleUserOf(job), payload: { leaseEpoch, sizeBytes: stored.sizeBytes, sha256: stored.sha256 },
       });
       return { ok: true as const, replacedKey: previous?.storageKey ?? null };
     });

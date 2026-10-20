@@ -11,6 +11,7 @@ import {
 
 const toSchedule = (r: ScheduleRow): ScheduleRecord => ({
   ...r,
+  createdByType: r.createdByType as 'USER' | 'AGENT',
   maxCostUsd: r.maxCostUsd.toString(),
   bashMode: r.bashMode as BashMode,
   disabledReason: r.disabledReason as ScheduleDisabledReason | null,
@@ -51,7 +52,8 @@ export class PrismaScheduleRepository implements IScheduleRepository {
 
   async create(data: NewSchedule): Promise<ScheduleRecord> {
     const row = await this.db.jobSchedule.create({
-      data: { ...data, maxCostUsd: new Prisma.Decimal(data.maxCostUsd), updatedById: data.createdById },
+      // US-002: a schedule with no creator type in its input was created by a user (every caller before agents could schedule).
+      data: { ...data, createdByType: data.createdByType ?? 'USER', maxCostUsd: new Prisma.Decimal(data.maxCostUsd), updatedById: data.createdById },
     });
     return toSchedule(row);
   }

@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import { actorTypeFor } from '../../action-context/action-context';
 import type { BashMode } from '../common/protocol';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { normalizeDispatch } from '../jobs/dispatch-input';
@@ -90,6 +91,7 @@ export class SchedulesService {
         profiles: t.profiles, maxCostUsd: t.maxCostUsd, selectorLabels: t.selectorLabels, pinnedRunnerId: t.pinnedRunnerId,
         bashMode: t.bashMode, approvalTimeoutSec: t.approvalTimeoutSec,
         noProgressLimit: dto.noProgressLimit ?? DEFAULT_NO_PROGRESS_LIMIT, nextFireAt: nextFireAfter(t.cron, t.timezone, now), createdById: actorId,
+        createdByType: actorTypeFor(actorId), // US-002: an agent owns the schedule it created
       });
       await this.record(actorId, 'schedule.created', schedule);
       return schedule;

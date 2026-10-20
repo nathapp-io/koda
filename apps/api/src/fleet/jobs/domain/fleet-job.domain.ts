@@ -73,6 +73,8 @@ export interface FleetJobRecord {
   state: FleetJobState;
   stateReason: string | null;
   requestedById: string;
+  /** US-002: who requested the job — a user, or an agent that dispatched it. Absent on records written before there were agent requesters. */
+  requestedByType?: 'USER' | 'AGENT';
   queuedAt: Date;
   assignedAt: Date | null;
   startedAt: Date | null;
@@ -134,6 +136,8 @@ export interface NewFleetJob {
   selectorLabels: string[];
   pinnedRunnerId: string | null;
   requestedById: string;
+  /** US-002: stored as 'USER' when absent; `FleetJobsService.dispatch` and `ConfigJobsService` set it from the action context. */
+  requestedByType?: 'USER' | 'AGENT';
   threadId?: string | null;
   scheduleId?: string | null;
 }
@@ -275,6 +279,8 @@ export interface IFleetJobRepository {
   /** Plan D19: sets attributedAt when still null; true when this call claimed it. */
   claimAttribution(jobId: string, now: Date): Promise<boolean>;
   findUserDisplayName(userId: string): Promise<string | null>;
+  /** US-002: the requesting agent's name (its `name`), for a PR attribution comment of an agent-requested job. */
+  findAgentDisplayName(agentId: string): Promise<string | null>;
   /** S3 §3 (D475): FleetConfigEdit.result := FleetJob.configResult for this job; no-op without an edit row. Inside the terminal transition. */
   copyConfigResult(jobId: string): Promise<void>;
 }

@@ -44,6 +44,7 @@ describe('SchedulesService.create', () => {
       projectId: 'p1', repoId: 'r1', name: 'nightly', cron: '0 9 * * *', timezone: 'Asia/Singapore', feature: 'login', ref: 'trunk', profiles: [],
       maxCostUsd: '5', selectorLabels: [], pinnedRunnerId: null, bashMode: 'raw', approvalTimeoutSec: 600, noProgressLimit: 3,
       nextFireAt: new Date('2026-10-03T01:00:00.000Z'), createdById: 'u9',
+      createdByType: 'USER', // US-002: no action context in a unit test, so the creator is a user's
     });
     expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'schedule.created', entityType: 'schedule', actorType: 'USER', actorId: 'u9', projectId: 'p1' }));
   });

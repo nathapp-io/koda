@@ -49,3 +49,63 @@ describe('PrAttributionService on a config job PR (fleet S3 §5 step 8: attribut
     expect(github.commentOnPullRequest).toHaveBeenCalledWith(BigInt(77), 'acme', 'app', 12, 'Dispatched by Dev One via koda job job-9', expect.objectContaining({ jobId: 'job-9' }));
   });
 });
+
+describe('PrAttributionService names an agent requester (permissions P1d US-002)', () => {
+  const job = (over: Record<string, unknown> = {}) => ({
+    id: 'job-9', state: 'COMPLETED', command: 'RUN', resultPrUrl: 'https://github.com/acme/app/pull/12', repoId: 'repo-1', leaseEpoch: 1,
+    requestedById: 'a1', requestedByType: 'AGENT', ...over,
+  });
+  const repoOf = (over: Record<string, unknown> = {}) => ({
+    findById: vi.fn(async () => job(over)),
+    findRepo: vi.fn(async () => ({ id: 'repo-1', projectId: 'p1', provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', githubInstallationId: BigInt(77) })),
+    claimAttribution: vi.fn(async () => true),
+    findAgentDisplayName: vi.fn(async () => 'Builder'),
+    findUserDisplayName: vi.fn(async () => 'Dev One'),
+  });
+
+  it('AC-7 posts the agent name for a job the agent requested', async () => {
+    const repo = repoOf();
+    const github = { commentOnPullRequest: vi.fn(async () => true) };
+    const svc = new PrAttributionService(repo as never, github as never, {} as never, {} as never);
+
+    await expect(svc.attribute('job-9')).resolves.toBe('posted');
+    expect(repo.findAgentDisplayName).toHaveBeenCalledWith('a1');
+    expect(github.commentOnPullRequest).toHaveBeenCalledWith(
+      BigInt(77), 'acme', 'app', 12, 'Dispatched by Builder via koda job job-9', expect.objectContaining({ jobId: 'job-9' }),
+    );
+  });
+
+  it('AC-8 never looks up a user for a job the agent requested', async () => {
+    const repo = repoOf();
+    const svc = new PrAttributionService(repo as never, { commentOnPullRequest: vi.fn(async () => true) } as never, {} as never, {} as never);
+
+    await svc.attribute('job-9');
+    expect(repo.findUserDisplayName).not.toHaveBeenCalled();
+  });
+
+  it('AC-9 falls back to "a koda agent" when the requesting agent is gone', async () => {
+    const repo = repoOf({ requestedById: 'gone' });
+    repo.findAgentDisplayName.mockResolvedValueOnce(null);
+    const github = { commentOnPullRequest: vi.fn(async () => true) };
+    const svc = new PrAttributionService(repo as never, github as never, {} as never, {} as never);
+
+    await expect(svc.attribute('job-9')).resolves.toBe('posted');
+    expect(github.commentOnPullRequest).toHaveBeenCalledWith(
+      BigInt(77), 'acme', 'app', 12, 'Dispatched by a koda agent via koda job job-9', expect.objectContaining({ jobId: 'job-9' }),
+    );
+  });
+
+  it('keeps the user path: a user-requested job still names the user, and "a koda user" when it is gone', async () => {
+    const repo = repoOf({ requestedById: 'u1', requestedByType: 'USER' });
+    const github = { commentOnPullRequest: vi.fn(async () => true) };
+    const svc = new PrAttributionService(repo as never, github as never, {} as never, {} as never);
+
+    await svc.attribute('job-9');
+    expect(repo.findAgentDisplayName).not.toHaveBeenCalled();
+    expect(github.commentOnPullRequest).toHaveBeenCalledWith(BigInt(77), 'acme', 'app', 12, 'Dispatched by Dev One via koda job job-9', expect.anything());
+
+    repo.findUserDisplayName.mockResolvedValueOnce(null);
+    await svc.attribute('job-9');
+    expect(github.commentOnPullRequest).toHaveBeenLastCalledWith(BigInt(77), 'acme', 'app', 12, 'Dispatched by a koda user via koda job job-9', expect.anything());
+  });
+});

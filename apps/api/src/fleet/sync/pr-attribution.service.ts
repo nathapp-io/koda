@@ -52,7 +52,9 @@ export class PrAttributionService {
       // for this job) instead of minting a fresh one for the attribution comment.
       const attributionCtx = { jobId: job.id, leaseEpoch: job.leaseEpoch, repo };
       if (!(await this.repo.claimAttribution(job.id, now))) return 'skipped';
-      const who = (await this.repo.findUserDisplayName(job.requestedById)) ?? 'a koda user';
+      const who = job.requestedByType === 'AGENT'
+        ? (await this.repo.findAgentDisplayName(job.requestedById)) ?? 'a koda agent'
+        : (await this.repo.findUserDisplayName(job.requestedById)) ?? 'a koda user';
       const body = `Dispatched by ${who} via koda job ${job.id}`;
       const posted = repo.provider === 'github'
         ? repo.githubInstallationId !== null && (await this.github.commentOnPullRequest(repo.githubInstallationId, repo.owner, repo.name, number, body, attributionCtx))
