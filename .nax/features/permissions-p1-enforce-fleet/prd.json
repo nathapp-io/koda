@@ -3,7 +3,7 @@
   "feature": "permissions-p1-enforce-fleet",
   "branchName": "feat/permissions-p1-enforce-fleet",
   "createdAt": "2026-10-20T00:00:00.000Z",
-  "updatedAt": "2026-10-20T04:51:31.454Z",
+  "updatedAt": "2026-10-20T05:17:24.371Z",
   "userStories": [
     {
       "id": "US-001",
@@ -340,8 +340,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -353,7 +353,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.20000000000000018,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-20T04:51:35.716Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/fleet/logs/fleet-job-logs.controller.ts",
@@ -375,7 +387,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "5ef7d984ff58bdc1b6f9807233835225e9e246c9"
     },
     {
       "id": "US-005",
