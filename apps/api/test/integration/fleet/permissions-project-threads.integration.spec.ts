@@ -348,6 +348,50 @@ describeIntegration('project thread keys and ownership (US-002)', () => {
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
+  // The rest of the "G + S" table: every any-row holder route, not only the ones an AC names
+  // -------------------------------------------------------------------------
+
+  it('a project-admin binding closes another user\'s live session (thread.end-session), and a THREAD_CLOSE is created', async () => {
+    const runnerRow = await runner();
+    const thread = await threadRow({ runnerId: runnerRow.id });
+    const job = await liveJob(thread.id, runnerRow.id, { requestedById: ids.other });
+
+    await as('adminBind', 'post', threadsUrl(`/${thread.id}/end-session`)).expect(200);
+
+    await expect(prisma.fleetCommand.findMany({ where: { jobId: job.id, type: 'THREAD_CLOSE' } })).resolves.toEqual([
+      expect.objectContaining({ runnerId: runnerRow.id, leaseEpoch: 7 }),
+    ]);
+  }, TIMEOUT);
+
+  it('a project-admin binding discards another user\'s idle thread, and the DISCARD job is theirs', async () => {
+    const runnerRow = await runner();
+    const thread = await threadRow({ runnerId: runnerRow.id });
+
+    const res = await as('adminBind', 'post', threadsUrl(`/${thread.id}/discard`)).expect(200);
+
+    const discard = data<{ jobId: string }>(res).jobId;
+    expect(await prisma.fleetJob.findUniqueOrThrow({ where: { id: discard } }))
+      .toEqual(expect.objectContaining({ command: 'THREAD', requestedById: ids.adminBind, requestedByType: 'USER' }));
+    expect(await prisma.fleetThreadTurn.findUniqueOrThrow({ where: { jobId: discard } }))
+      .toEqual(expect.objectContaining({ action: 'DISCARD' }));
+  }, TIMEOUT);
+
+  it('a project-admin binding runs another user\'s planned thread, and the RUN job is theirs', async () => {
+    const runnerRow = await runner();
+    const thread = await threadRow({ runnerId: runnerRow.id, specPublished: true });
+    await prisma.fleetJob.create({ data: {
+      projectId: p1Id, repoId, ref: 'feat/planned', command: 'PLAN', feature: thread.feature, planFrom: thread.specPath,
+      profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: ids.other, threadId: thread.id, state: 'COMPLETED',
+    } });
+
+    const res = await as('adminBind', 'post', threadsUrl(`/${thread.id}/run`), {}).expect(201);
+
+    const run = data<{ job: { id: string } }>(res).job;
+    expect(await prisma.fleetJob.findUniqueOrThrow({ where: { id: run.id } }))
+      .toEqual(expect.objectContaining({ command: 'RUN', requestedById: ids.adminBind, requestedByType: 'USER', threadId: thread.id }));
+  }, TIMEOUT);
+
+  // -------------------------------------------------------------------------
   // AC-16 / AC-17 — the .own holder and the non-holder
   // -------------------------------------------------------------------------
 
