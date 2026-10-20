@@ -3,7 +3,7 @@
   "feature": "permissions-p1-enforce-fleet",
   "branchName": "feat/permissions-p1-enforce-fleet",
   "createdAt": "2026-10-20T00:00:00.000Z",
-  "updatedAt": "2026-10-20T05:17:24.371Z",
+  "updatedAt": "2026-10-20T05:17:33.877Z",
   "userStories": [
     {
       "id": "US-001",
@@ -434,9 +434,9 @@
         "US-001",
         "US-002"
       ],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
-      "attempts": 0,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "complex",
@@ -447,7 +447,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.7999999999999998,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-20T05:17:29.636Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/fleet/schedules/project-fleet-schedules.controller.ts",
@@ -490,7 +502,9 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e57e7efb0928d65c29d70d0472f59eaeb007c729",
+      "failureStage": "workflow"
     },
     {
       "id": "US-006",
