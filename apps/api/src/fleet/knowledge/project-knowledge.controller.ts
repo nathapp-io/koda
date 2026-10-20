@@ -2,10 +2,11 @@ import { Body, Controller, Get, HttpCode, Inject, Param, Post, Put, UseGuards } 
 import { ConfigType } from '@nestjs/config';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiProperty, ApiPropertyOptional, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Allow } from 'class-validator';
-import { RequiredPermission } from '@nathapp/nestjs-auth';
 import { JsonResponse, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FLEET_CFG, fleetConfig } from '../../config/fleet.config';
+import { Requires } from '../../permissions/requires.decorator';
+import { RequiresGuard } from '../../permissions/requires.guard';
 import { ProjectMembershipGuard } from '../../projects/project-membership.guard';
 import { CurrentProject } from '../../projects/current-project.decorator';
 import type { ProjectContext } from '../../projects/project-context';
@@ -72,12 +73,14 @@ export class KnowledgePatternsResultDto {
  * `PUT patterns` (US-002) the admin replacement of the project's Markdown corpus patterns. The repository is
  * resolved through `KnowledgeIndexService` (the api-data layering rule), never by injecting the module-private
  * repository.
+ *
+ * Permissions P1d (US-007): every route declares `ProjectMembershipGuard, RequiresGuard` in one `@UseGuards`,
+ * so the membership guard resolves `request.projectContext` before the catalog key is checked.
  */
 @ApiTags('fleet knowledge')
 @ApiBearerAuth()
 @ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
 @Controller('projects/:slug/knowledge')
-@UseGuards(ProjectMembershipGuard)
 export class ProjectKnowledgeController {
   constructor(
     private readonly searchService: KnowledgeSearchService,
@@ -87,8 +90,11 @@ export class ProjectKnowledgeController {
   ) {}
 
   @Get('repos')
-  @ApiOperation({ summary: "Index state of the project's repositories (project member)" })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('fleet.knowledge.read')
+  @ApiOperation({ summary: "Index state of the project's repositories (fleet.knowledge.read)" })
   @ApiResponse({ status: 200, type: KnowledgeRepoStatesDto })
+  @ApiResponse({ status: 403, description: 'fleet.knowledge.read is missing' })
   async repos(@CurrentProject() project: ProjectContext) {
     const [states, patterns] = await Promise.all([
       this.index.listProjectStates(project.project.id),
@@ -107,10 +113,12 @@ export class ProjectKnowledgeController {
 
   @Put('patterns')
   @HttpCode(200)
-  @RequiredPermission('ADMIN')
-  @ApiOperation({ summary: "Replace the project's Markdown corpus patterns (global admin)" })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('fleet.knowledge.patterns.update')
+  @ApiOperation({ summary: "Replace the project's Markdown corpus patterns (fleet.knowledge.patterns.update)" })
   @ApiResponse({ status: 200, type: KnowledgePatternsResultDto })
   @ApiResponse({ status: 400, description: 'Invalid patterns body (knowledge.input)' })
+  @ApiResponse({ status: 403, description: 'fleet.knowledge.patterns.update is missing' })
   async patterns(@Body() body: KnowledgePatternsBodyDto, @CurrentProject() project: ProjectContext) {
     const saved = await this.index.savePatterns(project.project.id, this.acceptPatterns(body?.patterns));
     // The routes answer while indexing is disabled: the list is saved, only the passes are skipped.
@@ -138,10 +146,12 @@ export class ProjectKnowledgeController {
 
   @Post('repos/:repoId/reindex')
   @HttpCode(202)
-  @RequiredPermission('ADMIN')
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('fleet.knowledge.repo.reindex')
   @ApiParam({ name: 'repoId', required: true, schema: { type: 'string' } })
-  @ApiOperation({ summary: "Queue an index pass for one of the project's repositories (global admin)" })
+  @ApiOperation({ summary: "Queue an index pass for one of the project's repositories (fleet.knowledge.repo.reindex)" })
   @ApiResponse({ status: 202, type: KnowledgeReindexResultDto })
+  @ApiResponse({ status: 403, description: 'fleet.knowledge.repo.reindex is missing' })
   @ApiResponse({ status: 404, description: 'knowledge.repoNotFound' })
   @ApiResponse({ status: 409, description: 'knowledge.disabled' })
   async reindex(@Param('repoId') repoId: string, @CurrentProject() project: ProjectContext) {
@@ -154,9 +164,12 @@ export class ProjectKnowledgeController {
 
   @Post('search')
   @HttpCode(200)
-  @ApiOperation({ summary: "Search the project's indexed repository docs (project member)" })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('fleet.knowledge.read')
+  @ApiOperation({ summary: "Search the project's indexed repository docs (fleet.knowledge.read)" })
   @ApiResponse({ status: 200, type: KnowledgeSearchResultDto })
   @ApiResponse({ status: 400, description: 'Invalid search body (knowledge.input)' })
+  @ApiResponse({ status: 403, description: 'fleet.knowledge.read is missing' })
   @ApiResponse({ status: 404, description: 'knowledge.repoNotFound' })
   @ApiResponse({ status: 409, description: 'knowledge.disabled, or knowledge.unavailable when the store is down' })
   async search(@Body() body: KnowledgeSearchBodyDto, @CurrentProject() project: ProjectContext) {

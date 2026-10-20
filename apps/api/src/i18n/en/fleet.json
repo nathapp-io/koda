@@ -32,6 +32,10 @@
   "approvalNotPending": { "409": "This approval is no longer pending" },
   "approvalDecisionInvalid": { "-2": "This decision is not allowed: {reason}" },
   "approvalInput": { "-2": "Invalid approval request: {reason}" },
+  "approvalSelfDecide": {
+    "403": "An agent cannot decide an approval for a job it requested",
+    "40003": "An agent cannot decide an approval for a job it requested"
+  },
   "logInput": { "-2": "Invalid log upload: {reason}" },
   "logChunk": { "413": "Log chunk larger than {maxBytes} bytes" },
   "logHash": { "422": "Log chunk rejected: sha256 mismatch" },

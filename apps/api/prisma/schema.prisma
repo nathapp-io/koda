@@ -37,8 +37,6 @@ model User {
   assignedTickets                 Ticket[]                         @relation("TicketAssignedToUser")
   comments                        Comment[]                        @relation("CommentByUser")
   projectMemberships              ProjectMember[]
-  fleetJobs                       FleetJob[]                       @relation("FleetJobRequestedBy")
-  jobSchedules                    JobSchedule[]                    @relation("JobScheduleCreatedBy")
   notifications                   Notification[]
   ticketWatches                   TicketWatcher[]
   notificationCategoryPreferences NotificationCategoryPreference[]
@@ -991,14 +989,14 @@ model JobSchedule {
   noProgressTicks    Int       @default(0)
   noProgressLimit    Int       @default(3)
   disabledReason     String? // completed | finish_failed | no_progress | owner_lost_access | template_invalid | manual
-  createdById        String
+  createdById        String // a User or an Agent id (permissions P1d US-002: no foreign key, createdByType says which)
+  createdByType      String    @default("USER") // USER | AGENT
   updatedById        String
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  createdBy User       @relation("JobScheduleCreatedBy", fields: [createdById], references: [id])
-  jobs      FleetJob[]
+  project Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  jobs    FleetJob[]
 
   @@index([enabled, nextFireAt])
   @@index([projectId])
@@ -1024,7 +1022,8 @@ model FleetJob {
   leaseEpoch         Int       @default(0)
   state              String    @default("QUEUED") // QUEUED | ASSIGNED | RUNNING | UPLOADING | COMPLETED | FAILED | ESCALATED | CRASHED | CANCELLED
   stateReason        String?
-  requestedById      String
+  requestedById      String // a User or an Agent id (permissions P1d US-002: no foreign key, requestedByType says which)
+  requestedByType    String    @default("USER") // USER | AGENT
   queuedAt           DateTime  @default(now())
   assignedAt         DateTime?
   startedAt          DateTime?
@@ -1066,7 +1065,6 @@ model FleetJob {
   repo                FleetRepo            @relation(fields: [repoId], references: [id], onDelete: Cascade)
   runner              Runner?              @relation("FleetJobRunner", fields: [runnerId], references: [id], onDelete: SetNull)
   pinnedRunner        Runner?              @relation("FleetJobPinnedRunner", fields: [pinnedRunnerId], references: [id], onDelete: SetNull)
-  requestedBy         User                 @relation("FleetJobRequestedBy", fields: [requestedById], references: [id])
   schedule            JobSchedule?         @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
   thread              ChatThread?          @relation(fields: [threadId], references: [id], onDelete: SetNull)
   threadTurn          FleetThreadTurn?

@@ -83,6 +83,10 @@ export const OWNABLE_KEYS: ReadonlySet<string> = new Set([
   'thread.workspace.read',
   'thread.workspace.message.send',
   'thread.workspace.archive',
+  // Permissions P1d US-001: a developer edits and deletes only the schedules it created; a project
+  // admin holds the any-row keys through `*`.
+  'fleet.schedule.update',
+  'fleet.schedule.delete',
 ]);
 
 /** Keys the design adds on top of the TSV, with the scope it gives them. */
@@ -146,7 +150,7 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'comment.delete': ['global'],
   'context.read': ['project'],
   'context.query': ['project'],
-  'fleet.activity.read': ['global'],
+  'fleet.activity.read': ['project'],
   'fleet.analytics.read': ['global', 'project'],
   'fleet.analytics.delete': ['global'],
   'fleet.approval.read': ['global', 'project'],

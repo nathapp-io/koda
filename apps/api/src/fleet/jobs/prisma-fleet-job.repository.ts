@@ -23,6 +23,7 @@ const toJob = (r: JobRow): FleetJobRecord => ({
   ...r,
   command: r.command as FleetJobKind,
   state: r.state as FleetJobState,
+  requestedByType: r.requestedByType as 'USER' | 'AGENT',
   maxCostUsd: r.maxCostUsd.toString(),
   bashMode: r.bashMode as BashMode,
   costSpentUsd: r.costSpentUsd.toString(),
@@ -68,7 +69,10 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
 
   async createJob(data: NewFleetJob): Promise<FleetJobRecord> {
     try {
-      return toJob(await this.db.fleetJob.create({ data: { ...data, maxCostUsd: new Prisma.Decimal(data.maxCostUsd) } }));
+      // US-002: a job with no requester type in its input was requested by a user (every caller before agents could dispatch).
+      return toJob(await this.db.fleetJob.create({
+        data: { ...data, requestedByType: data.requestedByType ?? 'USER', maxCostUsd: new Prisma.Decimal(data.maxCostUsd) },
+      }));
     } catch (error) {
       // The unique constraints a new row can hit are the active (repoId, feature) index and, for a scheduled job, the
       // one-QUEUED-job-per-schedule index (S1b §3.1); both mean an active job already exists.
@@ -375,6 +379,12 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
   async findUserDisplayName(userId: string): Promise<string | null> {
     const u = await this.db.user.findUnique({ where: { id: userId }, select: { name: true } });
     return u?.name ?? null;
+  }
+
+  /** US-002: same contract as findUserDisplayName, for a job an agent requested. */
+  async findAgentDisplayName(agentId: string): Promise<string | null> {
+    const a = await this.db.agent.findUnique({ where: { id: agentId }, select: { name: true } });
+    return a?.name ?? null;
   }
 
   async copyConfigResult(jobId: string): Promise<void> {

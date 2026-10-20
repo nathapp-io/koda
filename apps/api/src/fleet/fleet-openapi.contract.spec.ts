@@ -168,6 +168,77 @@ describe('fleet OpenAPI contract', () => {
     expect(spec.components.schemas['AttentionReasonDto']).toBeDefined();
   });
 
+  it('documents the permission key and the 403 of every project fleet read (P1d US-004)', () => {
+    // The committed spec is the CLI's and web's contract, so a migrated route must read as one that
+    // needs its catalog key — a stale openapi.json still advertises "project member" (R10) and no 403.
+    const routes: Array<[string, string, string]> = [
+      ['/api/projects/{slug}/fleet/jobs/{id}/logs', 'get', 'fleet.job.logs.read'],
+      ['/api/projects/{slug}/fleet/jobs/{id}/logs/{stream}/entries', 'get', 'fleet.job.logs.read'],
+      ['/api/projects/{slug}/fleet/jobs/{id}/logs/{stream}/raw', 'get', 'fleet.job.logs.read'],
+      ['/api/projects/{slug}/fleet/jobs/{id}/bundle', 'get', 'fleet.job.bundle.read'],
+      ['/api/projects/{slug}/fleet/analytics/spend', 'get', 'fleet.analytics.read'],
+      ['/api/projects/{slug}/fleet/analytics/quality', 'get', 'fleet.analytics.read'],
+      ['/api/projects/{slug}/fleet/analytics/stories', 'get', 'fleet.analytics.read'],
+      ['/api/projects/{slug}/fleet/analytics/jobs', 'get', 'fleet.analytics.read'],
+      ['/api/projects/{slug}/fleet/analytics/ingest', 'get', 'fleet.analytics.read'],
+      ['/api/projects/{slug}/fleet/jobs/{id}/analytics', 'get', 'fleet.analytics.read'],
+      ['/api/projects/{slug}/fleet/dashboard', 'get', 'fleet.dashboard.read'],
+      ['/api/projects/{slug}/fleet/runners', 'get', 'fleet.runner.read'],
+      ['/api/projects/{slug}/fleet/repos', 'get', 'fleet.repo.read'],
+    ];
+    const documented = routes.map(([path, method, key]) => {
+      const op = (spec.paths[path]?.[method] ?? {}) as {
+        summary?: string;
+        responses?: Record<string, unknown>;
+      };
+      return { path, key, summary: op.summary ?? null, forbidden: op.responses?.['403'] !== undefined };
+    });
+    expect(documented).toEqual(
+      routes.map(([path, , key]) => ({ path, key, summary: expect.stringContaining(`(${key}`), forbidden: true })),
+    );
+  });
+
+  it('documents the permission key and the 403 of every global fleet admin route (P1d US-008)', () => {
+    // The global counterpart of the US-004 case above: every route this story migrated names its
+    // catalog key in its summary and documents the refusal, so the committed spec keeps saying the
+    // key decides instead of the legacy "global admin" gate.
+    const routes: Array<[string, string, string]> = [
+      ['/api/fleet/analytics/spend', 'get', 'fleet.analytics.read'],
+      ['/api/fleet/analytics', 'delete', 'fleet.analytics.delete'],
+      ['/api/fleet/dashboard', 'get', 'fleet.dashboard.read'],
+      ['/api/fleet/credential-board', 'get', 'fleet.credential.read'],
+      ['/api/fleet/ingest', 'get', 'fleet.ingest.read'],
+      ['/api/fleet/ingest/backfill', 'post', 'fleet.ingest.backfill'],
+      ['/api/fleet/ingest/jobs/{jobId}/rerun', 'post', 'fleet.ingest.rerun'],
+      ['/api/fleet/ingest/rerun-outdated', 'post', 'fleet.ingest.rerun'],
+      ['/api/fleet/repos', 'get', 'fleet.repo.read'],
+      ['/api/fleet/repos', 'post', 'fleet.repo.create'],
+      ['/api/fleet/repos/{id}/check', 'post', 'fleet.repo.check'],
+      ['/api/fleet/repos/{id}', 'delete', 'fleet.repo.delete'],
+      ['/api/fleet/enrollments', 'get', 'fleet.enrollment.read'],
+      ['/api/fleet/enrollments', 'post', 'fleet.enrollment.create'],
+      ['/api/fleet/runners', 'get', 'fleet.runner.read'],
+      ['/api/fleet/runners/{id}', 'get', 'fleet.runner.read'],
+      ['/api/fleet/runners/{id}', 'patch', 'fleet.runner.update'],
+      ['/api/fleet/runners/{id}', 'delete', 'fleet.runner.delete'],
+    ];
+    const documented = routes.map(([path, method, key]) => {
+      const op = (spec.paths[path]?.[method] ?? {}) as {
+        summary?: string;
+        responses?: Record<string, unknown>;
+      };
+      return { path, method, key, summary: op.summary ?? null, forbidden: op.responses?.['403'] !== undefined };
+    });
+    expect(documented).toEqual(
+      routes.map(([path, method, key]) => ({ path, method, key, summary: expect.stringContaining(`(${key}`), forbidden: true })),
+    );
+    // The activity feed answers its key in the handler (`projectIdsWithKey`), so its own 403 is gone:
+    // the route cannot refuse a caller, it filters the rows for them.
+    const activity = spec.paths['/api/fleet/activity']?.['get'] as { summary?: string; responses?: Record<string, unknown> } | undefined;
+    expect(activity?.summary).toContain('fleet.activity.read');
+    expect(activity?.responses?.['403']).toBeUndefined();
+  });
+
   it('exposes the credential board (S3 §4.4)', () => {
     expect(spec.paths['/api/fleet/credential-board']?.['get']).toBeDefined();
     expect(Object.keys(spec.components.schemas['CredentialBoardDto']?.properties ?? {}).sort())

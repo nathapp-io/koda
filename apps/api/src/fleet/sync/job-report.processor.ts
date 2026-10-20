@@ -3,6 +3,7 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { Prisma } from '../../generated/prisma/client';
 import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import { responsibleUserOf } from '../common/responsible-user';
 import type { BashAsk } from '../approvals/approval-closer';
 // Value import (not `import type`): Nest reads the class from emitDecoratorMetadata to resolve the token.
 import { ApprovalCloser } from '../approvals/approval-closer';
@@ -132,7 +133,7 @@ export class JobReportProcessor {
     this.logger.warn(`Rejected runner event on job ${job.id} (runnerSeq ${event.runnerSeq}): ${reason}`);
     await this.activity.record({
       actorType: 'RUNNER', actorId: runnerId, action: 'job.event_rejected', entityType: 'job', entityId: job.id, jobId: job.id,
-      projectId: job.projectId, responsibleUserId: job.requestedById, payload: { runnerSeq: event.runnerSeq, type: event.type, reason },
+      projectId: job.projectId, responsibleUserId: responsibleUserOf(job), payload: { runnerSeq: event.runnerSeq, type: event.type, reason },
     });
     return { job, mirrored: false };
   }

@@ -3,7 +3,7 @@ import type { FleetActivityRecord } from '../domain/fleet-activity.domain';
 
 export class FleetActivityDto {
   @ApiProperty() declare id: string;
-  @ApiProperty({ enum: ['USER', 'RUNNER', 'SYSTEM'] }) declare actorType: 'USER' | 'RUNNER' | 'SYSTEM';
+  @ApiProperty({ enum: ['USER', 'AGENT', 'RUNNER', 'SYSTEM'] }) declare actorType: 'USER' | 'AGENT' | 'RUNNER' | 'SYSTEM';
   @ApiProperty() declare actorId: string;
   @ApiProperty() declare action: string;
   @ApiProperty() declare entityType: string;

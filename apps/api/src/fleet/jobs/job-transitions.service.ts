@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { FleetCommandType, FleetJobState } from '../../common/enums';
 import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import { responsibleUserOf } from '../common/responsible-user';
 import { ApprovalCloser } from '../approvals/approval-closer';
 import { canTransition, isTerminal, TransitionActor } from './job-state';
 import { isConfigKind } from '../common/config-jobs';
@@ -92,7 +93,7 @@ export class JobTransitionsService {
     await this.activity.record({
       actorType: input.actor.type, actorId: input.actor.id, action: `job.${after.state.toLowerCase()}`,
       entityType: 'job', entityId: after.id, jobId: after.id, projectId: after.projectId,
-      responsibleUserId: after.requestedById, payload: { from: before.state, to: after.state, reason },
+      responsibleUserId: responsibleUserOf(after), payload: { from: before.state, to: after.state, reason },
     });
     return this.live.event(after);
   }

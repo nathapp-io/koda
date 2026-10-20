@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { JobSchedule as ScheduleRow, Prisma, PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { FleetJobState } from '../../common/enums';
-import { userProjectRole } from '../../permissions/legacy-membership.queries';
+import type { PrincipalRef } from '../../permissions/permissions.types';
 import type { BashMode } from '../common/protocol';
 import { ACTIVE_STATES } from '../jobs/job-state';
 import {
@@ -11,6 +11,7 @@ import {
 
 const toSchedule = (r: ScheduleRow): ScheduleRecord => ({
   ...r,
+  createdByType: r.createdByType as 'USER' | 'AGENT',
   maxCostUsd: r.maxCostUsd.toString(),
   bashMode: r.bashMode as BashMode,
   disabledReason: r.disabledReason as ScheduleDisabledReason | null,
@@ -51,7 +52,8 @@ export class PrismaScheduleRepository implements IScheduleRepository {
 
   async create(data: NewSchedule): Promise<ScheduleRecord> {
     const row = await this.db.jobSchedule.create({
-      data: { ...data, maxCostUsd: new Prisma.Decimal(data.maxCostUsd), updatedById: data.createdById },
+      // US-002: a schedule with no creator type in its input was created by a user (every caller before agents could schedule).
+      data: { ...data, createdByType: data.createdByType ?? 'USER', maxCostUsd: new Prisma.Decimal(data.maxCostUsd), updatedById: data.createdById },
     });
     return toSchedule(row);
   }
@@ -103,20 +105,19 @@ export class PrismaScheduleRepository implements IScheduleRepository {
   }
 
   /**
-   * S1b §3.2 / plan D201. Existence, `disabled` and the global `User.role` are read as before; the
-   * project role comes from the **access sources** the compatibility queries union (US-004): the
-   * owner's legacy `ProjectMember` row plus its PROJECT-scope bindings, in this project and
-   * `projectId`-null. Nothing is cached.
+   * S1b §3.2 / plan D201, permissions P1d US-005: existence only, read from the owner's own table. A
+   * USER exists when its `User` row does and is disabled when `User.disabled`; an AGENT exists when its
+   * `Agent` row does and is never disabled (a PAUSED agent keeps its schedules; status is liveness,
+   * not access). The permission itself is the owner's effective keys, read by `dispatchFresh`/`enable`.
+   * Nothing is cached.
    */
-  async findOwnerAccess(projectId: string, userId: string): Promise<OwnerAccess> {
-    const user = await this.db.user.findUnique({ where: { id: userId }, select: { disabled: true, role: true } });
-    if (!user) return { exists: false, disabled: false, globalRole: '', projectRole: null };
-    return {
-      exists: true,
-      disabled: user.disabled,
-      globalRole: user.role,
-      projectRole: await userProjectRole(this.db, userId, projectId),
-    };
+  async findOwnerAccess(_projectId: string, owner: PrincipalRef): Promise<OwnerAccess> {
+    if (owner.type === 'AGENT') {
+      const agent = await this.db.agent.findUnique({ where: { id: owner.id }, select: { id: true } });
+      return { exists: agent !== null, disabled: false };
+    }
+    const user = await this.db.user.findUnique({ where: { id: owner.id }, select: { disabled: true } });
+    return user === null ? { exists: false, disabled: false } : { exists: true, disabled: user.disabled };
   }
 
   async sumCostBySchedule(ids: readonly string[]): Promise<ReadonlyMap<string, string>> {

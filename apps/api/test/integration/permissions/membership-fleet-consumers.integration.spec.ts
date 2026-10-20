@@ -28,6 +28,7 @@ import { PrismaScheduleRepository } from '../../../src/fleet/schedules/prisma-sc
 import { ScheduleTicker } from '../../../src/fleet/schedules/schedule-ticker';
 import { mayDispatch } from '../../../src/fleet/schedules/schedule-access';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { PermissionService } from '../../../src/permissions/permission.service';
 import type { PrincipalRef } from '../../../src/permissions/permissions.types';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
@@ -81,6 +82,7 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
   let server: ReturnType<NathApplication['getHttpServer']>;
   let prisma: PrismaClient;
   let membership: MembershipService;
+  let permissions: PermissionService;
   let ticker: ScheduleTicker;
   let repo: PrismaScheduleRepository;
 
@@ -94,6 +96,8 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
   const as = (token: string) => ({ Authorization: `Bearer ${token}` });
 
   const userPrincipal = (who: string): PrincipalRef => ({ type: 'USER', id: ids[who] });
+  /** US-005: the owner's own effective keys in p1, which `mayDispatch` combines with its existence. */
+  const keysOf = (who: string) => permissions.effectiveKeys(userPrincipal(who), { projectId: p1Id });
   const bind = (principal: PrincipalRef, roleKey: string, projectId: string) =>
     membership.createBinding({ principal, roleKey, projectId }, { type: 'USER', id: ids.root });
 
@@ -154,6 +158,7 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
     server = app.getHttpServer();
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
     membership = app.get(MembershipService);
+    permissions = app.get(PermissionService);
     ticker = app.get(ScheduleTicker);
     repo = app.get(PrismaScheduleRepository);
 
@@ -279,7 +284,8 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
       command: 'RUN', feature: 'us004-dispatched', state: 'QUEUED', projectId: p1Id, requestedById: ids.devBind,
     }));
     expect(await reload(due.id)).toEqual(expect.objectContaining({ enabled: true, lastJobId: jobs[0]?.id }));
-    expect(mayDispatch(await repo.findOwnerAccess(p1Id, ids.devBind))).toBe(true);
+    // US-005: the owner's existence and its own effective keys are what `mayDispatch` combines.
+    expect(mayDispatch(await repo.findOwnerAccess(p1Id, userPrincipal('devBind')), await keysOf('devBind'))).toBe(true);
   }, TEST_TIMEOUT_MS);
 
   it('AC-6: a due schedule whose owner has only a viewer binding dispatches nothing and disables with owner_lost_access', async () => {
@@ -290,7 +296,7 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
 
     expect(await prisma.fleetJob.count({ where: { scheduleId: due.id } })).toBe(0);
     expect(await reload(due.id)).toEqual(expect.objectContaining({ enabled: false, disabledReason: 'owner_lost_access' }));
-    // The viewer-owner rejection is mayDispatch's, still unchanged by the binding-derived role read.
-    expect(mayDispatch(await repo.findOwnerAccess(p1Id, ids.viewerOwner))).toBe(false);
+    // A viewer binding's keys do not include fleet.job.dispatch, whatever the binding-derived role read.
+    expect(mayDispatch(await repo.findOwnerAccess(p1Id, userPrincipal('viewerOwner')), await keysOf('viewerOwner'))).toBe(false);
   }, TEST_TIMEOUT_MS);
 });

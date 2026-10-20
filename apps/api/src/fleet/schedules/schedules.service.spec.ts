@@ -23,14 +23,22 @@ function build(current: ScheduleRecord | null = schedule()) {
     update: vi.fn(async (_id: string, patch: Partial<ScheduleRecord>) => ({ ...(current as ScheduleRecord), ...patch })),
     delete: vi.fn(async () => undefined),
     sumCostBySchedule: vi.fn(async () => new Map<string, string>()),
-    findOwnerAccess: vi.fn(async () => ({ exists: true, disabled: false, globalRole: 'MEMBER', projectRole: 'DEVELOPER' })),
+    findOwnerAccess: vi.fn(async () => ({ exists: true, disabled: false })),
   };
   const jobsRepo = { findRepo: vi.fn(async () => REPO as typeof REPO | null) };
   const placement = { evaluatePinned: vi.fn(async (): Promise<string | null> => null) };
   const activity = { record: vi.fn(async () => undefined) };
   const txManager = { run: vi.fn(async <T>(fn: () => Promise<T>) => fn()) };
-  const svc = new SchedulesService(repo as never, jobsRepo as never, placement as never, activity as never, txManager as never);
-  return { repo, jobsRepo, placement, activity, svc };
+  // US-005: `enable` rechecks the owner's dispatch key through the real PermissionService, so the
+  // double answers the owner's effective keys. The default owner holds it. The service itself makes no
+  // route decision (`canAdminister` is the controller's), so `can` is deliberately absent.
+  const permissions = {
+    effectiveKeys: vi.fn(async () => new Set(['fleet.job.dispatch', 'fleet.schedule.read', 'fleet.schedule.update.own'])),
+  };
+  const svc = new SchedulesService(
+    repo as never, jobsRepo as never, placement as never, activity as never, txManager as never, permissions as never,
+  );
+  return { repo, jobsRepo, placement, activity, permissions, svc };
 }
 const input = (over: Record<string, unknown> = {}) => ({
   name: ' nightly ', repoId: 'r1', feature: 'login', cron: ' 0  9 * * * ', timezone: 'asia/singapore', maxCostUsd: 5, ...over,
@@ -44,6 +52,7 @@ describe('SchedulesService.create', () => {
       projectId: 'p1', repoId: 'r1', name: 'nightly', cron: '0 9 * * *', timezone: 'Asia/Singapore', feature: 'login', ref: 'trunk', profiles: [],
       maxCostUsd: '5', selectorLabels: [], pinnedRunnerId: null, bashMode: 'raw', approvalTimeoutSec: 600, noProgressLimit: 3,
       nextFireAt: new Date('2026-10-03T01:00:00.000Z'), createdById: 'u9',
+      createdByType: 'USER', // US-002: no action context in a unit test, so the creator is a user's
     });
     expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'schedule.created', entityType: 'schedule', actorType: 'USER', actorId: 'u9', projectId: 'p1' }));
   });
@@ -140,22 +149,44 @@ describe('SchedulesService.enable and disable', () => {
     expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'schedule.enabled' }));
   });
 
-  it.each([
-    ['a disabled owner', { exists: true, disabled: true, globalRole: 'MEMBER', projectRole: 'DEVELOPER' }],
-    ['an owner removed from the project', { exists: true, disabled: false, globalRole: 'MEMBER', projectRole: null }],
-    ['an owner demoted to VIEWER', { exists: true, disabled: false, globalRole: 'MEMBER', projectRole: 'VIEWER' }],
-    ['an owner that no longer exists', { exists: false, disabled: false, globalRole: '', projectRole: null }],
-  ])('enable is refused with a 409 conflict for %s, even when a project admin asks (plan D211)', async (_name, access) => {
+  it('checks the owner\'s own dispatch key: the stored owner ref and its effective keys in this project (US-005)', async () => {
+    const h = build(schedule({ enabled: false, disabledReason: 'manual', createdById: 'owner', createdByType: 'USER' }));
+
+    await h.svc.enable('owner', 'p1', 's1', false, NOW);
+
+    expect(h.repo.findOwnerAccess).toHaveBeenCalledWith('p1', { type: 'USER', id: 'owner' });
+    expect(h.permissions.effectiveKeys).toHaveBeenCalledWith({ type: 'USER', id: 'owner' }, { projectId: 'p1' });
+  });
+
+  it('rechecks an agent owner as the agent, with no type stored read as a user (US-005)', async () => {
+    const agentOwner = build(schedule({ enabled: false, disabledReason: 'manual', createdById: 'a1', createdByType: 'AGENT' }));
+    agentOwner.repo.findOwnerAccess.mockResolvedValue({ exists: true, disabled: false });
+    await agentOwner.svc.enable('admin', 'p1', 's1', true, NOW);
+    expect(agentOwner.repo.findOwnerAccess).toHaveBeenCalledWith('p1', { type: 'AGENT', id: 'a1' });
+    expect(agentOwner.permissions.effectiveKeys).toHaveBeenCalledWith({ type: 'AGENT', id: 'a1' }, { projectId: 'p1' });
+
+    const untagged = build(schedule({ enabled: false, disabledReason: 'manual', createdById: 'legacy', createdByType: undefined }));
+    await untagged.svc.enable('admin', 'p1', 's1', true, NOW);
+    expect(untagged.repo.findOwnerAccess).toHaveBeenCalledWith('p1', { type: 'USER', id: 'legacy' });
+  });
+
+  it.each<[string, { exists: boolean; disabled: boolean }, ReadonlySet<string>]>([
+    ['a disabled owner', { exists: true, disabled: true }, new Set(['fleet.job.dispatch'])],
+    ['an owner removed from the project', { exists: true, disabled: false }, new Set(['fleet.schedule.read', 'fleet.schedule.update.own'])],
+    ['an owner bound only to viewer', { exists: true, disabled: false }, new Set(['*.read'])],
+    ['an owner that no longer exists', { exists: false, disabled: false }, new Set(['fleet.job.dispatch'])],
+  ])('enable is refused with a 409 conflict for %s, even when a project admin asks (plan D211)', async (_name, access, keys) => {
     const h = build(schedule({ enabled: false, disabledReason: 'manual' }));
     h.repo.findOwnerAccess.mockResolvedValue(access);
+    h.permissions.effectiveKeys.mockResolvedValue(keys);
     await expect(h.svc.enable('admin', 'p1', 's1', true, NOW)).rejects.toBeInstanceOf(ConflictAppException);
     expect(h.repo.update).not.toHaveBeenCalled();
     expect(h.activity.record).not.toHaveBeenCalled();
   });
 
-  it('enable is refused with the structured fleet.scheduleOwnerNoAccess code, not only its message (US-004 AC-4)', async () => {
+  it('enable is refused with the structured fleet.scheduleOwnerNoAccess code, not only its message (US-005 AC-11)', async () => {
     const h = build(schedule({ enabled: false, disabledReason: 'manual' }));
-    h.repo.findOwnerAccess.mockResolvedValue({ exists: true, disabled: false, globalRole: 'MEMBER', projectRole: 'VIEWER' });
+    h.permissions.effectiveKeys.mockResolvedValue(new Set(['fleet.schedule.read']));
 
     const refusal = await h.svc.enable('admin', 'p1', 's1', true, NOW).then(
       () => {
@@ -168,15 +199,16 @@ describe('SchedulesService.enable and disable', () => {
     // translation, so status + code + message identify the i18n coordinate the AC names.
     expect(refusal.code).toBe(409);
     expect(refusal.prefix).toBe('fleet.scheduleOwnerNoAccess');
-    expect(h.repo.findOwnerAccess).toHaveBeenCalledWith('p1', 'owner');
+    expect(h.repo.findOwnerAccess).toHaveBeenCalledWith('p1', { type: 'USER', id: 'owner' });
     expect(h.repo.update).not.toHaveBeenCalled();
   });
 
   it('enable on an enabled schedule changes nothing', async () => {
     const h = build();
-    h.repo.findOwnerAccess.mockResolvedValue({ exists: false, disabled: false, globalRole: '', projectRole: null });
+    h.repo.findOwnerAccess.mockResolvedValue({ exists: false, disabled: false });
     await h.svc.enable('owner', 'p1', 's1', false, NOW);
     expect(h.repo.findOwnerAccess).not.toHaveBeenCalled();
+    expect(h.permissions.effectiveKeys).not.toHaveBeenCalled();
     expect(h.repo.update).not.toHaveBeenCalled();
     expect(h.activity.record).not.toHaveBeenCalled();
   });

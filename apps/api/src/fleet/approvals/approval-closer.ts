@@ -4,6 +4,7 @@ import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
+import { responsibleUserOf } from '../common/responsible-user';
 import { SYSTEM_ACTOR } from '../common/system-actor';
 import type { FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import { ApprovalLivePublisher } from './approval-live.publisher';
@@ -12,7 +13,8 @@ import {
   APPROVAL_REPOSITORY, ApprovalDecision, ApprovalResolvedBy, FleetApprovalRecord, IApprovalRepository,
 } from './domain/approval.domain';
 
-export interface ApprovalActor { type: 'USER' | 'SYSTEM' | 'RUNNER'; id: string; responsibleUserId: string }
+/** US-002: `responsibleUserId` is null when the job the approval belongs to was requested by an agent. */
+export interface ApprovalActor { type: 'USER' | 'SYSTEM' | 'RUNNER'; id: string; responsibleUserId: string | null }
 export interface ApprovalChange { approval: FleetApprovalRecord | null; live: LiveFleetApprovalEvent[] }
 export interface PolicyClose {
   status: 'approved' | 'cancelled';
@@ -31,14 +33,14 @@ export const userActor = (id: string): ApprovalActor => ({ type: 'USER', id, res
 export const systemActor = (policy: BudgetPolicyRecord): ApprovalActor =>
   ({ type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId: policy.updatedById });
 
-/** Plan D260: a runner-raised ask answers to the job's requester. */
-export const runnerActor = (runnerId: string, job: Pick<FleetJobRecord, 'requestedById'>): ApprovalActor =>
-  ({ type: 'RUNNER', id: runnerId, responsibleUserId: job.requestedById });
-/** Plan D260: job-end and timeout closes answer to the job's requester. */
-export const jobSystemActor = (job: Pick<FleetJobRecord, 'requestedById'>): ApprovalActor =>
-  ({ type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId: job.requestedById });
+/** Plan D260: a runner-raised ask answers to the job's requester (US-002: null for an agent requester). */
+export const runnerActor = (runnerId: string, job: Pick<FleetJobRecord, 'requestedById' | 'requestedByType'>): ApprovalActor =>
+  ({ type: 'RUNNER', id: runnerId, responsibleUserId: responsibleUserOf(job) });
+/** Plan D260: job-end and timeout closes answer to the job's requester (US-002: null for an agent requester). */
+export const jobSystemActor = (job: Pick<FleetJobRecord, 'requestedById' | 'requestedByType'>): ApprovalActor =>
+  ({ type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId: responsibleUserOf(job) });
 
-export type BashJob = Pick<FleetJobRecord, 'id' | 'projectId' | 'leaseEpoch' | 'state' | 'bashMode' | 'approvalTimeoutSec' | 'requestedById'>;
+export type BashJob = Pick<FleetJobRecord, 'id' | 'projectId' | 'leaseEpoch' | 'state' | 'bashMode' | 'approvalTimeoutSec' | 'requestedById' | 'requestedByType'>;
 export interface BashAsk { naxAskId: string; deadlineAt: Date; payload: Record<string, unknown> }
 
 /** S5b 2a-D5: the summary of a proposed koda action an `assistant_action` approval is opened for. */
@@ -157,7 +159,7 @@ export class ApprovalCloser {
   }
 
   /** Spec §1.4: the job left RUNNING, so nax has exited or is exiting; every pending ask of it is moot. */
-  async closeForJob(job: Pick<FleetJobRecord, 'id' | 'requestedById'>, now: Date): Promise<LiveFleetApprovalEvent[]> {
+  async closeForJob(job: Pick<FleetJobRecord, 'id' | 'requestedById' | 'requestedByType'>, now: Date): Promise<LiveFleetApprovalEvent[]> {
     const live: LiveFleetApprovalEvent[] = [];
     for (const pending of await this.repo.findPendingForJob(job.id)) {
       const locked = await this.repo.lockById(pending.id);
@@ -169,7 +171,7 @@ export class ApprovalCloser {
   }
 
   /** Spec §2.4: nax has already denied by its own timeout. The caller re-checked `pending` under the lock. */
-  async expire(approval: FleetApprovalRecord, job: Pick<FleetJobRecord, 'requestedById'>, now: Date): Promise<ApprovalChange> {
+  async expire(approval: FleetApprovalRecord, job: Pick<FleetJobRecord, 'requestedById' | 'requestedByType'>, now: Date): Promise<ApprovalChange> {
     const expired = await this.repo.resolve(approval.id, { status: 'expired', resolvedBy: 'timeout', decidedAt: now });
     return { approval: expired, live: await this.recordResolved(expired, jobSystemActor(job)) };
   }

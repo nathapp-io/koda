@@ -1,11 +1,11 @@
 import { Controller, Delete, Get, HttpCode, Param, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { CaslPermissionAction, Principal } from '@nathapp/nestjs-auth';
-import { ForbiddenAppException, JsonResponse } from '@nathapp/nestjs-common';
+import { Principal } from '@nathapp/nestjs-auth';
+import { JsonResponse } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
-import { isUserPrincipal } from '../../auth/principal/koda-principal.types';
+import { Requires } from '../../permissions/requires.decorator';
+import { RequiresGuard } from '../../permissions/requires.guard';
 import { ProjectMembershipGuard } from '../../projects/project-membership.guard';
-import { ProjectPermission } from '../../projects/project-permission.decorator';
 import { CurrentProject } from '../../projects/current-project.decorator';
 import type { ProjectContext } from '../../projects/project-context';
 import { TicketFleetJobDto } from './dto/ticket-fleet-job.dto';
@@ -17,27 +17,31 @@ import { FleetTicketsService } from './fleet-tickets.service';
 @ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
 @ApiParam({ name: 'ref', required: true, schema: { type: 'string' } })
 @Controller('projects/:slug/tickets/:ref/fleet-jobs')
-@UseGuards(ProjectMembershipGuard)
+// Permissions P1d (US-003): each route declares `ProjectMembershipGuard, RequiresGuard` in one
+// `@UseGuards`, so the membership guard resolves `request.projectContext` before the key check.
 export class TicketFleetJobsController {
   constructor(private readonly service: FleetTicketsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Fleet jobs linked to a ticket, newest first, at most 50 (project member)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('fleet.ticket-job.read')
+  @ApiOperation({ summary: 'Fleet jobs linked to a ticket, newest first, at most 50 (fleet.ticket-job.read)' })
   @ApiResponse({ status: 200, type: [TicketFleetJobDto] })
+  @ApiResponse({ status: 403, description: 'fleet.ticket-job.read is missing' })
   @ApiResponse({ status: 404, description: 'Ticket not found' })
-  async list(@Param('ref') ref: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    if (!isUserPrincipal(principal)) throw new ForbiddenAppException({}, 'projects');
+  async list(@Param('ref') ref: string, @CurrentProject() ctx: ProjectContext) {
     return JsonResponse.Ok(await this.service.listForTicket(ctx.project.id, ref));
   }
 
   @Delete(':jobId')
   @HttpCode(204)
-  @ProjectPermission([CaslPermissionAction.CREATE, 'FleetJob'])
-  @ApiOperation({ summary: 'Unlink a fleet job from a ticket (project DEVELOPER+); the PR and history stay' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('fleet.ticket-job.unlink')
+  @ApiOperation({ summary: 'Unlink a fleet job from a ticket (fleet.ticket-job.unlink); the PR and history stay' })
   @ApiResponse({ status: 204, description: 'Unlinked' })
+  @ApiResponse({ status: 403, description: 'fleet.ticket-job.unlink is missing' })
   @ApiResponse({ status: 404, description: 'Ticket not found, or the job is not linked to it' })
   async unlink(@Param('ref') ref: string, @Param('jobId') jobId: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal): Promise<void> {
-    if (!isUserPrincipal(principal)) throw new ForbiddenAppException({}, 'projects');
     await this.service.unlink(ctx.project.id, ref, jobId, principal.id);
   }
 }

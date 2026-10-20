@@ -13,6 +13,13 @@ export type { TicketActor } from './fleet-tickets.service';
 
 const STARTABLE: ReadonlySet<string> = new Set([TicketStatus.CREATED, TicketStatus.VERIFIED]);
 
+/**
+ * US-002: these effects run after commit, often outside any request, so the action context cannot say who the
+ * requester was. An agent-requested job's ticket events name the agent; a user's leave it to the recorder.
+ */
+const agentTypeOf = (job: { requestedByType?: 'USER' | 'AGENT' }): { actorType?: 'agent' } =>
+  job.requestedByType === 'AGENT' ? { actorType: 'agent' } : {};
+
 /** Fleet C9 §3: ticket-side effects of fleet jobs. After commit, best-effort per ticket, never throws (D451). */
 @Injectable()
 export class FleetJobTicketEffects {
@@ -25,11 +32,15 @@ export class FleetJobTicketEffects {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
-  /** D452: a RUN dispatch starts each CREATED/VERIFIED ticket as the requester; PLAN callers never call this. */
+  /**
+   * D452: a RUN dispatch starts each CREATED/VERIFIED ticket as the requester; PLAN callers never call
+   * this. Permissions P1d (US-003): it goes through `startForDispatch`, because the caller was
+   * authorized for `fleet.job.dispatch` and not for the ticket's edge key.
+   */
   async onRunDispatched(actor: TicketActor, tickets: readonly DispatchTicket[]): Promise<void> {
     for (const ticket of tickets.filter((t) => STARTABLE.has(t.status))) {
       try {
-        await this.transitions.start(actor.projectSlug, ticket.ref, actor.principal);
+        await this.transitions.startForDispatch(actor.projectSlug, ticket.ref, actor.principal);
       } catch (error) {
         this.logger.warn(`Fleet ticket ${ticket.ref}: start failed: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -84,7 +95,10 @@ export class FleetJobTicketEffects {
           externalRef: `${job.repo.owner}/${job.repo.name}#${prNumber}`, now: new Date(),
         });
         if (!created) return;
-        await this.events.record({ projectId: job.projectId, ticketId: ticket.ticketId, action: 'TICKET_UPDATED', actorId: job.requestedById, data: { fleetPrLinked: url, jobId: job.id } });
+        await this.events.record({
+          projectId: job.projectId, ticketId: ticket.ticketId, action: 'TICKET_UPDATED', actorId: job.requestedById,
+          ...agentTypeOf(job), data: { fleetPrLinked: url, jobId: job.id },
+        });
       });
     } catch (error) {
       this.logger.warn(`Fleet job ${job.id}: PR link on ticket ${ticket.ref} failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -96,7 +110,10 @@ export class FleetJobTicketEffects {
       await this.txManager.run(async () => {
         if (!(await this.repo.claimNotified(job.id, ticket.ticketId, job.leaseEpoch))) return;
         const comment = await this.repo.createSystemComment(ticket.ticketId, body);
-        await this.events.record({ projectId: job.projectId, ticketId: ticket.ticketId, action: 'COMMENT_ADDED', actorId: job.requestedById, data: { commentId: comment.id } });
+        await this.events.record({
+          projectId: job.projectId, ticketId: ticket.ticketId, action: 'COMMENT_ADDED', actorId: job.requestedById,
+          ...agentTypeOf(job), data: { commentId: comment.id },
+        });
       });
     } catch (error) {
       this.logger.warn(`Fleet job ${job.id}: comment on ticket ${ticket.ref} failed: ${error instanceof Error ? error.message : String(error)}`);

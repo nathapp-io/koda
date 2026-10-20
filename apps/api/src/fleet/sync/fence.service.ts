@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { FleetCommandType } from '../../common/enums';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import { responsibleUserOf } from '../common/responsible-user';
 import { FLEET_JOB_REPOSITORY, FleetJobRecord, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 
 /** Spec §6.2: only the job's current (runnerId, leaseEpoch) may write; anyone else gets ABANDON. */
@@ -26,7 +27,7 @@ export class FenceService {
     await this.repo.createCommand({ runnerId, jobId: job.id, type: FleetCommandType.ABANDON, leaseEpoch, payload: { reason } });
     await this.activity.record({
       actorType: 'SYSTEM', actorId: 'system', action: 'job.abandon_queued', entityType: 'job', entityId: job.id, jobId: job.id,
-      projectId: job.projectId, responsibleUserId: job.requestedById, payload: { runnerId, leaseEpoch, reason },
+      projectId: job.projectId, responsibleUserId: responsibleUserOf(job), payload: { runnerId, leaseEpoch, reason },
     });
     this.logger.warn(`Fenced runner ${runnerId} on job ${job.id}: holds epoch ${leaseEpoch}, current ${job.leaseEpoch}`);
     return true;

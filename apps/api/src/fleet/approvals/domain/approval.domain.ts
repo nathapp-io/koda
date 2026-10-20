@@ -105,6 +105,11 @@ export interface IApprovalRepository {
   findPage(f: ApprovalFilters, page: IPageOption): Promise<IPageResult<FleetApprovalRecord>>;
   /** Only projects with a pending approval, in slug order. */
   countPending(projectIds: readonly string[]): Promise<PendingCount[]>;
+  /**
+   * US-006: every live project's pending approvals, grouped by project, in slug order — the set a
+   * principal with a global `fleet.approval.read` grant counts. A soft-deleted project is left out.
+   */
+  countPendingAllProjects(): Promise<PendingCount[]>;
   countPendingUnscoped(): Promise<number>;
   findRequeueCandidates(policyId: string, since: Date, limit: number): Promise<RequeueCandidate[]>;
   findProjectSlug(projectId: string): Promise<string | null>;

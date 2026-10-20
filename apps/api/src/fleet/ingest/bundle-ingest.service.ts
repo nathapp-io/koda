@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import { responsibleUserOf } from '../common/responsible-user';
 import { ARTIFACT_STORE, ArtifactStore } from '../artifacts/artifact-store';
 import { BudgetEvaluator } from '../budgets/budget-evaluator';
 import { jobSpendKeys } from '../budgets/budget-rules';
@@ -96,7 +97,7 @@ export class BundleIngestService {
         await this.jobs.appendEvent(job.id, { leaseEpoch: claim.leaseEpoch, runnerSeq: null, type: 'state', payload: { from: job.state, to: updated.state, by: 'server', reason: updated.stateReason } });
         await this.activity.record({
           actorType: 'SYSTEM', actorId: 'system', action: 'job.verdict_corrected', entityType: 'job', entityId: job.id, jobId: job.id,
-          projectId: job.projectId, responsibleUserId: job.requestedById, payload: { from: job.state, to: updated.state, source: correction.escalatedFrom ?? 'finish-audit' },
+          projectId: job.projectId, responsibleUserId: responsibleUserOf(job), payload: { from: job.state, to: updated.state, source: correction.escalatedFrom ?? 'finish-audit' },
         });
       }
       await this.repo.markOutcome(claim.id, {

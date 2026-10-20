@@ -42,6 +42,7 @@ import { ContextModule } from './context/context.module';
 import { PolicyModule } from './policy/policy.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { FleetModule } from './fleet/fleet.module';
+import { ActionContextModule } from './action-context/action-context.module';
 import { HomeModule } from './home/home.module';
 import { SkillsModule } from './skills/skills.module';
 import { PermissionsModule } from './permissions/permissions.module';
@@ -115,6 +116,8 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     LabelsModule,
     TicketLinksModule,
     HealthModule,
+    // Permissions P1d US-001: the action context, so a fleet write by an agent records its type.
+    ActionContextModule,
     RagModule,
     RetrievalModule,
     WebhookModule,

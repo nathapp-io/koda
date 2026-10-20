@@ -3,6 +3,7 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetJobState } from '../../common/enums';
+import { actorTypeFor } from '../../action-context/action-context';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { FleetFenceException } from '../artifacts/bundle.exceptions';
 import { isConfigKind } from '../common/config-jobs';
@@ -125,6 +126,7 @@ export class ConfigJobsService {
         const created = await this.jobs.createJob({
           projectId: repo.projectId, repoId: repo.id, ref: repo.defaultBranch, command, feature: CONFIG_JOB_FEATURE, planFrom: null, profiles: [],
           maxCostUsd: '0', bashMode: 'raw', approvalTimeoutSec: DEFAULT_APPROVAL_TIMEOUT_SEC, selectorLabels: [], pinnedRunnerId: null, requestedById: actorId,
+          requestedByType: actorTypeFor(actorId), // US-002: an agent's drift check or edit is the agent's job
         });
         const row = await this.edits.create({ jobId: created.id, mode, edits, prTitle, prBody, baseSha });
         await this.jobs.appendEvent(created.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });

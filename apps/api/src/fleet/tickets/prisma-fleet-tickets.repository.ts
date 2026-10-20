@@ -9,9 +9,11 @@ export interface LinkedTicket { ticketId: string; ref: string; title: string; st
 export interface EffectJob {
   id: string; projectId: string; projectSlug: string; command: string; state: string; leaseEpoch: number;
   stateReason: string | null; escalationReason: string | null; requestedById: string;
+  /** US-002: 'AGENT' when an agent requested the job; the ticket events of its effects then name the agent. */
+  requestedByType?: 'USER' | 'AGENT';
 }
 export interface PrLinkJob {
-  id: string; projectId: string; requestedById: string; resultPrUrl: string | null;
+  id: string; projectId: string; requestedById: string; requestedByType?: 'USER' | 'AGENT'; resultPrUrl: string | null;
   repo: { provider: 'github' | 'gitlab'; owner: string; name: string };
 }
 export interface FleetPrLinkInput {
@@ -108,12 +110,12 @@ export class PrismaFleetTicketsRepository {
       where: { id: jobId },
       select: {
         id: true, projectId: true, command: true, state: true, leaseEpoch: true, stateReason: true, escalationReason: true,
-        requestedById: true, project: { select: { slug: true } },
+        requestedById: true, requestedByType: true, project: { select: { slug: true } },
       },
     });
     if (!r) return null;
     const { project, ...rest } = r;
-    return { ...rest, projectSlug: project.slug };
+    return { ...rest, requestedByType: rest.requestedByType as 'USER' | 'AGENT', projectSlug: project.slug };
   }
 
   /** D453: true for exactly one caller per (job, ticket, epoch); a later epoch claims again. */
@@ -135,9 +137,14 @@ export class PrismaFleetTicketsRepository {
   async findJobForPrLinks(jobId: string): Promise<PrLinkJob | null> {
     const r = await this.db.fleetJob.findUnique({
       where: { id: jobId },
-      select: { id: true, projectId: true, requestedById: true, resultPrUrl: true, repo: { select: { provider: true, owner: true, name: true } } },
+      select: {
+        id: true, projectId: true, requestedById: true, requestedByType: true, resultPrUrl: true,
+        repo: { select: { provider: true, owner: true, name: true } },
+      },
     });
-    return r ? { ...r, repo: { ...r.repo, provider: r.repo.provider as 'github' | 'gitlab' } } : null;
+    return r
+      ? { ...r, requestedByType: r.requestedByType as 'USER' | 'AGENT', repo: { ...r.repo, provider: r.repo.provider as 'github' | 'gitlab' } }
+      : null;
   }
 
   /**

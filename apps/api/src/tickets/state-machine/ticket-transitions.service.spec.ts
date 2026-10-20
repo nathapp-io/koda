@@ -339,6 +339,31 @@ describe('TicketTransitionsService', () => {
     });
   });
 
+  describe('startForDispatch (Permissions P1d US-003: the dispatch-only start)', () => {
+    it('moves a VERIFIED ticket to IN_PROGRESS without asking for the edge key', async () => {
+      const verifiedTicket = { ...mockTicket, status: TicketStatus.VERIFIED };
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifiedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue({ ...verifiedTicket, status: TicketStatus.IN_PROGRESS });
+      mockTicketRepo.createTicketActivity.mockResolvedValue({
+        ...mockActivity, fromStatus: TicketStatus.VERIFIED, toStatus: TicketStatus.IN_PROGRESS,
+      });
+
+      const result = await service.startForDispatch('koda', 'KODA-1', mockUserPrincipal);
+
+      expect(result.ticket.status).toBe(TicketStatus.IN_PROGRESS);
+      // The dispatcher was authorized for `fleet.job.dispatch`, not for the ticket's edge key.
+      expect(mockPermissions.can).not.toHaveBeenCalled();
+      // Everything else is `start`: the conditional write and the activity row with the caller as actor.
+      expect(mockTicketRepo.updateTicketStatusIf).toHaveBeenCalledWith('ticket-123', TicketStatus.VERIFIED, TicketStatus.IN_PROGRESS);
+      expect(mockTicketRepo.createTicketActivity).toHaveBeenCalledWith(
+        expect.objectContaining({ ticketId: 'ticket-123', action: ActivityType.STATUS_CHANGE, actorUserId: 'user-123' }),
+      );
+      // No comment: the dispatch starts the ticket silently, exactly like `start`.
+      expect(mockTicketRepo.createComment).not.toHaveBeenCalled();
+    });
+  });
+
   describe('fix (IN_PROGRESS → VERIFY_FIX)', () => {
     it('should transition from IN_PROGRESS to VERIFY_FIX with FIX_REPORT comment', async () => {
       const inProgressTicket = { ...mockTicket, status: TicketStatus.IN_PROGRESS };

@@ -123,9 +123,10 @@ export const FleetProvider = {
 } as const;
 export type FleetProvider = (typeof FleetProvider)[keyof typeof FleetProvider];
 
-/** Fleet S1: who performed a FleetActivity action. */
+/** Fleet S1: who performed a FleetActivity action. Permissions P1d adds AGENT: an agent principal's writes. */
 export const FleetActorType = {
   USER: 'USER',
+  AGENT: 'AGENT',
   RUNNER: 'RUNNER',
   SYSTEM: 'SYSTEM',
 } as const;

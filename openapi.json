@@ -5177,10 +5177,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Page of FleetActivityDto"
-          },
-          "403": {
-            "description": "Not a user"
+            "description": "Page of FleetActivityDto; every project when the key is held globally"
           }
         },
         "security": [
@@ -5188,7 +5185,7 @@
             "bearer": []
           }
         ],
-        "summary": "List fleet activity: global admin sees all, members see their projects' job rows",
+        "summary": "Fleet activity rows of the projects where the caller holds fleet.activity.read",
         "tags": [
           "fleet"
         ]
@@ -5211,6 +5208,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.budget.read is missing globally"
           }
         },
         "security": [
@@ -5218,7 +5218,7 @@
             "bearer": []
           }
         ],
-        "summary": "Every budget policy with its current window spend (global admin)",
+        "summary": "Every budget policy with its current window spend (fleet.budget.read, global)",
         "tags": [
           "fleet"
         ]
@@ -5250,6 +5250,9 @@
           "400": {
             "description": "fleet.budgetInput: wrong scope for this route"
           },
+          "403": {
+            "description": "fleet.budget.create is missing globally"
+          },
           "404": {
             "description": "Runner not found"
           },
@@ -5262,7 +5265,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create a global or runner budget policy (global admin)",
+        "summary": "Create a global or runner budget policy (fleet.budget.create, global)",
         "tags": [
           "fleet"
         ]
@@ -5301,6 +5304,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.budget.update is missing globally"
+          },
+          "404": {
+            "description": "fleet.budgets: no such global or runner policy"
           }
         },
         "security": [
@@ -5308,7 +5317,7 @@
             "bearer": []
           }
         ],
-        "summary": "Change the amount, warn, hard stop or running-jobs rule of a global or runner policy (global admin)",
+        "summary": "Change the amount, warn, hard stop or running-jobs rule of a global or runner policy (fleet.budget.update, global)",
         "tags": [
           "fleet"
         ]
@@ -5327,7 +5336,13 @@
         ],
         "responses": {
           "204": {
-            "description": ""
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "fleet.budget.delete is missing globally"
+          },
+          "404": {
+            "description": "fleet.budgets: no such global or runner policy"
           }
         },
         "security": [
@@ -5335,7 +5350,7 @@
             "bearer": []
           }
         ],
-        "summary": "Delete a global or runner policy; lifts its pause (global admin)",
+        "summary": "Delete a global or runner policy; lifts its pause (fleet.budget.delete, global)",
         "tags": [
           "fleet"
         ]
@@ -5378,6 +5393,12 @@
           "400": {
             "description": "fleet.budgetAmountNotAboveSpend"
           },
+          "403": {
+            "description": "fleet.budget.resume is missing globally"
+          },
+          "404": {
+            "description": "fleet.budgets: no such global or runner policy"
+          },
           "409": {
             "description": "fleet.budgetNotPaused"
           }
@@ -5387,7 +5408,7 @@
             "bearer": []
           }
         ],
-        "summary": "Resume a paused global or runner policy, optionally raising the amount (global admin)",
+        "summary": "Resume a paused global or runner policy, optionally raising the amount (fleet.budget.resume, global)",
         "tags": [
           "fleet"
         ]
@@ -5419,6 +5440,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.budget.read is missing"
           }
         },
         "security": [
@@ -5426,7 +5450,7 @@
             "bearer": []
           }
         ],
-        "summary": "The project's project and repo policies plus the global ones, read-only (project member)",
+        "summary": "The project's project and repo policies plus the global ones, read-only (fleet.budget.read)",
         "tags": [
           "fleet"
         ]
@@ -5464,6 +5488,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.budget.create is missing"
+          },
           "404": {
             "description": "Repo not in this project"
           },
@@ -5476,7 +5503,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create a project or repo budget policy (project ADMIN)",
+        "summary": "Create a project or repo budget policy (fleet.budget.create)",
         "tags": [
           "fleet"
         ]
@@ -5523,6 +5550,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.budget.update is missing"
+          },
+          "404": {
+            "description": "fleet.budgets: no such project policy"
           }
         },
         "security": [
@@ -5530,7 +5563,7 @@
             "bearer": []
           }
         ],
-        "summary": "Change a project or repo policy (project ADMIN)",
+        "summary": "Change a project or repo policy (fleet.budget.update)",
         "tags": [
           "fleet"
         ]
@@ -5557,7 +5590,13 @@
         ],
         "responses": {
           "204": {
-            "description": ""
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "fleet.budget.delete is missing"
+          },
+          "404": {
+            "description": "fleet.budgets: no such project policy"
           }
         },
         "security": [
@@ -5565,7 +5604,7 @@
             "bearer": []
           }
         ],
-        "summary": "Delete a project or repo policy; lifts its pause (project ADMIN)",
+        "summary": "Delete a project or repo policy; lifts its pause (fleet.budget.delete)",
         "tags": [
           "fleet"
         ]
@@ -5616,6 +5655,12 @@
           "400": {
             "description": "fleet.budgetAmountNotAboveSpend"
           },
+          "403": {
+            "description": "fleet.budget.resume is missing"
+          },
+          "404": {
+            "description": "fleet.budgets: no such project policy"
+          },
           "409": {
             "description": "fleet.budgetNotPaused"
           }
@@ -5625,7 +5670,7 @@
             "bearer": []
           }
         ],
-        "summary": "Resume a paused project or repo policy, optionally raising the amount (project ADMIN)",
+        "summary": "Resume a paused project or repo policy, optionally raising the amount (fleet.budget.resume)",
         "tags": [
           "fleet"
         ]
@@ -5665,6 +5710,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.job.dispatch is missing"
+          },
           "404": {
             "description": "Repo not in this project, or pinned runner unknown"
           },
@@ -5680,7 +5728,7 @@
             "bearer": []
           }
         ],
-        "summary": "Dispatch a nax run or plan to a fleet runner (project DEVELOPER+)",
+        "summary": "Dispatch a nax run or plan to a fleet runner (fleet.job.dispatch)",
         "tags": [
           "fleet"
         ]
@@ -5784,6 +5832,9 @@
         "responses": {
           "200": {
             "description": "Page of FleetJobDto"
+          },
+          "403": {
+            "description": "fleet.job.read is missing"
           }
         },
         "security": [
@@ -5791,7 +5842,7 @@
             "bearer": []
           }
         ],
-        "summary": "List fleet jobs (project member)",
+        "summary": "List fleet jobs (fleet.job.read)",
         "tags": [
           "fleet"
         ]
@@ -5829,6 +5880,9 @@
               }
             }
           },
+          "403": {
+            "description": "The caller neither holds fleet.job.cancel nor requested the job"
+          },
           "409": {
             "description": "Job already finished"
           }
@@ -5838,7 +5892,7 @@
             "bearer": []
           }
         ],
-        "summary": "Cancel a job (project DEVELOPER+, or the requester)",
+        "summary": "Cancel a job (fleet.job.cancel, or the requester)",
         "tags": [
           "fleet"
         ]
@@ -5876,6 +5930,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.job.requeue is missing"
+          },
           "409": {
             "description": "Job not requeueable, an active duplicate exists, or a budget covering the job is paused"
           }
@@ -5885,7 +5942,7 @@
             "bearer": []
           }
         ],
-        "summary": "Requeue a CRASHED, FAILED or CANCELLED job (project DEVELOPER+)",
+        "summary": "Requeue a CRASHED, FAILED or CANCELLED job (fleet.job.requeue)",
         "tags": [
           "fleet"
         ]
@@ -5922,6 +5979,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.job.read is missing"
           }
         },
         "security": [
@@ -5929,7 +5989,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get a fleet job (project member)",
+        "summary": "Get a fleet job (fleet.job.read)",
         "tags": [
           "fleet"
         ]
@@ -5982,6 +6042,9 @@
         "responses": {
           "200": {
             "description": "Page of FleetJobEventDto"
+          },
+          "403": {
+            "description": "fleet.job.read is missing"
           }
         },
         "security": [
@@ -5989,7 +6052,7 @@
             "bearer": []
           }
         ],
-        "summary": "Job timeline, ordered by seq (project member)",
+        "summary": "Job timeline, ordered by seq (fleet.job.read)",
         "tags": [
           "fleet"
         ]
@@ -6030,6 +6093,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.ticket-job.read is missing"
+          },
           "404": {
             "description": "Ticket not found"
           }
@@ -6039,7 +6105,7 @@
             "bearer": []
           }
         ],
-        "summary": "Fleet jobs linked to a ticket, newest first, at most 50 (project member)",
+        "summary": "Fleet jobs linked to a ticket, newest first, at most 50 (fleet.ticket-job.read)",
         "tags": [
           "fleet"
         ]
@@ -6078,6 +6144,9 @@
           "204": {
             "description": "Unlinked"
           },
+          "403": {
+            "description": "fleet.ticket-job.unlink is missing"
+          },
           "404": {
             "description": "Ticket not found, or the job is not linked to it"
           }
@@ -6087,7 +6156,7 @@
             "bearer": []
           }
         ],
-        "summary": "Unlink a fleet job from a ticket (project DEVELOPER+); the PR and history stay",
+        "summary": "Unlink a fleet job from a ticket (fleet.ticket-job.unlink); the PR and history stay",
         "tags": [
           "fleet"
         ]
@@ -6168,6 +6237,9 @@
         "responses": {
           "200": {
             "description": "Page of FleetApprovalDto"
+          },
+          "403": {
+            "description": "fleet.approval.read is missing"
           }
         },
         "security": [
@@ -6175,7 +6247,7 @@
             "bearer": []
           }
         ],
-        "summary": "This project's approvals, newest first (project member)",
+        "summary": "This project's approvals, newest first (fleet.approval.read)",
         "tags": [
           "fleet"
         ]
@@ -6212,6 +6284,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.approval.read is missing"
+          },
+          "404": {
+            "description": "fleet.approvals: no such approval in this project"
           }
         },
         "security": [
@@ -6219,7 +6297,7 @@
             "bearer": []
           }
         ],
-        "summary": "One approval; a pending budget override includes its re-queue candidates (project member)",
+        "summary": "One approval; a pending budget override includes its re-queue candidates (fleet.approval.read)",
         "tags": [
           "fleet"
         ]
@@ -6270,6 +6348,12 @@
           "400": {
             "description": "fleet.approvalDecisionInvalid, fleet.budgetAmountNotAboveSpend"
           },
+          "403": {
+            "description": "The type's decide key is missing, fleet.approvalSelfDecide, or threads.notCreator"
+          },
+          "404": {
+            "description": "fleet.approvals: no such approval in this project"
+          },
           "409": {
             "description": "fleet.approvalNotPending, fleet.budgetNotPaused"
           }
@@ -6279,7 +6363,7 @@
             "bearer": []
           }
         ],
-        "summary": "Decide a pending approval (budget overrides: project ADMIN)",
+        "summary": "Decide a pending approval (the key of its type: fleet.approval.decide.bash or .budget)",
         "tags": [
           "fleet"
         ]
@@ -6352,6 +6436,9 @@
         "responses": {
           "200": {
             "description": "Page of FleetApprovalDto"
+          },
+          "403": {
+            "description": "fleet.approval.read is missing globally"
           }
         },
         "security": [
@@ -6359,7 +6446,7 @@
             "bearer": []
           }
         ],
-        "summary": "Every approval, newest first (global admin)",
+        "summary": "Every approval, newest first (fleet.approval.read, global)",
         "tags": [
           "fleet"
         ]
@@ -6388,6 +6475,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.approval.read is missing globally"
+          },
+          "404": {
+            "description": "fleet.approvals: no such approval"
           }
         },
         "security": [
@@ -6395,7 +6488,7 @@
             "bearer": []
           }
         ],
-        "summary": "One approval with re-queue candidates when pending (global admin)",
+        "summary": "One approval with re-queue candidates when pending (fleet.approval.read, global)",
         "tags": [
           "fleet"
         ]
@@ -6438,6 +6531,12 @@
           "400": {
             "description": "fleet.approvalDecisionInvalid, fleet.budgetAmountNotAboveSpend"
           },
+          "403": {
+            "description": "fleet.approval.read globally, the type's decide key, or threads.notCreator"
+          },
+          "404": {
+            "description": "fleet.approvals: no such approval"
+          },
           "409": {
             "description": "fleet.approvalNotPending, fleet.budgetNotPaused"
           }
@@ -6447,7 +6546,7 @@
             "bearer": []
           }
         ],
-        "summary": "Decide a pending approval (global admin)",
+        "summary": "Decide a pending approval (fleet.approval.read globally, then the key of its type)",
         "tags": [
           "fleet"
         ]
@@ -6474,7 +6573,7 @@
             "bearer": []
           }
         ],
-        "summary": "Pending approvals per member project; no-project ones for a global admin",
+        "summary": "Pending approvals per project where the caller holds fleet.approval.read",
         "tags": [
           "fleet"
         ]
@@ -6506,6 +6605,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.schedule.read is missing"
           }
         },
         "security": [
@@ -6513,7 +6615,7 @@
             "bearer": []
           }
         ],
-        "summary": "List the project's schedules (project member)",
+        "summary": "List the project's schedules (fleet.schedule.read)",
         "tags": [
           "fleet"
         ]
@@ -6554,6 +6656,9 @@
           "400": {
             "description": "Invalid template, cron or timezone, or fleet.scheduleCronTooFrequent (fires closer than 15 minutes)"
           },
+          "403": {
+            "description": "fleet.schedule.create is missing"
+          },
           "404": {
             "description": "Repo not in this project, or pinned runner unknown"
           },
@@ -6566,7 +6671,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create a schedule that runs one feature on a cron (project DEVELOPER+)",
+        "summary": "Create a schedule that runs one feature on a cron (fleet.schedule.create)",
         "tags": [
           "fleet"
         ]
@@ -6604,6 +6709,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.schedule.read is missing"
+          },
           "404": {
             "description": "Schedule not found in this project"
           }
@@ -6613,7 +6721,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get a schedule (project member)",
+        "summary": "Get a schedule (fleet.schedule.read)",
         "tags": [
           "fleet"
         ]
@@ -6660,7 +6768,10 @@
             }
           },
           "403": {
-            "description": "Not the owner and not a project ADMIN"
+            "description": "The caller neither holds fleet.schedule.update nor created the schedule"
+          },
+          "404": {
+            "description": "Schedule not found in this project"
           }
         },
         "security": [
@@ -6668,7 +6779,7 @@
             "bearer": []
           }
         ],
-        "summary": "Change a schedule (owner or project ADMIN)",
+        "summary": "Change a schedule (fleet.schedule.update: the owner, or the any-row key)",
         "tags": [
           "fleet"
         ]
@@ -6695,7 +6806,13 @@
         ],
         "responses": {
           "204": {
-            "description": ""
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "The caller neither holds fleet.schedule.delete nor created the schedule"
+          },
+          "404": {
+            "description": "Schedule not found in this project"
           }
         },
         "security": [
@@ -6703,7 +6820,7 @@
             "bearer": []
           }
         ],
-        "summary": "Delete a schedule; its jobs are kept (owner or project ADMIN)",
+        "summary": "Delete a schedule; its jobs are kept (fleet.schedule.delete: the owner, or the any-row key)",
         "tags": [
           "fleet"
         ]
@@ -6741,8 +6858,14 @@
               }
             }
           },
+          "403": {
+            "description": "The caller neither holds fleet.schedule.update nor created the schedule"
+          },
+          "404": {
+            "description": "Schedule not found in this project"
+          },
           "409": {
-            "description": "fleet.scheduleOwnerNoAccess: the owner is disabled or no longer has DEVELOPER access to the project"
+            "description": "fleet.scheduleOwnerNoAccess: the owner no longer holds fleet.job.dispatch in this project"
           }
         },
         "security": [
@@ -6750,7 +6873,7 @@
             "bearer": []
           }
         ],
-        "summary": "Enable a schedule: resets the stall counter and recomputes the next fire (owner or project ADMIN)",
+        "summary": "Enable a schedule: resets the stall counter and recomputes the next fire (fleet.schedule.update)",
         "tags": [
           "fleet"
         ]
@@ -6787,6 +6910,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "The caller neither holds fleet.schedule.update nor created the schedule"
+          },
+          "404": {
+            "description": "Schedule not found in this project"
           }
         },
         "security": [
@@ -6794,7 +6923,7 @@
             "bearer": []
           }
         ],
-        "summary": "Disable a schedule (owner or project ADMIN)",
+        "summary": "Disable a schedule (fleet.schedule.update: the owner, or the any-row key)",
         "tags": [
           "fleet"
         ]
@@ -6831,6 +6960,9 @@
         "responses": {
           "200": {
             "description": "Page of FleetRepoDto"
+          },
+          "403": {
+            "description": "fleet.repo.read is missing globally"
           }
         },
         "security": [
@@ -6838,7 +6970,7 @@
             "bearer": []
           }
         ],
-        "summary": "List fleet repos (global admin)",
+        "summary": "List fleet repos (fleet.repo.read, global)",
         "tags": [
           "fleet"
         ]
@@ -6867,6 +6999,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.repo.create is missing globally"
+          },
           "409": {
             "description": "Already registered"
           },
@@ -6879,7 +7014,7 @@
             "bearer": []
           }
         ],
-        "summary": "Register a repo for fleet dispatch after proving koda can broker git access (global admin)",
+        "summary": "Register a repo for fleet dispatch after proving koda can broker git access (fleet.repo.create, global)",
         "tags": [
           "fleet"
         ]
@@ -6909,6 +7044,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.repo.check is missing globally"
+          },
           "404": {
             "description": "No such repo"
           }
@@ -6918,7 +7056,7 @@
             "bearer": []
           }
         ],
-        "summary": "Re-run the forge check for a registered repo (global admin)",
+        "summary": "Re-run the forge check for a registered repo (fleet.repo.check, global)",
         "tags": [
           "fleet"
         ]
@@ -6940,6 +7078,9 @@
         "responses": {
           "204": {
             "description": ""
+          },
+          "403": {
+            "description": "fleet.repo.delete is missing globally"
           }
         },
         "security": [
@@ -6947,7 +7088,7 @@
             "bearer": []
           }
         ],
-        "summary": "Unregister a fleet repo (global admin)",
+        "summary": "Unregister a fleet repo (fleet.repo.delete, global)",
         "tags": [
           "fleet"
         ]
@@ -6992,6 +7133,9 @@
         "responses": {
           "200": {
             "description": "Page of FleetRepoDto"
+          },
+          "403": {
+            "description": "fleet.repo.read is missing"
           }
         },
         "security": [
@@ -6999,7 +7143,7 @@
             "bearer": []
           }
         ],
-        "summary": "The project's fleet repos (project member)",
+        "summary": "The project's fleet repos (fleet.repo.read)",
         "tags": [
           "fleet"
         ]
@@ -7037,6 +7181,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.repo.config.read is missing"
+          },
           "409": {
             "description": "koda cannot read the repo (fleet.repoUnreachable)"
           },
@@ -7049,7 +7196,7 @@
             "bearer": []
           }
         ],
-        "summary": "The repo's allowlisted .nax files at the default-branch head (project member)",
+        "summary": "The repo's allowlisted .nax files at the default-branch head (fleet.repo.config.read)",
         "tags": [
           "fleet"
         ]
@@ -7104,6 +7251,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.repo.config.read is missing"
+          },
           "422": {
             "description": "Over 256 KiB or not UTF-8 text (fleet.naxFile)"
           }
@@ -7113,7 +7263,7 @@
             "bearer": []
           }
         ],
-        "summary": "One allowlisted .nax file at a commit (project member)",
+        "summary": "One allowlisted .nax file at a commit (fleet.repo.config.read)",
         "tags": [
           "fleet"
         ]
@@ -7161,6 +7311,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.job.config.edit is missing"
+          },
           "409": {
             "description": "A config job is already active for this repo (fleet.configJobActive)"
           }
@@ -7170,7 +7323,7 @@
             "bearer": []
           }
         ],
-        "summary": "Queue a CONFIG_EDIT job: a runner applies the edits, regenerates, validates and opens a PR (project DEVELOPER+)",
+        "summary": "Queue a CONFIG_EDIT job: a runner applies the edits, regenerates, validates and opens a PR (fleet.job.config.edit)",
         "tags": [
           "fleet"
         ]
@@ -7217,6 +7370,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.job.config.edit is missing"
           }
         },
         "security": [
@@ -7224,7 +7380,7 @@
             "bearer": []
           }
         ],
-        "summary": "Queue a regenerate PR (CONFIG_EDIT with no file edits) (project DEVELOPER+)",
+        "summary": "Queue a regenerate PR (CONFIG_EDIT with no file edits) (fleet.job.config.edit)",
         "tags": [
           "fleet"
         ]
@@ -7261,6 +7417,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.repo.drift.check is missing"
           }
         },
         "security": [
@@ -7268,7 +7427,7 @@
             "bearer": []
           }
         ],
-        "summary": "Queue a read-only CONFIG_DRIFT job (project DEVELOPER+)",
+        "summary": "Queue a read-only CONFIG_DRIFT job (fleet.repo.drift.check)",
         "tags": [
           "fleet"
         ]
@@ -7305,6 +7464,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.job.config.read is missing"
+          },
+          "404": {
+            "description": "No config job of this project with that id"
           }
         },
         "security": [
@@ -7312,7 +7477,7 @@
             "bearer": []
           }
         ],
-        "summary": "A config job's full edit set, for Reopen edits (project member)",
+        "summary": "A config job's full edit set, for Reopen edits (fleet.job.config.read)",
         "tags": [
           "fleet"
         ]
@@ -7426,6 +7591,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.enrollment.create is missing globally"
           }
         },
         "security": [
@@ -7433,7 +7601,7 @@
             "bearer": []
           }
         ],
-        "summary": "Issue a single-use runner enrollment token (global admin); the token is shown once",
+        "summary": "Issue a single-use runner enrollment token (fleet.enrollment.create, global); the token is shown once",
         "tags": [
           "fleet"
         ]
@@ -7468,6 +7636,9 @@
         "responses": {
           "200": {
             "description": "Page of EnrollmentDto"
+          },
+          "403": {
+            "description": "fleet.enrollment.read is missing globally"
           }
         },
         "security": [
@@ -7475,7 +7646,7 @@
             "bearer": []
           }
         ],
-        "summary": "List enrollment tokens (global admin); tokens are never returned",
+        "summary": "List enrollment tokens (fleet.enrollment.read, global); tokens are never returned",
         "tags": [
           "fleet"
         ]
@@ -7571,6 +7742,9 @@
         "responses": {
           "200": {
             "description": "Page of RunnerDto"
+          },
+          "403": {
+            "description": "fleet.runner.read is missing globally"
           }
         },
         "security": [
@@ -7578,7 +7752,7 @@
             "bearer": []
           }
         ],
-        "summary": "List runners (global admin)",
+        "summary": "List runners (fleet.runner.read, global)",
         "tags": [
           "fleet"
         ]
@@ -7607,6 +7781,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.runner.read is missing globally"
           }
         },
         "security": [
@@ -7614,7 +7791,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get a runner (global admin)",
+        "summary": "Get a runner (fleet.runner.read, global)",
         "tags": [
           "fleet"
         ]
@@ -7651,6 +7828,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.runner.update is missing globally"
           }
         },
         "security": [
@@ -7658,7 +7838,7 @@
             "bearer": []
           }
         ],
-        "summary": "Enable/disable a runner or change its labels or capacity (global admin)",
+        "summary": "Enable/disable a runner or change its labels or capacity (fleet.runner.update, global)",
         "tags": [
           "fleet"
         ]
@@ -7678,6 +7858,9 @@
         "responses": {
           "204": {
             "description": ""
+          },
+          "403": {
+            "description": "fleet.runner.delete is missing globally"
           }
         },
         "security": [
@@ -7685,7 +7868,7 @@
             "bearer": []
           }
         ],
-        "summary": "Delete a runner; revokes its key (global admin)",
+        "summary": "Delete a runner; revokes its key (fleet.runner.delete, global)",
         "tags": [
           "fleet"
         ]
@@ -7730,6 +7913,9 @@
         "responses": {
           "200": {
             "description": "Page of RunnerSummaryDto, ordered by name"
+          },
+          "403": {
+            "description": "fleet.runner.read is missing"
           }
         },
         "security": [
@@ -7737,7 +7923,7 @@
             "bearer": []
           }
         ],
-        "summary": "Runner summaries for dispatch and job lists (project member)",
+        "summary": "Runner summaries for dispatch and job lists (fleet.runner.read)",
         "tags": [
           "fleet"
         ]
@@ -7841,6 +8027,9 @@
           "200": {
             "description": "tar.gz stream"
           },
+          "403": {
+            "description": "fleet.job.bundle.read is missing"
+          },
           "404": {
             "description": "No such job or no bundle yet"
           },
@@ -7853,7 +8042,7 @@
             "bearer": []
           }
         ],
-        "summary": "Download the latest run bundle (project member)",
+        "summary": "Download the latest run bundle (fleet.job.bundle.read)",
         "tags": [
           "fleet"
         ]
@@ -7986,6 +8175,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.job.logs.read is missing"
+          },
           "404": {
             "description": "No such job in this project"
           }
@@ -7995,7 +8187,7 @@
             "bearer": []
           }
         ],
-        "summary": "Log streams of every attempt of a job, latest first (project member, S2a §3.1)",
+        "summary": "Log streams of every attempt of a job, latest first (fleet.job.logs.read)",
         "tags": [
           "fleet"
         ]
@@ -8144,6 +8336,9 @@
           "400": {
             "description": "Invalid stream or query"
           },
+          "403": {
+            "description": "fleet.job.logs.read is missing"
+          },
           "404": {
             "description": "No such job, or leaseEpoch is past the current attempt of the job"
           },
@@ -8156,7 +8351,7 @@
             "bearer": []
           }
         ],
-        "summary": "One page of log lines, filtered server-side within a bounded scan (project member, S2a §3.3)",
+        "summary": "One page of log lines, filtered server-side within a bounded scan (fleet.job.logs.read)",
         "tags": [
           "fleet"
         ]
@@ -8245,6 +8440,9 @@
           "400": {
             "description": "Invalid stream or range"
           },
+          "403": {
+            "description": "fleet.job.logs.read is missing"
+          },
           "404": {
             "description": "No such job or attempt, or nothing stored to download"
           },
@@ -8257,7 +8455,7 @@
             "bearer": []
           }
         ],
-        "summary": "Raw bytes of a log stream: a range of at most 1 MiB, or download=1 for all of it (S2a §3.2)",
+        "summary": "Raw bytes of a log stream: a range of at most 1 MiB, or download=1 for all of it (fleet.job.logs.read)",
         "tags": [
           "fleet"
         ]
@@ -8309,6 +8507,9 @@
         "responses": {
           "200": {
             "description": "Page of IngestRowDto"
+          },
+          "403": {
+            "description": "fleet.ingest.read is missing globally"
           }
         },
         "security": [
@@ -8316,7 +8517,7 @@
             "bearer": []
           }
         ],
-        "summary": "List bundle ingest rows (global admin)",
+        "summary": "List bundle ingest rows (fleet.ingest.read, global)",
         "tags": [
           "fleet"
         ]
@@ -8336,6 +8537,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.ingest.backfill is missing globally"
           }
         },
         "security": [
@@ -8343,7 +8547,7 @@
             "bearer": []
           }
         ],
-        "summary": "Queue every unexpired bundle that has no ingest row (global admin)",
+        "summary": "Queue every unexpired bundle that has no ingest row (fleet.ingest.backfill, global)",
         "tags": [
           "fleet"
         ]
@@ -8372,6 +8576,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.ingest.rerun is missing globally"
           }
         },
         "security": [
@@ -8379,7 +8586,7 @@
             "bearer": []
           }
         ],
-        "summary": "Re-ingest a job's bundles (global admin)",
+        "summary": "Re-ingest a job's bundles (fleet.ingest.rerun, global)",
         "tags": [
           "fleet"
         ]
@@ -8399,6 +8606,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.ingest.rerun is missing globally"
           }
         },
         "security": [
@@ -8406,7 +8616,7 @@
             "bearer": []
           }
         ],
-        "summary": "Re-ingest bundles ingested by an older parser version (global admin)",
+        "summary": "Re-ingest bundles ingested by an older parser version (fleet.ingest.rerun, global)",
         "tags": [
           "fleet"
         ]
@@ -8501,6 +8711,9 @@
           },
           "400": {
             "description": "Invalid window, bucket or groupBy"
+          },
+          "403": {
+            "description": "fleet.analytics.read is missing"
           }
         },
         "security": [
@@ -8508,7 +8721,7 @@
             "bearer": []
           }
         ],
-        "summary": "Fleet spend over a window, bucketed and grouped (project member, S2b §4.2)",
+        "summary": "Fleet spend over a window, bucketed and grouped (fleet.analytics.read, S2b §4.2)",
         "tags": [
           "fleet"
         ]
@@ -8574,6 +8787,9 @@
           },
           "400": {
             "description": "Invalid window or bucket"
+          },
+          "403": {
+            "description": "fleet.analytics.read is missing"
           }
         },
         "security": [
@@ -8581,7 +8797,7 @@
             "bearer": []
           }
         ],
-        "summary": "Run quality over a window: first pass, attempts, reviews, finish outcomes (project member)",
+        "summary": "Run quality over a window: first pass, attempts, reviews, finish outcomes (fleet.analytics.read)",
         "tags": [
           "fleet"
         ]
@@ -8657,6 +8873,9 @@
           },
           "400": {
             "description": "Invalid window, sort or limit"
+          },
+          "403": {
+            "description": "fleet.analytics.read is missing"
           }
         },
         "security": [
@@ -8664,7 +8883,7 @@
             "bearer": []
           }
         ],
-        "summary": "The most expensive or most looping stories in a window (project member)",
+        "summary": "The most expensive or most looping stories in a window (fleet.analytics.read)",
         "tags": [
           "fleet"
         ]
@@ -8739,6 +8958,9 @@
           },
           "400": {
             "description": "Invalid window, sort or limit"
+          },
+          "403": {
+            "description": "fleet.analytics.read is missing"
           }
         },
         "security": [
@@ -8746,7 +8968,7 @@
             "bearer": []
           }
         ],
-        "summary": "The most expensive jobs finished in a window, with ledger drift (project member)",
+        "summary": "The most expensive jobs finished in a window, with ledger drift (fleet.analytics.read)",
         "tags": [
           "fleet"
         ]
@@ -8798,6 +9020,9 @@
           },
           "400": {
             "description": "Invalid window"
+          },
+          "403": {
+            "description": "fleet.analytics.read is missing"
           }
         },
         "security": [
@@ -8805,7 +9030,7 @@
             "bearer": []
           }
         ],
-        "summary": "Ingest rows not yet analysed or failed, for jobs finished in a window (project member, D388)",
+        "summary": "Ingest rows not yet analysed or failed, for jobs finished in a window (fleet.analytics.read, D388)",
         "tags": [
           "fleet"
         ]
@@ -8843,6 +9068,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.analytics.read is missing"
+          },
           "404": {
             "description": "No such job in this project"
           }
@@ -8852,7 +9080,7 @@
             "bearer": []
           }
         ],
-        "summary": "One job's cost and quality breakdown across its attempts (project member)",
+        "summary": "One job's cost and quality breakdown across its attempts (fleet.analytics.read)",
         "tags": [
           "fleet"
         ]
@@ -8940,6 +9168,9 @@
           },
           "400": {
             "description": "Invalid window, bucket or groupBy"
+          },
+          "403": {
+            "description": "fleet.analytics.read is missing globally"
           }
         },
         "security": [
@@ -8947,7 +9178,7 @@
             "bearer": []
           }
         ],
-        "summary": "Fleet spend across projects; groupBy also accepts project (global admin)",
+        "summary": "Fleet spend across projects; groupBy also accepts project (fleet.analytics.read, global)",
         "tags": [
           "fleet"
         ]
@@ -9002,6 +9233,9 @@
           "400": {
             "description": "Missing before, or confirm is not the project slug / ALL"
           },
+          "403": {
+            "description": "fleet.analytics.delete is missing globally"
+          },
           "404": {
             "description": "No such project"
           }
@@ -9011,7 +9245,7 @@
             "bearer": []
           }
         ],
-        "summary": "Delete analytics rows dated before an instant; ingest rows are kept and marked (global admin, D384)",
+        "summary": "Delete analytics rows dated before an instant; ingest rows are kept and marked (fleet.analytics.delete, global, D384)",
         "tags": [
           "fleet"
         ]
@@ -9040,6 +9274,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.dashboard.read is missing"
           }
         },
         "security": [
@@ -9047,7 +9284,7 @@
             "bearer": []
           }
         ],
-        "summary": "The project's fleet health: its jobs, runner health, attention items (project member)",
+        "summary": "The project's fleet health: its jobs, runner health, attention items (fleet.dashboard.read)",
         "tags": [
           "fleet"
         ]
@@ -9067,6 +9304,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.dashboard.read is missing globally"
           }
         },
         "security": [
@@ -9074,7 +9314,7 @@
             "bearer": []
           }
         ],
-        "summary": "Fleet health across every project: runners, active and recent jobs, attention items (global admin)",
+        "summary": "Fleet health across every project: runners, active and recent jobs, attention items (fleet.dashboard.read, global)",
         "tags": [
           "fleet"
         ]
@@ -9094,6 +9334,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.credential.read is missing globally"
           }
         },
         "security": [
@@ -9101,7 +9344,7 @@
             "bearer": []
           }
         ],
-        "summary": "Credential health per provider and runner, and the profile inventory (global admin)",
+        "summary": "Credential health per provider and runner, and the profile inventory (fleet.credential.read, global)",
         "tags": [
           "fleet"
         ]
@@ -10499,6 +10742,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.knowledge.read is missing"
           }
         },
         "security": [
@@ -10506,7 +10752,7 @@
             "bearer": []
           }
         ],
-        "summary": "Index state of the project's repositories (project member)",
+        "summary": "Index state of the project's repositories (fleet.knowledge.read)",
         "tags": [
           "fleet knowledge"
         ]
@@ -10548,6 +10794,9 @@
           },
           "400": {
             "description": "Invalid patterns body (knowledge.input)"
+          },
+          "403": {
+            "description": "fleet.knowledge.patterns.update is missing"
           }
         },
         "security": [
@@ -10555,7 +10804,7 @@
             "bearer": []
           }
         ],
-        "summary": "Replace the project's Markdown corpus patterns (global admin)",
+        "summary": "Replace the project's Markdown corpus patterns (fleet.knowledge.patterns.update)",
         "tags": [
           "fleet knowledge"
         ]
@@ -10593,6 +10842,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.knowledge.repo.reindex is missing"
+          },
           "404": {
             "description": "knowledge.repoNotFound"
           },
@@ -10605,7 +10857,7 @@
             "bearer": []
           }
         ],
-        "summary": "Queue an index pass for one of the project's repositories (global admin)",
+        "summary": "Queue an index pass for one of the project's repositories (fleet.knowledge.repo.reindex)",
         "tags": [
           "fleet knowledge"
         ]
@@ -10648,6 +10900,9 @@
           "400": {
             "description": "Invalid search body (knowledge.input)"
           },
+          "403": {
+            "description": "fleet.knowledge.read is missing"
+          },
           "404": {
             "description": "knowledge.repoNotFound"
           },
@@ -10660,7 +10915,7 @@
             "bearer": []
           }
         ],
-        "summary": "Search the project's indexed repository docs (project member)",
+        "summary": "Search the project's indexed repository docs (fleet.knowledge.read)",
         "tags": [
           "fleet knowledge"
         ]

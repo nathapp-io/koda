@@ -5,6 +5,8 @@ import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetCommandType } from '../../common/enums';
 import type { LiveFleetApprovalEvent } from '../../live/live-event';
+import { isAgentPrincipal, type KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { PermissionService } from '../../permissions/permission.service';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { BudgetRoute, BudgetsService } from '../budgets/budgets.service';
 import { BUDGET_REPOSITORY, BudgetPolicyRecord, IBudgetRepository } from '../budgets/domain/budget.domain';
@@ -26,6 +28,12 @@ import { FleetApprovalDto } from './dto/fleet-approval.dto';
 export type ApprovalRoute = { kind: 'admin' } | { kind: 'project'; projectId: string; role: string | null };
 export interface ApprovalCaller { id: string; globalAdmin: boolean }
 
+/** The decide key of each approval type (permissions P1d US-006): the type, never the route, chooses it. */
+const DECIDE_KEYS = {
+  nax_bash_escalate: 'fleet.approval.decide.bash',
+  budget_override_required: 'fleet.approval.decide.budget',
+} as const;
+
 interface RequeueResult { jobId: string; ok: boolean; error?: string }
 
 function invalid(reason: string): never {
@@ -37,12 +45,6 @@ const visible = (route: ApprovalRoute, a: FleetApprovalRecord): boolean => route
 /** Plan D229: the budgets service's ownership route follows the policy's scope, not the request prefix. */
 const budgetRouteOf = (p: BudgetPolicyRecord): BudgetRoute =>
   p.projectId && (p.scopeType === 'project' || p.scopeType === 'repo') ? { kind: 'project', projectId: p.projectId } : { kind: 'admin' };
-
-/** Spec §1.7: budget asks are decided by whoever may resume the policy (S1b B3). A null role is not ADMIN. */
-const mayDecideBudget = (route: ApprovalRoute): boolean => route.kind === 'admin' || route.role === 'ADMIN';
-
-/** Spec §1.7 / A6 / plan D266: bash asks are decided by project DEVELOPER+ (or a global ADMIN on the admin prefix). */
-const mayDecideBash = (route: ApprovalRoute): boolean => route.kind === 'admin' || route.role === 'ADMIN' || route.role === 'DEVELOPER';
 
 type BashResult =
   | { kind: 'decided'; approval: FleetApprovalRecord; live: LiveFleetApprovalEvent[]; runnerId: string }
@@ -69,11 +71,16 @@ export class ApprovalsService {
     private readonly jobs: FleetJobsService,
     private readonly closer: ApprovalCloser,
     private readonly live: ApprovalLivePublisher,
+    // US-006: `counts` no longer reads the caller's memberships (the controller scopes it with
+    // `projectIdsWithKey`), so `FleetActivityService.memberProjectIds` has no caller left. The
+    // dependency stays, as the brief specifies (PermissionService is the only addition), and
+    // `permissions-p1-cleanup` removes `memberProjectIds` and this parameter together.
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_JOB_REPOSITORY) private readonly jobRepo: Pick<IFleetJobRepository, 'lockById' | 'createCommand'>,
     private readonly notifier: RunnerNotifier,
     private readonly assistantActions: AssistantActionPort,
+    private readonly permissions: PermissionService,
   ) {}
 
   async list(route: ApprovalRoute, q: { status?: ApprovalStatus; type?: ApprovalType; jobId?: string }, page: IPageOption): Promise<IPageResult<FleetApprovalDto>> {
@@ -87,14 +94,16 @@ export class ApprovalsService {
     return FleetApprovalDto.from(approval, await this.candidates(approval.policyId, approval.requestedAt));
   }
 
-  async decide(caller: ApprovalCaller, route: ApprovalRoute, id: string, dto: DecideApprovalDto, now = new Date()): Promise<FleetApprovalDto> {
+  async decide(caller: ApprovalCaller & { principal: KodaPrincipal }, route: ApprovalRoute, id: string, dto: DecideApprovalDto, now = new Date()): Promise<FleetApprovalDto> {
     const current = await this.findVisible(route, id);
-    // Spec §2.3: permission (1.7) is decided before the decision is validated, so an unauthorized
-    // caller gets 403 whatever they send, and before txManager.run, so it takes no lock and writes nothing.
-    if (current.type === 'nax_bash_escalate') return this.decideBash(caller, route, current, dto, now);
-    // 2a-D8: the creator-only handler owns its own gates; the budget role gate below never sees this type.
+    // Spec §2.3: the approval's type decides which key is needed (permissions P1d US-006), and it is
+    // checked before the decision is validated, so an unauthorized caller gets 403 whatever they send,
+    // and before txManager.run, so it takes no lock and writes nothing.
+    if (current.type === 'nax_bash_escalate') return this.decideBash(caller, current, dto, now);
+    // 2a-D8: the creator-only handler owns its own gates, and it has no key yet
+    // (`fleet.approval.decide.assistant` belongs to permissions-p1-enforce-assistant).
     if (current.type === 'assistant_action') return FleetApprovalDto.from(await this.assistantActions.decide(caller, current, dto, now));
-    if (!mayDecideBudget(route)) throw new ForbiddenAppException({}, 'projects');
+    if (!(await this.mayDecide(caller.principal, DECIDE_KEYS.budget_override_required, current))) throw new ForbiddenAppException({}, 'permissions');
     if (!current.policyId) invalid('a budget approval with no policy cannot be decided'); // plan D236
     if (dto.decision !== 'keep_paused' && dto.decision !== 'raise_budget_and_resume') invalid(`${dto.decision} does not apply to a budget approval`);
     const policyId: string = current.policyId;
@@ -141,8 +150,8 @@ export class ApprovalsService {
     return FleetApprovalDto.from(final);
   }
 
-  private async decideBash(caller: ApprovalCaller, route: ApprovalRoute, current: FleetApprovalRecord, dto: DecideApprovalDto, now: Date): Promise<FleetApprovalDto> {
-    if (!mayDecideBash(route)) throw new ForbiddenAppException({}, 'projects');
+  private async decideBash(caller: ApprovalCaller & { principal: KodaPrincipal }, current: FleetApprovalRecord, dto: DecideApprovalDto, now: Date): Promise<FleetApprovalDto> {
+    if (!(await this.mayDecide(caller.principal, DECIDE_KEYS.nax_bash_escalate, current))) throw new ForbiddenAppException({}, 'permissions');
     if (dto.amountUsd !== undefined || dto.requeueJobIds !== undefined) {
       throw new ValidationAppException({ reason: 'amountUsd and requeueJobIds apply only to budget approvals' }, 'fleet.approvalInput');   // plan D287
     }
@@ -154,6 +163,12 @@ export class ApprovalsService {
       const job = await this.jobRepo.lockById(jobId);   // lock order: job first, then approval (spec §1.4)
       const approval = await this.repo.lockById(current.id);
       if (!job || !approval || approval.status !== 'pending') return { kind: 'not_pending' };
+      // US-006 security ruling: no agent self-approval. A human may still decide an ask of a job it
+      // requested, and a budget ask has no single requester. Thrown inside the transaction, so it
+      // rolls back: nothing is written and the ask stays pending.
+      if (isAgentPrincipal(caller.principal) && job.requestedById === caller.id && (job.requestedByType ?? 'USER') === 'AGENT') {
+        throw new ForbiddenAppException({}, 'fleet.approvalSelfDecide');
+      }
       if (job.state !== 'RUNNING' || job.leaseEpoch !== approval.leaseEpoch || job.runnerId === null) {
         // nax has exited or is exiting. Close only THIS ask: on an epoch mismatch the job's other asks belong to a newer lease.
         const ended = await this.repo.resolve(approval.id, { status: 'cancelled', resolvedBy: 'job_ended', decidedAt: now });
@@ -179,12 +194,28 @@ export class ApprovalsService {
     return FleetApprovalDto.from(result.approval);
   }
 
-  async counts(caller: ApprovalCaller): Promise<ApprovalCountsDto> {
-    const projects = await this.repo.countPending(await this.activity.memberProjectIds(caller.id));
-    const unscoped = caller.globalAdmin ? await this.repo.countPendingUnscoped() : 0;
+  /**
+   * US-006: the badge counts what the caller may read. `{ all: true }` is a global `fleet.approval.read`
+   * grant (every live project, plus the asks with no project); otherwise only the projects where the
+   * caller holds that key are counted, and nothing is unscoped.
+   *
+   * Narrowed with `in`, not `scope.all`: the API compiles with `strictNullChecks: false`, where `false`
+   * is not a literal type and the truthiness check does not discriminate the union.
+   */
+  async counts(scope: { all: true } | { all: false; projectIds: string[] }): Promise<ApprovalCountsDto> {
+    const projects = 'projectIds' in scope ? await this.repo.countPending(scope.projectIds) : await this.repo.countPendingAllProjects();
+    const unscoped = 'projectIds' in scope ? 0 : await this.repo.countPendingUnscoped();
     return Object.assign(new ApprovalCountsDto(), {
       total: projects.reduce((sum, p) => sum + p.pending, unscoped), unscoped, projects,
     });
+  }
+
+  /**
+   * The key is asked in the approval's own project, or with no project for an ask that has none (a
+   * global policy's), so a global grant is what passes there — as the old global-admin check did.
+   */
+  private async mayDecide(principal: KodaPrincipal, key: string, approval: FleetApprovalRecord): Promise<boolean> {
+    return (await this.permissions.can(principal, key, approval.projectId ? { projectId: approval.projectId } : {})).allowed;
   }
 
   private async findVisible(route: ApprovalRoute, id: string): Promise<FleetApprovalRecord> {

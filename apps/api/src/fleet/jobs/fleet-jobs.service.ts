@@ -11,6 +11,8 @@ import { addUsd } from '../budgets/money';
 import { BudgetGate } from '../budgets/budget-gate';
 import { budgetReason, jobGateKeys } from '../budgets/budget-rules';
 import { normalizeDispatch } from './dispatch-input';
+import { actorTypeFor } from '../../action-context/action-context';
+import { responsibleUserOf } from '../common/responsible-user';
 import { isConfigKind } from '../common/config-jobs';
 import { CONFIG_EDIT_REPOSITORY, type IConfigEditRepository } from '../repo-config/domain/config-edit.domain';
 import type { FleetJobConfigEditDto } from '../repo-config/dto/config-edit.dto';
@@ -91,7 +93,8 @@ export class FleetJobsService {
       job = await this.txManager.run(async () => {
         if (opts.threadId && !(await this.repo.lockIdleThread(opts.threadId))) throw new ConflictAppException({}, 'threads.busy');
         const created = await this.repo.createJob({
-          ...input, projectId, requestedById: actorId, ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),
+          ...input, projectId, requestedById: actorId, requestedByType: actorTypeFor(actorId),
+          ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),
           ...(opts.threadId ? { threadId: opts.threadId } : {}),
         });
         await this.fleetTickets.link(created.id, tickets); // C9 D450: same transaction
@@ -146,7 +149,9 @@ export class FleetJobsService {
     const { job, live, wake } = await this.txManager.run(async () => {
       const current = await this.repo.lockById(jobId);
       if (!current || current.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.jobs');
-      if (!canOperate && current.requestedById !== actorId) throw new ForbiddenAppException({}, 'projects');
+      // Permissions P1d (US-003): the route's key is `fleet.job.cancel`, so a caller who holds neither
+      // it nor the job is refused with the permission code the route family uses.
+      if (!canOperate && current.requestedById !== actorId) throw new ForbiddenAppException({}, 'permissions');
       if (isTerminal(current.state)) throw new ConflictAppException({ state: current.state }, 'fleet.jobState');
 
       if (current.state === FleetJobState.QUEUED) {
@@ -170,7 +175,7 @@ export class FleetJobsService {
       await this.repo.appendEvent(jobId, { leaseEpoch: current.leaseEpoch, runnerSeq: null, type: 'lifecycle', payload: { level: 'info', message: 'cancel requested' } });
       await this.activity.record({
         actorType: 'USER', actorId, action: 'job.cancel_requested', entityType: 'job', entityId: jobId, jobId,
-        projectId, responsibleUserId: current.requestedById, payload: { state: current.state },
+        projectId, responsibleUserId: responsibleUserOf(current), payload: { state: current.state },
       });
       return { job: updated, live: this.live.event(updated), wake: current.runnerId };
     });

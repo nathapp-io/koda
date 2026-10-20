@@ -7,10 +7,16 @@ import {
 import { FLEET_JOB_REPOSITORY, FleetJobRecord, IFleetJobRepository } from './domain/fleet-job.domain';
 import { isThreadKind } from '../common/thread-jobs';
 
+/** US-002: an agent requested the job, so nothing that reads a user is meaningful for its requester. */
+const isAgentRequested = (job: Pick<FleetJobRecord, 'requestedByType'>): boolean => job.requestedByType === 'AGENT';
+
 /**
  * Fleet S4a §2.4 (D513): the enqueue side of `fleet_job_outcome`. Always called inside the caller's transaction,
  * so the outbox row commits or rolls back with the state change. The source id is `<jobId>:<leaseEpoch>` read
  * after the update: a requeued attempt that ends the same way notifies again; a retry of the same attempt does not.
+ *
+ * US-002: a job an agent requested enqueues nothing — a job-outcome notification is addressed to the requester's
+ * user rows (in-app notification, watchers), and agents have none.
  */
 @Injectable()
 export class FleetJobOutcomeRecorder {
@@ -20,12 +26,13 @@ export class FleetJobOutcomeRecorder {
   ) {}
 
   async onTerminal(job: FleetJobRecord): Promise<void> {
-    if (isThreadKind(job.command)) return;
+    if (isAgentRequested(job) || isThreadKind(job.command)) return;
     const outcome = jobOutcomeOf(job.state, job.resultPrUrl);
     if (outcome) await this.enqueue(job, outcome);
   }
 
   async onIngestCorrection(job: FleetJobRecord, change: { escalated: boolean; prFilled: boolean }): Promise<void> {
+    if (isAgentRequested(job)) return;
     if (change.escalated) {
       await this.enqueue(job, 'escalated');
       return;

@@ -2,6 +2,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
+import { actorTypeFor } from '../../action-context/action-context';
+import type { PrincipalRef } from '../../permissions/permissions.types';
+import { PermissionService } from '../../permissions/permission.service';
 import type { BashMode } from '../common/protocol';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { normalizeDispatch } from '../jobs/dispatch-input';
@@ -56,9 +59,10 @@ function cronProblem(error: unknown): Error {
 }
 
 /**
- * S1b §3.4: schedule management. Who may call is the controller's job (create: DEVELOPER+; mutations: DEVELOPER+
- * through CASL); `canAdminister` (project ADMIN, which a global ADMIN resolves to) is the other half of "owner or
- * project ADMIN" and is checked here under the row lock (plan D202).
+ * S1b §3.4: schedule management. Who may call is the controller's job — a route key (`fleet.schedule.create`,
+ * `.update`, `.delete`) — and `canAdminister` (the any-row key, so a project ADMIN) is the other half of "owner or
+ * project ADMIN", checked here under the row lock (plan D202). `enable` also rechecks the owner's own
+ * `fleet.job.dispatch` (US-005): the next tick would disable a schedule whose owner lost it anyway.
  */
 @Injectable()
 export class SchedulesService {
@@ -68,6 +72,7 @@ export class SchedulesService {
     private readonly placement: PlacementService,
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly permissions: PermissionService,
   ) {}
 
   async list(projectId: string): Promise<ScheduleDto[]> {
@@ -90,6 +95,7 @@ export class SchedulesService {
         profiles: t.profiles, maxCostUsd: t.maxCostUsd, selectorLabels: t.selectorLabels, pinnedRunnerId: t.pinnedRunnerId,
         bashMode: t.bashMode, approvalTimeoutSec: t.approvalTimeoutSec,
         noProgressLimit: dto.noProgressLimit ?? DEFAULT_NO_PROGRESS_LIMIT, nextFireAt: nextFireAfter(t.cron, t.timezone, now), createdById: actorId,
+        createdByType: actorTypeFor(actorId), // US-002: an agent owns the schedule it created
       });
       await this.record(actorId, 'schedule.created', schedule);
       return schedule;
@@ -138,10 +144,14 @@ export class SchedulesService {
     const result = await this.txManager.run(async () => {
       const current = await this.lockManaged(projectId, id, actorId, canAdminister);
       if (current.enabled) return current;
-      // Plan D211: the owner must still be able to dispatch, or the next tick would disable the schedule again.
-      if (!mayDispatch(await this.repo.findOwnerAccess(projectId, current.createdById))) {
-        throw new ConflictAppException({}, 'fleet.scheduleOwnerNoAccess');
-      }
+      // Plan D211 / US-005: the owner must still be able to dispatch, or the next tick would disable the
+      // schedule again. The permission is the owner's: its existence (`findOwnerAccess`) and its own
+      // effective keys in this project, never the enabling caller's. Read sequentially: this runs inside
+      // the transaction, and two concurrent queries on its one connection are a pool-level hazard.
+      const owner: PrincipalRef = { type: current.createdByType ?? 'USER', id: current.createdById };
+      const access = await this.repo.findOwnerAccess(projectId, owner);
+      const keys = await this.permissions.effectiveKeys(owner, { projectId: current.projectId });
+      if (!mayDispatch(access, keys)) throw new ConflictAppException({}, 'fleet.scheduleOwnerNoAccess');
       const after = await this.repo.update(id, {
         enabled: true, disabledReason: null, noProgressTicks: 0, nextFireAt: nextFireAfter(current.cron, current.timezone, now), updatedById: actorId,
       });
@@ -198,10 +208,12 @@ export class SchedulesService {
     return this.assertManaged(await this.repo.lockById(id), projectId, actorId, canAdminister);
   }
 
-  /** 404 for a missing schedule or another project's, 403 unless the owner or a project ADMIN. */
+  /** 404 for a missing schedule or another project's, 403 `permissions` unless the owner or a project ADMIN. */
   private assertManaged(schedule: ScheduleRecord | null, projectId: string, actorId: string, canAdminister: boolean): ScheduleRecord {
     if (!schedule || schedule.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.schedules');
-    if (!canAdminister && schedule.createdById !== actorId) throw new ForbiddenAppException({}, 'projects');
+    // US-005: the row-level half of `fleet.schedule.update`/`.delete`. A Developer holds only the `.own`
+    // key, so the route's guard passes it (`not-owner`) and this owner comparison decides.
+    if (!canAdminister && schedule.createdById !== actorId) throw new ForbiddenAppException({}, 'permissions');
     return schedule;
   }
 
