@@ -3322,13 +3322,14 @@ describeIntegration('API Integration Tests', () => {
       } finally { await db().chatThread.delete({ where: { id: thread.id } }); }
     });
 
-    it('workspace POST /threads refuses repo fields and non-user principals', async () => {
+    it('workspace POST /threads refuses repo fields and a principal without thread.workspace.create', async () => {
       const res = await request(httpServer).post('/api/threads').set('Authorization', `Bearer ${world.tokens.dev}`)
         .send({ title: 'Workspace', backend: { kind: 'native' }, repoId: world.repoId }).expect(400);
       refusal(res, 'threads.input.-2', { reason: 'workspaceFields' });
       const agentRes = await request(httpServer).post('/api/threads').set('Authorization', `Bearer ${agentApiKey}`)
         .send({ title: 'Workspace', backend: { kind: 'native' } }).expect(403);
-      refusal(agentRes, 'threads.principal.403');
+      // Permissions P1 US-003: an agent is refused by the key it does not hold, not by its principal type.
+      refusal(agentRes, 'permissions.40003');
     });
 
     it('US-003 AC1: creates an active thread with repo defaults and caller identity', async () => {
@@ -4214,13 +4215,14 @@ describeIntegration('API Integration Tests', () => {
           .send({ title: 'Workspace read', backend: { kind: 'native' }, homeProject: projectSlug }).expect(201)).id;
       });
 
-      it('GET /api/threads lists the caller’s workspace threads and refuses an agent key or bad query', async () => {
+      it('GET /api/threads lists the caller’s workspace threads and refuses a principal without the read key', async () => {
         const list = body<{ items: Array<Record<string, unknown>>; threadsEnabled: boolean }>(
           await request(httpServer).get('/api/threads').set('Authorization', `Bearer ${world.tokens.dev}`).expect(200));
         expect(list.items.find((item) => item.id === workspaceId)).toMatchObject({ kind: 'WORKSPACE', homeProject: { slug: projectSlug } });
         expect(list.items.every((item) => item.kind === 'WORKSPACE')).toBe(true);
         expect(list.threadsEnabled).toBe(true);
-        refusal(await request(httpServer).get('/api/threads').set('Authorization', `Bearer ${agentApiKey}`).expect(403), 'threads.principal.403');
+        // Permissions P1 US-003: the seeded agent role holds no `thread.workspace.read`, so the key refuses it.
+        refusal(await request(httpServer).get('/api/threads').set('Authorization', `Bearer ${agentApiKey}`).expect(403), 'permissions.40003');
         refusal(await request(httpServer).get('/api/threads?page=0').set('Authorization', `Bearer ${world.tokens.dev}`).expect(400), 'threads.input.400', { reason: 'page' });
       });
 

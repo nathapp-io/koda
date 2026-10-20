@@ -5,6 +5,7 @@ import { HttpAdapterHost } from '@nestjs/core';
 import { GlobalExceptionsFilter } from '@nathapp/nestjs-common';
 import { WorkspaceThreadsController } from './workspace-threads.controller';
 import { WorkspaceThreadsService } from './workspace-threads.service';
+import { PermissionService } from '../../permissions/permission.service';
 import { validateCreateWorkspaceThread } from './thread-input';
 
 // Principal injection reads request.user, as CombinedAuthGuard does in production.
@@ -12,7 +13,14 @@ describe('workspace POST body whitelist', () => {
   let app: NestFastifyApplication;
   let module: TestingModule;
   beforeEach(async () => {
-    module = await Test.createTestingModule({ controllers: [WorkspaceThreadsController], providers: [{ provide: WorkspaceThreadsService, useValue: { create: vi.fn(async (_principal, dto) => validateCreateWorkspaceThread(dto)) } }] }).compile();
+    module = await Test.createTestingModule({
+      controllers: [WorkspaceThreadsController],
+      providers: [
+        { provide: WorkspaceThreadsService, useValue: { create: vi.fn(async (_principal, dto) => validateCreateWorkspaceThread(dto)) } },
+        // US-003: the routes carry `RequiresGuard`, which reads the global PermissionService.
+        { provide: PermissionService, useValue: { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } },
+      ],
+    }).compile();
     app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
     app.useGlobalFilters(new GlobalExceptionsFilter(app.get(HttpAdapterHost)));
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));

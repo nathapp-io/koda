@@ -38,9 +38,15 @@ describe('workspace thread events guard', () => {
     );
   });
 
-  it('refuses a non-user principal with 403 threads.principal', async () => {
-    await expect(guard.canActivate(context(request(agent, token({ sub: 'a' }))))).rejects.toMatchObject({ prefix: 'threads.principal', httpStatus: 403 });
-    expect(streams.activeFor('a')).toBe(0);
+  // US-003: the principal-type refusal is gone. A non-user principal is judged by the same
+  // owned-thread fence (404 for anything that is not its own WORKSPACE thread) and the JWT check.
+  it('accepts a non-user principal the workspace fence allows, on the same terms as a user', async () => {
+    const req = request(agent, token({ sub: 'a', exp: 1_800_000_000 }));
+
+    await expect(guard.canActivate(context(req))).resolves.toBe(true);
+    expect(threads.requireOwnedThread).toHaveBeenCalledWith('a', 't1');
+    expect(req.workspaceThreadEvents).toEqual({ jwtPayload: { sub: 'a', exp: 1_800_000_000 } });
+    expect(streams.activeFor('a')).toBe(1);
   });
 
   it('answers 404 threads.notFound for a thread the caller does not own, before taking a slot', async () => {

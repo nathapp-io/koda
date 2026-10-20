@@ -1,25 +1,30 @@
-import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import * as instructions from './thread-instructions';
 import { WorkspaceThreadsService } from './workspace-threads.service';
-import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
-import type { UserPrincipal } from '../../auth/principal/koda-principal.types';
+import type { PermissionService } from '../../permissions/permission.service';
+import type { PermissionDecision } from '../../permissions/permissions.types';
+import type { AgentPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
+
+const allow = (): PermissionDecision => ({ allowed: true, reason: 'granted' });
+const deny = (): PermissionDecision => ({ allowed: false, reason: 'not-granted' });
 
 describe('workspace turn boundaries', () => {
   const principal: UserPrincipal = { actorType: 'user', id: 'u', role: 'MEMBER', email: 'u@test.com' };
   function setup() {
     const repository = { get: vi.fn(async () => ({ projectId: 'home' })), sendMessage: vi.fn(), archive: vi.fn(async (): Promise<string | null> => 'job') };
-    const resolveMembership = vi.fn(async (): Promise<string | null> => 'DEVELOPER');
+    const can = vi.fn(async (): Promise<PermissionDecision> => allow());
     const cancel = vi.fn(async () => undefined);
     const service = new WorkspaceThreadsService(repository as never, {} as never, {} as never, {} as never,
       { findAllForPrincipal: vi.fn(async () => [{ id: 'home' }]) } as never,
-      { resolveMembership } as never, new KodaCaslAbilityFactory(), { cancel } as never);
-    return { service, repository, resolveMembership, cancel };
+      { resolveMembership: vi.fn(async () => 'DEVELOPER') } as never, { can } as unknown as PermissionService, { cancel } as never);
+    return { service, repository, can, cancel };
   }
-  it('maps a membership refusal during the host check to threads.homeProjectAccess', async () => {
-    const { service, resolveMembership, repository } = setup();
-    resolveMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
-    await expect(service.sendMessage(principal, 't', { text: 'hi', clientMessageId: 'one' })).rejects.toMatchObject({ prefix: 'threads.homeProjectAccess', httpStatus: 403 });
+  /** US-003: hosting is the `thread.create` key of the thread's home project, and its refusal is `permissions`. */
+  it('maps a refused thread.create during the host check to 403 permissions', async () => {
+    const { service, can, repository } = setup();
+    can.mockResolvedValue(deny());
+    await expect(service.sendMessage(principal, 't', { text: 'hi', clientMessageId: 'one' })).rejects.toMatchObject({ prefix: 'permissions', httpStatus: 403 });
+    expect(can).toHaveBeenCalledWith(principal, 'thread.create', { projectId: 'home' });
     expect(repository.sendMessage).not.toHaveBeenCalled();
   });
   it.each([{ text: '', clientMessageId: 'ok' }, { text: '你'.repeat(11000), clientMessageId: 'ok' }, { text: 'hi', clientMessageId: 'bad id' }])('validates message before thread lookup (case %#)', async (input) => {
@@ -55,10 +60,24 @@ describe('workspace turn boundaries', () => {
       {} as never, {} as never, {} as never,
       { findAllForPrincipal: vi.fn(async () => [{ id: 'p' }]) } as never,
       { resolveMembership: vi.fn(async () => 'DEVELOPER') } as never,
-      new KodaCaslAbilityFactory(), {} as never,
+      { can: vi.fn(async () => allow()) } as unknown as PermissionService, {} as never,
     );
     const principal: UserPrincipal = { actorType: 'user', id: 'u', role: 'MEMBER', email: 'u@test.com' };
     await service.sendMessage(principal, 't', { text: 'hi', clientMessageId: 'cm' });
     expect(sendMessage).toHaveBeenCalledWith({ scope: { kind: 'workspace', userId: 'u' }, threadId: 't', userId: 'u', text: 'hi', clientMessageId: 'cm', repoContext: undefined });
+  });
+  /** US-003: an agent may send into its own workspace thread; the scope and the fence use its id. */
+  it('sends as an agent principal through the same workspace scope', async () => {
+    const sendMessage = vi.fn(async () => ({ jobId: 'j' }));
+    const service = new WorkspaceThreadsService(
+      { get: vi.fn(async () => ({ projectId: 'p', createdById: 'ag' })), sendMessage } as never,
+      {} as never, {} as never, {} as never,
+      { findAllForPrincipal: vi.fn(async () => [{ id: 'p' }]) } as never,
+      { resolveMembership: vi.fn(async () => null) } as never,
+      { can: vi.fn(async () => allow()) } as unknown as PermissionService, {} as never,
+    );
+    const agent: AgentPrincipal = { actorType: 'agent', id: 'ag', slug: 'ag', status: 'ACTIVE', agentRoles: [], capabilities: [] };
+    await service.sendMessage(agent, 't', { text: 'hi', clientMessageId: 'cm' });
+    expect(sendMessage).toHaveBeenCalledWith({ scope: { kind: 'workspace', userId: 'ag' }, threadId: 't', userId: 'ag', text: 'hi', clientMessageId: 'cm', repoContext: undefined });
   });
 });
