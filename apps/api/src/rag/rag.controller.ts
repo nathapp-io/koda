@@ -100,7 +100,11 @@ export class RagController {
     @Param('sourceId') sourceId: string,
   ) {
     const project = await this.resolveProject(slug);
-    await this.ragService.deleteBySource(project.id, sourceId);
+    // US-006: KB rows are keyed by (source, sourceId). The route keeps its interim meaning — delete the user rows
+    // of this id — so it names both user sources explicitly and leaves the ticket and code rows alone. US-007 adds
+    // the `source` query, the `kb.document.delete` key and the per-row ownership check on top.
+    await this.ragService.deleteBySource(project.id, 'doc', sourceId);
+    await this.ragService.deleteBySource(project.id, 'manual', sourceId);
     return JsonResponse.Ok({ deleted: true });
   }
 

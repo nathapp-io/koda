@@ -6,12 +6,18 @@ import { IncrementalGraphDiffService } from './incremental-graph-diff.service';
 import { VectorStore } from './vector-store.service';
 import type { GraphifyNodeDto, GraphifyLinkDto } from './dto/import-graphify.dto';
 import type { KbResultDto, SearchKbResponseDto } from './dto/kb-result.dto';
+import type { KbCreator } from './kb-creator';
 
 export interface IndexDocumentInput {
   source: 'ticket' | 'doc' | 'manual' | 'code';
   sourceId: string;
   content: string;
   metadata: Record<string, unknown>;
+  /**
+   * Who creates the row (US-006). The write path stores it under `kodaCreatedBy` and ignores any caller-supplied
+   * `metadata.kodaCreatedBy`; an absent `createdBy` leaves the row without a creator (a system row).
+   */
+  createdBy?: KbCreator;
 }
 
 /**
@@ -120,11 +126,22 @@ export class RagService {
   }
 
   /**
-   * Deletes documents by source ID in the knowledge base for a project.
+   * Deletes the documents of one `(source, sourceId)` pair in the knowledge base for a project.
    * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   * @throws ValidationAppException if source or sourceId is not filter-safe
    */
-  async deleteBySource(projectId: string, sourceId: string): Promise<void> {
-    return this.vectorStore.deleteBySource(projectId, sourceId);
+  async deleteBySource(projectId: string, source: string, sourceId: string): Promise<void> {
+    return this.vectorStore.deleteBySource(projectId, source, sourceId);
+  }
+
+  /**
+   * Answers the creator recorded on each row of one `(source, sourceId)` pair, one entry per matching row and
+   * `null` for a row with no creator; an empty array when nothing matches.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   * @throws ValidationAppException if source or sourceId is not filter-safe
+   */
+  async findSourceCreators(projectId: string, source: string, sourceId: string): Promise<Array<KbCreator | null>> {
+    return this.vectorStore.findSourceCreators(projectId, source, sourceId);
   }
 
   /**

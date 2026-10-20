@@ -166,13 +166,26 @@ describe('RagController', () => {
   });
 
   describe('deleteDocument', () => {
-    it('deletes by sourceId for admin', async () => {
+    it('deletes the user rows of that sourceId for admin, in both user sources', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.deleteBySource.mockResolvedValue(undefined);
 
       const result = await controller.deleteDocument('alpha', 'doc-1');
 
-      expect(ragService.deleteBySource).toHaveBeenCalledWith('proj-1', 'doc-1');
+      // US-006: the route keeps its interim meaning — delete the user rows of that id — while the store now
+      // keys deletes by (source, sourceId). US-007 adds the `source` query and the ownership check on top.
+      expect(ragService.deleteBySource).toHaveBeenNthCalledWith(1, 'proj-1', 'doc', 'doc-1');
+      expect(ragService.deleteBySource).toHaveBeenNthCalledWith(2, 'proj-1', 'manual', 'doc-1');
+      expect(ragService.deleteBySource).toHaveBeenCalledTimes(2);
+      expect((result as any).data).toEqual({ deleted: true });
+    });
+
+    it('answers 200 when no user row matches the id', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.deleteBySource.mockResolvedValue(undefined);
+
+      const result = await controller.deleteDocument('alpha', 'absent');
+
       expect((result as any).data).toEqual({ deleted: true });
     });
   });

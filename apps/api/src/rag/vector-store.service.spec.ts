@@ -288,7 +288,7 @@ describe('VectorStore — write mutex serialization (LanceDB has no built-in con
       content: 'first',
       metadata: {},
     });
-    const deletePromise = vectorStore.deleteBySource('test-project', 'ticket-001');
+    const deletePromise = vectorStore.deleteBySource('test-project', 'ticket', 'ticket-001');
 
     for (let i = 0; i < 5; i++) {
       await new Promise((resolve) => setImmediate(resolve));
@@ -302,7 +302,7 @@ describe('VectorStore — write mutex serialization (LanceDB has no built-in con
     await Promise.all([indexPromise, deletePromise]);
 
     expect(addSpy).toHaveBeenCalledTimes(1);
-    // Two deletes: indexDocument's replace-by-source_id pre-delete + deleteBySource.
+    // Two deletes: indexDocument's replace-by-(source, source_id) pre-delete + deleteBySource.
     expect(deleteSpy).toHaveBeenCalledTimes(2);
   });
 

@@ -334,3 +334,32 @@ describe('RagService.importGraphify (US-002)', () => {
     expect(result).toEqual({ imported: 2, cleared: 3 });
   });
 });
+
+describe('RagService — source-qualified delete and creator lookup (US-006)', () => {
+  function makeService() {
+    const store = {
+      deleteBySource: vi.fn().mockResolvedValue(undefined),
+      findSourceCreators: vi.fn().mockResolvedValue([]),
+    };
+    const ragService = new RagService(store as unknown as VectorStore);
+    return { ragService, store };
+  }
+
+  it('passes the source through to the store', async () => {
+    const { ragService, store } = makeService();
+
+    await ragService.deleteBySource('proj-1', 'manual', 's1');
+
+    expect(store.deleteBySource).toHaveBeenCalledWith('proj-1', 'manual', 's1');
+  });
+
+  it('answers the creators the store found', async () => {
+    const { ragService, store } = makeService();
+    store.findSourceCreators.mockResolvedValue([{ type: 'AGENT', id: 'a1' }, null]);
+
+    const creators = await ragService.findSourceCreators('proj-1', 'doc', 'd1');
+
+    expect(store.findSourceCreators).toHaveBeenCalledWith('proj-1', 'doc', 'd1');
+    expect(creators).toEqual([{ type: 'AGENT', id: 'a1' }, null]);
+  });
+});

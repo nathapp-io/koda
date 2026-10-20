@@ -10,6 +10,7 @@ import {
   EXCLUDE_KNOWLEDGE_ROWS_PREDICATE,
   isKnowledgeRow,
   isSafeFilterValue,
+  sourceRowFilter,
   whereIfSupported,
 } from './lance-table-manager';
 import { resolveCreatedAt } from './created-at-override';
@@ -17,9 +18,22 @@ import type { LanceRecord, LanceTable } from './lance-table-manager';
 import { simpleFtsScore, reciprocalRankFusion, getSimilarityTier, getVerdict } from './rag.service';
 import type { IndexDocumentInput } from './rag.service';
 import type { KbResultDto, SearchKbResponseDto } from './dto/kb-result.dto';
+import { KODA_CREATED_BY, readKbCreator } from './kb-creator';
+import type { KbCreator } from './kb-creator';
 
 function generateId(): string {
   return `doc_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/** Parses a row's stored metadata JSON; anything unreadable is an empty metadata object. */
+function parseRowMetadata(metadata: unknown): Record<string, unknown> {
+  if (typeof metadata !== 'string') return {};
+  try {
+    const parsed: unknown = JSON.parse(metadata);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
 }
 
 @Injectable()
@@ -216,6 +230,14 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Ignoring unparseable createdAtOverride for ${doc.sourceId}`);
     }
 
+    const metadata: Record<string, unknown> = { ...(doc.metadata ?? {}) };
+    // US-006: the creator comes from the caller's principal, never from caller-supplied metadata — drop any
+    // kodaCreatedBy the caller put there, then record the trusted one (if any). An absent createdBy leaves the
+    // row without a creator: a system row.
+    delete metadata[KODA_CREATED_BY];
+    const creator = readKbCreator(doc.createdBy);
+    if (creator) metadata[KODA_CREATED_BY] = creator;
+
     const id = generateId();
     const record: LanceRecord = {
       id,
@@ -223,7 +245,7 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
       source_id: doc.sourceId,
       content: doc.content,
       vector,
-      metadata: JSON.stringify(doc.metadata ?? {}),
+      metadata: JSON.stringify(metadata),
       created_at: createdAt,
       provider: this.embeddingService.providerName,
       model: this.embeddingService.modelName,
@@ -468,19 +490,57 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Deletes documents by source ID in the knowledge base for a project.
+   * Deletes the documents of one `(source, sourceId)` pair in the knowledge base for a project.
+   *
+   * The source is part of the key (US-006): a delete for `('manual', 's1')` leaves the ticket or code row that
+   * shares the id alone. Either value that cannot be embedded in a LanceDB filter throws before the table is
+   * touched.
    * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   * @throws ValidationAppException if source or sourceId is not filter-safe
    */
-  async deleteBySource(projectId: string, sourceId: string): Promise<void> {
+  async deleteBySource(projectId: string, source: string, sourceId: string): Promise<void> {
     await this.validateProjectId(projectId);
 
     // Graph/code source IDs are often path-like; isSafeFilterValue allows repo-path
     // punctuation and rejects the quote/control characters that could break the filter.
-    if (!isSafeFilterValue(sourceId)) {
+    if (!isSafeFilterValue(source) || !isSafeFilterValue(sourceId)) {
       throw new ValidationAppException();
     }
     const table = await this.getOrCreateTable(projectId);
-    await this.lanceTable.exclusive(`project_${projectId}`, () => table.delete(`source_id = '${sourceId}'`));
+    await this.lanceTable.exclusive(`project_${projectId}`, () =>
+      table.delete(sourceRowFilter(source, sourceId)));
+  }
+
+  /**
+   * Answers the creator recorded on every row of one `(source, sourceId)` pair: one entry per matching row, `null`
+   * for a row with no `kodaCreatedBy` (a system row), and an empty array when nothing matches.
+   *
+   * Reads through the same table query the other read paths use. Both key values are filter-checked before the
+   * table is touched, so a hostile id can never become a predicate. Every matching row is returned, not one
+   * page of the table: the caller decides ownership from the full set.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   * @throws ValidationAppException if source or sourceId is not filter-safe
+   */
+  async findSourceCreators(projectId: string, source: string, sourceId: string): Promise<Array<KbCreator | null>> {
+    await this.validateProjectId(projectId);
+
+    if (!isSafeFilterValue(source) || !isSafeFilterValue(sourceId)) {
+      throw new ValidationAppException();
+    }
+
+    const table = await this.getOrCreateTable(projectId);
+    const rowCount: number = await table.countRows();
+    if (rowCount === 0) return [];
+
+    const rows: LanceRecord[] = await whereIfSupported(table.query(), sourceRowFilter(source, sourceId))
+      .limit(rowCount)
+      .toArray();
+
+    // The in-memory fallback and test doubles may answer a wider set than the predicate asks for; keep the pair
+    // exact so a creator read never widens to another source.
+    return rows
+      .filter((row) => row.source === source && row.source_id === sourceId)
+      .map((row) => readKbCreator(parseRowMetadata(row.metadata)[KODA_CREATED_BY]));
   }
 
   /**

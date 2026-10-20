@@ -32,7 +32,8 @@ export interface LanceRecord {
 /**
  * True when `value` can be embedded in a LanceDB single-quoted SQL filter
  * without escaping (no quotes, no control characters). Shared by
- * LanceTableManager.addRecord and VectorStore.deleteBySource.
+ * LanceTableManager.addRecord and VectorStore's source-qualified reads and
+ * deletes.
  */
 export function isSafeFilterValue(value: string): boolean {
   if (!value) return false;
@@ -40,6 +41,48 @@ export function isSafeFilterValue(value: string): boolean {
   return ![...value].some((char) => {
     const code = char.charCodeAt(0);
     return code < 32 || code === 127;
+  });
+}
+
+/**
+ * The DataFusion predicate naming exactly one knowledge row: its source *and* its source_id (US-006).
+ *
+ * A KB row is identified by the pair, never by `source_id` alone, so a write to `('manual', 's1')` can no longer
+ * replace the ticket row that happens to share the id. Callers must have checked both values with
+ * `isSafeFilterValue` before embedding them here.
+ */
+export function sourceRowFilter(source: string, sourceId: string): string {
+  return `source = '${source}' AND source_id = '${sourceId}'`;
+}
+
+/** One parsed `field = 'value'` / `field != 'value'` clause of a DataFusion predicate. */
+interface FilterClause {
+  field: string;
+  negate: boolean;
+  value: string;
+}
+
+const FILTER_CLAUSE = /^([A-Za-z_][A-Za-z0-9_]*)\s*(!=|=)\s*'([^']*)'$/;
+
+/**
+ * Parses an AND-joined list of `field = 'value'` / `field != 'value'` clauses, the only predicate shapes the RAG
+ * services build. `null` means "not a predicate this fallback understands".
+ */
+function parseFilterClauses(filter: string): FilterClause[] | null {
+  const clauses: FilterClause[] = [];
+  for (const part of filter.split(/\s+AND\s+/i)) {
+    const match = FILTER_CLAUSE.exec(part.trim());
+    if (!match) return null;
+    clauses.push({ field: match[1], negate: match[2] === '!=', value: match[3] });
+  }
+  return clauses.length > 0 ? clauses : null;
+}
+
+function matchesClauses(record: LanceRecord, clauses: FilterClause[]): boolean {
+  return clauses.every((clause) => {
+    const actual = (record as unknown as Record<string, unknown>)[clause.field];
+    const equal = String(actual) === clause.value;
+    return clause.negate ? !equal : equal;
   });
 }
 
@@ -97,8 +140,9 @@ export function whereIfSupported<T>(query: T, predicate: string): T {
 /**
  * In-memory fallback table used when the LanceDB native module is unavailable
  * (or RAG runs with inMemoryOnly=true). Implements the subset of the LanceDB
- * table API the RAG services rely on, including the delete-filter patterns
- * used by VectorStore's deletes.
+ * table API the RAG services rely on, including the exact source-and-id delete
+ * and `where` filtering VectorStore needs so replacement, deletion and creator
+ * reads mean the same thing here as in native LanceDB.
  */
 export class InMemoryTable {
   private records: LanceRecord[] = [];
@@ -112,17 +156,14 @@ export class InMemoryTable {
   }
 
   async delete(filter: string): Promise<void> {
-    const sourceIdFilter = /^source_id\s*=\s*'([^']+)'$/.exec(filter);
-    if (sourceIdFilter) {
-      const sourceId = sourceIdFilter[1];
-      this.records = this.records.filter((record) => record.source_id !== sourceId);
-      return;
-    }
-
-    const sourceFilter = /^source\s*=\s*'([a-zA-Z0-9_-]+)'$/.exec(filter);
-    if (sourceFilter) {
-      const source = sourceFilter[1];
-      this.records = this.records.filter((record) => record.source !== source);
+    // Covers both the single-field patterns (`source_id = '…'`, `source = '…'`) and the compound
+    // `source = '…' AND source_id = '…'` predicate the KB write path uses. `source != '…'` is not a delete
+    // shape today, but the parser is shared so it deletes nothing rather than widening.
+    const clauses = parseFilterClauses(filter);
+    if (clauses) {
+      if (clauses.every((clause) => !clause.negate)) {
+        this.records = this.records.filter((record) => !matchesClauses(record, clauses));
+      }
       return;
     }
 
@@ -145,11 +186,34 @@ export class InMemoryTable {
     };
   }
 
+  /**
+   * Query builder with the `where(predicate)` + `limit(n)` + `toArray()` shape the services use. An
+   * unsupported predicate is skipped (the record set is not narrowed), matching `whereIfSupported`; callers
+   * that need exactness filter the returned rows themselves.
+   */
   query() {
-    return {
+    const predicates: FilterClause[][] = [];
+    let limit = Number.POSITIVE_INFINITY;
+
+    const rows = (): LanceRecord[] => this.records
+      .filter((record) => predicates.every((clauses) => matchesClauses(record, clauses)))
+      .slice(0, limit);
+
+    const builder = {
+      where: (predicate: string) => {
+        const clauses = parseFilterClauses(predicate);
+        if (clauses) predicates.push(clauses);
+        return builder;
+      },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      limit: (n: any) => ({ toArray: async () => this.records.slice(0, n) }),
+      limit: (n: any) => {
+        limit = typeof n === 'number' ? n : limit;
+        return builder;
+      },
+      toArray: async () => rows(),
     };
+
+    return builder;
   }
 }
 
@@ -434,19 +498,18 @@ export class LanceTableManager {
   }
 
   /**
-   * Idempotent record write under the per-table write mutex: replaces any
-   * existing rows with the same source_id before adding, so re-indexing a
-   * document (through either service, or the same service twice) yields
-   * exactly one row per sourceId instead of duplicating search results.
+   * Idempotent record write under the per-table write mutex: replaces the row with the same `(source, source_id)`
+   * before adding (US-006), so re-indexing a document — through either service, or the same service twice — yields
+   * exactly one row for that pair instead of duplicating search results, while a row of a different source that
+   * happens to share the id is left untouched.
    *
-   * The caller resolves the table (via getOrCreateTable) so first-access hooks
-   * stay at the service boundary; records with filter-unsafe source_id values
-   * are appended without the replace step.
+   * The caller resolves the table (via getOrCreateTable) so first-access hooks stay at the service boundary;
+   * records with a filter-unsafe source or source_id are appended without the replace step.
    */
   async addRecord(tableName: string, table: LanceTable, record: LanceRecord): Promise<void> {
     await this.exclusive(tableName, async () => {
-      if (isSafeFilterValue(record.source_id)) {
-        await table.delete(`source_id = '${record.source_id}'`);
+      if (isSafeFilterValue(record.source) && isSafeFilterValue(record.source_id)) {
+        await table.delete(sourceRowFilter(record.source, record.source_id));
       }
       await table.add([record]);
     });

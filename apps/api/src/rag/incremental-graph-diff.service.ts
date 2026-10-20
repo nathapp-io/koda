@@ -68,7 +68,9 @@ export class IncrementalGraphDiffService {
     const updatedIds = updatedNodes.map((n) => n.id);
     await this.graphStore.markVectorStale(projectId, [...removedNodeIds, ...updatedIds]);
     for (const nodeId of [...removedNodeIds, ...updatedIds]) {
-      await this.vectorStore.deleteBySource(projectId, nodeId);
+      // US-006: code vectors live in the `code` source; a ticket or manual row that happens to share the node id
+      // is not this service's to delete.
+      await this.vectorStore.deleteBySource(projectId, 'code', nodeId);
     }
 
     // Step 2: one Prisma transaction for the graph write.

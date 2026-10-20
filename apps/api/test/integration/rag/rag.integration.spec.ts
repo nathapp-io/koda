@@ -147,7 +147,7 @@ describe('RagService integration', () => {
     const beforeDelete = await ragService.listDocuments(deleteProjectId);
     expect(beforeDelete.some((d) => d.sourceId === 'ticket-to-delete')).toBe(true);
 
-    await ragService.deleteBySource(deleteProjectId, 'ticket-to-delete');
+    await ragService.deleteBySource(deleteProjectId, 'ticket', 'ticket-to-delete');
 
     const afterDelete = await ragService.listDocuments(deleteProjectId);
     expect(afterDelete.some((d) => d.sourceId === 'ticket-to-delete')).toBe(false);

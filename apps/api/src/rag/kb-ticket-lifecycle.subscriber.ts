@@ -36,6 +36,6 @@ export class KbTicketLifecycleSubscriber implements OnModuleInit {
     const project = await this.ragRepository.findProjectById(event.projectId);
     if (!project || project.deletedAt !== null) return;
 
-    await this.ragService.deleteBySource(event.projectId, event.ticketId);
+    await this.ragService.deleteBySource(event.projectId, 'ticket', event.ticketId);
   }
 }
