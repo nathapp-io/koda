@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { RetrievalController } from './retrieval.controller';
 import { EvaluationService } from './evaluation.service';
 import { ProjectAccessService } from '../projects/project-access.service';
+import { PermissionService } from '../permissions/permission.service';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 
 describe('RetrievalController', () => {
@@ -27,6 +28,10 @@ describe('RetrievalController', () => {
       providers: [
         { provide: EvaluationService, useValue: evaluationService },
         { provide: ProjectAccessService, useValue: mockProjectAccessService },
+        // US-007: the route carries RequiresGuard, which Nest instantiates with the controller even though these
+        // tests call the handler directly. The key decision itself is covered over HTTP by
+        // retrieval-membership.routes.spec.ts and test/integration/rag/permissions-kb-routes.integration.spec.ts.
+        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
       ],
     }).compile();
 

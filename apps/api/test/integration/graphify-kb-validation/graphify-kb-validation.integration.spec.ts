@@ -17,6 +17,7 @@ import { ValidationAppException } from '@nathapp/nestjs-common';
 import { ImportGraphifyDto, GraphifyNodeDto, GraphifyLinkDto } from '../../../src/rag/dto/import-graphify.dto';
 import { PrismaRagRepository } from '../../../src/rag/prisma-rag.repository';
 import { ProjectAccessService } from '../../../src/projects/project-access.service';
+import { PermissionService } from '../../../src/permissions/permission.service';
 
 // Variable-path import helper for ImportGraphifyDto (US-003). A runtime-computed
 // path compiles cleanly and fails with "Cannot find module" at test execution time.
@@ -55,25 +56,25 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
     });
   });
 
-  describe('AC2: AddDocumentDto accepts source: "code" without a validation error', () => {
-    it('should accept source "code" in AddDocumentDto with valid data', async () => {
-      const dto = plainToClass(AddDocumentDto, {
-        source: 'code',
-        sourceId: 'file-123',
-        content: 'function example() { return true; }',
-        metadata: { filename: 'example.ts' },
-      });
+  describe('AC2: AddDocumentDto accepts the two user sources and refuses the internal ones (US-007)', () => {
+    it('should accept source "doc" and "manual" in AddDocumentDto with valid data', async () => {
+      for (const source of ['doc', 'manual'] as const) {
+        const dto = plainToClass(AddDocumentDto, {
+          source,
+          sourceId: 'id-123',
+          content: 'content',
+          metadata: { title: 'source list' },
+        });
 
-      const errors = await validate(dto);
+        const errors = await validate(dto);
 
-      expect(errors).toHaveLength(0);
-      expect(dto.source).toBe('code');
+        expect(errors).toHaveLength(0);
+        expect(dto.source).toBe(source);
+      }
     });
 
-    it('should accept all valid sources: ticket, doc, manual, code', async () => {
-      const validSources = ['ticket', 'doc', 'manual', 'code'];
-
-      for (const source of validSources) {
+    it('should reject the internal sources "ticket" and "code": the REST route writes user rows only', async () => {
+      for (const source of ['ticket', 'code']) {
         const dto = plainToClass(AddDocumentDto, {
           source,
           sourceId: 'id-123',
@@ -81,12 +82,13 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
         });
 
         const errors = await validate(dto);
-        expect(errors).toHaveLength(0);
+
+        expect(errors.some((e) => e.property === 'source')).toBe(true);
       }
     });
   });
 
-  describe('AC3: AddDocumentDto rejects any source value not in ["ticket", "doc", "manual", "code"] with a 400 validation error', () => {
+  describe('AC3: AddDocumentDto rejects any source value outside ["doc", "manual"] with a 400 validation error', () => {
     it('should reject invalid source values', async () => {
       const invalidSources = ['invalid', 'code2', 'codebase', 'source', 'repository'];
 
@@ -536,10 +538,12 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
           { provide: HybridRetrieverService, useValue: { search: vi.fn(), indexDocument: vi.fn() } },
           { provide: EvaluationService, useValue: { evaluate: vi.fn() } },
           PrismaRagRepository,
-          // US-001: the class-level ProjectMembershipGuard is instantiated by the DI
+          // US-001: the `@UseGuards(...)` classes are instantiated by the DI
           // container even though these tests call the controller directly, so its
           // ProjectAccessService dependency must resolve.
           { provide: ProjectAccessService, useValue: {} },
+          // US-007: the KB routes carry permission keys; these cases exercise the graphify handler itself.
+          { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
         ],
       }).compile();
 

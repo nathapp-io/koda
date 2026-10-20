@@ -739,8 +739,11 @@
           "201": {
             "description": "Document indexed"
           },
+          "400": {
+            "description": "Source is not doc or manual, or the id is not filter-safe"
+          },
           "403": {
-            "description": "Forbidden - no project role"
+            "description": "kb.document.add is missing, or the replaced row is not the caller's"
           },
           "404": {
             "description": "Project not found"
@@ -751,7 +754,7 @@
             "bearer": []
           }
         ],
-        "summary": "Add a document to the project knowledge base",
+        "summary": "Add a document to the project knowledge base (kb.document.add)",
         "tags": [
           "knowledge-base"
         ]
@@ -787,7 +790,7 @@
             "description": "Invalid limit"
           },
           "403": {
-            "description": "Forbidden - no project role"
+            "description": "kb.read is missing"
           },
           "404": {
             "description": "Project not found"
@@ -798,7 +801,7 @@
             "bearer": []
           }
         ],
-        "summary": "List indexed documents in the project knowledge base",
+        "summary": "List indexed documents in the project knowledge base (kb.read)",
         "tags": [
           "knowledge-base"
         ]
@@ -823,14 +826,30 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "source",
+            "required": false,
+            "in": "query",
+            "description": "Restrict the delete to one user source",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "doc",
+                "manual"
+              ]
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "Delete documents by sourceId"
           },
+          "400": {
+            "description": "source is not doc or manual, or the id is not filter-safe"
+          },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "kb.document.delete is missing, or a matching row is not the caller's"
           },
           "404": {
             "description": "Project not found"
@@ -841,7 +860,7 @@
             "bearer": []
           }
         ],
-        "summary": "Delete documents by sourceId from the knowledge base (admin only)",
+        "summary": "Delete the user rows of a sourceId (kb.document.delete, row ownership)",
         "tags": [
           "knowledge-base"
         ]
@@ -875,7 +894,7 @@
             "description": "Search results with RRF merge and similarity tiers"
           },
           "403": {
-            "description": "Forbidden - no project role"
+            "description": "kb.search is missing"
           },
           "404": {
             "description": "Project not found"
@@ -886,7 +905,7 @@
             "bearer": []
           }
         ],
-        "summary": "Hybrid search the project knowledge base",
+        "summary": "Hybrid search the project knowledge base (kb.search)",
         "tags": [
           "knowledge-base"
         ]
@@ -923,7 +942,7 @@
             "description": "Graphify not enabled for this project or validation error"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "kb.graphify.import is missing"
           },
           "404": {
             "description": "Project not found"
@@ -934,7 +953,7 @@
             "bearer": []
           }
         ],
-        "summary": "Import graphify knowledge graph into the project knowledge base",
+        "summary": "Import graphify knowledge graph into the project knowledge base (kb.graphify.import)",
         "tags": [
           "knowledge-base"
         ]
@@ -958,7 +977,7 @@
             "description": "Table optimized"
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "kb.optimize is missing"
           },
           "404": {
             "description": "Project not found"
@@ -969,7 +988,7 @@
             "bearer": []
           }
         ],
-        "summary": "Optimize the LanceDB table for a project (admin only)",
+        "summary": "Optimize the LanceDB table for a project (kb.optimize)",
         "tags": [
           "knowledge-base"
         ]
@@ -4579,7 +4598,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - no project role"
+            "description": "retrieval.evaluate is missing, or the caller is not a member"
           }
         },
         "security": [
@@ -4590,7 +4609,7 @@
             "bearer": []
           }
         ],
-        "summary": "Run the retrieval evaluation harness with seeded queries",
+        "summary": "Run the retrieval evaluation harness with seeded queries (retrieval.evaluate)",
         "tags": [
           "knowledge-base"
         ]
@@ -9374,6 +9393,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "thread.workspace.create is missing, or thread.create is refused in the home project"
           }
         },
         "security": [
@@ -9381,7 +9403,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create a personal workspace chat thread",
+        "summary": "Create a personal workspace chat thread (thread.workspace.create, hosted by the home project’s thread.create)",
         "tags": [
           "fleet threads"
         ]
@@ -9399,6 +9421,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "thread.workspace.read is missing"
           }
         },
         "security": [
@@ -9406,7 +9431,7 @@
             "bearer": []
           }
         ],
-        "summary": "List the caller’s personal workspace chat threads",
+        "summary": "List the caller’s personal workspace chat threads (thread.workspace.read)",
         "tags": [
           "fleet threads"
         ]
@@ -9435,6 +9460,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "thread.workspace.read is missing"
+          },
+          "404": {
+            "description": "threads.notFound when the thread is not the caller’s WORKSPACE thread"
           }
         },
         "security": [
@@ -9442,7 +9473,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get one of the caller’s personal workspace chat threads",
+        "summary": "Get one of the caller’s personal workspace chat threads (thread.workspace.read)",
         "tags": [
           "fleet threads"
         ]
@@ -9479,6 +9510,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "The caller neither holds thread.cap.update nor created the thread"
           }
         },
         "security": [
@@ -9486,7 +9520,7 @@
             "bearer": []
           }
         ],
-        "summary": "Update the cost cap of one of the caller’s workspace chat threads",
+        "summary": "Update the cost cap of one of the caller’s workspace chat threads (thread.cap.update: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -9515,6 +9549,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "thread.workspace.read is missing"
+          },
+          "404": {
+            "description": "threads.notFound when the thread is not the caller’s WORKSPACE thread"
           }
         },
         "security": [
@@ -9522,7 +9562,7 @@
             "bearer": []
           }
         ],
-        "summary": "List the messages of one of the caller’s workspace chat threads",
+        "summary": "List the messages of one of the caller’s workspace chat threads (thread.workspace.read)",
         "tags": [
           "fleet threads"
         ]
@@ -9569,6 +9609,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "thread.workspace.message.send is missing, or thread.create is refused in the home project"
           }
         },
         "security": [
@@ -9576,7 +9619,7 @@
             "bearer": []
           }
         ],
-        "summary": "Send a message to a personal workspace chat thread",
+        "summary": "Send a message to a personal workspace chat thread (thread.workspace.message.send)",
         "tags": [
           "fleet threads"
         ]
@@ -9605,6 +9648,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "thread.workspace.archive is missing"
           }
         },
         "security": [
@@ -9612,7 +9658,7 @@
             "bearer": []
           }
         ],
-        "summary": "Archive a personal workspace chat thread (creator)",
+        "summary": "Archive a personal workspace chat thread (thread.workspace.archive)",
         "tags": [
           "fleet threads"
         ]
@@ -9634,6 +9680,9 @@
         "responses": {
           "200": {
             "description": ""
+          },
+          "403": {
+            "description": "The caller neither holds thread.stop nor created the thread"
           }
         },
         "security": [
@@ -9641,7 +9690,7 @@
             "bearer": []
           }
         ],
-        "summary": "Stop the live turn of a workspace chat thread (creator)",
+        "summary": "Stop the live turn of a workspace chat thread (thread.stop: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -9663,6 +9712,9 @@
         "responses": {
           "200": {
             "description": ""
+          },
+          "403": {
+            "description": "The caller neither holds thread.end-session nor created the thread"
           }
         },
         "security": [
@@ -9670,7 +9722,7 @@
             "bearer": []
           }
         ],
-        "summary": "Close the live session of a workspace chat thread (creator)",
+        "summary": "Close the live session of a workspace chat thread (thread.end-session: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -9702,6 +9754,9 @@
         "responses": {
           "200": {
             "description": ""
+          },
+          "403": {
+            "description": "The caller neither holds thread.answer nor created the thread"
           }
         },
         "security": [
@@ -9709,7 +9764,7 @@
             "bearer": []
           }
         ],
-        "summary": "Answer a pending question of a workspace chat thread (creator)",
+        "summary": "Answer a pending question of a workspace chat thread (thread.answer: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -9748,6 +9803,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "thread.create is missing"
           }
         },
         "security": [
@@ -9755,7 +9813,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create a chat thread (project DEVELOPER+)",
+        "summary": "Create a chat thread (thread.create)",
         "tags": [
           "fleet threads"
         ]
@@ -9782,6 +9840,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "thread.read is missing"
           }
         },
         "security": [
@@ -9789,7 +9850,7 @@
             "bearer": []
           }
         ],
-        "summary": "List project chat threads",
+        "summary": "List project chat threads (thread.read)",
         "tags": [
           "fleet threads"
         ]
@@ -9826,6 +9887,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "thread.read is missing"
           }
         },
         "security": [
@@ -9833,7 +9897,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get a chat thread",
+        "summary": "Get a chat thread (thread.read)",
         "tags": [
           "fleet threads"
         ]
@@ -9878,6 +9942,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "The caller neither holds thread.cap.update nor created the thread"
           }
         },
         "security": [
@@ -9885,7 +9952,7 @@
             "bearer": []
           }
         ],
-        "summary": "Update a chat thread cost cap",
+        "summary": "Update a chat thread cost cap (thread.cap.update: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -9932,6 +9999,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "thread.plan or fleet.job.dispatch is missing, or the caller did not create the thread"
           }
         },
         "security": [
@@ -9939,7 +10009,7 @@
             "bearer": []
           }
         ],
-        "summary": "Plan a published thread spec (creator, project DEVELOPER+)",
+        "summary": "Plan a published thread spec (thread.plan and fleet.job.dispatch: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -9986,6 +10056,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "thread.run or fleet.job.dispatch is missing, or the caller did not create the thread"
           }
         },
         "security": [
@@ -9993,7 +10066,7 @@
             "bearer": []
           }
         ],
-        "summary": "Run a thread after its latest plan completed (creator, project DEVELOPER+)",
+        "summary": "Run a thread after its latest plan completed (thread.run and fleet.job.dispatch: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -10023,6 +10096,9 @@
         "responses": {
           "200": {
             "description": ""
+          },
+          "403": {
+            "description": "The caller neither holds thread.stop nor created the thread"
           }
         },
         "security": [
@@ -10030,7 +10106,7 @@
             "bearer": []
           }
         ],
-        "summary": "Stop the live turn of a chat thread (creator)",
+        "summary": "Stop the live turn of a chat thread (thread.stop: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -10060,6 +10136,9 @@
         "responses": {
           "200": {
             "description": ""
+          },
+          "403": {
+            "description": "The caller neither holds thread.end-session nor created the thread"
           }
         },
         "security": [
@@ -10067,7 +10146,7 @@
             "bearer": []
           }
         ],
-        "summary": "Close the live session of a chat thread (creator)",
+        "summary": "Close the live session of a chat thread (thread.end-session: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -10107,6 +10186,12 @@
         "responses": {
           "200": {
             "description": ""
+          },
+          "403": {
+            "description": "The caller neither holds thread.answer nor created the thread"
+          },
+          "409": {
+            "description": "threads.noQuestion, threads.noSession, or threads.sessionOtherPrincipal"
           }
         },
         "security": [
@@ -10114,7 +10199,7 @@
             "bearer": []
           }
         ],
-        "summary": "Answer a pending question of a chat thread (creator)",
+        "summary": "Answer a pending question of a chat thread (thread.answer: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -10151,6 +10236,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "The caller neither holds thread.archive nor created the thread"
           }
         },
         "security": [
@@ -10158,7 +10246,7 @@
             "bearer": []
           }
         ],
-        "summary": "Archive a chat thread (creator or project admin)",
+        "summary": "Archive a chat thread (thread.archive: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -10201,6 +10289,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "The caller neither holds thread.publish nor created the thread"
+          },
+          "409": {
+            "description": "threads.sessionOtherPrincipal when another principal started the live session"
           }
         },
         "security": [
@@ -10208,7 +10302,7 @@
             "bearer": []
           }
         ],
-        "summary": "Publish thread documents (creator)",
+        "summary": "Publish thread documents (thread.publish: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -10250,6 +10344,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "The caller neither holds thread.discard nor created the thread"
           }
         },
         "security": [
@@ -10257,7 +10354,7 @@
             "bearer": []
           }
         ],
-        "summary": "Discard the thread worktree changes (creator)",
+        "summary": "Discard the thread worktree changes (thread.discard: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -10314,6 +10411,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "The caller neither holds thread.message.send nor created the thread"
+          },
+          "409": {
+            "description": "threads.sessionOtherPrincipal when another principal started the live session"
           }
         },
         "security": [
@@ -10321,7 +10424,7 @@
             "bearer": []
           }
         ],
-        "summary": "Send a message to a chat thread",
+        "summary": "Send a message to a chat thread (thread.message.send: the creator, or the any-row key)",
         "tags": [
           "fleet threads"
         ]
@@ -10356,6 +10459,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "thread.read is missing"
           }
         },
         "security": [
@@ -10363,7 +10469,7 @@
             "bearer": []
           }
         ],
-        "summary": "List chat thread messages",
+        "summary": "List chat thread messages (thread.read)",
         "tags": [
           "fleet threads"
         ]
@@ -11919,18 +12025,16 @@
         "properties": {
           "source": {
             "enum": [
-              "ticket",
               "doc",
-              "manual",
-              "code"
+              "manual"
             ],
             "type": "string",
-            "description": "Source type"
+            "description": "Source type (the two user-writable sources)"
           },
           "sourceId": {
             "type": "string",
             "minLength": 1,
-            "description": "Source record ID (e.g. ticket CUID)"
+            "description": "Source record ID of the document being indexed"
           },
           "content": {
             "type": "string",

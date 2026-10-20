@@ -65,6 +65,7 @@ interface RagServiceStub {
   indexDocument: Mock;
   listDocuments: Mock;
   deleteBySource: Mock;
+  findSourceCreators: Mock;
   importGraphify: Mock;
   optimizeTable: Mock;
 }
@@ -115,6 +116,12 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     authorities: ['ADMIN'],
   };
 
+  /** The catalog keys the stub refuses; each case marks the ones its role does not hold (US-007). */
+  let refusedKeys: ReadonlySet<string>;
+  const can = vi.fn(async (_principal: unknown, key: string) =>
+    refusedKeys.has(key) ? { allowed: false, reason: 'not-granted' } : { allowed: true, reason: 'granted' },
+  );
+
   beforeAll(async () => {
     membershipRepo = { findBySlug: vi.fn(), findMembershipRole: vi.fn(), isAgentOnRoster: vi.fn() };
 
@@ -144,6 +151,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
       indexDocument: vi.fn(),
       listDocuments: vi.fn(),
       deleteBySource: vi.fn(),
+      findSourceCreators: vi.fn().mockResolvedValue([]),
       importGraphify: vi.fn(),
       optimizeTable: vi.fn(),
     };
@@ -172,7 +180,10 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
         // with the controller even though none of these cases calls a migrated route. The key checks
         // themselves are covered by src/tickets/tickets.controller.spec.ts and
         // test/integration/permissions/core-ticket-transitions.integration.spec.ts.
-        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
+        // US-007: the KB routes carry keys too. Their key table is covered over real HTTP by
+        // test/integration/rag/permissions-kb-routes.integration.spec.ts, so the stub allows every key except
+        // the ones a case marks as refused (`refusedKeys`).
+        { provide: PermissionService, useValue: { can } },
         // #144: the guard's @ProjectPermission check builds an ability from this
         // factory; without it the check fails closed with 403.
         KodaCaslAbilityFactory,
@@ -203,6 +214,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     vi.clearAllMocks();
 
     currentPrincipal = developerUser;
+    refusedKeys = new Set();
 
     // `alpha` is an active project; the caller is a DEVELOPER member by default.
     membershipRepo.findBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: null });
@@ -369,6 +381,8 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
 
   it('AC12: POST /api/projects/:slug/kb/documents returns 403 for a member whose project role is VIEWER', async () => {
     membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
+    // US-007: a Viewer holds only `*.read`, so `kb.document.add` is refused by the key check.
+    refusedKeys = new Set(['kb.document.add']);
 
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/kb/documents')
@@ -401,6 +415,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
 
   it('AC12 boundary: DELETE /api/projects/:slug/kb/documents/:sourceId returns 403 for a member whose project role is VIEWER', async () => {
     membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
+    refusedKeys = new Set(['kb.document.delete']);
 
     const res = await request(app.getHttpServer()).delete(
       '/api/projects/alpha/kb/documents/doc-1',
@@ -412,6 +427,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
 
   it('AC12 boundary: POST /api/projects/:slug/kb/import/graphify returns 403 for a member whose project role is VIEWER', async () => {
     membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
+    refusedKeys = new Set(['kb.graphify.import']);
     ragRepository.findProjectBySlug.mockResolvedValue({
       id: 'proj-1',
       slug: 'alpha',
@@ -429,6 +445,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
 
   it('AC12 boundary: POST /api/projects/:slug/kb/optimize returns 403 for a member whose project role is VIEWER', async () => {
     membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
+    refusedKeys = new Set(['kb.optimize']);
 
     const res = await request(app.getHttpServer()).post('/api/projects/alpha/kb/optimize');
 
@@ -436,15 +453,26 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     expect(ragService.optimizeTable).not.toHaveBeenCalled();
   });
 
-  it('AC14: POST /api/projects/:slug/kb/search returns 200 for a member whose project role is VIEWER', async () => {
-    membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
-
+  it('AC14: POST /api/projects/:slug/kb/search returns 200 for a member whose project role is DEVELOPER', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/kb/search')
       .send({ query: 'auth bug' });
 
     expect(res.status).toBe(200);
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
+  });
+
+  // US-007: `kb.search` is a write-ish key a Viewer's `*.read` grant does not reach; it is refused by the guard.
+  it('US-007: POST /api/projects/:slug/kb/search returns 403 for a member whose project role is VIEWER', async () => {
+    membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
+    refusedKeys = new Set(['kb.search']);
+
+    const res = await request(app.getHttpServer())
+      .post('/api/projects/alpha/kb/search')
+      .send({ query: 'auth bug' });
+
+    expect(res.status).toBe(403);
+    expect(hybridRetriever.search).not.toHaveBeenCalled();
   });
 
   it('AC14 boundary: POST /api/projects/:slug/kb/search returns 403 for a non-member DEVELOPER user', async () => {
