@@ -42,8 +42,6 @@ model User {
   notificationCategoryPreferences NotificationCategoryPreference[]
   sentProjectInvites              ProjectInvite[]                  @relation("ProjectInviteInvitedBy")
   addedAgentProjects              AgentProject[]                   @relation("AgentProjectAddedBy")
-  chatThreadsCreated              ChatThread[]                     @relation("ChatThreadCreatedBy")
-  chatMessagesAuthored            ChatMessage[]                    @relation("ChatMessageAuthor")
 }
 
 model Agent {
@@ -1201,7 +1199,8 @@ model ChatThread {
   baseRef         String?
   feature         String? // nax feature; branch feat/<feature>
   title           String
-  createdById     String
+  createdById     String // a User or an Agent id (permissions P1 US-001: no foreign key, createdByType says which)
+  createdByType   String    @default("USER") // USER | AGENT
   runnerId        String?
   backend         Json // ThreadBackend; immutable
   status          String    @default("ACTIVE") // ACTIVE | ARCHIVED
@@ -1223,7 +1222,6 @@ model ChatThread {
 
   project        Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   repo           FleetRepo?        @relation(fields: [repoId], references: [id], onDelete: Cascade)
-  createdBy      User              @relation("ChatThreadCreatedBy", fields: [createdById], references: [id])
   runner         Runner?           @relation("ChatThreadRunner", fields: [runnerId], references: [id], onDelete: SetNull)
   messages       ChatMessage[]
   turns          FleetThreadTurn[]
@@ -1243,7 +1241,8 @@ model ChatMessage {
   jobId            String?
   turnId           String?
   role             String // user | assistant
-  authorUserId     String?
+  authorUserId     String? // a User or an Agent id (permissions P1 US-001: no foreign key, authorType says which)
+  authorType       String? // USER | AGENT; absent on rows written before there were agent senders
   clientMessageId  String?
   content          String   @db.Text
   toolSummary      Json?
@@ -1257,7 +1256,6 @@ model ChatMessage {
   createdAt        DateTime @default(now())
 
   thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  author User?      @relation("ChatMessageAuthor", fields: [authorUserId], references: [id])
 
   @@unique([threadId, seq])
   @@unique([threadId, clientMessageId])

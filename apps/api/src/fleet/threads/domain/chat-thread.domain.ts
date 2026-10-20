@@ -71,7 +71,13 @@ export type ThreadWriteResult =
 export interface ChatThreadRecord {
   id: string; kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null;
   title: string;
-  createdById: string; runnerId: string | null; backend: ThreadBackend; status: string; archivedAt: Date | null;
+  createdById: string;
+  /**
+   * The creator's principal type (permissions P1 US-001). Absent means a user: every row written before an agent could
+   * create a thread was a user's, and fixtures written before this field existed stay valid.
+   */
+  createdByType?: 'USER' | 'AGENT';
+  runnerId: string | null; backend: ThreadBackend; status: string; archivedAt: Date | null;
   skills: ThreadSkillSource[]; maxCostUsd: string; costUsd: string; tokens: unknown; specPath: string | null;
   pendingQuestion: unknown; session: ThreadSession | null; lastActivityAt: Date; createdAt: Date;
   activeJob: { id: string; state: string } | null;

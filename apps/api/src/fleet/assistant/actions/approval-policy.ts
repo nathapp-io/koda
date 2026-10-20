@@ -12,13 +12,15 @@ export type ApprovalMode = (typeof APPROVAL_MODES)[number];
  * once per write call, after the permission check and before the preview), so the answer moves here without touching
  * a call site.
  *
- * 3-R6: these are the code defaults — a thread write waits for the thread's user, an MCP write runs as the calling
- * agent. Nothing answers `self` or `agent` yet: the web policy editor and an agent decide path are koda #301, which
- * replaces this body (and the per-project source behind it), not the call sites.
+ * 3-R6: these are the code defaults — a user's thread write waits for the thread's user, an agent's thread write and
+ * every MCP write run as the calling agent. Nothing answers `self` or `agent` yet: the web policy editor and an agent
+ * decide path are koda #301, which replaces this body (and the per-project source behind it), not the call sites.
  *
  * `tool` is part of that seam — a per-tool policy needs it — and is deliberately unread while the defaults are
- * origin-only.
+ * origin- and actor-only. `actor` is the caller principal's type (permissions P1 US-001): an agent's turn has no human
+ * to wait for, so its thread write runs at once through the executor's `directWrite` path.
  */
-export function approvalModeFor(origin: ToolOrigin, tool: string): ApprovalMode {
-  return origin.kind === 'thread' ? 'human' : 'none';
+export function approvalModeFor(origin: ToolOrigin, tool: string, actor: 'user' | 'agent'): ApprovalMode {
+  void tool;
+  return origin.kind === 'thread' && actor === 'user' ? 'human' : 'none';
 }

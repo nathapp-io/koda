@@ -4,7 +4,8 @@ import { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { subject } from '@casl/ability';
 import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
-import { isAgentPrincipal, type AgentPrincipal, type UserPrincipal } from '../../auth/principal/koda-principal.types';
+import { isAgentPrincipal, type AgentPrincipal, type KodaAgentStatus, type UserPrincipal } from '../../auth/principal/koda-principal.types';
+import { runWithActor } from '../../action-context/action-context';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import { withProjectRole } from '../../projects/project-context';
@@ -12,7 +13,10 @@ import { stableStringify } from '../sync/stable-json';
 import { MAX_PENDING_ACTIONS, type ActionProposer, type PendingActionRecord } from './actions/pending-action.domain';
 import { approvalModeFor } from './actions/approval-policy';
 import { capText, fenceData, maskSecrets } from './assistant-tool-safety';
-import { ASSISTANT_TOOL_CALL_REPOSITORY, type AssistantToolCallRecord, type AssistantToolCallRepository, type ToolCallContext, type ToolCallOutcome } from './assistant-tool-call.domain';
+import {
+  ASSISTANT_TOOL_CALL_REPOSITORY, type AgentToolCallCreator, type AssistantToolCallRecord, type AssistantToolCallRepository,
+  type ToolCallContext, type ToolCallCreator, type ToolCallOutcome, type UserToolCallCreator,
+} from './assistant-tool-call.domain';
 import { AssistantToolRegistry } from './assistant-tool.registry';
 import { ToolActionError, ToolForbiddenError, ToolInputError, type AssistantTool, type ToolCaller, type ToolContext, type ToolResult } from './assistant-tool.types';
 
@@ -41,7 +45,7 @@ interface ActionScope {
   actor: UserPrincipal;
 }
 
-/** Fleet S5b §1 (US-002): runs a koda tool for the thread's creator, with the permission the creator would have in the web. */
+/** Fleet S5b §1 (US-002): runs a koda tool for the job's requester — a user, or an agent — with the permission they would have in the web. */
 @Injectable()
 export class AssistantToolExecutor {
   private readonly logger = new Logger(AssistantToolExecutor.name);
@@ -90,7 +94,10 @@ export class AssistantToolExecutor {
     const scope = await this.actionScope(action);
     if (!scope) return { ok: false, text: `error: ${action.tool} failed` };
     try {
-      const text = await scope.tool.execute(this.actionContext(action, scope.actor), scope.tool.parse(action.input));
+      // Permissions P1 US-001: the approve path also runs the tool inside the requester's action context, so a service
+      // the tool calls attributes its writes to that principal. `actionScope` admits users only, so the type is USER.
+      const text = await runWithActor({ type: 'USER', id: scope.actor.id }, () =>
+        scope.tool.execute(this.actionContext(action, scope.actor), scope.tool.parse(action.input)));
       return { ok: true, text: capText(maskSecrets(text), RESULT_CAP_BYTES) };
     } catch (error) {
       if (error instanceof NotFoundAppException) return { ok: false, text: 'not_found' };
@@ -152,12 +159,19 @@ export class AssistantToolExecutor {
     const context = await this.calls.findCallContext(call.jobId);
     if (!context) throw new NotFoundAppException({}, 'fleet.jobs');
 
+    const creator = context.creator;
+    // Permissions P1 US-001: `findCallContext` answers the job's requester, so an agent's turn runs as the agent and a
+    // user's as the user. `disabled` stays a user's own flag: an agent's status is liveness, not access.
+    const agent = isAgentCreator(creator);
     const caller: ToolCaller = {
-      principal: userPrincipal(context.creator),
-      disabled: context.creator.disabled,
+      principal: agent ? agentPrincipal(creator) : userPrincipal(creator),
+      disabled: agent ? false : creator.disabled,
       origin: { kind: 'thread', threadId: context.threadId, jobId: call.jobId, threadKind: context.kind ?? 'REPO', homeProject: context.project },
     };
-    return this.runAndStore(caller, call, tool, inputHash, started);
+    // Thread tool calls arrive on the runner route, which the action-context interceptor leaves outside any context, so
+    // the requester's context is established here: every service a tool calls (`FleetJobsService.dispatch` included)
+    // then attributes its writes with `actorTypeFor` to the requester.
+    return runWithActor({ type: agent ? 'AGENT' : 'USER', id: creator.id }, () => this.runAndStore(caller, call, tool, inputHash, started));
   }
 
   /** Non-thread callers have no replay key; every invocation gets its own audit row. */
@@ -294,7 +308,9 @@ export class AssistantToolExecutor {
   /** 3-D13/15: resolve policy once, after permission and before preview. Only none and thread-human are served. */
   private async writeTool(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, ctx: ToolContext): Promise<RunOutcome> {
     const name = tool.descriptor.name;
-    const mode = approvalModeFor(caller.origin, name);
+    // Permissions P1 US-001: the caller's type decides the code default — a user's thread write waits for a human, an
+    // agent's runs at once (and every MCP write runs at once, as before).
+    const mode = approvalModeFor(caller.origin, name, isAgentPrincipal(caller.principal) ? 'agent' : 'user');
     if (mode !== 'none' && !(mode === 'human' && caller.origin.kind === 'thread')) {
       this.logger.error(`koda write tool ${name} refused approval mode ${mode} for ${caller.origin.kind}`);
       return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
@@ -461,7 +477,7 @@ function parseInput(tool: AssistantTool, input: unknown): { value: unknown } | {
 }
 
 /** The creator acts with the principal their login would produce, without a project role until membership resolves one. */
-function userPrincipal(creator: ToolCallContext['creator']): UserPrincipal {
+function userPrincipal(creator: UserToolCallCreator): UserPrincipal {
   const role = creator.role === 'ADMIN' ? 'ADMIN' : 'MEMBER';
   return {
     actorType: 'user',
@@ -474,5 +490,30 @@ function userPrincipal(creator: ToolCallContext['creator']): UserPrincipal {
     revoked: false,
     authorities: [role],
     extra: { sub: creator.id, email: creator.email, role },
+  };
+}
+
+/** An absent (or non-AGENT) `type` is a user's, so every creator record written before this story still reads. */
+const isAgentCreator = (creator: ToolCallCreator): creator is AgentToolCallCreator => creator.type === 'AGENT';
+
+/**
+ * Permissions P1 US-001: the agent requester acts as the agent its own API key would produce, with no roles or
+ * capabilities of its own granted here — the tool's permission check decides what it may do, as for a user. A PAUSED
+ * agent is blacklisted (the one status that removes access); `disabled` stays false because an agent's status is
+ * liveness, not access.
+ */
+function agentPrincipal(creator: AgentToolCallCreator): AgentPrincipal {
+  return {
+    actorType: 'agent',
+    id: creator.id,
+    name: creator.slug,
+    slug: creator.slug,
+    status: creator.status as KodaAgentStatus,
+    agentRoles: [],
+    capabilities: [],
+    blacklisted: creator.status === 'PAUSED',
+    revoked: false,
+    authorities: [],
+    extra: { slug: creator.slug },
   };
 }

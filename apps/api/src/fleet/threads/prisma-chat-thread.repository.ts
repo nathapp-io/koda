@@ -7,6 +7,7 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetCommandType } from '../../common/enums';
+import { actorTypeFor, type ActorType } from '../../action-context/action-context';
 import { DEFAULT_APPROVAL_TIMEOUT_SEC } from '../common/protocol';
 import { isRunnerOnline } from '../common/runner-online';
 import { DuplicateActiveJobError, FLEET_JOB_REPOSITORY, type IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
@@ -68,6 +69,9 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       feature: input.feature,
       title: input.title,
       createdById: input.createdById,
+      // Permissions P1 US-001: the creator's type comes from the action context, so an agent's request (whose context
+      // the global interceptor set) creates an AGENT thread; anything else is a user's.
+      createdByType: actorTypeFor(input.createdById),
       backend: input.backend as Prisma.InputJsonValue,
       skills: input.skills as unknown as Prisma.InputJsonValue,
       // 1a-R4: a REPO thread's spec lives at .nax/features/<feature>/spec.md; a PROJECT thread has no repo, no feature
@@ -260,7 +264,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       }
       if (active) throw new ConflictAppException({}, 'threads.busy');
       if (thread.writtenPaths.length === 0) throw new ConflictAppException({}, 'threads.nothingToPublish');
-      const job = await this.createThreadJob(thread, 'PUBLISH');
+      const job = await this.createThreadJob(thread, 'PUBLISH', undefined, undefined, { id: userId, type: actorTypeFor(userId) });
       await this.jobs.appendEvent(job.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
       await this.activity.record({ actorType: 'USER', actorId: userId, action: 'job.dispatched', entityType: 'job', entityId: job.id, jobId: job.id, projectId: thread.projectId, responsibleUserId: userId, payload: { repoId: repoFields.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: repoFields.baseRef } });
       placeJobId = job.id;
@@ -301,7 +305,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       const paused = (await this.budgets.snapshot(new Date())).match(jobGateKeys({ projectId: thread.projectId, repoId: repoFields.repoId, pinnedRunnerId: thread.runnerId }));
       if (paused) throw new BudgetPausedException(paused);
       if (active) throw new ConflictAppException({}, 'threads.busy');
-      const job = await this.createThreadJob(thread, 'DISCARD');
+      const job = await this.createThreadJob(thread, 'DISCARD', undefined, undefined, { id: userId, type: actorTypeFor(userId) });
       await this.jobs.appendEvent(job.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
       await this.activity.record({ actorType: 'USER', actorId: userId, action: 'job.dispatched', entityType: 'job', entityId: job.id, jobId: job.id, projectId: thread.projectId, responsibleUserId: userId, payload: { repoId: repoFields.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: repoFields.baseRef } });
       placeJobId = job.id;
@@ -343,6 +347,8 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         const seq = await allocateThreadSeq(this.prisma.client, thread.id);
         const messageRow = await this.prisma.client.chatMessage.create({ data: {
           threadId: thread.id, seq, role: 'user', status: 'pending', authorUserId: input.userId,
+          // Permissions P1 US-001: the sender's type from the action context; an agent's send is the agent's message.
+          authorType: actorTypeFor(input.userId),
           clientMessageId: input.clientMessageId, content: input.text,
         } });
         await this.prisma.client.chatThread.update({ where: { id: thread.id }, data: { lastActivityAt: new Date() } });
@@ -356,7 +362,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
           return { kind: 'done' as const, result: { message, jobId: null, deduplicated: false }, notifyRunnerId: currentAfterLock.runnerId };
         }
 
-        const job = await this.createThreadJob(thread, 'SESSION', message, input.repoContext);
+        const job = await this.createThreadJob(thread, 'SESSION', message, input.repoContext, { id: input.userId, type: actorTypeFor(input.userId) });
         await this.prisma.client.chatMessage.update({ where: { id: message.id }, data: { jobId: job.id, turnId: job.id } });
         const linkedMessage = { ...message, jobId: job.id, turnId: job.id };
         await this.jobs.appendEvent(job.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
@@ -451,8 +457,13 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
    *
    * `repoContext` is the repository section `ThreadsService` resolved before the transaction (1c-D1); only a SESSION
    * passes it, so a PUBLISH or DISCARD turn keeps today's instructions.
+   *
+   * `requester` is who asked for this turn (permissions P1 US-001): the message's sender, or the caller of `publish` or
+   * `discard`. It is never the thread's creator — an agent may send into, publish or discard a thread a user created —
+   * so the job's `requestedById`/`requestedByType` name the requester and every reader of them (outcome notifications,
+   * PR attribution, `responsibleUserOf`) judges that principal.
    */
-  private async createThreadJob(thread: Prisma.ChatThreadGetPayload<object>, action: ThreadAction, message?: ChatMessageRecord, repoContext?: string) {
+  private async createThreadJob(thread: Prisma.ChatThreadGetPayload<object>, action: ThreadAction, message: ChatMessageRecord | undefined, repoContext: string | undefined, requester: { id: string; type: ActorType }) {
     const skills = thread.skills as unknown as ThreadSkillSource[];
     const backend = thread.backend as unknown as ThreadBackend;
     const target = await this.jobTargetFor(thread, repoContext);
@@ -464,7 +475,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         projectId: thread.projectId, repoId: target.repoId, ref: target.ref, command: 'THREAD', threadId: thread.id,
         feature: `thread-${thread.id}`, planFrom: null, profiles: [], maxCostUsd: action === 'SESSION' ? remaining.toString() : '0', bashMode: 'raw',
         approvalTimeoutSec: DEFAULT_APPROVAL_TIMEOUT_SEC, selectorLabels: [], pinnedRunnerId: thread.runnerId,
-        requestedById: thread.createdById,
+        requestedById: requester.id, requestedByType: requester.type,
       });
     } catch (error) {
       if (error instanceof DuplicateActiveJobError) throw new ConflictAppException({}, action === 'SESSION' ? 'threads.turnRunning' : 'threads.busy');
@@ -547,7 +558,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       id: row.id, kind: mapThreadKind(row.kind), projectId: row.projectId,
       ...(row.project ? { homeProject: row.project } : {}),
       repoId: row.repoId, baseRef: row.baseRef, feature: row.feature,
-      title: row.title, createdById: row.createdById, runnerId: row.runnerId,
+      title: row.title, createdById: row.createdById, createdByType: row.createdByType as 'USER' | 'AGENT', runnerId: row.runnerId,
       backend: row.backend as unknown as ThreadBackend, status: row.status, archivedAt: row.archivedAt,
       skills: row.skills as unknown as ThreadSkillSource[], maxCostUsd: row.maxCostUsd.toString(),
       costUsd: row.costUsd.toString(), tokens: row.tokens, specPath: row.specPath,

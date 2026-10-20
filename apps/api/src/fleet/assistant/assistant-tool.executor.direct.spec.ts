@@ -37,7 +37,8 @@ describe('direct assistant writes', () => {
     expect(tool.execute).toHaveBeenCalledTimes(1);
     expect(tool.execute).toHaveBeenCalledWith(expect.objectContaining({ actor: principal, threadId: null, jobId: null }), { ref: 'WEB-1', body: 'from mcp' });
     expect(actions.propose).not.toHaveBeenCalled();
-    expect(approvalModeFor).toHaveBeenCalledExactlyOnceWith(caller.origin, call.name);
+    // US-001: the policy also sees the caller principal's type, which is what lets an agent's thread write run at once.
+    expect(approvalModeFor).toHaveBeenCalledExactlyOnceWith(caller.origin, call.name, 'agent');
     expect(vi.mocked(approvalModeFor).mock.invocationCallOrder[0]).toBeLessThan(Number(preview.mock.invocationCallOrder[0]));
   });
   it('AC-2: returns the outcome and action suffix', async () => {
