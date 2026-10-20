@@ -5665,6 +5665,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.job.dispatch is missing"
+          },
           "404": {
             "description": "Repo not in this project, or pinned runner unknown"
           },
@@ -5680,7 +5683,7 @@
             "bearer": []
           }
         ],
-        "summary": "Dispatch a nax run or plan to a fleet runner (project DEVELOPER+)",
+        "summary": "Dispatch a nax run or plan to a fleet runner (fleet.job.dispatch)",
         "tags": [
           "fleet"
         ]
@@ -5784,6 +5787,9 @@
         "responses": {
           "200": {
             "description": "Page of FleetJobDto"
+          },
+          "403": {
+            "description": "fleet.job.read is missing"
           }
         },
         "security": [
@@ -5791,7 +5797,7 @@
             "bearer": []
           }
         ],
-        "summary": "List fleet jobs (project member)",
+        "summary": "List fleet jobs (fleet.job.read)",
         "tags": [
           "fleet"
         ]
@@ -5829,6 +5835,9 @@
               }
             }
           },
+          "403": {
+            "description": "The caller neither holds fleet.job.cancel nor requested the job"
+          },
           "409": {
             "description": "Job already finished"
           }
@@ -5838,7 +5847,7 @@
             "bearer": []
           }
         ],
-        "summary": "Cancel a job (project DEVELOPER+, or the requester)",
+        "summary": "Cancel a job (fleet.job.cancel, or the requester)",
         "tags": [
           "fleet"
         ]
@@ -5876,6 +5885,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.job.requeue is missing"
+          },
           "409": {
             "description": "Job not requeueable, an active duplicate exists, or a budget covering the job is paused"
           }
@@ -5885,7 +5897,7 @@
             "bearer": []
           }
         ],
-        "summary": "Requeue a CRASHED, FAILED or CANCELLED job (project DEVELOPER+)",
+        "summary": "Requeue a CRASHED, FAILED or CANCELLED job (fleet.job.requeue)",
         "tags": [
           "fleet"
         ]
@@ -5922,6 +5934,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.job.read is missing"
           }
         },
         "security": [
@@ -5929,7 +5944,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get a fleet job (project member)",
+        "summary": "Get a fleet job (fleet.job.read)",
         "tags": [
           "fleet"
         ]
@@ -5982,6 +5997,9 @@
         "responses": {
           "200": {
             "description": "Page of FleetJobEventDto"
+          },
+          "403": {
+            "description": "fleet.job.read is missing"
           }
         },
         "security": [
@@ -5989,7 +6007,7 @@
             "bearer": []
           }
         ],
-        "summary": "Job timeline, ordered by seq (project member)",
+        "summary": "Job timeline, ordered by seq (fleet.job.read)",
         "tags": [
           "fleet"
         ]
@@ -6030,6 +6048,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.ticket-job.read is missing"
+          },
           "404": {
             "description": "Ticket not found"
           }
@@ -6039,7 +6060,7 @@
             "bearer": []
           }
         ],
-        "summary": "Fleet jobs linked to a ticket, newest first, at most 50 (project member)",
+        "summary": "Fleet jobs linked to a ticket, newest first, at most 50 (fleet.ticket-job.read)",
         "tags": [
           "fleet"
         ]
@@ -6078,6 +6099,9 @@
           "204": {
             "description": "Unlinked"
           },
+          "403": {
+            "description": "fleet.ticket-job.unlink is missing"
+          },
           "404": {
             "description": "Ticket not found, or the job is not linked to it"
           }
@@ -6087,7 +6111,7 @@
             "bearer": []
           }
         ],
-        "summary": "Unlink a fleet job from a ticket (project DEVELOPER+); the PR and history stay",
+        "summary": "Unlink a fleet job from a ticket (fleet.ticket-job.unlink); the PR and history stay",
         "tags": [
           "fleet"
         ]
@@ -6992,6 +7016,9 @@
         "responses": {
           "200": {
             "description": "Page of FleetRepoDto"
+          },
+          "403": {
+            "description": "fleet.repo.read is missing"
           }
         },
         "security": [
@@ -6999,7 +7026,7 @@
             "bearer": []
           }
         ],
-        "summary": "The project's fleet repos (project member)",
+        "summary": "The project's fleet repos (fleet.repo.read)",
         "tags": [
           "fleet"
         ]
@@ -7730,6 +7757,9 @@
         "responses": {
           "200": {
             "description": "Page of RunnerSummaryDto, ordered by name"
+          },
+          "403": {
+            "description": "fleet.runner.read is missing"
           }
         },
         "security": [
@@ -7737,7 +7767,7 @@
             "bearer": []
           }
         ],
-        "summary": "Runner summaries for dispatch and job lists (project member)",
+        "summary": "Runner summaries for dispatch and job lists (fleet.runner.read)",
         "tags": [
           "fleet"
         ]
@@ -7841,6 +7871,9 @@
           "200": {
             "description": "tar.gz stream"
           },
+          "403": {
+            "description": "fleet.job.bundle.read is missing"
+          },
           "404": {
             "description": "No such job or no bundle yet"
           },
@@ -7853,7 +7886,7 @@
             "bearer": []
           }
         ],
-        "summary": "Download the latest run bundle (project member)",
+        "summary": "Download the latest run bundle (fleet.job.bundle.read)",
         "tags": [
           "fleet"
         ]
@@ -7986,6 +8019,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.job.logs.read is missing"
+          },
           "404": {
             "description": "No such job in this project"
           }
@@ -7995,7 +8031,7 @@
             "bearer": []
           }
         ],
-        "summary": "Log streams of every attempt of a job, latest first (project member, S2a §3.1)",
+        "summary": "Log streams of every attempt of a job, latest first (fleet.job.logs.read)",
         "tags": [
           "fleet"
         ]
@@ -8144,6 +8180,9 @@
           "400": {
             "description": "Invalid stream or query"
           },
+          "403": {
+            "description": "fleet.job.logs.read is missing"
+          },
           "404": {
             "description": "No such job, or leaseEpoch is past the current attempt of the job"
           },
@@ -8156,7 +8195,7 @@
             "bearer": []
           }
         ],
-        "summary": "One page of log lines, filtered server-side within a bounded scan (project member, S2a §3.3)",
+        "summary": "One page of log lines, filtered server-side within a bounded scan (fleet.job.logs.read)",
         "tags": [
           "fleet"
         ]
@@ -8245,6 +8284,9 @@
           "400": {
             "description": "Invalid stream or range"
           },
+          "403": {
+            "description": "fleet.job.logs.read is missing"
+          },
           "404": {
             "description": "No such job or attempt, or nothing stored to download"
           },
@@ -8257,7 +8299,7 @@
             "bearer": []
           }
         ],
-        "summary": "Raw bytes of a log stream: a range of at most 1 MiB, or download=1 for all of it (S2a §3.2)",
+        "summary": "Raw bytes of a log stream: a range of at most 1 MiB, or download=1 for all of it (fleet.job.logs.read)",
         "tags": [
           "fleet"
         ]
@@ -8501,6 +8543,9 @@
           },
           "400": {
             "description": "Invalid window, bucket or groupBy"
+          },
+          "403": {
+            "description": "fleet.analytics.read is missing"
           }
         },
         "security": [
@@ -8508,7 +8553,7 @@
             "bearer": []
           }
         ],
-        "summary": "Fleet spend over a window, bucketed and grouped (project member, S2b §4.2)",
+        "summary": "Fleet spend over a window, bucketed and grouped (fleet.analytics.read, S2b §4.2)",
         "tags": [
           "fleet"
         ]
@@ -8574,6 +8619,9 @@
           },
           "400": {
             "description": "Invalid window or bucket"
+          },
+          "403": {
+            "description": "fleet.analytics.read is missing"
           }
         },
         "security": [
@@ -8581,7 +8629,7 @@
             "bearer": []
           }
         ],
-        "summary": "Run quality over a window: first pass, attempts, reviews, finish outcomes (project member)",
+        "summary": "Run quality over a window: first pass, attempts, reviews, finish outcomes (fleet.analytics.read)",
         "tags": [
           "fleet"
         ]
@@ -8657,6 +8705,9 @@
           },
           "400": {
             "description": "Invalid window, sort or limit"
+          },
+          "403": {
+            "description": "fleet.analytics.read is missing"
           }
         },
         "security": [
@@ -8664,7 +8715,7 @@
             "bearer": []
           }
         ],
-        "summary": "The most expensive or most looping stories in a window (project member)",
+        "summary": "The most expensive or most looping stories in a window (fleet.analytics.read)",
         "tags": [
           "fleet"
         ]
@@ -8739,6 +8790,9 @@
           },
           "400": {
             "description": "Invalid window, sort or limit"
+          },
+          "403": {
+            "description": "fleet.analytics.read is missing"
           }
         },
         "security": [
@@ -8746,7 +8800,7 @@
             "bearer": []
           }
         ],
-        "summary": "The most expensive jobs finished in a window, with ledger drift (project member)",
+        "summary": "The most expensive jobs finished in a window, with ledger drift (fleet.analytics.read)",
         "tags": [
           "fleet"
         ]
@@ -8798,6 +8852,9 @@
           },
           "400": {
             "description": "Invalid window"
+          },
+          "403": {
+            "description": "fleet.analytics.read is missing"
           }
         },
         "security": [
@@ -8805,7 +8862,7 @@
             "bearer": []
           }
         ],
-        "summary": "Ingest rows not yet analysed or failed, for jobs finished in a window (project member, D388)",
+        "summary": "Ingest rows not yet analysed or failed, for jobs finished in a window (fleet.analytics.read, D388)",
         "tags": [
           "fleet"
         ]
@@ -8843,6 +8900,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.analytics.read is missing"
+          },
           "404": {
             "description": "No such job in this project"
           }
@@ -8852,7 +8912,7 @@
             "bearer": []
           }
         ],
-        "summary": "One job's cost and quality breakdown across its attempts (project member)",
+        "summary": "One job's cost and quality breakdown across its attempts (fleet.analytics.read)",
         "tags": [
           "fleet"
         ]
@@ -9040,6 +9100,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.dashboard.read is missing"
           }
         },
         "security": [
@@ -9047,7 +9110,7 @@
             "bearer": []
           }
         ],
-        "summary": "The project's fleet health: its jobs, runner health, attention items (project member)",
+        "summary": "The project's fleet health: its jobs, runner health, attention items (fleet.dashboard.read)",
         "tags": [
           "fleet"
         ]

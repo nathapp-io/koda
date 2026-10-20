@@ -168,6 +168,36 @@ describe('fleet OpenAPI contract', () => {
     expect(spec.components.schemas['AttentionReasonDto']).toBeDefined();
   });
 
+  it('documents the permission key and the 403 of every project fleet read (P1d US-004)', () => {
+    // The committed spec is the CLI's and web's contract, so a migrated route must read as one that
+    // needs its catalog key — a stale openapi.json still advertises "project member" (R10) and no 403.
+    const routes: Array<[string, string, string]> = [
+      ['/api/projects/{slug}/fleet/jobs/{id}/logs', 'get', 'fleet.job.logs.read'],
+      ['/api/projects/{slug}/fleet/jobs/{id}/logs/{stream}/entries', 'get', 'fleet.job.logs.read'],
+      ['/api/projects/{slug}/fleet/jobs/{id}/logs/{stream}/raw', 'get', 'fleet.job.logs.read'],
+      ['/api/projects/{slug}/fleet/jobs/{id}/bundle', 'get', 'fleet.job.bundle.read'],
+      ['/api/projects/{slug}/fleet/analytics/spend', 'get', 'fleet.analytics.read'],
+      ['/api/projects/{slug}/fleet/analytics/quality', 'get', 'fleet.analytics.read'],
+      ['/api/projects/{slug}/fleet/analytics/stories', 'get', 'fleet.analytics.read'],
+      ['/api/projects/{slug}/fleet/analytics/jobs', 'get', 'fleet.analytics.read'],
+      ['/api/projects/{slug}/fleet/analytics/ingest', 'get', 'fleet.analytics.read'],
+      ['/api/projects/{slug}/fleet/jobs/{id}/analytics', 'get', 'fleet.analytics.read'],
+      ['/api/projects/{slug}/fleet/dashboard', 'get', 'fleet.dashboard.read'],
+      ['/api/projects/{slug}/fleet/runners', 'get', 'fleet.runner.read'],
+      ['/api/projects/{slug}/fleet/repos', 'get', 'fleet.repo.read'],
+    ];
+    const documented = routes.map(([path, method, key]) => {
+      const op = (spec.paths[path]?.[method] ?? {}) as {
+        summary?: string;
+        responses?: Record<string, unknown>;
+      };
+      return { path, key, summary: op.summary ?? null, forbidden: op.responses?.['403'] !== undefined };
+    });
+    expect(documented).toEqual(
+      routes.map(([path, , key]) => ({ path, key, summary: expect.stringContaining(`(${key}`), forbidden: true })),
+    );
+  });
+
   it('exposes the credential board (S3 §4.4)', () => {
     expect(spec.paths['/api/fleet/credential-board']?.['get']).toBeDefined();
     expect(Object.keys(spec.components.schemas['CredentialBoardDto']?.properties ?? {}).sort())
