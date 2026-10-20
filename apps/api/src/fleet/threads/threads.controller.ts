@@ -1,47 +1,57 @@
 import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { CaslPermissionAction, Principal } from '@nathapp/nestjs-auth';
-import { ForbiddenAppException, JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
-import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
+import { Principal } from '@nathapp/nestjs-auth';
+import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
-import { isUserPrincipal } from '../../auth/principal/koda-principal.types';
+import { PermissionService } from '../../permissions/permission.service';
+import { Requires } from '../../permissions/requires.decorator';
+import { RequiresGuard } from '../../permissions/requires.guard';
 import { CurrentProject } from '../../projects/current-project.decorator';
 import { ProjectMembershipGuard } from '../../projects/project-membership.guard';
 import type { ProjectContext } from '../../projects/project-context';
-import { withProjectRole } from '../../projects/project-context';
 import { ThreadsService } from './threads.service';
 import { AnswerQuestionDto, ChatMessageListDto, ChatMessageDto, CreateThreadDto, SendMessageDto, SendMessageResultDto, ThreadDetailDto, ThreadDto, ThreadListDto, UpdateThreadDto } from './dto/thread.dto';
 import { PlanThreadDto, RunThreadDto } from './dto/thread-handoff.dto';
 import { DispatchResultDto } from '../jobs/dto/fleet-job.dto';
 
+/**
+ * The project thread routes, migrated onto permission keys by permissions P1 US-002.
+ *
+ * Every route declares `ProjectMembershipGuard, RequiresGuard` in one `@UseGuards`, so the membership
+ * guard resolves `request.projectContext` before the key check. There is no principal-type refusal and
+ * no CASL check left: an agent may create and drive a thread, and the key decides.
+ *
+ * The thread write keys are ownable, so `RequiresGuard` passes a caller holding only `X.own`
+ * (`not-owner`) on purpose — the row is not loaded yet. The handler then asks for the same key
+ * *without* a resource: `canOperate` is true only for an any-row holder, and a `.own` holder keeps the
+ * creator compare in the service and repository. `plan` and `run` also need `fleet.job.dispatch`,
+ * because both dispatch a job.
+ */
 @ApiTags('fleet threads')
 @ApiBearerAuth()
 @ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
 @Controller('projects/:slug/threads')
-@UseGuards(ProjectMembershipGuard)
 export class ThreadsController {
-  constructor(private readonly threads: ThreadsService, private readonly casl: KodaCaslAbilityFactory) {}
-
-  private assertUser(principal: KodaPrincipal): void {
-    if (!isUserPrincipal(principal)) throw new ForbiddenAppException({}, 'threads.principal');
-  }
+  constructor(private readonly threads: ThreadsService, private readonly permissions: PermissionService) {}
 
   @Post()
   @HttpCode(201)
-  @ApiOperation({ summary: 'Create a chat thread (project DEVELOPER+)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('thread.create')
+  @ApiOperation({ summary: 'Create a chat thread (thread.create)' })
   @ApiResponse({ status: 201, type: ThreadDto })
+  @ApiResponse({ status: 403, description: 'thread.create is missing' })
   async create(@Body() dto: CreateThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    this.assertUser(principal);
-    const ability = await this.casl.createForUser(withProjectRole(principal, ctx.role));
-    if (!ability.can(CaslPermissionAction.CREATE, 'FleetJob')) throw new ForbiddenAppException({}, 'projects');
     return JsonResponse.Ok(await this.threads.create(ctx.project.id, principal.id, dto));
   }
 
   @Get()
-  @ApiOperation({ summary: 'List project chat threads' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('thread.read')
+  @ApiOperation({ summary: 'List project chat threads (thread.read)' })
   @ApiResponse({ status: 200, type: ThreadListDto })
-  async list(@Query() query: Record<string, string | undefined>, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    this.assertUser(principal);
+  @ApiResponse({ status: 403, description: 'thread.read is missing' })
+  async list(@Query() query: Record<string, string | undefined>, @CurrentProject() ctx: ProjectContext) {
     const status = query.status;
     if (status !== undefined && status !== 'ACTIVE' && status !== 'ARCHIVED') throw new ValidationAppException({ reason: 'status' }, 'threads.input');
     // A query string is only digits here, so `Number('1e3')` or `Number('')` never become a page.
@@ -59,120 +69,156 @@ export class ThreadsController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a chat thread' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('thread.read')
+  @ApiOperation({ summary: 'Get a chat thread (thread.read)' })
   @ApiResponse({ status: 200, type: ThreadDetailDto })
-  async get(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    this.assertUser(principal);
+  @ApiResponse({ status: 403, description: 'thread.read is missing' })
+  async get(@Param('id') id: string, @CurrentProject() ctx: ProjectContext) {
     return JsonResponse.Ok(await this.threads.get(ctx.project.id, id));
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update a chat thread cost cap' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('thread.cap.update')
+  @ApiOperation({ summary: 'Update a chat thread cost cap (thread.cap.update: the creator, or the any-row key)' })
   @ApiResponse({ status: 200, type: ThreadDto })
+  @ApiResponse({ status: 403, description: 'The caller neither holds thread.cap.update nor created the thread' })
   async update(@Param('id') id: string, @Body() dto: UpdateThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    this.assertUser(principal);
-    return JsonResponse.Ok(await this.threads.updateCap(ctx.project.id, id, principal.id, dto.maxCostUsd));
+    const canOperate = await this.canOperate(principal, 'thread.cap.update', ctx);
+    return JsonResponse.Ok(await this.threads.updateCap(ctx.project.id, id, principal.id, dto.maxCostUsd, canOperate));
   }
 
   @Post(':id/plan')
   @HttpCode(201)
-  @ApiOperation({ summary: 'Plan a published thread spec (creator, project DEVELOPER+)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires(['thread.plan', 'fleet.job.dispatch'])
+  @ApiOperation({ summary: 'Plan a published thread spec (thread.plan and fleet.job.dispatch: the creator, or the any-row key)' })
   @ApiResponse({ status: 201, type: DispatchResultDto })
+  @ApiResponse({ status: 403, description: 'thread.plan or fleet.job.dispatch is missing, or the caller did not create the thread' })
   async plan(@Param('id') id: string, @Body() dto: PlanThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    this.assertUser(principal);
-    const ability = await this.casl.createForUser(withProjectRole(principal, ctx.role));
-    if (!ability.can(CaslPermissionAction.CREATE, 'FleetJob')) throw new ForbiddenAppException({}, 'projects');
-    return JsonResponse.Ok(await this.threads.plan(ctx.project.id, id, principal.id, dto));
+    const canOperate = await this.canOperate(principal, 'thread.plan', ctx);
+    return JsonResponse.Ok(await this.threads.plan(ctx.project.id, id, principal.id, dto, canOperate));
   }
 
   @Post(':id/run')
   @HttpCode(201)
-  @ApiOperation({ summary: 'Run a thread after its latest plan completed (creator, project DEVELOPER+)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires(['thread.run', 'fleet.job.dispatch'])
+  @ApiOperation({ summary: 'Run a thread after its latest plan completed (thread.run and fleet.job.dispatch: the creator, or the any-row key)' })
   @ApiResponse({ status: 201, type: DispatchResultDto })
+  @ApiResponse({ status: 403, description: 'thread.run or fleet.job.dispatch is missing, or the caller did not create the thread' })
   async run(@Param('id') id: string, @Body() dto: RunThreadDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    this.assertUser(principal);
-    const ability = await this.casl.createForUser(withProjectRole(principal, ctx.role));
-    if (!ability.can(CaslPermissionAction.CREATE, 'FleetJob')) throw new ForbiddenAppException({}, 'projects');
-    return JsonResponse.Ok(await this.threads.run(ctx.project.id, id, principal.id, dto));
+    const canOperate = await this.canOperate(principal, 'thread.run', ctx);
+    return JsonResponse.Ok(await this.threads.run(ctx.project.id, id, principal.id, dto, canOperate));
   }
 
   @Post(':id/stop')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Stop the live turn of a chat thread (creator)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('thread.stop')
+  @ApiOperation({ summary: 'Stop the live turn of a chat thread (thread.stop: the creator, or the any-row key)' })
+  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 403, description: 'The caller neither holds thread.stop nor created the thread' })
   async stop(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    this.assertUser(principal);
-    await this.threads.stop(ctx.project.id, id, principal.id);
+    const canOperate = await this.canOperate(principal, 'thread.stop', ctx);
+    await this.threads.stop(ctx.project.id, id, principal.id, canOperate);
     return JsonResponse.Ok({});
   }
 
   @Post(':id/end-session')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Close the live session of a chat thread (creator)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('thread.end-session')
+  @ApiOperation({ summary: 'Close the live session of a chat thread (thread.end-session: the creator, or the any-row key)' })
+  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 403, description: 'The caller neither holds thread.end-session nor created the thread' })
   async endSession(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    this.assertUser(principal);
-    await this.threads.endSession(ctx.project.id, id, principal.id);
+    const canOperate = await this.canOperate(principal, 'thread.end-session', ctx);
+    await this.threads.endSession(ctx.project.id, id, principal.id, canOperate);
     return JsonResponse.Ok({});
   }
 
   @Post(':id/answer')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Answer a pending question of a chat thread (creator)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('thread.answer')
+  @ApiOperation({ summary: 'Answer a pending question of a chat thread (thread.answer: the creator, or the any-row key)' })
+  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 403, description: 'The caller neither holds thread.answer nor created the thread' })
+  @ApiResponse({ status: 409, description: 'threads.noQuestion, threads.noSession, or threads.sessionOtherPrincipal' })
   async answer(@Param('id') id: string, @Body() dto: AnswerQuestionDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    this.assertUser(principal);
-    await this.threads.answer(ctx.project.id, id, principal.id, dto);
+    const canOperate = await this.canOperate(principal, 'thread.answer', ctx);
+    await this.threads.answer(ctx.project.id, id, principal.id, dto, canOperate);
     return JsonResponse.Ok({});
   }
 
   @Post(':id/archive')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Archive a chat thread (creator or project admin)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('thread.archive')
+  @ApiOperation({ summary: 'Archive a chat thread (thread.archive: the creator, or the any-row key)' })
   @ApiResponse({ status: 200, type: ThreadDetailDto })
+  @ApiResponse({ status: 403, description: 'The caller neither holds thread.archive nor created the thread' })
   async archive(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    this.assertUser(principal);
-    await this.threads.archive(ctx.project.id, id, principal.id, ctx.role === 'ADMIN');
+    const canOperate = await this.canOperate(principal, 'thread.archive', ctx);
+    await this.threads.archive(ctx.project.id, id, principal.id, canOperate);
     return JsonResponse.Ok(await this.threads.get(ctx.project.id, id));
   }
 
   @Post(':id/publish')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Publish thread documents (creator)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('thread.publish')
+  @ApiOperation({ summary: 'Publish thread documents (thread.publish: the creator, or the any-row key)' })
   @ApiResponse({ status: 200, schema: { type: 'object', properties: { jobId: { type: 'string', nullable: true } } } })
+  @ApiResponse({ status: 403, description: 'The caller neither holds thread.publish nor created the thread' })
+  @ApiResponse({ status: 409, description: 'threads.sessionOtherPrincipal when another principal started the live session' })
   async publish(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    this.assertUser(principal);
-    return JsonResponse.Ok(await this.threads.publish(ctx.project.id, id, principal.id));
+    const canOperate = await this.canOperate(principal, 'thread.publish', ctx);
+    return JsonResponse.Ok(await this.threads.publish(ctx.project.id, id, principal.id, canOperate));
   }
 
   @Post(':id/discard')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Discard the thread worktree changes (creator)' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('thread.discard')
+  @ApiOperation({ summary: 'Discard the thread worktree changes (thread.discard: the creator, or the any-row key)' })
   @ApiResponse({ status: 200, schema: { type: 'object', properties: { jobId: { type: 'string' } } } })
+  @ApiResponse({ status: 403, description: 'The caller neither holds thread.discard nor created the thread' })
   async discard(@Param('id') id: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    this.assertUser(principal);
-    return JsonResponse.Ok(await this.threads.discard(ctx.project.id, id, principal.id));
+    const canOperate = await this.canOperate(principal, 'thread.discard', ctx);
+    return JsonResponse.Ok(await this.threads.discard(ctx.project.id, id, principal.id, canOperate));
   }
 
   @Post(':id/messages')
   @HttpCode(201)
-  @ApiOperation({ summary: 'Send a message to a chat thread' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('thread.message.send')
+  @ApiOperation({ summary: 'Send a message to a chat thread (thread.message.send: the creator, or the any-row key)' })
   @ApiResponse({ status: 201, type: SendMessageResultDto })
   @ApiResponse({ status: 200, type: SendMessageResultDto })
+  @ApiResponse({ status: 403, description: 'The caller neither holds thread.message.send nor created the thread' })
+  @ApiResponse({ status: 409, description: 'threads.sessionOtherPrincipal when another principal started the live session' })
   async sendMessage(    @Param('id') id: string,
     @Body() dto: SendMessageDto,
     @CurrentProject() ctx: ProjectContext,
     @Principal() principal: KodaPrincipal,
     @Res({ passthrough: true }) response: { status: (code: number) => unknown },
   ) {
-    this.assertUser(principal);
-    const result = await this.threads.sendMessage(ctx.project.id, id, principal.id, dto);
+    const canOperate = await this.canOperate(principal, 'thread.message.send', ctx);
+    const result = await this.threads.sendMessage(ctx.project.id, id, principal.id, dto, canOperate);
     if (result.deduplicated) response.status(200);
     return JsonResponse.Ok({ message: result.message, jobId: result.jobId });
   }
 
   @Get(':id/messages')
-  @ApiOperation({ summary: 'List chat thread messages' })
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('thread.read')
+  @ApiOperation({ summary: 'List chat thread messages (thread.read)' })
   @ApiResponse({ status: 200, type: ChatMessageListDto })
-  async messages(@Param('id') id: string, @Query() query: Record<string, string | undefined>, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    this.assertUser(principal);
+  @ApiResponse({ status: 403, description: 'thread.read is missing' })
+  async messages(@Param('id') id: string, @Query() query: Record<string, string | undefined>, @CurrentProject() ctx: ProjectContext) {
     const intParam = (raw: string | undefined, min: number, max: number): number | null => {
       if (raw === undefined || !/^\d+$/.test(raw)) return null;
       const value = Number(raw);
@@ -182,5 +228,14 @@ export class ThreadsController {
     const limit = intParam(query.limit, 1, 200);
     if ((query.afterSeq !== undefined && after === null) || (query.limit !== undefined && limit === null)) throw new ValidationAppException({ reason: 'messages' }, 'threads.input');
     return JsonResponse.Ok(await this.threads.messages(ctx.project.id, id, after ?? 0, limit ?? 100));
+  }
+
+  /**
+   * The any-row half of "creator or any-row key holder": a caller holding the plain key operates on every
+   * thread of the project; one holding only `X.own` is answered `not-owner` here (no resource is passed),
+   * so the service and repository keep the `createdById === caller` compare.
+   */
+  private async canOperate(principal: KodaPrincipal, key: string, ctx: ProjectContext): Promise<boolean> {
+    return (await this.permissions.can(principal, key, { projectId: ctx.project.id })).allowed;
   }
 }

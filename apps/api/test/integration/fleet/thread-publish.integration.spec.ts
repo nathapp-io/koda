@@ -154,10 +154,11 @@ describeDb('US-003 thread publish', () => {
     expect(response.body.message).toContain('Another job of this thread is still active');
   });
 
-  it('AC-13: refuses publish by a project member who is not the creator', async () => {
+  it('AC-13: refuses publish by a project member who is not the creator with 403 permissions', async () => {
     const thread = await makeThread({ writtenPaths: ['docs/a.md'] });
     const response = await publish(thread.id, world.tokens.viewer).expect(403);
-    expect(response.body.message).toContain('Only the thread creator');
+    // Permissions P1 US-002: the creator compare asks for the `thread.publish` any-row key.
+    expect(response.body).toEqual(expect.objectContaining({ ret: 40003, message: 'You do not have permissions to perform this action' }));
     expect(await db.fleetJob.count({ where: { threadId: thread.id } })).toBe(0);
     expect(await db.fleetCommand.count({ where: { job: { threadId: thread.id } } })).toBe(0);
   });

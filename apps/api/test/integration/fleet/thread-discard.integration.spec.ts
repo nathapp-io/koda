@@ -120,11 +120,12 @@ describeDb('US-004 thread discard', () => {
     expect(response.body.message).toContain('Another job of this thread is still active');
   });
 
-  it('AC-7: refuses a project member who is not the creator with 403', async () => {
+  it('AC-7: refuses a project member who is not the creator with 403 permissions', async () => {
     const runner = await makeRunner(`discard-creator-${uid()}`);
     const thread = await makeThread({ runnerId: runner.id });
     const response = await discard(thread.id, world.tokens.viewer).expect(403);
-    expect(response.body.message).toContain('Only the thread creator');
+    // Permissions P1 US-002: the creator compare asks for the `thread.discard` any-row key.
+    expect(response.body).toEqual(expect.objectContaining({ ret: 40003, message: 'You do not have permissions to perform this action' }));
     expect(await db.fleetJob.count({ where: { threadId: thread.id } })).toBe(0);
   });
 });

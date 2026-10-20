@@ -79,10 +79,22 @@ describe('PrismaChatThreadRepository.discard (US-004)', () => {
     expect(jobs.createJob).toHaveBeenCalledWith(expect.objectContaining({ command: 'THREAD', maxCostUsd: '0', threadId: 'T' }));
   });
 
-  it('AC-7: refuses a project member who is not the creator with threads.notCreator', async () => {
+  it('AC-7: refuses a project member who is not the creator with 403 permissions when canOperate is false', async () => {
     const { repo, jobs } = discardRepo();
-    await expect(repo.discard('P', 'T', 'someone-else')).rejects.toMatchObject({ prefix: 'threads.notCreator' });
+    await expect(repo.discard('P', 'T', 'someone-else')).rejects.toMatchObject({ prefix: 'permissions', httpStatus: 403 });
     expect(jobs.createJob).not.toHaveBeenCalled();
+  });
+
+  it('US-002: an any-row key holder discards another creator\'s thread when canOperate is true', async () => {
+    const { repo, jobs } = discardRepo();
+    await expect(repo.discard('P', 'T', 'someone-else', true)).resolves.toEqual({ jobId: 'DJ' });
+    expect(jobs.createJob).toHaveBeenCalledWith(expect.objectContaining({ requestedById: 'someone-else', requestedByType: 'USER' }));
+  });
+
+  it('US-002: the creator still discards its own thread with canOperate false', async () => {
+    const { repo, jobs } = discardRepo();
+    await expect(repo.discard('P', 'T', 'U', false)).resolves.toEqual({ jobId: 'DJ' });
+    expect(jobs.createJob).toHaveBeenCalledTimes(1);
   });
 
   it('answers 404 threads.notFound for an unknown thread', async () => {

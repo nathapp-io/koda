@@ -15,13 +15,15 @@ const row = {
 
 /**
  * A `command` fake: the thread row, the current THREAD job (state RUNNING, action `action`), and no close command.
- * `txManager.run` calls through; `createCommand` records what it queues.
+ * `txManager.run` calls through; `createCommand` records what it queues. `requester` is the job's requester, which
+ * permissions P1 US-002 compares against the caller before it steers a live session.
  */
-function commandRepo(opts: { action: 'SESSION' | 'PUBLISH' | 'DISCARD'; pendingQuestion?: unknown }) {
+function commandRepo(opts: { action: 'SESSION' | 'PUBLISH' | 'DISCARD'; pendingQuestion?: unknown; requester?: { id: string; type: string } }) {
   const threadRow = {
     id: 'T', projectId: 'P', createdById: 'U', pendingQuestion: opts.pendingQuestion ?? null, status: 'ACTIVE',
   };
-  const job = { id: 'J', state: 'RUNNING', runnerId: 'R', leaseEpoch: 4, command: 'THREAD' };
+  const requester = opts.requester ?? { id: 'U', type: 'USER' };
+  const job = { id: 'J', state: 'RUNNING', runnerId: 'R', leaseEpoch: 4, command: 'THREAD', requestedById: requester.id, requestedByType: requester.type };
   const prisma = {
     client: {
       chatThread: { findFirst: vi.fn(async () => threadRow) },
@@ -71,6 +73,49 @@ describe('PrismaChatThreadRepository.command while a PUBLISH or DISCARD job is a
     await repo.command({ kind: 'project', projectId: 'P' }, 'T', 'U', 'THREAD_STOP_TURN', {});
     expect(jobs.createCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'THREAD_STOP_TURN', jobId: 'J', leaseEpoch: 4 }));
     expect(notifier.notify).toHaveBeenCalledWith('R');
+  });
+});
+
+/**
+ * Permissions P1 US-002: input that steers a live turn belongs to the turn's requester. An answer into
+ * someone else's RUNNING SESSION job is refused with 409 `threads.sessionOtherPrincipal` and writes
+ * nothing; a stop or end-session carries no input and is not affected.
+ */
+describe('PrismaChatThreadRepository.command session ownership (US-002)', () => {
+  it('AC-13: refuses an answer into another principal\'s live SESSION job without queuing a command', async () => {
+    const { repo, jobs, notifier } = commandRepo({ action: 'SESSION', pendingQuestion: { requestId: 'q1' }, requester: { id: 'U', type: 'USER' } });
+
+    // The any-row `thread.answer` holder (canOperate) passes the creator compare, so the session rule decides.
+    await expect(repo.command({ kind: 'project', projectId: 'P' }, 'T', 'other-admin', 'THREAD_ANSWER', { requestId: 'q1', text: 'yes' }, true))
+      .rejects.toMatchObject({ prefix: 'threads.sessionOtherPrincipal', httpStatus: 409 });
+
+    expect(jobs.createCommand).not.toHaveBeenCalled();
+    expect(notifier.notify).not.toHaveBeenCalled();
+  });
+
+  it('AC-13: answers the requester\'s own live session with the answer command', async () => {
+    const { repo, jobs } = commandRepo({ action: 'SESSION', pendingQuestion: { requestId: 'q1' }, requester: { id: 'U', type: 'USER' } });
+
+    await repo.command({ kind: 'project', projectId: 'P' }, 'T', 'U', 'THREAD_ANSWER', { requestId: 'q1', text: 'yes' });
+
+    expect(jobs.createCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'THREAD_ANSWER', payload: { requestId: 'q1', text: 'yes' } }));
+  });
+
+  it('compares the requester\'s type too, so an agent id equal to a user id is a different principal', async () => {
+    const { repo, jobs } = commandRepo({ action: 'SESSION', pendingQuestion: { requestId: 'q1' }, requester: { id: 'U', type: 'AGENT' } });
+
+    await expect(repo.command({ kind: 'project', projectId: 'P' }, 'T', 'U', 'THREAD_ANSWER', { requestId: 'q1', text: 'yes' }))
+      .rejects.toMatchObject({ prefix: 'threads.sessionOtherPrincipal' });
+
+    expect(jobs.createCommand).not.toHaveBeenCalled();
+  });
+
+  it('leaves stop and end-session alone on another principal\'s live SESSION job', async () => {
+    for (const type of ['THREAD_STOP_TURN', 'THREAD_CLOSE']) {
+      const { repo, jobs } = commandRepo({ action: 'SESSION', requester: { id: 'someone-else', type: 'USER' } });
+      await repo.command({ kind: 'project', projectId: 'P' }, 'T', 'U', type, {}, true);
+      expect(jobs.createCommand).toHaveBeenCalledWith(expect.objectContaining({ type }));
+    }
   });
 });
 
@@ -543,7 +588,7 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
   function deliveryRepo(opts: { actions?: readonly StoredAction[]; live?: boolean; thread?: Record<string, unknown>; inFlight?: boolean; threads?: boolean } = {}) {
     const store = pendingStore(opts.actions ?? []);
     const thread = threadRow(opts.thread);
-    const job = { id: 'J', state: 'RUNNING', runnerId: 'R', leaseEpoch: 4, command: 'THREAD', threadTurn: { action: 'SESSION' } };
+    const job = { id: 'J', state: 'RUNNING', runnerId: 'R', leaseEpoch: 4, command: 'THREAD', threadTurn: { action: 'SESSION' }, requestedById: 'U', requestedByType: 'USER' };
     const created = new Map<string, Record<string, unknown>>();
     const messageCreate = vi.fn(async (args: { data: { content: string; clientMessageId: string } }) => {
       const createdRow = {

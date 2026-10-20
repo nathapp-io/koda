@@ -232,12 +232,21 @@ describe('ThreadsService.run (US-007)', () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
-  it('refuses a caller who is not the thread creator with threads.notCreator', async () => {
+  it('refuses a caller who is not the thread creator with 403 permissions when canOperate is false', async () => {
     const dispatch = vi.fn();
     const service = runService({ get: vi.fn().mockResolvedValue({ ...record, createdById: 'someone-else' }), handoff: vi.fn().mockResolvedValue(completedPlan) }, dispatch);
 
-    await expect(service.run('p1', 't1', 'u1', {})).rejects.toMatchObject({ status: 403, prefix: 'threads.notCreator' });
+    await expect(service.run('p1', 't1', 'u1', {})).rejects.toMatchObject({ status: 403, prefix: 'permissions' });
     expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('US-002: runs another creator\'s thread as the caller when the any-row key holder passes canOperate', async () => {
+    const dispatch = vi.fn().mockResolvedValue({ job: { id: 'j1' } });
+    const service = runService({ get: vi.fn().mockResolvedValue({ ...record, createdById: 'someone-else', runnerId: 'runner-1' }), handoff: vi.fn().mockResolvedValue(completedPlan) }, dispatch);
+
+    await service.run('p1', 't1', 'u1', {}, true);
+
+    expect(dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'RUN' }), { threadId: 't1' });
   });
 });
 
@@ -309,20 +318,31 @@ describe('ThreadsService.create (US-003)', () => {
 });
 
 describe('ThreadsService.discard (US-004)', () => {
+  const discardService = (discard: ReturnType<typeof vi.fn>) => new ThreadsService(
+    { discard } as unknown as ChatThreadRepository,
+    {} as unknown as IFleetRepoRepository,
+    {} as unknown as SkillsService,
+    { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
+    {} as unknown as FleetJobsService,
+    briefStub(),
+  );
+
   it('AC-1: passes the project, thread and user to the repository and returns its { jobId }', async () => {
     const discard = vi.fn().mockResolvedValue({ jobId: 'job-d1' });
-    const threads = { discard } as unknown as ChatThreadRepository;
-    const service = new ThreadsService(
-      threads,
-      {} as unknown as IFleetRepoRepository,
-      {} as unknown as SkillsService,
-      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
-      {} as unknown as FleetJobsService,
-      briefStub(),
-    );
+    const service = discardService(discard);
 
     await expect(service.discard('p1', 't1', 'u1')).resolves.toEqual({ jobId: 'job-d1' });
-    expect(discard).toHaveBeenCalledWith('p1', 't1', 'u1');
+    // US-002: the creator compare is the repository's, and `canOperate` rides last (absent = false).
+    expect(discard).toHaveBeenCalledWith('p1', 't1', 'u1', false);
+  });
+
+  it('US-002: forwards the any-row key holder\'s canOperate so the repository skips the creator compare', async () => {
+    const discard = vi.fn().mockResolvedValue({ jobId: 'job-d2' });
+    const service = discardService(discard);
+
+    await service.discard('p1', 't1', 'u1', true);
+
+    expect(discard).toHaveBeenCalledWith('p1', 't1', 'u1', true);
   });
 });
 
@@ -372,7 +392,7 @@ describe('ThreadsService.sendMessage repository context (S5b US-003)', () => {
     expect(findAnchor).toHaveBeenCalledWith('p1');
     expect(resolveRepoContext).toHaveBeenCalledTimes(1);
     expect(resolveRepoContext).toHaveBeenCalledWith('r-anchor');
-    expect(sendMessage).toHaveBeenCalledWith({ scope: { kind: 'project', projectId: 'p1' }, threadId: 't1', userId: 'u1', text: 'hi', clientMessageId: 'c1', repoContext: SECTION });
+    expect(sendMessage).toHaveBeenCalledWith({ scope: { kind: 'project', projectId: 'p1' }, threadId: 't1', userId: 'u1', text: 'hi', clientMessageId: 'c1', repoContext: SECTION, canOperate: false });
     expect(order).toEqual(['resolve:r-anchor', `send:${SECTION}`]);
   });
 
@@ -402,5 +422,111 @@ describe('ThreadsService.sendMessage repository context (S5b US-003)', () => {
     expect(get).toHaveBeenCalledWith({ kind: 'project', projectId: 'p1' }, 't1');
     expect(resolveRepoContext).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ repoContext: undefined }));
+  });
+});
+
+/**
+ * Permissions P1 US-002: ownership comes from the keys. Every project write forwards the handler's
+ * `canOperate` — true only for an any-row key holder — and the repository keeps its creator compare
+ * when it is false. The default is false, so the unchanged workspace call sites keep the compare.
+ */
+describe('ThreadsService canOperate (US-002)', () => {
+  const message: ChatMessageRecord = {
+    id: 'm1', seq: 1, jobId: 'j1', turnId: 'j1', role: 'user', authorUserId: 'u1', clientMessageId: 'c1',
+    content: 'hi', toolSummary: null, status: 'pending', errorReason: null, usage: null, costUsd: null,
+    costSource: null, createdAt: new Date('2026-10-01T00:00:00.000Z'),
+  };
+
+  const serviceFor = (threads: Partial<ChatThreadRepository>) => new ThreadsService(
+    {
+      updateCap: vi.fn(async (..._args: unknown[]) => record),
+      command: vi.fn(async () => undefined),
+      publish: vi.fn(async () => ({ jobId: null })),
+      sendMessage: vi.fn(async () => ({ message, jobId: 'j1', deduplicated: false })),
+      get: vi.fn(async () => record),
+      ...threads,
+    } as unknown as ChatThreadRepository,
+    {} as unknown as IFleetRepoRepository,
+    {} as unknown as SkillsService,
+    { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
+    { dispatch: vi.fn() } as unknown as FleetJobsService,
+    briefStub(),
+  );
+
+  it('forwards canOperate to updateCap, stop, endSession, answer, publish and sendMessage', async () => {
+    const threads = {
+      updateCap: vi.fn(async () => record),
+      command: vi.fn(async () => undefined),
+      publish: vi.fn(async () => ({ jobId: null })),
+      sendMessage: vi.fn(async () => ({ message, jobId: 'j1', deduplicated: false })),
+      get: vi.fn(async () => record),
+    };
+    const service = serviceFor(threads);
+
+    await service.updateCap('p1', 't1', 'u1', 3, true);
+    await service.stop('p1', 't1', 'u1', true);
+    await service.endSession('p1', 't1', 'u1', true);
+    await service.answer('p1', 't1', 'u1', { requestId: 'q1', text: 'yes' }, true);
+    await service.publish('p1', 't1', 'u1', true);
+    await service.sendMessage('p1', 't1', 'u1', { text: 'hi', clientMessageId: 'c1' }, true);
+
+    expect(threads.updateCap).toHaveBeenCalledWith({ kind: 'project', projectId: 'p1' }, 't1', 'u1', '3', true);
+    expect(threads.command).toHaveBeenCalledWith({ kind: 'project', projectId: 'p1' }, 't1', 'u1', 'THREAD_STOP_TURN', {}, true);
+    expect(threads.command).toHaveBeenCalledWith({ kind: 'project', projectId: 'p1' }, 't1', 'u1', 'THREAD_CLOSE', {}, true);
+    expect(threads.command).toHaveBeenCalledWith({ kind: 'project', projectId: 'p1' }, 't1', 'u1', 'THREAD_ANSWER', { requestId: 'q1', text: 'yes' }, true);
+    expect(threads.publish).toHaveBeenCalledWith('p1', 't1', 'u1', true);
+    expect(threads.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ threadId: 't1', userId: 'u1', canOperate: true }));
+  });
+
+  it('defaults canOperate to false, so a caller that passes nothing keeps the creator compare', async () => {
+    const threads = {
+      updateCap: vi.fn(async () => record),
+      command: vi.fn(async () => undefined),
+      publish: vi.fn(async () => ({ jobId: null })),
+      sendMessage: vi.fn(async () => ({ message, jobId: 'j1', deduplicated: false })),
+      get: vi.fn(async () => record),
+    };
+    const service = serviceFor(threads);
+
+    await service.updateCap('p1', 't1', 'u1', 3);
+    await service.stop('p1', 't1', 'u1');
+    await service.publish('p1', 't1', 'u1');
+    await service.sendMessage('p1', 't1', 'u1', { text: 'hi', clientMessageId: 'c1' });
+
+    expect(threads.updateCap).toHaveBeenCalledWith({ kind: 'project', projectId: 'p1' }, 't1', 'u1', '3', false);
+    expect(threads.command).toHaveBeenCalledWith({ kind: 'project', projectId: 'p1' }, 't1', 'u1', 'THREAD_STOP_TURN', {}, false);
+    expect(threads.publish).toHaveBeenCalledWith('p1', 't1', 'u1', false);
+    expect(threads.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ canOperate: false }));
+  });
+
+  it('plans another creator\'s thread as the caller when canOperate is true', async () => {
+    const dispatch = vi.fn().mockResolvedValue({ job: { id: 'j1' } });
+    const service = new ThreadsService(
+      { get: vi.fn(async () => ({ ...record, createdById: 'someone-else', specPublished: true, runnerId: 'runner-1' })) } as unknown as ChatThreadRepository,
+      {} as unknown as IFleetRepoRepository,
+      {} as unknown as SkillsService,
+      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
+      { dispatch } as unknown as FleetJobsService,
+      briefStub(),
+    );
+
+    await service.plan('p1', 't1', 'u1', {}, true);
+
+    expect(dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'PLAN' }), { threadId: 't1' });
+  });
+
+  it('refuses a plan of another creator\'s thread with 403 permissions when canOperate is false', async () => {
+    const dispatch = vi.fn();
+    const service = new ThreadsService(
+      { get: vi.fn(async () => ({ ...record, createdById: 'someone-else', specPublished: true, runnerId: 'runner-1' })) } as unknown as ChatThreadRepository,
+      {} as unknown as IFleetRepoRepository,
+      {} as unknown as SkillsService,
+      { threadsEnabled: true } as unknown as ConfigType<typeof fleetConfig>,
+      { dispatch } as unknown as FleetJobsService,
+      briefStub(),
+    );
+
+    await expect(service.plan('p1', 't1', 'u1', {})).rejects.toMatchObject({ status: 403, prefix: 'permissions' });
+    expect(dispatch).not.toHaveBeenCalled();
   });
 });

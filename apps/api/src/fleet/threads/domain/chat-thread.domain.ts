@@ -136,11 +136,11 @@ export interface ChatThreadRepository {
   pendingActions(scope: ThreadScope, threadId: string): Promise<ChatThreadPendingAction[]>;
   sendRefusalOf(projectId: string, thread: ChatThreadRecord): Promise<ThreadSendRefusal | null>;
   messages(threadId: string, afterSeq: number, limit: number): Promise<ChatMessageRecord[]>;
-  sendMessage(input: { scope: ThreadScope; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
-  publish(projectId: string, threadId: string, userId: string): Promise<{ jobId: string | null }>;
-  discard(projectId: string, threadId: string, userId: string): Promise<{ jobId: string }>;
+  sendMessage(input: { scope: ThreadScope; threadId: string; userId: string; text: string; clientMessageId: string; repoContext?: string; canOperate?: boolean }): Promise<{ message: ChatMessageRecord; jobId: string | null; deduplicated: boolean }>;
+  publish(projectId: string, threadId: string, userId: string, canOperate?: boolean): Promise<{ jobId: string | null }>;
+  discard(projectId: string, threadId: string, userId: string, canOperate?: boolean): Promise<{ jobId: string }>;
   archivedThreadIds(runnerId: string): Promise<string[]>;
-  updateCap(scope: ThreadScope, threadId: string, userId: string, maxCostUsd: string): Promise<ChatThreadRecord>;
-  command(scope: ThreadScope, threadId: string, userId: string, type: string, payload: object): Promise<void>;
+  updateCap(scope: ThreadScope, threadId: string, userId: string, maxCostUsd: string, canOperate?: boolean): Promise<ChatThreadRecord>;
+  command(scope: ThreadScope, threadId: string, userId: string, type: string, payload: object, canOperate?: boolean): Promise<void>;
   archive(scope: ThreadScope, threadId: string, userId: string, canArchive: boolean): Promise<string | null>;
 }
