@@ -1,8 +1,11 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { runWithActor } from '../../action-context/action-context';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
+import type { PrincipalRef } from '../../permissions/permissions.types';
+import { PermissionService } from '../../permissions/permission.service';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { BudgetPausedException } from '../budgets/budget.exceptions';
 import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
@@ -58,6 +61,7 @@ export class ScheduleTicker implements OnModuleInit, OnModuleDestroy {
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'sweepEnabled'>,
+    private readonly permissions: PermissionService,
   ) {}
 
   onModuleInit(): void {
@@ -127,14 +131,22 @@ export class ScheduleTicker implements OnModuleInit, OnModuleDestroy {
   }
 
   private async dispatchFresh(s: ScheduleRecord): Promise<Outcome> {
-    if (!mayDispatch(await this.repo.findOwnerAccess(s.projectId, s.createdById))) {
+    // US-005: the permission is the owner's — its own existence and its own effective keys in this
+    // project — read off the record's creator type, which predates agents (`USER` then).
+    const owner: PrincipalRef = { type: s.createdByType ?? 'USER', id: s.createdById };
+    const [access, keys] = await Promise.all([
+      this.repo.findOwnerAccess(s.projectId, owner),
+      this.permissions.effectiveKeys(owner, { projectId: s.projectId }),
+    ]);
+    if (!mayDispatch(access, keys)) {
       await this.disable(s, 'owner_lost_access');
       return 'disabled';
     }
     let jobId: string;
     try {
       // No transaction is open here (plan D198): a 409 from the (repoId, feature) index must not poison one.
-      jobId = (await this.jobs.dispatch(s.createdById, s.projectId, toDispatchDto(s), { scheduleId: s.id })).job.id;
+      // The fire runs as the owner, so the job's `requestedByType` and its activity rows name the owner's type.
+      jobId = (await runWithActor(owner, () => this.jobs.dispatch(s.createdById, s.projectId, toDispatchDto(s), { scheduleId: s.id }))).job.id;
     } catch (error) {
       return this.onDispatchError(s, error);
     }

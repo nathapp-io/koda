@@ -1,4 +1,5 @@
 import type { FleetJobState } from '../../../common/enums';
+import type { PrincipalRef } from '../../../permissions/permissions.types';
 import type { BashMode } from '../../common/protocol';
 
 export const SCHEDULE_REPOSITORY = Symbol('SCHEDULE_REPOSITORY');
@@ -62,18 +63,16 @@ export type SchedulePatch = Partial<Pick<
   | 'disabledReason' | 'updatedById'
 >>;
 
-/** What the ticker needs to decide whether the owner may still dispatch (S1b §3.2, plan D201). */
+/**
+ * What the ticker needs to decide whether the owner may still dispatch (S1b §3.2, plan D201;
+ * permissions P1d US-005). It answers existence only: a USER owner exists when its `User` row does and
+ * is disabled when `User.disabled`; an AGENT owner exists when its `Agent` row does and is never
+ * disabled (a PAUSED agent keeps its schedules — status is liveness, not access). The permission
+ * itself comes from the owner's effective keys (`mayDispatch` in `schedule-access.ts`).
+ */
 export interface OwnerAccess {
   exists: boolean;
   disabled: boolean;
-  /** `User.role`: MEMBER | ADMIN (empty when the user is gone). */
-  globalRole: string;
-  /**
-   * The owner's project role in the schedule's project, or null. Read from the access sources the
-   * compatibility queries union: a legacy `ProjectMember` row and a PROJECT-scope `RoleBinding` in
-   * the project or with `projectId` null (US-004).
-   */
-  projectRole: string | null;
 }
 
 export interface ScheduleActiveJob {
@@ -101,7 +100,7 @@ export interface IScheduleRepository {
   coalesceIntoQueued(scheduleId: string): Promise<string | null>;
   /** Plan D196: sets scheduleCountedAt when still null; true when this call claimed it. */
   claimCounted(jobId: string, now: Date): Promise<boolean>;
-  findOwnerAccess(projectId: string, userId: string): Promise<OwnerAccess>;
+  findOwnerAccess(projectId: string, owner: PrincipalRef): Promise<OwnerAccess>;
   /** Sum of costSpentUsd + costCarriedUsd over each schedule's jobs, as 4-decimal strings; absent = no jobs. */
   sumCostBySchedule(ids: readonly string[]): Promise<ReadonlyMap<string, string>>;
 }

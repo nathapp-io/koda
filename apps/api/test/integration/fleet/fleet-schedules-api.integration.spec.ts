@@ -10,6 +10,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { SchedulesService } from '../../../src/fleet/schedules/schedules.service';
+import { MembershipService } from '../../../src/permissions/membership.service';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -124,7 +125,7 @@ describeIntegration('fleet schedules API (PG)', () => {
     expect(new Date(on.nextFireAt as string).getTime()).toBeGreaterThan(Date.now());
   });
 
-  it('enable is refused with 409 when the owner can no longer dispatch, and enabling a healthy schedule still works (plan D211)', async () => {
+  it('enable is refused with 409 when the owner can no longer dispatch, and enabling a healthy schedule still works (plan D211, US-005)', async () => {
     const lost = await prisma.user.create({ data: { email: 'lost@koda.test', passwordHash: 'x', role: 'MEMBER' } });
     const off = await prisma.jobSchedule.create({
       data: {
@@ -140,6 +141,10 @@ describeIntegration('fleet schedules API (PG)', () => {
     await prisma.projectMember.create({ data: { projectId: world.projectId, userId: lost.id, role: 'DEVELOPER' } });
     await request(server).post(`${BASE}/${off.id}/enable`).set(tok('root')).expect(409);
     await prisma.user.update({ where: { id: lost.id }, data: { disabled: false } });
+    // US-005: the dispatch permission is the owner's effective keys, so the DEVELOPER row must be visible
+    // to them. Written directly above (not through `MembershipService`, which invalidates on its own), it
+    // leaves the cached key set stale until this invalidation.
+    await app.get(MembershipService).invalidatePermissions();
     data<Row>(await request(server).post(`${BASE}/${off.id}/enable`).set(tok('root')).expect(200));
   });
 

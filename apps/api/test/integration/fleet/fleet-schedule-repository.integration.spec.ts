@@ -119,14 +119,15 @@ describeIntegration('schedule repository (PG)', () => {
     expect(await repo.claimCounted(j.id, NOW)).toBe(false);
   });
 
-  it('findOwnerAccess reports a missing user, a disabled user, and the project role', async () => {
-    expect(await repo.findOwnerAccess(base.projectId, 'no-such-user')).toEqual({ exists: false, disabled: false, globalRole: '', projectRole: null });
+  it('findOwnerAccess reports a missing user and a disabled user, and reads no project role (US-005)', async () => {
+    expect(await repo.findOwnerAccess(base.projectId, { type: 'USER', id: 'no-such-user' })).toEqual({ exists: false, disabled: false });
     const off = await prisma.user.create({ data: { email: 'off@koda.test', passwordHash: 'x', role: 'MEMBER', disabled: true } });
-    expect(await repo.findOwnerAccess(base.projectId, off.id)).toEqual({ exists: true, disabled: true, globalRole: 'MEMBER', projectRole: null });
+    expect(await repo.findOwnerAccess(base.projectId, { type: 'USER', id: off.id })).toEqual({ exists: true, disabled: true });
     const dev = await prisma.user.create({ data: { email: 'dev-access@koda.test', passwordHash: 'x', role: 'MEMBER' } });
     await prisma.projectMember.create({ data: { projectId: base.projectId, userId: dev.id, role: 'DEVELOPER' } });
-    expect(await repo.findOwnerAccess(base.projectId, dev.id)).toEqual({ exists: true, disabled: false, globalRole: 'MEMBER', projectRole: 'DEVELOPER' });
-    expect(await repo.findOwnerAccess(base.projectId, base.adminId)).toEqual({ exists: true, disabled: false, globalRole: 'ADMIN', projectRole: null });
+    // The permission is the owner's effective keys now, so a project role is not part of this answer.
+    expect(await repo.findOwnerAccess(base.projectId, { type: 'USER', id: dev.id })).toEqual({ exists: true, disabled: false });
+    expect(await repo.findOwnerAccess(base.projectId, { type: 'USER', id: base.adminId })).toEqual({ exists: true, disabled: false });
   });
 
   it('delete detaches the schedule\'s jobs and keeps them (plan D194)', async () => {

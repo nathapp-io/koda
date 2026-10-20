@@ -1,4 +1,5 @@
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { currentActor } from '../../action-context/action-context';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { BudgetPausedException } from '../budgets/budget.exceptions';
 import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
@@ -9,7 +10,11 @@ import { ScheduleTicker } from './schedule-ticker';
 const NOW = new Date('2026-10-02T03:00:30.000Z');
 const DUE = new Date('2026-10-02T03:00:00.000Z');
 const NEXT = new Date('2026-10-02T04:00:00.000Z');
-const OWNER_OK: OwnerAccess = { exists: true, disabled: false, globalRole: 'MEMBER', projectRole: 'DEVELOPER' };
+/** US-005: the owner exists and is not disabled; the permission itself is its key set. */
+const OWNER_OK: OwnerAccess = { exists: true, disabled: false };
+const DISPATCH_KEYS: ReadonlySet<string> = new Set(['fleet.job.dispatch', 'fleet.job.read']);
+/** A viewer binding: reads, no dispatch. */
+const VIEWER_KEYS: ReadonlySet<string> = new Set(['fleet.schedule.read', 'fleet.job.read']);
 
 const schedule = (over: Partial<ScheduleRecord> = {}): ScheduleRecord => ({
   id: 's1', projectId: 'p1', repoId: 'r1', name: 'nightly', cron: '0 * * * *', timezone: 'UTC', feature: 'login', ref: 'main', profiles: ['fast'],
@@ -24,16 +29,31 @@ function build(due: ScheduleRecord[] = [schedule()]) {
     claimFire: vi.fn(async () => true),
     findActiveJob: vi.fn(async (): Promise<ScheduleActiveJob | null> => null),
     coalesceIntoQueued: vi.fn(async (): Promise<string | null> => null),
-    findOwnerAccess: vi.fn(async () => OWNER_OK),
+    findOwnerAccess: vi.fn(async (): Promise<OwnerAccess> => OWNER_OK),
     update: vi.fn(async () => schedule()),
   };
-  const jobs = { dispatch: vi.fn(async () => ({ job: { id: 'job-1' } })) };
+  /** Records the action context `dispatch` was called in: US-005 fires as the schedule's owner. */
+  let dispatchActor: ReturnType<typeof currentActor> = undefined;
+  const jobs = {
+    dispatch: vi.fn(async () => {
+      dispatchActor = currentActor();
+      return { job: { id: 'job-1' } };
+    }),
+  };
   const progress = { disable: vi.fn(async () => true) };
   const activity = { record: vi.fn(async () => undefined) };
   const txManager = { run: vi.fn(async <T>(fn: () => Promise<T>) => fn()) };
-  const ticker = new ScheduleTicker(repo as never, jobs as never, progress as never, activity as never, txManager as never, { sweepEnabled: false });
-  const actions = () => activity.record.mock.calls.map((c) => (c as unknown as [{ action: string; payload: Record<string, unknown> }])[0]);
-  return { repo, jobs, progress, activity, ticker, actions };
+  // US-005: the owner's dispatch permission is its effective keys, read through the real service.
+  const permissions = { effectiveKeys: vi.fn(async () => DISPATCH_KEYS) };
+  const ticker = new ScheduleTicker(
+    repo as never, jobs as never, progress as never, activity as never, txManager as never,
+    { sweepEnabled: false }, permissions as never,
+  );
+  const actions = () => activity.record.mock.calls.map((c) => (c as unknown as [{ action: string; payload: Record<string, unknown>; actorType: string }])[0]);
+  return {
+    repo, jobs, progress, activity, permissions, ticker, actions,
+    actorSeenByDispatch: () => dispatchActor,
+  };
 }
 
 describe('ScheduleTicker.tick', () => {
@@ -96,26 +116,63 @@ describe('ScheduleTicker.tick', () => {
     expect(h.actions()).toEqual([expect.objectContaining({ action: 'schedule.tick_skipped', payload: expect.objectContaining({ reason: 'job_active', state }) })]);
   });
 
-  it.each<[string, OwnerAccess]>([
-    ['a user that no longer exists', { exists: false, disabled: false, globalRole: '', projectRole: null }],
-    ['a disabled user', { ...OWNER_OK, disabled: true }],
-    ['a user removed from the project', { ...OWNER_OK, projectRole: null }],
-    ['a user demoted to VIEWER', { ...OWNER_OK, projectRole: 'VIEWER' }],
-    ['a legacy AGENT member', { ...OWNER_OK, projectRole: 'AGENT' }],
-  ])('disables with owner_lost_access for %s', async (_name, access) => {
+  it('reads the owner ref off the record, defaulting an untagged creator to a user (US-005)', async () => {
+    const tagged = build([schedule({ createdById: 'a1', createdByType: 'AGENT' })]);
+    await tagged.ticker.tick(NOW);
+    expect(tagged.repo.findOwnerAccess).toHaveBeenCalledWith('p1', { type: 'AGENT', id: 'a1' });
+    expect(tagged.permissions.effectiveKeys).toHaveBeenCalledWith({ type: 'AGENT', id: 'a1' }, { projectId: 'p1' });
+
+    const untagged = build([schedule({ createdById: 'u1', createdByType: undefined })]);
+    await untagged.ticker.tick(NOW);
+    expect(untagged.repo.findOwnerAccess).toHaveBeenCalledWith('p1', { type: 'USER', id: 'u1' });
+    expect(untagged.permissions.effectiveKeys).toHaveBeenCalledWith({ type: 'USER', id: 'u1' }, { projectId: 'p1' });
+  });
+
+  it('dispatches inside the owner\'s action context, and keeps its own rows a system actor (US-005)', async () => {
+    const h = build([schedule({ createdById: 'a1', createdByType: 'AGENT' })]);
+
+    expect((await h.ticker.tick(NOW)).dispatched).toBe(1);
+
+    // The fire runs as the owner, so `actorTypeFor` inside dispatch names the agent's type.
+    expect(h.actorSeenByDispatch()).toEqual({ type: 'AGENT', id: 'a1' });
+    expect(h.jobs.dispatch).toHaveBeenCalledWith('a1', 'p1', expect.objectContaining({ feature: 'login' }), { scheduleId: 's1' });
+    // The ticker's own row is never relabelled: it is a SYSTEM entry, not the current actor's.
+    expect(h.actions()).toEqual([expect.objectContaining({ action: 'schedule.tick_dispatched', actorType: 'SYSTEM' })]);
+  });
+
+  it('leaves no actor in context after the tick (the runWithActor extent is the dispatch)', async () => {
+    const h = build();
+    await h.ticker.tick(NOW);
+    expect(currentActor()).toBeUndefined();
+  });
+
+  it.each<[string, OwnerAccess, ReadonlySet<string>]>([
+    ['a user that no longer exists', { exists: false, disabled: false }, DISPATCH_KEYS],
+    ['a disabled user', { exists: true, disabled: true }, DISPATCH_KEYS],
+    ['an owner that lost fleet.job.dispatch (a viewer binding)', OWNER_OK, VIEWER_KEYS],
+    ['an owner with no keys at all', OWNER_OK, new Set()],
+  ])('disables with owner_lost_access for %s', async (_name, access, keys) => {
     const h = build();
     h.repo.findOwnerAccess.mockResolvedValue(access);
+    h.permissions.effectiveKeys.mockResolvedValue(keys);
     expect((await h.ticker.tick(NOW)).disabled).toBe(1);
     expect(h.progress.disable).toHaveBeenCalledWith('s1', 'owner_lost_access');
     expect(h.jobs.dispatch).not.toHaveBeenCalled();
   });
 
-  it.each<[string, OwnerAccess]>([
-    ['a project DEVELOPER', OWNER_OK],
-    ['a project ADMIN', { ...OWNER_OK, projectRole: 'ADMIN' }],
-    ['a global ADMIN with no project role', { ...OWNER_OK, globalRole: 'ADMIN', projectRole: null }],
-  ])('dispatches for %s', async (_name, access) => {
-    expect(mayDispatch(access)).toBe(true);
+  it('keeps an agent owner\'s schedule alive: an agent owner is never disabled by its status (US-005 AC-10)', async () => {
+    const h = build([schedule({ createdById: 'a1', createdByType: 'AGENT' })]);
+    h.repo.findOwnerAccess.mockResolvedValue({ exists: true, disabled: false });
+
+    expect((await h.ticker.tick(NOW)).dispatched).toBe(1);
+    expect(h.progress.disable).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, OwnerAccess, ReadonlySet<string>]>([
+    ['a project developer', OWNER_OK, DISPATCH_KEYS],
+    ['an agent owner with the dispatch key', OWNER_OK, new Set(['fleet.job.dispatch'])],
+  ])('dispatches for %s', async (_name, access, keys) => {
+    expect(mayDispatch(access, keys)).toBe(true);
   });
 
   const budgetPolicy = { id: 'b1', scopeType: 'global' as const, scopeId: null, scopeKey: 'global' };

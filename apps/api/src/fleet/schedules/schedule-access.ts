@@ -1,10 +1,14 @@
 import type { OwnerAccess } from './domain/schedule.domain';
 
+/** The one key a schedule's owner must still hold in the project for its fires to dispatch. */
+const DISPATCH_KEY = 'fleet.job.dispatch';
+
 /**
- * S1b §3.2, plan D201: the owner may still dispatch when the user exists, is not disabled, and is a global ADMIN
- * or holds project role ADMIN or DEVELOPER (the roles that hold CASL CREATE on FleetJob).
+ * Permissions P1d US-005 (spec AC-13): the owner may still dispatch when it exists, is not disabled,
+ * and its effective keys in the schedule's project include `fleet.job.dispatch`. The keys are the
+ * owner's — `PermissionService.effectiveKeys` over the schedule's `createdByType`/`createdById` — so an
+ * agent owner is judged by the agent's bindings and legacy roles, not by a user's.
  */
-export function mayDispatch(access: OwnerAccess): boolean {
-  if (!access.exists || access.disabled) return false;
-  return access.globalRole === 'ADMIN' || access.projectRole === 'ADMIN' || access.projectRole === 'DEVELOPER';
+export function mayDispatch(access: OwnerAccess, keys: ReadonlySet<string>): boolean {
+  return access.exists && !access.disabled && keys.has(DISPATCH_KEY);
 }
