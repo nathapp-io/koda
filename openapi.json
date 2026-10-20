@@ -6530,6 +6530,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.schedule.read is missing"
           }
         },
         "security": [
@@ -6537,7 +6540,7 @@
             "bearer": []
           }
         ],
-        "summary": "List the project's schedules (project member)",
+        "summary": "List the project's schedules (fleet.schedule.read)",
         "tags": [
           "fleet"
         ]
@@ -6578,6 +6581,9 @@
           "400": {
             "description": "Invalid template, cron or timezone, or fleet.scheduleCronTooFrequent (fires closer than 15 minutes)"
           },
+          "403": {
+            "description": "fleet.schedule.create is missing"
+          },
           "404": {
             "description": "Repo not in this project, or pinned runner unknown"
           },
@@ -6590,7 +6596,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create a schedule that runs one feature on a cron (project DEVELOPER+)",
+        "summary": "Create a schedule that runs one feature on a cron (fleet.schedule.create)",
         "tags": [
           "fleet"
         ]
@@ -6628,6 +6634,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.schedule.read is missing"
+          },
           "404": {
             "description": "Schedule not found in this project"
           }
@@ -6637,7 +6646,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get a schedule (project member)",
+        "summary": "Get a schedule (fleet.schedule.read)",
         "tags": [
           "fleet"
         ]
@@ -6684,7 +6693,10 @@
             }
           },
           "403": {
-            "description": "Not the owner and not a project ADMIN"
+            "description": "The caller neither holds fleet.schedule.update nor created the schedule"
+          },
+          "404": {
+            "description": "Schedule not found in this project"
           }
         },
         "security": [
@@ -6692,7 +6704,7 @@
             "bearer": []
           }
         ],
-        "summary": "Change a schedule (owner or project ADMIN)",
+        "summary": "Change a schedule (fleet.schedule.update: the owner, or the any-row key)",
         "tags": [
           "fleet"
         ]
@@ -6719,7 +6731,13 @@
         ],
         "responses": {
           "204": {
-            "description": ""
+            "description": "Deleted"
+          },
+          "403": {
+            "description": "The caller neither holds fleet.schedule.delete nor created the schedule"
+          },
+          "404": {
+            "description": "Schedule not found in this project"
           }
         },
         "security": [
@@ -6727,7 +6745,7 @@
             "bearer": []
           }
         ],
-        "summary": "Delete a schedule; its jobs are kept (owner or project ADMIN)",
+        "summary": "Delete a schedule; its jobs are kept (fleet.schedule.delete: the owner, or the any-row key)",
         "tags": [
           "fleet"
         ]
@@ -6765,8 +6783,14 @@
               }
             }
           },
+          "403": {
+            "description": "The caller neither holds fleet.schedule.update nor created the schedule"
+          },
+          "404": {
+            "description": "Schedule not found in this project"
+          },
           "409": {
-            "description": "fleet.scheduleOwnerNoAccess: the owner is disabled or no longer has DEVELOPER access to the project"
+            "description": "fleet.scheduleOwnerNoAccess: the owner no longer holds fleet.job.dispatch in this project"
           }
         },
         "security": [
@@ -6774,7 +6798,7 @@
             "bearer": []
           }
         ],
-        "summary": "Enable a schedule: resets the stall counter and recomputes the next fire (owner or project ADMIN)",
+        "summary": "Enable a schedule: resets the stall counter and recomputes the next fire (fleet.schedule.update)",
         "tags": [
           "fleet"
         ]
@@ -6811,6 +6835,12 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "The caller neither holds fleet.schedule.update nor created the schedule"
+          },
+          "404": {
+            "description": "Schedule not found in this project"
           }
         },
         "security": [
@@ -6818,7 +6848,7 @@
             "bearer": []
           }
         ],
-        "summary": "Disable a schedule (owner or project ADMIN)",
+        "summary": "Disable a schedule (fleet.schedule.update: the owner, or the any-row key)",
         "tags": [
           "fleet"
         ]
