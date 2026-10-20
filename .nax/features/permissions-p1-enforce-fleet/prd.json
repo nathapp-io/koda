@@ -3,7 +3,7 @@
   "feature": "permissions-p1-enforce-fleet",
   "branchName": "feat/permissions-p1-enforce-fleet",
   "createdAt": "2026-10-20T00:00:00.000Z",
-  "updatedAt": "2026-10-20T06:42:20.310Z",
+  "updatedAt": "2026-10-20T07:12:15.038Z",
   "userStories": [
     {
       "id": "US-001",
@@ -643,8 +643,8 @@
         "US-001",
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -656,7 +656,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.20000000000000018,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-20T06:42:25.340Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/fleet/repo-config/project-repo-config.controller.ts",
@@ -681,7 +693,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7d99db33aee2183ac03c6bae0959edbd3647b9fd"
     },
     {
       "id": "US-008",
