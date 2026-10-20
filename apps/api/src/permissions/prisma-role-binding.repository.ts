@@ -10,7 +10,7 @@ import { Paginate } from '@nathapp/nestjs-prisma';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient, Role as RoleModel, RoleBinding as RoleBindingModel } from '../generated/prisma/client';
-import { legacyRoleKeys } from './legacy-membership.queries';
+import { accessibleProjectIds, legacyRoleKeys } from './legacy-membership.queries';
 import type {
   BindingFilter,
   BindingWithRole,
@@ -155,6 +155,17 @@ export class PrismaRoleBindingRepository
     agentScoping: boolean,
   ): Promise<string[]> {
     return legacyRoleKeys(this.db, principal, projectId, agentScoping);
+  }
+
+  /**
+   * The ids of the non-deleted projects the principal has an access source in, ascending: its
+   * `ProjectMember`/`AgentProject` rows and its project-scope bindings (every live project when it
+   * holds a global project binding). The union itself lives in `legacy-membership.queries.ts`; this
+   * method is the read `PermissionService.projectIdsWithKey` reaches it through, so the permission
+   * layer keeps its repository-only Prisma access.
+   */
+  async findAccessibleProjectIds(principal: PrincipalRef): Promise<string[]> {
+    return accessibleProjectIds(this.db, principal);
   }
 
   async findExisting(

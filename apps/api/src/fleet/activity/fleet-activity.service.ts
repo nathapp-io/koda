@@ -1,6 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
+import { actorTypeFor } from '../../action-context/action-context';
+import { FleetActorType } from '../../common/enums';
 import { remapPage } from '../../common/dto/koda-page.query';
 import {
   FLEET_ACTIVITY_REPOSITORY,
@@ -23,7 +25,7 @@ export class FleetActivityService {
       throw new Error('activity payload must not contain secrets');
     }
     await this.repo.create({
-      actorType: entry.actorType,
+      actorType: this.actorTypeOf(entry),
       actorId: entry.actorId,
       action: entry.action,
       entityType: entry.entityType,
@@ -42,5 +44,16 @@ export class FleetActivityService {
   /** Project ids the user is a member of, for activity scoping (plan D14). */
   memberProjectIds(userId: string): Promise<string[]> {
     return this.repo.findMemberProjectIds(userId);
+  }
+
+  /**
+   * The actor type to store. A `USER` entry whose id is the acting principal's is written with that
+   * principal's type, so the ~50 fleet call sites that pass `'USER'` keep working and an agent's write
+   * is labelled `AGENT` — while a `SYSTEM`/`RUNNER` entry, or a `USER` entry about someone else (a
+   * schedule owner, a job requester), keeps the type its caller gave it. Outside any request context
+   * `actorTypeFor` answers `USER`, so a write with no context is unchanged.
+   */
+  private actorTypeOf(entry: FleetActivityEntry): FleetActorType {
+    return entry.actorType === FleetActorType.USER ? actorTypeFor(entry.actorId) : entry.actorType;
   }
 }

@@ -68,6 +68,8 @@ const OWNABLE_KEY_LIST = [
   'thread.workspace.read',
   'thread.workspace.message.send',
   'thread.workspace.archive',
+  'fleet.schedule.update',
+  'fleet.schedule.delete',
 ];
 
 /** Keys the design adds on top of the TSV (Appendix A), with the scope it gives them. */
@@ -254,6 +256,20 @@ describe('PERMISSION_CATALOG', () => {
 
   it('AC-17: thread.create is not ownable', () => {
     expect(findCatalogEntry('thread.create')?.ownable).toBe(false);
+  });
+
+  it('US-001 AC-12: fleet.activity.read is scoped to a project', () => {
+    // Re-scoped from global: every project role's `*.read` holds it, and a global admin still does
+    // everywhere (it holds every project key in the global set).
+    expect(findCatalogEntry('fleet.activity.read')?.scope).toBe('project');
+  });
+
+  it('US-001 AC-13: fleet.schedule.update is ownable', () => {
+    expect(findCatalogEntry('fleet.schedule.update')?.ownable).toBe(true);
+  });
+
+  it('US-001 AC-14: fleet.schedule.delete is ownable', () => {
+    expect(findCatalogEntry('fleet.schedule.delete')?.ownable).toBe(true);
   });
 
   it('AC-18: ticket.delete is high risk', () => {

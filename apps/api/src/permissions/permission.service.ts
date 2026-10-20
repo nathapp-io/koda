@@ -86,6 +86,31 @@ export class PermissionService {
     return new Set(keys);
   }
 
+  /**
+   * `{ all: true }` when the principal holds `key` globally; otherwise the accessible projects where
+   * it holds `key`, ascending.
+   *
+   * The filtered listings (`GET /fleet/activity`, `GET /fleet/approval-counts`) use this to scope the
+   * rows they return. A runner principal holds nothing. The candidates are the principal's access
+   * sources — the roster and binding projects — not every project, which is also what an agent gets
+   * with `AGENT_PROJECT_SCOPING=off`.
+   */
+  async projectIdsWithKey(
+    principal: KodaPrincipal,
+    key: string,
+  ): Promise<{ all: true } | { all: false; projectIds: string[] }> {
+    if (principal.actorType === 'runner') return { all: false, projectIds: [] };
+
+    const ref: PrincipalRef = { type: principal.actorType === 'user' ? 'USER' : 'AGENT', id: principal.id };
+    if ((await this.effectiveKeys(ref, 'global')).has(key)) return { all: true };
+
+    const candidates = await this.bindings.findAccessibleProjectIds(ref);
+    const held = await Promise.all(
+      candidates.map(async (projectId) => ((await this.effectiveKeys(ref, { projectId })).has(key) ? projectId : null)),
+    );
+    return { all: false, projectIds: held.filter((projectId): projectId is string => projectId !== null) };
+  }
+
   private async computeKeys(principal: PrincipalRef, projectId: string | null): Promise<Set<string>> {
     const rows = await this.bindings.findEffectiveBindings(principal, projectId);
     const keys = new Set<string>();
