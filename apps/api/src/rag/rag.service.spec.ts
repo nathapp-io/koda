@@ -1,11 +1,6 @@
 import { IRagConfig } from '../config/rag.config';
-import {
-  RagService,
-  reciprocalRankFusion,
-  simpleFtsScore,
-  getSimilarityTier,
-  getVerdict,
-} from './rag.service';
+import { RagService } from './rag.service';
+import { reciprocalRankFusion, simpleFtsScore, getSimilarityTier, getVerdict } from './rag-scoring';
 import { VectorStore } from './vector-store.service';
 
 function makeRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {

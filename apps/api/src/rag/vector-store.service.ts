@@ -15,7 +15,7 @@ import {
 } from './lance-table-manager';
 import { resolveCreatedAt } from './created-at-override';
 import type { LanceRecord, LanceTable } from './lance-table-manager';
-import { simpleFtsScore, reciprocalRankFusion, getSimilarityTier, getVerdict } from './rag.service';
+import { simpleFtsScore, reciprocalRankFusion, getSimilarityTier, getVerdict } from './rag-scoring';
 import type { IndexDocumentInput } from './rag.service';
 import type { KbResultDto, SearchKbResponseDto } from './dto/kb-result.dto';
 import { KODA_CREATED_BY, readKbCreator } from './kb-creator';
