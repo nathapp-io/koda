@@ -42,6 +42,9 @@ function projectLines(ctx: ToolContext, project: ProjectDomain, counts: ProjectC
 export function myProjectsTool(projects: ProjectsService, counts: ProjectCountsReader): AssistantTool<Record<string, never>> {
   return {
     descriptor: KODA_MY_PROJECTS,
+    // Permissions P1 US-004: declared for the catalog's sake, never checked — a workspace-scope tool takes no key
+    // check, because the listing is already the caller's reachable projects.
+    key: 'project.read',
     permission: { kind: 'member' },
     scope: 'workspace',
     parse(): Record<string, never> {

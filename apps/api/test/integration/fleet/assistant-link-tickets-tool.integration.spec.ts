@@ -161,18 +161,20 @@ describeIntegration('fleet assistant link tickets tool (PG, US-005)', () => {
       .toMatchObject({ status: 'EXECUTED', result: `linked KODA-1 ${PR_URL}` });
   });
 
-  it('AC-15: a RUNNING REPO THREAD job whose thread the VIEWER created proposes links (membership is enough)', async () => {
+  it('AC-15 (US-004): a thread the VIEWER created is refused ticket.link.add and stores no action', async () => {
+    // Permissions P1 US-004: membership is no longer enough — the tool checks its catalog key, and the viewer role
+    // holds only the read keys and comment.create in web.
     const { content, isError } = resultOf(
       await callTool('ac15', { links: [{ ref: 'KODA-1', url: 'https://x.dev/viewer-doc' }] }, viewerRepo).expect(200),
     );
 
-    expect(isError).toBe(false);
-    expect(content.startsWith('pending ')).toBe(true);
-    expect(await actionOf('ac15', viewerRepo)).toMatchObject({
-      tool: TOOL, status: 'PENDING', actorType: 'user', actorId: world.ids.viewer,
-    });
-    // Nothing is written while the approval waits.
+    expect({ content, isError }).toEqual({ content: 'forbidden: koda_link_tickets needs ticket.link.add on web', isError: true });
+    expect(await prisma.pendingAction.count({ where: { jobId: viewerRepo.jobId, toolCallId: 'ac15' } })).toBe(0);
+    // Nothing is written: the refusal happens before the preview, let alone the propose.
     expect(await prisma.ticketLink.count({ where: { url: 'https://x.dev/viewer-doc' } })).toBe(0);
+    expect(await prisma.assistantToolCall.findUniqueOrThrow({
+      where: { jobId_toolCallId: { jobId: viewerRepo.jobId, toolCallId: 'ac15' } },
+    })).toMatchObject({ tool: TOOL, outcome: 'forbidden', isError: true });
   });
 
   it('AC-16: a missing and a foreign-project ref both answer not_found and store no action', async () => {

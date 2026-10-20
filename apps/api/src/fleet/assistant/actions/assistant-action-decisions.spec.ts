@@ -7,9 +7,9 @@
  * test/integration/fleet/assistant-actions-approve.integration.spec.ts.
  */
 import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import { KodaCaslAbilityFactory } from '../../../auth/casl/koda-casl-ability.factory';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
 import { testFleetConfig } from '../../../common/test-helpers/fleet-config';
+import type { PermissionService } from '../../../permissions/permission.service';
 import type { FleetApprovalRecord } from '../../approvals/domain/approval.domain';
 import { AssistantToolExecutor, type ActionOutcome } from '../assistant-tool.executor';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
@@ -74,7 +74,10 @@ function realExecutor(tool: AssistantTool<unknown>): AssistantToolExecutor {
   registry.register(tool);
   const calls = { findUserActor: vi.fn(async () => CONTEXT.creator), findCallContext: vi.fn(async () => CONTEXT) };
   const access = { resolveMembership: vi.fn(async () => 'DEVELOPER') };
-  return new AssistantToolExecutor(registry, calls as never, access as never, new KodaCaslAbilityFactory());
+  // Permissions P1 US-004: the approve re-checks the action's key through `PermissionService`; every key is allowed
+  // here, so the cases stay about the decide handler's own refusals.
+  const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
+  return new AssistantToolExecutor(registry, calls as never, access as never, permissions);
 }
 
 const CONTEXT = {
@@ -85,6 +88,7 @@ const CONTEXT = {
 const commentTool = (execute: (ctx: ToolContext, input: unknown) => Promise<string>): AssistantTool<unknown> => ({
   descriptor: { name: 'koda_add_comment', description: 'd', inputSchema: {} },
   permission: { kind: 'ability', action: 'create', subject: 'Comment' },
+  key: 'comment.create',
   parse: (input) => input,
   execute,
 });

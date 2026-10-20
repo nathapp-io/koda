@@ -1,12 +1,10 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
-import { subject } from '@casl/ability';
-import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
 import { isAgentPrincipal, type AgentPrincipal, type KodaAgentStatus, type UserPrincipal } from '../../auth/principal/koda-principal.types';
 import { runWithActor } from '../../action-context/action-context';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
+import { PermissionService } from '../../permissions/permission.service';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import { withProjectRole } from '../../projects/project-context';
 import { stableStringify } from '../sync/stable-json';
@@ -57,7 +55,7 @@ export class AssistantToolExecutor {
     private readonly registry: AssistantToolRegistry,
     @Inject(ASSISTANT_TOOL_CALL_REPOSITORY) private readonly calls: AssistantToolCallRepository,
     private readonly access: ProjectAccessService,
-    private readonly abilities: KodaCaslAbilityFactory,
+    private readonly permissions: PermissionService,
   ) {}
 
   /** 2a-D1: the late binding of the propose side; the constructor is unchanged so no provider depends on the service. */
@@ -68,10 +66,10 @@ export class AssistantToolExecutor {
   /**
    * 2a-D8 step 5 + 3-D12: whether the requester may still run this action's tool. The requester is the action's own
    * actor — the principal that asked for the write, never the approver (3-R3) — re-read now, and their membership and
-   * ability are re-resolved against the project the action acts in (2a-D3), never the thread's home project. A tool
-   * that left the registry, an actor who is gone or disabled, an actor that is not a user (no code default produces
-   * one; koda #301), a requester outside that project and a requester without the tool's ability all answer
-   * `forbidden`, so an approve writes nothing for any of them.
+   * catalog key are re-resolved against the project the action acts in (2a-D3; permissions P1 US-004), never the
+   * thread's home project. A tool that left the registry, an actor who is gone or disabled, an actor that is not a
+   * user (no code default produces one; koda #301), a requester outside that project and a requester who no longer
+   * holds the tool's key all answer `forbidden`, so an approve writes nothing for any of them.
    */
   async checkAction(action: PendingActionRecord): Promise<'ok' | 'forbidden'> {
     return (await this.actionScope(action)) === null ? 'forbidden' : 'ok';
@@ -112,7 +110,10 @@ export class AssistantToolExecutor {
     }
   }
 
-  /** The tool, the requester and the role an action runs with; null when any of the three gates refuses. */
+  /**
+   * The tool, the requester and the role an action runs with; null when the registry, actor, membership or key gate
+   * refuses.
+   */
   private async actionScope(action: PendingActionRecord): Promise<ActionScope | null> {
     const tool = this.registry.get(action.tool);
     if (!tool) return null;
@@ -125,11 +126,10 @@ export class AssistantToolExecutor {
     const role = await this.membership(action.projectId, principal);
     if (role === undefined) return null;
     const actor = withProjectRole(principal, role) as UserPrincipal;
-    if (tool.permission.kind === 'ability') {
-      const { action: caslAction, subject: target } = tool.permission;
-      const ability = await this.abilities.createForUser(actor);
-      if (!ability.can(caslAction as CaslPermissionAction, subject(target, {}))) return null;
-    }
+    // Permissions P1 US-004: the approve re-checks the tool's catalog key in the action's own project, exactly as
+    // the proposing call checked it, so a requester who lost the key between the proposal and the approve writes
+    // nothing. An implicit key answers allowed, as it does on the call path.
+    if (!(await this.can(actor, tool.key, action.projectId))) return null;
     return { tool, actor };
   }
 
@@ -144,6 +144,7 @@ export class AssistantToolExecutor {
       jobId: action.jobId,
       now: new Date(),
       data: (text) => fenceData(maskSecrets(text), token),
+      can: (key) => this.can(actor, key, action.projectId),
     };
   }
 
@@ -271,16 +272,21 @@ export class AssistantToolExecutor {
     }
   }
 
-  /** The ability check for the role the membership answered, then the tool. */
+  /**
+   * Permissions P1 US-004: the catalog-key check, for the actor the membership answered, in the project the call
+   * acts in — then the tool. The refusal names the tool, its key and the project slug; an implicit key is allowed by
+   * `PermissionService.can` itself, so no tool has to special-case one.
+   */
   private async execParsed(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope): Promise<RunOutcome> {
-    if (tool.permission.kind === 'ability') {
-      const { action, subject: target } = tool.permission;
-      const ability = await this.abilities.createForUser(scope.actor);
-      if (!ability.can(action as CaslPermissionAction, subject(target, {}))) {
-        return { ...refusal('forbidden', `forbidden: ${tool.descriptor.name} needs ${action} ${target} on ${scope.slug}`), projectId: scope.id };
-      }
+    if (!(await this.can(scope.actor, tool.key, scope.id))) {
+      return { ...refusal('forbidden', `forbidden: ${tool.descriptor.name} needs ${tool.key} on ${scope.slug}`), projectId: scope.id };
     }
     return this.execTool(call, tool, caller, scope);
+  }
+
+  /** Whether `actor` holds `key` in `projectId`; the one place the executor reads a permission decision. */
+  private async can(actor: UserPrincipal | AgentPrincipal, key: string, projectId: string): Promise<boolean> {
+    return (await this.permissions.can(actor, key, { projectId })).allowed;
   }
 
   private async execTool(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope): Promise<RunOutcome> {
@@ -294,6 +300,7 @@ export class AssistantToolExecutor {
       jobId: caller.origin.kind === 'thread' ? caller.origin.jobId : null,
       now: new Date(),
       data: (text) => fenceData(maskSecrets(text), token),
+      can: (key) => this.can(scope.actor, key, scope.id),
     };
     if (tool.kind === 'write') return this.writeTool(call, tool, caller, scope, ctx);
     try {

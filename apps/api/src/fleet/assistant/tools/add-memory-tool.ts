@@ -48,6 +48,7 @@ const isMemoryWriteKind = (value: unknown): value is MemoryWriteKind =>
 export function addMemoryTool(deps: { memory: PrismaMemoryItemRepository }): AssistantTool<AddMemoryInput> {
   return {
     descriptor: KODA_ADD_MEMORY,
+    key: 'memory.create',
     // 2b1-D4: the memory write routes check project membership (`memory.controller.ts`), so this tool does too.
     permission: { kind: 'member' },
     kind: 'write',

@@ -13,7 +13,11 @@ export interface ToolCaller {
   disabled: boolean;
 }
 
-/** What a tool needs from the acting user: project membership, or a CASL `(action, subject)` ability on top of it. */
+/**
+ * What a tool used to need from the acting user: project membership, or a CASL `(action, subject)` ability on top of
+ * it. Permissions P1 US-004 moved every check onto `AssistantTool.key`, so nothing reads this any more; it stays
+ * declared until `permissions-p1-cleanup` removes it with the other legacy mechanisms.
+ */
 export type ToolPermission = { kind: 'member' } | { kind: 'ability'; action: string; subject: string };
 
 export interface ToolContext {
@@ -25,11 +29,22 @@ export interface ToolContext {
   now: Date;
   /** Masks secrets, then wraps the text in this call's fence. Every user-written field goes through it. */
   data(text: string): string;
+  /**
+   * Permissions P1 US-004: whether the context's actor holds a permission key in the context's project, read from
+   * `PermissionService.can` — the one decision point a tool needs before it acts. An implicit key answers true.
+   */
+  can(key: string): Promise<boolean>;
 }
 
 export interface AssistantTool<I = unknown> {
   /** One of KODA_TOOL_DESCRIPTORS. */
   descriptor: KodaToolDescriptor;
+  /**
+   * Permissions P1 US-004: the catalog key (`src/permissions/catalog.ts`) the executor checks in the project the
+   * call acts in, before the tool runs and again when a stored action is approved. A workspace-scope tool takes no
+   * check. `permission` is declared and unread until `permissions-p1-cleanup` removes it.
+   */
+  key: string;
   permission: ToolPermission;
   /** 1d2-D3: `workspace` tools run only in WORKSPACE threads and take no `project`; absent means `project`. */
   scope?: 'project' | 'workspace';

@@ -12,6 +12,12 @@ import { updateTicketTool, type UpdateTicketInput } from './update-ticket-tool';
  * updated) is `test/integration/fleet/assistant-update-ticket-tool.integration.spec.ts`.
  */
 
+/**
+ * Permissions P1 US-004: the start check is the context's `can`, which the executor fills from `PermissionService`.
+ * It holds the key until a case says otherwise; `beforeEach` restores it so no case inherits a refusal.
+ */
+const can = vi.fn(async (_key: string) => true);
+
 const ctx = {
   projectId: 'project-1',
   projectSlug: 'web',
@@ -20,7 +26,13 @@ const ctx = {
   jobId: 'job-1',
   now: new Date('2026-10-23T09:00:00.000Z'),
   data: (text: string) => text,
+  can,
 } as unknown as ToolContext;
+
+beforeEach(() => {
+  can.mockReset();
+  can.mockResolvedValue(true);
+});
 
 /** The ticket `TicketsService.findByRef` answers for `KODA-1`, as the preview and `execute` read it. */
 const TICKET = {
@@ -133,11 +145,12 @@ describe('koda_update_ticket parse (US-004)', () => {
     expect(tool.parse({ ref: 'KODA-1', priority: 'LOW' }).priority).toBe('LOW');
   });
 
-  it('is a write tool that needs update Ticket', () => {
+  it('is a write tool that carries the ticket.update key', () => {
     const tool = toolDeps().tool;
     expect(tool.descriptor).toBe(KODA_UPDATE_TICKET);
     expect(tool.kind).toBe('write');
     expect(tool.permission).toEqual({ kind: 'ability', action: 'update', subject: 'Ticket' });
+    expect(tool.key).toBe('ticket.update');
   });
 });
 
@@ -166,23 +179,33 @@ describe('koda_update_ticket preview (US-004)', () => {
     expect(assertTransitionPermission).not.toHaveBeenCalled();
   });
 
-  it('AC-6: a start proposal without the transition permission refuses with the ability it needs', async () => {
-    const deps = toolDeps();
-    deps.assertTransitionPermission.mockRejectedValue(new ForbiddenAppException({}, 'tickets'));
+  it('AC-7 (US-004): a start proposal whose context refuses ticket.transition.start refuses with that key', async () => {
+    can.mockResolvedValue(false);
+    const { tool } = toolDeps();
 
-    const failure = await failureOf(() => previewOf(deps.tool, deps.tool.parse({ ref: 'KODA-1', status: 'IN_PROGRESS' })));
+    const failure = await failureOf(() => previewOf(tool, tool.parse({ ref: 'KODA-1', status: 'IN_PROGRESS' })));
 
     expect(failure).toBeInstanceOf(ToolForbiddenError);
-    expect((failure as ToolForbiddenError).need).toBe('transition Ticket');
+    expect((failure as ToolForbiddenError).need).toBe('ticket.transition.start');
+    // The key is asked through the context, in the context's project, and never through the legacy transition service.
+    expect(can).toHaveBeenCalledWith('ticket.transition.start');
   });
 
-  it('AC-6: the transition permission is checked before the ticket cannot start', async () => {
+  it('AC-7 boundary: the key is checked before the ticket cannot start', async () => {
+    can.mockResolvedValue(false);
     const deps = toolDeps({ ticket: { status: TicketStatus.CLOSED } });
-    deps.assertTransitionPermission.mockRejectedValue(new ForbiddenAppException({}, 'tickets'));
 
     const failure = await failureOf(() => previewOf(deps.tool, deps.tool.parse({ ref: 'KODA-1', status: 'IN_PROGRESS' })));
 
     expect(failure).toBeInstanceOf(ToolForbiddenError);
+  });
+
+  it('a start proposal whose context holds the key previews the move', async () => {
+    const { tool } = toolDeps();
+
+    const preview = await previewOf(tool, tool.parse({ ref: 'KODA-1', status: 'IN_PROGRESS' }));
+
+    expect(preview.split('\n').at(-1)).toBe('status: CREATED -> IN_PROGRESS');
   });
 
   it('AC-7: a start proposal on a VERIFY_FIX ticket refuses with reason status', async () => {
@@ -281,14 +304,14 @@ describe('koda_update_ticket execute (US-004)', () => {
     expect(deps.update).not.toHaveBeenCalled();
   });
 
-  it('AC-12: a service refusal on the transition becomes the move the ticket needs', async () => {
+  it('AC-12 (US-004): a service refusal on the transition names the key the ticket needs', async () => {
     const deps = toolDeps();
     deps.update.mockRejectedValue(new ForbiddenAppException({}, 'tickets'));
 
     const failure = await failureOf(() => deps.tool.execute(ctx, deps.tool.parse({ ref: 'KODA-1', status: 'IN_PROGRESS' })));
 
     expect(failure).toBeInstanceOf(ToolActionError);
-    expect((failure as ToolActionError).text).toBe('forbidden: KODA-1 needs transition Ticket');
+    expect((failure as ToolActionError).text).toBe('forbidden: KODA-1 needs ticket.transition.start');
   });
 
   it('writes the start and the field changes in one service call', async () => {

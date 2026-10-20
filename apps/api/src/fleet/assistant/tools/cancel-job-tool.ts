@@ -34,6 +34,7 @@ export interface CancelJobInput {
 export function cancelJobTool(fleetJobs: FleetJobsService, knowledge: KnowledgeIndexService): AssistantTool<CancelJobInput> {
   return {
     descriptor: KODA_CANCEL_JOB,
+    key: 'fleet.job.cancel',
     // 2b2-R4: the same CASL tuple the cancel route enforces (`fleet-jobs.controller.ts`), never `create`.
     permission: { kind: 'ability', action: 'update', subject: 'FleetJob' },
     kind: 'write',

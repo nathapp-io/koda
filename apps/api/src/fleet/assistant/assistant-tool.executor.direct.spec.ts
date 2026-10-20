@@ -1,6 +1,6 @@
 import { NotFoundAppException } from '@nathapp/nestjs-common';
-import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
 import type { AgentPrincipal } from '../../auth/principal/koda-principal.types';
+import type { PermissionService } from '../../permissions/permission.service';
 import type { ProjectAccessService } from '../../projects/project-access.service';
 import { approvalModeFor } from './actions/approval-policy';
 import type { ActionProposer } from './actions/pending-action.domain';
@@ -21,13 +21,15 @@ function setup() {
     record: vi.fn(async row => { rows.push(row); }),
   };
   const preview = vi.fn(async () => 'Add comment preview');
-  const tool: AssistantTool = { descriptor: { name: call.name, description: '', inputSchema: {} }, kind: 'write', permission: { kind: 'ability', action: 'create', subject: 'Comment' }, parse: vi.fn(input => input), preview, execute: vi.fn(async () => text) };
+  const tool: AssistantTool = { descriptor: { name: call.name, description: '', inputSchema: {} }, kind: 'write', permission: { kind: 'ability', action: 'create', subject: 'Comment' }, key: 'comment.create', parse: vi.fn(input => input), preview, execute: vi.fn(async () => text) };
   const registry = new AssistantToolRegistry();
   registry.register(tool);
   const actions: ActionProposer = { propose: vi.fn(async () => ({ actionId: 'p1' })), recordDirect: vi.fn(async () => ({ actionId: 'a1' })) };
-  const executor = new AssistantToolExecutor(registry, calls, { findProjectIdBySlug: async () => 'p1', resolveMembership: async () => null } as unknown as ProjectAccessService, new KodaCaslAbilityFactory());
+  // Permissions P1 US-004: the tool's key is a `PermissionService` read now; every key is allowed here.
+  const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
+  const executor = new AssistantToolExecutor(registry, calls, { findProjectIdBySlug: async () => 'p1', resolveMembership: async () => null } as unknown as ProjectAccessService, permissions);
   executor.attachActions(actions);
-  return { executor, tool, preview, actions, rows };
+  return { executor, tool, preview, actions, rows, permissions };
 }
 describe('direct assistant writes', () => {
   beforeEach(() => vi.mocked(approvalModeFor).mockReset().mockReturnValue('none'));
@@ -123,11 +125,13 @@ describe('direct assistant writes', () => {
     expect(actions.recordDirect).not.toHaveBeenCalled();
     expect(tool.execute).not.toHaveBeenCalled();
   });
-  it('denied ability does not consult policy or preview', async () => {
-    const { executor, tool } = setup();
-    tool.permission = { kind: 'ability', action: 'create', subject: 'FleetJob' };
+  it('a refused key does not consult policy or preview', async () => {
+    const { executor, tool, permissions } = setup();
+    vi.mocked(permissions.can).mockResolvedValue({ allowed: false, reason: 'not-granted' });
     expect((await executor.executeFor(caller, call)).isError).toBe(true);
     expect(approvalModeFor).not.toHaveBeenCalled();
     expect(tool.preview).not.toHaveBeenCalled();
+    // The refused key is the tool's own, asked in the project the call resolved (permissions P1 US-004).
+    expect(permissions.can).toHaveBeenCalledWith(principal, 'comment.create', { projectId: 'p1' });
   });
 });

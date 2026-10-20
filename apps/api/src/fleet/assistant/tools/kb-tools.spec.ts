@@ -1,5 +1,5 @@
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
-import { KodaCaslAbilityFactory } from '../../../auth/casl/koda-casl-ability.factory';
+import type { PermissionService } from '../../../permissions/permission.service';
 import type { ProjectAccessService } from '../../../projects/project-access.service';
 import type { KnowledgeChunkRow } from '../../knowledge/knowledge-chunk-store';
 import type { KnowledgeRepoRef } from '../../knowledge/knowledge-index.domain';
@@ -101,7 +101,9 @@ function harness(opts: { answer?: Partial<KnowledgeSearchResult>; doc?: Knowledg
       return 'DEVELOPER';
     }),
   };
-  const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, new KodaCaslAbilityFactory());
+  // Permissions P1 US-004: the tools' keys are `PermissionService` reads now; kb.search and kb.read are held here.
+  const permissions = { can: vi.fn(async (_actor: unknown, key: string) => ({ allowed: ['kb.search', 'kb.read'].includes(key), reason: 'granted' })) } as unknown as PermissionService;
+  const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions);
   let callId = 0;
   return {
     search, readDoc, readOutcome, resolveProjectRepo, rows,

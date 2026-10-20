@@ -4,7 +4,7 @@ import { AssistantToolRegistry } from './assistant-tool.registry';
 import type { AssistantTool, ToolContext } from './assistant-tool.types';
 import type { AssistantToolCallRecord, AssistantToolCallRepository, ToolCallContext } from './assistant-tool-call.domain';
 import type { ProjectAccessService } from '../../projects/project-access.service';
-import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
+import type { PermissionService } from '../../permissions/permission.service';
 
 type Kind = NonNullable<ToolCallContext['kind']>;
 
@@ -48,14 +48,18 @@ function setup(tool: AssistantTool<unknown>, opts: Options = {}) {
   };
   const registry = new AssistantToolRegistry();
   registry.register(tool);
-  const executor = new AssistantToolExecutor(registry, repo, access as unknown as ProjectAccessService, new KodaCaslAbilityFactory());
-  return { executor, rows, access, roles };
+  // Permissions P1 US-004: the tool's key is a `PermissionService` read now; every key is allowed here, so each case
+  // stays about the project argument and the resolved scope.
+  const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
+  const executor = new AssistantToolExecutor(registry, repo, access as unknown as ProjectAccessService, permissions);
+  return { executor, rows, access, roles, permissions };
 }
 
 function makeTool(over: Partial<AssistantTool<unknown>> = {}): AssistantTool<unknown> {
   return {
     descriptor: { name: 'koda_search_tickets', description: 'd', inputSchema: {} },
     permission: { kind: 'member' },
+    key: 'ticket.read',
     parse: vi.fn((input: unknown) => input),
     execute: vi.fn(async () => 'tool text'),
     ...over,
@@ -195,14 +199,19 @@ describe('S5b-R7 project argument: WORKSPACE threads validate it', () => {
     expect(rows[0]).toMatchObject({ projectId: 'b-id', outcome: 'ok' });
   });
 
-  it('AC-14: a VIEWER of b is refused an ability tool, naming b, and the tool never runs', async () => {
-    const tool = makeTool({ permission: { kind: 'ability', action: 'create', subject: 'FleetJob' } });
-    const { executor, rows } = setup(tool, { roles: { b: 'VIEWER' } });
+  it('AC-14 (US-004): a key the creator does not hold in b is refused, naming b, and the tool never runs', async () => {
+    const tool = makeTool({ key: 'fleet.job.dispatch' });
+    const { executor, rows, permissions } = setup(tool, { roles: { b: 'VIEWER' } });
+    vi.mocked(permissions.can).mockImplementation(async (_actor: unknown, key: string) => ({ allowed: key !== 'fleet.job.dispatch', reason: 'granted' }));
+
     const result = await executor.execute(call({ project: 'b' }));
+
     expect(result.isError).toBe(true);
-    expect(result.content).toMatch(/^forbidden: .* on b$/);
+    expect(result.content).toBe('forbidden: koda_search_tickets needs fleet.job.dispatch on b');
     expect(tool.execute).not.toHaveBeenCalled();
     expect(rows[0]).toMatchObject({ outcome: 'forbidden', projectId: 'b-id' });
+    // The key is asked in the project the call resolved, never the thread's home project.
+    expect(permissions.can).toHaveBeenCalledWith(expect.objectContaining({ id: 'u1', projectRole: 'VIEWER' }), 'fleet.job.dispatch', { projectId: 'b-id' });
   });
 
 });
@@ -229,16 +238,18 @@ describe('1d2-D3 and 1d2-D5: workspace-scoped tools', () => {
     expect(await executor.execute(wsCall({ project: 'b' }))).toEqual(INVALID_PROJECT);
   });
 
-  it('runs with no membership or ability check and the home project context', async () => {
+  it('runs with no membership or key check and the home project context', async () => {
     let seen: ToolContext | undefined;
     const tool = workspaceTool({
       permission: { kind: 'ability', action: 'create', subject: 'FleetJob' },
       execute: async (ctx: ToolContext) => { seen = ctx; return 'ok'; },
     });
-    const { executor, access, rows } = setup(tool);
+    const { executor, access, rows, permissions } = setup(tool);
     expect(await executor.execute(wsCall({}))).toEqual({ content: 'ok', isError: false });
     expect(access.resolveMembership).not.toHaveBeenCalled();
     expect(access.findProjectIdBySlug).not.toHaveBeenCalled();
+    // US-004: a workspace-scope tool takes no key check; the listing is the caller's reachable projects, as before.
+    expect(permissions.can).not.toHaveBeenCalled();
     expect(seen).toMatchObject({ projectId: 'home-id', projectSlug: 'home', actor: { id: 'u1', projectRole: undefined } });
     expect(rows[0]).toMatchObject({ projectId: 'home-id' });
   });

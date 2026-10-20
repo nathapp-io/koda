@@ -11,7 +11,7 @@
  */
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { currentActor } from '../../action-context/action-context';
-import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
+import type { PermissionService } from '../../permissions/permission.service';
 import type { ProjectAccessService } from '../../projects/project-access.service';
 import type { ActionProposer } from './actions/pending-action.domain';
 import { AssistantToolExecutor } from './assistant-tool.executor';
@@ -52,7 +52,9 @@ function setup(context: ToolCallContext | null, tool: AssistantTool) {
     recordDirect: vi.fn(async () => ({ actionId: 'da1' })),
   };
   const access = { findProjectIdBySlug: async () => 'p1', resolveMembership: async () => 'DEVELOPER' };
-  const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, new KodaCaslAbilityFactory());
+  // Permissions P1 US-004: the tool's key is a `PermissionService` read now; every key is allowed here.
+  const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
+  const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions);
   executor.attachActions(actions);
   return { executor, actions, rows };
 }
@@ -62,6 +64,7 @@ function readTool(onExecute: (ctx: ToolContext) => Promise<string> = async () =>
   return {
     descriptor: { name: 'koda_get_ticket', description: 'd', inputSchema: {} },
     permission: { kind: 'ability', action: 'read', subject: 'Ticket' },
+    key: 'ticket.read',
     parse: (input) => input,
     execute: vi.fn(onExecute),
   };
@@ -73,6 +76,7 @@ function commentTool(): AssistantTool<unknown> {
     descriptor: { name: 'koda_add_comment', description: 'd', inputSchema: {} },
     kind: 'write',
     permission: { kind: 'ability', action: 'create', subject: 'Comment' },
+    key: 'comment.create',
     parse: (input) => input,
     preview: vi.fn(async () => 'Add comment preview'),
     execute: vi.fn(async () => 'comment c1 added to WEB-1'),

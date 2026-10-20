@@ -3,7 +3,7 @@ import type { UserPrincipal } from '../../../auth/principal/koda-principal.types
 import type { ProjectDomain } from '../../../projects/domain/project.domain';
 import type { ProjectAccessService } from '../../../projects/project-access.service';
 import { ProjectsService } from '../../../projects/projects.service';
-import { KodaCaslAbilityFactory } from '../../../auth/casl/koda-casl-ability.factory';
+import type { PermissionService } from '../../../permissions/permission.service';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
 import { AssistantToolExecutor } from '../assistant-tool.executor';
 import type { ToolContext } from '../assistant-tool.types';
@@ -169,9 +169,9 @@ describe('koda_my_projects through the executor (US-003)', () => {
     const access = { findProjectIdBySlug: vi.fn(), resolveMembership: vi.fn() };
     const registry = new AssistantToolRegistry();
     registry.register(myProjectsTool(projectsOf([project('a')]), readerOf()));
-    const executor = new AssistantToolExecutor(
-      registry, repo, access as unknown as ProjectAccessService, new KodaCaslAbilityFactory(),
-    );
+    // Permissions P1 US-004: a workspace-scope tool takes no key check, so the double is never consulted.
+    const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
+    const executor = new AssistantToolExecutor(registry, repo, access as unknown as ProjectAccessService, permissions);
 
     const result = await executor.execute({ jobId: 'j1', toolCallId: 'c1', name: 'koda_my_projects', input: {} });
 
@@ -179,6 +179,7 @@ describe('koda_my_projects through the executor (US-003)', () => {
     expect(result.content.split('\n')[0]).toMatch(lines('a'));
     expect(access.resolveMembership).not.toHaveBeenCalled();
     expect(access.findProjectIdBySlug).not.toHaveBeenCalled();
+    expect(permissions.can).not.toHaveBeenCalled();
     expect(rows[0]).toMatchObject({ projectId: 'home-id', outcome: 'ok', tool: 'koda_my_projects' });
   });
 });

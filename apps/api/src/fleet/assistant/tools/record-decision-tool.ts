@@ -41,6 +41,7 @@ export function recordDecisionTool(deps: {
 }): AssistantTool<RecordDecisionInput> {
   return {
     descriptor: KODA_RECORD_DECISION,
+    key: 'memory.decision.record',
     // 2b1-D4: the memory write routes check project membership (`memory.controller.ts`), so this tool does too.
     permission: { kind: 'member' },
     kind: 'write',
