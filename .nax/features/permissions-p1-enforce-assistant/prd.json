@@ -3,7 +3,7 @@
   "feature": "permissions-p1-enforce-assistant",
   "branchName": "feat/permissions-p1-enforce-assistant",
   "createdAt": "2026-10-20T00:00:00.000Z",
-  "updatedAt": "2026-10-20T14:46:49.105Z",
+  "updatedAt": "2026-10-20T14:55:37.619Z",
   "userStories": [
     {
       "id": "US-001",
@@ -470,8 +470,8 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -483,7 +483,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.09999999999999964,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-20T14:46:56.974Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/mcp/mcp.controller.ts",
@@ -517,7 +529,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "66bad7e2870923ec3209d331629e2fb01ce962ea"
     },
     {
       "id": "US-006",
