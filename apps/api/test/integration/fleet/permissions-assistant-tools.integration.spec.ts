@@ -329,7 +329,7 @@ describeIntegration('assistant tools check their key (US-004)', () => {
   // -------------------------------------------------------------------------
 
   it('AC-10: an agent developer binding adds a comment at once, recorded as a thread-origin agent action', async () => {
-    const { jobId, threadId } = await threadJob('agent', 'p1-dev-agent');
+    const { jobId } = await threadJob('agent', 'p1-dev-agent');
 
     const answer = answerOf(await callTool(jobId, 'koda_add_comment', 'ac10', {
       ref: `${P1_KEY}-1`, body: 'the login form is fixed',
