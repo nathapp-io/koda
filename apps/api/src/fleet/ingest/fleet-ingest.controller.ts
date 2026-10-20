@@ -1,10 +1,12 @@
-import { Controller, Get, Inject, Param, Post, Query } from '@nestjs/common';
+import { Controller, Get, Inject, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { Principal, RequiredPermission } from '@nathapp/nestjs-auth';
+import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse, NotFoundAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { parseQuery, remapPage, toPageResult } from '../../common/dto/koda-page.query';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { Requires } from '../../permissions/requires.decorator';
+import { RequiresGuard } from '../../permissions/requires.guard';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { BundleIngestService } from './bundle-ingest.service';
@@ -12,7 +14,7 @@ import { BUNDLE_INGEST_REPOSITORY, IBundleIngestRepository, INGEST_PARSER_VERSIO
 import { IngestQueuedDto, IngestRowDto } from './dto/ingest-row.dto';
 import { ListIngestQuery } from './dto/list-ingest.query';
 
-/** Fleet S2b (d) §2.6, D370: ingest health and re-runs (global admin). */
+/** Fleet S2b (d) §2.6, D370: ingest health and re-runs, migrated onto permission keys by permissions P1d (US-008). */
 @ApiTags('fleet')
 @ApiBearerAuth()
 @Controller('fleet/ingest')
@@ -26,9 +28,11 @@ export class FleetIngestController {
   ) {}
 
   @Get()
-  @RequiredPermission('ADMIN')
-  @ApiOperation({ summary: 'List bundle ingest rows (global admin)' })
+  @UseGuards(RequiresGuard)
+  @Requires('fleet.ingest.read')
+  @ApiOperation({ summary: 'List bundle ingest rows (fleet.ingest.read, global)' })
   @ApiResponse({ status: 200, description: 'Page of IngestRowDto' })
+  @ApiResponse({ status: 403, description: 'fleet.ingest.read is missing globally' })
   async list(@Query() rawQuery: ListIngestQuery) {
     const q = parseQuery(ListIngestQuery, rawQuery);
     const page = await this.repo.findPage({ status: q.status }, { current: q.current, size: q.size });
@@ -36,17 +40,21 @@ export class FleetIngestController {
   }
 
   @Post('backfill')
-  @RequiredPermission('ADMIN')
-  @ApiOperation({ summary: 'Queue every unexpired bundle that has no ingest row (global admin)' })
+  @UseGuards(RequiresGuard)
+  @Requires('fleet.ingest.backfill')
+  @ApiOperation({ summary: 'Queue every unexpired bundle that has no ingest row (fleet.ingest.backfill, global)' })
   @ApiResponse({ status: 201, type: IngestQueuedDto })
+  @ApiResponse({ status: 403, description: 'fleet.ingest.backfill is missing globally' })
   async backfill(@Principal() principal: KodaPrincipal) {
     return JsonResponse.Ok(await this.queue(principal.id, 'ingest.backfill', 'ingest', 'all', null, () => this.repo.backfill(INGEST_PARSER_VERSION)));
   }
 
   @Post('jobs/:jobId/rerun')
-  @RequiredPermission('ADMIN')
-  @ApiOperation({ summary: "Re-ingest a job's bundles (global admin)" })
+  @UseGuards(RequiresGuard)
+  @Requires('fleet.ingest.rerun')
+  @ApiOperation({ summary: "Re-ingest a job's bundles (fleet.ingest.rerun, global)" })
   @ApiResponse({ status: 201, type: IngestQueuedDto })
+  @ApiResponse({ status: 403, description: 'fleet.ingest.rerun is missing globally' })
   async rerunJob(@Param('jobId') jobId: string, @Principal() principal: KodaPrincipal) {
     const job = await this.jobs.findById(jobId);
     if (!job) throw new NotFoundAppException({}, 'fleet.jobs');
@@ -54,9 +62,11 @@ export class FleetIngestController {
   }
 
   @Post('rerun-outdated')
-  @RequiredPermission('ADMIN')
-  @ApiOperation({ summary: 'Re-ingest bundles ingested by an older parser version (global admin)' })
+  @UseGuards(RequiresGuard)
+  @Requires('fleet.ingest.rerun')
+  @ApiOperation({ summary: 'Re-ingest bundles ingested by an older parser version (fleet.ingest.rerun, global)' })
   @ApiResponse({ status: 201, type: IngestQueuedDto })
+  @ApiResponse({ status: 403, description: 'fleet.ingest.rerun is missing globally' })
   async rerunOutdated(@Principal() principal: KodaPrincipal) {
     return JsonResponse.Ok(await this.queue(principal.id, 'ingest.rerun_outdated', 'ingest', 'all', null, () => this.repo.rerunOutdated(INGEST_PARSER_VERSION)));
   }

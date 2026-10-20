@@ -41,7 +41,13 @@ export class FleetActivityService {
     return remapPage(await this.repo.findPage(filters, page), FleetActivityDto.from);
   }
 
-  /** Project ids the user is a member of, for activity scoping (plan D14). */
+  /**
+   * Project ids the user is a member of, for activity scoping (plan D14).
+   *
+   * No caller is left: permissions P1d US-008 filters the feed with
+   * `PermissionService.projectIdsWithKey(principal, 'fleet.activity.read')` instead of by membership.
+   * Kept for `permissions-p1-cleanup`, which removes it.
+   */
   memberProjectIds(userId: string): Promise<string[]> {
     return this.repo.findMemberProjectIds(userId);
   }

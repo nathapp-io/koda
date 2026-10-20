@@ -5177,10 +5177,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Page of FleetActivityDto"
-          },
-          "403": {
-            "description": "Not a user"
+            "description": "Page of FleetActivityDto; every project when the key is held globally"
           }
         },
         "security": [
@@ -5188,7 +5185,7 @@
             "bearer": []
           }
         ],
-        "summary": "List fleet activity: global admin sees all, members see their projects' job rows",
+        "summary": "Fleet activity rows of the projects where the caller holds fleet.activity.read",
         "tags": [
           "fleet"
         ]
@@ -6963,6 +6960,9 @@
         "responses": {
           "200": {
             "description": "Page of FleetRepoDto"
+          },
+          "403": {
+            "description": "fleet.repo.read is missing globally"
           }
         },
         "security": [
@@ -6970,7 +6970,7 @@
             "bearer": []
           }
         ],
-        "summary": "List fleet repos (global admin)",
+        "summary": "List fleet repos (fleet.repo.read, global)",
         "tags": [
           "fleet"
         ]
@@ -6999,6 +6999,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.repo.create is missing globally"
+          },
           "409": {
             "description": "Already registered"
           },
@@ -7011,7 +7014,7 @@
             "bearer": []
           }
         ],
-        "summary": "Register a repo for fleet dispatch after proving koda can broker git access (global admin)",
+        "summary": "Register a repo for fleet dispatch after proving koda can broker git access (fleet.repo.create, global)",
         "tags": [
           "fleet"
         ]
@@ -7041,6 +7044,9 @@
               }
             }
           },
+          "403": {
+            "description": "fleet.repo.check is missing globally"
+          },
           "404": {
             "description": "No such repo"
           }
@@ -7050,7 +7056,7 @@
             "bearer": []
           }
         ],
-        "summary": "Re-run the forge check for a registered repo (global admin)",
+        "summary": "Re-run the forge check for a registered repo (fleet.repo.check, global)",
         "tags": [
           "fleet"
         ]
@@ -7072,6 +7078,9 @@
         "responses": {
           "204": {
             "description": ""
+          },
+          "403": {
+            "description": "fleet.repo.delete is missing globally"
           }
         },
         "security": [
@@ -7079,7 +7088,7 @@
             "bearer": []
           }
         ],
-        "summary": "Unregister a fleet repo (global admin)",
+        "summary": "Unregister a fleet repo (fleet.repo.delete, global)",
         "tags": [
           "fleet"
         ]
@@ -7582,6 +7591,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.enrollment.create is missing globally"
           }
         },
         "security": [
@@ -7589,7 +7601,7 @@
             "bearer": []
           }
         ],
-        "summary": "Issue a single-use runner enrollment token (global admin); the token is shown once",
+        "summary": "Issue a single-use runner enrollment token (fleet.enrollment.create, global); the token is shown once",
         "tags": [
           "fleet"
         ]
@@ -7624,6 +7636,9 @@
         "responses": {
           "200": {
             "description": "Page of EnrollmentDto"
+          },
+          "403": {
+            "description": "fleet.enrollment.read is missing globally"
           }
         },
         "security": [
@@ -7631,7 +7646,7 @@
             "bearer": []
           }
         ],
-        "summary": "List enrollment tokens (global admin); tokens are never returned",
+        "summary": "List enrollment tokens (fleet.enrollment.read, global); tokens are never returned",
         "tags": [
           "fleet"
         ]
@@ -7727,6 +7742,9 @@
         "responses": {
           "200": {
             "description": "Page of RunnerDto"
+          },
+          "403": {
+            "description": "fleet.runner.read is missing globally"
           }
         },
         "security": [
@@ -7734,7 +7752,7 @@
             "bearer": []
           }
         ],
-        "summary": "List runners (global admin)",
+        "summary": "List runners (fleet.runner.read, global)",
         "tags": [
           "fleet"
         ]
@@ -7763,6 +7781,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.runner.read is missing globally"
           }
         },
         "security": [
@@ -7770,7 +7791,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get a runner (global admin)",
+        "summary": "Get a runner (fleet.runner.read, global)",
         "tags": [
           "fleet"
         ]
@@ -7807,6 +7828,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.runner.update is missing globally"
           }
         },
         "security": [
@@ -7814,7 +7838,7 @@
             "bearer": []
           }
         ],
-        "summary": "Enable/disable a runner or change its labels or capacity (global admin)",
+        "summary": "Enable/disable a runner or change its labels or capacity (fleet.runner.update, global)",
         "tags": [
           "fleet"
         ]
@@ -7834,6 +7858,9 @@
         "responses": {
           "204": {
             "description": ""
+          },
+          "403": {
+            "description": "fleet.runner.delete is missing globally"
           }
         },
         "security": [
@@ -7841,7 +7868,7 @@
             "bearer": []
           }
         ],
-        "summary": "Delete a runner; revokes its key (global admin)",
+        "summary": "Delete a runner; revokes its key (fleet.runner.delete, global)",
         "tags": [
           "fleet"
         ]
@@ -8480,6 +8507,9 @@
         "responses": {
           "200": {
             "description": "Page of IngestRowDto"
+          },
+          "403": {
+            "description": "fleet.ingest.read is missing globally"
           }
         },
         "security": [
@@ -8487,7 +8517,7 @@
             "bearer": []
           }
         ],
-        "summary": "List bundle ingest rows (global admin)",
+        "summary": "List bundle ingest rows (fleet.ingest.read, global)",
         "tags": [
           "fleet"
         ]
@@ -8507,6 +8537,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.ingest.backfill is missing globally"
           }
         },
         "security": [
@@ -8514,7 +8547,7 @@
             "bearer": []
           }
         ],
-        "summary": "Queue every unexpired bundle that has no ingest row (global admin)",
+        "summary": "Queue every unexpired bundle that has no ingest row (fleet.ingest.backfill, global)",
         "tags": [
           "fleet"
         ]
@@ -8543,6 +8576,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.ingest.rerun is missing globally"
           }
         },
         "security": [
@@ -8550,7 +8586,7 @@
             "bearer": []
           }
         ],
-        "summary": "Re-ingest a job's bundles (global admin)",
+        "summary": "Re-ingest a job's bundles (fleet.ingest.rerun, global)",
         "tags": [
           "fleet"
         ]
@@ -8570,6 +8606,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.ingest.rerun is missing globally"
           }
         },
         "security": [
@@ -8577,7 +8616,7 @@
             "bearer": []
           }
         ],
-        "summary": "Re-ingest bundles ingested by an older parser version (global admin)",
+        "summary": "Re-ingest bundles ingested by an older parser version (fleet.ingest.rerun, global)",
         "tags": [
           "fleet"
         ]
@@ -9129,6 +9168,9 @@
           },
           "400": {
             "description": "Invalid window, bucket or groupBy"
+          },
+          "403": {
+            "description": "fleet.analytics.read is missing globally"
           }
         },
         "security": [
@@ -9136,7 +9178,7 @@
             "bearer": []
           }
         ],
-        "summary": "Fleet spend across projects; groupBy also accepts project (global admin)",
+        "summary": "Fleet spend across projects; groupBy also accepts project (fleet.analytics.read, global)",
         "tags": [
           "fleet"
         ]
@@ -9191,6 +9233,9 @@
           "400": {
             "description": "Missing before, or confirm is not the project slug / ALL"
           },
+          "403": {
+            "description": "fleet.analytics.delete is missing globally"
+          },
           "404": {
             "description": "No such project"
           }
@@ -9200,7 +9245,7 @@
             "bearer": []
           }
         ],
-        "summary": "Delete analytics rows dated before an instant; ingest rows are kept and marked (global admin, D384)",
+        "summary": "Delete analytics rows dated before an instant; ingest rows are kept and marked (fleet.analytics.delete, global, D384)",
         "tags": [
           "fleet"
         ]
@@ -9259,6 +9304,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.dashboard.read is missing globally"
           }
         },
         "security": [
@@ -9266,7 +9314,7 @@
             "bearer": []
           }
         ],
-        "summary": "Fleet health across every project: runners, active and recent jobs, attention items (global admin)",
+        "summary": "Fleet health across every project: runners, active and recent jobs, attention items (fleet.dashboard.read, global)",
         "tags": [
           "fleet"
         ]
@@ -9286,6 +9334,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "fleet.credential.read is missing globally"
           }
         },
         "security": [
@@ -9293,7 +9344,7 @@
             "bearer": []
           }
         ],
-        "summary": "Credential health per provider and runner, and the profile inventory (global admin)",
+        "summary": "Credential health per provider and runner, and the profile inventory (fleet.credential.read, global)",
         "tags": [
           "fleet"
         ]
