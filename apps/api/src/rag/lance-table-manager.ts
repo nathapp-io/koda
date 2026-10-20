@@ -62,18 +62,35 @@ interface FilterClause {
   value: string;
 }
 
-const FILTER_CLAUSE = /^([A-Za-z_][A-Za-z0-9_]*)\s*(!=|=)\s*'([^']*)'$/;
+/** One `field = 'value'` / `field != 'value'` clause at the start of a predicate. */
+const FILTER_CLAUSE = /^([A-Za-z_][A-Za-z0-9_]*)\s*(!=|=)\s*'([^']*)'/;
+
+/** The `AND` between two clauses; a value's own `AND` is inside its quotes and never read as one. */
+const FILTER_CONJUNCTION = /^AND(?:\s+|$)/i;
 
 /**
  * Parses an AND-joined list of `field = 'value'` / `field != 'value'` clauses, the only predicate shapes the RAG
  * services build. `null` means "not a predicate this fallback understands".
+ *
+ * The scan reads one clause at a time and then one conjunction, so a quoted value is opaque: `source = 'doc' AND
+ * source_id = 'research AND development'` is two clauses, not three (branch fix B2). Splitting the whole predicate on
+ * whitespace-delimited `AND` cut that value in half, and the unparseable tail silently left the row in place — a
+ * re-index added a duplicate and a delete answered success while retaining the document.
  */
 function parseFilterClauses(filter: string): FilterClause[] | null {
   const clauses: FilterClause[] = [];
-  for (const part of filter.split(/\s+AND\s+/i)) {
-    const match = FILTER_CLAUSE.exec(part.trim());
-    if (!match) return null;
-    clauses.push({ field: match[1], negate: match[2] === '!=', value: match[3] });
+  let rest = filter.trim();
+  while (rest.length > 0) {
+    const clause = FILTER_CLAUSE.exec(rest);
+    if (!clause) return null;
+    clauses.push({ field: clause[1], negate: clause[2] === '!=', value: clause[3] });
+    rest = rest.slice(clause[0].length).trim();
+    if (rest.length === 0) break;
+    const conjunction = FILTER_CONJUNCTION.exec(rest);
+    // A trailing `AND`, or any other operator, is not a predicate this fallback understands.
+    if (!conjunction) return null;
+    rest = rest.slice(conjunction[0].length).trim();
+    if (rest.length === 0) return null;
   }
   return clauses.length > 0 ? clauses : null;
 }

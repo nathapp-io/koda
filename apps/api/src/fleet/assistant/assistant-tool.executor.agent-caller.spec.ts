@@ -16,7 +16,7 @@ import type { ProjectAccessService } from '../../projects/project-access.service
 import type { ActionProposer } from './actions/pending-action.domain';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
-import type { AssistantToolCallRepository, ToolCallContext } from './assistant-tool-call.domain';
+import type { AssistantToolCallRecord, AssistantToolCallRepository, ToolCallContext } from './assistant-tool-call.domain';
 import type { AssistantTool, ToolContext } from './assistant-tool.types';
 
 /** An agent `a1` requested the turn of this PROJECT thread; a user made the thread (1d2-D4 kind PROJECT). */
@@ -53,6 +53,31 @@ function setup(context: ToolCallContext | null, tool: AssistantTool) {
   };
   const access = { findProjectIdBySlug: async () => 'p1', resolveMembership: async () => 'DEVELOPER' };
   // Permissions P1 US-004: the tool's key is a `PermissionService` read now; every key is allowed here.
+  const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
+  const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions);
+  executor.attachActions(actions);
+  return { executor, actions, rows };
+}
+
+/**
+ * The same wiring, with a repository that really stores its rows: `findByCall` answers a stored `(jobId, toolCallId)`,
+ * so a case can tell a replay from a second execution.
+ */
+function storingSetup(context: ToolCallContext, tool: AssistantTool) {
+  const rows: AssistantToolCallRecord[] = [];
+  const calls: AssistantToolCallRepository = {
+    findUserActor: vi.fn(async () => null),
+    findByCall: vi.fn(async (jobId, toolCallId) => rows.find((r) => r.jobId === jobId && r.toolCallId === toolCallId) ?? null),
+    findCallContext: vi.fn(async () => context),
+    record: vi.fn(async (row) => { rows.push(row); }),
+  };
+  const registry = new AssistantToolRegistry();
+  registry.register(tool);
+  const actions: ActionProposer = {
+    propose: vi.fn(async () => ({ actionId: 'pa1' })),
+    recordDirect: vi.fn(async () => ({ actionId: 'da1' })),
+  };
+  const access = { findProjectIdBySlug: async () => 'p1', resolveMembership: async () => 'DEVELOPER' };
   const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
   const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions);
   executor.attachActions(actions);
@@ -148,5 +173,49 @@ describe('AssistantToolExecutor as the thread requester (US-001)', () => {
     const error = await executor.execute({ ...CALL, name: 'koda_get_ticket', input: {} }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(NotFoundAppException);
     expect(JSON.stringify(error)).toContain('fleet.jobs');
+  });
+
+  /**
+   * Branch fix B1: an agent's thread write runs at once, so the only thing standing between a runner's retry and a
+   * duplicated comment, ticket batch or dispatch is the replay row — and reading it before executing and inserting it
+   * afterwards let two concurrent duplicates of one `(jobId, toolCallId)` both execute. The replay key is a critical
+   * section now: the second call awaits the winner's execution and then replays its stored row.
+   */
+  it('B1: two concurrent calls with one replay key make exactly one agent write and answer its stored row', async () => {
+    let writes = 0;
+    const tool = commentTool();
+    vi.mocked(tool.execute).mockImplementation(async () => {
+      writes += 1;
+      // Keep the winner in flight long enough for the duplicate to reach its own permission check and preview.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return 'comment c1 added to WEB-1';
+    });
+    const { executor, actions, rows } = storingSetup(AGENT_CONTEXT, tool);
+    const input = { ref: 'WEB-1', body: 'x' };
+
+    const [first, second] = await Promise.all([
+      executor.execute({ ...CALL, name: 'koda_add_comment', input }),
+      executor.execute({ ...CALL, name: 'koda_add_comment', input }),
+    ]);
+
+    expect(writes).toBe(1);
+    expect(tool.execute).toHaveBeenCalledTimes(1);
+    expect(actions.recordDirect).toHaveBeenCalledTimes(1);
+    expect(rows).toHaveLength(1);
+    expect(first.content).toContain('comment c1 added to WEB-1');
+    expect(second).toEqual(first);
+  });
+
+  it('B1: a stored call replayed after the concurrent winner never runs the tool again', async () => {
+    const tool = commentTool();
+    const { executor, rows } = storingSetup(AGENT_CONTEXT, tool);
+    const input = { ref: 'WEB-1', body: 'x' };
+
+    const first = await executor.execute({ ...CALL, name: 'koda_add_comment', input });
+    const second = await executor.execute({ ...CALL, name: 'koda_add_comment', input });
+
+    expect(tool.execute).toHaveBeenCalledTimes(1);
+    expect(rows).toHaveLength(1);
+    expect(second).toEqual(first);
   });
 });

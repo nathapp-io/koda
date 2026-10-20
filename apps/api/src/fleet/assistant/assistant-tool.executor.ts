@@ -4,6 +4,7 @@ import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-com
 import { isAgentPrincipal, type AgentPrincipal, type KodaAgentStatus, type UserPrincipal } from '../../auth/principal/koda-principal.types';
 import { runWithActor } from '../../action-context/action-context';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
+import { KeyedMutex } from '../../common/utils/keyed-mutex';
 import { PermissionService } from '../../permissions/permission.service';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import { withProjectRole } from '../../projects/project-context';
@@ -50,6 +51,9 @@ export class AssistantToolExecutor {
 
   /** 2a-D1: attached by `AssistantActionService.onModuleInit`, which is how the two providers stay acyclic. */
   private actions: ActionProposer | null = null;
+
+  /** B1: one critical section per replay key, so a duplicate of a thread call awaits the winner instead of running it. */
+  private readonly replayKeys = new KeyedMutex();
 
   constructor(
     private readonly registry: AssistantToolRegistry,
@@ -148,11 +152,24 @@ export class AssistantToolExecutor {
     };
   }
 
+  /**
+   * The thread call path. Its replay key `(jobId, toolCallId)` is a critical section, not a read-then-write: a stored
+   * row is answered as a replay, and a duplicate that arrives while the winner is still executing waits for it and then
+   * replays the row the winner stored (branch fix B1). Without that, two concurrent requests carrying one replay key
+   * both read no row, both ran the tool, and the later insert's unique violation only replayed the winning response —
+   * so an agent's thread write (a comment, a ticket batch, a dispatch) landed twice.
+   */
   async execute(call: ToolCall): Promise<ToolResult> {
     const inputHash = sha256(stableStringify(call.input));
-    const stored = await this.calls.findByCall(call.jobId, call.toolCallId);
-    if (stored) return this.replay(stored, call.name, inputHash);
+    return this.replayKeys.run(replayKey(call.jobId, call.toolCallId), async () => {
+      const stored = await this.calls.findByCall(call.jobId, call.toolCallId);
+      if (stored) return this.replay(stored, call.name, inputHash);
+      return this.executeUnstored(call, inputHash);
+    });
+  }
 
+  /** The execution behind a replay key nobody stored: look the tool and its requester up, then run and audit it. */
+  private async executeUnstored(call: ToolCall, inputHash: string): Promise<ToolResult> {
     const tool = this.registry.get(call.name);
     if (!tool) throw new NotFoundAppException({}, 'fleet.assistantTool');
 
@@ -411,7 +428,11 @@ export class AssistantToolExecutor {
     }
   }
 
-  /** Step 8: audit and store; a concurrent duplicate answers the stored row instead. */
+  /**
+   * Step 8: audit and store. A concurrent duplicate inside this process never reaches here with the same key (the
+   * replay-key section above serializes it); a duplicate from another process loses on the `(jobId, toolCallId)`
+   * unique constraint and answers the stored row instead.
+   */
   private async store(row: AssistantToolCallRecord): Promise<ToolResult> {
     try {
       await this.calls.record(row);
@@ -428,6 +449,9 @@ export class AssistantToolExecutor {
 type RunCall = { name: string; input: unknown; jobId: string | null; toolCallId: string | null };
 
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
+
+/** B1: the audit's replay key as a mutex key. The `/` separator keeps `('j1', 'c/1')` apart from `('j1/c', '1')`. */
+const replayKey = (jobId: string, toolCallId: string): string => `${jobId}/${toolCallId}`;
 
 const refusal = (outcome: ToolCallOutcome, content: string): RunOutcome => ({ outcome, content });
 

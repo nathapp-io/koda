@@ -151,4 +151,29 @@ describe.each([
 
     await expect(store.findSourceCreators(projectId, 'doc', 'd3')).resolves.toEqual([null]);
   });
+
+  /**
+   * Branch fix B2: a valid source id may contain ` AND ` (no quotes, no control characters), and the pair predicate is
+   * `source = 'doc' AND source_id = 'research AND development'`. The fallback parser split that value in half, so its
+   * delete matched nothing: re-indexing duplicated the row, and `deleteBySource` answered success while the document
+   * stayed indexed.
+   */
+  it('B2: replacement and deletion work for a source id that contains AND', async () => {
+    const projectId = `kbown_${inMemoryOnly ? 'mem' : 'native'}_b2`;
+    const sourceId = 'research AND development';
+
+    await store.indexDocument(projectId, { source: 'doc', sourceId, content: 'v1', metadata: {} });
+    await store.indexDocument(projectId, { source: 'ticket', sourceId, content: 'ticket row', metadata: {} });
+    await store.indexDocument(projectId, { source: 'doc', sourceId, content: 'v2', metadata: {} });
+
+    const docRows = (await store.listDocuments(projectId, 100)).filter((doc) => doc.source === 'doc' && doc.sourceId === sourceId);
+    expect(docRows).toHaveLength(1);
+    expect(docRows[0]?.content).toBe('v2');
+
+    await store.deleteBySource(projectId, 'doc', sourceId);
+
+    const after = await store.listDocuments(projectId, 100);
+    expect(after.filter((doc) => doc.source === 'doc' && doc.sourceId === sourceId)).toHaveLength(0);
+    expect(after.filter((doc) => doc.source === 'ticket' && doc.sourceId === sourceId)).toHaveLength(1);
+  });
 });
