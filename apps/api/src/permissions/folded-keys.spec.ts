@@ -5,8 +5,11 @@
  * removes `project.agent.add`, `project.agent.remove`, `project.agent.update`, `member.role.update`
  * and `agent.roles.update`: they duplicate what `member.*`, `role.binding.manage` and `agent.update`
  * already express. This spec pins the fold — the catalog, the surviving keys' scopes, the seeded
- * project-admin role and the five route declarations that used the removed keys.
+ * project-admin role, the five route declarations that used the removed keys and the route texts
+ * that name the surviving keys.
  */
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { AgentsController } from '../agents/agents.controller';
 import { ProjectMembersController } from '../projects/members/project-members.controller';
 import { ProjectsController } from '../projects/projects.controller';
@@ -23,6 +26,51 @@ const REMOVED_KEYS: readonly string[] = [
   'member.role.update',
   'agent.roles.update',
 ];
+
+/**
+ * @nestjs/swagger's metadata keys. Its `DECORATORS` map is not exported from the package root,
+ * so the two literals the `ApiOperation` and `ApiResponse` decorators write are spelled out here.
+ */
+const API_OPERATION_METADATA = 'swagger/apiOperation';
+const API_RESPONSE_METADATA = 'swagger/apiResponse';
+
+interface SwaggerOperation {
+  summary?: string;
+}
+
+type SwaggerResponses = Record<string, { description?: string } | undefined>;
+
+/**
+ * The five routes the fold rewires: the route, its handler and the surviving key its texts name.
+ */
+const FOLDED_ROUTES: ReadonlyArray<readonly [route: string, handler: object, key: string]> = [
+  ['POST /projects/:slug/agents', ProjectsController.prototype.addProjectAgent, 'member.add'],
+  ['DELETE /projects/:slug/agents/:agentSlug', ProjectsController.prototype.removeProjectAgent, 'member.remove'],
+  ['PATCH /projects/:slug/agents/:agentSlug', ProjectsController.prototype.updateProjectAgent, 'agent.update'],
+  ['PATCH /projects/:slug/members/:userId', ProjectMembersController.prototype.updateRole, 'role.binding.manage'],
+  ['PATCH /agents/:slug/update-roles', AgentsController.prototype.updateRoles, 'agent.update'],
+];
+
+/**
+ * The same five routes in the committed spec: the spec path, the method and the surviving key.
+ */
+const FOLDED_OPERATIONS: ReadonlyArray<readonly [path: string, method: string, key: string]> = [
+  ['/api/projects/{slug}/agents', 'post', 'member.add'],
+  ['/api/projects/{slug}/agents/{agentSlug}', 'delete', 'member.remove'],
+  ['/api/projects/{slug}/agents/{agentSlug}', 'patch', 'agent.update'],
+  ['/api/projects/{slug}/members/{userId}', 'patch', 'role.binding.manage'],
+  ['/api/agents/{slug}/update-roles', 'patch', 'agent.update'],
+];
+
+interface OpenApiSpec {
+  paths: Record<string, Record<string, { summary?: string; responses?: SwaggerResponses } | undefined>>;
+}
+
+/** The committed spec, regenerated with `bun run api:export-spec` from the repo root. */
+function committedSpec(): OpenApiSpec {
+  const raw = readFileSync(join(__dirname, '..', '..', '..', '..', 'openapi.json'), 'utf-8');
+  return JSON.parse(raw) as OpenApiSpec;
+}
 
 /** The keys of one handler, read off its `@Requires` metadata. */
 function declaredKeys(handler: object): readonly string[] {
@@ -75,5 +123,26 @@ describe('the folded permission keys (US-001)', () => {
       updateRole: ['role.binding.manage'],
       updateRoles: ['agent.update'],
     });
+  });
+
+  it('AC-6: every folded route names its surviving key in the operation and 403 texts', () => {
+    for (const [route, handler, key] of FOLDED_ROUTES) {
+      const operation = Reflect.getMetadata(API_OPERATION_METADATA, handler) as SwaggerOperation | undefined;
+      const responses = Reflect.getMetadata(API_RESPONSE_METADATA, handler) as SwaggerResponses | undefined;
+
+      expect(operation?.summary, `${route} operation summary`).toContain(key);
+      expect(responses?.['403']?.description, `${route} 403 description`).toContain(key);
+    }
+  });
+
+  it('AC-7: the committed openapi.json names the surviving keys on the folded operations', () => {
+    const spec = committedSpec();
+
+    for (const [path, method, key] of FOLDED_OPERATIONS) {
+      const operation = spec.paths[path]?.[method];
+
+      expect(operation?.summary, `${method.toUpperCase()} ${path} summary`).toContain(key);
+      expect(operation?.responses?.['403']?.description, `${method.toUpperCase()} ${path} 403`).toContain(key);
+    }
   });
 });

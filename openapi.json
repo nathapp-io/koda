@@ -1859,7 +1859,7 @@
             "bearer": []
           }
         ],
-        "summary": "Add an agent to the project roster",
+        "summary": "Add an agent to the project roster (member.add)",
         "tags": [
           "projects"
         ]
@@ -1908,7 +1908,7 @@
             "bearer": []
           }
         ],
-        "summary": "Remove an agent from the project roster",
+        "summary": "Remove an agent from the project roster (member.remove)",
         "tags": [
           "projects"
         ]
