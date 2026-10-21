@@ -110,11 +110,11 @@ describe('ProjectsController route permission metadata (US-007)', () => {
     },
   );
 
-  it('code-intel impact keeps the legacy @ProjectPermission until the integrations story moves it', () => {
+  it('code-intel impact requires its project-scoped key', () => {
     const fn = ProjectsController.prototype.getChangeImpact as unknown as object;
 
-    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeDefined();
-    expect(Reflect.getMetadata(REQUIRES_METADATA, fn)).toBeUndefined();
+    expect(Reflect.getMetadata(REQUIRES_METADATA, fn)).toMatchObject({ keys: ['codeintel.impact.read'] });
+    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeUndefined();
   });
 });
 

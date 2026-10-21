@@ -6,6 +6,7 @@ import { CodeIntelController } from './code-intel.controller';
 import { AstIndexService } from './ast-index.service';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
+import { RequiresGuard } from '../permissions/requires.guard';
 import { ProjectContext } from '../projects/project-context';
 
 // ---------------------------------------------------------------------------
@@ -107,7 +108,10 @@ describe('CodeIntelController.searchSymbols()', () => {
           } as unknown as ProjectAccessService,
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(ProjectMembershipGuard).useValue(guardStub)
+      .overrideGuard(RequiresGuard).useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get(CodeIntelController);
   });
@@ -402,6 +406,8 @@ describe('AC10 HTTP routing: detail route is not shadowed by the search route', 
     })
       .overrideGuard(ProjectMembershipGuard)
       .useValue(guardStub)
+      .overrideGuard(RequiresGuard)
+      .useValue({ canActivate: () => true })
       .compile();
 
     routingApp = routingModule.createNestApplication<NestFastifyApplication>(

@@ -81,14 +81,15 @@ describeIntegration('code-intel project-role gate (Slice 4)', () => {
     expect(symbolId).toMatch(/^[^:]+:acme\/widgets:src\/a\.ts::alpha$/);
   });
 
-  it.each(['padmin', 'pdev', 'agent', 'root'])('%s reads every code-intel route', async (who) => {
+  it.each(['padmin', 'pdev', 'pviewer', 'agent', 'root'])('%s reads every code-intel route', async (who) => {
     for (const url of routes()) {
       const res = await get(who, url);
       expect({ url, status: res.status }).toEqual({ url, status: 200 });
     }
   });
 
-  it.each(['pviewer', 'outsider'])('%s is refused on every code-intel route', async (who) => {
+  it('outsider is refused on every code-intel route', async () => {
+    const who = 'outsider';
     for (const url of routes()) {
       const res = await get(who, url);
       expect({ url, status: res.status }).toEqual({ url, status: 403 });

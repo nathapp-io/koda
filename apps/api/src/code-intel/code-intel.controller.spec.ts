@@ -1,58 +1,17 @@
-import type { Mock, Mocked } from 'vitest';
+import type { Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { CodeIntelController } from './code-intel.controller';
 import { AstIndexService, SymbolIndexResult, Symbol } from './ast-index.service';
 import { CallerInfo, CalleeInfo } from './symbol-store';
-import { UserPrincipal, AgentPrincipal } from '../auth/principal/koda-principal.types';
 import { IndexCommitDto, SourceFileDto } from './dto/index-commit.dto';
-import { ProjectAccessService } from '../projects/project-access.service';
 import { ProjectContext } from '../projects/project-context';
+import { ProjectMembershipGuard } from '../projects/project-membership.guard';
+import { RequiresGuard } from '../permissions/requires.guard';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function makeAdminUser(): UserPrincipal {
-  return {
-    actorType: 'user',
-    id: 'user-admin',
-    role: 'ADMIN',
-    email: 'admin@example.com',
-    blacklisted: false,
-    revoked: false,
-    authorities: ['ADMIN'],
-    extra: {},
-  } as unknown as UserPrincipal;
-}
-
-function makeMemberUser(id = 'user-member'): UserPrincipal {
-  return {
-    actorType: 'user',
-    id,
-    role: 'MEMBER',
-    email: 'member@example.com',
-    blacklisted: false,
-    revoked: false,
-    authorities: ['MEMBER'],
-    extra: {},
-  } as unknown as UserPrincipal;
-}
-
-function makeAgent(): AgentPrincipal {
-  return {
-    actorType: 'agent',
-    id: 'agent-1',
-    slug: 'my-agent',
-    status: 'ACTIVE',
-    agentRoles: ['DEVELOPER'],
-    capabilities: [],
-    blacklisted: false,
-    revoked: false,
-    authorities: [],
-    extra: {},
-  } as unknown as AgentPrincipal;
-}
 
 function makeProject(id = 'proj-1', slug = 'my-project') {
   return { id, slug };
@@ -111,20 +70,7 @@ describe('CodeIntelController', () => {
   let controller: CodeIntelController;
   let astIndexService: Mocked<Pick<AstIndexService, 'indexCommit' | 'getSymbol' | 'getCallers' | 'getCallees'>>;
 
-  // ProjectAccessService mock — provides findProjectIdBySlug and assertProjectMembership
-  let mockFindProjectIdBySlug: Mock;
-  let mockAssertProjectMembership: Mock;
-  let mockProjectAccessService: Mocked<Pick<ProjectAccessService, 'findProjectIdBySlug' | 'assertProjectMembership'>>;
-
   beforeEach(async () => {
-    mockFindProjectIdBySlug = vi.fn();
-    mockAssertProjectMembership = vi.fn();
-
-    mockProjectAccessService = {
-      findProjectIdBySlug: mockFindProjectIdBySlug,
-      assertProjectMembership: mockAssertProjectMembership,
-    };
-
     astIndexService = {
       indexCommit: vi.fn(),
       getSymbol: vi.fn(),
@@ -136,9 +82,11 @@ describe('CodeIntelController', () => {
       controllers: [CodeIntelController],
       providers: [
         { provide: AstIndexService, useValue: astIndexService },
-        { provide: ProjectAccessService, useValue: mockProjectAccessService },
       ],
-    }).compile();
+    })
+      .overrideGuard(ProjectMembershipGuard).useValue({ canActivate: () => true })
+      .overrideGuard(RequiresGuard).useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<CodeIntelController>(CodeIntelController);
   });
@@ -152,57 +100,14 @@ describe('CodeIntelController', () => {
   // -------------------------------------------------------------------------
 
   describe('indexCommit()', () => {
-    it('returns JsonResponse.Ok wrapping the indexing result for an admin user', async () => {
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockResolvedValue(undefined);
+    it('delegates indexing with the guard-resolved project id and wraps the result', async () => {
       astIndexService.indexCommit.mockResolvedValue(makeIndexResult());
+      const dto = makeDto();
 
-      const result = await controller.indexCommit(makeDto(), makeAdminUser());
+      const result = await controller.indexCommit(dto, makeCtx());
 
       expect(result.data).toMatchObject({ commitHash: 'abc123', symbolsIndexed: 1 });
-      expect(astIndexService.indexCommit).toHaveBeenCalledWith(
-        'repo-1',
-        'abc123',
-        expect.any(Array),
-        'proj-1',
-      );
-    });
-
-    it('returns JsonResponse.Ok for an agent principal', async () => {
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockResolvedValue(undefined);
-      astIndexService.indexCommit.mockResolvedValue(makeIndexResult());
-
-      const result = await controller.indexCommit(makeDto(), makeAgent());
-
-      expect(result.data).toBeDefined();
-    });
-
-    it('throws NotFoundAppException when project slug does not exist', async () => {
-      mockFindProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
-
-      await expect(
-        controller.indexCommit(makeDto({ projectSlug: 'missing-slug' }), makeAdminUser()),
-      ).rejects.toBeInstanceOf(NotFoundAppException);
-    });
-
-    it('throws ForbiddenAppException when MEMBER user is not a project member', async () => {
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'code-intel'));
-
-      await expect(
-        controller.indexCommit(makeDto(), makeMemberUser()),
-      ).rejects.toBeInstanceOf(ForbiddenAppException);
-    });
-
-    it('allows MEMBER user who has project membership', async () => {
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockResolvedValue(undefined);
-      astIndexService.indexCommit.mockResolvedValue(makeIndexResult());
-
-      const result = await controller.indexCommit(makeDto(), makeMemberUser());
-
-      expect(result.data).toBeDefined();
+      expect(astIndexService.indexCommit).toHaveBeenCalledWith('repo-1', 'abc123', dto.files, 'proj-1');
     });
   });
 
