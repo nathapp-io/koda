@@ -1,10 +1,12 @@
 import type { Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { ContextController } from './context.controller';
 import { ContextBuilderService } from './context-builder.service';
-import { ProjectAccessService } from '../projects/project-access.service';
+import { PermissionService } from '../permissions/permission.service';
+import { RequiresGuard } from '../permissions/requires.guard';
+import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import type { ProjectContext } from '../projects/project-context';
 
 const makeContextResponse = () => ({
   projectId: 'project-1',
@@ -49,237 +51,114 @@ const agentPrincipal: KodaPrincipal = {
   authorities: ['WORKER'],
 };
 
+const projectContext: ProjectContext = {
+  project: { id: 'project-1', slug: 'my-project' },
+  role: 'ADMIN',
+};
+
 describe('ContextController', () => {
   let controller: ContextController;
   let contextBuilderService: { getProjectContext: Mock };
-  let projectAccess: {
-    findProjectIdBySlug: Mock;
-    assertProjectMembership: Mock;
-  };
+  let permissions: { can: Mock };
+  let module: TestingModule;
 
   beforeEach(async () => {
     contextBuilderService = {
       getProjectContext: vi.fn().mockResolvedValue(makeContextResponse()),
     };
+    permissions = { can: vi.fn().mockResolvedValue({ allowed: true }) };
 
-    projectAccess = {
-      findProjectIdBySlug: vi.fn().mockResolvedValue('project-1'),
-      assertProjectMembership: vi.fn().mockResolvedValue(undefined),
-    };
-
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       controllers: [ContextController],
       providers: [
         { provide: ContextBuilderService, useValue: contextBuilderService },
-        { provide: ProjectAccessService, useValue: projectAccess },
+        { provide: PermissionService, useValue: permissions },
       ],
-    }).compile();
+    })
+      .overrideGuard(RequiresGuard)
+      .useValue({ canActivate: vi.fn().mockResolvedValue(true) })
+      .overrideGuard(ProjectMembershipGuard)
+      .useValue({ canActivate: vi.fn().mockResolvedValue(true) })
+      .compile();
 
     controller = module.get(ContextController);
-    vi.clearAllMocks();
-
-    // Default: project found, membership ok
-    projectAccess.findProjectIdBySlug.mockResolvedValue('project-1');
-    projectAccess.assertProjectMembership.mockResolvedValue(undefined);
-    contextBuilderService.getProjectContext.mockResolvedValue(makeContextResponse());
   });
 
-  describe('slug resolution', () => {
-    it('resolves slug to projectId before building context (getContext)', async () => {
-      const result = await controller.getContext('my-project', { intent: 'answer' }, adminUser);
-
-      expect(projectAccess.findProjectIdBySlug).toHaveBeenCalledWith('my-project');
-      expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
-        expect.objectContaining({ projectId: 'project-1' }),
-      );
-      expect(result).toBeDefined();
-    });
-
-    it('throws NotFoundAppException for unknown slug (getContext)', async () => {
-      projectAccess.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
-
-      await expect(
-        controller.getContext('nonexistent', { intent: 'answer' }, adminUser),
-      ).rejects.toBeInstanceOf(NotFoundAppException);
-    });
-
-    it('throws NotFoundAppException for soft-deleted project (getContext)', async () => {
-      projectAccess.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
-
-      await expect(
-        controller.getContext('deleted-project', { intent: 'answer' }, adminUser),
-      ).rejects.toBeInstanceOf(NotFoundAppException);
-    });
-
-    it('resolves slug to projectId before building context (queryContext)', async () => {
-      const result = await controller.queryContext('my-project', { intent: 'plan' }, adminUser);
-
-      expect(projectAccess.findProjectIdBySlug).toHaveBeenCalledWith('my-project');
-      expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
-        expect.objectContaining({ projectId: 'project-1' }),
-      );
-      expect(result).toBeDefined();
-    });
-
-    it('throws NotFoundAppException for unknown slug (queryContext)', async () => {
-      projectAccess.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
-
-      await expect(
-        controller.queryContext('nonexistent', { intent: 'answer' }, adminUser),
-      ).rejects.toBeInstanceOf(NotFoundAppException);
-    });
+  afterEach(async () => {
+    await module.close();
   });
 
   describe('GET /context/:slug — getContext', () => {
-    describe('membership checks', () => {
-      test('throws ForbiddenAppException when principal is null', async () => {
-        await expect(
-          controller.getContext('my-project', { intent: 'answer' }, null as unknown as KodaPrincipal),
-        ).rejects.toThrow(ForbiddenAppException);
-      });
+    it('uses the guarded project id and principal id to build context', async () => {
+      const result = await controller.getContext({ intent: 'answer' }, adminUser, projectContext);
 
-      test('allows ADMIN user and calls assertProjectMembership', async () => {
-        const result = await controller.getContext('my-project', { intent: 'answer' }, adminUser);
-
-        expect(projectAccess.assertProjectMembership).toHaveBeenCalledWith('project-1', adminUser);
-        expect(result).toMatchObject({ data: expect.objectContaining({ projectId: 'project-1' }) });
-      });
-
-      test('allows agent principal and calls assertProjectMembership', async () => {
-        const result = await controller.getContext('my-project', { intent: 'answer' }, agentPrincipal);
-
-        expect(projectAccess.assertProjectMembership).toHaveBeenCalledWith('project-1', agentPrincipal);
-        expect(result).toBeDefined();
-      });
-
-      test('throws ForbiddenAppException when member has no project membership', async () => {
-        projectAccess.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
-
-        await expect(
-          controller.getContext('my-project', { intent: 'answer' }, memberUser),
-        ).rejects.toThrow(ForbiddenAppException);
-      });
-
-      test('allows member with valid membership', async () => {
-        projectAccess.assertProjectMembership.mockResolvedValue(undefined);
-
-        const result = await controller.getContext('my-project', { intent: 'answer' }, memberUser);
-
-        expect(result).toBeDefined();
-        expect(contextBuilderService.getProjectContext).toHaveBeenCalled();
-      });
-
-      test('calls assertProjectMembership with resolved projectId and principal for member user', async () => {
-        projectAccess.assertProjectMembership.mockResolvedValue(undefined);
-        await controller.getContext('my-project', { intent: 'answer' }, memberUser);
-
-        expect(projectAccess.assertProjectMembership).toHaveBeenCalledWith('project-1', memberUser);
-      });
+      expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: 'project-1', actorId: 'user-admin' }),
+      );
+      expect(result).toMatchObject({ data: expect.objectContaining({ projectId: 'project-1' }) });
     });
 
-    describe('query building', () => {
-      test('passes resolved projectId and actorId to contextBuilderService', async () => {
-        await controller.getContext('my-project', { intent: 'answer' }, adminUser);
+    it('passes intent and optional query fields through', async () => {
+      await controller.getContext(
+        { intent: 'diagnose', query: 'auth flow', ticketIds: ['t-1'], repoRefs: ['sha-1'] },
+        adminUser,
+        projectContext,
+      );
 
-        expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
-          expect.objectContaining({ projectId: 'project-1', actorId: 'user-admin' }),
-        );
-      });
-
-      test('passes intent from query dto', async () => {
-        await controller.getContext('my-project', { intent: 'diagnose' }, adminUser);
-
-        expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
-          expect.objectContaining({ intent: 'diagnose' }),
-        );
-      });
-
-      test('passes optional query, ticketIds, repoRefs when provided', async () => {
-        await controller.getContext(
-          'my-project',
-          { intent: 'answer', query: 'auth flow', ticketIds: ['t-1'], repoRefs: ['sha-1'] },
-          adminUser,
-        );
-
-        expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
-          expect.objectContaining({ query: 'auth flow', ticketIds: ['t-1'], repoRefs: ['sha-1'] }),
-        );
-      });
-
-      test('converts tokenBudget from query string to number', async () => {
-        await controller.getContext(
-          'my-project',
-          { intent: 'answer', tokenBudget: '2000' as unknown as number },
-          adminUser,
-        );
-
-        expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
-          expect.objectContaining({ tokenBudget: 2000 }),
-        );
-      });
-
-      test('passes undefined tokenBudget when not provided', async () => {
-        await controller.getContext('my-project', { intent: 'answer' }, adminUser);
-
-        expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
-          expect.objectContaining({ tokenBudget: undefined }),
-        );
-      });
+      expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          intent: 'diagnose',
+          query: 'auth flow',
+          ticketIds: ['t-1'],
+          repoRefs: ['sha-1'],
+        }),
+      );
     });
 
-    describe('response', () => {
-      test('returns JsonResponse.Ok wrapping context response', async () => {
-        const ctxResponse = makeContextResponse();
-        contextBuilderService.getProjectContext.mockResolvedValue(ctxResponse);
+    it('parses tokenBudget and keeps it undefined when omitted', async () => {
+      await controller.getContext({ intent: 'answer', tokenBudget: '2000' as unknown as number }, adminUser, projectContext);
+      expect(contextBuilderService.getProjectContext).toHaveBeenLastCalledWith(
+        expect.objectContaining({ tokenBudget: 2000 }),
+      );
 
-        const result = await controller.getContext('my-project', { intent: 'answer' }, adminUser);
+      await controller.getContext({ intent: 'answer' }, adminUser, projectContext);
+      expect(contextBuilderService.getProjectContext).toHaveBeenLastCalledWith(
+        expect.objectContaining({ tokenBudget: undefined }),
+      );
+    });
 
-        expect(result).toMatchObject({ data: expect.objectContaining({ projectId: 'project-1' }) });
-      });
+    it('returns the context in a JsonResponse.Ok envelope', async () => {
+      const result = await controller.getContext({ intent: 'answer' }, adminUser, projectContext);
+      expect(result).toMatchObject({ data: expect.objectContaining({ projectId: 'project-1' }) });
     });
   });
 
   describe('POST /context/:slug/query — queryContext', () => {
-    test('throws ForbiddenAppException when principal is null', async () => {
-      await expect(
-        controller.queryContext('my-project', { intent: 'answer' }, null as unknown as KodaPrincipal),
-      ).rejects.toThrow(ForbiddenAppException);
-    });
-
-    test('allows ADMIN user and calls contextBuilderService', async () => {
-      const result = await controller.queryContext('my-project', { intent: 'plan' }, adminUser);
+    it('uses the guarded project id and principal id and passes body fields', async () => {
+      const body = { intent: 'search' as const, query: 'ticket bugs', ticketIds: ['t-2'] };
+      const result = await controller.queryContext(body, memberUser, projectContext);
 
       expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
-        expect.objectContaining({ intent: 'plan', projectId: 'project-1', actorId: 'user-admin' }),
+        expect.objectContaining({
+          projectId: 'project-1',
+          actorId: 'user-member',
+          intent: 'search',
+          query: 'ticket bugs',
+          ticketIds: ['t-2'],
+        }),
       );
       expect(result).toBeDefined();
     });
 
-    test('throws ForbiddenAppException when member has no project membership', async () => {
-      projectAccess.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
-
-      await expect(
-        controller.queryContext('my-project', { intent: 'answer' }, memberUser),
-      ).rejects.toThrow(ForbiddenAppException);
-    });
-
-    test('allows member with valid membership and passes body fields', async () => {
-      projectAccess.assertProjectMembership.mockResolvedValue(undefined);
-      const body = { intent: 'search' as const, query: 'ticket bugs', ticketIds: ['t-2'] };
-
-      await controller.queryContext('my-project', body, memberUser);
-
+    it('allows an agent principal to act as the context actor', async () => {
+      await controller.queryContext({ intent: 'plan' }, agentPrincipal, projectContext);
       expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
-        expect.objectContaining({ intent: 'search', query: 'ticket bugs', ticketIds: ['t-2'] }),
+        expect.objectContaining({ projectId: 'project-1', actorId: 'agent-1', intent: 'plan' }),
       );
     });
 
-    test('returns JsonResponse.Ok wrapping context response', async () => {
-      const ctxResponse = makeContextResponse();
-      contextBuilderService.getProjectContext.mockResolvedValue(ctxResponse);
-
-      const result = await controller.queryContext('my-project', { intent: 'answer' }, adminUser);
-
+    it('returns the context in a JsonResponse.Ok envelope', async () => {
+      const result = await controller.queryContext({ intent: 'answer' }, adminUser, projectContext);
       expect(result).toMatchObject({ data: expect.objectContaining({ projectId: 'project-1' }) });
     });
   });

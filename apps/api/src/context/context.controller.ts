@@ -4,41 +4,27 @@ import {
   HttpCode,
   Post,
   Body,
-  Param,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { JsonResponse, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { Principal } from '@nathapp/nestjs-auth';
+import { JsonResponse } from '@nathapp/nestjs-common';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
-import { KodaAction } from '../auth/casl/koda-action.enum';
 import { ContextBuilderService, GetProjectContextQuery } from './context-builder.service';
 import { GetContextQueryDto } from './dto/get-context-query.dto';
 import { parseQuery } from '../common/dto/koda-page.query';
-import { ProjectAccessService } from '../projects/project-access.service';
+import { Requires } from '../permissions/requires.decorator';
+import { RequiresGuard } from '../permissions/requires.guard';
+import { CurrentProject } from '../projects/current-project.decorator';
+import { ProjectMembershipGuard } from '../projects/project-membership.guard';
+import type { ProjectContext } from '../projects/project-context';
 
 @ApiTags('context')
 @ApiBearerAuth()
 @Controller('context')
 export class ContextController {
-  constructor(
-    private readonly contextBuilderService: ContextBuilderService,
-    private readonly projectAccess: ProjectAccessService,
-  ) {}
-
-  private async resolveProjectId(slug: string): Promise<string> {
-    return this.projectAccess.findProjectIdBySlug(slug);
-  }
-
-  private async checkProjectMembership(
-    projectId: string,
-    principal: KodaPrincipal | null,
-  ): Promise<void> {
-    if (!principal) {
-      throw new ForbiddenAppException({}, 'context');
-    }
-    await this.projectAccess.assertProjectMembership(projectId, principal);
-  }
+  constructor(private readonly contextBuilderService: ContextBuilderService) {}
 
   private buildQuery(
     projectId: string,
@@ -60,28 +46,29 @@ export class ContextController {
   }
 
   @Get(':slug')
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('context.read')
   @ApiOperation({ summary: 'Get project context for agent use' })
   @ApiResponse({ status: 200, description: 'Project context retrieved' })
   @ApiResponse({ status: 400, description: 'Invalid query' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  @RequiredPermission([KodaAction.READ as CaslPermissionAction, 'ProjectContext'])
   async getContext(
-    @Param('slug') slug: string,
     @Query() queryDto: GetContextQueryDto,
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() ctx: ProjectContext,
   ) {
-    const projectId = await this.resolveProjectId(slug);
-    await this.checkProjectMembership(projectId, principal);
     const actorId = principal.id;
     const result = await this.contextBuilderService.getProjectContext(
-      this.buildQuery(projectId, actorId, queryDto),
+      this.buildQuery(ctx.project.id, actorId, queryDto),
     );
     return JsonResponse.Ok(result);
   }
 
   @Post(':slug/query')
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('context.query')
   @HttpCode(200)
   @ApiOperation({ summary: 'Query project context with request body' })
   @ApiResponse({ status: 200, description: 'Project context retrieved' })
@@ -89,17 +76,14 @@ export class ContextController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  @RequiredPermission([KodaAction.READ as CaslPermissionAction, 'ProjectContext'])
   async queryContext(
-    @Param('slug') slug: string,
     @Body() body: GetContextQueryDto,
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() ctx: ProjectContext,
   ) {
-    const projectId = await this.resolveProjectId(slug);
-    await this.checkProjectMembership(projectId, principal);
     const actorId = principal.id;
     const result = await this.contextBuilderService.getProjectContext(
-      this.buildQuery(projectId, actorId, body),
+      this.buildQuery(ctx.project.id, actorId, body),
     );
     return JsonResponse.Ok(result);
   }
