@@ -3,7 +3,7 @@
   "feature": "permissions-p1-enforce-integrations",
   "branchName": "feat/permissions-p1-enforce-integrations",
   "createdAt": "2026-10-21T00:00:00.000Z",
-  "updatedAt": "2026-10-21T04:29:54.604Z",
+  "updatedAt": "2026-10-21T04:53:44.840Z",
   "userStories": [
     {
       "id": "US-001",
@@ -228,14 +228,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two existing controllers receive standard key declarations and one ordered class guard pair, with HMAC and sync algorithms unchanged; credential-sensitive authorization requires the security TDD override."
+        "reasoning": "Two existing controllers receive standard key declarations and one ordered class guard pair, with HMAC and sync algorithms unchanged; credential-sensitive authorization requires the security TDD override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/vcs/vcs.controller.ts",
@@ -274,7 +277,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "9e4e7117a744ea4526784c9ae32fac4a3b04b18a"
     },
     {
       "id": "US-005",
