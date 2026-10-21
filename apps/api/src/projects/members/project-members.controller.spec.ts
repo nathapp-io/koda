@@ -5,7 +5,7 @@ describe('US-008 permission keys on member routes', () => {
   it.each([
     ['list', 'member.read'],
     ['add', 'member.add'],
-    ['updateRole', 'member.role.update'],
+    ['updateRole', 'role.binding.manage'],
     ['remove', 'member.remove'],
   ] as const)('%s declares @Requires(%s)', (handler, key) => {
     const fn = (ProjectMembersController.prototype as unknown as Record<string, object>)[handler];

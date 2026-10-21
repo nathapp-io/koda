@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { IRagConfig, RAG_CFG } from '../../config/rag.config';
 import type { FtsOptimizeStrategy } from './fts-optimize-strategy.interface';
@@ -13,6 +14,7 @@ interface SchedulerRegistryLike {
 }
 
 @Injectable()
+@SystemWriter('system.rag.optimize')
 export class CronOptimizeStrategy implements FtsOptimizeStrategy {
   private readonly logger = new Logger(CronOptimizeStrategy.name);
   private readonly dirtyTables = new Map<string, LanceTable>();

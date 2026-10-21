@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxService } from '@nathapp/nestjs-outbox';
@@ -18,6 +19,7 @@ type HealthConfig = Pick<IFleetConfig, 'sweepEnabled' | 'runnerOfflineSec' | 'cr
  * runner's lastSeenAt is stale after an API restart until it syncs again.
  */
 @Injectable()
+@SystemWriter('system.health.detect')
 export class FleetHealthDetector implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FleetHealthDetector.name);
   private readonly bootedAtMs = Date.now();

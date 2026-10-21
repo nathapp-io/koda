@@ -1,9 +1,11 @@
+import { SystemWriter } from '../permissions/system-writer.decorator';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { MemoryGovernanceService } from './memory-governance.service';
 import { ProjectsService } from '../projects/projects.service';
 
 @Injectable()
+@SystemWriter('system.memory.govern')
 export class MemoryGovernanceProcessor {
   private readonly logger = new Logger(MemoryGovernanceProcessor.name);
 

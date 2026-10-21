@@ -146,7 +146,7 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
     ]);
 
     // The legacy rows: a ProjectMember row for legDev (US-002 AC-5) and for listUser in p2 (AC-10),
-    // plus the AgentProject row paBound's PATCH target needs (AC-14).
+    // plus the AgentProject row AC-14's PATCH target needs.
     await prisma.projectMember.createMany({
       data: [
         { projectId: projectIds.p1, userId: ids.legDev, role: 'DEVELOPER' },
@@ -256,8 +256,11 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
     expect(slugs).toEqual(['p1']);
   }, TEST_TIMEOUT_MS);
 
-  it('AC-14: a project-admin binding may update an agent that is on the legacy roster', async () => {
-    const res = await send('patch', `/api/projects/p1/agents/${agents.agRoster.slug}`, 'paBound', {
+  it('AC-14: a global admin may update an agent that is on the legacy roster', async () => {
+    // US-001: the project-scoped `project.agent.update` is folded into the global `agent.update`, so
+    // the caller that may update an agent is a global admin; the legacy roster row is still what
+    // makes the agent reachable in the project (without it the route answers 404).
+    const res = await send('patch', `/api/projects/p1/agents/${agents.agRoster.slug}`, 'root', {
       name: 'Renamed Bot',
     });
 

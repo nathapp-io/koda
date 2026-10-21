@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../../permissions/system-writer.decorator';
 import { Injectable, Module, OnModuleInit } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { BudgetsModule } from '../../budgets/budgets.module';
@@ -11,7 +12,8 @@ import { THREAD_INGEST_REPOSITORY, THREAD_UNFOLDED_STREAM_SOURCE } from './domai
 import { PrismaThreadIngestRepository } from './prisma-thread-ingest.repository';
 
 @Injectable()
-class ThreadIngestHook implements OnModuleInit {
+@SystemWriter('system.thread.ingest')
+export class ThreadIngestHook implements OnModuleInit {
   constructor(private readonly hooks: LogAppendHooks, private readonly ingestor: ThreadIngestor) {}
 
   onModuleInit(): void {

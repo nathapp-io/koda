@@ -1,9 +1,11 @@
+import { SystemWriter } from '../permissions/system-writer.decorator';
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { AstIndexService, SourceFile } from './ast-index.service';
 import { CodeCommitOutboxHandler } from './code-commit-outbox-handler';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
 
 @Injectable()
+@SystemWriter('system.codeintel.index-commit')
 export class CodeIntelOutboxSubscriber implements OnModuleInit {
   private readonly logger = new Logger(CodeIntelOutboxSubscriber.name);
 

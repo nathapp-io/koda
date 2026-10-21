@@ -1,3 +1,4 @@
+import { SystemWriter } from '../permissions/system-writer.decorator';
 import { Injectable } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { TicketType, Priority } from '../common/enums';
@@ -6,6 +7,7 @@ import { CiWebhookPayloadDto, CiFailureDto } from './ci-webhook.dto';
 import { PrismaCiWebhookRepository } from './prisma-ci-webhook.repository';
 
 @Injectable()
+@SystemWriter('system.ci.ticket-create')
 export class CiWebhookService {
   constructor(private readonly repo: PrismaCiWebhookRepository) {}
 

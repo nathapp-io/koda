@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
@@ -25,6 +26,7 @@ export interface BudgetSweepResult {
  * clears monthly pauses from an earlier window (B8), and evaluates every policy (the B7 backstop).
  */
 @Injectable()
+@SystemWriter('system.budget.window-reset')
 export class BudgetSweeper implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BudgetSweeper.name);
   private timer: NodeJS.Timeout | null = null;

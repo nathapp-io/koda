@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FleetJobState } from '../../common/enums';
@@ -17,6 +18,7 @@ const SWEEP_INTERVAL_MS = 30_000;
  * Each job is re-checked under its row lock, so a runner that synced after the scan is spared.
  */
 @Injectable()
+@SystemWriter('system.job.crash-silent-runner')
 export class FleetSweeper implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FleetSweeper.name);
   private timer: NodeJS.Timeout | null = null;

@@ -190,12 +190,12 @@ export class ProjectsController {
   @Post(':slug/agents')
   @HttpCode(201)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
-  @Requires('project.agent.add')
-  @ApiOperation({ summary: 'Add an agent to the project roster' })
+  @Requires('member.add')
+  @ApiOperation({ summary: 'Add an agent to the project roster (member.add)' })
   @ApiResponse({ status: 201, type: ProjectAgentDto, description: 'Agent added to the roster' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Not a project member, or project.agent.add is missing' })
+  @ApiResponse({ status: 403, description: 'Not a project member, or member.add is missing' })
   @ApiResponse({ status: 404, description: 'Project or agent not found' })
   @ApiResponse({ status: 409, description: 'Agent is already on the roster, or is OFFLINE' })
   async addProjectAgent(
@@ -210,11 +210,11 @@ export class ProjectsController {
   @Delete(':slug/agents/:agentSlug')
   @HttpCode(204)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
-  @Requires('project.agent.remove')
-  @ApiOperation({ summary: 'Remove an agent from the project roster' })
+  @Requires('member.remove')
+  @ApiOperation({ summary: 'Remove an agent from the project roster (member.remove)' })
   @ApiResponse({ status: 204, description: 'Agent removed from the roster' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Not a project member, or project.agent.remove is missing' })
+  @ApiResponse({ status: 403, description: 'Not a project member, or member.remove is missing' })
   @ApiResponse({ status: 404, description: 'Project, agent or roster entry not found' })
   @ApiResponse({ status: 409, description: 'The agent still holds open tickets in this project' })
   async removeProjectAgent(
@@ -228,11 +228,13 @@ export class ProjectsController {
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   // US-007: whose status this is (self) and what the caller holds are only known here, so the guard
   // records the key and the handler decides.
-  @Requires('project.agent.update', { enforcedBy: 'service' })
-  @ApiOperation({ summary: 'Update an agent status within a project context (the key, or the agent itself)' })
+  // US-001: the key is the global `agent.update` — the project-scoped `project.agent.update` is
+  // folded into it, so a Project Admin no longer edits an agent's global record from here.
+  @Requires('agent.update', { enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Update an agent status within a project context (the global agent.update key, or the agent itself)' })
   @ApiResponse({ status: 200, description: 'Agent updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Not a project member, project.agent.update is missing and the caller is not the agent' })
+  @ApiResponse({ status: 403, description: 'Not a project member, agent.update is missing and the caller is not the agent' })
   @ApiResponse({ status: 404, description: 'Project or agent not found' })
   async updateProjectAgent(
     @Param('slug') slug: string,
@@ -256,10 +258,11 @@ export class ProjectsController {
       throw new NotFoundAppException({}, 'projectAgents');
     }
 
-    // US-007: the old `isAdmin || isSelf` pair becomes one key-or-self refusal. A holder of
-    // `project.agent.update` (a project admin, a global admin) may change any rostered agent; an agent
-    // may always update itself (graceful OFFLINE shutdown).
-    const isAdmin = (await this.permissions.can(principal, 'project.agent.update', { projectId: ctx.project.id })).allowed;
+    // US-007: the old `isAdmin || isSelf` pair becomes one key-or-self refusal. US-001: the key is
+    // the global `agent.update`, so only a global Owner or Admin may change another agent; an agent
+    // may always update itself (graceful OFFLINE shutdown). `ctx` stays in the signature — the route
+    // is project-scoped — but the global key is asked without a project context.
+    const isAdmin = (await this.permissions.can(principal, 'agent.update')).allowed;
     const isSelf = isAgentPrincipal(principal) && principal.slug === agentSlug;
     if (!isAdmin && !isSelf) {
       throw new ForbiddenAppException({}, 'permissions');

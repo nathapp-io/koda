@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
@@ -10,6 +11,7 @@ import { IRunnerRepository, RUNNER_REPOSITORY } from './domain/runner.domain';
  * governance (03:00) and outbox retention (04:00). Errors are logged and swallowed.
  */
 @Injectable()
+@SystemWriter('system.enrollment.retention')
 export class EnrollmentRetentionProcessor {
   private readonly logger = new Logger(EnrollmentRetentionProcessor.name);
   private static readonly DAY_MS = 86_400_000;

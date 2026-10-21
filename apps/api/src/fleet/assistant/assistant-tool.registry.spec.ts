@@ -22,5 +22,20 @@ describe('AssistantToolRegistry', () => {
     const registry = new AssistantToolRegistry();
     registry.register(tool('koda_a'));
     expect(() => registry.register(tool('koda_a'))).toThrow(Error);
+    // US-007 AC-10: the refusal names the tool that is already registered.
+    expect(() => registry.register(tool('koda_a'))).toThrow('koda tool already registered: koda_a');
+  });
+
+  it('AC-1: lists the registered tools in registration order', () => {
+    const registry = new AssistantToolRegistry();
+    const a = tool('koda_a');
+    const b = tool('koda_b');
+    registry.register(a);
+    registry.register(b);
+    expect(registry.list()).toEqual([a, b]);
+  });
+
+  it('AC-2: lists nothing on a new registry', () => {
+    expect(new AssistantToolRegistry().list()).toEqual([]);
   });
 });

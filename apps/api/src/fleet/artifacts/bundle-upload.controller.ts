@@ -1,9 +1,11 @@
-import { Controller, Headers, HttpCode, Param, Put, Query, Req } from '@nestjs/common';
+import { Controller, Headers, HttpCode, Param, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { Readable } from 'stream';
 import { RunnerRoute } from '../../auth/guards/runner-route.decorator';
+import { RequiresGuard } from '../../permissions/requires.guard';
+import { Requires } from '../../permissions/requires.decorator';
 import type { RunnerPrincipal } from '../../auth/principal/koda-principal.types';
 import { BundleService } from './bundle.service';
 
@@ -19,6 +21,7 @@ export function requestStream(req: unknown): Readable {
 @ApiTags('fleet-runner')
 @ApiBearerAuth()
 @RunnerRoute()
+@UseGuards(RequiresGuard)
 @Controller('fleet/runner/jobs')
 export class BundleUploadController {
   constructor(private readonly bundles: BundleService) {}
@@ -31,6 +34,7 @@ export class BundleUploadController {
   @ApiResponse({ status: 409, description: 'Stale lease, or job not RUNNING/UPLOADING' })
   @ApiResponse({ status: 413, description: 'Larger than FLEET_BUNDLE_MAX_BYTES' })
   @ApiResponse({ status: 415, description: 'Not application/gzip' })
+  @Requires('runner.bundle.upload')
   @ApiResponse({ status: 422, description: 'X-Content-SHA256 mismatch' })
   async upload(
     @Principal() runner: RunnerPrincipal,

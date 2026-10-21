@@ -1,3 +1,4 @@
+import { SystemWriter } from '../permissions/system-writer.decorator';
 /**
  * VcsPrSyncService - Syncs PR status from VCS provider to TicketLink records
  */
@@ -21,6 +22,7 @@ export interface SyncPrStatusResult {
 }
 
 @Injectable()
+@SystemWriter('system.vcs.pr-merge-transition')
 export class VcsPrSyncService {
   private readonly logger = new Logger(VcsPrSyncService.name);
 

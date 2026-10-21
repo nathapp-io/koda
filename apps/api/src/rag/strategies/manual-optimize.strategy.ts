@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Injectable, Logger } from '@nestjs/common';
 import type { FtsOptimizeStrategy } from './fts-optimize-strategy.interface';
 import { optimizeInBackground } from './optimize-in-background';
@@ -6,6 +7,7 @@ import { optimizeInBackground } from './optimize-in-background';
 type LanceTable = any;
 
 @Injectable()
+@SystemWriter('system.rag.optimize')
 export class ManualOptimizeStrategy implements FtsOptimizeStrategy {
   private readonly logger = new Logger(ManualOptimizeStrategy.name);
 

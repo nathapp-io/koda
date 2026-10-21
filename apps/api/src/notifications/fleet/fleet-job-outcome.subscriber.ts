@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { FanOutPublisher } from '../../outbox/fan-out-publisher';
 import { NotificationWriter } from '../notification-writer';
@@ -7,6 +8,7 @@ import { FleetNotificationReader } from './fleet-notification.reader';
 
 /** Fleet S4a §2.4: fleet_job_outcome -> the requester (FLEET_NEEDS_YOU). Throws only on database failure. */
 @Injectable()
+@SystemWriter('system.notification.fleet')
 export class FleetJobOutcomeSubscriber implements OnModuleInit {
   private readonly logger = new Logger(FleetJobOutcomeSubscriber.name);
 

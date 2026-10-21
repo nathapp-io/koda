@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { LiveFleetApprovalEvent } from '../../live/live-event';
@@ -13,6 +14,7 @@ export interface ApprovalExpiryResult { expired: number; failed: number }
 
 /** Spec §2.4: expires pending bash asks past `expiresAt` (nax has already denied them). Budget asks never expire. */
 @Injectable()
+@SystemWriter('system.approval.expire')
 export class ApprovalExpirySweeper implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ApprovalExpirySweeper.name);
   private timer: NodeJS.Timeout | null = null;

@@ -1,3 +1,4 @@
+import { SystemWriter } from '../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { IOutboxPublisher, OutboxRecord } from '@nathapp/nestjs-outbox';
 import { PrismaOutboxRepository } from './prisma-outbox.repository';
@@ -26,6 +27,7 @@ const errorMessage = (err: unknown): string => (err instanceof Error ? err.messa
  * must be idempotent).
  */
 @Injectable()
+@SystemWriter('system.outbox.dispatch')
 export class FanOutPublisher implements IOutboxPublisher, OnApplicationBootstrap {
   private readonly logger = new Logger(FanOutPublisher.name);
   private handlers: ReadonlyMap<string, readonly OutboxHandlerFn[]> = new Map();

@@ -11,6 +11,7 @@ import {
 } from './dto/role-binding.dto';
 import { RoleAdminService } from './role-admin.service';
 import type { BindingFilter } from './permissions.types';
+import { Requires } from './requires.decorator';
 
 /**
  * Permissions P1a: the role bindings a principal holds, globally or in one project.
@@ -29,6 +30,7 @@ export class RoleBindingsController {
   constructor(private readonly roles: RoleAdminService) {}
 
   @Get()
+  @Requires('role.read', { enforcedBy: 'service' })
   @ApiOperation({ summary: 'List role bindings, optionally for one principal or one project (role.read)' })
   @ApiResponse({
     status: 200,
@@ -55,6 +57,7 @@ export class RoleBindingsController {
   }
 
   @Post()
+  @Requires(['role.binding.manage', 'role.binding.global', 'role.binding.owner'], { mode: 'any', enforcedBy: 'service' })
   @HttpCode(201)
   @ApiOperation({
     summary: 'Grant a role to a principal (role.binding.global or role.binding.manage, plus role.binding.owner for the owner role)',
@@ -69,6 +72,7 @@ export class RoleBindingsController {
   }
 
   @Delete(':id')
+  @Requires(['role.binding.manage', 'role.binding.global', 'role.binding.owner'], { mode: 'any', enforcedBy: 'service' })
   @HttpCode(204)
   @ApiOperation({
     summary: 'Remove a binding, authorised from the stored row (role.binding.global or role.binding.manage, plus role.binding.owner for the owner role)',

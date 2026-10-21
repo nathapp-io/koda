@@ -1,3 +1,4 @@
+import { SystemWriter } from '../permissions/system-writer.decorator';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
 import { RagService } from './rag.service';
@@ -12,6 +13,7 @@ import { PrismaRagRepository } from './prisma-rag.repository';
  * no reachable KB, so the event completes instead of failing on every retry.
  */
 @Injectable()
+@SystemWriter('system.kb.ticket-index')
 export class KbTicketLifecycleSubscriber implements OnModuleInit {
   private readonly logger = new Logger(KbTicketLifecycleSubscriber.name);
 

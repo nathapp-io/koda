@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
@@ -31,6 +32,7 @@ const errorName = (error: unknown): string =>
  * FleetSweeper; one pass at a time; never throws.
  */
 @Injectable()
+@SystemWriter('system.ticket-link.pr-refresh')
 export class FleetPrStateRefresher implements OnModuleInit, OnModuleDestroy {
   static readonly BATCH = 500; // plan P5
 

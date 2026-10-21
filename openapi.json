@@ -609,7 +609,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "agent.roles.update is missing"
+            "description": "agent.update is missing"
           },
           "404": {
             "description": "Agent not found"
@@ -620,7 +620,7 @@
             "bearer": []
           }
         ],
-        "summary": "Update agent roles (agent.roles.update)",
+        "summary": "Update agent roles (agent.update)",
         "tags": [
           "agents"
         ]
@@ -1845,7 +1845,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Not a project member, or project.agent.add is missing"
+            "description": "Not a project member, or member.add is missing"
           },
           "404": {
             "description": "Project or agent not found"
@@ -1859,7 +1859,7 @@
             "bearer": []
           }
         ],
-        "summary": "Add an agent to the project roster",
+        "summary": "Add an agent to the project roster (member.add)",
         "tags": [
           "projects"
         ]
@@ -1894,7 +1894,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Not a project member, or project.agent.remove is missing"
+            "description": "Not a project member, or member.remove is missing"
           },
           "404": {
             "description": "Project, agent or roster entry not found"
@@ -1908,7 +1908,7 @@
             "bearer": []
           }
         ],
-        "summary": "Remove an agent from the project roster",
+        "summary": "Remove an agent from the project roster (member.remove)",
         "tags": [
           "projects"
         ]
@@ -1951,7 +1951,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Not a project member, project.agent.update is missing and the caller is not the agent"
+            "description": "Not a project member, agent.update is missing and the caller is not the agent"
           },
           "404": {
             "description": "Project or agent not found"
@@ -1962,7 +1962,7 @@
             "bearer": []
           }
         ],
-        "summary": "Update an agent status within a project context (the key, or the agent itself)",
+        "summary": "Update an agent status within a project context (the global agent.update key, or the agent itself)",
         "tags": [
           "projects"
         ]
@@ -2395,7 +2395,7 @@
             }
           },
           "403": {
-            "description": "Not a project member, or member.role.update is missing"
+            "description": "Not a project member, or role.binding.manage is missing"
           },
           "404": {
             "description": "Not a member"
@@ -2409,7 +2409,7 @@
             "bearer": []
           }
         ],
-        "summary": "Change a member's project role (member.role.update)",
+        "summary": "Change a member's project role (role.binding.manage)",
         "tags": [
           "projects"
         ]

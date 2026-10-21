@@ -1,3 +1,4 @@
+import { SystemWriter } from '../permissions/system-writer.decorator';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
@@ -15,6 +16,7 @@ import { IOutboxConfig, OUTBOX_CFG } from '../config/outbox.config';
  * a single statement).
  */
 @Injectable()
+@SystemWriter('system.outbox.retention')
 export class OutboxRetentionProcessor {
   private readonly logger = new Logger(OutboxRetentionProcessor.name);
   private static readonly DAY_MS = 86_400_000;

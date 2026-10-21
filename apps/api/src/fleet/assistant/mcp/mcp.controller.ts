@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, Inject, Post, Req, Res } from '@nestjs/common';
+import { Controller, Delete, Get, Inject, Post, Req, Res, UseGuards } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import { ApiExcludeController } from '@nestjs/swagger';
 import type { IncomingMessage } from 'http';
@@ -11,6 +11,8 @@ import { mcpConfig } from '../../../config/mcp.config';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
 import { isAgentPrincipal, type AgentPrincipal, type KodaPrincipal } from '../../../auth/principal/koda-principal.types';
 import { PermissionService } from '../../../permissions/permission.service';
+import { Requires } from '../../../permissions/requires.decorator';
+import { RequiresGuard } from '../../../permissions/requires.guard';
 import { AssistantToolExecutor } from '../assistant-tool.executor';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
 import { createKodaMcpServer, kodaMcpToolRegistrations, visibleMcpToolNames } from './mcp-server.factory';
@@ -41,6 +43,7 @@ const VISIBLE_TOOLS_KEY = 'visibleTools';
 @ApiExcludeController()
 @Throttle({ default: { limit: 120, ttl: 60_000 } })
 @Controller('mcp')
+@UseGuards(RequiresGuard)
 export class McpController {
   private readonly handler: McpHttpHandler;
 
@@ -64,16 +67,19 @@ export class McpController {
   }
 
   @Post()
+  @Requires('mcp.access')
   post(@Principal() principal: KodaPrincipal, @Req() req: McpHttpRequest, @Res() reply: McpHttpReply) {
     return this.serve(principal, req, reply);
   }
 
   @Get()
+  @Requires('mcp.access')
   get(@Principal() principal: KodaPrincipal, @Req() req: McpHttpRequest, @Res() reply: McpHttpReply) {
     return this.serve(principal, req, reply);
   }
 
   @Delete()
+  @Requires('mcp.access')
   delete(@Principal() principal: KodaPrincipal, @Req() req: McpHttpRequest, @Res() reply: McpHttpReply) {
     return this.serve(principal, req, reply);
   }

@@ -1,0 +1,533 @@
+{
+  "project": "koda",
+  "feature": "permissions-p1-contract-tests",
+  "branchName": "feat/permissions-p1-contract-tests",
+  "createdAt": "2026-10-21T00:00:00.000Z",
+  "updatedAt": "2026-10-21T09:50:00.129Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Fold the removed permission keys",
+      "description": "**Goal** — Fold five duplicate permission keys into their surviving keys atomically with their route consumers, closing Project Admin access to global agent updates.\n\n**Motivation** — One of them lets a Project Admin edit an agent's global record (review finding A/SEC-2).\n\n**Approach** — All in `apps/api/src/permissions/catalog.ts` and the `proposed_key` / `catalog_scope` columns of `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv`, whose rows `catalog.spec.ts` re-reads:\n\n| TSV row (route) | Baseline `proposed_key` / `catalog_scope` | Target |\n|:--|:--|:--|\n| `PATCH /agents/:slug/update-roles` | `agent.roles.update` / `global` | `agent.update` / `global` |\n| `PATCH /projects/:slug/members/:userId` | `member.role.update` / `project` | `role.binding.manage` / `project` |\n| `POST /projects/:slug/agents` | `project.agent.add` / `project` | `member.add` / `project` |\n| `DELETE /projects/:slug/agents/:agentSlug` | `project.agent.remove` / `project` | `member.remove` / `project` |\n| `PATCH /projects/:slug/agents/:agentSlug` | `project.agent.update` / `project` | `agent.update` / `global` |\n\n- `role.binding.manage` now has an inventory row, so it moves out of `NEW_KEY_SCOPES` and into `INVENTORY_SCOPE_ROWS` (scope `project`). It must not appear in both: `CATALOG_KEYS` concatenates them, and the catalog must hold no duplicate.\n- The catalog goes from 226 to 221 keys.\n- `agent.update` keeps scope `global`: every row naming it is `global`.\n- Seeded role contents are unchanged:\n  - Project Admin's `*` covers `member.add`, `member.remove` and `role.binding.manage`, just as it covered the folded keys.\n  - `agent.update` stays with global Owner and Admin.\n  - No seeded role names a folded key explicitly.\n- `ProjectsController.updateProjectAgent` asks `permissions.can(principal, 'agent.update')` (two arguments, no context), in place of `can(principal, 'project.agent.update', { projectId })`. Its parameter list is unchanged: `@CurrentProject() ctx` stays, so the existing unit cases keep calling it with five arguments. The self-update rule (`isAgentPrincipal(principal) && principal.slug === agentSlug`) and the roster lookup are unchanged.\n- The `@ApiOperation` / `@ApiResponse` texts of the five routes name the new keys, and `openapi.json` is regenerated with `bun run api:export-spec`.\n\nBinding ruling: **`project.agent.update` folds into the global `agent.update` now**, per the design. A Project Admin is refused `PATCH /projects/:slug/agents/:agentSlug` with 403 `permissions`. A global Owner or Admin may still update a rostered agent, and an agent may still update itself (graceful OFFLINE). Enforce-core's AC-17 (\"a project-admin binding alone updates a rostered agent's status\") is inverted.\n\nRegression edits travel with the implementation: remove role.binding.manage from catalog.spec.ts's copied NEW_KEY_SCOPES; its former five-agent-management-key invariant now pins the four surviving global keys. Update projects.controller.spec.ts's route table to member.add/member.remove/agent.update and its can assertions to exactly two arguments, leaving five-argument handler calls and self-update/roster-404/refusal cases unchanged; rename the project-admin allow unit case to a caller holding agent.update. Update project-members.controller.spec.ts's updateRole row to role.binding.manage, retaining other rows. In core-project-routes.integration.spec.ts invert AC-17 to 403 permissions and ACTIVE unchanged, retain AC-15 self-update and AC-16 peer refusal, and rename folded-key comments. In core-members-invites.integration.spec.ts the PATCH/DELETE comment becomes role.binding.manage/member.remove with all cases unchanged. Preserve core-agent-routes allow/refuse anchors. Regenerated openapi.json changes only these five operations' summaries/403 descriptions, not paths or schemas. Only existing e2e cases broken by this correct fold are edited; no unrelated new endpoint e2e cases.\n\nFixture wording: a user whose only source in p1 is a project-admin binding has no ProjectMember row and no global admin role; a global admin has a global admin binding; a rostered agent has a viewer binding in p1. Reset then boot the app, or explicitly run SystemRoleSeeder.onApplicationBootstrap() after resetDb. Refusal is new ForbiddenAppException({}, 'permissions').\n\n**Scope** — In: the catalog/TSV fold, five route declarations and texts, exact global can call, affected existing regressions and root OpenAPI regeneration. Out: runner and remaining route declarations (US-002/003), system-writer metadata (US-004), matrix/checker/collector (US-005/006/007), seeded-role changes and legacy mechanism deletion.\n- Rewriting the stored permissions of an existing database's unlocked system roles or custom roles that name a folded key is out of scope: koda-wk is reset by decision 2, and `SystemRoleSeeder` re-seeds system roles.\n- Replacing `PATCH /projects/:slug/agents/:agentSlug` with the binding routes, and the web pages for roles, bindings and the merged member list, are out of scope (`permissions-p1-web`).\n- Regenerating the CLI client (`apps/cli/src/generated/`) is out of scope; only `openapi.json` is regenerated, and only route descriptions change.\n\n**Interface** — `permissions.can(principal, 'agent.update')` (two arguments, no context). `ProjectsController.updateProjectAgent` retains `@CurrentProject() ctx` and its existing five-argument parameter list.",
+      "acceptanceCriteria": [
+        "[unit] The set of PERMISSION_CATALOG keys and the set { project.agent.add, project.agent.remove, project.agent.update, member.role.update, agent.roles.update } have no key in common.",
+        "[unit] PERMISSION_CATALOG holds exactly one entry with key role.binding.manage, and its scope is 'project'.",
+        "[unit] findCatalogEntry('agent.update') returns an entry with scope 'global'.",
+        "[unit] expandEntries of the seeded project-admin role's permissions with scope 'PROJECT' returns a set containing member.add, member.remove and role.binding.manage.",
+        "[unit] Reading REQUIRES_METADATA from ProjectsController.addProjectAgent, ProjectsController.removeProjectAgent, ProjectsController.updateProjectAgent, ProjectMembersController.updateRole and AgentsController.updateRoles returns the handler-to-keys map { addProjectAgent: ['member.add'], removeProjectAgent: ['member.remove'], updateProjectAgent: ['agent.update'], updateRole: ['role.binding.manage'], updateRoles: ['agent.update'] }.",
+        "[unit] ProjectsController.updateProjectAgent for a rostered agent, with a PermissionService double, calls can exactly once with exactly the two arguments (principal, 'agent.update').",
+        "[integration] Given a user whose only source in p1 is a project-admin binding, PATCH /projects/p1/agents/<slug> with { status: 'OFFLINE' } for a rostered agent returns 403 with error code permissions and leaves the agent's status ACTIVE.",
+        "[integration] Given a global admin, PATCH /projects/p1/agents/<slug> with { status: 'OFFLINE' } for a rostered agent returns 200 with the agent's persisted status OFFLINE.",
+        "[integration] Given a rostered agent using its own API key, PATCH /projects/p1/agents/<its own slug> with { status: 'OFFLINE' } returns 200."
+      ],
+      "tags": [
+        "security",
+        "api",
+        "permissions",
+        "refactor"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Atomic catalog/route migration across multiple controllers changes an access-control boundary and inverts a DB-backed regression; strict security isolation is required.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.2599999999999998,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-21T08:06:00.553Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/catalog.ts",
+        "docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv",
+        "apps/api/src/projects/projects.controller.ts",
+        "apps/api/src/projects/members/project-members.controller.ts",
+        "apps/api/src/agents/agents.controller.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "its `NEW_KEY_SCOPES` copy lists `role.binding.manage`, so with the inventory now naming it, \"holds exactly the inventory keys plus the keys the design adds, with no duplicates\" would expect it twice. Separately, \"US-001 AC-13: the five agent-management keys are scoped globally\" lists `agent.roles.update`. The replacing invariant: `NEW_KEY_SCOPES` no longer holds `role.binding.manage`, which is derived from its inventory row with scope `project`; AC-13 checks the four remaining agent-management keys; every other derivation is unchanged."
+        },
+        {
+          "path": "apps/api/src/projects/projects.controller.spec.ts",
+          "reason": "its table of migrated routes pins `['addProjectAgent', ['project.agent.add'], 'guard']`, `['removeProjectAgent', ['project.agent.remove'], 'guard']` and `['updateProjectAgent', ['project.agent.update'], 'service']`. Its `updateProjectAgent` cases assert `permissions.can` was called with `(principal, 'project.agent.update', { projectId: 'proj-1' })`. The replacing invariant: the table pins `member.add` (guard), `member.remove` (guard) and `agent.update` (service); the cases assert `can` was called with exactly `(principal, 'agent.update')`; the handler is still called with five arguments; the self-update, roster 404 and refusal outcomes are unchanged. The case titled \"a project admin (global MEMBER with a project-admin binding) is admitted by its can answer\" is renamed to say the caller holds `agent.update`."
+        },
+        {
+          "path": "apps/api/src/projects/members/project-members.controller.spec.ts",
+          "reason": "its route table pins `['updateRole', 'member.role.update']`. The replacing invariant: `updateRole` declares `role.binding.manage`; the other rows are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-project-routes.integration.spec.ts",
+          "reason": "\"AC-17: a project-admin binding alone updates a rostered agent's status with 200\" expects 200 for the `padmin` user. The replacing invariant (ruling 2026-10-21): that user gets 403 with error code `permissions` and the agent's status stays `ACTIVE`; AC-15 (self-update) and AC-16 (peer refused) are unchanged; the comments naming `project.agent.add` / `project.agent.remove` name `member.add` / `member.remove`."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-members-invites.integration.spec.ts",
+          "reason": "its comment above AC-3 says the PATCH/DELETE member routes \"need member.role.update / member.remove\". The replacing invariant: the comment names `role.binding.manage` / `member.remove`; every case is unchanged (Project Admin holds both keys, as before)."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "the five routes' operation summaries and 403 descriptions name the folded keys. The replacing invariant: it is regenerated with `bun run api:export-spec`, and every path and schema other than those texts is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "de20ad6843a1d159d28d998f4b3bf251b4d60b24"
+    },
+    {
+      "id": "US-002",
+      "title": "Declare runner-route keys and admit runner principals",
+      "description": "**Goal** — Declare the seven runner keys on their six controllers and teach RequiresGuard that only runner principals hold runner-access keys.\n\n**Motivation** — A new route without `@Requires` is silently open to any authenticated principal. No test notices.\n\n**Approach** — Runner rows of the route-declaration design table:\n\n| Route | Key(s) | Enforced by | Notes |\n|:--|:--|:--|:--|\n| `PUT /fleet/runner/jobs/:jobId/bundle` (`BundleUploadController.upload`) | `runner.bundle.upload` | guard | class-level `@UseGuards(RequiresGuard)` next to `@RunnerRoute()` |\n| `POST /fleet/runner/jobs/:jobId/tools/:name` (`RunnerToolController.call`) | `runner.tool.call` | guard | same |\n| `PUT /fleet/runner/jobs/:jobId/logs/:stream` (`LogUploadController.append`) | `runner.log.append` | guard | same |\n| `GET /fleet/runner/jobs/:jobId/config-edit` (`RunnerConfigEditController.get`) | `runner.config.read` | guard | same |\n| `GET /fleet/runner/me` (`RunnerApiController.me`) | `runner.self.read` | guard | same |\n| `POST /fleet/runner/enroll` (`RunnerApiController.enroll`) | `runner.enroll` | service | `@Public()`; `EnrollmentService.enroll` checks the enrollment token |\n| `POST /fleet/runner/sync` (`RunnerSyncController.sync`) | `runner.sync` | guard | same as the first row |\n\n### `RequiresGuard`: runner keys\n\n`apps/api/src/permissions/requires.guard.ts`, `passes`:\n\nTarget:\n```ts\nconst entry = findCatalogEntry(key);\nif (!entry) return false;\nif (entry.access === 'public') return true;\n// A runner key is held by runner principals only; PermissionService.can never grants one.\nif (entry.access === 'runner') return principal?.actorType === 'runner';\nif (!principal) return false;\n```\n\n`@Requires(keys, { enforcedBy: 'service' })` means the handler, its service or a route-specific guard checks the access, and `RequiresGuard` only records the keys. Every other route this feature touches is guard-enforced: `@UseGuards(RequiresGuard)` is in the same class or handler, as `apps/api/src/auth/auth.controller.ts` does it.\n\n**No access changes except the fold.** Declaring a key on the runner, MCP, health, live, roles and memory routes changes no response for any caller. The runner rule (below) admits exactly the principals `CombinedAuthGuard` already admits on a runner route. `mcp.access` and `notification.read` are implicit keys, and `health.read` is public. Only US-001's fold changes who may call a route.\n\nPreserve RequiresGuard's public branch, unknown-key refusal, service pass-through, metadata precedence, modes and ownership handling. PermissionsModule stays global and the guard needs no provider entry. Refused runner keys throw new ForbiddenAppException({}, 'permissions'); requests with a user principal, agent principal or no principal are denied by this guard. CombinedAuthGuard continues to refuse non-runner credentials on runner routes before this guard, as today. POST /fleet/runner/enroll with no principal is passed through by RequiresGuard; EnrollmentService.enroll still decides using the enrollment token.\n\nMirror the existing Reflector/context/can-double harness in requires.guard.spec.ts. Add a source-level runner-route-declarations.spec.ts for the complete metadata map and class guards, and runner-route-permissions.integration.spec.ts for enrolled runner me/public enrollment outcomes. DB-backed cases reset then boot to seed system roles and must run under test:scoped with Postgres, not skip. The six runner controllers have no unit spec constructing them; their full-app integration tests already resolve global PermissionService. No new unrelated endpoint e2e cases.\n\n**Scope** — In: runner declaration metadata, class guards and the single runner-access branch. Out: catalog fold (US-001), non-runner route declarations (US-003), writer metadata (US-004), matrix/checker/collector (US-005/006/007). US-002 only: changing how `CombinedAuthGuard` authenticates runner keys or fences jobs (`runnerId` + `leaseEpoch`) is out of scope; only the key declaration and the guard's runner rule are added.\n\n**Interface** — Existing `RequiresGuard.canActivate(ctx: ExecutionContext): Promise<boolean>` remains unchanged; `passes` short-circuits `entry.access === 'runner'` with `principal?.actorType === 'runner'`. Runner enroll declares `{ keys: ['runner.enroll'], mode: 'all', enforcedBy: 'service' }`; the other six handlers declare `{ keys: [key], mode: 'all', enforcedBy: 'guard' }`.",
+      "acceptanceCriteria": [
+        "[unit] RequiresGuard.canActivate on a handler decorated @Requires('runner.sync'), for a request whose user is a runner principal, resolves true without calling PermissionService.can.",
+        "[unit] RequiresGuard.canActivate on a handler decorated @Requires('runner.sync'), for a request whose user is a user principal, rejects with ForbiddenAppException carrying prefix 'permissions' and httpStatus 403.",
+        "[unit] RequiresGuard.canActivate on a handler decorated @Requires('runner.sync'), for a request whose user is an agent principal, rejects with ForbiddenAppException carrying prefix 'permissions' and httpStatus 403.",
+        "[unit] RequiresGuard.canActivate on a handler decorated @Requires('runner.sync'), for a request with no user, rejects with ForbiddenAppException carrying prefix 'permissions' and httpStatus 403.",
+        "[unit] Reading REQUIRES_METADATA from the seven runner handlers returns the Class.handler map matching the runner design rows: BundleUploadController.upload=runner.bundle.upload, RunnerToolController.call=runner.tool.call, LogUploadController.append=runner.log.append, RunnerConfigEditController.get=runner.config.read, RunnerApiController.me=runner.self.read and RunnerSyncController.sync=runner.sync each as { keys: [key], mode: 'all', enforcedBy: 'guard' }, and RunnerApiController.enroll as { keys: ['runner.enroll'], mode: 'all', enforcedBy: 'service' }.",
+        "[unit] Reading class-level GUARDS_METADATA from each of BundleUploadController, RunnerToolController, LogUploadController, RunnerConfigEditController, RunnerApiController and RunnerSyncController includes RequiresGuard.",
+        "[integration] In the booted app, GET /fleet/runner/me with an enrolled runner's kr_ key returns 200 with that runner's name.",
+        "[integration] In the booted app, POST /fleet/runner/enroll with no Authorization header and a valid unused enrollment token returns 201 with a body whose apiKey starts with kr_.",
+        "[unit] RequiresGuard.canActivate on the service-enforced RunnerApiController.enroll handler with no principal resolves true, leaving EnrollmentService.enroll to decide access as today."
+      ],
+      "tags": [
+        "security",
+        "api",
+        "permissions",
+        "runner",
+        "mechanical"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One explicit runner-access branch and repetitive controller metadata use the existing guard harness and boot helper without new infrastructure; access-control changes still require the security-mandated strict TDD strategy.",
+        "agentProfileId": "native-luna",
+        "agent": "native",
+        "profileModelTier": "fast",
+        "initialAgent": "native",
+        "initialProfileId": "native-luna",
+        "initialModelTier": "fast",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.28000000000000025,
+          "plannedProfileId": "native-luna",
+          "applied": false,
+          "decidedAt": "2026-10-21T08:33:51.439Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/requires.guard.ts",
+        "apps/api/src/fleet/runners/runner-api.controller.ts",
+        "apps/api/src/fleet/sync/runner-sync.controller.ts",
+        "apps/api/src/fleet/artifacts/bundle-upload.controller.ts",
+        "apps/api/src/fleet/logs/log-upload.controller.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/permissions/runner-route-declarations.spec.ts",
+        "apps/api/test/integration/permissions/runner-route-permissions.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "dd174dbe791c4dc8e83f056b60dc6ca5a4236d46"
+    },
+    {
+      "id": "US-003",
+      "title": "Declare MCP, health, live, role and memory route keys",
+      "description": "**Goal** — Finish non-runner route declarations without changing existing response or service authorization behavior.\n\n**Motivation** — Nothing yet proves it stays that way.\n\n**Approach** — Non-runner rows of the route-declaration design table:\n\n| Route | Key(s) | Enforced by | Notes |\n|:--|:--|:--|:--|\n| `POST`, `GET`, `DELETE /mcp` (`McpController.post/get/delete`) | `mcp.access` | guard | implicit key; the controller's user refusal is unchanged |\n| `GET /health` (`HealthController.check`) | `health.read` | guard | `@Public()` kept, plus `@UseGuards(RequiresGuard)` |\n| `GET /projects/:slug/threads/:id/events` (`ThreadEventsController.events`) | `thread.read` | service | `ThreadEventsGuard` already checks `thread.read` |\n| `GET /threads/:id/events` (`WorkspaceThreadEventsController.events`) | `thread.workspace.read` | service | `WorkspaceThreadEventsGuard` checks the caller owns the thread |\n| `GET /projects/:slug/events` (`LiveController.events`) | `project.read` | service | the handler's membership check stays |\n| `GET /me/events` (`MeLiveController.events`) | `notification.read` | service | implicit key; the handler's user-only check stays |\n| `GET /roles` (`RolesController.list`) | `role.read` | service | `RoleAdminService.assertCan` |\n| `POST /roles`, `PATCH /roles/:id`, `DELETE /roles/:id` | `role.manage` | service | same |\n| `GET /role-bindings` (`RoleBindingsController.list`) | `role.read` | service | same |\n| `POST /role-bindings`, `DELETE /role-bindings/:id` | `role.binding.manage`, `role.binding.global`, `role.binding.owner` (mode `any`) | service | `RoleAdminService` picks the key from the binding's scope and role |\n| `POST /memory` (`MemoryController.createMemory`) | `memory.create`, `memory.update` | service | unchanged check; `memory.update` is the attribution and replace key the service already asks |\n| `POST /memory/decisions` (`MemoryController.recordDecision`) | `memory.decision.record`, `memory.update` | service | same |\n\n`thread.workspace.read`, `project.read` and `notification.read` on the three live streams name the key their access corresponds to. Making those handlers ask `PermissionService.can` for it is out of scope (retire-checks replaces their membership checks).\n\n`@Requires(keys, { enforcedBy: 'service' })` means the handler, its service or a route-specific guard checks the access, and `RequiresGuard` only records the keys. The roles and role-bindings routes, the four live streams and the memory writes use it. Every other route this feature touches is guard-enforced: `@UseGuards(RequiresGuard)` is in the same class or handler, as `apps/api/src/auth/auth.controller.ts` does it.\n\n**No access changes except the fold.** Declaring a key on the runner, MCP, health, live, roles and memory routes changes no response for any caller. The runner rule (below) admits exactly the principals `CombinedAuthGuard` already admits on a runner route. `mcp.access` and `notification.read` are implicit keys, and `health.read` is public. Only US-001's fold changes who may call a route.\n\nAdd RequiresGuard to MCP and health at class or handler level; default mode is all, except binding writes any. Do not add guards that reinterpret service-enforced declarations as authorization requirements. In particular, memory.update metadata describes existing global attribution and transactional replacement checks, not a new blanket grant required for creates. Keep RoleAdminService's existing scope/role/owner selection and refusal code new ForbiddenAppException({}, 'permissions'). Keep the health public response and stream behavior unchanged. PermissionsModule is global and RequiresGuard needs no provider entry.\n\nModify `apps/api/src/fleet/assistant/mcp/mcp.controller.routes.spec.ts`: its PermissionService double currently exposes only projectIdsWithKey; add can resolving `{ allowed: true, reason: 'implicit' }`, retaining 409 when MCP is off, 403 for a user, initialize, tools/list and tools/call outcomes. Add remaining-route-declarations.spec.ts for the full 17-handler metadata map and guard metadata, and remaining-route-permissions.integration.spec.ts for health and roles route outcomes. DB tests reset before boot or seed system roles after reset. No new endpoint e2e case for declaration-only changes; only edit existing e2e cases a correct implementation breaks.\n\n**Scope** — In: the fifteen newly declared non-runner handlers plus the two memory write declarations, MCP/health guard registration and the isolated MCP double repair. Out: key folding (US-001), runner behavior (US-002), writers (US-004), matrix/checker/collector (US-005/006/007).\n- Making the live-stream handlers (`LiveController`, `MeLiveController`, `WorkspaceThreadEventsGuard`) ask `PermissionService.can` for their declared key in place of their membership, user-only or ownership checks is out of scope (`permissions-p1-retire-checks`).\n- Deleting `KodaCaslAbilityFactory`, `@RequiredPermission`, `@ProjectPermission`, `@ProjectRoles`, `exemptAgents`, `canOverrideClose`, `withProjectRole`, `canManageMembers`, `ProjectAccessService.assertProjectMembership` / `assertProjectAdmin`, `AssistantTool.permission` / `ToolPermission`, `TicketTransitionsService.assertTransitionPermission`, `FleetActivityService.memberProjectIds`, the unreachable IN_PROGRESS → VERIFIED transition rule and the i18n messages `skills.principal` / `skills.projectPrincipal` is out of scope (`permissions-p1-retire-checks`).\n\n**Interface** — `@Requires(keys, { enforcedBy: 'service' })`; binding writes use `@Requires(['role.binding.manage', 'role.binding.global', 'role.binding.owner'], { mode: 'any', enforcedBy: 'service' })`. Memory writes declare respectively `['memory.create', 'memory.update']` and `['memory.decision.record', 'memory.update']`, with mode all and service enforcement.",
+      "acceptanceCriteria": [
+        "[unit] Reading REQUIRES_METADATA from the fifteen non-runner handlers and MemoryController.createMemory/recordDecision into Class.handler -> { keys, mode, enforcedBy } returns: McpController.post/get/delete each ['mcp.access']/all/guard; HealthController.check ['health.read']/all/guard; ThreadEventsController.events ['thread.read']/all/service; WorkspaceThreadEventsController.events ['thread.workspace.read']/all/service; LiveController.events ['project.read']/all/service; MeLiveController.events ['notification.read']/all/service; RolesController.list ['role.read']/all/service; RolesController.create/update/remove each ['role.manage']/all/service; RoleBindingsController.list ['role.read']/all/service; RoleBindingsController.create/remove each ['role.binding.manage', 'role.binding.global', 'role.binding.owner']/any/service; MemoryController.createMemory ['memory.create', 'memory.update']/all/service; MemoryController.recordDecision ['memory.decision.record', 'memory.update']/all/service.",
+        "[unit] Every route declared by McpController and HealthController has RequiresGuard in class-level or handler-level GUARDS_METADATA.",
+        "[integration] In the booted app, GET /health with no Authorization header returns 200 with status 'ok'.",
+        "[integration] In the booted app, a user with only the member baseline receives 403 with error code permissions from GET /roles.",
+        "[integration] In the booted app, a global admin receives 200 from GET /roles."
+      ],
+      "tags": [
+        "security",
+        "api",
+        "permissions",
+        "mechanical"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Prescribed Requires metadata, two guard registrations and one existing MCP double adjustment introduce no new authorization algorithm or abstraction; strict TDD remains mandatory for access-control wiring.",
+        "agentProfileId": "native-luna",
+        "agent": "native",
+        "profileModelTier": "fast",
+        "initialAgent": "native",
+        "initialProfileId": "native-luna",
+        "initialModelTier": "fast",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.16000000000000014,
+          "plannedProfileId": "native-luna",
+          "applied": false,
+          "decidedAt": "2026-10-21T08:39:45.370Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/mcp/mcp.controller.ts",
+        "apps/api/src/health/health.controller.ts",
+        "apps/api/src/permissions/roles.controller.ts",
+        "apps/api/src/permissions/role-bindings.controller.ts",
+        "apps/api/src/live/live.controller.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/permissions/remaining-route-declarations.spec.ts",
+        "apps/api/test/integration/permissions/remaining-route-permissions.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/mcp/mcp.controller.routes.spec.ts",
+          "reason": "its module provides `PermissionService` as `{ projectIdsWithKey }` only, and the `RequiresGuard` now on the MCP routes calls `can` for the implicit `mcp.access`, which would throw. The replacing invariant: the double also has `can` resolving `{ allowed: true, reason: 'implicit' }`; every case (409 when MCP is off, 403 for a user principal, initialize, tools/list, tools/call) keeps its expected outcome."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "41eef10c9bc8dad2af098f69d16630b0c6e6447e"
+    },
+    {
+      "id": "US-004",
+      "title": "Declare the system writers' catalog keys",
+      "description": "**Goal** — Add validated system-writer metadata to exactly 35 classes representing all 30 system-access catalog keys.\n\n**Motivation** — A deletion that leaves a route without a key, or changes what a role can do, fails CI.\n\n**Approach** — New file `apps/api/src/permissions/system-writer.decorator.ts`:\n\n```ts\nimport { SetMetadata } from '@nestjs/common';\nimport { findCatalogEntry } from './catalog';\n\nexport const SYSTEM_WRITER_METADATA = 'koda:system-writer';\n\n/**\n * Declares the catalog key of a class that writes on the system's own behalf (a sweeper, a cron\n * processor, an outbox subscriber, a webhook intake). The catalog contract test reads it back.\n * Throws at decoration time unless `key` is a catalog key with access `system`.\n */\nexport const SystemWriter = (key: string): ClassDecorator => {\n  if (findCatalogEntry(key)?.access !== 'system') {\n    throw new Error(`@SystemWriter needs a system catalog key, got '${key}'`);\n  }\n  return SetMetadata(SYSTEM_WRITER_METADATA, key);\n};\n```\n\nThe 35 classes and their keys. Paths are under `apps/api/src/`; the inventory's `evidence` column names them:\n\n| Class | File | Key |\n|:--|:--|:--|\n| `EmailDispatcher` | `email/email-dispatcher.ts` | `system.email.dispatch` |\n| `ApprovalExpirySweeper` | `fleet/approvals/approval-expiry-sweeper.ts` | `system.approval.expire` |\n| `PendingActionExpirySweeper` | `fleet/assistant/actions/pending-action-expiry.sweeper.ts` | `system.assistant-action.expire` |\n| `BudgetSweeper` | `fleet/budgets/budget-sweeper.ts` | `system.budget.window-reset` |\n| `BundleIngestSweeper` | `fleet/ingest/bundle-ingest.sweeper.ts` | `system.ingest.drain` |\n| `KnowledgePoller` | `fleet/knowledge/knowledge-poller.ts` | `system.knowledge.poll` |\n| `KnowledgeIndexQueue` | `fleet/knowledge/knowledge-index.queue.ts` | `system.knowledge.index` |\n| `FleetLogRetentionProcessor` | `fleet/logs/fleet-log-retention.processor.ts` | `system.log.retention` |\n| `EnrollmentRetentionProcessor` | `fleet/runners/enrollment-retention.processor.ts` | `system.enrollment.retention` |\n| `ScheduleTicker` | `fleet/schedules/schedule-ticker.ts` | `system.schedule.dispatch` |\n| `FleetSweeper` | `fleet/sync/fleet-sweeper.ts` | `system.job.crash-silent-runner` |\n| `FleetPrStateRefresher` | `fleet/tickets/fleet-pr-state.refresher.ts` | `system.ticket-link.pr-refresh` |\n| `FleetHealthDetector` | `notifications/fleet/fleet-health.detector.ts` | `system.health.detect` |\n| `MemoryGovernanceProcessor` | `memory/memory-governance.processor.ts` | `system.memory.govern` |\n| `NotificationRetentionProcessor` | `notifications/notification-retention.processor.ts` | `system.notification.retention` |\n| `OutboxRetentionProcessor` | `outbox/outbox-retention.processor.ts` | `system.outbox.retention` |\n| `CronOptimizeStrategy` | `rag/strategies/cron-optimize.strategy.ts` | `system.rag.optimize` |\n| `CounterOptimizeStrategy` | `rag/strategies/counter-optimize.strategy.ts` | `system.rag.optimize` |\n| `ManualOptimizeStrategy` | `rag/strategies/manual-optimize.strategy.ts` | `system.rag.optimize` |\n| `VcsPollingService` | `vcs/vcs-polling.service.ts` | `system.vcs.poll-issues` |\n| `VcsPrSyncService` | `vcs/vcs-pr-sync.service.ts` | `system.vcs.pr-merge-transition` |\n| `VcsWebhookService` | `vcs/vcs-webhook.service.ts` | `system.vcs.webhook-intake` |\n| `CiWebhookService` | `ci-webhook/ci-webhook.service.ts` | `system.ci.ticket-create` |\n| `WebhookDeliveryHandler` | `webhook/webhook-delivery.handler.ts` | `system.webhook.deliver` |\n| `MemoryOutboxSubscriber` | `memory/memory-outbox.subscriber.ts` | `system.memory.extract-from-event` |\n| `KbTicketLifecycleSubscriber` | `rag/kb-ticket-lifecycle.subscriber.ts` | `system.kb.ticket-index` |\n| `EntityGraphOutboxSubscriber` | `entity-graph/entity-graph-outbox.subscriber.ts` | `system.entity-graph.write` |\n| `CodeIntelOutboxSubscriber` | `code-intel/code-intel-outbox.subscriber.ts` | `system.codeintel.index-commit` |\n| `TicketNotificationSubscriber` | `notifications/ticket-notification.subscriber.ts` | `system.notification.ticket` |\n| `FleetApprovalRequestedSubscriber` | `notifications/fleet/fleet-approval-requested.subscriber.ts` | `system.notification.fleet` |\n| `FleetBudgetIncidentSubscriber` | `notifications/fleet/fleet-budget-incident.subscriber.ts` | `system.notification.fleet` |\n| `FleetHealthAlertSubscriber` | `notifications/fleet/fleet-health-alert.subscriber.ts` | `system.notification.fleet` |\n| `FleetJobOutcomeSubscriber` | `notifications/fleet/fleet-job-outcome.subscriber.ts` | `system.notification.fleet` |\n| `ThreadIngestHook` | `fleet/threads/ingest/thread-ingest.module.ts` | `system.thread.ingest` |\n| `FanOutPublisher` | `outbox/fan-out-publisher.ts` | `system.outbox.dispatch` |\n\n- `ThreadIngestHook` is a module-local class today; it becomes `export class ThreadIngestHook` so a test can import it. Its module registration is unchanged.\n- All three FTS optimize strategies are decorated. `RagModule`'s `FTS_OPTIMIZE_STRATEGY` factory builds exactly one of them from `FTS_OPTIMIZE_STRATEGY` (default `counter`), and each runs `optimizeInBackground` as the system, so `system.rag.optimize` is declared whatever the environment.\n- The 35 classes cover exactly the 30 catalog keys with access `system`.\n\nA non-system or unknown key throws at decoration time, failing API import rather than waiting for a write. This is metadata only: decorated classes' module specs must compile as before, with no changes to lifecycle, DI registration, cron scheduling, outbox behavior, approval behavior or audit behavior. Mirror SetMetadata in requires.decorator.ts; add system-writer.decorator.spec.ts with decorator success/refusals and the full one-map class table/set equality. The decorator's exported metadata constant is the only producer/consumer channel to US-007.\n\n**Scope** — In: SystemWriter and its validation, all class annotations, TypeScript export of ThreadIngestHook. Out: catalog folding (US-001), HTTP declarations (US-002/003), matrix/checker/collector (US-005/006/007), processor behavioral changes, approval or audit changes.\n\n**Interface** — `export const SYSTEM_WRITER_METADATA = 'koda:system-writer';` and `export const SystemWriter = (key: string): ClassDecorator => { ... };` are implemented exactly as above.",
+      "acceptanceCriteria": [
+        "[unit] A class decorated @SystemWriter('system.outbox.retention') carries SYSTEM_WRITER_METADATA 'system.outbox.retention'.",
+        "[unit] Calling SystemWriter('ticket.read') throws an Error whose message contains 'ticket.read', because a role key is not a system key.",
+        "[unit] Calling SystemWriter('system.no-such-writer') throws an Error whose message contains 'system.no-such-writer'.",
+        "[unit] Reading SYSTEM_WRITER_METADATA from each of the 35 classes returns one class-to-key map exactly equal to the full 35-row design table in this story's description.",
+        "[unit] The set of keys read from those 35 classes equals the set of PERMISSION_CATALOG keys whose access is 'system'."
+      ],
+      "tags": [
+        "security",
+        "api",
+        "permissions",
+        "metadata",
+        "codemod"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A fully prescribed SetMetadata decorator, one TypeScript export and 35 mechanical annotations leave DI and processor behavior unchanged; security-contract metadata still requires strict TDD despite the broad file count.",
+        "agentProfileId": "native-luna",
+        "agent": "native",
+        "profileModelTier": "fast",
+        "initialAgent": "native",
+        "initialProfileId": "native-luna",
+        "initialModelTier": "fast",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.56,
+          "plannedProfileId": "native-luna",
+          "applied": false,
+          "decidedAt": "2026-10-21T08:45:32.197Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/notifications/notifications.module.ts",
+        "apps/api/src/fleet/threads/ingest/thread-ingest.module.ts",
+        "apps/api/src/rag/rag.module.ts",
+        "docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv"
+      ],
+      "expectedFiles": [
+        "apps/api/src/permissions/system-writer.decorator.ts",
+        "apps/api/src/permissions/system-writer.decorator.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "4ab04c9d094dc4df75054c873544db242dc3aa17"
+    },
+    {
+      "id": "US-005",
+      "title": "Commit the seeded-role allow/deny matrix",
+      "description": "**Goal** — Freeze real PermissionService decisions for all seeded roles and post-fold catalog keys, independently pinning Appendix A and ownership behavior.\n\n**Motivation** — A seeded role whose entries drift, for example a wildcard that starts matching a new key, changes who may do what with no test failing.\n\n**Approach** — A unit spec, `apps/api/src/permissions/role-matrix.spec.ts`, builds a real `PermissionService` over `InMemoryPermissionStore` (as `permission.service.spec.ts` does), with project `p1` known to the store.\n- **One row per seeded role R** (`SYSTEM_ROLES`, 11 roles).\n- **The row's principal:**\n  - for R = `agent`: an AGENT principal bound to `agent` globally;\n  - otherwise: a USER principal (legacy role `MEMBER`) bound to the global `member` baseline, plus R itself — globally when R is a GLOBAL role (`owner`, `admin`), in `p1` when R is a PROJECT role. For R = `member`, the baseline binding alone.\n\n  The baseline is bound explicitly, so the matrix does not depend on `PermissionService`'s no-binding fallback, which drop-legacy removes.\n- **One column per catalog key K** (`PERMISSION_CATALOG`, 221 keys).\n- **Each cell** is the pair `[can(principal, K, {}).reason, can(principal, K, { projectId: 'p1' }).reason]`. A fresh store and service are built per row, so no cached keys carry between rows.\n- **The file.** The matrix is serialised as JSON, with roles in `SYSTEM_ROLES` order and keys in catalog order. It is compared with the committed file `apps/api/src/permissions/__snapshots__/role-matrix.json` through Vitest's file snapshot. A change to the catalog, a seeded role or `PermissionService.can` shows up as a reviewed diff of that file. `bunx vitest run -u` regenerates it.\n\n**Pinned cells.** Taken from Appendix A, not from the file, so the committed matrix is checked against the design at least at these points. `g` is the `global` reason, `p1` the project reason; all were executed against `PermissionService` at `07b11c0a` (with the fold's two `project-admin` keys checked by their pre-fold holders):\n\n| Role | Key | Context | Reason |\n|:--|:--|:--|:--|\n| `viewer` | `ticket.create` | p1 | `not-granted` |\n| `viewer` | `comment.create` | p1 | `granted` |\n| `developer` | `ticket.transition.start` | p1 | `granted` |\n| `developer` | `ticket.delete` | p1 | `not-granted` |\n| `developer` | `comment.update` | p1 | `not-owner` |\n| `project-admin` | `member.add` | p1 | `granted` |\n| `project-admin` | `role.binding.manage` | p1 | `granted` |\n| `project-admin` | `agent.update` | g | `not-granted` |\n| `admin` | `role.binding.owner` | g | `not-granted` |\n| `owner` | `role.binding.owner` | g | `granted` |\n| `agent` | `role.binding.owner` | g | `principal-type` |\n| `agent` | `mcp.access` | g | `implicit` |\n| `member` | `thread.workspace.create` | g | `granted` |\n| `member` | `project.create` | g | `not-granted` |\n| `reviewer` | `ticket.transition.close` | p1 | `granted` |\n| `triager` | `ticket.transition.reject` | p1 | `granted` |\n| `approver` | `approval.decide` | p1 | `granted` |\n\n**Ownership.** The `.own` ACs loop over every cell whose `p1` reason is `not-owner`. `resource.createdBy` is a `PrincipalRef`: the row principal's own ref is `{ type: 'USER', id }` (or `'AGENT'` for the `agent` row); \"another principal\" is `{ type: 'USER', id: 'someone-else' }`.\n\nUse the real-service wiring from permission.service.spec.ts with a fresh FakeCacheManager and PermissionCache per row; do not mock can or compute expected reasons by reimplementing permission rules. Register each USER with store.addUser(..., 'MEMBER') or AGENT in store.agents, add p1 to store.projects and explicitly bind baselines. Snapshot only the deterministic role -> key -> [global reason, p1 reason] result. Compare the 17 hardcoded expected cells independently of the snapshot. Own-grant cases iterate every not-owner p1 cell; any-row cases iterate OWNABLE_KEYS with a granted p1 cell, including globally granted scope-any keys. This is the binding spec's standalone matrix story, not a separate validation gate.\n\n**Scope** — In: deterministic role-matrix.spec.ts, committed JSON file snapshot, pinned cells and exhaustive ownership assertions. Out: changing the fold (US-001), route/writer declarations (US-002/003/004), checker/collector (US-006/007), seeded role permissions and PermissionService behavior.\n- Removing the legacy union and the baseline fallback in `PermissionService`, dropping the legacy tables and columns, deleting `PATCH /agents/:slug/update-roles` and `AGENT_PROJECT_SCOPING` are out of scope (`permissions-p1-drop-legacy`).\n- Moving test fixtures from `ProjectMember`, `AgentProject`, `AgentRoleEntry` and `User.role` rows to role bindings is out of scope (`permissions-p1-fixtures-to-bindings`).\n\n**Interface** — Each cell is `[can(principal, K, {}).reason, can(principal, K, { projectId: 'p1' }).reason]`. Ownership inputs use `resource: { createdBy: <PrincipalRef> }`, with `{ type: 'USER', id }` or `{ type: 'AGENT', id }` for self and `{ type: 'USER', id: 'someone-else' }` for other.",
+      "acceptanceCriteria": [
+        "[unit] The serialised role matrix equals the committed file apps/api/src/permissions/__snapshots__/role-matrix.json.",
+        "[unit] The matrix's role keys equal the SYSTEM_ROLES keys in order (11), and every row's cell keys equal the PERMISSION_CATALOG keys in order (221).",
+        "[unit] Reading the 17 pinned cells from the matrix in the design table's order returns ['not-granted', 'granted', 'granted', 'not-granted', 'not-owner', 'granted', 'granted', 'not-granted', 'not-granted', 'granted', 'principal-type', 'implicit', 'granted', 'not-granted', 'granted', 'granted', 'granted'] for viewer/ticket.create/p1, viewer/comment.create/p1, developer/ticket.transition.start/p1, developer/ticket.delete/p1, developer/comment.update/p1, project-admin/member.add/p1, project-admin/role.binding.manage/p1, project-admin/agent.update/global, admin/role.binding.owner/global, owner/role.binding.owner/global, agent/role.binding.owner/global, agent/mcp.access/global, member/thread.workspace.create/global, member/project.create/global, reviewer/ticket.transition.close/p1, triager/ticket.transition.reject/p1 and approver/approval.decide/p1 respectively.",
+        "[unit] In every matrix row, the cells for runner.sync and system.outbox.dispatch are ['non-role-key', 'non-role-key'].",
+        "[unit] In every matrix row, the health.read cell is ['public', 'public'].",
+        "[unit] In every matrix row, every project-scope role key has global reason 'no-project'.",
+        "[unit] In every matrix row, no project-scope role key has p1 reason 'no-project'.",
+        "[unit] For every row and key whose p1 cell is 'not-owner', can(principal, K, { projectId: 'p1', resource: { createdBy: <the row principal's own ref> } }) returns { allowed: true, reason: 'granted' }.",
+        "[unit] For every row and key whose p1 cell is 'not-owner', can with projectId 'p1' and resource.createdBy { type: 'USER', id: 'someone-else' } returns { allowed: false, reason: 'not-owner' }.",
+        "[unit] For every row and every key in OWNABLE_KEYS whose p1 cell is 'granted', can with projectId 'p1' and resource.createdBy { type: 'USER', id: 'someone-else' } returns { allowed: true, reason: 'granted' }."
+      ],
+      "tags": [
+        "security",
+        "api",
+        "permissions",
+        "role-matrix"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two new files with deterministic but non-trivial role/baseline/ownership fixture construction over a real access-control service; strict security TDD applies to this explicitly bound matrix story.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.20000000000000018,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-21T08:49:54.759Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/permission.service.spec.ts",
+        "apps/api/src/permissions/test-helpers/in-memory-permissions.ts",
+        "apps/api/src/permissions/system-roles.ts",
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/permissions/permission.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/permissions/role-matrix.spec.ts",
+        "apps/api/src/permissions/__snapshots__/role-matrix.json"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "809db18da0e142db3c6aea171f3c7469a008c147"
+    },
+    {
+      "id": "US-006",
+      "title": "Implement the pure permission catalog contract checker",
+      "description": "**Goal** — Define the permission declaration contract, its pure violation checker and the exact five temporary pending-surface exceptions.\n\n**Motivation** — The contract and matrix tests are its safety net.\n\n**Approach** — `apps/api/src/permissions/catalog.ts` gains:\n\n```ts\n/**\n * Role keys whose surface arrives in a later phase: approvals and their policies (P3), the audit log (P2),\n * and deciding an assistant action as an approval type (P3). No route, tool or system writer declares\n * them yet; the catalog contract test refuses an undeclared key unless it is listed here, and refuses a\n * listed key once a surface declares it, so the list shrinks as P2 and P3 land.\n */\nexport const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([\n  'approval.decide',\n  'approval.policy.read',\n  'approval.policy.manage',\n  'audit.read',\n  'fleet.approval.decide.assistant',\n]);\n```\n\nNew file `apps/api/src/permissions/test-helpers/permission-contract.ts` (test support, next to `in-memory-permissions.ts`). US-006 creates it with the types and `findContractViolations`; US-007 adds `collectPermissionDeclarations`:\n\n```ts\nexport interface RouteDeclaration {\n  /** `\"<METHOD> /<controller path>/<handler path>\"`, for violation messages. */\n  route: string;\n  /** Handler metadata, else class metadata, as RequiresGuard reads it. */\n  requires: RequiresMetadata | undefined;\n  /** Whether RequiresGuard is among the class's or the handler's `@UseGuards`. */\n  hasRequiresGuard: boolean;\n}\nexport interface ToolDeclaration { tool: string; key: string }\nexport interface SystemWriterDeclaration { writer: string; key: string }\nexport interface PermissionDeclarations {\n  routes: readonly RouteDeclaration[];\n  tools: readonly ToolDeclaration[];\n  systemWriters: readonly SystemWriterDeclaration[];\n}\n\nexport type ContractViolation =\n  | { kind: 'route-without-key'; route: string }\n  | { kind: 'unknown-key'; source: string; key: string }\n  | { kind: 'guard-missing'; route: string }\n  | { kind: 'unused-key'; key: string }\n  | { kind: 'pending-key-declared'; source: string; key: string };\n\n/** Walks a booted Nest app's controllers and providers, and the tool registry. */\nexport function collectPermissionDeclarations(\n  modules: ModulesContainer,\n  registry: AssistantToolRegistry,\n): PermissionDeclarations;\n\n/** Every violation; callers compare as a set (the order is not part of the contract). */\nexport function findContractViolations(\n  declarations: PermissionDeclarations,\n  catalog: readonly PermissionCatalogEntry[] = PERMISSION_CATALOG,\n  pending: ReadonlySet<string> = PENDING_SURFACE_KEYS,\n): ContractViolation[];\n```\n\nThe collector signature above is the shared interface delivered in US-007; this story implements the types and checker only, not an empty collector stub.\n\n**`findContractViolations` rules:**\n1. A route whose `requires` is undefined is `route-without-key`.\n2. Every key of a route, tool or writer that is not the `key` of an entry in the `catalog` argument is `unknown-key`, with `source` the route, tool name or writer class name. (The checker never calls the global `findCatalogEntry`, so a unit test can pass a small catalog of made-up keys.)\n3. A route whose `requires.enforcedBy` is `'guard'` and whose `hasRequiresGuard` is false is `guard-missing`.\n4. Every catalog key declared by no route, tool or writer, and not in `pending`, is `unused-key`.\n5. Every key in `pending` that some route, tool or writer declares is `pending-key-declared`.\n\nAdd permission-contract.spec.ts beside this source helper. Synthetic fixtures use catalog entries k.one and k.two, pending empty unless stated, with guard-enforced/hasRequiresGuard=true routes unless the case changes it. Compare violations as a set: enumeration order is not public behavior. A missing requires declaration does not license bypassing unused catalog checks. A service declaration can omit RequiresGuard; unknown keys and pending declarations must still be reported for tools and writers as well as routes. The pending set is not a permanent allowlist: remove an exception once a later surface declares it, enforced by pending-key-declared. US-001 supplies the post-fold catalog before this story runs.\n\n**Scope** — In: PENDING_SURFACE_KEYS, declaration and violation types, pure findContractViolations and synthetic unit behavior. Out: runtime collection, registry.list and booted-app contract (US-007), route annotations (US-002/003), SystemWriter decorator (US-004) and matrix (US-005).\n- Surfaces for the five pending keys (approval decide and policies, the audit log, assistant-action approvals) are out of scope (P2, P3).\n\n**Interface** — The exact TypeScript declarations and checker defaults above are the seam consumed by US-007; collectPermissionDeclarations is explicitly implemented only in US-007.",
+      "acceptanceCriteria": [
+        "[unit] PENDING_SURFACE_KEYS equals the set { approval.decide, approval.policy.read, approval.policy.manage, audit.read, fleet.approval.decide.assistant }.",
+        "[unit] Every key in PENDING_SURFACE_KEYS resolves to a PERMISSION_CATALOG entry.",
+        "[unit] findContractViolations for route GET /x with requires undefined returns a set containing { kind: 'route-without-key', route: 'GET /x' }.",
+        "[unit] findContractViolations for route GET /x declaring ['no.such.key'] returns a set containing { kind: 'unknown-key', source: 'GET /x', key: 'no.such.key' }.",
+        "[unit] findContractViolations for tool { tool: 'koda_x', key: 'no.such.key' } returns a set containing { kind: 'unknown-key', source: 'koda_x', key: 'no.such.key' }.",
+        "[unit] findContractViolations for system writer { writer: 'XSweeper', key: 'no.such.key' } returns a set containing { kind: 'unknown-key', source: 'XSweeper', key: 'no.such.key' }.",
+        "[unit] findContractViolations for route GET /x declaring ['k.one'] with enforcedBy 'guard' and hasRequiresGuard false returns a set containing { kind: 'guard-missing', route: 'GET /x' }.",
+        "[unit] findContractViolations for route GET /x declaring ['k.one'] with enforcedBy 'service' and hasRequiresGuard false returns no guard-missing violation.",
+        "[unit] findContractViolations with catalog [k.one, k.two] and a single route declaring ['k.one'] returns exactly [{ kind: 'unused-key', key: 'k.two' }].",
+        "[unit] findContractViolations with catalog [k.one, k.two], a single route GET /x declaring ['k.one'] and pending { k.two } returns [].",
+        "[unit] findContractViolations with catalog [k.one, k.two], pending { k.two } and route GET /x declaring ['k.one', 'k.two'] returns a set containing { kind: 'pending-key-declared', source: 'GET /x', key: 'k.two' }.",
+        "[unit] findContractViolations with catalog [k.one, k.two], k.one declared only by a tool and k.two only by a system writer returns []."
+      ],
+      "tags": [
+        "security",
+        "api",
+        "permissions",
+        "contract",
+        "algorithm"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One prescribed pure checker plus additive catalog exceptions and synthetic unit fixtures; explicit five-rule algorithm is small and well specified, but authorization-contract security still requires strict TDD.",
+        "agentProfileId": "native-luna",
+        "agent": "native",
+        "profileModelTier": "fast",
+        "initialAgent": "native",
+        "initialProfileId": "native-luna",
+        "initialModelTier": "fast",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.6400000000000001,
+          "plannedProfileId": "native-luna",
+          "applied": false,
+          "decidedAt": "2026-10-21T09:11:42.387Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/permissions/requires.decorator.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/permissions/test-helpers/permission-contract.ts",
+        "apps/api/src/permissions/test-helpers/permission-contract.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ab3edb73d77aa42a02d95238e427ab0a6711f711"
+    },
+    {
+      "id": "US-007",
+      "title": "Collect declarations and enforce the booted-app contract",
+      "description": "**Goal** — Collect real Nest route/provider/tool declarations and assert the booted API has no permission catalog contract violations.\n\n**Motivation** — The contract and matrix tests are its safety net.\n\n**Approach** — Extend `apps/api/src/permissions/test-helpers/permission-contract.ts`, created by US-006, with the runtime collector. Shared interface from the design:\n\n```ts\nexport interface RouteDeclaration {\n  /** `\"<METHOD> /<controller path>/<handler path>\"`, for violation messages. */\n  route: string;\n  /** Handler metadata, else class metadata, as RequiresGuard reads it. */\n  requires: RequiresMetadata | undefined;\n  /** Whether RequiresGuard is among the class's or the handler's `@UseGuards`. */\n  hasRequiresGuard: boolean;\n}\nexport interface ToolDeclaration { tool: string; key: string }\nexport interface SystemWriterDeclaration { writer: string; key: string }\nexport interface PermissionDeclarations {\n  routes: readonly RouteDeclaration[];\n  tools: readonly ToolDeclaration[];\n  systemWriters: readonly SystemWriterDeclaration[];\n}\n\nexport type ContractViolation =\n  | { kind: 'route-without-key'; route: string }\n  | { kind: 'unknown-key'; source: string; key: string }\n  | { kind: 'guard-missing'; route: string }\n  | { kind: 'unused-key'; key: string }\n  | { kind: 'pending-key-declared'; source: string; key: string };\n\n/** Walks a booted Nest app's controllers and providers, and the tool registry. */\nexport function collectPermissionDeclarations(\n  modules: ModulesContainer,\n  registry: AssistantToolRegistry,\n): PermissionDeclarations;\n\n/** Every violation; callers compare as a set (the order is not part of the contract). */\nexport function findContractViolations(\n  declarations: PermissionDeclarations,\n  catalog: readonly PermissionCatalogEntry[] = PERMISSION_CATALOG,\n  pending: ReadonlySet<string> = PENDING_SURFACE_KEYS,\n): ContractViolation[];\n```\n\n**`collectPermissionDeclarations`:**\n- For every module in `ModulesContainer`, each controller wrapper's `metatype` contributes one `RouteDeclaration` per prototype method carrying Nest's `METHOD_METADATA`. The path comes from `PATH_METADATA` on the class and the method, and the method name from `RequestMethod`.\n- Each provider wrapper contributes a `SystemWriterDeclaration` when `SYSTEM_WRITER_METADATA` is set on its `metatype` or on `instance.constructor`. The second source covers factory-built providers such as the FTS optimize strategy.\n- A class reached through several wrappers (`useExisting` aliases, re-exports) is reported once.\n- Tools come from `registry.list()`, as `{ tool: descriptor.name, key }`.\n\n`AssistantToolRegistry` (`apps/api/src/fleet/assistant/assistant-tool.registry.ts`) gains `list(): readonly AssistantTool[]`, which returns the registered tools in registration order.\n\nUse Nest's ModulesContainer from @nestjs/core; PATH_METADATA, METHOD_METADATA and GUARDS_METADATA from @nestjs/common/constants; RequestMethod from @nestjs/common. Resolve handler Requires metadata before class metadata, exactly as RequiresGuard does. hasRequiresGuard is true if RequiresGuard appears in either class or handler guards. Construct readable '<METHOD> /<controller path>/<handler path>' route names without duplicated path separators. Deduplicate by class identity across wrappers, not by key, since distinct classes may legitimately declare the same system key. Factory providers require inspecting the initialized instance constructor; do not filter them out because their wrapper metatype is a factory. Keep excluded-from-OpenAPI and SSE controller routes in the walk. Do not use Swagger as the discovery source or enumerate a manually maintained route whitelist.\n\nUS-006's pure checker remains the consumer of these declarations: missing route keys, unknown keys, missing guards for guard enforcement, unused catalog keys except pending, and declared pending keys are violations. The default pending set contains only approval.decide, approval.policy.read, approval.policy.manage, audit.read and fleet.approval.decide.assistant. No extra exemptions. The declaration work of US-002/003/004 is required before the full-app assertion, and US-006 transitively brings US-001's fold.\n\nExtend assistant-tool.registry.spec.ts for empty and ordered list outcomes while preserving get results and the existing Error('koda tool already registered: <name>') duplicate-name refusal. Add permission-contract.collector.spec.ts beside the helper with initialized miniature Nest testing modules for provider metadata, handler-over-class fallback, tool extraction and useExisting deduplication; these are DB-free unit tests, not integration tests. Add `apps/api/test/integration/permissions/permission-contract.integration.spec.ts`: reset DB before bootHttpApp, retrieve app.get(ModulesContainer) and app.get(AssistantToolRegistry), collect after initialization and assert no violations. Also pin runner.sync, thread.read, role.binding.owner and system.schedule.dispatch, plus the default CounterOptimizeStrategy factory writer. Use default FTS_OPTIMIZE_STRATEGY (counter) in that assertion, restoring any test environment changes. Close the app after the suite. Boot seeds system roles; run this DB-backed spec with test:scoped and the compose test Postgres available. Do not weaken the contract if it exposes a missed declaration.\n\n**Scope** — In: additive registry.list, metadata-based collector, synthetic collector unit behavior and the booted-app contract integration. Out: rewriting checker rules/pending exceptions (US-006), implementing route/writer annotations instead of consuming them (US-002/003/004), matrix (US-005), key folding (US-001), production authorization changes, audit and approval surfaces or legacy deletion.\n\n**Interface** — Implement `collectPermissionDeclarations(modules: ModulesContainer, registry: AssistantToolRegistry): PermissionDeclarations` above and `list(): readonly AssistantTool[]` on AssistantToolRegistry; consume US-006's `findContractViolations` and US-004's `SYSTEM_WRITER_METADATA` without alternative metadata channels.",
+      "acceptanceCriteria": [
+        "[unit] AssistantToolRegistry.list() after register(a) then register(b) returns [a, b].",
+        "[unit] AssistantToolRegistry.list() on a new registry returns [].",
+        "[unit] collectPermissionDeclarations over the ModulesContainer of an initialised testing module with one provider class decorated @SystemWriter('system.outbox.retention') returns systemWriters equal to [{ writer: <that class's name>, key: 'system.outbox.retention' }].",
+        "[unit] collectPermissionDeclarations over the ModulesContainer of an initialised testing module with one controller containing a handler decorated @Requires('ticket.read') and another handler covered only by class-level @Requires('ticket.update') returns two routes whose requires.keys, as a set of lists, is { ['ticket.read'], ['ticket.update'] }.",
+        "[unit] collectPermissionDeclarations with a registry holding one tool whose descriptor name is koda_x and key ticket.read returns tools equal to [{ tool: 'koda_x', key: 'ticket.read' }].",
+        "[integration] In the app booted by bootHttpApp, findContractViolations(collectPermissionDeclarations(app.get(ModulesContainer), app.get(AssistantToolRegistry))) returns [].",
+        "[integration] In that app, the set of keys declared by the collected routes and system writers includes runner.sync, thread.read, role.binding.owner and system.schedule.dispatch.",
+        "[integration] In that app with the default FTS_OPTIMIZE_STRATEGY, the collected system writers include { writer: 'CounterOptimizeStrategy', key: 'system.rag.optimize' }, a factory-built provider.",
+        "[unit] collectPermissionDeclarations over a testing module where one @SystemWriter class is a provider and is also aliased by a useExisting token returns that writer once.",
+        "[unit] Given a registered tool whose descriptor.name is 'koda_a', registering another tool named 'koda_a' throws Error with message 'koda tool already registered: koda_a', preserving the existing duplicate-name refusal when list() is added."
+      ],
+      "tags": [
+        "security",
+        "api",
+        "permissions",
+        "contract",
+        "integration"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-003",
+        "US-004",
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New Nest metadata traversal crosses controller/provider/tool registration, aliases and factories and validates real app boot wiring; access-control contract integration requires strict security TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.3200000000000003,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-21T09:16:09.815Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/test-helpers/permission-contract.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.registry.ts",
+        "apps/api/src/permissions/system-writer.decorator.ts",
+        "apps/api/test/helpers/http-app.ts",
+        "apps/api/src/rag/rag.module.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/permissions/test-helpers/permission-contract.collector.spec.ts",
+        "apps/api/test/integration/permissions/permission-contract.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Given class-level RequiresGuard and no handler-level guards, collecting a routed handler returns hasRequiresGuard true.",
+        "Given handler-level RequiresGuard and no class-level guards, collecting that routed handler returns hasRequiresGuard true.",
+        "Given controller path 'x' and handler path 'y' with a GET method, collecting declarations returns route 'GET /x/y'.",
+        "Given two different decorated writer classes with the same system key, collecting declarations returns both writer class names."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f91762b96c94ef2f973828e204bf598a668f2f77"
+    }
+  ],
+  "analysis": "Existing-code enhancement and security regression safety net, not greenfield. Goal: make every HTTP route, registered assistant tool and system-writer kind declare a catalog key; prove catalog/declaration completeness against the booted application; freeze the 11 seeded roles' global/project decisions across the 221 post-fold keys; close the project-admin-to-global-agent-update escalation. Done means the declarations, pure checker, runtime collector, committed role matrix and route-level fold outcomes all agree. The binding decomposition is exactly US-001 through US-007, including the explicitly specified test-only matrix story. All workdirs remain apps/api even though US-001 also edits the root inventory and regenerates root openapi.json.\n\nNavigation and evidence: codebase-memory MCP is unavailable in this session, so discovery used direct Read/Grep/Glob, not an unverified index. The source context was read at .nax/mono/apps/api/context.md:1. Its NestJS/Fastify architecture supersedes the supplied generic Express/Next.js detection; this feature does not touch web. apps/api/package.json:9-29 defines Vitest unit/scoped/DB commands, oxlint and Prisma generation; apps/api/package.json:43-76 confirms Nathapp/Nest 12, platform-fastify and Prisma dependencies. Existing package versions, rather than stale guidance version numbers, should be mirrored without dependency upgrades. Read nathapp-nestjs-patterns before implementation of Nest code; its SKILL.md was not found within the repository by glob during PRD discovery. No implementation or test execution was performed while drafting this PRD.\n\nShared binding conventions: PermissionsModule remains @Global(), as already implemented in apps/api/src/permissions/permissions.module.ts:34-58; RequiresGuard needs no provider entry. Refused keys throw new ForbiddenAppException({}, 'permissions'). DB fixtures requiring system roles must run SystemRoleSeeder.onApplicationBootstrap() after resetDb, or reset then boot the app. @Requires(keys, { enforcedBy: 'service' }) records the handler/service/route-specific guard's existing check rather than introducing a guard decision. Every guard-enforced route must list RequiresGuard on the class or handler. apps/api/src/permissions/requires.decorator.ts:12-40 defines the metadata with default mode all, default enforcedBy guard, and rejects empty key lists; apps/api/src/permissions/requires.guard.ts:29-59 resolves handler metadata before class metadata, bypasses service enforcement, combines all/any answers, preserves not-owner pass-through and fails closed with permissions. apps/api/src/auth/auth.controller.ts:36-57 is the public-route-plus-RequiresGuard convention to mirror. No access response changes except the fold; no approval or audit changes.\n\nUS-001 impact and migration: apps/api/src/permissions/catalog.ts:91-106 defines NEW_KEY_SCOPES, including role.binding.manage today. Inventory-derived key/scope data starts at catalog.ts:130, contains agent.roles.update at :136, member.role.update at :258 and the roster keys at :266-269. catalog.ts:352-371 derives scopes, and :407-421 concatenates inventory keys and new keys into PERMISSION_CATALOG and its lookup map. Therefore moving role.binding.manage into the inventory requires deleting it from NEW_KEY_SCOPES, not adding a duplicate; five removed keys shrink 226 to 221 while preserving inventory-first ordering. docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv:8,174,184-186 contains the five exact proposed_key/catalog_scope cells to edit; do not rewrite its historical evidence or unrelated columns. apps/api/src/permissions/catalog.spec.ts:24-25,78-92,107-160 re-reads that TSV and independently copies NEW_KEY_SCOPES; :255-267 pins the obsolete agent.roles.update among five management keys. Update the copied scopes and pin four remaining global agent-management keys while retaining all other derivation invariants.\n\nThe consumers to change together with catalog removal are ProjectsController.addProjectAgent/removeProjectAgent/updateProjectAgent (apps/api/src/projects/projects.controller.ts:190-269), ProjectMembersController.updateRole (apps/api/src/projects/members/project-members.controller.ts:59-62), and AgentsController.updateRoles (apps/api/src/agents/agents.controller.ts:164-168). Roster update currently calls can(principal, 'project.agent.update', { projectId: ctx.project.id }) at projects.controller.ts:262; replace it with exactly two arguments can(principal, 'agent.update'). Keep @CurrentProject ctx and the five-argument handler signature (:237-243), the roster lookup and 404/refused-unrostered-self behavior (:247-257), and self-update predicate (:263) unchanged. Keep project.agent.read: it is not one of the five removed keys. No seeded role names a removed key; SYSTEM_ROLES and stored role permissions are not edited. apps/api/src/permissions/entry-matcher.ts:42-63,77-90,140-162 expands only access=role keys fitting GLOBAL/PROJECT scope and applies exclusions last. Global agent.update thus cannot be reached by project-admin's PROJECT '*'.\n\nAffected regressions: apps/api/src/projects/projects.controller.spec.ts:71-74 pins old route metadata; :496-525 pins the old can call and has a misleading project-admin allow-case title. Change that title to a caller holding agent.update, preserving five-argument handler invocations and self/roster/refusal cases (:528-584). apps/api/src/projects/members/project-members.controller.spec.ts:8 pins member.role.update; agents.controller.spec.ts exists and can host the updateRoles metadata assertion. apps/api/test/integration/permissions/core-project-routes.integration.spec.ts:131-166 resets then boots and creates bindings; :318-357 contains self-update, peer-refusal and the project-admin AC-17 that must invert to 403 permissions with ACTIVE unchanged. Existing HTTP error checks at :75-81 use status 403, ret 40003 and the translated permissions message; distinguish the exception prefix permissions from the JSON numeric ret. Add the explicit global-admin allow case with a global admin binding; avoid sharing an agent already set OFFLINE with an authentication-dependent case. Keep self-update/peer-refusal outcomes. Update folded-key comments in core-project-routes and core-members-invites; preserve existing allow/refuse behavior in core-members-invites and core-agent-routes. Only existing e2e cases broken by the correct implementation are edited; unrelated declaration-only changes do not justify new endpoint e2e suites. Change the five operations' summary/403 texts and regenerate openapi.json using bun run api:export-spec from the root; paths/schemas must not change, and CLI client generation is explicitly excluded.\n\nUS-002: apps/api/src/permissions/requires.guard.ts:49-57 currently has public and missing-principal branches but no runner-access branch; PermissionService.can at apps/api/src/permissions/permission.service.ts:54-62 intentionally never grants runner keys. Add the runner branch immediately after public, returning principal?.actorType === 'runner', without calling can. Existing unit harness in requires.guard.spec.ts:20-104 builds Reflector contexts and can doubles; :109-196 pins fail-closed, public, service and ownership behavior to retain. RunnerApiController (apps/api/src/fleet/runners/runner-api.controller.ts:14-37) has class @RunnerRoute, public enroll and me but no Requires declarations. Apply the same class RequiresGuard and per-handler declaration pattern to bundle-upload, runner-tool, log-upload, runner-config-edit and runner-sync controllers. apps/api/src/fleet/assistant/runner-tool.controller.ts:17-23 independently confirms the runner-route pattern. Enrollment stays public/service-enforced. CombinedAuthGuard (apps/api/src/auth/guards/combined-auth.guard.ts:28-44) skips public routes first, otherwise enforces kr_ isolation bidirectionally before JWT/agent processing; do not modify it or job fencing. RequiresGuard unit denial is 403 permissions, whereas the earlier global auth guard can still reject an invalid runner-route caller under its existing authentication contract.\n\nUS-003: RolesController (apps/api/src/permissions/roles.controller.ts:8-20,24-67) and RoleBindingsController (apps/api/src/permissions/role-bindings.controller.ts:16-28,32-83) already delegate authorization to RoleAdminService, so metadata stays service-enforced. Binding writes declare all three candidate binding keys with mode any, without replacing the service's scope/owner checks with an OR authorization. McpController at apps/api/src/fleet/assistant/mcp/mcp.controller.ts:40-80 has three undecorated protocol handlers; :83-85 preserves disabled=409 and user=403 refusals. Its isolated Fastify test at mcp.controller.routes.spec.ts:65-101 currently supplies PermissionService with projectIdsWithKey only; add can resolving { allowed: true, reason: 'implicit' } so the new guard does not break those outcomes. HealthController (apps/api/src/health/health.controller.ts:5-15) stays @Public and returns a raw { status: 'ok', timestamp } response, not a newly wrapped response. LiveController (apps/api/src/live/live.controller.ts:32-44,58-67) currently enforces user-only plus membership, including continued stream eligibility; add service metadata without replacing those checks. The other three streams retain their thread-key, owner or user-only checks. MemoryController at apps/api/src/memory/memory.controller.ts:52-68 already checks a write key in its project and memory.update globally for attribution; :162-195 and :198-235 already enforce replacement through MemoryWriteGuard. Add memory.update to its two service declarations only; do not turn this into a new requirement that ordinary creators hold memory.update globally.\n\nUS-004: new SystemWriter decorator mirrors SetMetadata in Requires but validates catalog access=system at decoration time. Decorate the exact 35 classes in the story's design map, spanning email, fleet, notifications, memory, outbox, RAG, VCS, CI webhook, webhook, entity graph and code intel. catalog.ts:318-347 contains the 30 system-access keys; duplicate writer keys are intentional (three optimize strategies; four fleet-notification subscribers). Keep class identity, DI and lifecycle registrations unchanged. apps/api/src/fleet/threads/ingest/thread-ingest.module.ts:13-20 has a module-local ThreadIngestHook; export its class while retaining provider registration at :29. apps/api/src/rag/rag.module.ts:95-110 constructs exactly one FTS strategy with useFactory, so decorators must be present on all three strategy constructors and the collector must inspect instance.constructor. apps/api/src/config/rag.config.ts:104 defaults FTS_OPTIMIZE_STRATEGY to counter.\n\nUS-005: real PermissionService can() order in permission.service.ts:54-80 explains public/implicit/non-role/principal-type/no-project/ownership reasons; effectiveKeys and caching are at :83-91; :122-163 still union bindings, legacy rows and a no-global-binding baseline fallback. Do not remove that fallback or legacy union here. The matrix explicitly binds baseline member for users and agent for the agent row so it survives future fallback removal. SYSTEM_ROLES is an ordered eleven-role list (system-roles.ts:19-174), owner/admin/member/agent then project roles; wildcard/exclusion behavior must not be restated in the snapshot generator. permission.service.spec.ts:12-38 shows the real-service construction using InMemoryPermissionStore and PermissionCache(FakeCacheManager). The store seeds role copies at test-helpers/in-memory-permissions.ts:20-29, offers addUser/bind at :39-64, projects at :33, and returns no legacy role rows at :127-137; FakeCacheManager is at :270-290. Create a fresh store/cache/service per row, add p1, register the principal, bind the baseline plus role in its proper scope, then serialize only stable reason pairs in role/catalog insertion order. Never snapshot dates, bindings or random IDs. Independently pin all 17 design cells and exhaustively exercise own-resource, other-resource and any-row-grant ownership behavior rather than accepting generated data as the sole oracle. Use Vitest file snapshots with a committed JSON file, refreshed deliberately with bunx vitest run -u.\n\nUS-006/007 interfaces and seams: new permission-contract.ts is test support beside the in-memory helper, not a production guard. US-006 owns declaration types, ContractViolation, findContractViolations and PENDING_SURFACE_KEYS; US-007 consumes and extends it with collectPermissionDeclarations. Pure checker must use its injected catalog argument, never global findCatalogEntry, and callers compare violations as a set. Pending exceptions are exactly five keys; they prevent unused-key only while undeclared and produce pending-key-declared as soon as a surface appears. US-007 enumerates ModulesContainer controller wrappers' metatypes, Nest METHOD_METADATA/PATH_METADATA/RequestMethod, handler-first Requires metadata and unioned class/handler GUARDS_METADATA. Providers use metadata on metatype or instance.constructor, deduplicated by class identity across aliases, not by key (different writers may share a key). Service declarations need no RequiresGuard. Include excluded-from-Swagger controllers and SSE routes; discovery is Nest metadata based, not OpenAPI based. AssistantToolRegistry is currently a private insertion-ordered Map with register/get (assistant-tool.registry.ts:5-20), rejecting duplicate names; add list(): readonly AssistantTool[] without altering get/register. assistant-tool.types.ts:41-57 provides descriptor.name and key while retaining legacy permission; assistant-tool.registry.spec.ts:4-25 supplies a reusable fixture and existing duplicate/get cases. Collector must consume list(), not reach into the private map or the static MCP catalog. Unit-compile miniature modules without DB for collector behavior; boot the real application only in the required integration contract.\n\nFull boot contract: apps/api/test/helpers/http-app.ts:26-45 builds AppModule, installs CombinedAuthGuard, global prefix/pipes/filters/guards and awaits app.init(), so providers and assistant tool lifecycle registration have completed before collection. It restores registration/owner env afterward. Its resetThrottle and data/login helpers at :52-84 should be reused in endpoint integration tests. New test/integration/permissions/permission-contract.integration.spec.ts must reset DB before boot, inspect app.get(ModulesContainer) and app.get(AssistantToolRegistry), assert zero violations plus representative runner/live/binding/system keys and the CounterOptimizeStrategy factory instance. Do not globally export the local ThreadIngestHook from its Nest module just to collect metadata; exporting the TypeScript class suffices.\n\nTesting execution constraints: apps/api/vitest.config.ts:7-18 enables SWC decorator metadata and includes src/**/*.spec.ts plus test/**/*.spec.ts; :34-45 uses globals and serial DB-mode projects. Use vi.*, vi.hoisted for outer factory state, and lazy await import for TS module loading, not require(). Unit declaration/checker/collector and DI tests remain beside source and need no database; DB-backed HTTP and full-app contract specs live only under test/integration. The new files listed in expectedFiles include supporting unit/integration specs, not extra user stories. bun run test:scoped <files> sets DB mode for integration paths; DB tests otherwise skip unless KODA_DB_TESTS=1. Bring up compose test Postgres with bun run test:db:up from apps/api before execution because sandbox agents cannot use Docker/Testcontainers. Every DB run resets the schema; do not run DB suites concurrently against the same test database. Generated acceptance material stays in apps/api/.nax/features/permissions-p1-contract-tests/.nax-acceptance.test.ts, never copied into src or test; run it using vitest.nax.config.ts and story-specific AC filters when available.\n\nRisk and rollout: catalog/route fold must be atomic because an old declared key fails closed after removal. Project Admin status edits are the only intentional access regression; global Owner/Admin and rostered self-agent OFFLINE updates remain. New guard registration can expose incomplete isolated PermissionService doubles, notably MCP. Runtime collector can silently miss factory instances, aliases, inherited metadata or excluded controllers if discovery is simplified, so synthetic modules and the app-level contract are both necessary. Snapshot review must catch wildcard drift rather than blindly regenerate. Metadata-only system decorators can trigger import-time failures on typoed keys, by design; do not alter processor behavior. No schema migration, data backfill, custom-role rewrite, legacy deletion or CLI generation belongs here. Existing stored custom/unlocked-role entries naming folded keys are not migrated; the agreed installation reset and SystemRoleSeeder handle system-role setup. Sequence: run independent US-001..004; US-005 and US-006 wait only for US-001; US-007 waits for US-002/003/004/006, not US-005. This safety net precedes permissions-p1-retire-checks, then fixtures-to-bindings, then drop-legacy; drop-legacy also waits for permissions-p1-web. The binding story structure overrides generic advice against test-only stories. Every story uses three-session-tdd because its subject is access control even where runtime changes are metadata-only.\n\nRefine-pass adversarial audit: re-read the draft and the guard, decorator, principal-ref/decision types, registry and its existing unit spec, runner bundle/log controllers, live controller, notifications module and boot helper. Concrete corrections: US-002 exception criteria now identify the actual observable prefix='permissions' and httpStatus=403, rather than implying an exception.code property; each denial names its handler fixture independently. US-002 contextFiles now prioritizes all five primary files explicitly recommended by the spec (guard, runner API, sync, bundle, logs). US-003 now includes the spec's live controller rather than the secondary memory context; memory remains explicitly in scope and its source references remain above. US-004 now includes NotificationsModule, where writers are registered, instead of the less critical decorator sibling. Removed the irrelevant in-memory-store context from US-006. US-002/003/004 are medium: their changes are prescribed standard metadata/guard patterns, not new cross-module architecture; US-001 and US-007 remain complex due to the atomic security fold and runtime metadata discovery respectively. All strategies remain three-session-tdd under the explicit security override. US-007 lacked a negative AC: appended the existing registry duplicate-name Error/message behavior as its tenth criterion, also anchoring backward compatibility of register while adding list. It is a refinement-added regression, not an additional claim attributed to the spec. The existing US-002 ninth criterion separately pins the enrollment service-pass-through failure-table row. No original criterion was replaced by either addition.\n\nExhaustive spec-AC preservation ledger (58 original criteria, retained in their original stories and order; counts 9/8/5/5/10/12/9):\nUS-001: AC1 excludes all five removed keys; AC2 exactly one project-scoped role.binding.manage; AC3 global agent.update; AC4 PROJECT project-admin expansion contains the three surviving keys; AC5 exact five-handler metadata map; AC6 rostered update makes exactly one can call with exactly two arguments; AC7 project-admin-only binding gets 403 permissions and agent remains ACTIVE; AC8 global admin gets 200 and persisted OFFLINE; AC9 rostered self-agent using its own API key gets 200.\nUS-002: AC1 runner.sync guard allows runner without PermissionService.can; AC2 same handler refuses user with permissions; AC3 refuses agent with permissions; AC4 refuses missing principal with permissions; AC5 exact seven-handler metadata map including all/service enrollment versus all/guard others; AC6 RequiresGuard on each of the six classes; AC7 enrolled kr_ runner reads its own name with 200; AC8 unauthenticated enrollment with valid unused token returns 201 and kr_ API key.\nUS-003: AC1 exact fifteen non-runner plus two memory handler metadata map, including any/service binding writes and all other modes; AC2 RequiresGuard on every MCP and health route through class or handler metadata; AC3 health with no Authorization returns 200/ok; AC4 member-baseline-only roles read refused with 403 permissions; AC5 global admin roles read returns 200.\nUS-004: AC1 system decorator metadata round trip; AC2 ticket.read throws Error containing ticket.read, a role rather than system key; AC3 unknown system key throws Error containing that key; AC4 exact whole 35-class map; AC5 its key set equals all system-access catalog keys.\nUS-005: AC1 serialized matrix matches committed JSON file; AC2 ordered 11 roles and ordered 221 keys per row; AC3 all 17 independently pinned design cells and their ordered expected reasons; AC4 runner.sync and system.outbox.dispatch both non-role-key in both contexts in every row; AC5 health.read public in both contexts in every row; AC6 all project-scope role keys report no-project globally; AC7 none report no-project in p1; AC8 every not-owner p1 cell becomes granted for its exact USER/AGENT self PrincipalRef; AC9 those cells remain not-owner for USER someone-else; AC10 every OWNABLE_KEYS granted p1 cell stays granted for USER someone-else.\nUS-006: AC1 exact five pending keys; AC2 all pending keys exist in catalog; AC3 missing route declaration violation; AC4 unknown route key/source; AC5 unknown tool key/source; AC6 unknown writer key/source; AC7 missing guard for guard-enforced declaration; AC8 no missing-guard violation for service enforcement; AC9 exactly unused k.two when only k.one declared; AC10 no violation when k.two is pending; AC11 pending-key-declared when k.two declared at GET /x; AC12 no violations when tool and writer alone declare the two synthetic catalog keys. Synthetic catalogs and empty-pending defaults remain in the description; no global lookup may replace the catalog argument.\nUS-007: AC1 registration-order list [a,b]; AC2 empty registry list []; AC3 initialized miniature module collects the decorated provider's class name and key; AC4 handler Requires overrides class fallback with exact two-key lists; AC5 descriptor.name/key tool extraction; AC6 bootHttpApp declaration collection yields zero checker violations; AC7 collected routes/writers include all four named cross-story seam keys; AC8 default FTS selection exposes CounterOptimizeStrategy as a factory-built system.rag.optimize writer; AC9 provider plus useExisting alias yields one writer.\n\nQualifying-clause audit: retained rostered/self and own-API-key conditions, exact-once/two-argument call semantics, handler/class fallback, class-or-handler guard semantics, the default FTS condition and factory-built qualifier, alias/provider identity, all per-row/per-key quantifiers, seeded-role/correct-scope and catalog/role insertion-order qualifiers, and every negative control's exact source/key/reason. Original metadata maps and result tuples stay single aggregate assertions rather than splitting or dropping qualifying checks. No deprecated grep/file/verbatim AC tags occur. All criteria are directly observable through reflected metadata, method calls/results, exceptions, snapshot content, HTTP responses or persisted state.\n\nFailure-mode census: runner-access keys refused for user/agent/no principal are US-002 AC2-4; invalid SystemWriter keys are US-004 AC2-3; project-admin agent update refusal and unchanged ACTIVE state are US-001 AC7; no-principal service-enforced enrollment pass-through is US-002 AC9, with actual valid-token HTTP behavior in AC8. Every story has a negative path: US-001 AC7, US-002 AC2-4, US-003 AC4, US-004 AC2-3, US-005 AC3/4/6/9, US-006 AC3-7/9/11, US-007 appended duplicate-name refusal. Regression anchors include US-001 self-update and global-admin outcomes, US-002 existing runner/enrollment responses, US-003 existing public health and role allow/refuse outcomes, and US-007 unchanged duplicate-name refusal. Metadata-only writer annotations do not authorize new writes.\n\nScope/dependency audit: all seven fixed IDs, workdirs and exact binding dependency arrays are unchanged, with no dangling dependency. Only US-007 reads source files created by upstream US-004/006; no story lists its own outputs as context, and every list stays within five files. Existing registry unit tests are extended, not newly invented as an output; the extra named declaration and miniature-module specs are genuinely new supporting tests for the required behavior. All ten feature-level exclusions remain verbatim in outOfScope: legacy checks; live-stream check replacement; fixture migrations; legacy union/fallback/schema/endpoint removal; web and roster-route replacement; pending P2/P3 surfaces; stored-role rewrites; CLI generation; manual phasing-document edits; runner auth/fencing changes. Relevant exclusions are echoed verbatim in adjacent story Scope sections. The root OpenAPI generation command remains in scope for US-001 while CLI generation stays excluded. Descriptions agree with all original ACs and preserve their verbatim design blocks; no source implementation, schema migration, role-content change or unrelated validation work was introduced by this PRD audit.",
+  "outOfScope": [
+    "Deleting `KodaCaslAbilityFactory`, `@RequiredPermission`, `@ProjectPermission`, `@ProjectRoles`, `exemptAgents`, `canOverrideClose`, `withProjectRole`, `canManageMembers`, `ProjectAccessService.assertProjectMembership` / `assertProjectAdmin`, `AssistantTool.permission` / `ToolPermission`, `TicketTransitionsService.assertTransitionPermission`, `FleetActivityService.memberProjectIds`, the unreachable IN_PROGRESS → VERIFIED transition rule and the i18n messages `skills.principal` / `skills.projectPrincipal` is out of scope (`permissions-p1-retire-checks`).",
+    "Making the live-stream handlers (`LiveController`, `MeLiveController`, `WorkspaceThreadEventsGuard`) ask `PermissionService.can` for their declared key in place of their membership, user-only or ownership checks is out of scope (`permissions-p1-retire-checks`).",
+    "Moving test fixtures from `ProjectMember`, `AgentProject`, `AgentRoleEntry` and `User.role` rows to role bindings is out of scope (`permissions-p1-fixtures-to-bindings`).",
+    "Removing the legacy union and the baseline fallback in `PermissionService`, dropping the legacy tables and columns, deleting `PATCH /agents/:slug/update-roles` and `AGENT_PROJECT_SCOPING` are out of scope (`permissions-p1-drop-legacy`).",
+    "Replacing `PATCH /projects/:slug/agents/:agentSlug` with the binding routes, and the web pages for roles, bindings and the merged member list, are out of scope (`permissions-p1-web`).",
+    "Surfaces for the five pending keys (approval decide and policies, the audit log, assistant-action approvals) are out of scope (P2, P3).",
+    "Rewriting the stored permissions of an existing database's unlocked system roles or custom roles that name a folded key is out of scope: koda-wk is reset by decision 2, and `SystemRoleSeeder` re-seeds system roles.",
+    "Regenerating the CLI client (`apps/cli/src/generated/`) is out of scope; only `openapi.json` is regenerated, and only route descriptions change.",
+    "Updating the design doc's phasing section and Appendix A notes for the four-way cleanup split is out of scope for the run; it is a manual doc edit.",
+    "US-002 only: changing how `CombinedAuthGuard` authenticates runner keys or fences jobs (`runnerId` + `leaseEpoch`) is out of scope; only the key declaration and the guard's runner rule are added."
+  ],
+  "routingProfile": "cross-agent-m3-flash"
+}

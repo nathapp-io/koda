@@ -160,7 +160,7 @@ export class MemoryController {
   }
 
   @Post('decisions')
-  @Requires('memory.decision.record', { enforcedBy: 'service' })
+  @Requires(['memory.decision.record', 'memory.update'], { enforcedBy: 'service' })
   @ApiOperation({ summary: 'Record a decision (memory.decision.record)' })
   @ApiResponse({ status: 201, description: 'Decision recorded' })
   @ApiResponse({ status: 403, description: 'memory.decision.record is missing, or it may not replace its active decision' })
@@ -196,7 +196,7 @@ export class MemoryController {
   }
 
   @Post()
-  @Requires('memory.create', { enforcedBy: 'service' })
+  @Requires(['memory.create', 'memory.update'], { enforcedBy: 'service' })
   @ApiOperation({ summary: 'Create a memory item (memory.create)' })
   @ApiResponse({ status: 201, description: 'Memory item created' })
   @ApiResponse({ status: 403, description: 'memory.create is missing, or the item may not replace its active item' })

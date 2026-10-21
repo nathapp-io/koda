@@ -56,10 +56,10 @@ export class ProjectMembersController {
   }
 
   @Patch(':userId')
-  @Requires('member.role.update')
-  @ApiOperation({ summary: 'Change a member\'s project role (member.role.update)' })
+  @Requires('role.binding.manage')
+  @ApiOperation({ summary: 'Change a member\'s project role (role.binding.manage)' })
   @ApiResponse({ status: 200, type: ProjectMemberDto })
-  @ApiResponse({ status: 403, description: 'Not a project member, or member.role.update is missing' })
+  @ApiResponse({ status: 403, description: 'Not a project member, or role.binding.manage is missing' })
   @ApiResponse({ status: 404, description: 'Not a member' })
   @ApiResponse({ status: 409, description: 'Would leave the project without an ADMIN' })
   async updateRole(

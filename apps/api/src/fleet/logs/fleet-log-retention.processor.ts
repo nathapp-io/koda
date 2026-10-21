@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -16,6 +17,7 @@ export const RETENTION_BATCH = 200;
  * than the epoch seen at selection are never touched. 04:45 follows enrollment retention (04:30).
  */
 @Injectable()
+@SystemWriter('system.log.retention')
 export class FleetLogRetentionProcessor {
   private readonly logger = new Logger(FleetLogRetentionProcessor.name);
 

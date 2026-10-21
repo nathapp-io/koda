@@ -50,6 +50,7 @@ export class RequiresGuard implements CanActivate {
     const entry = findCatalogEntry(key);
     if (!entry) return false; // unknown key: fail closed
     if (entry.access === 'public') return true; // no principal needed
+    if (entry.access === 'runner') return principal?.actorType === 'runner';
     if (!principal) return false;
     if (entry.scope === 'project' && !projectId) return false; // project key outside a resolved project: fail closed
     const decision = await this.permissions.can(principal, key, projectId ? { projectId } : {});

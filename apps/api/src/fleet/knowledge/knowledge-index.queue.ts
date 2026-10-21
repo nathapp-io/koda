@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
@@ -35,6 +36,7 @@ export const KNOWLEDGE_OUTCOME_KEY_PREFIX = 'job:';
  * state, so a dropped or failed pass is only recovered by the next ingest re-run.
  */
 @Injectable()
+@SystemWriter('system.knowledge.index')
 export class KnowledgeIndexQueue {
   private readonly logger = new Logger(KnowledgeIndexQueue.name);
   /** Insertion-ordered, so `Set` iteration is the FIFO. */

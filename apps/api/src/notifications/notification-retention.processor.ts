@@ -1,3 +1,4 @@
+import { SystemWriter } from '../permissions/system-writer.decorator';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
@@ -15,6 +16,7 @@ const DAY_MS = 86_400_000;
  * night's run is the retry.
  */
 @Injectable()
+@SystemWriter('system.notification.retention')
 export class NotificationRetentionProcessor {
   private readonly logger = new Logger(NotificationRetentionProcessor.name);
 

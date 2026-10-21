@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { FanOutPublisher } from '../../outbox/fan-out-publisher';
 import { NotificationEligibility } from '../notification-eligibility';
@@ -7,6 +8,7 @@ import { FLEET_BUDGET_INCIDENT, parseBudgetIncidentPayload } from './fleet-notif
 
 /** Fleet S4a §2.4 (D508): fleet_budget_incident (warn, hard_stop) -> every global admin (FLEET_HEALTH). */
 @Injectable()
+@SystemWriter('system.notification.fleet')
 export class FleetBudgetIncidentSubscriber implements OnModuleInit {
   private readonly logger = new Logger(FleetBudgetIncidentSubscriber.name);
 

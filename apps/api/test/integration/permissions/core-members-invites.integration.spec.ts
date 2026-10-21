@@ -198,7 +198,7 @@ describeIntegration('member and invite route keys (US-008)', () => {
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
-  // AC-3 .. AC-4 — PATCH/DELETE /projects/:slug/members/:userId need member.role.update / member.remove
+  // AC-3 .. AC-4 — PATCH/DELETE /projects/:slug/members/:userId need role.binding.manage / member.remove
   // -------------------------------------------------------------------------
 
   it("AC-3: a developer binding alone is refused by PATCH /projects/p1/members/<user id> with 403 permissions and the role is unchanged", async () => {

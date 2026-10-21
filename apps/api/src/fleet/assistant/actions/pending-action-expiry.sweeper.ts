@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { randomUUID } from 'crypto';
@@ -22,6 +23,7 @@ export interface PendingActionExpiryResult { expired: number; failed: number }
  * `expiresAt` — so the two closers of an action cannot drift.
  */
 @Injectable()
+@SystemWriter('system.assistant-action.expire')
 export class PendingActionExpirySweeper implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PendingActionExpirySweeper.name);
   private timer: NodeJS.Timeout | null = null;

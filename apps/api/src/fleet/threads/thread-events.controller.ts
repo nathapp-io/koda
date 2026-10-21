@@ -11,6 +11,7 @@ import { JwtAuthProvider } from '../../auth/jwt-auth.provider';
 import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { ILiveConfig, LIVE_CFG } from '../../config/live.config';
 import { PermissionService } from '../../permissions/permission.service';
+import { Requires } from '../../permissions/requires.decorator';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import { decodeJwtPayload, tokenExpiryMs } from '../../live/jwt-payload';
 import { createLiveStream } from '../../live/live-stream';
@@ -76,6 +77,7 @@ export class ThreadEventsController {
   ) {}
 
   @Sse()
+  @Requires('thread.read', { enforcedBy: 'service' })
   @SkipThrottle()
   @ApiExcludeEndpoint()
   async events(

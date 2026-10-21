@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { FanOutPublisher } from '../../outbox/fan-out-publisher';
 import { NotificationEligibility } from '../notification-eligibility';
@@ -7,6 +8,7 @@ import { FLEET_HEALTH_ALERT, parseHealthAlertPayload } from './fleet-notificatio
 
 /** Fleet S4a §2.4 (D507): fleet_health_alert -> every global admin (FLEET_HEALTH), once per opened episode. */
 @Injectable()
+@SystemWriter('system.notification.fleet')
 export class FleetHealthAlertSubscriber implements OnModuleInit {
   private readonly logger = new Logger(FleetHealthAlertSubscriber.name);
 

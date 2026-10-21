@@ -1,3 +1,4 @@
+import { SystemWriter } from '../permissions/system-writer.decorator';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ExtractionService, MemoryExtractedItem } from './extraction.service';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
@@ -6,6 +7,7 @@ import { MemoryKind } from '../common/enums';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
 
 @Injectable()
+@SystemWriter('system.memory.extract-from-event')
 export class MemoryOutboxSubscriber implements OnModuleInit {
   private readonly logger = new Logger(MemoryOutboxSubscriber.name);
 

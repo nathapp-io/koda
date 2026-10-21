@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { IKnowledgeIndexRepository, KNOWLEDGE_INDEX_REPOSITORY } from './knowledge-index.domain';
@@ -12,6 +13,7 @@ import { KnowledgeIndexQueue } from './knowledge-index.queue';
  * repository, so `KnowledgeIndexService` stays the only face other modules see.
  */
 @Injectable()
+@SystemWriter('system.knowledge.poll')
 export class KnowledgePoller implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(KnowledgePoller.name);
   private timer: NodeJS.Timeout | null = null;

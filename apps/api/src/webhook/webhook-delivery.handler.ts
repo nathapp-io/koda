@@ -1,3 +1,4 @@
+import { SystemWriter } from '../permissions/system-writer.decorator';
 import * as crypto from 'crypto';
 import { Injectable } from '@nestjs/common';
 import { PrismaWebhookRepository } from './prisma-webhook.repository';
@@ -10,6 +11,7 @@ export interface WebhookDeliveryPayload {
 }
 
 @Injectable()
+@SystemWriter('system.webhook.deliver')
 export class WebhookDeliveryHandler {
   constructor(
     private readonly webhookRepo: PrismaWebhookRepository,

@@ -78,7 +78,6 @@ const OWNABLE_KEY_LIST = [
 const NEW_KEY_SCOPES: Readonly<Record<string, CatalogScope>> = {
   'role.read': 'global',
   'role.manage': 'global',
-  'role.binding.manage': 'project',
   'role.binding.global': 'global',
   'role.binding.owner': 'global',
   'approval.decide': 'project',
@@ -252,13 +251,13 @@ describe('PERMISSION_CATALOG', () => {
     expect(findCatalogEntry('agent.read')?.scope).toBe('any');
   });
 
-  it('US-001 AC-13: the five agent-management keys are scoped globally', () => {
+  it('US-001 AC-13: the four surviving agent-management keys are scoped globally', () => {
+    // `agent.roles.update` is folded into `agent.update` (US-001 of the contract-tests feature).
     const agentManagementKeys = [
       'agent.update',
       'agent.delete',
       'agent.key.rotate',
       'agent.capabilities.update',
-      'agent.roles.update',
     ];
 
     for (const key of agentManagementKeys) {

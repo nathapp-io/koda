@@ -13,6 +13,7 @@ import { createLiveStream } from '../../live/live-stream';
 import { LiveStreamRegistry } from '../../live/live-stream-registry';
 import { ThreadEventBus, type ThreadLiveEvent } from '../../live/thread-event-bus';
 import { WorkspaceThreadsService } from './workspace-threads.service';
+import { Requires } from '../../permissions/requires.decorator';
 
 interface WorkspaceThreadEventsRequest {
   params: { id: string };
@@ -63,6 +64,7 @@ export class WorkspaceThreadEventsController {
   ) {}
 
   @Sse()
+  @Requires('thread.workspace.read', { enforcedBy: 'service' })
   @SkipThrottle()
   @ApiExcludeEndpoint()
   async events(

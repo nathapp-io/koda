@@ -1,9 +1,11 @@
-import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal, Public } from '@nathapp/nestjs-auth';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { Throttle } from '@nathapp/nestjs-throttler';
 import { RunnerRoute } from '../../auth/guards/runner-route.decorator';
+import { RequiresGuard } from '../../permissions/requires.guard';
+import { Requires } from '../../permissions/requires.decorator';
 import type { RunnerPrincipal } from '../../auth/principal/koda-principal.types';
 import { EnrollmentService } from './enrollment.service';
 import { EnrollDto } from './dto/enroll.dto';
@@ -12,11 +14,13 @@ import { EnrollDto } from './dto/enroll.dto';
 @ApiTags('fleet-runner')
 @ApiBearerAuth()
 @RunnerRoute()
+@UseGuards(RequiresGuard)
 @Controller('fleet/runner')
 export class RunnerApiController {
   constructor(private readonly enrollments: EnrollmentService) {}
 
   @Post('enroll')
+  @Requires('runner.enroll', { enforcedBy: 'service' })
   @HttpCode(201)
   @Public()
   @Throttle({ default: { limit: 10, ttl: 60000 } })
@@ -30,6 +34,7 @@ export class RunnerApiController {
   }
 
   @Get('me')
+  @Requires('runner.self.read')
   @ApiOperation({ summary: "The calling runner's identity" })
   @ApiResponse({ status: 200, description: '{ id, name, labels, capacity, enabled }' })
   async me(@Principal() runner: RunnerPrincipal) {
