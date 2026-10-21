@@ -999,14 +999,6 @@
         "operationId": "ContextController_getContext",
         "parameters": [
           {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "intent",
             "required": false,
             "in": "query",
@@ -1115,16 +1107,7 @@
     "/api/context/{slug}/query": {
       "post": {
         "operationId": "ContextController_queryContext",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "parameters": [],
         "requestBody": {
           "required": true,
           "content": {

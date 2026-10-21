@@ -254,12 +254,14 @@ describeIntegration('US-005 project skill enablement routes (PG)', () => {
     expect(items.map((item) => item.name)).toEqual(['zeta']);
   });
 
-  // ── AC4 — agent refused even on the roster ───────────────────────
+  // ── Agent project roles are authorized by permission keys ─────────
 
-  it('US-005 AC4: an agent API key on the project roster still gets 403', async () => {
-    const res = await listSkills('web', tokens.agent).expect(403);
+  it('US-006: a rostered DEVELOPER agent can list project skills', async () => {
+    const { byName } = await seedCatalog('agent-list', [{ name: 'agent-readable', description: 'Readable', dir: 'agent-readable' }]);
 
-    expect((res.body as { items?: unknown }).items).toBeUndefined();
+    const items = data<{ items: ProjectSkillItem[] }>(await listSkills('web', tokens.agent).expect(200)).items;
+
+    expect(items.map((item) => item.id)).toContain(byName['agent-readable'].id);
   });
 
   it('US-005 AC4 boundary: an agent API key not on the roster also gets 403', async () => {
