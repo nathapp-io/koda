@@ -140,8 +140,12 @@ describe('TicketsService', () => {
     assertTransitionAllowed: vi.fn(),
   };
 
-  /** Permissions P1 (US-004): the sixth constructor argument, where the CASL factory used to sit. */
-  const mockPermissions = { can: vi.fn() };
+  /**
+   * Permissions P1 (US-004): the sixth constructor argument, where the CASL factory used to sit.
+   * Permissions P1 (US-002): `effectiveKeys` decides whether a user assignee may hold the ticket —
+   * the assignee's `project.read` in the project, not the assignee's `role` claim.
+   */
+  const mockPermissions = { can: vi.fn(), effectiveKeys: vi.fn() };
   /** Answers the key check as `PermissionService` does, from the keys the principal holds. */
   const holdKeys = (held: readonly string[]) =>
     mockPermissions.can.mockImplementation(async (_principal: unknown, key: string) => ({
@@ -156,6 +160,9 @@ describe('TicketsService', () => {
     mockTicketEventService.create.mockReset().mockResolvedValue({ id: 'evt-mock' });
     mockOutbox.record.mockReset().mockResolvedValue(undefined);
     mockPermissions.can.mockReset().mockResolvedValue({ allowed: false, reason: 'not-granted' });
+    // Permissions P1 (US-002): an assignee holds `project.read` in the project unless a test says
+    // otherwise, which is the eligibility the assign cases below are about.
+    mockPermissions.effectiveKeys.mockReset().mockResolvedValue(new Set<string>(['project.read']));
     inTx = false;
 
     const module: TestingModule = await Test.createTestingModule({
@@ -1137,7 +1144,7 @@ describe('TicketsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.findUserById.mockResolvedValue({ id: 'user-456', role: 'MEMBER' });
-      mockTicketRepo.findProjectMemberRole.mockResolvedValue('DEVELOPER');
+      mockPermissions.effectiveKeys.mockResolvedValue(new Set<string>(['project.read']));
       mockTicketRepo.assignTicket.mockResolvedValue({
         ...mockTicket,
         assignedToUserId: 'user-456',
@@ -1149,7 +1156,11 @@ describe('TicketsService', () => {
       expect(result.assignedToUserId).toBe('user-456');
       expect(result.assignedToAgentId).toBeNull();
       expect(mockTicketRepo.findUserById).toHaveBeenCalledWith('user-456');
-      expect(mockTicketRepo.findProjectMemberRole).toHaveBeenCalledWith('proj-123', 'user-456');
+      // Permissions P1 (US-002): the assignee's effective keys in the project decide eligibility.
+      expect(mockPermissions.effectiveKeys).toHaveBeenCalledWith(
+        { type: 'USER', id: 'user-456' },
+        { projectId: 'proj-123' },
+      );
     });
 
     it('should assign ticket to agent', async () => {
@@ -1213,8 +1224,8 @@ describe('TicketsService', () => {
 
       expect(error).toBeInstanceOf(ConflictAppException);
       expect((error as ConflictAppException).prefix).toBe('tickets.userDisabled');
-      // Disabled wins over non-member: the membership read never runs.
-      expect(mockTicketRepo.findProjectMemberRole).not.toHaveBeenCalled();
+      // Disabled wins over ineligible: the key read never runs.
+      expect(mockPermissions.effectiveKeys).not.toHaveBeenCalled();
       expect(mockTicketRepo.assignTicket).not.toHaveBeenCalled();
     });
 
@@ -1296,31 +1307,34 @@ describe('TicketsService', () => {
       expect(mockTicketRepo.assignTicket).not.toHaveBeenCalled();
     });
 
-    it('should return 403 when the assigned user is not a project member (BUG-2)', async () => {
+    it('AC-10: an ADMIN-role assignee whose keys lack project.read is refused (403 tickets), nothing assigned', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
-      mockTicketRepo.findUserById.mockResolvedValue({ id: 'user-456', role: 'MEMBER' });
-      mockTicketRepo.findProjectMemberRole.mockResolvedValue(null);
+      mockTicketRepo.findUserById.mockResolvedValue({ id: 'u2', role: 'ADMIN' });
+      // The claim says ADMIN; the key says no. The key decides.
+      mockPermissions.effectiveKeys.mockResolvedValue(new Set<string>(['ticket.read']));
 
       await expect(
-        service.assign('koda', 'KODA-1', { userId: 'user-456' })
+        service.assign('koda', 'KODA-1', { userId: 'u2' })
       ).rejects.toThrow(ForbiddenAppException);
+      expect(mockPermissions.effectiveKeys).toHaveBeenCalledWith(
+        { type: 'USER', id: 'u2' },
+        { projectId: 'proj-123' },
+      );
       expect(mockTicketRepo.assignTicket).not.toHaveBeenCalled();
     });
 
-    it('should skip the membership check for ADMIN assignees (BUG-17)', async () => {
+    it('AC-11: a MEMBER-role assignee whose keys hold project.read is assigned', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
-      mockTicketRepo.findUserById.mockResolvedValue({ id: 'admin-1', role: 'ADMIN' });
-      mockTicketRepo.assignTicket.mockResolvedValue({
-        ...mockTicket,
-        assignedToUserId: 'admin-1',
-        assignedToAgentId: null,
-      });
+      mockTicketRepo.findUserById.mockResolvedValue({ id: 'u2', role: 'MEMBER' });
+      mockPermissions.effectiveKeys.mockResolvedValue(new Set<string>(['project.read']));
+      mockTicketRepo.assignTicket.mockResolvedValue({ ...mockTicket, assignedToUserId: 'u2' });
 
-      const result = await service.assign('koda', 'KODA-1', { userId: 'admin-1' });
+      await service.assign('koda', 'KODA-1', { userId: 'u2' });
 
-      expect(result.assignedToUserId).toBe('admin-1');
+      expect(mockTicketRepo.assignTicket).toHaveBeenCalledWith('ticket-123', expect.objectContaining({ assignedToUserId: 'u2' }));
+      // The old membership read is gone: the key answers for the assignee.
       expect(mockTicketRepo.findProjectMemberRole).not.toHaveBeenCalled();
     });
 

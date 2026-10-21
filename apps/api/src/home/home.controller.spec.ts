@@ -15,9 +15,16 @@ const agent: KodaPrincipal = {
 
 const snapshot = { projects: [], assigned: [], activity: [] };
 
-function setup() {
+function setup(projectRead = false) {
   const home = { snapshot: vi.fn().mockResolvedValue(snapshot) };
-  return { home, controller: new HomeController(home as never) };
+  // Permissions P1 (US-002): the dashboard's `globalAdmin` is the `project.read` key, asked globally.
+  const permissions = {
+    can: vi.fn(async () => ({
+      allowed: projectRead,
+      reason: projectRead ? 'granted' : 'not-granted',
+    })),
+  };
+  return { home, permissions, controller: new HomeController(home as never, permissions as never) };
 }
 
 describe('US-010 permission key on the home route', () => {
@@ -46,5 +53,26 @@ describe('HomeController', () => {
     const { controller } = setup();
 
     await expect(controller.get(agent)).rejects.toBeInstanceOf(ForbiddenAppException);
+  });
+
+  // Permissions P1 (US-002): the dashboard scope is the `project.read` key, not the `role` claim.
+  it('AC-4: a MEMBER-role user holding project.read globally gets globalAdmin true', async () => {
+    const { controller, home, permissions } = setup(true);
+
+    const res = await controller.get(user);
+
+    expect(permissions.can).toHaveBeenCalledWith(user, 'project.read');
+    expect(home.snapshot).toHaveBeenCalledWith({ id: 'u1', globalAdmin: true }, expect.any(Date));
+    expect(res).toEqual(expect.objectContaining({ data: snapshot }));
+  });
+
+  it('AC-5: an ADMIN-role user whose project.read is refused gets globalAdmin false', async () => {
+    const admin = { ...user, id: 'u2', sub: 'u2', role: 'ADMIN', email: 'u2@k.t', name: 'u2' } as KodaPrincipal;
+    // The claim says ADMIN; the key says no. The key decides.
+    const { controller, home } = setup(false);
+
+    await controller.get(admin);
+
+    expect(home.snapshot).toHaveBeenCalledWith({ id: 'u2', globalAdmin: false }, expect.any(Date));
   });
 });

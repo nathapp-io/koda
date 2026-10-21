@@ -21,7 +21,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { InternalAppException } from '@nathapp/nestjs-common';
 import { PrismaClient } from '../../../src/generated/prisma/client';
-import { MEMBERSHIP_READ_CAP, readAccessibleProjectIds } from '../../../src/permissions/legacy-membership.queries';
+import { MEMBERSHIP_READ_CAP, accessibleProjectIds, readAccessibleProjectIds } from '../../../src/permissions/legacy-membership.queries';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import type { PrincipalRef } from '../../../src/permissions/permissions.types';
 import { resetDb } from '../../helpers/reset-db';
@@ -124,7 +124,7 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
     // A soft-deleted project never reaches a list, whatever sources point at it.
     await request(server).delete('/api/projects/gone').set(auth('root')).expect(204);
 
-    for (const who of ['devBind', 'viewerBind', 'legDev', 'noSource', 'globalRev', 'paBound', 'listUser', 'customReader']) {
+    for (const who of ['devBind', 'viewerBind', 'legDev', 'noSource', 'globalRev', 'paBound', 'listUser', 'customReader', 'customGlobal']) {
       await createUser(who);
     }
     const agentFixtures: Array<[string, string]> = [
@@ -153,6 +153,14 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
       .send({ key: 'ticket-reader', name: 'Ticket Reader', scope: 'PROJECT', permissions: ['ticket.read'] })
       .expect(201);
     await bind(userPrincipal('customReader'), 'ticket-reader', projectIds.p1);
+
+    // US-002 AC-15: a custom GLOBAL role that holds `project.read`. Its holder keeps the baseline
+    // `member` binding it was created with and has no source in any project.
+    resetThrottle(app);
+    await request(server).post('/api/roles').set(auth('root'))
+      .send({ key: 'project-reader', name: 'Project Reader', scope: 'GLOBAL', permissions: ['project.read'] })
+      .expect(201);
+    await bind(userPrincipal('customGlobal'), 'project-reader', null);
 
     // The legacy rows: a ProjectMember row for legDev (US-002 AC-5) and for listUser in p2 (AC-10),
     // plus the AgentProject row AC-14's PATCH target needs.
@@ -246,6 +254,21 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
     // p1 through a developer binding, p2 through a legacy row, and not the bound-less p3.
     expect(projectSlugs(res).sort()).toEqual(['p1', 'p2']);
     expect(projectSlugs(res)).not.toContain('p3');
+  }, TEST_TIMEOUT_MS);
+
+  it('AC-15: a GLOBAL custom role holding project.read lists every non-deleted project', async () => {
+    // The source is the role binding, not a project row: the baseline member binding and the custom
+    // GLOBAL role are the caller's only bindings, and there is no ProjectMember row in any project.
+    expect(await prisma.roleBinding.count({ where: { principalId: ids.customGlobal as string, projectId: null } })).toBe(2);
+    expect(await prisma.projectMember.count({ where: { userId: ids.customGlobal } })).toBe(0);
+    // The access-source read the old branch used has nothing for this caller: a GLOBAL-scope binding is
+    // never a source, so `findAllForUser` would have answered an empty list.
+    expect(await accessibleProjectIds(prisma, { type: 'USER', id: ids.customGlobal as string })).toEqual([]);
+
+    const res = await send('get', '/api/projects', 'customGlobal');
+
+    expect(res.status).toBe(200);
+    expect(projectSlugs(res).sort()).toEqual(LIVE_SLUGS);
   }, TEST_TIMEOUT_MS);
 
   it('AC-11: with scoping on, a projectId-null developer binding lists every non-deleted project', async () => {

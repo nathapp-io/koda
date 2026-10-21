@@ -6,6 +6,7 @@ import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { Requires } from '../permissions/requires.decorator';
 import { RequiresGuard } from '../permissions/requires.guard';
+import { PermissionService } from '../permissions/permission.service';
 import { HomeService } from './home.service';
 import { HomeActivityDto, HomeDashboardDto } from './dto/home-dashboard.dto';
 
@@ -14,13 +15,19 @@ import { HomeActivityDto, HomeDashboardDto } from './dto/home-dashboard.dto';
  *
  * Permissions P1 (US-010): `home.read` is an implicit key, so any authenticated principal passes
  * `RequiresGuard` and the users-only rule stays in the handler.
+ *
+ * Permissions P1 (US-002): the dashboard's `globalAdmin` scope is the `project.read` key held
+ * globally, not the principal's `role` claim.
  */
 @ApiTags('home')
 @ApiBearerAuth()
 @ApiExtraModels(HomeActivityDto)
 @Controller('home')
 export class HomeController {
-  constructor(private readonly home: HomeService) {}
+  constructor(
+    private readonly home: HomeService,
+    private readonly permissions: PermissionService,
+  ) {}
 
   @Get()
   @UseGuards(RequiresGuard)
@@ -30,6 +37,7 @@ export class HomeController {
   @ApiResponse({ status: 403, description: 'Agents have no home dashboard' })
   async get(@Principal() principal: KodaPrincipal) {
     if (!isUserPrincipal(principal)) throw new ForbiddenAppException({}, 'projects');
-    return JsonResponse.Ok(await this.home.snapshot({ id: principal.id, globalAdmin: principal.role === 'ADMIN' }, new Date()));
+    const globalAdmin = (await this.permissions.can(principal, 'project.read')).allowed;
+    return JsonResponse.Ok(await this.home.snapshot({ id: principal.id, globalAdmin }, new Date()));
   }
 }

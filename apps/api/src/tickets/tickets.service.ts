@@ -450,13 +450,15 @@ export class TicketsService {
         if (user.disabled) {
           throw new ConflictAppException({}, 'tickets.userDisabled');
         }
-        // BUG-17: ADMIN-role assignees are implicit members (mirrors
-        // ProjectAccessService.assertProjectMembership's admin exemption).
-        if (user.role !== 'ADMIN') {
-          const role = await this.ticketRepo.findProjectMemberRole(project.id, user.id);
-          if (!role) {
-            throw new ForbiddenAppException({}, 'tickets');
-          }
+        // Permissions P1 (US-002): an assignee is eligible when it holds `project.read` in the
+        // project — a custom project role narrows and widens it, the user row's `role` claim does not
+        // decide. The read is the assignee's, in the project's scope, not the caller's.
+        const assigneeKeys = await this.permissions.effectiveKeys(
+          { type: 'USER', id: user.id },
+          { projectId: project.id },
+        );
+        if (!assigneeKeys.has('project.read')) {
+          throw new ForbiddenAppException({}, 'tickets');
         }
         assignData.assignedToUserId = user.id;
       } else if (assignInput.agentId) {

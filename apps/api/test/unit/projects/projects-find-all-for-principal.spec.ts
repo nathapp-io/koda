@@ -18,6 +18,10 @@ import type { Mock } from 'vitest';
  * caller's roster rows. The DB-backed form of AC6–AC9 — real repository, real
  * membership rows — lives in
  * `test/integration/projects/project-membership-gate.integration.spec.ts`.
+ *
+ * Permissions P1 (US-002): "a global ADMIN user principal" is now the principal the
+ * `PermissionService` double answers with a *global* `project.read` grant (`globalReaders`), whatever
+ * its `role` claim says. An `role: 'ADMIN'` principal refused that key keeps the membership branch.
  */
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { PrismaProjectRepository } from '../../../src/projects/prisma-project.repository';
@@ -186,6 +190,13 @@ const AGENT_PRINCIPAL: AgentPrincipal = {
 
 const slugsOf = (projects: { slug: string }[]): string[] => projects.map((p) => p.slug).sort();
 
+/**
+ * Permissions P1 (US-002): "sees every project" is the `project.read` key held **globally**, not the
+ * `role: 'ADMIN'` claim. These are the principal ids the `PermissionService` double answers with a
+ * global `project.read` grant; every other principal is refused it and keeps the membership branch.
+ */
+let globalReaders: Set<string>;
+
 describe('ProjectsService.findAllForPrincipal (US-002)', () => {
   let repo: RepoDouble;
   let service: ProjectsService;
@@ -194,8 +205,12 @@ describe('ProjectsService.findAllForPrincipal (US-002)', () => {
 
   beforeEach(() => {
     repo = createRepoDouble();
+    globalReaders = new Set<string>();
     permissions = {
-      can: vi.fn(async () => ({ allowed: true, reason: 'granted' })),
+      can: vi.fn(async (principal: { id: string }, key: string) => {
+        const allowed = key === 'project.read' && globalReaders.has(principal.id);
+        return { allowed, reason: allowed ? 'granted' : 'not-granted' };
+      }),
     } as unknown as PermissionService;
     service = new ProjectsService(
       repo as unknown as PrismaProjectRepository,
@@ -224,7 +239,9 @@ describe('ProjectsService.findAllForPrincipal (US-002)', () => {
     expect(projects).toEqual([]);
   });
 
-  it('AC7: returns every non-deleted project for a global ADMIN user principal', async () => {
+  it('AC7: returns every non-deleted project for a user principal whose global project.read is held', async () => {
+    globalReaders = new Set([ADMIN_PRINCIPAL.id]);
+
     const projects = await service.findAllForPrincipal(ADMIN_PRINCIPAL);
 
     expect(slugsOf(projects)).toEqual(['alpha', 'bravo', 'charlie']);
@@ -265,9 +282,48 @@ describe('ProjectsService.findAllForPrincipal (US-002)', () => {
     expect(slugsOf(projects)).toEqual(['alpha', 'bravo']);
   });
 
-  it('AC9 boundary: a soft-deleted project is absent for a global ADMIN user principal too', async () => {
+  it('AC9 boundary: a soft-deleted project is absent for a principal whose global project.read is held too', async () => {
+    globalReaders = new Set([ADMIN_PRINCIPAL.id]);
+
     const projects = await service.findAllForPrincipal(ADMIN_PRINCIPAL);
 
     expect(slugsOf(projects)).not.toContain('delta');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Permissions P1 US-002: "sees every project" is `ProjectAccessService.readsEveryProject` — the
+  // `project.read` key held globally — checked before either branch, not the `role: 'ADMIN'` claim.
+  // ---------------------------------------------------------------------------
+
+  it('AC-1: a MEMBER-role user holding project.read globally gets the rows of findAll()', async () => {
+    globalReaders = new Set([MEMBER_PRINCIPAL.id]);
+
+    const projects = await service.findAllForPrincipal(MEMBER_PRINCIPAL);
+
+    expect(slugsOf(projects)).toEqual(['alpha', 'bravo', 'charlie']);
+    expect(repo.findAll).toHaveBeenCalledTimes(1);
+    expect(repo.findAllForUser).not.toHaveBeenCalled();
+  });
+
+  it('AC-2: an ADMIN-role user whose global project.read is refused gets the rows of findAllForUser()', async () => {
+    // The claim says ADMIN; the key says no. The key decides.
+    globalReaders = new Set<string>();
+
+    const projects = await service.findAllForPrincipal(ADMIN_PRINCIPAL);
+
+    expect(slugsOf(projects)).toEqual([]);
+    expect(repo.findAllForUser).toHaveBeenCalledWith(ADMIN_PRINCIPAL.id);
+    expect(repo.findAll).not.toHaveBeenCalled();
+  });
+
+  it('AC-3: an agent holding project.read globally gets the rows of findAll() with scoping on', async () => {
+    globalReaders = new Set([AGENT_PRINCIPAL.id]);
+
+    const projects = await service.findAllForPrincipal(AGENT_PRINCIPAL);
+
+    expect(slugsOf(projects)).toEqual(['alpha', 'bravo', 'charlie']);
+    expect(permissions.can).toHaveBeenCalledWith(AGENT_PRINCIPAL, 'project.read');
+    // The roster branch is not reached: the global key answers first.
+    expect(repo.findAllForAgent).not.toHaveBeenCalled();
   });
 });
