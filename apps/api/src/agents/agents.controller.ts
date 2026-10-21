@@ -161,11 +161,11 @@ export class AgentsController {
 
   @Patch(':slug/update-roles')
   @UseGuards(RequiresGuard)
-  @Requires('agent.roles.update')
-  @ApiOperation({ summary: 'Update agent roles (agent.roles.update)' })
+  @Requires('agent.update')
+  @ApiOperation({ summary: 'Update agent roles (agent.update)' })
   @ApiResponse({ status: 200, description: 'Roles updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'agent.roles.update is missing' })
+  @ApiResponse({ status: 403, description: 'agent.update is missing' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
   async updateRoles(@Param('slug') slug: string, @Body() updateRolesDto: UpdateRolesDto, @Principal() principal: KodaPrincipal) {
     const data = await this.updateAgentRoles(slug, updateRolesDto, principal);

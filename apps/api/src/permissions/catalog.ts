@@ -4,7 +4,7 @@
  *
  * Every route, tool and system writer declares a key from this catalog; roles are bundles of these
  * keys and nothing else. The keys and their `catalog_scope` column come from
- * `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv` (216 keys), plus the ten keys
+ * `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv` (212 keys), plus the nine keys
  * the design adds on top. `INVENTORY_SCOPE_ROWS` is that TSV data in file order, and
  * `catalog.spec.ts` re-reads the TSV to prove the two cannot drift.
  *
@@ -95,7 +95,6 @@ export const OWNABLE_KEYS: ReadonlySet<string> = new Set([
 const NEW_KEY_SCOPES: Readonly<Record<string, KeyScope>> = {
   'role.read': 'global',
   'role.manage': 'global',
-  'role.binding.manage': 'project',
   'role.binding.global': 'global',
   'role.binding.owner': 'global',
   'approval.decide': 'project',
@@ -133,7 +132,6 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'agent.self.read': ['own'],
   'agent.pickup': ['project'],
   'agent.update': ['global'],
-  'agent.roles.update': ['global'],
   'agent.capabilities.update': ['global'],
   'agent.delete': ['global'],
   'agent.key.rotate': ['global'],
@@ -255,7 +253,8 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'invite.accept': ['public'],
   'member.read': ['project'],
   'member.add': ['project'],
-  'member.role.update': ['project'],
+  // The members PATCH route folded `member.role.update` into `role.binding.manage` (US-001).
+  'role.binding.manage': ['project'],
   'member.remove': ['project'],
   'project.create': ['global'],
   'project.read': ['global', 'project'],
@@ -264,9 +263,6 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'project.delete': ['project'],
   'codeintel.impact.read': ['project'],
   'project.agent.read': ['project'],
-  'project.agent.add': ['project'],
-  'project.agent.remove': ['project'],
-  'project.agent.update': ['project'],
   'kb.document.add': ['project'],
   'kb.read': ['project'],
   'kb.document.delete': ['project'],

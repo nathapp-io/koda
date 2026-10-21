@@ -94,6 +94,13 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
       { type: 'SYSTEM', id: 'test' },
     );
 
+  /** The global binding that makes a principal a global admin (role `admin`, no project). */
+  const bindGlobal = (who: string, roleKey: string): Promise<unknown> =>
+    membership.createBinding(
+      { principal: { type: 'USER', id: userIds[who] }, roleKey, projectId: null },
+      { type: 'SYSTEM', id: 'test' },
+    );
+
   /** An agent created by the Owner; created OFFLINE-free and not yet on any roster. */
   const createAgent = async (slug: string): Promise<Agent> => {
     const created = await asRoot('post', '/api/agents', { name: slug, slug, roles: ['DEVELOPER'] }).expect(201);
@@ -130,6 +137,10 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
     for (const who of ['developer', 'viewer', 'padmin']) await createUser(who);
     // AC-2's caller: a global admin, and a source in no project at all.
     await createUser('gadmin', 'ADMIN');
+    // US-001 AC-8's caller: a global admin through a global `admin` binding. A global binding is
+    // not a project access source, so it also holds a `viewer` binding in p1 — the project route
+    // is only reachable with a source in the project.
+    await createUser('globaladmin');
 
     const project = await asRoot('post', '/api/projects', {
       name: 'P1',
@@ -143,6 +154,12 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
     await bind('developer', 'developer');
     await bind('viewer', 'viewer');
     await bind('padmin', 'project-admin');
+    await bind('globaladmin', 'viewer');
+    await bindGlobal('globaladmin', 'admin');
+    // The global admin binding promotes the user's legacy role and revokes the token minted at
+    // creation, so the caller logs in again before it calls anything.
+    resetThrottle(app);
+    tokens['globaladmin'] = await loginToken(server, 'globaladmin@koda.test');
 
     for (const slug of ['roster-a', 'roster-b', 'peer', 'removable', 'addable', 'blocked']) await createAgent(slug);
     for (const slug of ['roster-a', 'roster-b', 'peer', 'removable']) await roster(slug);
@@ -260,7 +277,7 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
-  // AC-11 .. AC-12 — POST /projects/:slug/agents needs project.agent.add
+  // AC-11 .. AC-12 — POST /projects/:slug/agents needs member.add
   // -------------------------------------------------------------------------
 
   it('AC-11: a developer binding alone is refused by POST /projects/p1/agents and writes no binding', async () => {
@@ -287,7 +304,7 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
-  // AC-13 .. AC-14 — DELETE /projects/:slug/agents/:agentSlug needs project.agent.remove
+  // AC-13 .. AC-14 — DELETE /projects/:slug/agents/:agentSlug needs member.remove
   // -------------------------------------------------------------------------
 
   it('AC-13: a project-admin binding alone removes a rostered agent with no open tickets, 204', async () => {
@@ -311,10 +328,12 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
-  // AC-15 .. AC-17 — PATCH /projects/:slug/agents/:agentSlug is the key, or the agent itself
+  // AC-15 .. AC-17 — PATCH /projects/:slug/agents/:agentSlug is the global agent.update key, or the
+  // agent itself. US-001 folds the project-scoped `project.agent.update` into the global
+  // `agent.update`, so a project admin is refused (AC-17 / US-001 AC-7) and a global admin is not.
   // -------------------------------------------------------------------------
 
-  it('AC-15: a rostered agent updates its own status with 200', async () => {
+  it('AC-15 (US-001 AC-9): a rostered agent updates its own status with 200', async () => {
     const res = await request(server)
       .patch(`/api/projects/${P1_SLUG}/agents/roster-b`)
       .set(agentAuth('roster-b'))
@@ -336,14 +355,29 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
     ).resolves.toEqual({ status: 'ACTIVE' });
   }, TIMEOUT);
 
-  it("AC-17: a project-admin binding alone updates a rostered agent's status with 200", async () => {
+  it("AC-17 (US-001 AC-7): a project-admin binding alone is refused by PATCH on a rostered agent's status with 403 permissions", async () => {
     const res = await request(server)
       .patch(`/api/projects/${P1_SLUG}/agents/roster-a`)
       .set(auth('padmin'))
+      .send({ status: 'OFFLINE' });
+
+    expectPermissionsRefusal(res);
+    await expect(
+      db.agent.findUniqueOrThrow({ where: { id: agents['roster-a']?.id ?? '' }, select: { status: true } }),
+    ).resolves.toEqual({ status: 'ACTIVE' });
+  }, TIMEOUT);
+
+  it("US-001 AC-8: a global admin updates a rostered agent's status with 200", async () => {
+    const res = await request(server)
+      .patch(`/api/projects/${P1_SLUG}/agents/roster-a`)
+      .set(auth('globaladmin'))
       .send({ status: 'OFFLINE' })
       .expect(200);
 
     expect(data<{ slug: string; status: string }>(res)).toMatchObject({ slug: 'roster-a', status: 'OFFLINE' });
+    await expect(
+      db.agent.findUniqueOrThrow({ where: { id: agents['roster-a']?.id ?? '' }, select: { status: true } }),
+    ).resolves.toEqual({ status: 'OFFLINE' });
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------

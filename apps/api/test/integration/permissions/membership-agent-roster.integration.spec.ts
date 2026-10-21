@@ -154,7 +154,11 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
     await bind(a, null, 'developer');
     await request(server).get(`/api/agents/${a.slug}/pickup?project=p1`)
       .set({ Authorization: `Bearer ${a.apiKey}` }).expect(200);
-    await request(server).patch(`/api/projects/p1/agents/${a.slug}`).set(auth())
+    // US-001: updating an agent needs the global `agent.update` key, so the caller is the
+    // installation Owner; the project admin of p1 is refused since the fold. The 200 (not a 404)
+    // is still what shows the agent's global-only access reaches the project.
+    await request(server).patch(`/api/projects/p1/agents/${a.slug}`)
+      .set({ Authorization: `Bearer ${rootToken}` })
       .send({ name: 'Global renamed' }).expect(200);
     const me = await request(server).get('/api/agents/me')
       .set({ Authorization: `Bearer ${a.apiKey}` }).expect(200);

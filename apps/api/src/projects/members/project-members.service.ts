@@ -76,7 +76,7 @@ export class ProjectMembersService {
     }));
   }
 
-  /** The route's `member.role.update` key is the gate; the last-admin rule still applies. */
+  /** The route's `role.binding.manage` key is the gate; the last-admin rule still applies. */
   async updateRole(slug: string, userId: string, dto: UpdateMemberRoleDto, principal: KodaPrincipal): Promise<ProjectMemberDto> {
     const projectId = await this.access.findProjectIdBySlug(slug);
     const updated = await this.membership.afterCommit(() => this.txManager.run(async () => {

@@ -69,9 +69,9 @@ describe('ProjectsController route permission metadata (US-007)', () => {
     ['update', ['project.update'], 'guard'],
     ['remove', ['project.delete'], 'guard'],
     ['getProjectAgents', ['project.agent.read'], 'guard'],
-    ['addProjectAgent', ['project.agent.add'], 'guard'],
-    ['removeProjectAgent', ['project.agent.remove'], 'guard'],
-    ['updateProjectAgent', ['project.agent.update'], 'service'],
+    ['addProjectAgent', ['member.add'], 'guard'],
+    ['removeProjectAgent', ['member.remove'], 'guard'],
+    ['updateProjectAgent', ['agent.update'], 'service'],
     ['getChangeImpact', ['codeintel.impact.read'], 'guard'],
   ];
 
@@ -493,7 +493,7 @@ describe('ProjectsController', () => {
       authorities: ['WORKER'],
     });
 
-    // US-007: `isAdmin` is the `can` answer for `project.agent.update`, so every case states it.
+    // US-007 / US-001: `isAdmin` is the `can` answer for `agent.update`, so every case states it.
     const projectCtx: ProjectContext = { project: { id: 'proj-1', slug: 'alpha' }, role: 'DEVELOPER' };
     const canAllow = () => permissions.can.mockResolvedValue({ allowed: true, reason: 'granted' });
     const canDeny = () => permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
@@ -505,20 +505,32 @@ describe('ProjectsController', () => {
 
       const result = await controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, adminPrincipal, projectCtx);
 
-      expect(permissions.can).toHaveBeenCalledWith(adminPrincipal, 'project.agent.update', { projectId: 'proj-1' });
+      expect(permissions.can).toHaveBeenCalledWith(adminPrincipal, 'agent.update');
       expect(agentsService.isOnProjectRosterBySlug).toHaveBeenCalledWith('alpha', 'bot');
       expect(agentsService.update).toHaveBeenCalledWith('bot', { status: 'PAUSED' });
       expect((result as any).data.status).toBe('PAUSED');
     });
 
-    it('US-007: a project admin (global MEMBER with a project-admin binding) is admitted by its can answer', async () => {
+    it('US-001 AC-6: asks can exactly once, with exactly the two arguments (principal, agent.update)', async () => {
+      canAllow();
+      agentsService.isOnProjectRosterBySlug.mockResolvedValue(true);
+      agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
+
+      await controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, adminPrincipal, projectCtx);
+
+      expect(permissions.can).toHaveBeenCalledTimes(1);
+      expect(permissions.can).toHaveBeenCalledWith(adminPrincipal, 'agent.update');
+      expect(permissions.can.mock.calls[0]).toHaveLength(2);
+    });
+
+    it('US-007: a caller holding agent.update is admitted by its can answer', async () => {
       canAllow();
       agentsService.isOnProjectRosterBySlug.mockResolvedValue(true);
       agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
 
       const result = await controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal, projectCtx);
 
-      expect(permissions.can).toHaveBeenCalledWith(memberPrincipal, 'project.agent.update', { projectId: 'proj-1' });
+      expect(permissions.can).toHaveBeenCalledWith(memberPrincipal, 'agent.update');
       expect(projectsService.findMembershipRole).not.toHaveBeenCalled();
       expect((result as any).data.status).toBe('PAUSED');
     });
