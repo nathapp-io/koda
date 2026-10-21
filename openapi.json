@@ -1074,6 +1074,14 @@
               "maximum": 100000,
               "type": "number"
             }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1107,7 +1115,16 @@
     "/api/context/{slug}/query": {
       "post": {
         "operationId": "ContextController_queryContext",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {

@@ -7,7 +7,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
@@ -23,6 +23,7 @@ import type { ProjectContext } from '../projects/project-context';
 @ApiTags('context')
 @ApiBearerAuth()
 @Controller('context')
+@ApiParam({ name: 'slug', type: String })
 export class ContextController {
   constructor(private readonly contextBuilderService: ContextBuilderService) {}
 

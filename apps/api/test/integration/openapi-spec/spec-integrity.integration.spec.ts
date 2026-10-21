@@ -111,6 +111,16 @@ describe('Phase 3 — Step 1: OpenAPI Spec Integrity', () => {
   });
 
   describe('Endpoint coverage', () => {
+    it('documents the slug path parameter on both context operations', () => {
+      for (const [path, method] of [
+        ['/api/context/{slug}', 'get'],
+        ['/api/context/{slug}/query', 'post'],
+      ] as const) {
+        const params = spec.paths[path]?.[method]?.parameters as Array<{ name: string; in: string; schema: { type: string } }> | undefined;
+        expect(params).toContainEqual({ name: 'slug', required: true, in: 'path', schema: { type: 'string' } });
+      }
+    });
+
     it('should have at least 20 paths defined', () => {
       const pathCount = Object.keys(spec.paths).length;
       expect(pathCount).toBeGreaterThanOrEqual(20);
