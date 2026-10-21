@@ -116,8 +116,11 @@ describe('Phase 3 — Step 1: OpenAPI Spec Integrity', () => {
         ['/api/context/{slug}', 'get'],
         ['/api/context/{slug}/query', 'post'],
       ] as const) {
-        const params = spec.paths[path]?.[method]?.parameters as Array<{ name: string; in: string; schema: { type: string } }> | undefined;
-        expect(params).toContainEqual({ name: 'slug', required: true, in: 'path', schema: { type: 'string' } });
+        const params: unknown = spec.paths[path]?.[method]?.parameters;
+        expect(params, `${method.toUpperCase()} ${path} parameters`).toEqual(expect.any(Array));
+        expect(params).toEqual(expect.arrayContaining([
+          expect.objectContaining({ name: 'slug', required: true, in: 'path', schema: expect.objectContaining({ type: 'string' }) }),
+        ]));
       }
     });
 

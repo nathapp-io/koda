@@ -1,4 +1,3 @@
-import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
@@ -101,39 +100,6 @@ describe('VcsController', () => {
   const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
   const projectContext = (): ProjectContext => ({ project: { id: 'proj-1', slug: 'test-project' }, role: 'ADMIN' });
-
-  const adminUser: KodaPrincipal = {
-    actorType: 'user',
-    id: 'user-admin',
-    role: 'ADMIN',
-    email: 'admin@example.com',
-    name: 'admin@example.com',
-    blacklisted: false,
-    revoked: false,
-    authorities: ['ADMIN'],
-  } as KodaPrincipal;
-  const memberUser: KodaPrincipal = {
-    actorType: 'user',
-    id: 'user-member',
-    role: 'MEMBER',
-    email: 'member@example.com',
-    name: 'member@example.com',
-    blacklisted: false,
-    revoked: false,
-    authorities: ['MEMBER'],
-  } as KodaPrincipal;
-  const agentPrincipal: KodaPrincipal = {
-    actorType: 'agent',
-    id: 'agent-1',
-    slug: 'koda-agent',
-    status: 'ACTIVE',
-    agentRoles: ['DEVELOPER'],
-    capabilities: [],
-    name: 'koda-agent',
-    blacklisted: false,
-    revoked: false,
-    authorities: [],
-  } as unknown as KodaPrincipal;
 
   beforeEach(async () => {
     mockProjectsService = {

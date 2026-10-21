@@ -2,6 +2,8 @@
  * US-003: Context project routes enforce project access before route permission keys.
  * Run with the compose Postgres up: bun run test:scoped test/integration/context/context-permissions.integration.spec.ts
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -10,6 +12,11 @@ import { ContextBuilderService } from '../../../src/context/context-builder.serv
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+
+const refusalMessage = (namespace: string): string => {
+  const messages = JSON.parse(readFileSync(join(__dirname, `../../../src/i18n/en/${namespace}.json`), 'utf8')) as Record<string, string>;
+  return messages['40003'] ?? `${namespace}.40003`;
+};
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -38,9 +45,7 @@ describeIntegration('US-003 context route permissions', () => {
   const expectRefusal = (res: request.Response, code: 'permissions' | 'projects') => {
     expect(res.status).toBe(403);
     expect(res.body.ret).toBe(40003);
-    expect(res.body.message).toBe(code === 'permissions'
-      ? 'You do not have permissions to perform this action'
-      : 'projects.40003');
+    expect(res.body.message).toBe(refusalMessage(code));
   };
 
   beforeAll(async () => {

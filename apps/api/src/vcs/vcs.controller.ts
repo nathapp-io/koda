@@ -69,7 +69,7 @@ export class VcsController {
   @ApiOperation({ summary: 'Create a VCS connection for a project' })
   @ApiResponse({ status: 201, type: VcsConnectionCreatedResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role or project membership required' })
+  @ApiResponse({ status: 403, description: 'Forbidden - project access and vcs.connection.create required' })
   @HttpCode(HttpStatus.CREATED)
   async createConnection(
     @Param('slug') slug: string,
@@ -96,7 +96,7 @@ export class VcsController {
   @ApiOperation({ summary: 'Get VCS connection for a project' })
   @ApiResponse({ status: 200, type: VcsConnectionResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role or project membership required' })
+  @ApiResponse({ status: 403, description: 'Forbidden - project access and vcs.connection.read required' })
   async getConnection(
     @Param('slug') slug: string,
   ) {
@@ -115,7 +115,7 @@ export class VcsController {
   @ApiOperation({ summary: 'Update VCS connection for a project' })
   @ApiResponse({ status: 200, type: VcsConnectionUpdatedResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role or project membership required' })
+  @ApiResponse({ status: 403, description: 'Forbidden - project access and vcs.connection.update required' })
   async updateConnection(
     @Param('slug') slug: string,
     @Body() dto: UpdateVcsConnectionDto,
@@ -140,7 +140,7 @@ export class VcsController {
   @Requires('vcs.connection.delete')
   @ApiOperation({ summary: 'Delete VCS connection for a project' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role or project membership required' })
+  @ApiResponse({ status: 403, description: 'Forbidden - project access and vcs.connection.delete required' })
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteConnection(
     @Param('slug') slug: string,
@@ -160,7 +160,7 @@ export class VcsController {
   @ApiOperation({ summary: 'Test the VCS connection for a project' })
   @ApiResponse({ status: 200, type: TestConnectionResultDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role or project membership required' })
+  @ApiResponse({ status: 403, description: 'Forbidden - project access and vcs.connection.test required' })
   async testConnection(
     @Param('slug') slug: string,
   ) {
@@ -178,8 +178,7 @@ export class VcsController {
 
   /**
    * POST /projects/:slug/vcs/webhook-secret/rotate
-   * M9: project ADMIN or global ADMIN. Agents never hold VCS webhook secrets:
-   * ProjectRoles lets agents through, so the handler refuses them.
+   * Requires project access and `vcs.webhook-secret.rotate`, for users and agents alike.
    */
   @Post('/webhook-secret/rotate')
   @Requires('vcs.webhook-secret.rotate')
@@ -188,7 +187,7 @@ export class VcsController {
   @ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
   @ApiResponse({ status: 200, type: WebhookSecretResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - project ADMIN or global ADMIN required' })
+  @ApiResponse({ status: 403, description: 'Forbidden - project access and vcs.webhook-secret.rotate required' })
   @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
   async rotateWebhookSecret(
     @CurrentProject() ctx: ProjectContext,
@@ -205,7 +204,7 @@ export class VcsController {
   @ApiOperation({ summary: 'Manually sync a specific issue by number' })
   @ApiResponse({ status: 200, description: 'Issue synced successfully', type: SyncResultDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role or project membership required' })
+  @ApiResponse({ status: 403, description: 'Forbidden - project access and vcs.sync.issue required' })
   @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
   @ApiResponse({ status: 409, description: 'Issue already synced (externalVcsId exists)' })
   async syncIssue(
@@ -266,7 +265,7 @@ export class VcsController {
   @ApiOperation({ summary: 'Trigger a full sync of all issues from the VCS provider' })
   @ApiResponse({ status: 200, description: 'Full sync completed', type: SyncResultDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role or project membership required' })
+  @ApiResponse({ status: 403, description: 'Forbidden - project access and vcs.sync.all required' })
   @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
   async syncAll(
     @Param('slug') slug: string,
@@ -306,7 +305,7 @@ export class VcsController {
   @ApiOperation({ summary: 'Manually sync PR status for all active pull requests' })
   @ApiResponse({ status: 200, description: 'PR sync completed', type: Object })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role or project membership required' })
+  @ApiResponse({ status: 403, description: 'Forbidden - project access and vcs.sync.pr required' })
   @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
   async syncPr(
     @Param('slug') slug: string,

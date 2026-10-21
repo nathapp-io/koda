@@ -1,9 +1,9 @@
 import { SetMetadata } from '@nestjs/common';
 
 /**
- * Track 3 Slice 4: where ProjectMembershipGuard finds the project slug on a
- * route that carries it outside `:slug`. The code-intel read routes take
- * `?projectSlug=`; without this the guard never runs on them.
+ * Selects where ProjectMembershipGuard finds a slug outside `:slug`: a query
+ * parameter (code-intel reads use `?projectSlug=`) or a body field (code-intel
+ * indexing uses `projectSlug`). Path slugs take precedence over either source.
  */
 export const PROJECT_SLUG_FROM_KEY = 'koda:projectSlugFrom';
 

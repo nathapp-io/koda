@@ -1,7 +1,6 @@
-import { Controller, Headers, HttpCode, HttpStatus, Param, Post, Req } from '@nestjs/common';
+import { Controller, Headers, HttpCode, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Public } from '@nathapp/nestjs-auth';
-import { UseGuards } from '@nestjs/common';
 import { Requires } from '../permissions/requires.decorator';
 import { RequiresGuard } from '../permissions/requires.guard';
 import { AuthException } from '@nathapp/nestjs-common';

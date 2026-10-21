@@ -4,7 +4,6 @@ import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { REQUIRES_METADATA } from '../permissions/requires.decorator';
 import { ContextController } from './context.controller';
 import { ContextBuilderService } from './context-builder.service';
-import { PermissionService } from '../permissions/permission.service';
 import { RequiresGuard } from '../permissions/requires.guard';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
@@ -74,20 +73,17 @@ describe('ContextController route authorization metadata', () => {
 describe('ContextController', () => {
   let controller: ContextController;
   let contextBuilderService: { getProjectContext: Mock };
-  let permissions: { can: Mock };
   let module: TestingModule;
 
   beforeEach(async () => {
     contextBuilderService = {
       getProjectContext: vi.fn().mockResolvedValue(makeContextResponse()),
     };
-    permissions = { can: vi.fn().mockResolvedValue({ allowed: true }) };
 
     module = await Test.createTestingModule({
       controllers: [ContextController],
       providers: [
         { provide: ContextBuilderService, useValue: contextBuilderService },
-        { provide: PermissionService, useValue: permissions },
       ],
     })
       .overrideGuard(RequiresGuard)

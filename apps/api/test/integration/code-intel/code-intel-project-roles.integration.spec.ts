@@ -1,10 +1,12 @@
 /**
- * Track 3 Slice 4: the code-intel read routes and the impact route are
- * project-role gated (#144 matrix: ADMIN and DEVELOPER read CodeIntel, VIEWER
- * does not). The code-intel routes take the slug from ?projectSlug=.
+ * Code-intel routes enforce project access followed by permission keys.
+ * Viewers can read but cannot index; custom roles need the specific route key.
+ * Reads resolve ?projectSlug= and indexing resolves the body projectSlug.
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/code-intel/code-intel-project-roles.integration.spec.ts
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -12,6 +14,11 @@ import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+
+const refusalMessage = (namespace: string): string => {
+  const messages = JSON.parse(readFileSync(join(__dirname, `../../../src/i18n/en/${namespace}.json`), 'utf8')) as Record<string, string>;
+  return messages['40003'] ?? `${namespace}.40003`;
+};
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -32,9 +39,7 @@ describeIntegration('code-intel project-role gate (Slice 4)', () => {
   const expectRefusalCode = (res: request.Response, namespace: 'permissions' | 'projects') => {
     expect(res.status).toBe(403);
     expect(res.body.ret).toBe(40003);
-    expect(res.body.message).toBe(namespace === 'permissions'
-      ? 'You do not have permissions to perform this action'
-      : 'projects.40003');
+    expect(res.body.message).toBe(refusalMessage(namespace));
   };
 
   beforeAll(async () => {
@@ -47,7 +52,7 @@ describeIntegration('code-intel project-role gate (Slice 4)', () => {
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
 
-    for (const who of ['padmin', 'pdev', 'pviewer', 'outsider']) {
+    for (const who of ['padmin', 'pdev', 'pviewer', 'outsider', 'custom']) {
       await request(server).post('/api/admin/users').set(auth('root'))
         .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
       tokens[who] = await loginToken(server, `${who}@koda.test`);
@@ -166,14 +171,14 @@ describeIntegration('code-intel project-role gate (Slice 4)', () => {
       permissions: ['ticket.read'],
     } });
     await db.roleBinding.create({ data: {
-      principalType: 'USER', principalId: userIds.outsider as string, roleId: custom.id,
+      principalType: 'USER', principalId: userIds.custom as string, roleId: custom.id,
       projectId: intelProjectId, grantedByType: 'SYSTEM', grantedById: 'integration-test',
     } });
     for (const url of [
       '/api/code-intel/symbols?projectSlug=intel',
       `/api/code-intel/symbols/${encodeURIComponent(symbolId)}/callers?projectSlug=intel`,
       '/api/projects/intel/codeintel/impact?repoId=acme%2Fwidgets&commitHash=c1&changedFiles=src%2Fa.ts',
-    ]) expectRefusalCode(await get('outsider', url), 'permissions');
+    ]) expectRefusalCode(await get('custom', url), 'permissions');
   });
 
   it('AC-8: global admin without projectSlug is refused for symbol search by the key guard', async () => {

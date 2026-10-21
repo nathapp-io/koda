@@ -68,6 +68,7 @@ function makeDto(overrides: Partial<IndexCommitDto> = {}): IndexCommitDto {
 
 describe('CodeIntelController', () => {
   let controller: CodeIntelController;
+  let module: TestingModule;
   let astIndexService: Mocked<Pick<AstIndexService, 'indexCommit' | 'getSymbol' | 'getCallers' | 'getCallees'>>;
 
   beforeEach(async () => {
@@ -78,7 +79,7 @@ describe('CodeIntelController', () => {
       getCallees: vi.fn(),
     };
 
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       controllers: [CodeIntelController],
       providers: [
         { provide: AstIndexService, useValue: astIndexService },
@@ -91,7 +92,8 @@ describe('CodeIntelController', () => {
     controller = module.get<CodeIntelController>(CodeIntelController);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await module.close();
     vi.clearAllMocks();
   });
 

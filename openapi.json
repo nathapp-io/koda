@@ -3504,7 +3504,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role or project membership required"
+            "description": "Forbidden - project access and vcs.connection.create required"
           }
         },
         "security": [
@@ -3544,7 +3544,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role or project membership required"
+            "description": "Forbidden - project access and vcs.connection.read required"
           }
         },
         "security": [
@@ -3594,7 +3594,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role or project membership required"
+            "description": "Forbidden - project access and vcs.connection.update required"
           }
         },
         "security": [
@@ -3627,7 +3627,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role or project membership required"
+            "description": "Forbidden - project access and vcs.connection.delete required"
           }
         },
         "security": [
@@ -3669,7 +3669,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role or project membership required"
+            "description": "Forbidden - project access and vcs.connection.test required"
           }
         },
         "security": [
@@ -3711,7 +3711,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - project ADMIN or global ADMIN required"
+            "description": "Forbidden - project access and vcs.webhook-secret.rotate required"
           },
           "404": {
             "description": "Project or VCS connection not found"
@@ -3764,7 +3764,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role or project membership required"
+            "description": "Forbidden - project access and vcs.sync.issue required"
           },
           "404": {
             "description": "Project or VCS connection not found"
@@ -3812,7 +3812,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role or project membership required"
+            "description": "Forbidden - project access and vcs.sync.all required"
           },
           "404": {
             "description": "Project or VCS connection not found"
@@ -3857,7 +3857,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - admin role or project membership required"
+            "description": "Forbidden - project access and vcs.sync.pr required"
           },
           "404": {
             "description": "Project or VCS connection not found"
