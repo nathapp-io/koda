@@ -3,7 +3,7 @@
   "feature": "permissions-p1-fixtures-to-bindings",
   "branchName": "feat/permissions-p1-fixtures-to-bindings",
   "createdAt": "2026-10-22T00:00:00.000Z",
-  "updatedAt": "2026-10-21T20:07:56.947Z",
+  "updatedAt": "2026-10-21T21:10:13.004Z",
   "userStories": [
     {
       "id": "US-001",
@@ -471,14 +471,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Large sequential e2e lifecycle fixtures, role-API exceptions, cache-sensitive replacements and rerunnable import-safe seed integration create cross-file authorization risk; security override applies."
+        "reasoning": "Large sequential e2e lifecycle fixtures, role-API exceptions, cache-sensitive replacements and rerunnable import-safe seed integration create cross-file authorization risk; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/permissions/test-helpers/permission-fixtures.ts",
@@ -519,7 +522,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "579dd94e85cec40a06e39da54f18e35ba031bcd9"
     },
     {
       "id": "US-006",
