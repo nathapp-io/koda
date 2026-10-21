@@ -1,4 +1,5 @@
 import type { PrismaClient } from '../../generated/prisma/client';
+import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { SystemRoleSeeder } from '../system-role.seeder';
 import { SYSTEM_ROLES } from '../system-roles';
 import type { PrincipalRef, RoleDomain, RoleRepository, RoleScope } from '../permissions.types';
@@ -46,32 +47,35 @@ export async function grantRole(
   }
   if (!role) throw new Error(`no role ${roleKey}`);
 
-  const existing = await db.roleBinding.findFirst({
-    where: { principalType: principal.type, principalId: principal.id, roleId: role.id, projectId: scopeId },
-    select: { id: true },
-  });
-  if (existing) {
-    if (principal.type === 'USER' && scopeId === null && (roleKey === 'owner' || roleKey === 'admin')) {
-      await db.user.update({ where: { id: principal.id }, data: { role: 'ADMIN' } });
-    }
+  const where = { principalType: principal.type, principalId: principal.id, roleId: role.id, projectId: scopeId };
+  const mirrorsAdmin = principal.type === 'USER' && scopeId === null && (roleKey === 'owner' || roleKey === 'admin');
+  try {
+    return await db.$transaction(async (tx) => {
+      const existing = await tx.roleBinding.findFirst({ where, select: { id: true } });
+      if (existing) {
+        if (mirrorsAdmin) await tx.user.update({ where: { id: principal.id }, data: { role: 'ADMIN' } });
+        return { id: existing.id };
+      }
+
+      const binding = await tx.roleBinding.create({
+        data: {
+          ...where,
+          grantedByType: 'SYSTEM',
+          grantedById: 'test',
+        },
+        select: { id: true },
+      });
+      if (mirrorsAdmin) await tx.user.update({ where: { id: principal.id }, data: { role: 'ADMIN' } });
+      return binding;
+    });
+  } catch (error) {
+    if (!isUniqueViolation(error, 'principalId')) throw error;
+    // A concurrent transaction inserted the same binding after our lookup. Its transaction also
+    // commits the admin mirror; re-read outside our failed transaction to return its binding.
+    const existing = await db.roleBinding.findFirst({ where, select: { id: true } });
+    if (!existing) throw error;
     return { id: existing.id };
   }
-
-  const binding = await db.roleBinding.create({
-    data: {
-      principalType: principal.type,
-      principalId: principal.id,
-      roleId: role.id,
-      projectId: scopeId,
-      grantedByType: 'SYSTEM',
-      grantedById: 'test',
-    },
-    select: { id: true },
-  });
-  if (principal.type === 'USER' && scopeId === null && (roleKey === 'owner' || roleKey === 'admin')) {
-    await db.user.update({ where: { id: principal.id }, data: { role: 'ADMIN' } });
-  }
-  return binding;
 }
 
 /** Grants the baseline role production writes when creating a principal. */

@@ -57,6 +57,7 @@ describeIntegration('permission fixture bindings (PG)', () => {
   });
 
   it('AC-1/2: seeds exactly the system roles with seeded values idempotently', async () => {
+    await db.role.deleteMany();
     await ensureSystemRoles(db);
     const roles = await db.role.findMany({ orderBy: { key: 'asc' } });
     expect(roles).toHaveLength(11);
@@ -77,6 +78,7 @@ describeIntegration('permission fixture bindings (PG)', () => {
     expect((await db.role.findUniqueOrThrow({ where: { key: 'owner' } })).permissions).toEqual(['*']);
   });
   it('AC-4/5: creates and idempotently returns a binding with fixture attribution', async () => {
+    await db.role.deleteMany();
     const u = await user(); const p = await project();
     const first = await grantRole(db, ref(u.id), 'developer', p.id);
     const second = await grantRole(db, ref(u.id), 'developer', p.id);
@@ -86,6 +88,44 @@ describeIntegration('permission fixture bindings (PG)', () => {
       roleId: (await db.role.findUniqueOrThrow({ where: { key: 'developer' } })).id,
       principalType: 'USER', projectId: p.id, grantedByType: 'SYSTEM', grantedById: 'test',
     });
+  });
+  it('F2: concurrent identical grants both resolve to the winning binding id', async () => {
+    const u = await user(); const p = await project();
+    let lookups = 0;
+    let releaseLookups!: () => void;
+    const allLookups = new Promise<void>((resolve) => { releaseLookups = resolve; });
+    const concurrentDb = new Proxy(db, {
+      get(target, property, receiver) {
+        if (property !== 'roleBinding') return Reflect.get(target, property, receiver) as unknown;
+        const bindingDelegate = Reflect.get(target, property, receiver) as PrismaClient['roleBinding'];
+        return new Proxy(bindingDelegate, {
+          get(delegate, method, delegateReceiver) {
+            if (method !== 'findFirst') return Reflect.get(delegate, method, delegateReceiver) as unknown;
+            return async (args: Parameters<PrismaClient['roleBinding']['findFirst']>[0]) => {
+              const result = await db.roleBinding.findFirst(args);
+              lookups += 1;
+              if (lookups === 2) releaseLookups();
+              await allLookups;
+              return result;
+            };
+          },
+        });
+      },
+    }) as PrismaClient;
+    const results = await Promise.all([grantRole(concurrentDb, ref(u.id), 'developer', p.id), grantRole(concurrentDb, ref(u.id), 'developer', p.id)]);
+    expect(results[0]?.id).toBe(results[1]?.id);
+    expect(await db.roleBinding.count({ where: { principalId: u.id, projectId: p.id } })).toBe(1);
+  });
+  it('F3: failed admin mirror rolls back a new binding and repairs the mirror for an existing one', async () => {
+    await expect(grantRole(db, ref('missing-user'), 'admin')).rejects.toThrow();
+    expect(await db.roleBinding.count({ where: { principalId: 'missing-user' } })).toBe(0);
+
+    const u = await user();
+    const adminRole = await db.role.findUniqueOrThrow({ where: { key: 'admin' } });
+    await db.roleBinding.create({ data: { principalType: 'USER', principalId: u.id, roleId: adminRole.id, grantedByType: 'SYSTEM', grantedById: 'test' } });
+    await db.user.update({ where: { id: u.id }, data: { role: 'MEMBER' } });
+    await grantRole(db, ref(u.id), 'admin');
+    expect((await db.user.findUniqueOrThrow({ where: { id: u.id } })).role).toBe('ADMIN');
   });
   it('AC-6: unknown role rejects without creating a binding', async () => {
     const u = await user(); const p = await project();
