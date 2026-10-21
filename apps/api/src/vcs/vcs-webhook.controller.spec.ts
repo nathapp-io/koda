@@ -2,7 +2,7 @@ import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException } from '@nestjs/common';
 import { AuthException } from '@nathapp/nestjs-common';
-import { RequiresGuard } from '../permissions/requires.guard';
+import { PermissionService } from '../permissions/permission.service';
 import { VcsWebhookController } from './vcs-webhook.controller';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsWebhookService, GitHubWebhookPayload } from './vcs-webhook.service';
@@ -95,7 +95,7 @@ describe('VcsWebhookController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [VcsWebhookController],
       providers: [
-        { provide: RequiresGuard, useValue: { canActivate: () => true } },
+        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true }) } },
         { provide: VcsConnectionService, useValue: mockVcsConnectionService },
         { provide: VcsWebhookService, useValue: mockWebhookService },
         { provide: WebhookReplayGuard, useValue: mockReplayGuard },
