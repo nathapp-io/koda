@@ -114,6 +114,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     role: 'ADMIN',
     authorities: ['ADMIN'],
   };
+  const globalReaders = new Set<string>();
 
   /** The catalog keys the stub refuses; each case marks the ones its role does not hold (US-007). */
   let refusedKeys: ReadonlySet<string>;
@@ -131,7 +132,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     }
     if (refusedKeys.has(key)) return { allowed: false, reason: 'not-granted' };
     if (ctx?.projectId === undefined) {
-      return principal.actorType === 'user' && principal.role === 'ADMIN'
+      return principal.actorType === 'user' && globalReaders.has(principal.id)
         ? { allowed: true, reason: 'granted' }
         : { allowed: false, reason: 'not-granted' };
     }
@@ -380,16 +381,18 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
   });
 
-  it('AC4: a global ADMIN user reads GET /api/projects/:slug with no membership row', async () => {
-    currentPrincipal = adminUser;
+  it('AC3: a global reader with MEMBER role reads GET /api/projects/:slug without a membership row', async () => {
+    currentPrincipal = makeUserPrincipal('global-reader');
+    globalReaders.add(currentPrincipal.id);
     membershipRepo.findMembershipRole.mockResolvedValue(null);
 
     const res = await request(app.getHttpServer()).get('/api/projects/alpha');
 
     expect(res.status).toBe(200);
     expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
-    // The route is guarded: the slug is still resolved before the handler runs.
+    expect(can).toHaveBeenCalledWith(currentPrincipal, PROJECT_ACCESS_KEY);
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
+    globalReaders.delete(currentPrincipal.id);
   });
 
   // ---------------------------------------------------------------------------

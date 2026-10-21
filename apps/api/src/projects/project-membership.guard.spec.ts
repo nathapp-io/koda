@@ -138,6 +138,7 @@ describe('ProjectMembershipGuard (US-001)', () => {
    * `project.read` here: that refusal is what ProjectMembershipGuard answers with 403 `projects`.
    */
   let refusedKeys: ReadonlySet<string>;
+  const globalReaders = new Set<string>();
   const can = vi.fn(async (principal: KodaPrincipal, key: string, ctx?: { projectId?: string }) => {
     if (key !== PROJECT_ACCESS_KEY) {
       return refusedKeys.has(key)
@@ -145,10 +146,8 @@ describe('ProjectMembershipGuard (US-001)', () => {
         : { allowed: true, reason: 'granted' };
     }
     if (refusedKeys.has(key)) return { allowed: false, reason: 'not-granted' };
-    // The global ask is what a global Owner/Admin holds: with the seeded roles that is exactly what the
-    // legacy `User.role = 'ADMIN'` claim resolves to (`PermissionService.isLegacyAdmin`).
     if (ctx?.projectId === undefined) {
-      return principal.actorType === 'user' && principal.role === 'ADMIN'
+      return principal.actorType === 'user' && globalReaders.has(principal.id)
         ? { allowed: true, reason: 'granted' }
         : { allowed: false, reason: 'not-granted' };
     }
@@ -160,6 +159,7 @@ describe('ProjectMembershipGuard (US-001)', () => {
   beforeEach(() => {
     membershipRepo = { findBySlug: vi.fn(), findMembershipRole: vi.fn(), isAgentOnRoster: vi.fn() };
     refusedKeys = new Set();
+    globalReaders.clear();
     access = new ProjectAccessService(
       membershipRepo as unknown as PrismaProjectRepository,
       { can } as unknown as PermissionService,
@@ -319,16 +319,25 @@ describe('ProjectMembershipGuard (US-001)', () => {
   // AC4 — global ADMIN users bypass the membership gate
   // ---------------------------------------------------------------------------
 
-  it('AC4: returns true for a global ADMIN user with no membership row', async () => {
+  it('AC1: admits a global reader with MEMBER role and no membership row', async () => {
     membershipRepo.findBySlug.mockResolvedValue(activeProject);
     membershipRepo.findMembershipRole.mockResolvedValue(null);
+    globalReaders.add(memberUser.id);
 
     const result = await guard.canActivate(
-      makeExecutionContext({ params: { slug: 'alpha' }, user: adminUser }),
+      makeExecutionContext({ params: { slug: 'alpha' }, user: memberUser }),
     );
 
     expect(result).toBe(true);
+    expect(can).toHaveBeenCalledWith(memberUser, PROJECT_ACCESS_KEY);
     expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
+  });
+
+  it('AC2: refuses an ADMIN claim outside globalReaders', async () => {
+    membershipRepo.findBySlug.mockResolvedValue(activeProject);
+    globalReaders.clear();
+
+    await expect(can(adminUser, PROJECT_ACCESS_KEY)).resolves.toMatchObject({ allowed: false });
   });
 
   // ---------------------------------------------------------------------------

@@ -181,10 +181,10 @@ describe('AssistantToolExecutor', () => {
     expect((await executor.execute(call())).isError).toBe(false);
   });
 
-  it('AC-7: a global ADMIN creator with no ProjectMember row runs a member tool', async () => {
-    const { executor, access } = setup(makeTool(), { creator: { role: 'ADMIN' }, role: 'ADMIN' });
+  it('AC-4: a global reader with MEMBER role and no ProjectMember row runs a member tool', async () => {
+    const { executor, access } = setup(makeTool(), { creator: { role: 'MEMBER' }, role: 'ADMIN' });
     expect((await executor.execute(call())).isError).toBe(false);
-    expect(access.resolveMembership).toHaveBeenCalledWith('p1', expect.objectContaining({ id: 'u1', role: 'ADMIN' }));
+    expect(access.resolveMembership).toHaveBeenCalledWith('p1', expect.objectContaining({ id: 'u1', role: 'MEMBER' }));
   });
 
   it('AC-8: a tool raising NotFoundAppException answers not_found', async () => {
