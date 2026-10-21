@@ -1,5 +1,4 @@
 import { Injectable, type OnModuleInit } from '@nestjs/common';
-import { isAgentPrincipal } from '../../../auth/principal/koda-principal.types';
 import { FleetJobState } from '../../../common/enums';
 import { AnalyticsService } from '../../analytics/analytics.service';
 import { APPROVAL_STATUSES, type ApprovalStatus } from '../../approvals/domain/approval.domain';
@@ -234,7 +233,7 @@ export function fleetSpendTool(analytics: AnalyticsService): AssistantTool<Fleet
 
 /**
  * `koda_list_approvals` (US-004): one page of the project's approvals through the project route, so another
- * project's approval can never appear. `role` follows the executor's resolved membership (1b-D1).
+ * project's approval can never appear. The route carries the project's id only (permissions P1 US-004).
  */
 export function listApprovalsTool(approvals: ApprovalsService): AssistantTool<ListApprovalsInput> {
   return {
@@ -249,7 +248,7 @@ export function listApprovalsTool(approvals: ApprovalsService): AssistantTool<Li
       };
     },
     async execute(ctx: ToolContext, input: ListApprovalsInput): Promise<string> {
-      const route: ApprovalRoute = { kind: 'project', projectId: ctx.projectId, role: isAgentPrincipal(ctx.actor) ? null : ctx.actor.projectRole ?? null };
+      const route: ApprovalRoute = { kind: 'project', projectId: ctx.projectId };
       const page = await approvals.list(route, { status: input.status }, { current: input.page, size: PAGE_SIZE });
       if (page.records.length === 0) return 'no approvals';
       const lines = page.records.map(

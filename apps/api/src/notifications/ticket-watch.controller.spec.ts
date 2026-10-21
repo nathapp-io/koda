@@ -2,7 +2,6 @@ import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import type { ProjectContext } from '../projects/project-context';
 import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
-import { PROJECT_PERMISSION_KEY } from '../projects/project-permission.decorator';
 import { REQUIRES_METADATA } from '../permissions/requires.decorator';
 import { TicketWatchController } from './ticket-watch.controller';
 
@@ -13,7 +12,7 @@ const agent: KodaPrincipal = {
   actorType: 'agent', id: 'a1', sub: 'a1', slug: 'bot', status: 'ACTIVE', agentRoles: [], capabilities: [],
   name: 'bot', blacklisted: false, revoked: false, authorities: [],
 };
-const ctx: ProjectContext = { project: { id: 'p1', slug: 'koda' }, role: 'VIEWER' };
+const ctx: ProjectContext = { project: { id: 'p1', slug: 'koda' } };
 
 function setup() {
   const service = {
@@ -53,7 +52,6 @@ describe('TicketWatchController permission metadata (US-005)', () => {
     const fn = TicketWatchController.prototype[handler] as unknown as object;
     expect(Reflect.getMetadata(REQUIRES_METADATA, fn)).toEqual({ keys: [key], mode: 'all', enforcedBy: 'guard' });
     expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
-    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeUndefined();
   });
 
   it('runs ProjectMembershipGuard before RequiresGuard at the class level', () => {

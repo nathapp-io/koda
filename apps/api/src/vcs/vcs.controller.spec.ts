@@ -99,7 +99,7 @@ describe('VcsController', () => {
 
   const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
-  const projectContext = (): ProjectContext => ({ project: { id: 'proj-1', slug: 'test-project' }, role: 'ADMIN' });
+  const projectContext = (): ProjectContext => ({ project: { id: 'proj-1', slug: 'test-project' } });
 
   beforeEach(async () => {
     mockProjectsService = {

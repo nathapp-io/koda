@@ -5,7 +5,6 @@ import { LabelsService } from './labels.service';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { LabelResponseDto } from './dto/label-response.dto';
 import { ProjectAccessService } from '../projects/project-access.service';
-import { PROJECT_PERMISSION_KEY } from '../projects/project-permission.decorator';
 import { PermissionService } from '../permissions/permission.service';
 import { REQUIRES_METADATA, RequiresMetadata } from '../permissions/requires.decorator';
 
@@ -25,7 +24,6 @@ describe('US-005 permission keys on label routes', () => {
       enforcedBy: 'guard',
     });
     // The legacy decorators are gone from the migrated routes, so only one mechanism decides them.
-    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeUndefined();
     expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
   });
 

@@ -15,7 +15,7 @@ import { DecideApprovalDto } from './dto/decide-approval.dto';
 import { FleetApprovalDto } from './dto/fleet-approval.dto';
 import { ListApprovalsQuery } from './dto/list-approvals.query';
 
-const route = (ctx: ProjectContext): ApprovalRoute => ({ kind: 'project', projectId: ctx.project.id, role: ctx.role });
+const route = (ctx: ProjectContext): ApprovalRoute => ({ kind: 'project', projectId: ctx.project.id });
 
 /**
  * S1.5 §2.3 project routes, migrated onto permission keys by permissions P1d (US-006): a member reads

@@ -27,7 +27,6 @@ import { RagController } from '../rag/rag.controller';
 import { RagService } from '../rag/rag.service';
 import { HybridRetrieverService } from '../rag/hybrid-retriever.service';
 import { PrismaRagRepository } from '../rag/prisma-rag.repository';
-import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 import { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
 
 interface MembershipRepoStub {
@@ -202,9 +201,8 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
         // test/integration/rag/permissions-kb-routes.integration.spec.ts, so the stub allows every key except
         // the ones a case marks as refused (`refusedKeys`).
         { provide: PermissionService, useValue: { can } },
-        // #144: the guard's @ProjectPermission check builds an ability from this
-        // factory; without it the check fails closed with 403.
-        KodaCaslAbilityFactory,
+        // Permissions P1 US-004: the membership guard no longer builds a CASL ability, so this module no
+        // longer provides KodaCaslAbilityFactory. The guard resolves the key and the project identity only.
       ],
     }).compile();
 

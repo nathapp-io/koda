@@ -5,21 +5,16 @@ import type { Mock, MockInstance } from 'vitest';
  * The guard is exercised against the real ProjectAccessService, whose two collaborators are doubles:
  * a repository stub that answers only the display role (`findMembershipRole`) and a `PermissionService`
  * double that answers `project.read`. Admission and refusal (403 `projects`) therefore follow the key,
- * which is what this file's cases drive; the fake membership rows decide nothing but the role the guard
- * attaches to the request.
+ * which is what this file's cases drive; the fake membership rows decide nothing but the role the
+ * access service reports to other callers (US-004: the request no longer carries one).
  */
-import { ExecutionContext } from '@nestjs/common';
+import { ExecutionContext, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
-import { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { ProjectAccessService, PROJECT_ACCESS_KEY } from './project-access.service';
 import { PrismaProjectRepository } from './prisma-project.repository';
 import { ProjectMembershipGuard } from './project-membership.guard';
-import { ProjectRoles } from './project-roles.decorator';
-import { ProjectPermission } from './project-permission.decorator';
 import { ProjectSlugFrom } from './project-slug-from.decorator';
-import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
-import { KodaAction } from '../auth/casl/koda-action.enum';
 import type { PermissionService } from '../permissions/permission.service';
 import {
   AgentPrincipal,
@@ -53,44 +48,29 @@ async function expectForbidden(
   return error as ForbiddenAppException;
 }
 
-/** Controller stub carrying @ProjectRoles on a handler, as the KB write routes do. */
-class KbWriteRouteStub {
-  @ProjectRoles('ADMIN', 'DEVELOPER', 'AGENT')
-  addDocument(): string {
-    return 'indexed';
+/** Controller stub carrying the retired project-role metadata, set raw as a route would still be able to. */
+class RetiredRoleMetadataStub {
+  @SetMetadata('koda:projectRoles', ['ADMIN'])
+  gated(): string {
+    return 'ok';
   }
 }
 
-/** Controller stub carrying @ProjectRoles on the class, as a class-level KB gate would. */
-@ProjectRoles('ADMIN', 'DEVELOPER', 'AGENT')
-class KbClassRolesStub {
-  listDocuments(): string {
-    return 'listed';
+/** Controller stub carrying the retired permission metadata on a handler with no slug source. */
+class RetiredPermissionMetadataStub {
+  @SetMetadata('koda:projectPermission', { permission: ['read', 'Ticket'], exemptAgents: false })
+  gated(): string {
+    return 'ok';
   }
 }
-
-/** Controller stub carrying @ProjectPermission, as the ticket/label routes do (#144). */
-class TicketRoutesStub {
-  @ProjectPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
-  transition(): string { return 'ok'; }
-
-  @ProjectPermission([CaslPermissionAction.DELETE, 'Ticket'])
-  remove(): string { return 'ok'; }
-
-  @ProjectPermission([KodaAction.UPDATE as CaslPermissionAction, 'Ticket'], { exemptAgents: true })
-  assignLabel(): string { return 'ok'; }
-}
-const routes = new TicketRoutesStub();
 
 /** Controller stub for the code-intel read routes: slug in `?projectSlug=` (Slice 4). */
 class CodeIntelRoutesStub {
   @ProjectSlugFrom('body', 'projectSlug')
   bodySlug(): string { return 'ok'; }
   @ProjectSlugFrom('query', 'projectSlug')
-  @ProjectPermission([CaslPermissionAction.READ, 'CodeIntel'])
   searchSymbols(): string { return 'ok'; }
 
-  @ProjectPermission([CaslPermissionAction.READ, 'CodeIntel'])
   withoutSlugSource(): string { return 'ok'; }
 
   plainRoute(): string { return 'ok'; }
@@ -194,6 +174,60 @@ describe('ProjectMembershipGuard (US-001)', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Permissions P1 US-004 — the guard is key-based access plus project identity
+  // ---------------------------------------------------------------------------
+
+  describe('US-004: key-based access and a role-free request context', () => {
+    it('AC-1: attaches exactly { project: { id, slug } } to the request for a member', async () => {
+      membershipRepo.findBySlug.mockResolvedValue(activeProject);
+      membershipRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
+      const req: Record<string, unknown> = { params: { slug: 'alpha' }, user: memberUser };
+
+      await expect(guard.canActivate(makeExecutionContext(req))).resolves.toBe(true);
+
+      expect(req.projectContext).toEqual({ project: { id: 'proj-1', slug: 'alpha' } });
+    });
+
+    it('AC-2: ignores retired koda:projectRoles metadata, so a VIEWER member is admitted', async () => {
+      membershipRepo.findBySlug.mockResolvedValue(activeProject);
+      membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
+      const handler = RetiredRoleMetadataStub.prototype.gated;
+      // The fixture really carries the retired key: otherwise this case would pass by accident.
+      expect(Reflect.getMetadata('koda:projectRoles', handler)).toEqual(['ADMIN']);
+
+      await expect(
+        guard.canActivate(makeExecutionContext({ params: { slug: 'alpha' }, user: memberUser }, handler, RetiredRoleMetadataStub)),
+      ).resolves.toBe(true);
+    });
+
+    it('AC-3: ignores retired koda:projectPermission metadata and a missing slug source, resolving true with no project lookup', async () => {
+      const findProjectIdBySlugSpy = vi.spyOn(access, 'findProjectIdBySlug');
+      const handler = RetiredPermissionMetadataStub.prototype.gated;
+      expect(Reflect.getMetadata('koda:projectPermission', handler)).toBeDefined();
+
+      const req: Record<string, unknown> = { params: undefined, user: memberUser };
+      await expect(
+        guard.canActivate(makeExecutionContext(req, handler, RetiredPermissionMetadataStub)),
+      ).resolves.toBe(true);
+
+      expect(findProjectIdBySlugSpy).not.toHaveBeenCalled();
+      expect(membershipRepo.findBySlug).not.toHaveBeenCalled();
+      expect(req.projectContext).toBeUndefined();
+    });
+
+    it('AC-4: rejects with the access refusal and leaves projectContext unset', async () => {
+      membershipRepo.findBySlug.mockResolvedValue(activeProject);
+      refusedKeys = new Set([PROJECT_ACCESS_KEY]);
+      const req: Record<string, unknown> = { params: { slug: 'alpha' }, user: memberUser };
+
+      const error = await expectForbidden(guard.canActivate(makeExecutionContext(req)), 'projects');
+
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      expect(req.projectContext).toBeUndefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // AC1 — member of the project is admitted
   // ---------------------------------------------------------------------------
 
@@ -209,7 +243,7 @@ describe('ProjectMembershipGuard (US-001)', () => {
     expect(membershipRepo.findMembershipRole).toHaveBeenCalledWith('proj-1', 'user-1');
   });
 
-  it('AC1 boundary: returns true for a VIEWER member on a route without @ProjectRoles (the project role gates visibility only)', async () => {
+  it('AC1 boundary: returns true for a VIEWER member on a plain route (the display role gates no route)', async () => {
     membershipRepo.findBySlug.mockResolvedValue(activeProject);
     membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
 
@@ -363,200 +397,10 @@ describe('ProjectMembershipGuard (US-001)', () => {
     expect(findProjectIdBySlugSpy).not.toHaveBeenCalled();
   });
 
-  // ---------------------------------------------------------------------------
-  // AC15 / AC16 — @ProjectRoles applied to a handler
-  // ---------------------------------------------------------------------------
-
-  it('AC15: returns true for an agent principal holding project.read on a handler carrying @ProjectRoles without calling findMembershipRole', async () => {
-    membershipRepo.findBySlug.mockResolvedValue(activeProject);
-
-    const result = await guard.canActivate(
-      makeExecutionContext(
-        { params: { slug: 'alpha' }, user: agentPrincipal },
-        KbWriteRouteStub.prototype.addDocument,
-        KbWriteRouteStub,
-      ),
-    );
-
-    expect(result).toBe(true);
-    expect(can).toHaveBeenCalledWith(agentPrincipal, PROJECT_ACCESS_KEY, { projectId: 'proj-1' });
-    expect(findMembershipRoleSpy).not.toHaveBeenCalled();
-    expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
-  });
-
-  it('AC16: returns true for a global ADMIN user on a handler carrying @ProjectRoles without calling findMembershipRole', async () => {
-    membershipRepo.findBySlug.mockResolvedValue(activeProject);
-
-    const result = await guard.canActivate(
-      makeExecutionContext(
-        { params: { slug: 'alpha' }, user: adminUser },
-        KbWriteRouteStub.prototype.addDocument,
-        KbWriteRouteStub,
-      ),
-    );
-
-    expect(result).toBe(true);
-    expect(findMembershipRoleSpy).not.toHaveBeenCalled();
-    expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
-  });
-
-  it('AC16 boundary: allows a member whose project role is in @ProjectRoles', async () => {
-    membershipRepo.findBySlug.mockResolvedValue(activeProject);
-    membershipRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
-
-    const result = await guard.canActivate(
-      makeExecutionContext(
-        { params: { slug: 'alpha' }, user: memberUser },
-        KbWriteRouteStub.prototype.addDocument,
-        KbWriteRouteStub,
-      ),
-    );
-
-    expect(result).toBe(true);
-    expect(membershipRepo.findMembershipRole).toHaveBeenCalledWith('proj-1', 'user-1');
-  });
-
-  it('AC12: throws ForbiddenAppException for a member whose project role is VIEWER on a @ProjectRoles write handler', async () => {
-    membershipRepo.findBySlug.mockResolvedValue(activeProject);
-    membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
-
-    await expect(
-      guard.canActivate(
-        makeExecutionContext(
-          { params: { slug: 'alpha' }, user: memberUser },
-          KbWriteRouteStub.prototype.addDocument,
-          KbWriteRouteStub,
-        ),
-      ),
-    ).rejects.toBeInstanceOf(ForbiddenAppException);
-  });
-
-  it('AC12 boundary: throws ForbiddenAppException when the membership row is missing on a @ProjectRoles handler', async () => {
-    membershipRepo.findBySlug.mockResolvedValue(activeProject);
-    membershipRepo.findMembershipRole.mockResolvedValue(null);
-
-    await expect(
-      guard.canActivate(
-        makeExecutionContext(
-          { params: { slug: 'alpha' }, user: memberUser },
-          KbWriteRouteStub.prototype.addDocument,
-          KbWriteRouteStub,
-        ),
-      ),
-    ).rejects.toBeInstanceOf(ForbiddenAppException);
-  });
-
-  it('AC16 boundary: reads @ProjectRoles from the controller class when the handler carries none', async () => {
-    membershipRepo.findBySlug.mockResolvedValue(activeProject);
-    membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
-
-    await expect(
-      guard.canActivate(
-        makeExecutionContext(
-          { params: { slug: 'alpha' }, user: memberUser },
-          KbClassRolesStub.prototype.listDocuments,
-          KbClassRolesStub,
-        ),
-      ),
-    ).rejects.toBeInstanceOf(ForbiddenAppException);
-  });
-
-  it('AC16 boundary: leaves routes without @ProjectRoles ungated by project role', async () => {
-    membershipRepo.findBySlug.mockResolvedValue(activeProject);
-    membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
-
-    const result = await guard.canActivate(
-      makeExecutionContext({ params: { slug: 'alpha' }, user: memberUser }),
-    );
-
-    expect(result).toBe(true);
-    expect(findMembershipRoleSpy).not.toHaveBeenCalled();
-  });
-
-  // ---------------------------------------------------------------------------
-  // #144/#145 — ProjectContext and @ProjectPermission
-  // ---------------------------------------------------------------------------
-
-  describe('ProjectMembershipGuard - ProjectContext and @ProjectPermission (#144/#145)', () => {
-    let guardWithCasl: ProjectMembershipGuard;
-
-    beforeEach(() => {
-      guardWithCasl = new ProjectMembershipGuard(access, new Reflector(), new KodaCaslAbilityFactory());
-      membershipRepo.findBySlug.mockResolvedValue({ id: 'p1', slug: 'team', deletedAt: null });
-      // US-001: agents reach the project through `project.read`; the legacy roster read is not consulted.
-      membershipRepo.isAgentOnRoster.mockResolvedValue(true);
-    });
-
-    it('attaches ProjectContext with the membership role, querying membership exactly once', async () => {
-      membershipRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
-      const req: Record<string, unknown> = { params: { slug: 'team' }, user: memberUser };
-      await expect(guardWithCasl.canActivate(makeExecutionContext(req, routes.transition, TicketRoutesStub))).resolves.toBe(true);
-      expect(req.projectContext).toEqual({ project: { id: 'p1', slug: 'team' }, role: 'DEVELOPER' });
-      expect(membershipRepo.findMembershipRole).toHaveBeenCalledTimes(1);
-    });
-
-    it('refuses a VIEWER on a TRANSITION route before the handler runs', async () => {
-      membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
-      const req = { params: { slug: 'team' }, user: memberUser };
-      await expect(guardWithCasl.canActivate(makeExecutionContext(req, routes.transition, TicketRoutesStub)))
-        .rejects.toBeInstanceOf(ForbiddenAppException);
-    });
-
-    it('refuses a DEVELOPER on DELETE Ticket and allows a project ADMIN', async () => {
-      membershipRepo.findMembershipRole.mockResolvedValueOnce('DEVELOPER').mockResolvedValueOnce('ADMIN');
-      const ctx = () => makeExecutionContext({ params: { slug: 'team' }, user: memberUser }, routes.remove, TicketRoutesStub);
-      await expect(guardWithCasl.canActivate(ctx())).rejects.toBeInstanceOf(ForbiddenAppException);
-      await expect(guardWithCasl.canActivate(ctx())).resolves.toBe(true);
-    });
-
-    it('evaluates agents with their agent-role ability, exactly as @RequiredPermission did', async () => {
-      const reviewer = { ...agentPrincipal, agentRoles: ['REVIEWER'] as const };
-      const noTransition = { ...agentPrincipal, agentRoles: ['TRIAGER'] as const };
-      await expect(guardWithCasl.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: reviewer }, routes.transition, TicketRoutesStub))).resolves.toBe(true);
-      await expect(guardWithCasl.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: noTransition }, routes.transition, TicketRoutesStub)))
-        .rejects.toBeInstanceOf(ForbiddenAppException);
-      expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
-    });
-
-    it('exemptAgents skips the permission for agents but still enforces it for users', async () => {
-      const triager = { ...agentPrincipal, agentRoles: [] as const };
-      await expect(guardWithCasl.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: triager }, routes.assignLabel, TicketRoutesStub))).resolves.toBe(true);
-      membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
-      await expect(guardWithCasl.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: memberUser }, routes.assignLabel, TicketRoutesStub)))
-        .rejects.toBeInstanceOf(ForbiddenAppException);
-    });
-
-    it('fails closed when a @ProjectPermission route has no :slug param', async () => {
-      await expect(guardWithCasl.canActivate(makeExecutionContext({ params: {}, user: memberUser }, routes.transition, TicketRoutesStub)))
-        .rejects.toBeInstanceOf(ForbiddenAppException);
-    });
-
-    it('fails closed on a @ProjectPermission route when no ability factory is wired', async () => {
-      const bare = new ProjectMembershipGuard(access, new Reflector());
-      membershipRepo.findMembershipRole.mockResolvedValue('ADMIN');
-      await expect(bare.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: memberUser }, routes.transition, TicketRoutesStub)))
-        .rejects.toBeInstanceOf(ForbiddenAppException);
-    });
-
-    it('ignores a projectRole already on the principal (e.g. a forged claim)', async () => {
-      membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
-      const forged = { ...memberUser, projectRole: 'ADMIN' };
-      await expect(guardWithCasl.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: forged }, routes.remove, TicketRoutesStub)))
-        .rejects.toBeInstanceOf(ForbiddenAppException);
-    });
-
-    it('a @ProjectRoles route reads the resolved role without a second membership query', async () => {
-      membershipRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
-      const kb = new KbWriteRouteStub();
-      await expect(guardWithCasl.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: memberUser }, kb.addDocument, KbWriteRouteStub))).resolves.toBe(true);
-      expect(membershipRepo.findMembershipRole).toHaveBeenCalledTimes(1);
-    });
-  });
-
   describe('ProjectMembershipGuard - slug sources', () => {
     let slugGuard: ProjectMembershipGuard;
     beforeEach(() => {
-      slugGuard = new ProjectMembershipGuard(access, new Reflector(), new KodaCaslAbilityFactory());
+      slugGuard = new ProjectMembershipGuard(access, new Reflector());
       membershipRepo.findBySlug.mockResolvedValue({ id: 'p1', slug: 'p1', deletedAt: null });
       membershipRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
     });
@@ -570,7 +414,7 @@ describe('ProjectMembershipGuard (US-001)', () => {
     it('US-001 AC-9: resolves body slug and attaches project context for an accessible project', async () => {
       const req = request({ projectSlug: 'p1' });
       await expect(activate(req, CodeIntelRoutesStub.prototype.bodySlug)).resolves.toBe(true);
-      expect(req.projectContext).toEqual({ project: { id: 'p1', slug: 'p1' }, role: 'DEVELOPER' });
+      expect(req.projectContext).toEqual({ project: { id: 'p1', slug: 'p1' } });
     });
 
     it('US-001 AC-10: unknown body slug returns project 404', async () => {
@@ -600,54 +444,55 @@ describe('ProjectMembershipGuard (US-001)', () => {
   });
 
   describe('ProjectMembershipGuard - query slug (Track 3 Slice 4)', () => {
-    let guardWithCasl: ProjectMembershipGuard;
+    let slugGuard: ProjectMembershipGuard;
 
     beforeEach(() => {
-      guardWithCasl = new ProjectMembershipGuard(access, new Reflector(), new KodaCaslAbilityFactory());
+      slugGuard = new ProjectMembershipGuard(access, new Reflector());
       membershipRepo.findBySlug.mockResolvedValue({ id: 'p1', slug: 'team', deletedAt: null });
     });
 
     const run = (query: Record<string, unknown>, handler = intel.searchSymbols, user: KodaPrincipal = memberUser) => {
       const req: Record<string, unknown> = { params: {}, query, user };
-      return { req, result: guardWithCasl.canActivate(makeExecutionContext(req, handler, CodeIntelRoutesStub)) };
+      return { req, result: slugGuard.canActivate(makeExecutionContext(req, handler, CodeIntelRoutesStub)) };
     };
 
-    it('resolves the project from the opted-in query key and admits a DEVELOPER', async () => {
-      membershipRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
+    it('resolves the project from the opted-in query key and admits a member', async () => {
+      membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
       const { req, result } = run({ projectSlug: 'team' });
       await expect(result).resolves.toBe(true);
-      expect(req.projectContext).toEqual({ project: { id: 'p1', slug: 'team' }, role: 'DEVELOPER' });
+      expect(req.projectContext).toEqual({ project: { id: 'p1', slug: 'team' } });
     });
 
-    it('refuses a VIEWER (no READ CodeIntel)', async () => {
-      membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
+    it('refuses a caller without project.read in the project', async () => {
+      refusedKeys = new Set([PROJECT_ACCESS_KEY]);
       await expect(run({ projectSlug: 'team' }).result).rejects.toBeInstanceOf(ForbiddenAppException);
     });
 
-    it('refuses a non-member', async () => {
-      membershipRepo.findMembershipRole.mockResolvedValue(null);
-      await expect(run({ projectSlug: 'team' }).result).rejects.toBeInstanceOf(ForbiddenAppException);
+    it('refuses a caller for a project that does not exist', async () => {
+      membershipRepo.findBySlug.mockResolvedValue(null);
+      await expect(run({ projectSlug: 'team' }).result).rejects.toBeInstanceOf(NotFoundAppException);
     });
 
     it.each([
       ['missing', {}],
       ['empty', { projectSlug: '' }],
       ['repeated', { projectSlug: ['team', 'other'] }],
-    ])('fails closed on a %s projectSlug without looking the project up', async (_label, query) => {
-      await expect(run(query).result).rejects.toBeInstanceOf(ForbiddenAppException);
+    ])('treats a %s projectSlug as no slug: resolves true without looking the project up', async (_label, query) => {
+      const { req, result } = run(query);
+      await expect(result).resolves.toBe(true);
+      expect(req.projectContext).toBeUndefined();
       expect(membershipRepo.findBySlug).not.toHaveBeenCalled();
     });
 
     it('ignores the query on routes that did not opt in', async () => {
-      await expect(run({ projectSlug: 'team' }, intel.withoutSlugSource).result).rejects.toBeInstanceOf(ForbiddenAppException);
+      await expect(run({ projectSlug: 'team' }, intel.withoutSlugSource).result).resolves.toBe(true);
       await expect(run({ projectSlug: 'team' }, intel.plainRoute).result).resolves.toBe(true);
       expect(membershipRepo.findBySlug).not.toHaveBeenCalled();
     });
 
     it('prefers params.slug over the query', async () => {
-      membershipRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
       const req: Record<string, unknown> = { params: { slug: 'team' }, query: { projectSlug: 'elsewhere' }, user: memberUser };
-      await expect(guardWithCasl.canActivate(makeExecutionContext(req, intel.searchSymbols, CodeIntelRoutesStub))).resolves.toBe(true);
+      await expect(slugGuard.canActivate(makeExecutionContext(req, intel.searchSymbols, CodeIntelRoutesStub))).resolves.toBe(true);
       expect(membershipRepo.findBySlug.mock.calls[0][0]).toBe('team');
     });
   });

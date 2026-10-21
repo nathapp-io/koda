@@ -7,10 +7,8 @@ import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
 import { ValidationAppException, ForbiddenAppException, Page } from '@nathapp/nestjs-common';
-import { PROJECT_PERMISSION_KEY } from '../projects/project-permission.decorator';
 import { REQUIRES_METADATA, RequiresMetadata } from '../permissions/requires.decorator';
 import { PermissionService } from '../permissions/permission.service';
-import { withProjectRole } from '../projects/project-context';
 import { ProjectsService } from '../projects/projects.service';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
@@ -111,8 +109,8 @@ describe('TicketsController', () => {
     assign: vi.fn(),
   };
 
-  // ProjectContext a global-ADMIN caller would receive from ProjectMembershipGuard.
-  const adminProject = { project: { id: 'proj-1', slug: 'koda' }, role: 'ADMIN' };
+  // ProjectContext a request receives from ProjectMembershipGuard (permissions P1 US-004: no role).
+  const adminProject = { project: { id: 'proj-1', slug: 'koda' } };
 
   const mockTransitionsService = {
     verify: vi.fn(),
@@ -323,10 +321,10 @@ describe('TicketsController', () => {
   });
 
   describe('GET :ref (M25 allowedActions)', () => {
-    it('GET :ref returns allowedActions computed for the enriched principal', async () => {
+    it('GET :ref hands the principal itself to the service', async () => {
       mockTicketsService.findByRefWithActions.mockResolvedValue({ id: 't1', allowedActions: ['start'] });
-      const res = await controller.findByRef('koda', 'KODA-1', mockMemberUser, { project: { id: 'p1', slug: 'koda' }, role: 'DEVELOPER' });
-      expect(mockTicketsService.findByRefWithActions).toHaveBeenCalledWith('koda', 'KODA-1', { ...mockMemberUser, projectRole: 'DEVELOPER' });
+      const res = await controller.findByRef('koda', 'KODA-1', mockMemberUser, adminProject);
+      expect(mockTicketsService.findByRefWithActions).toHaveBeenCalledWith('koda', 'KODA-1', mockMemberUser);
       expect(res).toEqual(expect.objectContaining({ data: { id: 't1', allowedActions: ['start'] } }));
     });
   });
@@ -523,7 +521,17 @@ describe('TicketsController', () => {
       await controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockMemberUser, adminProject);
 
       expect(mockProjectsService.assertProjectMembership).not.toHaveBeenCalled();
-      expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', {}, withProjectRole(mockMemberUser, 'ADMIN'));
+      expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', {}, mockMemberUser);
+    });
+
+    it('AC-6 (US-004): assign hands the received principal object itself to the service', async () => {
+      mockTicketsService.assign.mockResolvedValue(mockTicket);
+
+      await controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockMemberUser, adminProject);
+
+      // Identity, not shape: the very object the handler received, never a spread copy.
+      expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', {}, mockMemberUser);
+      expect(vi.mocked(service.assign).mock.calls[0]?.[3]).toBe(mockMemberUser);
     });
 
     it('AC9 boundary: assign called directly does not resolve the project by slug either', async () => {
@@ -557,8 +565,7 @@ describe('TicketsController', () => {
       const metadata = Reflect.getMetadata(REQUIRES_METADATA, fn) as RequiresMetadata;
 
       expect(metadata).toEqual({ keys, mode, enforcedBy: 'guard' });
-      // The legacy decorators are gone from the migrated routes, so only one mechanism decides them.
-      expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeUndefined();
+      // The nathapp permission decorator is gone from the migrated routes, so only one mechanism decides them.
       expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
     });
 
@@ -583,13 +590,13 @@ describe('TicketsController', () => {
       expect(Reflect.getMetadata('__guards__', TicketsController)).toBeUndefined();
     });
 
-    it('passes the principal enriched with the resolved project role to the service', async () => {
-      const project = { project: { id: 'p1', slug: 'koda' }, role: 'DEVELOPER' };
-      mockTicketsService.update.mockResolvedValue({ id: 't1' });
-      await controller.update('koda', 'KODA-1', { title: 'x' }, mockMemberUser, project);
-      expect(mockTicketsService.update).toHaveBeenCalledWith(
-        'koda', 'KODA-1', { title: 'x' }, { ...mockMemberUser, projectRole: 'DEVELOPER' },
-      );
+    it('AC-5 (US-004): start hands transitionsService the principal object it received', async () => {
+      mockTransitionsService.start.mockResolvedValue({ ticket: mockTicket });
+
+      await controller.start('koda', 'KODA-1', mockMemberUser, adminProject);
+
+      expect(mockTransitionsService.start).toHaveBeenCalledWith('koda', 'KODA-1', mockMemberUser);
+      expect(vi.mocked(mockTransitionsService.start).mock.calls[0]?.[2]).toBe(mockMemberUser);
     });
   });
 
@@ -637,7 +644,7 @@ describe('TicketsController', () => {
         'koda',
         'KODA-1',
         'Verified against staging',
-        withProjectRole(mockAdminUser, 'ADMIN'),
+        mockAdminUser,
       );
     });
 
@@ -646,35 +653,33 @@ describe('TicketsController', () => {
 
       await controller.start('koda', 'KODA-1', mockAdminUser, adminProject);
 
-      expect(mockTransitionsService.start).toHaveBeenCalledWith('koda', 'KODA-1', withProjectRole(mockAdminUser, 'ADMIN'));
+      expect(mockTransitionsService.start).toHaveBeenCalledWith('koda', 'KODA-1', mockAdminUser);
     });
   });
 
   describe('POST :ref/close (reason required, key checked by RequiresGuard)', () => {
-    const project = (role: string | null) => ({ project: { id: 'p1', slug: 'koda' }, role });
+    const project = { project: { id: 'p1', slug: 'koda' } };
 
-    // Permissions P1 (US-003): the role check moved to RequiresGuard / ticket.transition.close, which
-    // runs before this handler — so the handler answers only body validation and the service call.
-    it('lets a project DEVELOPER through to the service (the guard, not the role, decides)', async () => {
+    // Permissions P1 (US-003/US-004): the key check lives in RequiresGuard / ticket.transition.close and
+    // the request carries no project role, so the handler answers only body validation and the service call.
+    it('lets a project member through to the service (the guard, not a role, decides)', async () => {
       mockTransitionsService.close.mockResolvedValue({ ticket: { id: 't1', status: 'CLOSED' }, comment: {}, activity: {} });
 
-      await controller.close('koda', 'KODA-1', { body: 'why' }, mockMemberUser, project('DEVELOPER'));
+      await controller.close('koda', 'KODA-1', { body: 'why' }, mockMemberUser, project);
 
-      expect(mockTransitionsService.close).toHaveBeenCalledWith(
-        'koda', 'KODA-1', 'why', { ...mockMemberUser, projectRole: 'DEVELOPER' },
-      );
+      expect(mockTransitionsService.close).toHaveBeenCalledWith('koda', 'KODA-1', 'why', mockMemberUser);
     });
 
     it('lets an agent through to the service (the guard, not the principal type, decides)', async () => {
       mockTransitionsService.close.mockResolvedValue({ ticket: { id: 't1', status: 'CLOSED' }, comment: {}, activity: {} });
 
-      await controller.close('koda', 'KODA-1', { body: 'why' }, mockAgent, project(null));
+      await controller.close('koda', 'KODA-1', { body: 'why' }, mockAgent, project);
 
-      expect(mockTransitionsService.close).toHaveBeenCalled();
+      expect(mockTransitionsService.close).toHaveBeenCalledWith('koda', 'KODA-1', 'why', mockAgent);
     });
 
     it.each([undefined, '', '   '])('400 for a blank reason %j, without reaching the service', async (body) => {
-      await expect(controller.close('koda', 'KODA-1', { body }, mockMemberUser, project('ADMIN')))
+      await expect(controller.close('koda', 'KODA-1', { body }, mockMemberUser, project))
         .rejects.toBeInstanceOf(ValidationAppException);
       expect(mockTransitionsService.close).not.toHaveBeenCalled();
     });
@@ -683,15 +688,15 @@ describe('TicketsController', () => {
     // pass undefined for @Body(), which used to TypeError on dto.body and 500.
     // The controller now defaults the dto, so the missing reason is a 400.
     it('400 when the request carries no body at all', async () => {
-      await expect(controller.close('koda', 'KODA-1', undefined, mockMemberUser, project('ADMIN')))
+      await expect(controller.close('koda', 'KODA-1', undefined, mockMemberUser, project))
         .rejects.toBeInstanceOf(ValidationAppException);
       expect(mockTransitionsService.close).not.toHaveBeenCalled();
     });
 
-    it('closes with a reason, passing the enriched principal', async () => {
+    it('closes with a reason, passing the principal itself', async () => {
       mockTransitionsService.close.mockResolvedValue({ ticket: { id: 't1', status: 'CLOSED' }, comment: {}, activity: {} });
-      const res = await controller.close('koda', 'KODA-1', { body: 'dup' }, mockMemberUser, project('ADMIN'));
-      expect(mockTransitionsService.close).toHaveBeenCalledWith('koda', 'KODA-1', 'dup', { ...mockMemberUser, projectRole: 'ADMIN' });
+      const res = await controller.close('koda', 'KODA-1', { body: 'dup' }, mockMemberUser, project);
+      expect(mockTransitionsService.close).toHaveBeenCalledWith('koda', 'KODA-1', 'dup', mockMemberUser);
       expect(res).toEqual(expect.objectContaining({ data: { id: 't1', status: 'CLOSED' } }));
     });
   });

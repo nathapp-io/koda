@@ -4,8 +4,10 @@ import { TRANSITION_RULES } from './ticket-transitions';
 
 /**
  * `close()` is an admin override (Track 3 ruling 2026-09-27): global ADMIN or
- * project ADMIN only; agents never. `principal` must be the role-enriched one
- * (withProjectRole), so projectRole is the role in the project being accessed.
+ * project ADMIN only; agents never. `principal.projectRole` is only ever set by a
+ * caller outside the request path (permissions P1 US-004 stopped decorating the
+ * principal with the project role), and US-005 deletes both the field and this
+ * override.
  */
 export function canOverrideClose(principal: KodaPrincipal): boolean {
   if (!isUserPrincipal(principal)) return false;

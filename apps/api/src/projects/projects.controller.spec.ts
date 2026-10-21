@@ -10,7 +10,6 @@ import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-com
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { ProjectContext } from './project-context';
 import { ProjectAccessService } from './project-access.service';
-import { PROJECT_PERMISSION_KEY } from './project-permission.decorator';
 import { ProjectResponseDto } from './dto/project-response.dto';
 import { PermissionService } from '../permissions/permission.service';
 import { REQUIRES_METADATA, RequiresMetadata } from '../permissions/requires.decorator';
@@ -85,7 +84,6 @@ describe('ProjectsController route permission metadata (US-007)', () => {
     });
     // The legacy decorators are gone from the migrated routes, so only one mechanism decides them.
     expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
-    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeUndefined();
   });
 
   /** A route with a `:slug` lists the membership guard first, in the same @UseGuards call. */
@@ -277,7 +275,7 @@ describe('ProjectsController', () => {
   describe('getChangeImpact', () => {
     // Slice 4: the route is guarded by ProjectMembershipGuard, so the handler
     // receives the guard-resolved ProjectContext instead of a slug+principal.
-    const adminCtx: ProjectContext = { project: { id: 'proj-1', slug: 'alpha' }, role: 'ADMIN' };
+    const adminCtx: ProjectContext = { project: { id: 'proj-1', slug: 'alpha' } };
 
     it('throws BadRequestException when required params are missing', async () => {
       await expect(
@@ -494,7 +492,7 @@ describe('ProjectsController', () => {
     });
 
     // US-007 / US-001: `isAdmin` is the `can` answer for `agent.update`, so every case states it.
-    const projectCtx: ProjectContext = { project: { id: 'proj-1', slug: 'alpha' }, role: 'DEVELOPER' };
+    const projectCtx: ProjectContext = { project: { id: 'proj-1', slug: 'alpha' } };
     const canAllow = () => permissions.can.mockResolvedValue({ allowed: true, reason: 'granted' });
     const canDeny = () => permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
 

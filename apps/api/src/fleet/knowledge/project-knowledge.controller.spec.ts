@@ -36,7 +36,7 @@ import { KnowledgeSearchService } from './knowledge-search.service';
 import { KnowledgePatternsBodyDto, KnowledgeSearchBodyDto, ProjectKnowledgeController } from './project-knowledge.controller';
 
 const PROJECT_ID = 'proj-1';
-const PROJECT: ProjectContext = { project: { id: PROJECT_ID, slug: 'koda' }, role: 'DEVELOPER' };
+const PROJECT: ProjectContext = { project: { id: PROJECT_ID, slug: 'koda' } };
 
 const HIT: KnowledgeHit = {
   source: 'repo', repoId: 'repo-1', owner: 'o', name: 'n', path: 'docs/adr/1.md', sha: 'sha-1', anchor: 'adr',

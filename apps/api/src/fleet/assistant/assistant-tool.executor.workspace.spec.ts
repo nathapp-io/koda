@@ -157,12 +157,16 @@ describe('S5b-R7 project argument: WORKSPACE threads validate it', () => {
     expect(input).toEqual({ project: 'b', text: 'x' });
   });
 
-  it('the ability check uses the role resolveMembership answered for the resolved project', async () => {
+  it('the key check uses the caller principal for the resolved project', async () => {
     let seen: ToolContext | undefined;
     const tool = makeTool({ execute: async (ctx: ToolContext) => { seen = ctx; return 'ok'; } });
-    const { executor } = setup(tool, { roles: { b: 'VIEWER' } });
+    const { executor, access, permissions } = setup(tool, { roles: { b: 'VIEWER' } });
     await executor.execute(call({ project: 'b' }));
-    expect(seen?.actor.projectRole).toBe('VIEWER');
+    expect(access.resolveMembership).toHaveBeenCalledWith('b-id', expect.objectContaining({ id: 'u1' }));
+    expect(permissions.can).toHaveBeenCalledWith(expect.objectContaining({ id: 'u1' }), 'ticket.read', { projectId: 'b-id' });
+    // US-004: the resolved role admits the call; it does not decorate the actor the tool receives.
+    expect(seen?.actor).toMatchObject({ id: 'u1', actorType: 'user' });
+    expect(Object.prototype.hasOwnProperty.call(seen?.actor, 'projectRole')).toBe(false);
   });
 
   it('AC-10: an unknown slug answers not_found: project and no row names the lookup', async () => {
@@ -210,8 +214,12 @@ describe('S5b-R7 project argument: WORKSPACE threads validate it', () => {
     expect(result.content).toBe('forbidden: koda_search_tickets needs fleet.job.dispatch on b');
     expect(tool.execute).not.toHaveBeenCalled();
     expect(rows[0]).toMatchObject({ outcome: 'forbidden', projectId: 'b-id' });
-    // The key is asked in the project the call resolved, never the thread's home project.
-    expect(permissions.can).toHaveBeenCalledWith(expect.objectContaining({ id: 'u1', projectRole: 'VIEWER' }), 'fleet.job.dispatch', { projectId: 'b-id' });
+    // The key is asked in the project the call resolved, never the thread's home project, and for the
+    // caller's own principal (US-004: the resolved role no longer decorates it).
+    const [checkedActor] = vi.mocked(permissions.can).mock.calls.at(-1) ?? [];
+    expect(checkedActor).toMatchObject({ id: 'u1' });
+    expect(Object.prototype.hasOwnProperty.call(checkedActor, 'projectRole')).toBe(false);
+    expect(vi.mocked(permissions.can).mock.calls.at(-1)?.[2]).toEqual({ projectId: 'b-id' });
   });
 
 });
@@ -250,7 +258,8 @@ describe('1d2-D3 and 1d2-D5: workspace-scoped tools', () => {
     expect(access.findProjectIdBySlug).not.toHaveBeenCalled();
     // US-004: a workspace-scope tool takes no key check; the listing is the caller's reachable projects, as before.
     expect(permissions.can).not.toHaveBeenCalled();
-    expect(seen).toMatchObject({ projectId: 'home-id', projectSlug: 'home', actor: { id: 'u1', projectRole: undefined } });
+    expect(seen).toMatchObject({ projectId: 'home-id', projectSlug: 'home', actor: { id: 'u1' } });
+    expect(Object.prototype.hasOwnProperty.call(seen?.actor, 'projectRole')).toBe(false);
     expect(rows[0]).toMatchObject({ projectId: 'home-id' });
   });
 });

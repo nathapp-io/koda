@@ -127,8 +127,8 @@ function buildBash() {
 const statusOf = (p: Promise<unknown>): Promise<number> => p.then(() => 0, (e: { httpStatus?: number }) => e.httpStatus ?? -1);
 const ADMIN_CALLER: ApprovalCaller & { principal: KodaPrincipal } = { id: 'root', globalAdmin: true, principal: userPrincipal('root', 'ADMIN') };
 const DEV_CALLER: ApprovalCaller & { principal: KodaPrincipal } = { id: 'dev', globalAdmin: false, principal: userPrincipal('dev') };
-const PROJECT_ADMIN = { kind: 'project' as const, projectId: 'p1', role: 'ADMIN' };
-const PROJECT_DEV = { kind: 'project' as const, projectId: 'p1', role: 'DEVELOPER' };
+const PROJECT_ADMIN = { kind: 'project' as const, projectId: 'p1' };
+const PROJECT_DEV = { kind: 'project' as const, projectId: 'p1' };
 
 describe('ApprovalsService.decide (budget)', () => {
   it('keep_paused rejects the approval without resuming', async () => {
@@ -243,7 +243,7 @@ describe('bash decide (S1.5 §2.3, plan D265-D267)', () => {
   const pending = { id: 'a1', type: 'nax_bash_escalate', status: 'pending', projectId: 'p1', jobId: 'j1', leaseEpoch: 2,
     naxAskId: 'ask-1f2e3d4c', expiresAt: new Date(NOW.getTime() + 60_000), payload: { command: 'ls', commandTruncated: false, options: ['allow', 'deny'] } };
   const running = { id: 'j1', state: 'RUNNING', leaseEpoch: 2, runnerId: 'r1', requestedById: 'u9', requestedByType: 'USER' };
-  const dev = { kind: 'project', projectId: 'p1', role: 'DEVELOPER' } as const;
+  const dev = { kind: 'project', projectId: 'p1' } as const;
 
   it('a DEVELOPER allows: approved, APPROVAL_ANSWER for the job runner and epoch, notify after commit', async () => {
     const { service, seed, jobRepo, notifier } = buildBash();
@@ -266,17 +266,10 @@ describe('bash decide (S1.5 §2.3, plan D265-D267)', () => {
     const { service, seed, permissions, jobRepo } = buildBash();
     seed(pending);
     permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
-    await expect(service.decide(DEV_CALLER, { ...dev, role: null }, 'a1', { decision: 'deny' }, NOW)).rejects.toThrow(ForbiddenAppException);
+    await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'deny' }, NOW)).rejects.toThrow(ForbiddenAppException);
     expect(permissions.can).toHaveBeenCalledWith(DEV_CALLER.principal, 'fleet.approval.decide.bash', { projectId: 'p1' });
     // The key is answered before every lock and every write (spec §2.3).
     expect(jobRepo.lockById).not.toHaveBeenCalled();
-  });
-
-  it('ignores the route role: a null role whose keys allow it decides (US-006)', async () => {
-    const { service, seed, jobRepo } = buildBash();
-    seed(pending); jobRepo.lockById.mockResolvedValue(running);
-    await expect(service.decide(DEV_CALLER, { ...dev, role: null }, 'a1', { decision: 'deny' }, NOW)).resolves
-      .toEqual(expect.objectContaining({ status: 'rejected' }));
   });
 
   it('refuses an agent deciding the ask of the job it requested (US-006 security ruling)', async () => {

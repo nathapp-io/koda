@@ -62,7 +62,7 @@ const user: KodaPrincipal = { actorType: 'user', id: 'u1', role: 'MEMBER', email
 
 const projectRequest = (): Partial<ProjectScopedRequest> => ({
   user,
-  projectContext: { project: { id: 'p1', slug: 'p1' }, role: 'DEVELOPER' },
+  projectContext: { project: { id: 'p1', slug: 'p1' } },
 });
 
 /** The thrown `AppException`, asserted to be one so `prefix`/`httpStatus` can be read by name. */

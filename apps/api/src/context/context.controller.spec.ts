@@ -54,7 +54,6 @@ const agentPrincipal: KodaPrincipal = {
 
 const projectContext: ProjectContext = {
   project: { id: 'project-1', slug: 'my-project' },
-  role: 'ADMIN',
 };
 
 describe('ContextController route authorization metadata', () => {

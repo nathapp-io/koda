@@ -24,8 +24,8 @@ import { ApprovalCountsDto } from './dto/approval-counts.dto';
 import type { DecideApprovalDto } from './dto/decide-approval.dto';
 import { FleetApprovalDto } from './dto/fleet-approval.dto';
 
-/** Which prefix a request came through (plan D230); `role` is the caller's project role (null for an agent). */
-export type ApprovalRoute = { kind: 'admin' } | { kind: 'project'; projectId: string; role: string | null };
+/** Which prefix a request came through (plan D230). Permissions P1 US-004: the project variant carries the project's id only. */
+export type ApprovalRoute = { kind: 'admin' } | { kind: 'project'; projectId: string };
 export interface ApprovalCaller { id: string; globalAdmin: boolean }
 
 /** The decide key of each approval type (permissions P1d US-006): the type, never the route, chooses it. */

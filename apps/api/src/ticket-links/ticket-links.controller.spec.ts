@@ -4,7 +4,6 @@ import { TicketLinksController } from './ticket-links.controller';
 import { TicketLinksService } from './ticket-links.service';
 import { CreateTicketLinkDto } from './dto/create-ticket-link.dto';
 import { ProjectAccessService } from '../projects/project-access.service';
-import { PROJECT_PERMISSION_KEY } from '../projects/project-permission.decorator';
 import { PermissionService } from '../permissions/permission.service';
 import { REQUIRES_METADATA, RequiresMetadata } from '../permissions/requires.decorator';
 import type { AgentPrincipal, KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
@@ -48,7 +47,6 @@ describe('TicketLinksController route permission metadata (US-006)', () => {
     expect(metadata).toEqual({ keys, mode: 'all', enforcedBy });
     // The legacy decorators are gone from the migrated routes, so only one mechanism decides them.
     expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
-    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeUndefined();
   });
 
   it.each(requiresCases)('%s runs ProjectMembershipGuard before RequiresGuard', (handler) => {

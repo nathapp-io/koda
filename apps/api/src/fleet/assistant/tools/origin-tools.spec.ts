@@ -43,13 +43,13 @@ describe('origin-aware tools', () => {
       expect.objectContaining({ beforeSupersede: expect.any(Function) }),
     );
   });
-  it('AC-12: approvals use null for agents and preserve legacy user fixture roles', async () => {
+  it('AC-12: approvals use the project id only, whatever the actor carries', async () => {
     const list = vi.fn(async () => ({ records: [], hasNext: false }));
     const tool = listApprovalsTool({ list } as unknown as ApprovalsService);
     await tool.execute(context({ actor: { ...agent, ...{ projectRole: 'ADMIN' } } }), tool.parse({}));
-    expect(list).toHaveBeenLastCalledWith({ kind: 'project', projectId: 'p1', role: null }, { status: 'pending' }, { current: 1, size: 20 });
+    expect(list).toHaveBeenLastCalledWith({ kind: 'project', projectId: 'p1' }, { status: 'pending' }, { current: 1, size: 20 });
     const user = { id: 'u1', projectRole: 'DEVELOPER' } as UserPrincipal;
     await tool.execute(context({ actor: user }), tool.parse({}));
-    expect(list).toHaveBeenLastCalledWith({ kind: 'project', projectId: 'p1', role: 'DEVELOPER' }, { status: 'pending' }, { current: 1, size: 20 });
+    expect(list).toHaveBeenLastCalledWith({ kind: 'project', projectId: 'p1' }, { status: 'pending' }, { current: 1, size: 20 });
   });
 });

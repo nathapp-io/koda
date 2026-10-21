@@ -231,7 +231,23 @@ describe('AssistantToolExecutor', () => {
     const tool = makeTool({ execute: async (ctx: ToolContext) => { seen = ctx; return 'ok'; } });
     const { executor } = setup(tool, { role: 'DEVELOPER' });
     await executor.execute(call());
-    expect(seen).toMatchObject({ projectId: 'p1', projectSlug: 'web', threadId: 't1', jobId: 'j1', actor: { id: 'u1', actorType: 'user', projectRole: 'DEVELOPER' } });
+    expect(seen).toMatchObject({ projectId: 'p1', projectSlug: 'web', threadId: 't1', jobId: 'j1', actor: { id: 'u1', actorType: 'user' } });
+  });
+
+  it('AC-9 (US-004): a project tool runs with the caller principal itself, which carries no projectRole property', async () => {
+    let seen: ToolContext | undefined;
+    const tool = makeTool({ execute: async (ctx: ToolContext) => { seen = ctx; return 'ok'; } });
+    const { executor, access, permissions } = setup(tool, { role: 'DEVELOPER' });
+
+    await executor.execute(call());
+
+    // The membership was resolved (the caller is admitted)…
+    expect(access.resolveMembership).toHaveBeenCalledWith('p1', expect.objectContaining({ id: 'u1' }));
+    // …but the actor the tool receives is the principal as it is, with no role decorating it.
+    expect(seen?.actor).toMatchObject({ id: 'u1', actorType: 'user' });
+    expect(Object.prototype.hasOwnProperty.call(seen?.actor, 'projectRole')).toBe(false);
+    // The key check reads the same undecorated principal.
+    expect(Object.prototype.hasOwnProperty.call(permissions.can.mock.calls[0]?.[0], 'projectRole')).toBe(false);
   });
 
   it('AC-11: a 40000-byte result is capped to 16384 bytes and ends with [truncated]', async () => {
@@ -458,10 +474,10 @@ describe('S5b 2a-D8: checkAction and executeAction', () => {
     const { executor } = setup(tool, { permissions });
 
     expect(await executor.checkAction(pendingAction())).toBe('forbidden');
-    // The tool's own catalog key, asked for the requester acting with the action project's role (never the thread's).
-    expect(permissions.can).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'u1', projectRole: 'DEVELOPER' }), 'comment.create', { projectId: 'p2' },
-    );
+    // The tool's own catalog key, asked for the requester under the action's project (never the thread's),
+    // and for the principal as it is — US-004 stopped decorating it with the project role.
+    expect(permissions.can).toHaveBeenCalledWith(expect.objectContaining({ id: 'u1' }), 'comment.create', { projectId: 'p2' });
+    expect(Object.prototype.hasOwnProperty.call(permissions.can.mock.calls[0]?.[0], 'projectRole')).toBe(false);
   });
 
   it('AC-8 boundary: the same action is approved when the requester holds the key', async () => {
@@ -527,9 +543,22 @@ describe('S5b 2a-D8: checkAction and executeAction', () => {
     expect(await executor.executeAction(pendingAction())).toEqual({ ok: true, text: 'comment c1' });
     expect(seen).toMatchObject({
       projectId: 'p2', projectSlug: 'ops', threadId: 't1', jobId: 'j1',
-      actor: { id: 'u1', actorType: 'user', projectRole: 'DEVELOPER' },
+      actor: { id: 'u1', actorType: 'user' },
     });
     expect(access.resolveMembership).toHaveBeenCalledWith('p2', expect.objectContaining({ id: 'u1' }));
+  });
+
+  it('AC-10 (US-004): an approved action runs with an actor that carries no projectRole property', async () => {
+    let seen: ToolContext | undefined;
+    const tool = makeTool({ execute: async (ctx: ToolContext) => { seen = ctx; return 'comment c1'; } });
+    const { executor, access } = setup(tool, { role: 'DEVELOPER' });
+
+    expect(await executor.executeAction(pendingAction())).toEqual({ ok: true, text: 'comment c1' });
+
+    // Membership was resolved for the requester, so the actor is still the requester — just not decorated.
+    expect(access.resolveMembership).toHaveBeenCalledWith('p2', expect.objectContaining({ id: 'u1' }));
+    expect(seen?.actor).toMatchObject({ id: 'u1', actorType: 'user' });
+    expect(Object.prototype.hasOwnProperty.call(seen?.actor, 'projectRole')).toBe(false);
   });
 
   it('executeAction re-parses the stored input and answers the tool text', async () => {

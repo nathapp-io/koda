@@ -222,8 +222,8 @@ export class TicketsService {
   }
 
   /**
-   * M25: the detail view plus the actions the caller may take. `principal`
-   * must be role-enriched (withProjectRole) by the controller.
+   * M25: the detail view plus the actions the caller may take. `principal` is the caller's own principal
+   * (permissions P1 US-004: the controller no longer decorates it with a project role).
    *
    * Permissions P1 (US-004): the actions come from the caller's keys in this project, not from the
    * legacy CASL ability — an action is offered when the caller holds at least one of the keys

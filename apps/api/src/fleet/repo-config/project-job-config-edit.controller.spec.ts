@@ -4,7 +4,6 @@
  */
 import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
 import { REQUIRES_METADATA, type RequiresMetadata } from '../../permissions/requires.decorator';
-import { PROJECT_PERMISSION_KEY } from '../../projects/project-permission.decorator';
 import { ProjectJobConfigEditController } from './project-job-config-edit.controller';
 
 describe('ProjectJobConfigEditController route keys (US-007)', () => {
@@ -26,7 +25,6 @@ describe('ProjectJobConfigEditController route keys (US-007)', () => {
 
   it('get carries no legacy decorator, so one mechanism decides it', () => {
     expect(Reflect.getMetadata(PERMISSION_KEY, handler())).toBeUndefined();
-    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, handler())).toBeUndefined();
   });
 
   it('keeps the controller class free of a class-level key or membership guard', () => {

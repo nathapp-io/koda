@@ -14,15 +14,14 @@ import { UserAuthState, userAuthStateCacheKey, userTokenVersionCacheTag } from '
  * We store role + email in IPrincipal.extra so they survive the principal pipeline
  * without breaking the IPrincipal contract.
  *
- * SECURITY: `projectRole` is NEVER read from the JWT. The CASL ability factory
- * honours `UserPrincipal.projectRole`, but the project membership role is
- * always resolved from the DB by ProjectMembershipGuard and re-attached via
- * `withProjectRole`. Allowing a forged JWT claim (e.g. `projectRole: 'ADMIN'`)
- * to leak into the principal would let a non-admin principal satisfy
- * `@ProjectPermission` checks that rely on the factory reading `projectRole`
- * before the guard runs (the global permission guard sees the principal
- * directly). We pick a curated allow-list of safe claims here so the threat
- * model stays explicit, even if a future contributor adds a JWT-driven role.
+ * SECURITY: `projectRole` is NEVER read from the JWT. While the field existed, a
+ * project-role CASL check honoured it, and the project membership role was always
+ * resolved from the DB (permissions P1 US-004 removed the decorator that attached
+ * it to the request). Allowing a forged JWT claim (e.g. `projectRole: 'ADMIN'`) to
+ * leak into the principal would let a non-admin principal satisfy a check that
+ * reads the field before any project guard runs (the global permission guard sees
+ * the principal directly). We pick a curated allow-list of safe claims here so the
+ * threat model stays explicit, even if a future contributor adds a JWT-driven role.
  */
 @Injectable()
 export class JwtAuthProvider implements AuthProvider {

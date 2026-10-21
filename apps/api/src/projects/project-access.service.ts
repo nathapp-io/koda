@@ -63,9 +63,9 @@ export class ProjectAccessService {
   }
 
   /**
-   * Thin wrapper over PrismaProjectRepository.findMembershipRole: the guard
-   * resolves a project's role for a user principal to enforce an optional
-   * `@ProjectRoles(...)` gate.
+   * Thin wrapper over PrismaProjectRepository.findMembershipRole: a project's raw membership role for a
+   * display-only read (the workspace thread stream, `viewerRole`). It decides no access — that is
+   * `resolveMembership`'s 403 on `project.read`.
    */
   async findMembershipRole(projectId: string, userId: string): Promise<string | null> {
     return this.projectRepo.findMembershipRole(projectId, userId);

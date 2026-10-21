@@ -138,9 +138,19 @@ describe('S5b 3-D12: executeAction runs the tool as the action\'s actor', () => 
     expect(await executor.executeAction(action())).toEqual({ ok: true, text: 'comment c1 added to OPS-1' });
 
     expect(tool.execute).toHaveBeenCalledWith(
-      expect.objectContaining({ actor: expect.objectContaining({ id: REQUESTER.id, actorType: 'user', projectRole: 'DEVELOPER' }) }),
+      expect.objectContaining({ actor: expect.objectContaining({ id: REQUESTER.id, actorType: 'user' }) }),
       { ref: 'OPS-1', body: 'hello' },
     );
+  });
+
+  it('AC-10 (US-004): the approved actor carries no projectRole property', async () => {
+    const { executor, tool } = setup({ [REQUESTER.id]: REQUESTER });
+
+    await executor.executeAction(action());
+
+    const actor = vi.mocked(tool.execute).mock.calls[0]?.[0].actor;
+    expect(actor).toMatchObject({ id: REQUESTER.id, actorType: 'user' });
+    expect(Object.prototype.hasOwnProperty.call(actor, 'projectRole')).toBe(false);
   });
 
   it('AC-4: the context the tool receives names the action\'s own project, thread and job', async () => {

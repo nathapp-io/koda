@@ -39,7 +39,7 @@ interface SearchSymbolsQuery {
  * covered by project-membership.guard.spec.ts and the integration specs).
  */
 function makeCtx(id = 'proj-1', slug = 'my-project'): ProjectContext {
-  return { project: { id, slug }, role: 'ADMIN' };
+  return { project: { id, slug } };
 }
 
 function makeSearchItem(overrides: Partial<SymbolSearchItem> = {}): SymbolSearchItem {
