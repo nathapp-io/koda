@@ -46,6 +46,12 @@ class TestController {
 
   @Requires('comment.delete')
   commentDelete(): void {}
+
+  @Requires('runner.sync')
+  runnerSync(): void {}
+
+  @Requires('runner.enroll', { enforcedBy: 'service' })
+  runnerEnroll(): void {}
 }
 
 const ALLOWED: PermissionDecision = { allowed: true, reason: 'granted' };
@@ -183,6 +189,29 @@ describe('RequiresGuard', () => {
 
     expect(error).toBeInstanceOf(ForbiddenAppException);
     expect(error.prefix).toBe('permissions');
+    expect(can).not.toHaveBeenCalled();
+  });
+
+  it('AC-1: runner principal passes runner.sync without calling PermissionService.can', async () => {
+    const runner: KodaPrincipal = { actorType: 'runner', id: 'r1', runnerName: 'runner', labels: [], enabled: true, capacity: 1 };
+    await expect(guard.canActivate(contextFor(TestController.prototype.runnerSync, { user: runner }))).resolves.toBe(true);
+    expect(can).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['AC-2', user],
+    ['AC-3', { actorType: 'agent', id: 'a1', slug: 'agent', status: 'ACTIVE', agentRoles: [], capabilities: [] } as KodaPrincipal],
+    ['AC-4', undefined],
+  ])('%s: refuses a non-runner principal for runner.sync with permissions 403', async (_ac, principal) => {
+    const error = await thrown(() => guard.canActivate(contextFor(TestController.prototype.runnerSync, principal ? { user: principal } : {})));
+    expect(error).toBeInstanceOf(ForbiddenAppException);
+    expect(error.prefix).toBe('permissions');
+    expect(error.httpStatus).toBe(403);
+    expect(can).not.toHaveBeenCalled();
+  });
+
+  it('AC-9: service-enforced runner enrollment passes without a principal or permission lookup', async () => {
+    await expect(guard.canActivate(contextFor(TestController.prototype.runnerEnroll, {}))).resolves.toBe(true);
     expect(can).not.toHaveBeenCalled();
   });
 

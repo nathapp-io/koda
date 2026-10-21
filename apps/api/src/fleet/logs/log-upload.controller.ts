@@ -1,9 +1,11 @@
-import { Controller, Headers, HttpCode, Param, Put, Query, Req } from '@nestjs/common';
+import { Controller, Headers, HttpCode, Param, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { SkipThrottle } from '@nathapp/nestjs-throttler';
 import { RunnerRoute } from '../../auth/guards/runner-route.decorator';
+import { RequiresGuard } from '../../permissions/requires.guard';
+import { Requires } from '../../permissions/requires.decorator';
 import type { RunnerPrincipal } from '../../auth/principal/koda-principal.types';
 import { requestStream } from '../artifacts/bundle-upload.controller';
 import { LogUploadService } from './log-upload.service';
@@ -11,6 +13,7 @@ import { LogUploadService } from './log-upload.service';
 @ApiTags('fleet-runner')
 @ApiBearerAuth()
 @RunnerRoute()
+@UseGuards(RequiresGuard)
 @SkipThrottle() // S2a §2.2: runner-key authenticated; its own byte rate applies (plan D312)
 @Controller('fleet/runner/jobs')
 export class LogUploadController {
@@ -26,6 +29,7 @@ export class LogUploadController {
   @ApiResponse({ status: 409, description: 'Stale lease (ABANDON queued) or the job is in a terminal state' })
   @ApiResponse({ status: 413, description: 'Body larger than FLEET_LOG_CHUNK_MAX_BYTES' })
   @ApiResponse({ status: 422, description: 'X-Content-SHA256 mismatch' })
+  @Requires('runner.log.append')
   @ApiResponse({ status: 507, description: 'The server could not store the bytes' })
   async append(
     @Principal() runner: RunnerPrincipal,

@@ -1,9 +1,11 @@
-import { Body, Controller, HttpCode, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { SkipThrottle } from '@nathapp/nestjs-throttler';
 import { RunnerRoute } from '../../auth/guards/runner-route.decorator';
+import { RequiresGuard } from '../../permissions/requires.guard';
+import { Requires } from '../../permissions/requires.decorator';
 import type { RunnerPrincipal } from '../../auth/principal/koda-principal.types';
 import { RunnerToolService } from './runner-tool.service';
 
@@ -15,6 +17,7 @@ import { RunnerToolService } from './runner-tool.service';
 @ApiTags('fleet-runner')
 @ApiBearerAuth()
 @RunnerRoute()
+@UseGuards(RequiresGuard)
 @SkipThrottle() // S5b: runner-key authenticated; calls are bounded by the session's own turn loop
 @Controller('fleet/runner/jobs')
 export class RunnerToolController {
@@ -27,6 +30,7 @@ export class RunnerToolController {
   @ApiResponse({ status: 400, description: 'Invalid leaseEpoch or malformed body' })
   @ApiResponse({ status: 401, description: 'Runner authentication failed' })
   @ApiResponse({ status: 404, description: 'No such job, or an unknown koda tool' })
+  @Requires('runner.tool.call')
   @ApiResponse({ status: 409, description: 'Threads disabled, stale lease, not a THREAD job, the job is not RUNNING, or the thread is closing' })
   async call(
     @Principal() runner: RunnerPrincipal,
