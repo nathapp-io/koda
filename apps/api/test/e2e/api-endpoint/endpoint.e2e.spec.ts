@@ -19,7 +19,8 @@ import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { MembershipService } from '../../../src/permissions/membership.service';
-import { PrismaClient, ProjectMember } from '../../../src/generated/prisma/client';
+import { expectBindingOnlyFixtures, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
+import { PrismaClient } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { SKILL_RESOLVER, SkillResolver } from '../../../src/skills/skill-resolver';
 import { createHmac } from 'node:crypto';
@@ -110,6 +111,60 @@ describeIntegration('API Integration Tests', () => {
   let labelId: string;
   let commentId: string;
   let ticketLinkId: string;
+  let adminUserId = '';
+  let memberUserId = '';
+  let rosterAgentId = '';
+  /** The roles the agent API reports; the agent acts with the matching project bindings. */
+  let agentRoleNames: readonly string[] = ['DEVELOPER', 'REVIEWER'];
+  /** The projects the agent is rostered in; its project grants follow the roles it acts with. */
+  const agentRosterProjectIds: string[] = [];
+
+  /** The system role key a legacy agent role is bound as. */
+  const ROLE_KEY_BY_AGENT_ROLE: Record<string, string> = {
+    DEVELOPER: 'developer', REVIEWER: 'reviewer', VERIFIER: 'verifier', TRIAGER: 'triager',
+  };
+
+  const prismaClient = (): PrismaClient => app.get<PrismaService<PrismaClient>>(PrismaService).client;
+
+  /**
+   * Permissions P1 US-005: the roster reach and the roles the agent acts with are role bindings —
+   * the `viewer` of the roster plus one binding per role, in that project only.
+   */
+  const rosterAgentIn = async (projectId: string): Promise<void> => {
+    const principal = { type: 'AGENT' as const, id: agentId };
+    await grantRole(prismaClient(), principal, 'viewer', projectId);
+    for (const role of agentRoleNames) {
+      await grantRole(prismaClient(), principal, ROLE_KEY_BY_AGENT_ROLE[role], projectId);
+    }
+    if (!agentRosterProjectIds.includes(projectId)) agentRosterProjectIds.push(projectId);
+  };
+
+  /** Replaces the agent's project grants after its roles changed. */
+  const syncAgentRoles = async (): Promise<void> => {
+    const principal = { type: 'AGENT' as const, id: agentId };
+    for (const projectId of agentRosterProjectIds) {
+      await revokeProjectRoles(prismaClient(), principal, projectId);
+      await grantRole(prismaClient(), principal, 'viewer', projectId);
+      for (const role of agentRoleNames) {
+        await grantRole(prismaClient(), principal, ROLE_KEY_BY_AGENT_ROLE[role], projectId);
+      }
+    }
+    await app.get(MembershipService).invalidatePermissions();
+  };
+
+  /** Replaces a user's project grants with the one role key, and drops the permission cache. */
+  const setProjectRole = async (userId: string, projectId: string, roleKey: string): Promise<void> => {
+    const principal = { type: 'USER' as const, id: userId };
+    await revokeProjectRoles(prismaClient(), principal, projectId);
+    await grantRole(prismaClient(), principal, roleKey, projectId);
+    await app.get(MembershipService).invalidatePermissions();
+  };
+
+  /** Removes every project grant of a user, and drops the permission cache. */
+  const clearProjectRoles = async (userId: string, projectId: string): Promise<void> => {
+    await revokeProjectRoles(prismaClient(), { type: 'USER' as const, id: userId }, projectId);
+    await app.get(MembershipService).invalidatePermissions();
+  };
 
   beforeAll(async () => {
     if (!DATABASE_URL) return;
@@ -167,13 +222,17 @@ describeIntegration('API Integration Tests', () => {
       userRefreshToken = data.refreshToken;
     });
 
-    it('promote user to ADMIN (direct DB update)', async () => {
-      // New users default to MEMBER — promote to ADMIN for full API access
+    it('promote user to ADMIN (a global admin binding)', async () => {
+      // New users default to MEMBER — grant the global admin binding for full API access.
+      // Permissions P1 US-005: the admin's access is a role binding, not `User { role: 'ADMIN' }`.
       const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
       const user = await prisma.client.user.findUnique({ where: { email: 'admin@koda.test' } });
       expect(user).toBeTruthy();
       const safeUser = user as NonNullable<typeof user>;
-      await prisma.client.user.update({ where: { id: safeUser.id }, data: { role: 'ADMIN' } });
+      adminUserId = safeUser.id;
+      await grantRole(prisma.client, { type: 'USER', id: safeUser.id }, 'admin', null);
+      // The grant is written under the permission cache, so the cache is dropped explicitly.
+      await app.get(MembershipService).invalidatePermissions();
     });
 
     it('POST /api/auth/login — returns tokens (now as ADMIN)', async () => {
@@ -199,6 +258,8 @@ describeIntegration('API Integration Tests', () => {
       expect(data.user.role).toBe('MEMBER');
 
       nonAdminUserAccessToken = data.accessToken;
+      const memberUser = await prismaClient().user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
+      memberUserId = memberUser.id;
     });
 
     it('POST /api/auth/register — 400 for weak password policy violation', async () => {
@@ -373,14 +434,16 @@ describeIntegration('API Integration Tests', () => {
       const project = await prisma.client.project.findUnique({ where: { slug: projectSlug } });
       const adminUser = await prisma.client.user.findUnique({ where: { email: 'admin@koda.test' } });
       if (project && adminUser) {
-        await prisma.client.projectMember.create({
-          data: { projectId: project.id, userId: adminUser.id, role: 'ADMIN' },
-        });
+        // Permissions P1 US-005: the project grants are role bindings, not legacy membership rows.
+        // They are written before the admin's first project request, so the cache is still cold.
+        await grantRole(prisma.client, { type: 'USER', id: adminUser.id }, 'project-admin', project.id);
       }
       // S4c US-001: the agent API key reaches this project through its
       // AgentProject roster row, not through any ProjectMember row.
+      // Permissions P1 US-005: that roster is the `viewer` binding plus a binding per role the agent
+      // acts with.
       if (project) {
-        await prisma.client.agentProject.create({ data: { projectId: project.id, agentId } });
+        await rosterAgentIn(project.id);
       }
     });
 
@@ -530,9 +593,9 @@ describeIntegration('API Integration Tests', () => {
       const guardSlug = body<{ slug: string }>(created).slug;
       const member = await prisma.client.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
       const guardProject = await prisma.client.project.findUniqueOrThrow({ where: { slug: guardSlug } });
-      await prisma.client.projectMember.create({
-        data: { projectId: guardProject.id, userId: member.id, role: 'DEVELOPER' },
-      });
+      // Permissions P1 US-005: the project grant is a role binding, not a legacy membership row. It is
+      // written before the member's first request in this project, so the cache is still cold.
+      await grantRole(prisma.client, { type: 'USER', id: member.id }, 'developer', guardProject.id);
 
       const previous = 'Koda is a fleet platform.';
       await request(httpServer)
@@ -1126,6 +1189,10 @@ describeIntegration('API Integration Tests', () => {
       const data = body<{ roles: { role: string }[] }>(res);
       const roleNames = data.roles.map((r) => r.role);
       expect(roleNames).toContain('REVIEWER');
+      // Permissions P1 US-005: the roles the agent acts with are bindings, so they follow the roles the
+      // API just replaced.
+      agentRoleNames = ['REVIEWER'];
+      await syncAgentRoles();
     });
 
     it('PATCH /api/agents/:slug/update-capabilities — replaces agent capabilities', async () => {
@@ -1191,7 +1258,9 @@ describeIntegration('API Integration Tests', () => {
       const res = await request(httpServer)
         .post('/api/agents')
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .send({ name: 'Temp Agent', slug: 'temp-agent', roles: ['DEVELOPER'] })
+        // Permissions P1 US-005: the fixture agent carries no role and is rostered nowhere, so it holds
+        // no project grant at all.
+        .send({ name: 'Temp Agent', slug: 'temp-agent', roles: [] })
         .expect(201);
       deleteAgentSlug = body<{ agent: { slug: string } }>(res).agent.slug;
     });
@@ -1460,9 +1529,10 @@ describeIntegration('API Integration Tests', () => {
       expect(project).toBeTruthy();
       const safeProject = project as NonNullable<typeof project>;
       await prisma.client.agent.update({ where: { id: agentId }, data: { status: 'OFFLINE' } });
-      await prisma.client.agentProject.delete({
-        where: { agentId_projectId: { agentId, projectId: safeProject.id } },
-      });
+      // Permissions P1 US-005: the roster reach is a project binding, so dropping it is what takes the
+      // agent out of the project.
+      await revokeProjectRoles(prisma.client, { type: 'AGENT', id: agentId }, safeProject.id);
+      await app.get(MembershipService).invalidatePermissions();
       try {
         const res = await request(httpServer)
           .post(`/api/projects/${projectSlug}/tickets/${safeAssignTicketRef}/assign`)
@@ -1471,7 +1541,8 @@ describeIntegration('API Integration Tests', () => {
           .expect(409);
         refusal(res, 'tickets.agentNotInProject.409');
       } finally {
-        await prisma.client.agentProject.create({ data: { agentId, projectId: safeProject.id } });
+        await rosterAgentIn(safeProject.id);
+        await app.get(MembershipService).invalidatePermissions();
         await prisma.client.agent.update({ where: { id: agentId }, data: { status: 'ACTIVE' } });
       }
     });
@@ -1914,19 +1985,23 @@ describeIntegration('API Integration Tests', () => {
     const freshAgentRes = await request(httpServer)
       .post('/api/agents')
       .set('Authorization', `Bearer ${userAccessToken}`)
-      .send({ name: 'Pickup Empty Agent', slug: 'pickup-empty-agent', roles: ['DEVELOPER'] })
+      // Permissions P1 US-005: the fixture agent carries no role; the role it needs in the project it
+      // is rostered in is a binding.
+      .send({ name: 'Pickup Empty Agent', slug: 'pickup-empty-agent', roles: [] })
       .expect(201);
 
     const freshAgentSlug = body<{ agent: { slug: string } }>(freshAgentRes).agent.slug;
 
     // S4c US-001: the pickup target must be on the project's AgentProject roster.
+    // Permissions P1 US-005: that roster is the `viewer` binding, and the pickup needs
+    // `agent.pickup`, so the `developer` role it acts with is bound there too.
     const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
     const pickupProject = await prisma.client.project.findUnique({ where: { slug: projectSlug } });
     const pickupAgent = await prisma.client.agent.findUnique({ where: { slug: freshAgentSlug } });
     if (pickupProject && pickupAgent) {
-      await prisma.client.agentProject.create({
-        data: { projectId: pickupProject.id, agentId: pickupAgent.id },
-      });
+      const principal = { type: 'AGENT' as const, id: pickupAgent.id };
+      await grantRole(prisma.client, principal, 'viewer', pickupProject.id);
+      await grantRole(prisma.client, principal, 'developer', pickupProject.id);
     }
 
     // Use a project that has no VERIFIED unassigned tickets for this new agent
@@ -1964,6 +2039,9 @@ describeIntegration('API Integration Tests', () => {
         .send({ roles: ['DEVELOPER'] })
         .expect(200);
       expect(body<{ roles: { role: string }[] }>(roles).roles.map((r) => r.role)).toEqual(['DEVELOPER']);
+      // Permissions P1 US-005: the bindings follow the roles the API just reported.
+      agentRoleNames = ['DEVELOPER'];
+      await syncAgentRoles();
 
       // Create a ticket that the agent will try to soft-delete (AC-6)
       const res = await request(httpServer)
@@ -2765,14 +2843,15 @@ describeIntegration('API Integration Tests', () => {
 
   describe('US-003 Project agent roster writes', () => {
     let rosterAgentSlug: string;
-    let rosterAgentId: string;
     let rosterAgentApiKey: string;
 
     it('AC1: project ADMIN adds an agent and records the administrator', async () => {
       const createRes = await request(httpServer)
         .post('/api/agents')
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .send({ name: 'Roster Target', slug: 'roster-target', maxConcurrentTickets: 1, roles: ['DEVELOPER'] })
+        // Permissions P1 US-005: the fixture agent carries no role; the roster route under test writes
+        // its `viewer` binding.
+        .send({ name: 'Roster Target', slug: 'roster-target', maxConcurrentTickets: 1, roles: [] })
         .expect(201);
       const created = body<{ agent: { id: string; slug: string }; apiKey: string }>(createRes);
       rosterAgentSlug = created.agent.slug;
@@ -2816,15 +2895,14 @@ describeIntegration('API Integration Tests', () => {
       const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
       const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
       const user = await prisma.client.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
-      await prisma.client.projectMember.upsert({
-        where: { projectId_userId: { projectId: project.id, userId: user.id } },
-        create: { projectId: project.id, userId: user.id, role: 'DEVELOPER' },
-        update: { role: 'DEVELOPER' },
-      });
+      // Permissions P1 US-005: the project grant is a role binding, not a legacy membership row.
+      await setProjectRole(user.id, project.id, 'developer');
       const candidate = await request(httpServer)
         .post('/api/agents')
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .send({ name: 'Developer Blocked Target', slug: 'developer-blocked-target', roles: ['DEVELOPER'] })
+        // Permissions P1 US-005: the fixture agent carries no role; the roster route under test writes
+        // its `viewer` binding.
+        .send({ name: 'Developer Blocked Target', slug: 'developer-blocked-target', roles: [] })
         .expect(201);
       const candidateSlug = body<{ agent: { slug: string; id: string } }>(candidate).agent;
 
@@ -2858,7 +2936,9 @@ describeIntegration('API Integration Tests', () => {
       const candidateRes = await request(httpServer)
         .post('/api/agents')
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .send({ name: 'Offline Roster Target', slug: 'offline-roster-target', roles: ['DEVELOPER'] })
+        // Permissions P1 US-005: the fixture agent carries no role; the roster route under test writes
+        // its `viewer` binding.
+        .send({ name: 'Offline Roster Target', slug: 'offline-roster-target', roles: [] })
         .expect(201);
       const candidate = body<{ agent: { id: string; slug: string } }>(candidateRes).agent;
       const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
@@ -3173,7 +3253,9 @@ describeIntegration('API Integration Tests', () => {
       const db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
       const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
       const user = await db.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
-      await db.projectMember.deleteMany({ where: { projectId: project.id, userId: user.id } });
+      // Permissions P1 US-005: the project grant is a role binding, so dropping it is what takes the
+      // member out of the project.
+      await clearProjectRoles(user.id, project.id);
 
       await request(httpServer)
         .get(`/api/projects/${projectSlug}/skills`)
@@ -3282,15 +3364,11 @@ describeIntegration('API Integration Tests', () => {
         projectId: foreignProject.id, provider: 'github', owner: 'acme', name: 'threads-foreign', defaultBranch: 'main',
         githubInstallationId: BigInt(77), createdById: admin.id,
       } });
-      await prisma.projectMember.upsert({
-        where: { projectId_userId: { projectId: project.id, userId: developer.id } },
-        create: { projectId: project.id, userId: developer.id, role: 'DEVELOPER' }, update: { role: 'DEVELOPER' },
-      });
-      await prisma.agentProject.upsert({
-        where: { agentId_projectId: { agentId, projectId: project.id } },
-        create: { agentId, projectId: project.id, addedById: admin.id }, update: {},
-      });
-      // US-001: project access is decided from the effective-permission cache, and these membership rows are
+      // Permissions P1 US-005: the project grants are role bindings, not legacy membership rows. The
+      // developer's grant is written back here (the skills case above dropped it).
+      await setProjectRole(developer.id, project.id, 'developer');
+      await rosterAgentIn(project.id);
+      // US-001: project access is decided from the effective-permission cache, and these grants are
       // written under it rather than through a membership route, so the cache is dropped explicitly.
       await app.get(MembershipService).invalidatePermissions();
       world = {
@@ -3376,15 +3454,13 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('US-003 AC5: refuses thread creation by a project viewer', async () => {
-      await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.viewer } }, data: { role: 'VIEWER' } });
-      // Permissions P1 US-002: the route key is decided from the effective-permission cache, and this row is written
-      // under it rather than through a membership route, so the cache is dropped explicitly.
-      await app.get(MembershipService).invalidatePermissions();
+      // Permissions P1 US-005: the role change is a binding change, and the route key is decided from
+      // the effective-permission cache, so the grant and the cache drop go together.
+      await setProjectRole(world.ids.viewer, world.projectId, 'viewer');
       try {
         await createThread('viewer-denied', world.tokens.viewer).expect(403);
       } finally {
-        await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'DEVELOPER' } });
-        await app.get(MembershipService).invalidatePermissions();
+        await setProjectRole(world.ids.dev, world.projectId, 'developer');
       }
     });
 
@@ -3531,16 +3607,15 @@ describeIntegration('API Integration Tests', () => {
     it('US-006 AC-14: denies a thread creator whose project role no longer holds thread.plan (403 permissions)', async () => {
       const thread = body<{ id: string }>(await createThread('plan-viewer').expect(201));
       await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
-      await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'VIEWER' } });
-      // The role row is written under the effective-permission cache (US-002), so drop it explicitly.
-      await app.get(MembershipService).invalidatePermissions();
+      // Permissions P1 US-005: the role change is a binding change, and the grant is written under the
+      // effective-permission cache (US-002), so the cache is dropped with it.
+      await setProjectRole(world.ids.dev, world.projectId, 'viewer');
       try {
         const denied = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
           .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(403);
         refusal(denied, 'permissions.40003');
       } finally {
-        await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'DEVELOPER' } });
-        await app.get(MembershipService).invalidatePermissions();
+        await setProjectRole(world.ids.dev, world.projectId, 'developer');
       }
     });
 
@@ -3731,7 +3806,9 @@ describeIntegration('API Integration Tests', () => {
       const newer = body<{ id: string }>(await createThread('list-newer').expect(201));
       await db().chatThread.update({ where: { id: older.id }, data: { lastActivityAt: new Date('2020-01-01T00:00:00Z') } });
       await db().chatThread.update({ where: { id: newer.id }, data: { lastActivityAt: new Date('2021-01-01T00:00:00Z') } });
-      await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.viewer } }, data: { role: 'VIEWER' } });
+      // Permissions P1 US-005: the role change is a binding change, and the grant is written under the
+      // effective-permission cache, so the cache is dropped with it.
+      await setProjectRole(world.ids.viewer, world.projectId, 'viewer');
       try {
         // size=100: the US-007 block adds threads to this project, so the default page of 20 can drop both.
         const res = await request(httpServer).get(`/api/projects/${projectSlug}/threads?size=100`).set('Authorization', `Bearer ${world.tokens.viewer}`).expect(200);
@@ -3739,7 +3816,7 @@ describeIntegration('API Integration Tests', () => {
         expect(items.findIndex((item) => item.id === newer.id)).toBeGreaterThanOrEqual(0);
         expect(items.findIndex((item) => item.id === newer.id)).toBeLessThan(items.findIndex((item) => item.id === older.id));
       } finally {
-        await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'DEVELOPER' } });
+        await setProjectRole(world.ids.dev, world.projectId, 'developer');
       }
     });
 
@@ -4150,7 +4227,8 @@ describeIntegration('API Integration Tests', () => {
         // Its own project: its anchor repository has no GitHub installation, so the section is the deterministic
         // `no installation` line (no forge call at all) and the shared thread suite's repo is left untouched.
         const project = await prisma.project.create({ data: { name: 'Brief block', slug: 'brief-block', key: 'BRFB' } });
-        await prisma.projectMember.create({ data: { projectId: project.id, userId: dev.id, role: 'DEVELOPER' } });
+        // Permissions P1 US-005: the project grant is a role binding, not a legacy membership row.
+        await grantRole(prisma, { type: 'USER', id: dev.id }, 'developer', project.id);
         await prisma.fleetRepo.create({ data: {
           projectId: project.id, provider: 'github', owner: 'acme', name: 'brief-app', defaultBranch: 'trunk',
           githubInstallationId: null, createdById: world.ids.root,
@@ -4387,7 +4465,8 @@ describeIntegration('API Integration Tests', () => {
       const repo = await prisma.fleetRepo.create({ data: {
         projectId: project.id, provider: 'github', owner: 'o', name: 'n', defaultBranch: 'main', createdById: admin.id,
       } });
-      await prisma.projectMember.create({ data: { projectId: project.id, userId: developer.id, role: 'DEVELOPER' } });
+      // Permissions P1 US-005: the project grant is a role binding, not a legacy membership row.
+      await grantRole(prisma, { type: 'USER', id: developer.id }, 'developer', project.id);
 
       slug = project.slug;
       projectId = project.id;
@@ -4480,18 +4559,16 @@ describeIntegration('API Integration Tests', () => {
     it('AC-14: answers 403 for a user who is not a project member', async () => {
       // The membership is dropped and restored rather than registering a second user: POST /api/auth/register is
       // throttled at 5/min per IP and this file already registers four users (it answered 429 for a fifth).
-      await db().projectMember.deleteMany({ where: { projectId, userId: developerId } });
-      // US-001: access is decided from the effective-permission cache, so dropping the row under it takes a
-      // explicit invalidation to be seen by the next request.
-      await app.get(MembershipService).invalidatePermissions();
+      // Permissions P1 US-005: the grant is a role binding, so dropping it is what takes the member out
+      // of the project, and the cache is dropped with it.
+      await clearProjectRoles(developerId, projectId);
       try {
         const res = await search(memberToken, { query: 'broker' }).expect(403);
 
         expect(res.body.ret).not.toBe(0);
         expect(searchSpy).not.toHaveBeenCalled();
       } finally {
-        await db().projectMember.create({ data: { projectId, userId: developerId, role: 'DEVELOPER' } });
-        await app.get(MembershipService).invalidatePermissions();
+        await setProjectRole(developerId, projectId, 'developer');
       }
     });
   });
@@ -4541,7 +4618,8 @@ describeIntegration('API Integration Tests', () => {
       const foreignRepo = await prisma.fleetRepo.create({ data: {
         projectId: foreign.id, provider: 'github', owner: 'acme', name: 'other', defaultBranch: 'main', createdById: admin.id,
       } });
-      await prisma.projectMember.create({ data: { projectId: project.id, userId: developer.id, role: 'DEVELOPER' } });
+      // Permissions P1 US-005: the project grant is a role binding, not a legacy membership row.
+      await grantRole(prisma, { type: 'USER', id: developer.id }, 'developer', project.id);
       // One repository carries a finished pass; the other one has no state row at all (`status: 'never'`).
       await prisma.knowledgeRepoIndex.create({ data: {
         repoId: github.id, projectId: project.id, status: 'idle', indexedSha: 'head0001', fileCount: 4, chunkCount: 9,
@@ -4630,18 +4708,18 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('AC-14: GET repos answers 403 for a user who is not a project member', async () => {
-      const member = await db().projectMember.findFirstOrThrow({ where: { project: { slug } } });
-      await db().projectMember.delete({ where: { id: member.id } });
-      // US-001: access is decided from the effective-permission cache, so the removal needs an invalidation
-      // before the next request sees it — and the restore needs one too.
-      await app.get(MembershipService).invalidatePermissions();
+      // Permissions P1 US-005: the grant is a role binding, so dropping it is what takes the member out
+      // of the project. The removal needs a cache drop before the next request sees it — and the
+      // restore needs one too.
+      const project = await db().project.findUniqueOrThrow({ where: { slug } });
+      const developer = await db().user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
+      await clearProjectRoles(developer.id, project.id);
       try {
         const res = await states(nonAdminUserAccessToken).expect(403);
 
         expect(res.body.ret).not.toBe(0);
       } finally {
-        await db().projectMember.create({ data: { projectId: member.projectId, userId: member.userId, role: 'DEVELOPER' } });
-        await app.get(MembershipService).invalidatePermissions();
+        await setProjectRole(developer.id, project.id, 'developer');
       }
     });
   });
@@ -4681,7 +4759,8 @@ describeIntegration('API Integration Tests', () => {
       const second = await prisma.fleetRepo.create({ data: {
         projectId: project.id, provider: 'gitlab', owner: 'grp', name: 'notes', defaultBranch: 'main', createdById: admin.id,
       } });
-      await prisma.projectMember.create({ data: { projectId: project.id, userId: developer.id, role: 'DEVELOPER' } });
+      // Permissions P1 US-005: the project grant is a role binding, not a legacy membership row.
+      await grantRole(prisma, { type: 'USER', id: developer.id }, 'developer', project.id);
 
       slug = project.slug;
       projectId = project.id;
@@ -4969,12 +5048,14 @@ describeIntegration('API Integration Tests', () => {
 
     it('DELETE /api/role-bindings/{id} — 204 removes a project binding', async () => {
       const projectId = await projectIdOf(projectSlug);
-      const viewer = await db().role.findUniqueOrThrow({ where: { key: 'viewer' } });
+      // Permissions P1 US-005: the agent already holds the `viewer` binding of its roster in this
+      // project, so the case binds a role it does not hold yet.
+      const reviewer = await db().role.findUniqueOrThrow({ where: { key: 'reviewer' } });
       const binding = await db().roleBinding.create({
         data: {
           principalType: 'AGENT',
           principalId: agentId,
-          roleId: viewer.id,
+          roleId: reviewer.id,
           projectId,
           grantedByType: 'USER',
           grantedById: agentId,
@@ -4991,5 +5072,29 @@ describeIntegration('API Integration Tests', () => {
 
       refusal(res, 'permissions.bindingNotFound.404');
     });
+  });
+
+  // The sentinel runs last: the principals of this file are created across its tests, and it lists the
+  // ones that still exist here. `temp-agent` is left out — the file deletes it.
+  it('fixtures grant through bindings only', async () => {
+    const prisma = prismaClient();
+    await expectBindingOnlyFixtures(
+      prisma,
+      [
+        { type: 'USER', id: adminUserId },
+        { type: 'USER', id: memberUserId },
+        { type: 'AGENT', id: agentId },
+        { type: 'AGENT', id: rosterAgentId },
+      ],
+      // The agent's `roles` are the subject of this file (the agent API reports them), so its
+      // `AgentRoleEntry` row stays; every other grant of it is a binding.
+      { agentRoleEntries: [{ type: 'AGENT', id: agentId }] },
+    );
+    // Permissions P1 US-005: the admin's global access is the `admin` binding, not `User.role`.
+    const adminBinding = await prisma.roleBinding.findFirst({
+      where: { principalType: 'USER', principalId: adminUserId, projectId: null, role: { key: 'admin' } },
+      select: { id: true },
+    });
+    expect(adminBinding).not.toBeNull();
   });
 });

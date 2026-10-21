@@ -25,6 +25,8 @@ import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
+import { MembershipService } from '../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantRole } from '../../src/permissions/test-helpers/permission-fixtures';
 
 interface ContextApiResponse {
   projectId?: string;
@@ -53,6 +55,8 @@ describeIntegration('Context API E2E', () => {
   let memberAccessToken: string;
   let projectId: string;
   let projectSlug: string;
+  let adminUserId: string;
+  let memberUserId: string;
 
   beforeAll(async () => {
     if (!DATABASE_URL) return;
@@ -79,10 +83,11 @@ describeIntegration('Context API E2E', () => {
     const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
     const adminUser = await prisma.client.user.findUnique({ where: { email: 'context-admin@koda.test' } });
     expect(adminUser).toBeTruthy();
-    await prisma.client.user.update({
-      where: { id: (adminUser as NonNullable<typeof adminUser>).id },
-      data: { role: 'ADMIN' },
-    });
+    adminUserId = (adminUser as NonNullable<typeof adminUser>).id;
+    // Permissions P1 US-005: the admin's global access is a role binding, not `User { role: 'ADMIN' }`.
+    // The grant is written under the permission cache, so the cache is dropped explicitly.
+    await grantRole(prisma.client, { type: 'USER', id: adminUserId }, 'admin', null);
+    await app.get(MembershipService).invalidatePermissions();
 
     const adminLoginRes = await request(httpServer)
       .post('/api/auth/login')
@@ -97,6 +102,8 @@ describeIntegration('Context API E2E', () => {
       .expect(201);
 
     memberAccessToken = body<{ accessToken: string }>(memberRegisterRes).accessToken;
+    const memberUser = await prisma.client.user.findUniqueOrThrow({ where: { email: 'context-member@koda.test' } });
+    memberUserId = memberUser.id;
 
     const projectRes = await request(httpServer)
       .post('/api/projects')
@@ -113,6 +120,20 @@ describeIntegration('Context API E2E', () => {
   });
 
   describe('GET /api/context/:slug', () => {
+    it('fixtures grant through bindings only', async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      await expectBindingOnlyFixtures(prisma.client, [
+        { type: 'USER', id: adminUserId },
+        { type: 'USER', id: memberUserId },
+      ]);
+      // Permissions P1 US-005: the admin's global access is the `admin` binding, not `User.role`.
+      const adminBinding = await prisma.client.roleBinding.findFirst({
+        where: { principalType: 'USER', principalId: adminUserId, projectId: null, role: { key: 'admin' } },
+        select: { id: true },
+      });
+      expect(adminBinding).not.toBeNull();
+    });
+
     it('AC-1: returns all four top-level blocks', async () => {
       const res = await request(httpServer)
         .get(`/api/context/${projectSlug}`)

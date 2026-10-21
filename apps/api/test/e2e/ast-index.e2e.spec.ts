@@ -18,6 +18,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 import { resetDb } from '../helpers/reset-db';
+import { expectBindingOnlyFixtures, grantRole } from '../../src/permissions/test-helpers/permission-fixtures';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeE2E = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -35,6 +36,9 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
   let agentApiKey: string;
   let agentSlug: string;
   let projectSlug: string;
+  let adminUserId: string;
+  let devAgentUserId: string;
+  let developerAgentId: string;
 
   beforeAll(async () => {
     if (!DATABASE_URL) return;
@@ -70,6 +74,8 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
       const data = body<{ accessToken: string }>(res);
       adminAccessToken = data.accessToken;
       expect(adminAccessToken).toBeDefined();
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      adminUserId = (await prisma.client.user.findUniqueOrThrow({ where: { email: 'admin@koda-ast.test' } })).id;
     });
 
     it('should register agent with DEVELOPER role', async () => {
@@ -79,10 +85,13 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
 
       expect(res.status).toBe(201);
 
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      devAgentUserId = (await prisma.client.user.findUniqueOrThrow({ where: { email: 'dev-agent@koda-ast.test' } })).id;
+
       const agentRes = await request(httpServer)
         .post('/api/agents')
         .set('Authorization', `Bearer ${adminAccessToken}`)
-        .send({ name: 'AST Developer Agent', slug: 'ast-developer-agent', roles: ['DEVELOPER'] });
+        .send({ name: 'AST Developer Agent', slug: 'ast-developer-agent', roles: [] });
 
       expect(agentRes.status).toBe(201);
       // POST /api/agents returns { apiKey, agent } — the agent's own fields live
@@ -90,6 +99,7 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
       const agentData = body<{ apiKey: string; agent: { id: string; slug: string } }>(agentRes);
       agentSlug = agentData.agent.slug;
       agentApiKey = agentData.apiKey;
+      developerAgentId = agentData.agent.id;
       expect(agentSlug).toBe('ast-developer-agent');
     });
   });
@@ -105,17 +115,27 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
       const data = body<{ slug: string }>(res);
       projectSlug = data.slug;
 
-      // S4c US-001: the DEVELOPER agent reaches the project through its roster row.
+      // Permissions P1 US-005: the DEVELOPER agent reaches the project through role bindings — the
+      // `viewer` reach of the roster plus the `developer` role it acts with. The fixture agent carries
+      // no legacy role, so production wrote no `AgentRoleEntry` row for it.
       const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
       const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
       const agent = await prisma.client.agent.findUniqueOrThrow({ where: { slug: agentSlug } });
-      await prisma.client.agentProject.create({
-        data: { projectId: project.id, agentId: agent.id },
-      });
+      await grantRole(prisma.client, { type: 'AGENT', id: agent.id }, 'viewer', project.id);
+      await grantRole(prisma.client, { type: 'AGENT', id: agent.id }, 'developer', project.id);
     });
   });
 
   describe('AC-1, AC-6: indexCommit parses source files and stores symbol metadata', () => {
+    it('fixtures grant through bindings only', async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      await expectBindingOnlyFixtures(prisma.client, [
+        { type: 'USER', id: adminUserId },
+        { type: 'USER', id: devAgentUserId },
+        { type: 'AGENT', id: developerAgentId },
+      ]);
+    });
+
     it('should index a TypeScript file and return SymbolIndexResult', async () => {
       const files = [
         {
@@ -261,7 +281,9 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
       const agentRes = await request(httpServer)
         .post('/api/agents')
         .set('Authorization', `Bearer ${adminAccessToken}`)
-        .send({ name: 'Non-Developer Agent', slug: 'non-developer-agent', roles: ['REVIEWER'] });
+        // Permissions P1 US-005: the fixture agent carries no role, and it is rostered in no project,
+        // so it holds no project key at all — the refusal is unchanged.
+        .send({ name: 'Non-Developer Agent', slug: 'non-developer-agent', roles: [] });
 
       expect(agentRes.status).toBe(201);
       const nonDevAgent = body<{ apiKey: string }>(agentRes);
