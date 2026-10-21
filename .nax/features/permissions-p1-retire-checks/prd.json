@@ -3,7 +3,7 @@
   "feature": "permissions-p1-retire-checks",
   "branchName": "feat/permissions-p1-retire-checks",
   "createdAt": "2026-10-21T00:00:00Z",
-  "updatedAt": "2026-10-21T12:21:07.459Z",
+  "updatedAt": "2026-10-21T12:56:05.114Z",
   "userStories": [
     {
       "id": "US-001",
@@ -143,8 +143,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -156,7 +156,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.33999999999999986,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-21T12:21:11.456Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/projects/projects.service.ts",
@@ -204,7 +216,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "12c04f9700a987e3d2ad8e971610261313fdfee6"
     },
     {
       "id": "US-003",
