@@ -8,8 +8,9 @@ type TransitionRule = {
   };
 };
 
-// IN_PROGRESS -> VERIFIED (GENERAL) is kept but unreachable: no route supplies
-// a comment for it (PATCH {status} passes none). It is not an allowedActions entry.
+// Permissions P1 US-005: the IN_PROGRESS -> VERIFIED rule is gone. It was unreachable (no route
+// supplied the GENERAL comment it required) and it kept a state-machine edge alive that no key
+// guarded. A PATCH that asks for it answers 400 `tickets` from the missing-rule branch below.
 export const TRANSITION_RULES: Readonly<TransitionRule> = {
   [TicketStatus.CREATED]: {
     [TicketStatus.VERIFIED]: CommentType.VERIFICATION,
@@ -22,7 +23,6 @@ export const TRANSITION_RULES: Readonly<TransitionRule> = {
   },
   [TicketStatus.IN_PROGRESS]: {
     [TicketStatus.VERIFY_FIX]: CommentType.FIX_REPORT,
-    [TicketStatus.VERIFIED]: CommentType.GENERAL,
   },
   [TicketStatus.VERIFY_FIX]: {
     [TicketStatus.CLOSED]: CommentType.REVIEW,

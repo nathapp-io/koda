@@ -7,7 +7,7 @@ import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { KodaDomainWriter } from './koda-domain-writer.service';
 import { PrismaKodaDomainWriterRepository } from './prisma-koda-domain-writer.repository';
 import { RagService } from '../rag/rag.service';
-import { AgentAuthProvider } from '../auth/agent-auth.provider';
+import { PermissionService } from '../permissions/permission.service';
 import { TicketEventService } from '../events/ticket-event.service';
 import { AgentEventService } from '../events/agent-event.service';
 import { DecisionEventService } from '../events/decision-event.service';
@@ -42,11 +42,15 @@ describe('KodaDomainWriter Unit Tests', () => {
     isInTransaction: vi.fn(() => depth > 0),
   };
 
-  const mockAgentAuthProvider = {
-    loadAgentRoles: vi.fn().mockResolvedValue(['AGENT']),
-    buildPrincipal: vi.fn(),
-    invalidateByTag: vi.fn(),
+  /**
+   * Permissions P1 (US-003): the writer asks for the actor's effective keys in the event's project.
+   * The default grants `project.read`, which is what a developer/admin/agent actor holds there; a
+   * test that asserts a refusal overrides it with a set that lacks the key.
+   */
+  const mockPermissions = {
+    effectiveKeys: vi.fn(),
   };
+  const PROJECT_READ = new Set(['project.read']);
 
   const mockTicketEventService = {
     create: vi.fn(),
@@ -67,7 +71,7 @@ describe('KodaDomainWriter Unit Tests', () => {
       Object.values(group).forEach((m) => (m as Mock).mockReset());
     }
     outbox.record.mockReset().mockResolvedValue(undefined);
-    mockAgentAuthProvider.loadAgentRoles.mockReset().mockResolvedValue(['AGENT']);
+    mockPermissions.effectiveKeys.mockReset().mockResolvedValue(PROJECT_READ);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         KodaDomainWriter,
@@ -75,7 +79,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         { provide: RagService, useValue: mockRagService },
         { provide: NathappOutboxService, useValue: outbox },
         { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
-        { provide: AgentAuthProvider, useValue: mockAgentAuthProvider },
+        { provide: PermissionService, useValue: mockPermissions },
         { provide: TicketEventService, useValue: mockTicketEventService },
         { provide: AgentEventService, useValue: mockAgentEventService },
         { provide: DecisionEventService, useValue: mockDecisionEventService },
@@ -301,6 +305,195 @@ describe('KodaDomainWriter Unit Tests', () => {
 
         await expect(service.writeDecisionEvent(data)).rejects.toBeInstanceOf(ForbiddenAppException);
       });
+    });
+  });
+
+  /**
+   * Permissions P1 (US-003): the legacy actor-role allow-list is replaced by the actor's effective
+   * `project.read` key in the event's project — the same key project routes are gated on.
+   */
+  describe('US-003: the actor needs project.read in the event’s project', () => {
+    const NOW = new Date('2026-01-01T00:00:00.000Z');
+    const ticketInput = {
+      ticketId: 'ticket-001',
+      projectId: 'p1',
+      action: 'TICKET_CREATED',
+      source: 'api' as const,
+      data: {},
+    };
+    const agentActionInput = {
+      agentId: 'a1',
+      projectId: 'p1',
+      action: 'TICKET_SUGGESTED',
+      actorId: 'a1',
+      source: 'internal' as const,
+      data: {},
+    };
+    const decisionInput = {
+      projectId: 'p1',
+      agentId: 'a1',
+      action: 'reviewed',
+      decision: 'approved' as const,
+      rationale: null,
+      source: 'api' as const,
+      data: {},
+    };
+
+    /** The refusal of `promise`, or undefined when it resolved. */
+    async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
+      try {
+        await promise;
+        return undefined;
+      } catch (error) {
+        return error;
+      }
+    }
+
+    beforeEach(() => {
+      mockWriterRepo.findProjectById.mockResolvedValue({ id: 'p1' });
+      mockTicketEventService.create.mockResolvedValue({
+        id: 'event-ticket-1',
+        ticketId: 'ticket-001',
+        projectId: 'p1',
+        action: 'TICKET_CREATED',
+        actorId: 'u1',
+        actorType: 'user',
+        source: 'api',
+        data: '{}',
+        timestamp: NOW,
+        createdAt: NOW,
+      });
+      mockAgentEventService.create.mockResolvedValue({
+        id: 'event-agent-1',
+        agentId: 'a1',
+        projectId: 'p1',
+        action: 'TICKET_SUGGESTED',
+        actorId: 'a1',
+        source: 'internal',
+        data: '{}',
+        timestamp: NOW,
+        createdAt: NOW,
+      });
+      mockDecisionEventService.create.mockResolvedValue({
+        id: 'event-decision-1',
+        projectId: 'p1',
+        agentId: 'a1',
+        action: 'reviewed',
+        decision: 'approved',
+        rationale: null,
+        source: 'api',
+        data: '{}',
+        timestamp: NOW,
+        createdAt: NOW,
+      });
+    });
+
+    it('AC-1: writeTicketEvent for a user actor holding project.read creates the event once', async () => {
+      mockPermissions.effectiveKeys.mockResolvedValue(new Set(['project.read', 'ticket.read']));
+
+      await expect(
+        service.writeTicketEvent({ ...ticketInput, actorId: 'u1', actorType: 'user' }),
+      ).resolves.toMatchObject({ canonicalId: 'event-ticket-1' });
+
+      expect(mockTicketEventService.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('AC-2: writeTicketEvent asks for the user actor’s keys in exactly that project', async () => {
+      await service.writeTicketEvent({ ...ticketInput, actorId: 'u1', actorType: 'user' });
+
+      expect(mockPermissions.effectiveKeys).toHaveBeenCalledWith(
+        { type: 'USER', id: 'u1' },
+        { projectId: 'p1' },
+      );
+    });
+
+    it('AC-3: writeTicketEvent refuses a user actor without project.read and creates no event', async () => {
+      mockPermissions.effectiveKeys.mockResolvedValue(new Set(['ticket.read', 'comment.create']));
+
+      const error = await rejectionOf(
+        service.writeTicketEvent({ ...ticketInput, actorId: 'u1', actorType: 'user' }),
+      );
+
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      expect((error as ForbiddenAppException).prefix).toBe('koda-domain-writer');
+      expect(mockTicketEventService.create).not.toHaveBeenCalled();
+      expect(outbox.record).not.toHaveBeenCalled();
+    });
+
+    it('AC-4: writeTicketEvent reads an agent actor’s keys as an AGENT principal', async () => {
+      await service.writeTicketEvent({ ...ticketInput, actorId: 'a1', actorType: 'agent' });
+
+      expect(mockPermissions.effectiveKeys).toHaveBeenCalledWith(
+        { type: 'AGENT', id: 'a1' },
+        { projectId: 'p1' },
+      );
+    });
+
+    it('AC-5: writeAgentAction asks for the agent’s keys in the project and creates the event once', async () => {
+      await expect(service.writeAgentAction(agentActionInput)).resolves.toMatchObject({
+        canonicalId: 'event-agent-1',
+      });
+
+      expect(mockPermissions.effectiveKeys).toHaveBeenCalledWith(
+        { type: 'AGENT', id: 'a1' },
+        { projectId: 'p1' },
+      );
+      expect(mockAgentEventService.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('AC-6: writeAgentAction refuses an agent without project.read and creates no event', async () => {
+      mockPermissions.effectiveKeys.mockResolvedValue(new Set(['agent.pickup']));
+
+      const error = await rejectionOf(service.writeAgentAction(agentActionInput));
+
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      expect((error as ForbiddenAppException).prefix).toBe('koda-domain-writer');
+      expect(mockAgentEventService.create).not.toHaveBeenCalled();
+      expect(outbox.record).not.toHaveBeenCalled();
+    });
+
+    it('AC-7: writeDecisionEvent refuses an agent without project.read and creates no event', async () => {
+      mockPermissions.effectiveKeys.mockResolvedValue(new Set(['ticket.read']));
+
+      const error = await rejectionOf(service.writeDecisionEvent(decisionInput));
+
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      expect((error as ForbiddenAppException).prefix).toBe('koda-domain-writer');
+      expect(mockDecisionEventService.create).not.toHaveBeenCalled();
+      expect(outbox.record).not.toHaveBeenCalled();
+    });
+
+    it('AC-8: an unknown project refuses before any key is read', async () => {
+      mockWriterRepo.findProjectById.mockResolvedValue(null);
+
+      const error = await rejectionOf(
+        service.writeTicketEvent({ ...ticketInput, actorId: 'u1', actorType: 'user' }),
+      );
+
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      expect((error as ForbiddenAppException).prefix).toBe('koda-domain-writer');
+      expect(mockPermissions.effectiveKeys).not.toHaveBeenCalled();
+      expect(mockTicketEventService.create).not.toHaveBeenCalled();
+    });
+
+    it('AC-12: each write refuses without project.read before any event create or outbox row', async () => {
+      mockPermissions.effectiveKeys.mockResolvedValue(new Set(['ticket.read']));
+      const calls = [
+        ['writeTicketEvent', () => service.writeTicketEvent({ ...ticketInput, actorId: 'u1', actorType: 'user' })],
+        ['writeAgentAction', () => service.writeAgentAction(agentActionInput)],
+        ['writeDecisionEvent', () => service.writeDecisionEvent(decisionInput)],
+      ] as const;
+
+      for (const [, call] of calls) {
+        const error = await rejectionOf(call());
+        expect(error).toBeInstanceOf(ForbiddenAppException);
+        expect((error as ForbiddenAppException).prefix).toBe('koda-domain-writer');
+      }
+
+      expect(mockTicketEventService.create).not.toHaveBeenCalled();
+      expect(mockAgentEventService.create).not.toHaveBeenCalled();
+      expect(mockDecisionEventService.create).not.toHaveBeenCalled();
+      expect(outbox.record).not.toHaveBeenCalled();
     });
   });
 

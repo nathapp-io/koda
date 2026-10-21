@@ -18,7 +18,7 @@ const declarations: ReadonlyArray<readonly [object, string, readonly string[], '
   [McpController, 'delete', ['mcp.access'], 'all', 'guard'],
   [HealthController, 'check', ['health.read'], 'all', 'guard'],
   [ThreadEventsController, 'events', ['thread.read'], 'all', 'service'],
-  [WorkspaceThreadEventsController, 'events', ['thread.workspace.read'], 'all', 'service'],
+  [WorkspaceThreadEventsController, 'events', ['thread.workspace.read'], 'all', 'guard'],
   [LiveController, 'events', ['project.read'], 'all', 'service'],
   [MeLiveController, 'events', ['notification.read'], 'all', 'service'],
   [RolesController, 'list', ['role.read'], 'all', 'service'],

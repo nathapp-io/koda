@@ -7,7 +7,6 @@
  */
 import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
 import { REQUIRES_METADATA, type RequiresMetadata } from '../../permissions/requires.decorator';
-import { PROJECT_PERMISSION_KEY } from '../../projects/project-permission.decorator';
 import { ProjectRepoConfigController } from './project-repo-config.controller';
 
 type Handler = 'list' | 'read' | 'submitEdit' | 'submitRegenerate' | 'submitDrift';
@@ -42,7 +41,6 @@ describe('ProjectRepoConfigController route keys (US-007)', () => {
     const fn = ProjectRepoConfigController.prototype[handler] as unknown as object;
 
     expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
-    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeUndefined();
   });
 
   it('keeps the controller class free of a class-level key or membership guard', () => {

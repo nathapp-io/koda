@@ -1,12 +1,12 @@
 /**
  * Permissions P1b US-003 — ticket assignment, assignee search and the domain writer read the
- * compatibility union (AC-1 .. AC-9), over real HTTP and real Postgres.
+ * compatibility union (AC-1 .. AC-10), over real HTTP and real Postgres.
  *
  * Every principal here has exactly one kind of source in the project under test, so an AC passes only
- * when the reader consults the access sources: `PrismaTicketsRepository.findProjectMemberRole` /
- * `isAgentOnProjectRoster`, `PrismaProjectAssigneesRepository.search` and
- * `PrismaKodaDomainWriterRepository.findUserProjectRoles` on one side, and `TicketsService.assign`,
- * `ProjectAssigneesService.search` and `KodaDomainWriter.writeTicketEvent` on the other. Sources are
+ * when the reader consults the access sources: `PrismaTicketsRepository.isAgentOnProjectRoster` /
+ * the assignee's `project.read`, `PrismaProjectAssigneesRepository.search` and `KodaDomainWriter` (which
+ * decides on `project.read`) on one side, and `TicketsService.assign`, `ProjectAssigneesService.search`
+ * and `KodaDomainWriter.writeTicketEvent` on the other. Sources are
  * real rows — bindings through `MembershipService.createBinding` (booting the app runs
  * `SystemRoleSeeder`, so the seeded role keys exist), the legacy `ProjectMember` row through Prisma,
  * which is what a pre-bindings installation looks like.
@@ -294,25 +294,51 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
     expect(await prisma.ticketEvent.count({ where: { projectId, actorId: ids.devBind } })).toBe(1);
   }, TEST_TIMEOUT_MS);
 
-  it('AC-9: the writer refuses a user whose only source is a viewer binding and records no event', async () => {
+  it('AC-9: the writer records the event for a user whose only source is a viewer binding', async () => {
     expect(await prisma.projectMember.count({ where: { projectId, userId: ids.viewerBind } })).toBe(0);
     expect(await projectBindingsOf('USER', ids.viewerBind)).toEqual([
       { projectId, role: { key: 'viewer' } },
     ]);
-    const ticket = await createTicket('Refused through a viewer binding');
+    const ticket = await createTicket('Written through a viewer binding');
+
+    // US-003: the writer decides on `project.read`, which the viewer role holds — this is the
+    // behaviour the legacy ADMIN/DEVELOPER/REVIEWER/TRIAGER/AGENT allow-list got wrong.
+    const result = await writer.writeTicketEvent({
+      ticketId: ticket.id,
+      projectId,
+      action: 'TICKET_CREATED',
+      actorId: ids.viewerBind,
+      actorType: 'user',
+      source: 'api',
+      data: {},
+    });
+
+    expect(result.canonicalId).toBeTruthy();
+    expect(await prisma.ticketEvent.count({ where: { projectId, actorId: ids.viewerBind } })).toBe(1);
+  }, TEST_TIMEOUT_MS);
+
+  it('AC-10: the writer refuses a user with no source in the project and records no event', async () => {
+    expect(await projectBindingsOf('USER', ids.noSource)).toEqual([]);
+    expect(await prisma.projectMember.count({ where: { projectId, userId: ids.noSource } })).toBe(0);
+    const ticket = await createTicket('Refused with no source in the project');
+
+    // A USER with no source holds its GLOBAL `member` baseline and nothing project-scoped, so it has
+    // no `project.read` here. The effective keys are cached per principal and project; nothing above
+    // wrote a row for it, but invalidating keeps this independent of the order the cases run in.
+    await membership.invalidatePermissions();
 
     await expect(
       writer.writeTicketEvent({
         ticketId: ticket.id,
         projectId,
         action: 'TICKET_CREATED',
-        actorId: ids.viewerBind,
+        actorId: ids.noSource,
         actorType: 'user',
         source: 'api',
         data: {},
       }),
     ).rejects.toBeInstanceOf(ForbiddenAppException);
 
-    expect(await prisma.ticketEvent.count({ where: { projectId, actorId: ids.viewerBind } })).toBe(0);
+    expect(await prisma.ticketEvent.count({ where: { projectId, actorId: ids.noSource } })).toBe(0);
   }, TEST_TIMEOUT_MS);
 });

@@ -10,7 +10,7 @@ import { createHmac } from 'crypto';
 import { randomBytes } from 'crypto';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { AgentPrincipal } from '../auth/principal/koda-principal.types';
+import { AgentPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
 
 describe('AgentsService', () => {
   let service: AgentsService;
@@ -149,6 +149,9 @@ describe('AgentsService', () => {
     mockAgentRepo.isOnProjectRoster.mockResolvedValue(true);
     // Permissions P1 (US-009): the pickup target holds `agent.pickup` unless a test says otherwise.
     mockPermissions.effectiveKeys.mockResolvedValue(new Set<string>(['agent.pickup']));
+    // Permissions P1 (US-002): `can` decides acting for another agent. Reset it at this outer scope too, so a case
+    // that installs its own implementation (AC-9 installs a throwing one) cannot leak into a later describe.
+    mockPermissions.can.mockReset().mockResolvedValue({ allowed: true, reason: 'granted' });
   });
 
   afterEach(() => {
@@ -858,6 +861,23 @@ describe('AgentsService', () => {
     beforeEach(() => {
       vi.clearAllMocks();
       mockPermissions.effectiveKeys.mockResolvedValue(new Set<string>(['agent.pickup']));
+      // Permissions P1 (US-002): `can` now decides acting for another agent, so a test that overrides it
+      // must not leak its answer into the next one.
+      mockPermissions.can.mockReset().mockResolvedValue({ allowed: true, reason: 'granted' });
+    });
+
+    /** Permissions P1 (US-002): acting for another agent is `agent.update`, not the `role: 'ADMIN'` claim. */
+    const userPrincipal = (role: 'ADMIN' | 'MEMBER'): UserPrincipal => ({
+      actorType: 'user',
+      id: `user-${role.toLowerCase()}`,
+      sub: `user-${role.toLowerCase()}`,
+      name: `${role.toLowerCase()}@koda.dev`,
+      email: `${role.toLowerCase()}@koda.dev`,
+      role,
+      blacklisted: false,
+      revoked: false,
+      authorities: [role],
+      extra: {},
     });
 
     it('should return highest-scored ticket with matchScore and matchedCapabilities', async () => {
@@ -990,6 +1010,81 @@ describe('AgentsService', () => {
       const safeResult = result as NonNullable<typeof result>;
       expect(safeResult.ticket.id).toBe('ticket-critical');
       expect(safeResult.matchScore).toBe(1);
+    });
+
+    // -------------------------------------------------------------------------
+    // Permissions P1 US-002: acting for another agent is the `agent.update` key. The owning agent is
+    // admitted without asking it; every other caller must hold it, whatever its `role` claim says.
+    // -------------------------------------------------------------------------
+
+    it('AC-6: a MEMBER user holding agent.update gets a suggestion for another agent', async () => {
+      mockAgentRepo.findBySlugWithCapabilities.mockResolvedValue(mockAgentForPickup);
+      mockAgentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockAgentRepo.findVerifiedUnassignedTickets.mockResolvedValue([
+        makeTicket('ticket-1', 'HIGH', ['nestjs']),
+      ]);
+      const memberUser = userPrincipal('MEMBER');
+
+      const result = await service.suggestTicket('test-agent', 'koda', memberUser);
+
+      expect(result).not.toBeNull();
+      expect(mockPermissions.can).toHaveBeenCalledWith(memberUser, 'agent.update');
+      // The target's keys are still the second gate.
+      expect(mockPermissions.effectiveKeys).toHaveBeenCalledWith(
+        { type: 'AGENT', id: 'agent-123' },
+        { projectId: 'project-1' },
+      );
+    });
+
+    it('AC-7: an ADMIN user whose agent.update is refused gets 403 agents before any target-agent key read', async () => {
+      mockPermissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
+      const adminUser = userPrincipal('ADMIN');
+
+      const error = await service
+        .suggestTicket('test-agent', 'koda', adminUser)
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      expect((error as ForbiddenAppException).prefix).toBe('agents');
+      expect(mockPermissions.effectiveKeys).not.toHaveBeenCalled();
+      expect(mockAgentRepo.findBySlugWithCapabilities).not.toHaveBeenCalled();
+      expect(mockAgentRepo.findVerifiedUnassignedTickets).not.toHaveBeenCalled();
+    });
+
+    it('AC-8: another agent without agent.update gets 403 agents before any target-agent key read', async () => {
+      mockPermissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
+      const otherAgent: AgentPrincipal = { ...authorizedPrincipal, id: 'agent-999', slug: 'other' };
+
+      const error = await service
+        .suggestTicket('test-agent', 'koda', otherAgent)
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      expect((error as ForbiddenAppException).prefix).toBe('agents');
+      expect(mockPermissions.can).toHaveBeenCalledWith(otherAgent, 'agent.update');
+      expect(mockPermissions.effectiveKeys).not.toHaveBeenCalled();
+      expect(mockAgentRepo.findVerifiedUnassignedTickets).not.toHaveBeenCalled();
+    });
+
+    it('AC-9: the owning agent gets a suggestion without asking can at all', async () => {
+      mockAgentRepo.findBySlugWithCapabilities.mockResolvedValue(mockAgentForPickup);
+      mockAgentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockAgentRepo.findVerifiedUnassignedTickets.mockResolvedValue([
+        makeTicket('ticket-1', 'HIGH', ['nestjs']),
+      ]);
+      mockPermissions.can.mockImplementation(() => {
+        throw new Error('can must not be asked for the owning agent');
+      });
+
+      const result = await service.suggestTicket('test-agent', 'koda', authorizedPrincipal);
+
+      expect(result).not.toBeNull();
+      expect(mockPermissions.can).not.toHaveBeenCalled();
+      // The target's own `agent.pickup` is still checked.
+      expect(mockPermissions.effectiveKeys).toHaveBeenCalledWith(
+        { type: 'AGENT', id: 'agent-123' },
+        { projectId: 'project-1' },
+      );
     });
 
     it('should only consider tickets where both assignedToAgentId and assignedToUserId are null', async () => {

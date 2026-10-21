@@ -1,6 +1,6 @@
 import { TicketStatus, CommentType } from '../../common/enums';
-import { validateTransition } from './ticket-transitions';
-import { AppException } from '@nathapp/nestjs-common';
+import { validateTransition, TRANSITION_RULES } from './ticket-transitions';
+import { AppException, ValidationAppException } from '@nathapp/nestjs-common';
 
 describe('validateTransition', () => {
   describe('Valid Transitions', () => {
@@ -34,10 +34,14 @@ describe('validateTransition', () => {
       ).not.toThrow();
     });
 
-    it('allows IN_PROGRESS → VERIFIED with GENERAL comment (sent back)', () => {
+    /**
+     * Permissions P1 US-005: the stored-but-unreachable IN_PROGRESS -> VERIFIED rule is retired, so the pair
+     * is not a transition at all any more.
+     */
+    it('AC-1: IN_PROGRESS → VERIFIED with a GENERAL comment throws ValidationAppException', () => {
       expect(() =>
         validateTransition(TicketStatus.IN_PROGRESS, TicketStatus.VERIFIED, CommentType.GENERAL)
-      ).not.toThrow();
+      ).toThrow(ValidationAppException);
     });
 
     it('allows VERIFY_FIX → CLOSED with REVIEW comment', () => {
@@ -276,10 +280,15 @@ describe('validateTransition', () => {
       ).not.toThrow();
     });
 
-    it('accepts GENERAL for IN_PROGRESS → VERIFIED', () => {
+    it('accepts GENERAL for IN_PROGRESS → VERIFIED only as an invalid pair (rule retired in US-005)', () => {
       expect(() =>
         validateTransition(TicketStatus.IN_PROGRESS, TicketStatus.VERIFIED, CommentType.GENERAL)
-      ).not.toThrow();
+      ).toThrow();
+    });
+
+    /** Permissions P1 US-005 AC-2: the retired rule leaves exactly one target from IN_PROGRESS. */
+    it('AC-2: TRANSITION_RULES[IN_PROGRESS] lists exactly [VERIFY_FIX]', () => {
+      expect(Object.keys(TRANSITION_RULES[TicketStatus.IN_PROGRESS] ?? {})).toEqual([TicketStatus.VERIFY_FIX]);
     });
 
     it('accepts REVIEW for VERIFY_FIX → CLOSED', () => {

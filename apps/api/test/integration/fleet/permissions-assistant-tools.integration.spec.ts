@@ -190,9 +190,11 @@ describeIntegration('assistant tools check their key (US-004)', () => {
       data: { protocolVersion: 4, enabled: true, lastSeenAt: OFFLINE_AT },
     });
 
-    await customRole(NO_COMMENT_ROLE, ['thread.message.send.own', 'thread.read', 'ticket.read']);
-    await customRole(UPDATER_ROLE, ['ticket.read', 'ticket.update', 'thread.read', 'thread.message.send.own']);
-    await customRole(APPROVAL_READER_ROLE, ['thread.read', 'ticket.read', 'fleet.approval.read']);
+    // US-001: `project.read` is what admits these principals to p1 at all, so the tool's own key is
+    // what refuses the call.
+    await customRole(NO_COMMENT_ROLE, ['project.read', 'thread.message.send.own', 'thread.read', 'ticket.read']);
+    await customRole(UPDATER_ROLE, ['project.read', 'ticket.read', 'ticket.update', 'thread.read', 'thread.message.send.own']);
+    await customRole(APPROVAL_READER_ROLE, ['project.read', 'thread.read', 'ticket.read', 'fleet.approval.read']);
 
     // AC-2, AC-4, AC-11: one PROJECT-scope binding each, and no `ProjectMember` row anywhere.
     await createUserWithBinding('viewerBind', 'viewer');

@@ -12,7 +12,7 @@ import type { AssistantTool, ToolContext } from '../assistant-tool.types';
  * `project` argument in such a thread and the agent copies the slug from one of these lines.
  *
  * The tool reads only what the creator can reach, by construction — the executor runs a workspace-scoped tool with
- * no membership or ability check (1d2-D5), so `findAllForPrincipal` is what keeps the answer inside the creator's
+ * no permission-key check (1d2-D5), so `findAllForPrincipal` is what keeps the answer inside the creator's
  * own reach. `ctx.projectId`/`ctx.projectSlug` are the home project's and are deliberately never read.
  */
 
@@ -45,7 +45,6 @@ export function myProjectsTool(projects: ProjectsService, counts: ProjectCountsR
     // Permissions P1 US-004: declared for the catalog's sake, never checked — a workspace-scope tool takes no key
     // check, because the listing is already the caller's reachable projects.
     key: 'project.read',
-    permission: { kind: 'member' },
     scope: 'workspace',
     parse(): Record<string, never> {
       return {};

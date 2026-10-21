@@ -8,7 +8,6 @@ import { TicketEventService } from '../../events/ticket-event.service';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { TICKET_REPOSITORY } from '../domain/ticket.domain';
-import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
 import { PermissionService } from '../../permissions/permission.service';
 import type { AgentPrincipal, KodaPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
 
@@ -156,7 +155,6 @@ describe('TicketTransitionsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TicketTransitionsService,
-        KodaCaslAbilityFactory,
         {
           provide: TICKET_REPOSITORY,
           useValue: mockTicketRepo,
@@ -988,51 +986,6 @@ describe('TicketTransitionsService', () => {
 
       expect(fields).not.toHaveBeenCalled();
       expect(mockTicketRepo.updateTicketStatusIf).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('assertTransitionPermission (legacy CASL check, still used by the assistant tool)', () => {
-    const triagerAgent = (): AgentPrincipal => ({
-      id: 'agent-triager',
-      sub: 'agent-triager',
-      actorType: 'agent',
-      slug: 'triager-agent',
-      status: 'ACTIVE',
-      agentRoles: ['TRIAGER'],
-      capabilities: [],
-      blacklisted: false,
-      revoked: false,
-      authorities: ['WORKER'],
-      name: 'Triager Agent',
-    });
-
-    const adminUser = (): UserPrincipal => ({
-      id: 'admin-1',
-      sub: 'admin-1',
-      actorType: 'user',
-      role: 'ADMIN',
-      email: 'admin@example.com',
-      blacklisted: false,
-      revoked: false,
-      authorities: ['ADMIN'],
-      name: 'Admin User',
-    });
-
-    it('refuses 403 for a principal without TRANSITION (agent TRIAGER)', async () => {
-      await expect(service.assertTransitionPermission(triagerAgent())).rejects.toBeInstanceOf(ForbiddenAppException);
-    });
-
-    it('passes for a global ADMIN and for a TRANSITION-holding agent', async () => {
-      const developer: AgentPrincipal = { ...triagerAgent(), id: 'agent-dev', slug: 'developer-agent', agentRoles: ['DEVELOPER'] };
-
-      await expect(service.assertTransitionPermission(adminUser())).resolves.toBeUndefined();
-      await expect(service.assertTransitionPermission(developer)).resolves.toBeUndefined();
-    });
-
-    it('fails closed with 403 when no ability factory is available', async () => {
-      const bareService = new TicketTransitionsService(mockTicketRepo, mockTxManager, mockPermissions as never);
-
-      await expect(bareService.assertTransitionPermission(adminUser())).rejects.toBeInstanceOf(ForbiddenAppException);
     });
   });
 

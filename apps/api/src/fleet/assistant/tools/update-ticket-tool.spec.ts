@@ -1,6 +1,5 @@
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { Priority, TicketStatus } from '../../../common/enums';
-import { TicketTransitionsService } from '../../../tickets/state-machine/ticket-transitions.service';
 import { TicketsService } from '../../../tickets/tickets.service';
 import { ToolActionError, ToolForbiddenError, ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
 import { KODA_UPDATE_TICKET } from '../koda-tool-descriptors';
@@ -8,7 +7,7 @@ import { updateTicketTool, type UpdateTicketInput } from './update-ticket-tool';
 
 /**
  * Fleet S5b 2b1 US-004: the ticket update tool's parser, masked field-diff preview and prechecked execution. The
- * tool is pure over its three collaborators here — the DB-backed path (route, propose, approve, the ticket really
+ * tool is pure over its collaborators here — the DB-backed path (route, propose, approve, the ticket really
  * updated) is `test/integration/fleet/assistant-update-ticket-tool.integration.spec.ts`.
  */
 
@@ -21,7 +20,7 @@ const can = vi.fn(async (_key: string) => true);
 const ctx = {
   projectId: 'project-1',
   projectSlug: 'web',
-  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test', projectRole: 'DEVELOPER' },
+  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test' },
   threadId: 'thread-1',
   jobId: 'job-1',
   now: new Date('2026-10-23T09:00:00.000Z'),
@@ -50,10 +49,8 @@ const TOKEN = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
 function toolDeps(overrides: { ticket?: Record<string, unknown> } = {}) {
   const findByRef = vi.fn(async () => ({ ...TICKET, ...overrides.ticket }));
   const update = vi.fn(async () => ({ ...TICKET, ...overrides.ticket }));
-  const assertTransitionPermission = vi.fn(async () => undefined);
   const tickets = { findByRef, update } as unknown as TicketsService;
-  const transitions = { assertTransitionPermission } as unknown as TicketTransitionsService;
-  return { findByRef, update, assertTransitionPermission, tool: updateTicketTool({ tickets, transitions }) };
+  return { findByRef, update, tool: updateTicketTool({ tickets }) };
 }
 
 /** The `reason` a parser refuses with; fails loudly when it accepts or throws something else. */
@@ -149,7 +146,6 @@ describe('koda_update_ticket parse (US-004)', () => {
     const tool = toolDeps().tool;
     expect(tool.descriptor).toBe(KODA_UPDATE_TICKET);
     expect(tool.kind).toBe('write');
-    expect(tool.permission).toEqual({ kind: 'ability', action: 'update', subject: 'Ticket' });
     expect(tool.key).toBe('ticket.update');
   });
 });
@@ -171,12 +167,12 @@ describe('koda_update_ticket preview (US-004)', () => {
     expect(preview?.split('\n')[1]).toBe('priority: MEDIUM -> HIGH');
   });
 
-  it('AC-5: a field-only proposal never checks the transition permission', async () => {
-    const { assertTransitionPermission, tool } = toolDeps();
+  it('AC-5: a field-only proposal never asks for a transition key', async () => {
+    const { tool } = toolDeps();
 
     await tool.preview?.(ctx, tool.parse({ ref: 'KODA-1', title: 'New' }));
 
-    expect(assertTransitionPermission).not.toHaveBeenCalled();
+    expect(can).not.toHaveBeenCalled();
   });
 
   it('AC-7 (US-004): a start proposal whose context refuses ticket.transition.start refuses with that key', async () => {
@@ -187,7 +183,7 @@ describe('koda_update_ticket preview (US-004)', () => {
 
     expect(failure).toBeInstanceOf(ToolForbiddenError);
     expect((failure as ToolForbiddenError).need).toBe('ticket.transition.start');
-    // The key is asked through the context, in the context's project, and never through the legacy transition service.
+    // The key is asked through the context, in the context's project.
     expect(can).toHaveBeenCalledWith('ticket.transition.start');
   });
 

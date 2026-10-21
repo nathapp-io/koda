@@ -31,9 +31,9 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
   const bind = (agent: Agent, projectId: string | null = projects.p1, roleKey = 'viewer') => membership.createBinding(
     { principal: { type: 'AGENT', id: agent.id }, roleKey, projectId }, { type: 'USER', id: adminId },
   );
-  const agent = async (slug: string, name = slug): Promise<Agent> => {
+  const agent = async (slug: string, name = slug, roles: string[] = ['DEVELOPER']): Promise<Agent> => {
     const res = await request(server).post('/api/agents').set({ Authorization: `Bearer ${rootToken}` })
-      .send({ slug, name, roles: ['DEVELOPER'] }).expect(201);
+      .send({ slug, name, roles }).expect(201);
     const body = data<{ agent: { id: string; slug: string }; apiKey: string }>(res);
     return { ...body.agent, apiKey: body.apiKey };
   };
@@ -192,6 +192,33 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
   it('AC-11: agent without access cannot pick up from project', async () => {
     const a = await agent('pickup-none-bot');
     await request(server).get(`/api/agents/${a.slug}/pickup?project=p1`).set({ Authorization: `Bearer ${a.apiKey}` }).expect(403);
+  });
+  // Permissions P1 US-003: the pickup's own write (`writeAgentAction` of TICKET_SUGGESTED) is
+  // authorized by the same `project.read` key as the route. The legacy actor-role allow-list omitted
+  // VERIFIER, so a VERIFIER-only agent's pickup was refused *after* the pickup itself was allowed.
+  it('US-003 AC-11: a rostered VERIFIER-only agent picks up and its TICKET_SUGGESTED event is stored', async () => {
+    const a = await agent('pickup-verifier-bot', 'Pickup Verifier', ['VERIFIER']);
+    // Its only legacy membership source is the AgentProject roster row; its only legacy role is the
+    // VERIFIER AgentRoleEntry. No binding, no ProjectMember row (agents have none).
+    await legacy(a);
+    expect(await db.agentRoleEntry.findMany({ where: { agentId: a.id }, select: { role: true } }))
+      .toEqual([{ role: 'VERIFIER' }]);
+    expect(await bindings(a)).toEqual([]);
+    const ticket = await db.ticket.create({
+      data: {
+        projectId: projects.p1, number: 900, title: 'Verifier pickup', type: 'BUG',
+        status: 'VERIFIED', createdByUserId: adminId,
+      },
+    });
+    // The roster row and the ticket were written behind the API's back, so drop the cached keys.
+    await membership.invalidatePermissions();
+
+    const res = await request(server).get(`/api/agents/${a.slug}/pickup?project=p1`)
+      .set({ Authorization: `Bearer ${a.apiKey}` }).expect(200);
+    expect(data<{ ticket: { id: string; ref: string } }>(res).ticket.id).toBe(ticket.id);
+
+    const events = await db.agentEvent.findMany({ where: { projectId: projects.p1, agentId: a.id } });
+    expect(events.map((event) => event.action)).toContain('TICKET_SUGGESTED');
   });
   it('AC-12: me lists legacy and bound projects in slug order', async () => {
     const a = await agent('me-bot');

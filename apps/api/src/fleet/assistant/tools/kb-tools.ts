@@ -19,7 +19,7 @@ import { KODA_GET_DOC, KODA_KB_SEARCH } from '../koda-tool-descriptors';
  * GitHub, so a citation names the text that was indexed rather than a historical revision. The project is the
  * thread's own (S5b-R7): both tools resolve their repository inside `ctx.projectId`, so a foreign repository is
  * `not_found` rather than readable. Input is parsed by hand (1b-D5) and the descriptors' `inputSchema` is what
- * the model sees; both are `permission: { kind: 'member' }` (1b-D1), like the REST routes they read.
+ * the model sees; both declare their own read key (1b-D1), like the REST routes they read.
  *
  * S5b 3c-2-D11 adds the run outcomes to both: `koda_kb_search` takes a `source` (3c-2-D9) and cites an outcome hit
  * as `job:<jobId>/<file>#<anchor>`, and `koda_get_doc` reads that citation back through `readOutcome`, under the
@@ -239,8 +239,7 @@ export function kbSearchTool(deps: KnowledgeToolDeps): AssistantTool<KbSearchInp
   return {
     descriptor: KODA_KB_SEARCH,
     key: 'kb.search',
-    // 1b-D1: the search route is member-gated, so the tool declares membership rather than one ability.
-    permission: { kind: 'member' },
+    // 1b-D1: the tool declares the key the search route itself enforces.
     parse(input: unknown): KbSearchInput {
       const raw = asRecord(input);
       return {
@@ -372,9 +371,8 @@ async function outcomeDoc(ctx: ToolContext, input: JobDocInput, deps: KnowledgeT
 export function getDocTool(deps: KnowledgeToolDeps): AssistantTool<GetDocInput> {
   return {
     descriptor: KODA_GET_DOC,
+    // 1b-D1: the search route reads the same index, so this tool's gate is its own catalog key, `kb.read`.
     key: 'kb.read',
-    // 1b-D1: the search route reads the same index and is member-gated, so the tool declares membership.
-    permission: { kind: 'member' },
     parse(input: unknown): GetDocInput {
       const raw = asRecord(input);
       const citation = raw['citation'];

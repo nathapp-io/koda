@@ -18,7 +18,7 @@ import { requeueJobTool, type RequeueJobInput } from './requeue-job-tool';
 const ctx = {
   projectId: 'p-web',
   projectSlug: 'web',
-  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test', projectRole: 'DEVELOPER' },
+  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test' },
   threadId: 'thread-1',
   jobId: 'job-thread',
   now: new Date('2026-10-23T09:00:00.000Z'),
@@ -140,7 +140,7 @@ describe('koda_requeue_job parse (US-004)', () => {
 
     expect(tool.descriptor).toBe(KODA_REQUEUE_JOB);
     expect(tool.kind).toBe('write');
-    expect(tool.permission).toEqual({ kind: 'ability', action: 'update', subject: 'FleetJob' });
+    expect(tool.key).toBe('fleet.job.requeue');
   });
 });
 

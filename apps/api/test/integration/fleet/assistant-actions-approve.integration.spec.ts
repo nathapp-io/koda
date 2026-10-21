@@ -20,6 +20,7 @@ import { CommentsService } from '../../../src/comments/comments.service';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantActionService } from '../../../src/fleet/assistant/actions/assistant-action.service';
 import type { ProposeInput } from '../../../src/fleet/assistant/actions/pending-action.domain';
+import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
@@ -191,6 +192,9 @@ describeIntegration('approving an assistant_action (PG, US-006)', () => {
   it('AC-10 and AC-11: a requester removed from the action\'s project is refused and the action stays PENDING', async () => {
     const { actionId, approvalId, ticketId, threadId } = await propose();
     await prisma.projectMember.deleteMany({ where: { projectId: world.projectId, userId: world.ids.dev } });
+    // US-001: access is decided from the effective-permission cache, so a row removed under it takes an
+    // explicit invalidation to be seen by the next request.
+    await app.get(MembershipService).invalidatePermissions();
 
     try {
       const res = await decide(approvalId, world.tokens.dev, { decision: 'approve' }).expect(403);
@@ -202,6 +206,7 @@ describeIntegration('approving an assistant_action (PG, US-006)', () => {
       expect(await systemNotes(threadId)).toHaveLength(0);
     } finally {
       await prisma.projectMember.create({ data: { projectId: world.projectId, userId: world.ids.dev, role: 'DEVELOPER' } });
+      await app.get(MembershipService).invalidatePermissions();
     }
   });
 

@@ -14,7 +14,7 @@ import { addMemoryTool, type AddMemoryInput } from './add-memory-tool';
 const ctx = {
   projectId: 'project-1',
   projectSlug: 'web',
-  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test', projectRole: 'DEVELOPER' },
+  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test' },
   threadId: 'thread-1',
   jobId: 'job-1',
   now: new Date('2026-10-23T09:00:00.000Z'),
@@ -146,7 +146,7 @@ describe('koda_add_memory parse (US-006)', () => {
     expect(tool.descriptor).toBe(KODA_ADD_MEMORY);
     expect(tool.descriptor.name).toBe('koda_add_memory');
     expect(tool.kind).toBe('write');
-    expect(tool.permission).toEqual({ kind: 'member' });
+    expect(tool.key).toBe('memory.create');
   });
 });
 

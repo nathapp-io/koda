@@ -17,7 +17,7 @@ import { cancelJobTool, type CancelJobInput } from './cancel-job-tool';
 const ctx = {
   projectId: 'p-web',
   projectSlug: 'web',
-  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test', projectRole: 'DEVELOPER' },
+  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test' },
   threadId: 'thread-1',
   jobId: 'job-thread',
   now: new Date('2026-10-23T09:00:00.000Z'),
@@ -136,7 +136,7 @@ describe('koda_cancel_job parse (US-005)', () => {
 
     expect(tool.descriptor).toBe(KODA_CANCEL_JOB);
     expect(tool.kind).toBe('write');
-    expect(tool.permission).toEqual({ kind: 'ability', action: 'update', subject: 'FleetJob' });
+    expect(tool.key).toBe('fleet.job.cancel');
   });
 });
 

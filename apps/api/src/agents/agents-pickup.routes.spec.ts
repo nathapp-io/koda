@@ -110,6 +110,9 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
    * Permissions P1 (US-009): the pickup target's project keys are the authorization. The double
    * answers `agent.pickup` by default — every AC here except the two refusal rows starts from a
    * target that holds it.
+   *
+   * Permissions P1 (US-002): `can` answers `agent.update` for a caller that is not the owning agent,
+   * so it allows by default and the refusal rows below turn it off.
    */
   const permissions: { can: Mock; effectiveKeys: Mock } = {
     can: vi.fn(async () => ({ allowed: true, reason: 'granted' })),
@@ -207,6 +210,9 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
 
     await bootApp();
     currentPrincipal = agentPrincipal('test-agent');
+    // Permissions P1 (US-002): `can` decides acting for another agent, so it starts from the seeded
+    // Owner/Admin answer and each refusal row below turns it off.
+    permissions.can.mockReset().mockResolvedValue({ allowed: true, reason: 'granted' });
     seedHappyPath();
   });
 
@@ -246,6 +252,8 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
   });
 
   it('AC10: returns 403 when authenticated as a different agent', async () => {
+    // Permissions P1 (US-002): another agent is admitted only with `agent.update`, which it lacks.
+    permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
     currentPrincipal = agentPrincipal('other-agent');
 
     const res = await request(app.getHttpServer())
@@ -253,10 +261,14 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
       .query({ project: 'koda' });
 
     expect(res.status).toBe(403);
+    expect(permissions.can).toHaveBeenCalledWith(currentPrincipal, 'agent.update');
+    // No target-agent key read and no ticket read.
+    expect(permissions.effectiveKeys).not.toHaveBeenCalled();
     expect(agentRepo.findVerifiedUnassignedTickets).not.toHaveBeenCalled();
   });
 
-  it('AC11: returns 403 for a non-ADMIN user', async () => {
+  it('AC11: returns 403 for a user without agent.update', async () => {
+    permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
     currentPrincipal = userPrincipal('MEMBER');
 
     const res = await request(app.getHttpServer())
@@ -264,10 +276,12 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
       .query({ project: 'koda' });
 
     expect(res.status).toBe(403);
+    expect(permissions.can).toHaveBeenCalledWith(currentPrincipal, 'agent.update');
+    expect(permissions.effectiveKeys).not.toHaveBeenCalled();
     expect(agentRepo.findVerifiedUnassignedTickets).not.toHaveBeenCalled();
   });
 
-  it('AC12: returns 200 for a global ADMIN user', async () => {
+  it('AC12: returns 200 for a user holding agent.update', async () => {
     currentPrincipal = userPrincipal('ADMIN');
 
     const res = await request(app.getHttpServer())
@@ -275,6 +289,7 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
       .query({ project: 'koda' });
 
     expect(res.status).toBe(200);
+    expect(permissions.can).toHaveBeenCalledWith(currentPrincipal, 'agent.update');
     expect(res.body.data.ticket.ref).toBe('KT-1');
     expect(res.body.data.matchScore).toBe(1);
   });

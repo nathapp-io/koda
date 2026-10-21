@@ -168,9 +168,15 @@ describeIntegration('fleet project read keys (US-004)', () => {
     ).id;
 
     await bind('viewer', 'viewer');
-    // AC-3 / AC-4: a custom role that reads tickets and nothing else, so every fleet read is refused.
+    // AC-3 / AC-4: a custom role that holds only project access and `ticket.read`, so every fleet read
+    // is refused. US-001: `project.read` is what lets the caller reach the project at all.
     await db.role.create({
-      data: { key: 'ticket-reader', name: 'Ticket Reader', scope: 'PROJECT', permissions: ['ticket.read'] },
+      data: {
+        key: 'ticket-reader',
+        name: 'Ticket Reader',
+        scope: 'PROJECT',
+        permissions: ['project.read', 'ticket.read'],
+      },
     });
     await bind('custom', 'ticket-reader');
 

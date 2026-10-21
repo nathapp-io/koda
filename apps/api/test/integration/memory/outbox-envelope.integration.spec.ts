@@ -154,7 +154,12 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
       transitionsService,
       // Permissions P1 (US-004): the sixth argument is the key check, allow-all here: the envelope
       // assertions below are about what a successful write records, not about who may write.
-      { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
+      // Permissions P1 (US-002): the user assignee is eligible through its project keys, so the double
+      // answers `effectiveKeys` too.
+      {
+        can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }),
+        effectiveKeys: vi.fn().mockResolvedValue(new Set<string>(['project.read'])),
+      } as never,
     );
 
     // Seed: project, ADMIN user (assignee), and two tickets.

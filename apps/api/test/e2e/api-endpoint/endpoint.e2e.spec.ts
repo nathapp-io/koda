@@ -3290,6 +3290,9 @@ describeIntegration('API Integration Tests', () => {
         where: { agentId_projectId: { agentId, projectId: project.id } },
         create: { agentId, projectId: project.id, addedById: admin.id }, update: {},
       });
+      // US-001: project access is decided from the effective-permission cache, and these membership rows are
+      // written under it rather than through a membership route, so the cache is dropped explicitly.
+      await app.get(MembershipService).invalidatePermissions();
       world = {
         tokens: { root: userAccessToken, dev: nonAdminUserAccessToken, viewer: nonAdminUserAccessToken, outsider: nonAdminUserAccessToken },
         ids: { root: admin.id, dev: developer.id, viewer: developer.id, outsider: developer.id },
@@ -4478,6 +4481,9 @@ describeIntegration('API Integration Tests', () => {
       // The membership is dropped and restored rather than registering a second user: POST /api/auth/register is
       // throttled at 5/min per IP and this file already registers four users (it answered 429 for a fifth).
       await db().projectMember.deleteMany({ where: { projectId, userId: developerId } });
+      // US-001: access is decided from the effective-permission cache, so dropping the row under it takes a
+      // explicit invalidation to be seen by the next request.
+      await app.get(MembershipService).invalidatePermissions();
       try {
         const res = await search(memberToken, { query: 'broker' }).expect(403);
 
@@ -4485,6 +4491,7 @@ describeIntegration('API Integration Tests', () => {
         expect(searchSpy).not.toHaveBeenCalled();
       } finally {
         await db().projectMember.create({ data: { projectId, userId: developerId, role: 'DEVELOPER' } });
+        await app.get(MembershipService).invalidatePermissions();
       }
     });
   });
@@ -4625,12 +4632,16 @@ describeIntegration('API Integration Tests', () => {
     it('AC-14: GET repos answers 403 for a user who is not a project member', async () => {
       const member = await db().projectMember.findFirstOrThrow({ where: { project: { slug } } });
       await db().projectMember.delete({ where: { id: member.id } });
+      // US-001: access is decided from the effective-permission cache, so the removal needs an invalidation
+      // before the next request sees it — and the restore needs one too.
+      await app.get(MembershipService).invalidatePermissions();
       try {
         const res = await states(nonAdminUserAccessToken).expect(403);
 
         expect(res.body.ret).not.toBe(0);
       } finally {
         await db().projectMember.create({ data: { projectId: member.projectId, userId: member.userId, role: 'DEVELOPER' } });
+        await app.get(MembershipService).invalidatePermissions();
       }
     });
   });

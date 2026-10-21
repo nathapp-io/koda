@@ -6,9 +6,9 @@ import type { TicketAction } from './allowed-actions';
  *
  * A transition route is gated twice: the route key says the caller may make that kind of move
  * (`ticket.transition.verify`), the edge key says the ticket's *current* status allows it for this
- * caller (`ticket.transition.verify-fix.approve` on a VERIFY_FIX ticket). A pair with no key is
- * either not an edge of the state machine (`CREATED -> CLOSED`) or the stored-but-unreachable
- * `IN_PROGRESS -> VERIFIED` rule: neither is checked, and `validateTransition` answers for it.
+ * caller (`ticket.transition.verify-fix.approve` on a VERIFY_FIX ticket). A pair with no key is not
+ * an edge of the state machine (`CREATED -> CLOSED`): nothing is checked, and `validateTransition`
+ * answers for it.
  */
 const EDGE_KEYS: Readonly<Partial<Record<TicketStatus, Readonly<Partial<Record<TicketStatus, string>>>>>> = {
   [TicketStatus.CREATED]: {
@@ -30,8 +30,8 @@ const EDGE_KEYS: Readonly<Partial<Record<TicketStatus, Readonly<Partial<Record<T
 };
 
 /**
- * The permission key of a state-machine edge; undefined for a pair with no key (not an edge, or the
- * unreachable IN_PROGRESS -> VERIFIED).
+ * The permission key of a state-machine edge; undefined for a pair with no key (not an edge of the
+ * state machine).
  */
 export function transitionKeyFor(from: TicketStatus, to: TicketStatus): string | undefined {
   return EDGE_KEYS[from]?.[to];

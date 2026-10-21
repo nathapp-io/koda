@@ -173,7 +173,9 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
       projectId: p2Id, number: 1, type: 'BUG', status: 'CREATED', priority: 'MEDIUM', title: 'P2 bug',
     } })).id;
 
-    await prisma.role.create({ data: { key: TICKET_READER_ROLE, name: TICKET_READER_ROLE, scope: 'PROJECT', system: false, permissions: ['ticket.read'] } });
+    // US-001: `project.read` admits the caller to the project; the memory keys are what the routes then
+    // refuse for this role.
+    await prisma.role.create({ data: { key: TICKET_READER_ROLE, name: TICKET_READER_ROLE, scope: 'PROJECT', system: false, permissions: ['project.read', 'ticket.read'] } });
 
     // AC-2, AC-4, AC-5, AC-7, AC-15: two developers, one of whom owns the item the other may not replace.
     await createUserWithBinding('dev1', 'developer');

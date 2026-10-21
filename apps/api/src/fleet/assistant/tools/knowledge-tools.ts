@@ -134,8 +134,7 @@ export function memorySearchTool(memory: MemoryGovernanceService): AssistantTool
   return {
     descriptor: KODA_MEMORY_SEARCH,
     key: 'memory.read',
-    // 1b-D1: the memory REST routes are member-gated, so the tool declares membership rather than one ability.
-    permission: { kind: 'member' },
+    // 1b-D1: the memory REST routes' key.
     parse(input: unknown): MemorySearchInput {
       const raw = asRecord(input);
       return {
@@ -196,8 +195,7 @@ export function timelineTool(deps: { timeline: TimelineService; tickets: Tickets
   return {
     descriptor: KODA_TIMELINE,
     key: 'timeline.read',
-    // 1b-D1: the timeline REST route is member-gated, so the tool declares membership rather than one ability.
-    permission: { kind: 'member' },
+    // 1b-D1: the timeline REST route's key.
     parse(input: unknown): TimelineInput {
       const raw = asRecord(input);
       return {

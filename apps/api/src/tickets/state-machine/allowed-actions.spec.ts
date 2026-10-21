@@ -1,31 +1,7 @@
-import { allowedActions, canOverrideClose, TICKET_ACTIONS } from './allowed-actions';
+import { allowedActions, TICKET_ACTIONS } from './allowed-actions';
 import type { TicketAction } from './allowed-actions';
 import { TRANSITION_RULES, validateTransition } from './ticket-transitions';
 import { TicketStatus, CommentType } from '../../common/enums';
-import type { AgentPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
-
-const user = (over: Partial<UserPrincipal> = {}): UserPrincipal => ({
-  actorType: 'user', id: 'u1', name: 'u1', email: 'u1@x', role: 'MEMBER',
-  blacklisted: false, revoked: false, authorities: ['MEMBER'], ...over,
-});
-const agent: AgentPrincipal = {
-  actorType: 'agent', id: 'a1', name: 'bot', slug: 'bot', status: 'ACTIVE',
-  agentRoles: ['DEVELOPER', 'REVIEWER', 'VERIFIER', 'TRIAGER'], capabilities: [],
-  blacklisted: false, revoked: false, authorities: ['WORKER'],
-};
-
-describe('canOverrideClose', () => {
-  it.each([
-    ['global ADMIN', user({ role: 'ADMIN' }), true],
-    ['project ADMIN', user({ projectRole: 'ADMIN' }), true],
-    ['project DEVELOPER', user({ projectRole: 'DEVELOPER' }), false],
-    ['project VIEWER', user({ projectRole: 'VIEWER' }), false],
-    ['no project role', user(), false],
-    ['agent with every role', agent, false],
-  ])('%s -> %s', (_label, principal, expected) => {
-    expect(canOverrideClose(principal)).toBe(expected);
-  });
-});
 
 /** What each endpoint asks the state machine for, from a given status. */
 const ENDPOINT_TARGETS: Record<Exclude<typeof TICKET_ACTIONS[number], 'close'>, Array<[TicketStatus, CommentType | undefined]>> = {
@@ -83,8 +59,6 @@ describe('allowedActions', () => {
   it('covers every reachable rule in TRANSITION_RULES for a caller holding every key', () => {
     for (const [from, targets] of Object.entries(TRANSITION_RULES) as Array<[TicketStatus, Record<string, unknown>]>) {
       for (const to of Object.keys(targets) as TicketStatus[]) {
-        // IN_PROGRESS -> VERIFIED needs a GENERAL comment no route supplies: unreachable by design.
-        if (from === TicketStatus.IN_PROGRESS && to === TicketStatus.VERIFIED) continue;
         const actions = allowedActions(from, EVERY_ACTION).filter((a): a is keyof typeof ENDPOINT_TARGETS => a !== 'close');
         expect({ from, to, covered: actions.some((a) => ENDPOINT_TARGETS[a].some(([t]) => t === to)) })
           .toEqual({ from, to, covered: true });

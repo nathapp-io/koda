@@ -14,6 +14,7 @@ import { LiveStreamRegistry } from '../../live/live-stream-registry';
 import { ThreadEventBus, type ThreadLiveEvent } from '../../live/thread-event-bus';
 import { WorkspaceThreadsService } from './workspace-threads.service';
 import { Requires } from '../../permissions/requires.decorator';
+import { RequiresGuard } from '../../permissions/requires.guard';
 
 interface WorkspaceThreadEventsRequest {
   params: { id: string };
@@ -26,6 +27,11 @@ interface WorkspaceThreadEventsRequest {
  * project stream there is no project membership and, since permissions P1 US-003, no principal-type refusal either:
  * the workspace scope's own read already answers 404 to anyone but the creator, global admins and agents included
  * (fleet S5b 1d-D2), and it answers before a stream slot is acquired. The JWT check below is unchanged.
+ *
+ * Permissions P1 (US-002): `thread.workspace.read` is a route key now. `RequiresGuard` runs first — a caller
+ * holding neither the key nor `.own` is refused with 403 `permissions` before this fence, the JWT read and the
+ * stream slot. A `.own` holder passes (`RequiresGuard` answers `not-owner`) and this fence still decides, so a
+ * Member's own stream behaves as before.
  */
 @Injectable()
 export class WorkspaceThreadEventsGuard implements CanActivate {
@@ -54,7 +60,8 @@ export class WorkspaceThreadEventsGuard implements CanActivate {
 
 @ApiTags('live')
 @Controller('threads/:id/events')
-@UseGuards(WorkspaceThreadEventsGuard)
+// Order matters: the key is asked before the ownership fence, the JWT read and the stream slot.
+@UseGuards(RequiresGuard, WorkspaceThreadEventsGuard)
 export class WorkspaceThreadEventsController {
   constructor(
     private readonly bus: ThreadEventBus,
@@ -64,7 +71,7 @@ export class WorkspaceThreadEventsController {
   ) {}
 
   @Sse()
-  @Requires('thread.workspace.read', { enforcedBy: 'service' })
+  @Requires('thread.workspace.read')
   @SkipThrottle()
   @ApiExcludeEndpoint()
   async events(

@@ -13,8 +13,8 @@
  * AC-5: Event creation is included in the WriteResult.provenance output.
  * AC-6: Creating an event with a non-existent projectId throws ForbiddenError with code PROJECT_NOT_FOUND.
  * AC-7: ActorResolver maps current Koda auth and agent context into the Phase 1 actor model before permission checks run.
- * AC-8: Only actors with role admin, developer, or agent on the target project can call event write operations,
- *       and GET /admin/outbox requires admin.
+ * AC-8: Only an actor with `project.read` in the target project can call the event write operations.
+ *       (Permissions P1 US-003: the legacy admin/developer/agent allow-list became that key.)
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -27,7 +27,7 @@ import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { KodaDomainWriter } from '../../../src/koda-domain-writer/koda-domain-writer.service';
 import { PrismaKodaDomainWriterRepository } from '../../../src/koda-domain-writer/prisma-koda-domain-writer.repository';
 import { RagService } from '../../../src/rag/rag.service';
-import { AgentAuthProvider } from '../../../src/auth/agent-auth.provider';
+import { PermissionService } from '../../../src/permissions/permission.service';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { AgentEventService } from '../../../src/events/agent-event.service';
 import { DecisionEventService } from '../../../src/events/decision-event.service';
@@ -60,15 +60,6 @@ describe('Event Write Operations and Actor Resolution', () => {
     apiKeyHash: 'hashed-key-123',
     status: 'ACTIVE',
     maxConcurrentTickets: 5,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-
-  const mockUser = {
-    id: 'user-123',
-    email: 'admin@koda.dev',
-    passwordHash: 'hashed-password',
-    role: 'ADMIN',
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -131,25 +122,9 @@ describe('Event Write Operations and Actor Resolution', () => {
         create: vi.fn(),
         findMany: vi.fn(),
       },
-      agentRoleEntry: {
-        findMany: vi.fn(),
-      },
-      // US-004: a user actor's project roles are read from User.role and
-      // ProjectMember.role, so the writer's repository needs both delegates.
-      user: {
-        findUnique: vi.fn(),
-        findFirst: vi.fn(),
-      },
-      projectMember: {
-        findUnique: vi.fn(),
-        findFirst: vi.fn(),
-      },
-      // Permissions P1b US-003: a user actor's project roles are the union of `User.role`, the legacy
-      // `ProjectMember` row and the user's PROJECT-scope bindings, which the compatibility queries read
-      // here. No binding is stubbed as a source, so the event assertions below keep their meaning.
-      roleBinding: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
+      // Permissions P1 (US-003): the writer no longer reads actor roles from the database; the
+      // PermissionService double below answers the decision. The project delegate stays because the
+      // event services still validate the project before writing.
       $transaction: vi.fn(),
     },
   };
@@ -163,6 +138,14 @@ describe('Event Write Operations and Actor Resolution', () => {
 
   const mockOutbox = {
     record: vi.fn().mockResolvedValue(undefined),
+  };
+
+  /**
+   * Permissions P1 (US-003): the writer's only authorization input. It answers with `project.read`
+   * unless a test overrides it, which is what an actor with access to the project holds there.
+   */
+  const mockPermissions = {
+    effectiveKeys: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -186,7 +169,7 @@ describe('Event Write Operations and Actor Resolution', () => {
             isInTransaction: vi.fn(() => false),
           },
         },
-        { provide: AgentAuthProvider, useValue: { loadAgentRoles: vi.fn().mockResolvedValue([]) } },
+        { provide: PermissionService, useValue: mockPermissions },
       ],
     }).compile();
 
@@ -194,6 +177,7 @@ describe('Event Write Operations and Actor Resolution', () => {
     ticketEventService = module.get<TicketEventService>(TicketEventService);
     agentEventService = module.get<AgentEventService>(AgentEventService);
     decisionEventService = module.get<DecisionEventService>(DecisionEventService);
+    mockPermissions.effectiveKeys.mockReset().mockResolvedValue(new Set(['project.read']));
   });
 
   afterEach(() => {
@@ -811,11 +795,11 @@ describe('Event Write Operations and Actor Resolution', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // AC-8: Role-based access control for event write operations
+  // AC-8: access control for event write operations (project.read, US-003)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe('AC-8: Role-based access control for event write operations', () => {
-    it('should allow actors with admin role to create ticket events', async () => {
+  describe('AC-8: event writes need project.read in the event’s project', () => {
+    it('allows a user actor whose effective keys hold project.read', async () => {
       const eventData = {
         ticketId: 'ticket-domain-001',
         projectId: 'proj-koda-123',
@@ -842,68 +826,18 @@ describe('Event Write Operations and Actor Resolution', () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticketEvent.create.mockResolvedValue(createdEvent);
       mockOutbox.record.mockResolvedValue({ id: 'outbox-5' } as any);
-
-      // US-004: the user's global ADMIN role is what grants the write.
-      mockPrismaService.client.user.findUnique.mockResolvedValue(mockUser);
-      mockPrismaService.client.user.findFirst.mockResolvedValue(mockUser);
-      mockPrismaService.client.projectMember.findFirst.mockResolvedValue(null);
-      mockPrismaService.client.projectMember.findUnique.mockResolvedValue(null);
+      mockPermissions.effectiveKeys.mockResolvedValue(new Set(['project.read', 'ticket.read']));
 
       const result = await kodaDomainWriter.writeTicketEvent(eventData);
 
       expect(result).toHaveProperty('canonicalId');
+      expect(mockPermissions.effectiveKeys).toHaveBeenCalledWith(
+        { type: 'USER', id: 'user-123' },
+        { projectId: 'proj-koda-123' },
+      );
     });
 
-    it('should allow actors with developer role to create ticket events', async () => {
-      const eventData = {
-        ticketId: 'ticket-domain-001',
-        projectId: 'proj-koda-123',
-        action: 'CREATED',
-        actorId: 'user-developer',
-        actorType: 'user' as const,
-        source: 'api' as const,
-        data: { actorRole: 'DEVELOPER' },
-      };
-
-      const createdEvent = {
-        id: 'event-ac-002',
-        ticketId: eventData.ticketId,
-        projectId: eventData.projectId,
-        action: eventData.action,
-        actorId: eventData.actorId,
-        actorType: eventData.actorType,
-        source: eventData.source,
-        data: '{"actorRole":"DEVELOPER"}',
-        timestamp: new Date(),
-        createdAt: new Date(),
-      };
-
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticketEvent.create.mockResolvedValue(createdEvent);
-      mockOutbox.record.mockResolvedValue({ id: 'outbox-6' } as any);
-
-      // US-004: the DEVELOPER role comes from the ProjectMember row, not the payload.
-      mockPrismaService.client.user.findUnique.mockResolvedValue({ ...mockUser, role: 'MEMBER' });
-      mockPrismaService.client.user.findFirst.mockResolvedValue({ ...mockUser, role: 'MEMBER' });
-      mockPrismaService.client.projectMember.findFirst.mockResolvedValue({
-        id: 'membership-1',
-        projectId: eventData.projectId,
-        userId: eventData.actorId,
-        role: 'DEVELOPER',
-      });
-      mockPrismaService.client.projectMember.findUnique.mockResolvedValue({
-        id: 'membership-1',
-        projectId: eventData.projectId,
-        userId: eventData.actorId,
-        role: 'DEVELOPER',
-      });
-
-      const result = await kodaDomainWriter.writeTicketEvent(eventData);
-
-      expect(result).toHaveProperty('canonicalId');
-    });
-
-    it('should allow agents to create ticket events', async () => {
+    it('allows an agent actor whose effective keys hold project.read', async () => {
       const eventData = {
         ticketId: 'ticket-domain-001',
         projectId: 'proj-koda-123',
@@ -929,17 +863,19 @@ describe('Event Write Operations and Actor Resolution', () => {
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticketEvent.create.mockResolvedValue(createdEvent);
-      mockPrismaService.client.agentRoleEntry.findMany.mockResolvedValue([
-        { projectId: 'proj-koda-123', role: 'AGENT' },
-      ]);
       mockOutbox.record.mockResolvedValue({ id: 'outbox-7' } as any);
+      mockPermissions.effectiveKeys.mockResolvedValue(new Set(['project.read']));
 
       const result = await kodaDomainWriter.writeTicketEvent(eventData);
 
       expect(result).toHaveProperty('canonicalId');
+      expect(mockPermissions.effectiveKeys).toHaveBeenCalledWith(
+        { type: 'AGENT', id: 'agent-writer-001' },
+        { projectId: 'proj-koda-123' },
+      );
     });
 
-    it('should deny actors without admin, developer, or agent role', async () => {
+    it('denies an actor whose effective keys lack project.read, whatever the payload claims', async () => {
       const eventData = {
         ticketId: 'ticket-domain-001',
         projectId: 'proj-koda-123',
@@ -947,31 +883,17 @@ describe('Event Write Operations and Actor Resolution', () => {
         actorId: 'user-member',
         actorType: 'user' as const,
         source: 'api' as const,
-        data: {},
+        data: { actorRole: 'ADMIN' },
       };
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.agentRoleEntry.findMany.mockResolvedValue([
-        { projectId: 'proj-koda-123', role: 'MEMBER' },
-      ]);
-      // US-004: neither a global ADMIN role nor a membership row grants access.
-      mockPrismaService.client.user.findUnique.mockResolvedValue({
-        ...mockUser,
-        id: 'user-member',
-        role: 'MEMBER',
-      });
-      mockPrismaService.client.user.findFirst.mockResolvedValue({
-        ...mockUser,
-        id: 'user-member',
-        role: 'MEMBER',
-      });
-      mockPrismaService.client.projectMember.findFirst.mockResolvedValue(null);
-      mockPrismaService.client.projectMember.findUnique.mockResolvedValue(null);
+      mockPermissions.effectiveKeys.mockResolvedValue(new Set(['ticket.read']));
 
       await expect(kodaDomainWriter.writeTicketEvent(eventData)).rejects.toThrow(
         ForbiddenAppException,
       );
+      expect(mockPrismaService.client.ticketEvent.create).not.toHaveBeenCalled();
+      expect(mockOutbox.record).not.toHaveBeenCalled();
     });
-
   });
 });

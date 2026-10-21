@@ -7,7 +7,6 @@ import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { KeyedMutex } from '../../common/utils/keyed-mutex';
 import { PermissionService } from '../../permissions/permission.service';
 import { ProjectAccessService } from '../../projects/project-access.service';
-import { withProjectRole } from '../../projects/project-context';
 import { stableStringify } from '../sync/stable-json';
 import { MAX_PENDING_ACTIONS, type ActionProposer, type PendingActionRecord } from './actions/pending-action.domain';
 import { approvalModeFor } from './actions/approval-policy';
@@ -38,7 +37,7 @@ export interface ActionOutcome {
   text: string;
 }
 
-/** What an approved action runs with: the tool, and the requester acting with the action project's role. */
+/** What an approved action runs with: the tool and the requester's own principal. */
 interface ActionScope {
   tool: AssistantTool;
   actor: UserPrincipal;
@@ -115,8 +114,7 @@ export class AssistantToolExecutor {
   }
 
   /**
-   * The tool, the requester and the role an action runs with; null when the registry, actor, membership or key gate
-   * refuses.
+   * The tool and the requester an action runs as; null when the registry, actor, membership or key gate refuses.
    */
   private async actionScope(action: PendingActionRecord): Promise<ActionScope | null> {
     const tool = this.registry.get(action.tool);
@@ -127,14 +125,14 @@ export class AssistantToolExecutor {
     const requester = await this.calls.findUserActor(action.actorId);
     if (!requester || requester.disabled) return null;
     const principal = userPrincipal(requester);
-    const role = await this.membership(action.projectId, principal);
-    if (role === undefined) return null;
-    const actor = withProjectRole(principal, role) as UserPrincipal;
+    // The membership check still admits or refuses, but its display role no longer decorates the actor
+    // (permissions P1 US-004): the tool acts as the requester's own principal.
+    if ((await this.membership(action.projectId, principal)) === undefined) return null;
     // Permissions P1 US-004: the approve re-checks the tool's catalog key in the action's own project, exactly as
     // the proposing call checked it, so a requester who lost the key between the proposal and the approve writes
     // nothing. An implicit key answers allowed, as it does on the call path.
-    if (!(await this.can(actor, tool.key, action.projectId))) return null;
-    return { tool, actor };
+    if (!(await this.can(principal, tool.key, action.projectId))) return null;
+    return { tool, actor: principal };
   }
 
   /** The action's own scope, exactly as `propose` recorded it: its project, its thread, its job and a fresh fence. */
@@ -252,9 +250,8 @@ export class AssistantToolExecutor {
     const parsed = parseInput(tool, call.input);
     if ('refusal' in parsed) return parsed.refusal;
     const { id, slug } = project;
-    const role = await this.membership(id, caller.principal);
-    if (role === undefined) return refusal('forbidden', `forbidden: ${tool.descriptor.name} needs project membership on ${slug}`);
-    return this.execParsed(call, tool, caller, { id, slug, actor: withProjectRole(caller.principal, role) as ToolScope['actor'], input: parsed.value });
+    if ((await this.membership(id, caller.principal)) === undefined) return refusal('forbidden', `forbidden: ${tool.descriptor.name} needs project membership on ${slug}`);
+    return this.execParsed(call, tool, caller, { id, slug, actor: caller.principal, input: parsed.value });
   }
 
   /** WORKSPACE and MCP callers resolve and authorize the explicit project before parsing tool input. */
@@ -262,11 +259,11 @@ export class AssistantToolExecutor {
     const slug = projectArgument(call.input);
     if (slug === null) return refusal('invalid_input', 'invalid_input: project');
     const id = await this.findProject(slug);
-    const role = id === undefined ? undefined : await this.membership(id, caller.principal);
-    if (id === undefined || role === undefined) return refusal('not_found', 'not_found: project');
+    const resolved = id === undefined ? undefined : await this.membership(id, caller.principal);
+    if (id === undefined || resolved === undefined) return refusal('not_found', 'not_found: project');
     const parsed = parseInput(tool, withoutProject(call.input));
     if ('refusal' in parsed) return { ...parsed.refusal, projectId: id };
-    return this.execParsed(call, tool, caller, { id, slug, actor: withProjectRole(caller.principal, role) as ToolScope['actor'], input: parsed.value });
+    return this.execParsed(call, tool, caller, { id, slug, actor: caller.principal, input: parsed.value });
   }
 
   /** The project's id, or undefined for an unknown or soft-deleted slug. */
@@ -279,7 +276,10 @@ export class AssistantToolExecutor {
     }
   }
 
-  /** The creator's role in the project, or undefined when they are not a member. */
+  /**
+   * The creator's display role in the project, or undefined when they are not a member. Admissions still come
+   * from it (a refusal is `undefined`), but US-004 stopped putting the role on the actor.
+   */
   private async membership(projectId: string, actor: UserPrincipal | AgentPrincipal): Promise<string | null | undefined> {
     try {
       return await this.access.resolveMembership(projectId, actor);
@@ -290,8 +290,8 @@ export class AssistantToolExecutor {
   }
 
   /**
-   * Permissions P1 US-004: the catalog-key check, for the actor the membership answered, in the project the call
-   * acts in — then the tool. The refusal names the tool, its key and the project slug; an implicit key is allowed by
+   * Permissions P1 US-004: the catalog-key check, for the caller's own principal, in the project the call acts in —
+   * then the tool. The refusal names the tool, its key and the project slug; an implicit key is allowed by
    * `PermissionService.can` itself, so no tool has to special-case one.
    */
   private async execParsed(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope): Promise<RunOutcome> {
@@ -465,7 +465,7 @@ interface RunOutcome {
   projectId?: string;
 }
 
-/** What a tool runs in: the project it acts on, the actor with that project's role, and the input its parser sees. */
+/** What a tool runs in: the project it acts on, the caller's principal, and the input its parser sees. */
 interface ToolScope {
   id: string;
   slug: string;
@@ -507,7 +507,7 @@ function parseInput(tool: AssistantTool, input: unknown): { value: unknown } | {
   }
 }
 
-/** The creator acts with the principal their login would produce, without a project role until membership resolves one. */
+/** The creator acts with the principal their login would produce. No project role decorates it (permissions P1 US-004). */
 function userPrincipal(creator: UserToolCallCreator): UserPrincipal {
   const role = creator.role === 'ADMIN' ? 'ADMIN' : 'MEMBER';
   return {
@@ -516,7 +516,6 @@ function userPrincipal(creator: UserToolCallCreator): UserPrincipal {
     name: creator.email,
     email: creator.email,
     role,
-    projectRole: undefined,
     blacklisted: false,
     revoked: false,
     authorities: [role],

@@ -104,8 +104,16 @@ describe('fleet read tools (US-004)', () => {
     expect(KODA_TOOL_DESCRIPTORS.map((d) => d.name)).toEqual(expect.arrayContaining([...TOOL_NAMES]));
   });
 
-  it('every fleet tool declares project membership as its permission', () => {
-    for (const name of TOOL_NAMES) expect(registry.get(name)?.permission).toEqual({ kind: 'member' });
+  it('every fleet tool declares its own read key', () => {
+    const expected: Record<string, string> = {
+      koda_list_jobs: 'fleet.job.read',
+      koda_get_job: 'fleet.job.read',
+      koda_fleet_spend: 'fleet.analytics.read',
+      koda_list_approvals: 'fleet.approval.read',
+      koda_runner_status: 'fleet.runner.read',
+      koda_job_log_excerpt: 'fleet.job.logs.read',
+    };
+    for (const name of TOOL_NAMES) expect({ name, key: registry.get(name)?.key }).toEqual({ name, key: expected[name] });
   });
 
   it('koda_list_jobs parse keeps state and feature and defaults page to 1', () => {
@@ -285,15 +293,19 @@ describe('fleet read tools execute (US-004)', () => {
     expect(content).toContain('totals.medianJobCostUsd: 0.7500');
   });
 
-  it('koda_list_approvals reads the project route with the executor role and reports the ids', async () => {
+  it('AC-8 (US-004): koda_list_approvals reads the project route with the project id only and reports the ids', async () => {
     const list = vi.fn(async () => ({
       records: [{ id: 'approval-1', type: 'nax_bash_escalate', status: 'pending', jobId: 'job-1', requestedAt: '2026-10-14T00:00:00.000Z' }],
       hasNext: true,
     }));
     const tool = listApprovalsTool({ list } as unknown as ApprovalsService);
-    const content = await tool.execute(ctx({ actor: { id: 'dev-1', projectRole: 'DEVELOPER' } as ToolContext['actor'] }), tool.parse({}));
+    // A user actor that still carries a legacy projectRole: the route must not copy it.
+    const user = { actorType: 'user', id: 'dev-1', projectRole: 'DEVELOPER' } as ToolContext['actor'];
+    const content = await tool.execute(ctx({ actor: user }), tool.parse({}));
 
-    expect(list).toHaveBeenCalledWith({ kind: 'project', projectId: 'project-1', role: 'DEVELOPER' }, { status: 'pending' }, { current: 1, size: 20 });
+    expect(list).toHaveBeenCalledWith({ kind: 'project', projectId: 'project-1' }, { status: 'pending' }, { current: 1, size: 20 });
+    // Exactly two fields: a route that happens to carry a role as well would pass the call assertion above.
+    expect(Object.keys(list.mock.calls[0]?.[0] as object).sort()).toEqual(['kind', 'projectId']);
     expect(content).toContain('approval-1 nax_bash_escalate pending job-1 2026-10-14T00:00:00.000Z');
     expect(content.split('\n').at(-1)).toBe('more: call koda_list_approvals with page 2');
   });

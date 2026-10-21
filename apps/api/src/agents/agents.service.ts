@@ -374,8 +374,13 @@ export class AgentsService {
   }
 
   /**
-   * US-003: ticket pickup is gated to the agent itself, or to a global ADMIN
-   * user. 403 for everyone else; 404 when the project is missing or soft-deleted.
+   * US-003: ticket pickup is gated to the agent itself, or to a caller that holds `agent.update`
+   * (with the seeded roles: an Owner or an Admin). 403 for everyone else; 404 when the project is
+   * missing or soft-deleted.
+   *
+   * Permissions P1 (US-002): acting for another agent is a permission key, not a `role: 'ADMIN'`
+   * claim. The owning agent is its own caller and asks nothing; any other caller is refused before a
+   * target-agent key is read.
    *
    * S4c US-001: a pickup is the target agent's act inside the project, so the
    * target agent must hold `agent.pickup` there. Permissions P1 (US-009): that is
@@ -388,10 +393,9 @@ export class AgentsService {
     projectSlug: string,
     principal: KodaPrincipal,
   ) {
-    // Authorize: only the matching agent or a global ADMIN user may pick up.
+    // Authorize: the matching agent acts for itself; anyone else needs `agent.update`.
     const isOwningAgent = principal.actorType === 'agent' && principal.slug === agentSlug;
-    const isGlobalAdmin = principal.actorType === 'user' && principal.role === 'ADMIN';
-    if (!isOwningAgent && !isGlobalAdmin) {
+    if (!isOwningAgent && !(await this.permissions.can(principal, 'agent.update')).allowed) {
       throw new ForbiddenAppException({}, 'agents');
     }
 

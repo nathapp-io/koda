@@ -66,25 +66,38 @@ describe('JwtAuthProvider', () => {
     expect((await provider.getPrincipal(payload(0))).revoked).toBe(true);
   });
 
-  // SECURITY (#144): the CASL ability factory reads UserPrincipal.projectRole
-  // when deciding permission for routes that don't go through
-  // ProjectMembershipGuard (e.g. PATCH/DELETE /api/comments/:id via the
-  // global permission guard). A forged JWT carrying `projectRole: 'ADMIN'`
-  // would otherwise grant unconditional DELETE Comment. This test pins the
-  // invariant that the JWT auth provider NEVER carries projectRole onto the
-  // principal — only ProjectMembershipGuard sets it, and only from the DB.
-  it('SECURITY: never carries projectRole from the JWT onto the principal', async () => {
+  // Permissions P1 US-005: UserPrincipal has no `projectRole` field any more. The JWT claim of that
+  // name is still ignored (a forged claim must not reach a principal), and the provider must not even
+  // set an own `projectRole: undefined` property.
+  it('AC-3: a projectRole claim changes nothing the principal carries', async () => {
     mockCacheManager.get.mockResolvedValue({ tokenVersion: 0, disabled: false });
-    const forged = { sub: 'user-1', email: 'a@b.com', role: 'MEMBER', tokenVersion: 0, projectRole: 'ADMIN' };
-    const principal = await provider.getPrincipal(forged);
-    expect(principal.projectRole).toBeUndefined();
+    const base = { sub: 'user-1', email: 'a@b.com', role: 'MEMBER', tokenVersion: 0 };
+    const plain = await provider.getPrincipal(base);
+    const forged = await provider.getPrincipal({ ...base, projectRole: 'ADMIN' });
+    expect(forged).toEqual(plain);
   });
 
-  it('SECURITY: an empty/garbage projectRole claim still does not leak onto the principal', async () => {
+  it('SECURITY: the principal carries no own projectRole property, whatever the claim says', async () => {
     mockCacheManager.get.mockResolvedValue({ tokenVersion: 0, disabled: false });
-    for (const claim of ['DEVELOPER', 'VIEWER', 'owner', '', null, 42]) {
+    for (const claim of ['ADMIN', 'DEVELOPER', 'VIEWER', 'owner', '', null, 42]) {
       const principal = await provider.getPrincipal({ sub: 'user-1', email: 'a@b.com', role: 'MEMBER', tokenVersion: 0, projectRole: claim });
-      expect(principal.projectRole).toBeUndefined();
+      expect(Object.prototype.hasOwnProperty.call(principal, 'projectRole')).toBe(false);
     }
+  });
+
+  // The claims that DO survive, unchanged by the projectRole removal.
+  it('keeps role, email, authorities and extra from the payload', async () => {
+    mockCacheManager.get.mockResolvedValue({ tokenVersion: 0, disabled: false });
+    const principal = await provider.getPrincipal({ sub: 'user-1', email: 'a@b.com', role: 'ADMIN', tokenVersion: 0 });
+    expect(principal).toMatchObject({
+      actorType: 'user',
+      id: 'user-1',
+      name: 'a@b.com',
+      email: 'a@b.com',
+      role: 'ADMIN',
+      authorities: ['ADMIN'],
+      extra: { sub: 'user-1', email: 'a@b.com', role: 'ADMIN' },
+      blacklisted: false,
+    });
   });
 });

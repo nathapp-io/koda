@@ -1,5 +1,4 @@
 import { Injectable, type OnModuleInit } from '@nestjs/common';
-import { isAgentPrincipal } from '../../../auth/principal/koda-principal.types';
 import { FleetJobState } from '../../../common/enums';
 import { AnalyticsService } from '../../analytics/analytics.service';
 import { APPROVAL_STATUSES, type ApprovalStatus } from '../../approvals/domain/approval.domain';
@@ -22,8 +21,8 @@ import { jobPath } from './tool-input';
 /**
  * Fleet S5b US-004: the six fleet read tools. The project is the thread's project (S5b-R7) — no tool takes a
  * project argument, and every read goes through a project-scoped service, so an id of another project is
- * `not_found`. The permission is project membership (1b-D1): `FleetJob` reads are not a CASL permission for
- * non-admins. Input is parsed by hand (1b-D5); the descriptor's `inputSchema` is what the model sees.
+ * `not_found`. Each tool declares its own read key (1b-D1) instead of one blanket check. Input is parsed by hand
+ * (1b-D5); the descriptor's `inputSchema` is what the model sees.
  */
 
 /** Every list tool asks the API for one page of 20 (1b §Tool catalog). */
@@ -144,7 +143,6 @@ export function listJobsTool(jobs: FleetJobsService): AssistantTool<ListJobsInpu
   return {
     descriptor: KODA_LIST_JOBS,
     key: 'fleet.job.read',
-    permission: { kind: 'member' },
     parse(input: unknown): ListJobsInput {
       const raw = asRecord(input);
       return {
@@ -188,7 +186,6 @@ export function getJobTool(jobs: FleetJobsService): AssistantTool<GetJobInput> {
   return {
     descriptor: KODA_GET_JOB,
     key: 'fleet.job.read',
-    permission: { kind: 'member' },
     parse(input: unknown): GetJobInput {
       return { jobId: requiredString(asRecord(input).jobId, 'jobId') };
     },
@@ -213,7 +210,6 @@ export function fleetSpendTool(analytics: AnalyticsService): AssistantTool<Fleet
   return {
     descriptor: KODA_FLEET_SPEND,
     key: 'fleet.analytics.read',
-    permission: { kind: 'member' },
     parse(input: unknown): FleetSpendInput {
       return { days: optionalInteger(asRecord(input).days, MIN_SPEND_DAYS, MAX_SPEND_DAYS, DEFAULT_SPEND_DAYS, 'days') };
     },
@@ -234,13 +230,12 @@ export function fleetSpendTool(analytics: AnalyticsService): AssistantTool<Fleet
 
 /**
  * `koda_list_approvals` (US-004): one page of the project's approvals through the project route, so another
- * project's approval can never appear. `role` follows the executor's resolved membership (1b-D1).
+ * project's approval can never appear. The route carries the project's id only (permissions P1 US-004).
  */
 export function listApprovalsTool(approvals: ApprovalsService): AssistantTool<ListApprovalsInput> {
   return {
     descriptor: KODA_LIST_APPROVALS,
     key: 'fleet.approval.read',
-    permission: { kind: 'member' },
     parse(input: unknown): ListApprovalsInput {
       const raw = asRecord(input);
       return {
@@ -249,7 +244,7 @@ export function listApprovalsTool(approvals: ApprovalsService): AssistantTool<Li
       };
     },
     async execute(ctx: ToolContext, input: ListApprovalsInput): Promise<string> {
-      const route: ApprovalRoute = { kind: 'project', projectId: ctx.projectId, role: isAgentPrincipal(ctx.actor) ? null : ctx.actor.projectRole ?? null };
+      const route: ApprovalRoute = { kind: 'project', projectId: ctx.projectId };
       const page = await approvals.list(route, { status: input.status }, { current: input.page, size: PAGE_SIZE });
       if (page.records.length === 0) return 'no approvals';
       const lines = page.records.map(
@@ -269,7 +264,6 @@ export function runnerStatusTool(runners: RunnersService): AssistantTool<Record<
   return {
     descriptor: KODA_RUNNER_STATUS,
     key: 'fleet.runner.read',
-    permission: { kind: 'member' },
     parse(): Record<string, never> {
       return {};
     },
@@ -295,7 +289,6 @@ export function jobLogExcerptTool(logs: LogReadService): AssistantTool<JobLogExc
   return {
     descriptor: KODA_JOB_LOG_EXCERPT,
     key: 'fleet.job.logs.read',
-    permission: { kind: 'member' },
     parse(input: unknown): JobLogExcerptInput {
       const raw = asRecord(input);
       const jobId = requiredString(raw.jobId, 'jobId');

@@ -56,8 +56,7 @@ export function dispatchJobTool(fleetJobs: FleetJobsService, knowledge: Knowledg
   return {
     descriptor: KODA_DISPATCH_JOB,
     key: 'fleet.job.dispatch',
-    // 2b2-D2: the same CASL tuple the dispatch route enforces (`fleet-jobs.controller.ts`).
-    permission: { kind: 'ability', action: 'create', subject: 'FleetJob' },
+    // 2b2-D2: the key the dispatch route enforces (`fleet-jobs.controller.ts`).
     kind: 'write',
     parse(input: unknown): DispatchJobInput {
       const raw = asRecord(input);

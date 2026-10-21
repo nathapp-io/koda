@@ -34,7 +34,7 @@ import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { RequiresGuard } from '../permissions/requires.guard';
 import { Requires } from '../permissions/requires.decorator';
 import { CurrentProject } from '../projects/current-project.decorator';
-import { ProjectContext, withProjectRole } from '../projects/project-context';
+import { ProjectContext } from '../projects/project-context';
 import { TicketListFilterInput } from './tickets.service';
 
 /** `assignedTo=self` means the caller: its user id, or its agent id for an agent. */
@@ -175,7 +175,7 @@ export class TicketsController {
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
-    const data = await this.createTicket(slug, createTicketDto, withProjectRole(principal, project.role));
+    const data = await this.createTicket(slug, createTicketDto, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -210,7 +210,7 @@ export class TicketsController {
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
-    const data = await this.ticketsService.findByRefWithActions(slug, ref, withProjectRole(principal, project.role));
+    const data = await this.ticketsService.findByRefWithActions(slug, ref, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -229,7 +229,7 @@ export class TicketsController {
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
-    const data = await this.updateTicket(slug, ref, updateTicketDto, withProjectRole(principal, project.role));
+    const data = await this.updateTicket(slug, ref, updateTicketDto, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -246,7 +246,7 @@ export class TicketsController {
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
-    const data = await this.deleteTicket(slug, ref, withProjectRole(principal, project.role));
+    const data = await this.deleteTicket(slug, ref, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -267,7 +267,7 @@ export class TicketsController {
     @CurrentProject() project: ProjectContext,
   ) {
     // Membership is enforced by ProjectMembershipGuard before this handler runs.
-    const data = await this.assignTicket(slug, ref, assignInput, withProjectRole(principal, project.role));
+    const data = await this.assignTicket(slug, ref, assignInput, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -288,7 +288,7 @@ export class TicketsController {
     @CurrentProject() project: ProjectContext,
   ) {
     const result = await this.verifyTicket(
-      slug, ref, this.requireCommentBody(dto.body), withProjectRole(principal, project.role),
+      slug, ref, this.requireCommentBody(dto.body), principal,
     );
     return JsonResponse.Ok(result.ticket);
   }
@@ -308,7 +308,7 @@ export class TicketsController {
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
-    const result = await this.startTicket(slug, ref, withProjectRole(principal, project.role));
+    const result = await this.startTicket(slug, ref, principal);
     return JsonResponse.Ok(result.ticket);
   }
 
@@ -329,7 +329,7 @@ export class TicketsController {
     @CurrentProject() project: ProjectContext,
   ) {
     const result = await this.fixTicket(
-      slug, ref, this.requireCommentBody(dto.body), withProjectRole(principal, project.role),
+      slug, ref, this.requireCommentBody(dto.body), principal,
     );
     return JsonResponse.Ok(result.ticket);
   }
@@ -356,7 +356,7 @@ export class TicketsController {
     const commentBody = this.requireCommentBody(dto.body);
     const isApproved = approve === 'true' || approve === true;
     const result = await this.verifyFixTicket(
-      slug, ref, commentBody, isApproved, withProjectRole(principal, project.role),
+      slug, ref, commentBody, isApproved, principal,
     );
     return JsonResponse.Ok(result.ticket);
   }
@@ -384,7 +384,7 @@ export class TicketsController {
       slug,
       ref,
       this.requireCommentBody(dto.body),
-      withProjectRole(principal, project.role),
+      principal,
     );
     return JsonResponse.Ok(result.ticket);
   }
@@ -406,7 +406,7 @@ export class TicketsController {
     @CurrentProject() project: ProjectContext,
   ) {
     const result = await this.rejectTicket(
-      slug, ref, this.requireCommentBody(dto.body), withProjectRole(principal, project.role),
+      slug, ref, this.requireCommentBody(dto.body), principal,
     );
     return JsonResponse.Ok(result.ticket);
   }

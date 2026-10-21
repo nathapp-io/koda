@@ -22,11 +22,9 @@ import { PrismaWebhookRepository } from '../../../src/webhook/prisma-webhook.rep
 import { KodaDomainWriter } from '../../../src/koda-domain-writer/koda-domain-writer.service';
 import { PrismaKodaDomainWriterRepository } from '../../../src/koda-domain-writer/prisma-koda-domain-writer.repository';
 import { RagService } from '../../../src/rag/rag.service';
-import { AgentAuthProvider } from '../../../src/auth/agent-auth.provider';
 import { TicketStatus, TicketType } from '../../../src/common/enums';
 import { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { resetDb } from '../../helpers/reset-db';
-import { KodaCaslAbilityFactory } from '../../../src/auth/casl/koda-casl-ability.factory';
 import { PermissionService } from '../../../src/permissions/permission.service';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
@@ -63,10 +61,16 @@ describeIntegration('producers record outbox rows atomically', () => {
       providers: [
         TicketsService,
         TicketTransitionsService,
-        KodaCaslAbilityFactory,
         // Permissions P1 (US-003): TicketTransitionsService's required third dependency. The
-        // transitions these tests drive are their own subject, so the edge check allows them.
-        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
+        // transitions these tests drive are their own subject, so the edge check allows them. The
+        // domain writer reads the same service, so `effectiveKeys` answers with project access too.
+        {
+          provide: PermissionService,
+          useValue: {
+            can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }),
+            effectiveKeys: vi.fn().mockResolvedValue(new Set(['project.read'])),
+          },
+        },
         PrismaTicketsRepository,
         { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
         TicketEventService,
@@ -78,7 +82,6 @@ describeIntegration('producers record outbox rows atomically', () => {
         KodaDomainWriter,
         PrismaKodaDomainWriterRepository,
         { provide: RagService, useValue: { indexDocument: vi.fn(), importGraphify: vi.fn() } },
-        { provide: AgentAuthProvider, useValue: { loadAgentRoles: vi.fn().mockResolvedValue(['AGENT']) } },
       ],
     }).compile();
     prisma = module.get(PrismaService);

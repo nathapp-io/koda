@@ -194,9 +194,15 @@ describeIntegration('repo config and fleet knowledge route keys (US-007)', () =>
     await bind('viewer', 'viewer');
     await bind('developer', 'developer');
     await bind('padmin', 'project-admin');
-    // AC-14: a custom role that reads tickets and nothing else, so every knowledge key is refused.
+    // AC-14: a custom role that holds only project access and `ticket.read`, so every knowledge key is
+    // refused. US-001: `project.read` is what lets the caller reach the project at all.
     await db.role.create({
-      data: { key: 'ticket-reader', name: 'Ticket Reader', scope: 'PROJECT', permissions: ['ticket.read'] },
+      data: {
+        key: 'ticket-reader',
+        name: 'Ticket Reader',
+        scope: 'PROJECT',
+        permissions: ['project.read', 'ticket.read'],
+      },
     });
     await bind('custom', 'ticket-reader');
 

@@ -19,7 +19,7 @@ import type { PendingActionRecord } from './pending-action.domain';
 
 const NOW = new Date('2026-10-23T09:00:00.000Z');
 const FUTURE = new Date(NOW.getTime() + 60_000);
-const CALLER = { id: 'u1', globalAdmin: false };
+const CALLER = { id: 'u1' };
 
 const action = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
   actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
@@ -87,7 +87,6 @@ const CONTEXT = {
 
 const commentTool = (execute: (ctx: ToolContext, input: unknown) => Promise<string>): AssistantTool<unknown> => ({
   descriptor: { name: 'koda_add_comment', description: 'd', inputSchema: {} },
-  permission: { kind: 'ability', action: 'create', subject: 'Comment' },
   key: 'comment.create',
   parse: (input) => input,
   execute,
@@ -110,7 +109,7 @@ describe('AssistantActionDecisions.decide gates (2a-D8)', () => {
 
   it('answers 403 threads.notCreator to anyone but the payload requester, before the decision is validated', async () => {
     const { service, tx } = build();
-    const other = { id: 'u2', globalAdmin: true };
+    const other = { id: 'u2' };
     const err = await service.decide(other, approval(), dto('allow'), NOW).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ForbiddenAppException);
     expect(err).toMatchObject({ prefix: 'threads.notCreator', httpStatus: 403 });

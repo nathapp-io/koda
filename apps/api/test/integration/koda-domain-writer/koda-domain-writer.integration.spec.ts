@@ -27,7 +27,7 @@ import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { KodaDomainWriter } from '../../../src/koda-domain-writer/koda-domain-writer.service';
 import { PrismaKodaDomainWriterRepository } from '../../../src/koda-domain-writer/prisma-koda-domain-writer.repository';
 import { RagService } from '../../../src/rag/rag.service';
-import { AgentAuthProvider } from '../../../src/auth/agent-auth.provider';
+import { PermissionService } from '../../../src/permissions/permission.service';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { AgentEventService } from '../../../src/events/agent-event.service';
 import { DecisionEventService } from '../../../src/events/decision-event.service';
@@ -155,10 +155,10 @@ describe('KodaDomainWriter Integration Tests', () => {
           },
         },
         {
-          provide: AgentAuthProvider,
-          useValue: {
-            loadAgentRoles: vi.fn().mockResolvedValue(['AGENT']),
-          },
+          provide: PermissionService,
+          // Permissions P1 (US-003): the writer decides on the actor's effective `project.read`
+          // key. These cases are about delegation and provenance, so the actor has access.
+          useValue: { effectiveKeys: vi.fn().mockResolvedValue(new Set(['project.read'])) },
         },
         {
           provide: TicketEventService,

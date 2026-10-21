@@ -69,8 +69,9 @@ export class ProjectsService {
 
   /**
    * US-002: list projects scoped to the calling principal.
-   *  - User principals get only projects where they hold a `ProjectMember` row.
-   *  - Global ADMIN user principals see every non-deleted project.
+   *  - A principal that holds `project.read` globally (with the seeded roles: Owner and Admin) sees
+   *    every non-deleted project. That is the key, not the `role` claim (Permissions P1 US-002).
+   *  - Otherwise user principals get only projects where they hold a `ProjectMember` row.
    *  - Agents (S4c US-001, D533) see exactly their AgentProject roster unless
    *    `AGENT_PROJECT_SCOPING=off`.
    *  - Soft-deleted projects are never returned.
@@ -78,7 +79,7 @@ export class ProjectsService {
    * Returns domain objects; callers wrap them in the HTTP DTO at the boundary.
    */
   async findAllForPrincipal(principal: KodaPrincipal): Promise<ProjectDomain[]> {
-    if (principal.actorType === 'user' && principal.role === 'ADMIN') {
+    if (await this.access.readsEveryProject(principal)) {
       return this.projectRepo.findAll();
     }
     if (principal.actorType === 'agent') {
@@ -188,22 +189,6 @@ export class ProjectsService {
 
   findProjectIdBySlug(slug: string): Promise<string> {
     return this.access.findProjectIdBySlug(slug);
-  }
-
-  assertProjectMembership(projectId: string, principal: KodaPrincipal): Promise<void> {
-    return this.access.assertProjectMembership(projectId, principal);
-  }
-
-  /**
-   * S4c US-003 (D530): project ADMIN or global ADMIN; agents never manage a
-   * project's agent roster, even when they are on it.
-   */
-  assertProjectAdmin(projectId: string, principal: KodaPrincipal): Promise<void> {
-    return this.access.assertProjectAdmin(projectId, principal);
-  }
-
-  findMembershipRole(projectId: string, userId: string): Promise<string | null> {
-    return this.projectRepo.findMembershipRole(projectId, userId);
   }
 
   async findCiWebhookToken(slug: string): Promise<string | null> {

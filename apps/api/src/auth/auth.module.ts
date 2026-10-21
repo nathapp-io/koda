@@ -7,7 +7,6 @@ import { JwtAuthProvider } from './jwt-auth.provider';
 import { KodaJwtRefreshStrategyProvider } from './koda-jwt-refresh-strategy.provider';
 import { CombinedAuthGuard } from './guards/combined-auth.guard';
 import { AgentAuthProvider } from './agent-auth.provider';
-import { KodaCaslAbilityFactory } from './casl/koda-casl-ability.factory';
 import { AuthRepositoryModule } from './auth-repository.module';
 
 type JwtFromRequestFunction = (req: unknown) => string | null;
@@ -107,7 +106,6 @@ export { KODA_TOKEN_COOKIE, KODA_REFRESH_COOKIE };
       inject: [ConfigService],
       authProvider: { useClass: JwtAuthProvider },
       refreshStrategyProvider: { useClass: KodaJwtRefreshStrategyProvider },
-      caslAbilityFactory: KodaCaslAbilityFactory,
       useFactory: (config: ConfigService) => {
         const authConfig = config.get<{
           jwtSecret: string;
@@ -142,9 +140,8 @@ export { KODA_TOKEN_COOKIE, KODA_REFRESH_COOKIE };
     JwtRefreshStrategy,
     AgentAuthProvider,
     CombinedAuthGuard,
-    KodaCaslAbilityFactory,
   ],
   controllers: [AuthController],
-  exports: [AuthService, CombinedAuthGuard, AgentAuthProvider, KodaCaslAbilityFactory, KodaJwtRefreshStrategyProvider, JwtAuthProvider],
+  exports: [AuthService, CombinedAuthGuard, AgentAuthProvider, KodaJwtRefreshStrategyProvider, JwtAuthProvider],
 })
 export class AuthModule {}

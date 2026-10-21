@@ -16,7 +16,7 @@ import { recordDecisionTool, type RecordDecisionInput } from './record-decision-
 const ctx = {
   projectId: 'project-1',
   projectSlug: 'web',
-  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test', projectRole: 'DEVELOPER' },
+  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test' },
   threadId: 'thread-1',
   jobId: 'job-1',
   now: new Date('2026-10-23T09:00:00.000Z'),
@@ -140,7 +140,7 @@ describe('koda_record_decision parse (US-007)', () => {
     expect(tool.descriptor).toBe(KODA_RECORD_DECISION);
     expect(tool.descriptor.name).toBe('koda_record_decision');
     expect(tool.kind).toBe('write');
-    expect(tool.permission).toEqual({ kind: 'member' });
+    expect(tool.key).toBe('memory.decision.record');
   });
 });
 

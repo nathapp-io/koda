@@ -38,7 +38,6 @@ const DELIVERY_MAX_BYTES = 32_768;
 function makeLinkTool(execute: () => Promise<string>): AssistantTool<unknown> {
   return {
     descriptor: { name: 'koda_link_tickets', description: 'd', inputSchema: {} },
-    permission: { kind: 'member' },
     key: 'ticket.link.add',
     kind: 'write',
     parse: (input: unknown) => input,

@@ -3,10 +3,9 @@ import { ProjectAssigneesService } from './project-assignees.service';
 import { AssigneeQuery } from './dto/assignee.query';
 import { ProjectContext } from '../project-context';
 import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
-import { PROJECT_PERMISSION_KEY } from '../project-permission.decorator';
 import { REQUIRES_METADATA, RequiresMetadata } from '../../permissions/requires.decorator';
 
-const PROJECT: ProjectContext = { project: { id: 'proj-1', slug: 'koda' }, role: 'ADMIN' };
+const PROJECT: ProjectContext = { project: { id: 'proj-1', slug: 'koda' } };
 
 describe('ProjectAssigneesController route permission metadata (US-007)', () => {
   it('search declares @Requires project.assignee.read and runs ProjectMembershipGuard first', () => {
@@ -23,7 +22,6 @@ describe('ProjectAssigneesController route permission metadata (US-007)', () => 
       'RequiresGuard',
     ]);
     expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
-    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeUndefined();
   });
 });
 

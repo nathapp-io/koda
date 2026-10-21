@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import { IPageResult, ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { KodaPrincipal, isUserPrincipal } from '../../auth/principal/koda-principal.types';
+import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { ActorRole } from '../../common/enums';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
@@ -15,9 +15,6 @@ import { ProjectMemberRecord, ProjectMemberRole } from './domain/project-member.
 import { AddMemberDto } from './dto/add-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { ProjectMemberDto } from './dto/project-member.dto';
-
-const isGlobalAdmin = (principal: KodaPrincipal): boolean =>
-  isUserPrincipal(principal) && principal.role === 'ADMIN';
 
 /**
  * Project membership management over the role bindings (Permissions P1a US-004).
@@ -115,7 +112,7 @@ export class ProjectMembersService {
     return current;
   }
 
-  /** A change that drops the last project ADMIN is refused unless a global ADMIN makes it. */
+  /** A change that drops the last project ADMIN is refused unless the caller may override the rule. */
   private async assertKeepsAnAdmin(
     projectId: string,
     current: ProjectMemberRecord,
@@ -125,7 +122,10 @@ export class ProjectMembersService {
     // A disabled member is not an active admin: removing them cannot lock the
     // project out, so they do not trigger the guard.
     const losesAdmin = current.role === ActorRole.ADMIN && !current.disabled && nextRole !== ActorRole.ADMIN;
-    if (!losesAdmin || isGlobalAdmin(principal)) return;
+    if (!losesAdmin) return;
+    // Permissions P1 (US-002): the override is `role.binding.global` (with the seeded roles: an Owner
+    // or an Admin), not the principal's `role` claim. A change that loses no admin asks nothing.
+    if ((await this.permissions.can(principal, 'role.binding.global')).allowed) return;
     if ((await this.membersRepo.countProjectAdmins(projectId)) <= 1) {
       throw new ConflictAppException({}, 'members.lastAdmin');
     }

@@ -1,7 +1,8 @@
-import type { Mocked } from 'vitest';
+import type { Mock, Mocked } from 'vitest';
 import { HttpException } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { ProjectAccessService } from './project-access.service';
+import type { PermissionService } from '../permissions/permission.service';
 import { RagService } from '../rag/rag.service';
 import {
   NotFoundAppException,
@@ -10,7 +11,6 @@ import {
 } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { IProjectRepository } from './domain/project.domain';
-import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 /** The rejection of `promise`, or undefined when it resolved. */
 async function rejectionOf(promise: Promise<unknown>): Promise<HttpException | undefined> {
@@ -27,6 +27,8 @@ describe('ProjectsService', () => {
   let service: ProjectsService;
   let ragService: Mocked<RagService>;
   let mockProjectRepo: any;
+  let can: Mock;
+  let permissions: PermissionService;
 
   beforeEach(() => {
     mockProjectRepo = {
@@ -44,11 +46,15 @@ describe('ProjectsService', () => {
       deleteAllBySourceType: vi.fn(),
     } as any;
 
+    // US-001: project access is `project.read`; each case below answers it through this double.
+    can = vi.fn(async () => ({ allowed: true, reason: 'granted' }));
+    permissions = { can } as unknown as PermissionService;
+
     service = new ProjectsService(
       mockProjectRepo as any,
       ragService,
       undefined,
-      new ProjectAccessService(mockProjectRepo as any)
+      new ProjectAccessService(mockProjectRepo as any, permissions)
     );
   });
 
@@ -213,54 +219,6 @@ describe('ProjectsService', () => {
         id: 'p1', slug: 'proj', deletedAt: null,
       });
       expect(await service.findProjectIdBySlug('proj')).toBe('p1');
-    });
-  });
-
-  describe('assertProjectMembership', () => {
-    const adminUser: KodaPrincipal = {
-      actorType: 'user', id: 'u1', role: 'ADMIN', email: 'a@a.com',
-    } as KodaPrincipal;
-
-    const memberUser: KodaPrincipal = {
-      actorType: 'user', id: 'u2', role: 'MEMBER', email: 'm@m.com',
-    } as KodaPrincipal;
-
-    const agentPrincipal = {
-      actorType: 'agent', id: 'ag1', slug: 'agent-1', status: 'ACTIVE',
-      agentRoles: [], capabilities: [],
-    } as unknown as KodaPrincipal;
-
-    it('passes without checking membership for ADMIN user', async () => {
-      await expect(service.assertProjectMembership('p1', adminUser)).resolves.toBeUndefined();
-      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
-    });
-
-    it('passes a rostered agent principal without a membership lookup', async () => {
-      mockProjectRepo.isAgentOnRoster.mockResolvedValue(true);
-      await expect(service.assertProjectMembership('p1', agentPrincipal)).resolves.toBeUndefined();
-      expect(mockProjectRepo.isAgentOnRoster).toHaveBeenCalledWith('p1', 'ag1');
-      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
-    });
-
-    it('refuses an agent principal absent from the project roster with a projects-scoped 403', async () => {
-      mockProjectRepo.isAgentOnRoster.mockResolvedValue(false);
-
-      const error = await rejectionOf(service.assertProjectMembership('p1', agentPrincipal));
-
-      expect(error).toBeInstanceOf(ForbiddenAppException);
-      expect((error as ForbiddenAppException).prefix).toBe('projects');
-      expect(mockProjectRepo.isAgentOnRoster).toHaveBeenCalledWith('p1', 'ag1');
-      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
-    });
-
-    it('throws ForbiddenAppException when membership role is null', async () => {
-      mockProjectRepo.findMembershipRole.mockResolvedValue(null);
-      await expect(service.assertProjectMembership('p1', memberUser)).rejects.toBeInstanceOf(ForbiddenAppException);
-    });
-
-    it('resolves when user has a valid membership role', async () => {
-      mockProjectRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
-      await expect(service.assertProjectMembership('p1', memberUser)).resolves.toBeUndefined();
     });
   });
 

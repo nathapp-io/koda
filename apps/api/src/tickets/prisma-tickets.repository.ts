@@ -5,7 +5,7 @@ import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { parseTicketRef } from '../common/utils/ticket-ref.util';
 import { lockProjectAgents } from '../common/utils/advisory-lock';
-import { agentHasProjectAccess, userProjectRole } from '../permissions/legacy-membership.queries';
+import { agentHasProjectAccess } from '../permissions/legacy-membership.queries';
 import { TicketLinkSource } from '../common/enums';
 import { ACTIVE_STATES } from '../fleet/jobs/job-state';
 import type {
@@ -262,15 +262,6 @@ export class PrismaTicketsRepository implements ITicketRepository {
   /** S4c US-004: the same lock `AgentsService.removeFromProject` holds. */
   async lockProjectAgents(projectId: string): Promise<void> {
     await lockProjectAgents(this.db, projectId);
-  }
-
-  /**
-   * Permissions P1b US-003: the caller's legacy project role over its access sources — its legacy
-   * `ProjectMember` row unioned with its PROJECT-scope bindings (and its `projectId`-null ones).
-   * `null` when it has no source, which is what `TicketsService.assign` refuses.
-   */
-  async findProjectMemberRole(projectId: string, userId: string): Promise<string | null> {
-    return userProjectRole(this.db, userId, projectId);
   }
 
   /**

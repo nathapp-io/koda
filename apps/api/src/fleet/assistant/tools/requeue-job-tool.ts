@@ -35,8 +35,7 @@ export function requeueJobTool(fleetJobs: FleetJobsService, knowledge: Knowledge
   return {
     descriptor: KODA_REQUEUE_JOB,
     key: 'fleet.job.requeue',
-    // 2b2-R4: the same CASL tuple the requeue route enforces (`fleet-jobs.controller.ts`), never `create`.
-    permission: { kind: 'ability', action: 'update', subject: 'FleetJob' },
+    // 2b2-R4: the key the requeue route enforces (`fleet-jobs.controller.ts`), never `fleet.job.create`.
     kind: 'write',
     parse(input: unknown): RequeueJobInput {
       const jobId = asRecord(input)['jobId'];
