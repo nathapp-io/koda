@@ -26,7 +26,7 @@
  * a real Postgres database and the real JWT/registration auth chain.
  */
 import { CanActivate, ExecutionContext, ValidationPipe } from '@nestjs/common';
-import { HttpAdapterHost, Reflector } from '@nestjs/core';
+import { HttpAdapterHost } from '@nestjs/core';
 import { Test, TestingModule } from '@nestjs/testing';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -37,7 +37,11 @@ import {
   I18nCoreModule,
   I18nWrapper,
 } from '@nathapp/nestjs-common';
-import { DefaultPermissionProvider, PermissionAuthGuard } from '@nathapp/nestjs-auth';
+import { PermissionService } from '../permissions/permission.service';
+import { ProjectMembershipGuard } from '../projects/project-membership.guard';
+import { RequiresGuard } from '../permissions/requires.guard';
+import { ProjectAccessService } from '../projects/project-access.service';
+import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 import { join } from 'node:path';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
@@ -233,6 +237,28 @@ describe('webhook routes (US-003)', () => {
         { provide: TRANSACTION_MANAGER, useValue: txManager },
         { provide: WEBHOOK_CFG, useValue: webhookConfig },
         { provide: DnsResolver, useValue: makeUnresolvableResolver() },
+        ProjectMembershipGuard,
+        KodaCaslAbilityFactory,
+        {
+          provide: ProjectAccessService,
+          useValue: {
+            findProjectIdBySlug: async (slug: string) => {
+              const project = [projectA, projectB].find((row) => row.slug === slug);
+              return project?.id ?? 'missing';
+            },
+            resolveMembership: async () => 'MEMBER',
+          },
+        },
+        {
+          provide: PermissionService,
+          useValue: {
+            can: async (principal: KodaPrincipal, _key: string) => ({
+              allowed: principal.actorType === 'user' && principal.id === adminPrincipal.id,
+              reason: principal.actorType === 'user' && principal.id === adminPrincipal.id ? 'granted' : 'role-missing',
+            }),
+          },
+        },
+        RequiresGuard,
       ],
     }).compile();
 
@@ -254,10 +280,7 @@ describe('webhook routes (US-003)', () => {
         return true;
       },
     };
-    app.useGlobalGuards(
-      principalInjector,
-      new PermissionAuthGuard(testingModule.get(Reflector), new DefaultPermissionProvider()),
-    );
+    app.useGlobalGuards(principalInjector);
 
     await app.init();
     await app.getHttpAdapter().getInstance().ready();

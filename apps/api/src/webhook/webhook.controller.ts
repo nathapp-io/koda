@@ -7,13 +7,16 @@ import {
   Body,
   Param,
   HttpCode,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
-import { RequiredPermission } from '@nathapp/nestjs-auth';
+import { ProjectMembershipGuard } from '../projects/project-membership.guard';
+import { Requires } from '../permissions/requires.decorator';
+import { RequiresGuard } from '../permissions/requires.guard';
 import { WebhookService } from './webhook.service';
 import { CreateWebhookDto, UpdateWebhookDto } from './webhook.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
@@ -25,7 +28,8 @@ export class WebhookController {
 
   @Post('projects/:slug/webhooks')
   @HttpCode(201)
-  @RequiredPermission('ADMIN')
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('webhook.create')
   @ApiOperation({ summary: 'Register a webhook for a project' })
   @ApiResponse({ status: 201, description: 'Webhook registered' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
@@ -40,7 +44,8 @@ export class WebhookController {
   }
 
   @Get('projects/:slug/webhooks')
-  @RequiredPermission('ADMIN')
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('webhook.read')
   @ApiOperation({ summary: 'List all webhooks for a project' })
   @ApiResponse({ status: 200, description: 'List of webhooks' })
   @ApiResponse({ status: 404, description: 'Project not found' })
@@ -50,7 +55,8 @@ export class WebhookController {
   }
 
   @Patch('projects/:slug/webhooks/:id')
-  @RequiredPermission('ADMIN')
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('webhook.update')
   @ApiOperation({ summary: 'Update a webhook for a project' })
   @ApiResponse({ status: 200, description: 'Webhook updated' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
@@ -68,7 +74,8 @@ export class WebhookController {
   /** Deliberate cross-project admin route (global ADMIN only); see the project-scoped route below. */
   @Delete('webhooks/:id')
   @HttpCode(204)
-  @RequiredPermission('ADMIN')
+  @UseGuards(RequiresGuard)
+  @Requires('webhook.delete')
   @ApiOperation({ summary: 'Remove a webhook' })
   @ApiResponse({ status: 204, description: 'Webhook deleted' })
   @ApiResponse({ status: 404, description: 'Webhook not found' })
@@ -78,7 +85,8 @@ export class WebhookController {
 
   @Delete('projects/:slug/webhooks/:id')
   @HttpCode(204)
-  @RequiredPermission('ADMIN')
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('webhook.delete')
   @ApiOperation({ summary: 'Remove a webhook (project-scoped)' })
   @ApiResponse({ status: 204, description: 'Webhook deleted' })
   @ApiResponse({ status: 404, description: 'Project or webhook not found, or the webhook belongs to another project' })
