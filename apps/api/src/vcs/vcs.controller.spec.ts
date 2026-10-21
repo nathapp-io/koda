@@ -1,3 +1,4 @@
+import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
@@ -16,7 +17,6 @@ import { SyncResultDto } from './dto/sync-result.dto';
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
-import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 vi.mock('./factory', () => ({
   createVcsProvider: vi.fn(),
@@ -193,7 +193,7 @@ describe('VcsController', () => {
         token: 'ghp_abc',
       } as CreateVcsConnectionDto;
 
-      const result = await controller.createConnection('test-project', dto, adminUser);
+      const result = await controller.createConnection('test-project', dto);
 
       expect(mockProjectsService.findBySlug).toHaveBeenCalledWith('test-project');
       expect(mockVcsService.create).toHaveBeenCalledWith('proj-1', encryptionKey, dto);
@@ -205,14 +205,14 @@ describe('VcsController', () => {
       mockVcsConfig.encryptionKey = null;
 
       await expect(
-        controller.createConnection('test-project', {} as CreateVcsConnectionDto, adminUser),
+        controller.createConnection('test-project', {} as CreateVcsConnectionDto),
       ).rejects.toThrow(ValidationAppException);
     });
   });
 
   describe('getConnection', () => {
     it('should resolve the project by slug and return the connection', async () => {
-      const result = await controller.getConnection('test-project', adminUser);
+      const result = await controller.getConnection('test-project');
 
       expect(mockProjectsService.findBySlug).toHaveBeenCalledWith('test-project');
       expect(mockVcsService.findByProject).toHaveBeenCalledWith('proj-1');
@@ -225,7 +225,7 @@ describe('VcsController', () => {
     it('should resolve the project by slug and delegate to vcsService.update', async () => {
       const dto: UpdateVcsConnectionDto = { syncMode: 'polling' } as UpdateVcsConnectionDto;
 
-      await controller.updateConnection('test-project', dto, adminUser);
+      await controller.updateConnection('test-project', dto);
       expect(mockVcsService.update).toHaveBeenCalledWith('proj-1', encryptionKey, dto);
     });
 
@@ -234,14 +234,14 @@ describe('VcsController', () => {
       mockVcsConfig.encryptionKey = null;
 
       await expect(
-        controller.updateConnection('test-project', {} as UpdateVcsConnectionDto, adminUser),
+        controller.updateConnection('test-project', {} as UpdateVcsConnectionDto),
       ).rejects.toThrow(ValidationAppException);
     });
   });
 
   describe('deleteConnection', () => {
     it('should resolve the project by slug and delete the connection', async () => {
-      await controller.deleteConnection('test-project', adminUser);
+      await controller.deleteConnection('test-project');
 
       expect(mockProjectsService.findBySlug).toHaveBeenCalledWith('test-project');
       expect(mockVcsService.delete).toHaveBeenCalledWith('proj-1');
@@ -253,7 +253,7 @@ describe('VcsController', () => {
     it('should return test result from vcsService.testConnection', async () => {
       mockVcsService.testConnection.mockResolvedValue({ ok: true, latencyMs: 100 });
 
-      const result = await controller.testConnection('test-project', adminUser);
+      const result = await controller.testConnection('test-project');
 
       expect(result.data).toMatchObject({ ok: true, latencyMs: 100 });
       expect(mockVcsService.testConnection).toHaveBeenCalledWith('proj-1', encryptionKey);
@@ -263,7 +263,7 @@ describe('VcsController', () => {
     it('should throw ValidationAppException when encryption key is not configured', async () => {
       mockVcsConfig.encryptionKey = null;
 
-      await expect(controller.testConnection('test-project', adminUser)).rejects.toThrow(ValidationAppException);
+      await expect(controller.testConnection('test-project')).rejects.toThrow(ValidationAppException);
     });
   });
 
@@ -271,7 +271,7 @@ describe('VcsController', () => {
     it('wraps the rotated secret in JsonResponse.Ok for a user', async () => {
       mockVcsService.rotateWebhookSecret.mockResolvedValue({ webhookSecret: 'b'.repeat(32) });
 
-      const result = await controller.rotateWebhookSecret(projectContext(), adminUser);
+      const result = await controller.rotateWebhookSecret(projectContext());
 
       expect(result.ret).toBe(0);
       expect(result.data).toEqual({ webhookSecret: 'b'.repeat(32) });
@@ -309,7 +309,7 @@ describe('VcsController', () => {
 
       mockSyncService.syncIssue.mockResolvedValue({ action: 'created', ticketId: 't-1', ticketNumber: 5, ticketTitle: 'Issue title' });
 
-      const result = await controller.syncIssue('test-project', '5', adminUser);
+      const result = await controller.syncIssue('test-project', '5');
 
       expect(mockProvider.fetchIssue).toHaveBeenCalledWith(5);
       expect(mockSyncService.syncIssue).toHaveBeenCalled();
@@ -339,7 +339,7 @@ describe('VcsController', () => {
 
       mockSyncService.syncIssue.mockResolvedValue({ action: 'skipped', reason: 'already exists' });
 
-      await expect(controller.syncIssue('test-project', '5', adminUser)).rejects.toThrow(
+      await expect(controller.syncIssue('test-project', '5')).rejects.toThrow(
         new HttpException('Issue already synced', HttpStatus.CONFLICT),
       );
     });
@@ -347,7 +347,7 @@ describe('VcsController', () => {
     it('should throw ValidationAppException when encryption key is not configured', async () => {
       mockVcsConfig.encryptionKey = null;
 
-      await expect(controller.syncIssue('test-project', '5', adminUser)).rejects.toThrow(ValidationAppException);
+      await expect(controller.syncIssue('test-project', '5')).rejects.toThrow(ValidationAppException);
     });
   });
 
@@ -360,7 +360,7 @@ describe('VcsController', () => {
         errors: [],
       });
 
-      const result = await controller.syncAll('test-project', adminUser);
+      const result = await controller.syncAll('test-project');
       expect(result.data).toMatchObject({ syncType: 'manual', issuesSynced: 3, issuesSkipped: 1 });
       expect((result.data as SyncResultDto).tickets[0].ref).toBe('TEST-7');
       expect((result.data as SyncResultDto).tickets[0].title).toBe('Issue 7');
@@ -370,7 +370,7 @@ describe('VcsController', () => {
     it('should throw ValidationAppException when encryption key is not configured', async () => {
       mockVcsConfig.encryptionKey = null;
 
-      await expect(controller.syncAll('test-project', adminUser)).rejects.toThrow(ValidationAppException);
+      await expect(controller.syncAll('test-project')).rejects.toThrow(ValidationAppException);
     });
   });
 
@@ -378,7 +378,7 @@ describe('VcsController', () => {
     it('should run PR sync and return updated count', async () => {
       mockPrSyncService.syncPrStatus.mockResolvedValue({ updated: 5, skipped: 1 });
 
-      const result = await controller.syncPr('test-project', adminUser);
+      const result = await controller.syncPr('test-project');
       expect(result.data).toMatchObject({ updated: 5 });
       expect(mockPrSyncService.syncPrStatus).toHaveBeenCalled();
     });
@@ -387,7 +387,7 @@ describe('VcsController', () => {
     it('should throw ValidationAppException when encryption key is not configured', async () => {
       mockVcsConfig.encryptionKey = null;
 
-      await expect(controller.syncPr('test-project', adminUser)).rejects.toThrow(ValidationAppException);
+      await expect(controller.syncPr('test-project')).rejects.toThrow(ValidationAppException);
     });
   });
 });

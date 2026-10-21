@@ -31,7 +31,6 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { VcsIssue } from '../../../src/vcs/types';
 import { Project, VcsConnection } from '../../../src/generated/prisma/client';
-import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { SyncResultDto } from '../../../src/vcs/dto/sync-result.dto';
 
 // Mock the createVcsProvider factory
@@ -92,17 +91,6 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
 
   const encryptionKey = 'test-encryption-key-32-chars-long';
 
-  const principal: KodaPrincipal = {
-    actorType: 'user',
-    id: 'user-1',
-    sub: 'user-1',
-    role: 'ADMIN',
-    email: 'admin@test.com',
-    name: undefined,
-    blacklisted: false,
-    revoked: false,
-    authorities: [],
-  };
 
   const mockVcsConfig: IVcsConfig = {
     encryptionKey,
@@ -722,8 +710,8 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         .mockResolvedValueOnce(syncResult1)
         .mockResolvedValueOnce(syncResult2);
 
-      const result1 = (await controller.syncIssue(mockProject.slug, issueNumber1, principal)).data as SyncResultDto;
-      const result2 = (await controller.syncIssue(mockProject.slug, issueNumber2, principal)).data as SyncResultDto;
+      const result1 = (await controller.syncIssue(mockProject.slug, issueNumber1)).data as SyncResultDto;
+      const result2 = (await controller.syncIssue(mockProject.slug, issueNumber2)).data as SyncResultDto;
 
       expect(result1.tickets[0].ref).toBe(`${mockProject.key}-1`);
       expect(result2.tickets[0].ref).toBe(`${mockProject.key}-2`);

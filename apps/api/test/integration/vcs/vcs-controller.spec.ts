@@ -37,7 +37,6 @@ import { VcsConnectionResponseDto } from '../../../src/vcs/dto/vcs-connection-re
 import { TestConnectionResultDto } from '../../../src/vcs/dto/test-connection-result.dto';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
-import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 
 describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
   let controller: VcsController;
@@ -56,18 +55,6 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     defaultPollingIntervalMs: 300000,
     githubApiUrl: 'https://api.github.com',
     gitlabApiUrl: 'https://gitlab.com/api/v4',
-  };
-
-  const principal: KodaPrincipal = {
-    actorType: 'user',
-    id: 'user-1',
-    sub: 'user-1',
-    role: 'ADMIN',
-    email: 'admin@test.com',
-    name: undefined,
-    blacklisted: false,
-    revoked: false,
-    authorities: [],
   };
 
   const mockVcsConnection: VcsConnectionResponseDto = {
