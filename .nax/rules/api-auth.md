@@ -1,57 +1,29 @@
 ---
-description: "CASL and permissions in apps/api: caslAbilityFactory registration, enumerating subjects instead of all, guard-level vs service-level authorization, union-type tightening, assertNever in the factory"
+description: "Permissions in apps/api: route keys with @Requires and RequiresGuard, service-level ownership and edge checks, project access through project.read, no decisions on role claims, union-type tightening in test mocks"
 paths:
   - "apps/api/*"
 priority: 45
 ---
 
-# API Auth Rules — CASL & Permissions
+# API Auth Rules — Permission Keys
 
-## CASL Factory Registration (`forRootAsync`)
-
-`caslAbilityFactory` takes a **bare class**, unlike `authProvider` which takes `{ useClass: ... }`:
-
-```typescript
-// CORRECT
-AuthModule.forRootAsync({
-  authProvider: { useClass: JwtAuthProvider },
-  caslAbilityFactory: KodaCaslAbilityFactory,
-})
-
-// WRONG — library wraps with useClass internally → double-wrapped → silent failure
-AuthModule.forRootAsync({
-  caslAbilityFactory: { useClass: KodaCaslAbilityFactory },
-})
-```
-
-Failure mode: no runtime error, but `@RequiredPermission([action, subject])` silently stops enforcing — guard can't resolve the factory from DI.
-
-## Enumerate Subjects — Don't Use `all` With Virtual Subjects
-
-The wildcard subject `all` covers **everything**, including virtual subjects like `AgentScope` and `AdminScope`. If you use `manage all` for ADMIN, they can access agent-only routes.
-
-**Always enumerate real subjects.** Virtual subjects are granted selectively:
-
-```typescript
-// CORRECT — enumerated, excludes virtual subjects
-{ action: MANAGE, subject: 'Comment' },
-{ action: MANAGE, subject: 'Label' },
-{ action: MANAGE, subject: 'Ticket' },
-
-// WRONG — manages to leak into virtual subjects
-{ action: MANAGE, subject: 'all' },
-```
+Every authorization decision goes through `PermissionService` (`src/permissions/`) and a catalog key from `src/permissions/catalog.ts`. There is no CASL ability factory and no role-based decorator.
 
 ## Guard-Level vs Service-Level Authorization
 
-Migrated routes (permission keys, `src/permissions/`):
 - **Route keys** → `@Requires('<key>')` checked by `RequiresGuard`, listed after `ProjectMembershipGuard` in the same `@UseGuards(...)` on project routes. Delete the inline check from the service.
 - **Ownership checks** (`comment.update.own`, `ticket.link.remove.own`) and **transition edges** → `@Requires(key, { enforcedBy: 'service' })` on the route, then `PermissionService.can(principal, key, { projectId, resource: { createdBy } })` in the service after the row lookup.
 - Do **not** duplicate authorization: if the guard handles it, remove the inline `if`-throw from the service.
 
-Legacy routes not yet migrated keep the CASL rules below:
-- **Pure role gates** (`ADMIN`-only, `AgentScope`-only) → `@RequiredPermission` on the controller.
-- **Ownership checks** → `@RequiredPermission([action, subject])` on the controller as coarse gate, then `ability.can(action, subject('Subject', instance))` in the service.
+## Project Access
+
+- Access to a project is holding `project.read` in it. `ProjectAccessService.resolveMembership` / `assertProjectMembership` decide it with `PermissionService.can(principal, 'project.read', { projectId })` and refuse with 403 `projects`. Use them; do not read membership rows to decide access.
+- "Sees every project" is holding `project.read` globally: `ProjectAccessService.readsEveryProject(principal)`.
+
+## No Decisions on Role Claims
+
+- Never decide on `principal.role`, a user row's `role`, or a legacy project role. Ask for the key the action needs (for example `agent.update` to act for another agent, `role.binding.global` to override the last-admin rule).
+- For another principal (an assignee, a target agent, an event actor), read its keys with `PermissionService.effectiveKeys({ type, id }, { projectId })`.
 
 ## Union Type Tightening & Test Mocks
 
@@ -66,23 +38,3 @@ agentRoles: ['DEVELOPER'] as AgentRoleNames[],
 ```
 
 Prefer `readonly` on interface array properties (`agentRoles: readonly KodaAgentRole[]`) so both mutable and `as const` arrays are accepted.
-
-## `assertNever` in CASL Factory — Runtime-Safe Exhaustiveness
-
-The factory's `agentRoleDerivedPermissions` switch needs to:
-- Compile-time: error if a new value is added to `AGENT_ROLES` without a case
-- Runtime: safely skip unknown DB values (production DB may have legacy roles)
-
-```typescript
-// CORRECT — compile-time exhaustiveness + runtime no-op
-default:
-  // TS errors here if AGENT_ROLES gains a value without a case.
-  void (role as never);
-  break;
-
-// WRONG — throws at runtime when DB has unknown roles
-default:
-  assertNever(role); // crashes on every request for agents with legacy roles
-```
-
-Failure mode: `assertNever` kills the permissions computation → all agent requests get 403.
