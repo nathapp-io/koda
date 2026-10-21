@@ -1,5 +1,7 @@
 import type { Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
+import { REQUIRES_METADATA } from '../permissions/requires.decorator';
 import { ContextController } from './context.controller';
 import { ContextBuilderService } from './context-builder.service';
 import { PermissionService } from '../permissions/permission.service';
@@ -55,6 +57,19 @@ const projectContext: ProjectContext = {
   project: { id: 'project-1', slug: 'my-project' },
   role: 'ADMIN',
 };
+
+describe('ContextController route authorization metadata', () => {
+  it.each([
+    [ContextController.prototype.getContext, 'context.read'],
+    [ContextController.prototype.queryContext, 'context.query'],
+  ])('declares %s with ordered project and permission guards', (handler, key) => {
+    expect(Reflect.getMetadata(REQUIRES_METADATA, handler)).toMatchObject({ keys: [key] });
+    expect(Reflect.getMetadata(GUARDS_METADATA, handler)).toEqual([
+      ProjectMembershipGuard,
+      RequiresGuard,
+    ]);
+  });
+});
 
 describe('ContextController', () => {
   let controller: ContextController;
