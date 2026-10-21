@@ -8,7 +8,7 @@
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 
@@ -24,12 +24,14 @@ describeIntegration('VCS webhook secret (M9)', () => {
   const tokens: Record<string, string> = {};
   let createdSecret: string;
   const previousKey = process.env.VCS_ENCRYPTION_KEY;
+  const previousScoping = process.env.AGENT_PROJECT_SCOPING;
 
   const auth = (who: string) => ({ Authorization: `Bearer ${tokens[who]}` });
 
   beforeAll(async () => {
     await resetDb();
     process.env.VCS_ENCRYPTION_KEY = 'ab'.repeat(32);
+    process.env.AGENT_PROJECT_SCOPING = 'on';
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
     prisma = createTestPrismaClient(process.env.DATABASE_URL);
@@ -52,11 +54,6 @@ describeIntegration('VCS webhook secret (M9)', () => {
       .send({ name: 'Hook Agent', slug: 'hook-agent', roles: ['DEVELOPER'] }).expect(201);
     tokens.agent = data<{ apiKey: string }>(agent).apiKey;
 
-    const created = await request(server).post('/api/projects/hooks/vcs').set(auth('root'))
-      .send({ provider: 'github', repoOwner: 'acme', repoName: 'widgets', token: 'ghp_test', syncMode: 'webhook' })
-      .expect(201);
-    createdSecret = data<{ webhookSecret: string }>(created).webhookSecret;
-
     const project = await prisma.project.findUniqueOrThrow({ where: { slug: 'hooks' } });
     const grantor = await prisma.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } });
     const projectAdminRole = await prisma.role.findUniqueOrThrow({ where: { key: 'project-admin' } });
@@ -70,6 +67,9 @@ describeIntegration('VCS webhook secret (M9)', () => {
       const agent = data<{ apiKey: string }>(response);
       tokens[who] = agent.apiKey;
       const agentRow = await prisma.agent.findUniqueOrThrow({ where: { slug: who } });
+      await prisma.roleBinding.deleteMany({ where: { principalType: 'AGENT', principalId: agentRow.id } });
+      expect(await prisma.agentProject.count({ where: { agentId: agentRow.id } })).toBe(0);
+      expect(await prisma.agentRoleEntry.count({ where: { agentId: agentRow.id } })).toBe(0);
       await prisma.roleBinding.create({ data: {
         principalType: 'AGENT', principalId: agentRow.id, roleId, projectId: project.id,
         grantedByType: 'USER', grantedById: grantor.id,
@@ -77,11 +77,23 @@ describeIntegration('VCS webhook secret (M9)', () => {
     }
   });
 
+  beforeEach(async () => {
+    resetThrottle(app);
+    // Rotation cases must not change the connection observed by another case.
+    await prisma.vcsConnection.deleteMany({ where: { project: { slug: 'hooks' } } });
+    const created = await request(server).post('/api/projects/hooks/vcs').set(auth('root'))
+      .send({ provider: 'github', repoOwner: 'acme', repoName: 'widgets', token: 'ghp_test', syncMode: 'webhook' })
+      .expect(201);
+    createdSecret = data<{ webhookSecret: string }>(created).webhookSecret;
+  });
+
   afterAll(async () => {
     await prisma?.$disconnect();
     await app?.close();
     if (previousKey === undefined) delete process.env.VCS_ENCRYPTION_KEY;
     else process.env.VCS_ENCRYPTION_KEY = previousKey;
+    if (previousScoping === undefined) delete process.env.AGENT_PROJECT_SCOPING;
+    else process.env.AGENT_PROJECT_SCOPING = previousScoping;
   });
 
   const storedSecret = async () =>
