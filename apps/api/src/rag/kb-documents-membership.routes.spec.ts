@@ -145,8 +145,9 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
     projectRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
   });
 
-  it('AC1: POST /api/projects/:slug/kb/documents returns 403 for a non-member DEVELOPER user', async () => {
-    projectRepo.findMembershipRole.mockResolvedValue(null);
+  it('AC1: POST /api/projects/:slug/kb/documents returns 403 for a caller without project.read', async () => {
+    // US-001: access is `project.read` in the project, so that is what a non-member is refused.
+    refusedKeys = new Set(['project.read']);
 
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/kb/documents')

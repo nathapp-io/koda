@@ -95,9 +95,10 @@ describeIntegration('US-003 context route permissions', () => {
       { type: 'SYSTEM', id: 'us-003-integration' },
     );
 
+    // US-001: `project.read` admits the caller to the project; `ticket.read` alone is not access.
     const custom = await db.role.create({ data: {
       key: 'context-ticket-only', name: 'Context ticket-only', scope: 'PROJECT', system: false,
-      permissions: ['ticket.read'],
+      permissions: ['project.read', 'ticket.read'],
     } });
     await db.roleBinding.create({ data: {
       principalType: 'USER', principalId: userIds.custom as string, roleId: custom.id,

@@ -4,11 +4,16 @@ import { PrismaProjectRepository } from './prisma-project.repository';
 import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { ActorRole } from '../common/enums';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
+import { PermissionService } from '../permissions/permission.service';
+
+/** The key whose holding in a project is access to it (design §2 "Project access"; ruling 2026-10-21). */
+export const PROJECT_ACCESS_KEY = 'project.read';
 
 @Injectable()
 export class ProjectAccessService {
   constructor(
     private projectRepo: PrismaProjectRepository,
+    private readonly permissions: PermissionService,
     @Optional() @Inject(AUTH_CFG) private authConfig?: IAuthConfig,
   ) {}
 
@@ -27,43 +32,34 @@ export class ProjectAccessService {
   }
 
   /**
-   * Resolves the caller's role in a project with at most one query.
-   * Global ADMIN -> 'ADMIN' (no query); agent -> roster-checked, returns null
-   * (one query, unless scoping is off); member -> their ProjectMember.role;
-   * non-member user -> 403.
+   * The access gate, and the caller's display role for the members page (`viewerRole`, read by the web until
+   * permissions-p1-web). A runner is not checked (unchanged; `CombinedAuthGuard` keeps runners off project routes),
+   * and an agent passes while AGENT_PROJECT_SCOPING is off (unchanged until drop-legacy).
    *
-   * S4c US-001 (D534): agent project reach is enforced here, so project routes,
-   * project lists and pickup all read the same decision. An agent absent from
-   * the project's roster is refused; a rostered agent's permissions inside the
-   * project still come from its global AgentRoleEntry roles.
-   *
-   * The allow-list keeps the legacy 'AGENT' / 'MEMBER' values so older rows
-   * continue to authenticate (the CASL factory collapses them to the VIEWER
-   * least-privilege set — see KodaCaslAbilityFactory.projectRolePermissions).
-   * New code should type the return as ProjectMemberRole.
+   * Access is holding `project.read` in the project, whatever the caller's `role` claim or legacy membership row
+   * says: a custom project role narrows and widens it. The returned role is display only (`findMembershipRole`),
+   * and a principal that holds `project.read` globally is an ADMIN here — which is what `User.role = 'ADMIN'` and a
+   * global Owner/Admin binding both resolve to through `PermissionService`. A database error from `can` propagates
+   * unchanged; no refusal is invented.
    */
   async resolveMembership(projectId: string, principal: KodaPrincipal): Promise<string | null> {
-    if (isUserPrincipal(principal)) {
-      if (principal.role === 'ADMIN') return ActorRole.ADMIN;
-      const role = await this.projectRepo.findMembershipRole(projectId, principal.id);
-      const allowed = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT, ActorRole.VIEWER] as const;
-      if (!role || !allowed.includes(role as typeof allowed[number])) {
-        throw new ForbiddenAppException({}, 'projects');
-      }
-      return role;
-    }
-    if (!this.agentScopingEnabled()) return null;
-    if (isAgentPrincipal(principal)) {
-      const rostered = await this.projectRepo.isAgentOnRoster(projectId, principal.id);
-      if (rostered) return null;
-      throw new ForbiddenAppException({}, 'projects');
-    }
-    // Runners are not scoped by the agent roster (out of scope for S4c US-001).
-    return null;
+    if (principal.actorType === 'runner') return null;
+    if (isAgentPrincipal(principal) && !this.agentScopingEnabled()) return null;
+    const decision = await this.permissions.can(principal, PROJECT_ACCESS_KEY, { projectId });
+    if (!decision.allowed) throw new ForbiddenAppException({}, 'projects');
+    if (!isUserPrincipal(principal)) return null;
+    if (await this.readsEveryProject(principal)) return ActorRole.ADMIN;
+    return this.projectRepo.findMembershipRole(projectId, principal.id);
   }
 
   async assertProjectMembership(projectId: string, principal: KodaPrincipal): Promise<void> {
     await this.resolveMembership(projectId, principal);
+  }
+
+  /** Whether the principal holds `project.read` globally (with the seeded roles: a global Owner or Admin). */
+  async readsEveryProject(principal: KodaPrincipal): Promise<boolean> {
+    if (principal.actorType === 'runner') return false;
+    return (await this.permissions.can(principal, PROJECT_ACCESS_KEY)).allowed;
   }
 
   /**

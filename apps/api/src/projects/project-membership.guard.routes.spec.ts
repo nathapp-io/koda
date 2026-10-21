@@ -18,7 +18,7 @@ import { TicketsService } from '../tickets/tickets.service';
 import { TicketTransitionsService } from '../tickets/state-machine/ticket-transitions.service';
 import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
-import { ProjectAccessService } from './project-access.service';
+import { ProjectAccessService, PROJECT_ACCESS_KEY } from './project-access.service';
 import { PermissionService } from '../permissions/permission.service';
 import { PrismaProjectRepository } from './prisma-project.repository';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
@@ -118,9 +118,26 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
 
   /** The catalog keys the stub refuses; each case marks the ones its role does not hold (US-007). */
   let refusedKeys: ReadonlySet<string>;
-  const can = vi.fn(async (_principal: unknown, key: string) =>
-    refusedKeys.has(key) ? { allowed: false, reason: 'not-granted' } : { allowed: true, reason: 'granted' },
-  );
+  /**
+   * US-001: project access is `project.read`. `refusedKeys` holding it models a caller with no access
+   * to the project (403 `projects` from the guard); otherwise the project ask is granted and the
+   * display role still comes from the fake membership row. The global ask is what a global
+   * Owner/Admin holds — the legacy `User.role = 'ADMIN'` claim is exactly that.
+   */
+  const can = vi.fn(async (principal: KodaPrincipal, key: string, ctx?: { projectId?: string }) => {
+    if (key !== PROJECT_ACCESS_KEY) {
+      return refusedKeys.has(key)
+        ? { allowed: false, reason: 'not-granted' }
+        : { allowed: true, reason: 'granted' };
+    }
+    if (refusedKeys.has(key)) return { allowed: false, reason: 'not-granted' };
+    if (ctx?.projectId === undefined) {
+      return principal.actorType === 'user' && principal.role === 'ADMIN'
+        ? { allowed: true, reason: 'granted' }
+        : { allowed: false, reason: 'not-granted' };
+    }
+    return { allowed: true, reason: 'granted' };
+  });
 
   beforeAll(async () => {
     membershipRepo = { findBySlug: vi.fn(), findMembershipRole: vi.fn(), isAgentOnRoster: vi.fn() };
@@ -158,10 +175,11 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     hybridRetriever = { indexDocument: vi.fn(), search: vi.fn() };
     ragRepository = { findProjectBySlug: vi.fn(), findProjectMembership: vi.fn() };
 
-    // The real access service over a stubbed repository: the guard's membership
-    // decisions are driven by the fake ProjectMember rows below.
+    // The real access service over stubbed collaborators: admission comes from the
+    // `project.read` answers above, and the fake membership rows supply the display role.
     const accessService = new ProjectAccessService(
       membershipRepo as unknown as PrismaProjectRepository,
+      { can } as unknown as PermissionService,
     );
 
     testingModule = await Test.createTestingModule({
@@ -246,13 +264,15 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
   // AC7 / AC8 — ticket routes
   // ---------------------------------------------------------------------------
 
-  it('AC7: GET /api/projects/:slug/tickets returns 403 for a non-member DEVELOPER user', async () => {
-    membershipRepo.findMembershipRole.mockResolvedValue(null);
+  it('AC7: GET /api/projects/:slug/tickets returns 403 for a caller without project.read', async () => {
+    // US-001: access is the key, so a caller with no source in the project is refused here.
+    refusedKeys = new Set([PROJECT_ACCESS_KEY]);
 
     const res = await request(app.getHttpServer()).get('/api/projects/alpha/tickets');
 
     expect(res.status).toBe(403);
     expect(ticketsService.findAll).not.toHaveBeenCalled();
+    expect(can).toHaveBeenCalledWith(developerUser, PROJECT_ACCESS_KEY, { projectId: 'proj-1' });
   });
 
   it('AC7 boundary: GET /api/projects/:slug/tickets returns 200 for a member DEVELOPER user', async () => {
@@ -263,8 +283,8 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
   });
 
-  it('AC8: POST /api/projects/:slug/tickets/:ref/assign returns 403 for a non-member DEVELOPER user', async () => {
-    membershipRepo.findMembershipRole.mockResolvedValue(null);
+  it('AC8: POST /api/projects/:slug/tickets/:ref/assign returns 403 for a caller without project.read', async () => {
+    refusedKeys = new Set([PROJECT_ACCESS_KEY]);
 
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/tickets/KODA-1/assign')
@@ -283,7 +303,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
   });
 
-  it('AC8 boundary: a rostered agent principal is admitted to POST :ref/assign with no membership row', async () => {
+  it('AC8 boundary: an agent principal holding project.read is admitted to POST :ref/assign with no membership row', async () => {
     // #144: assign requires UPDATE Ticket; TRIAGER agents have it (DEVELOPER
     // agents only get TRANSITION). This test is about membership semantics, so
     // the agent carries a role that passes the permission check.
@@ -299,24 +319,24 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
       revoked: false,
       authorities: ['WORKER'],
     };
-    membershipRepo.findMembershipRole.mockResolvedValue(null);
-    // S4c US-001: the agent reaches the project through its AgentProject row.
-    membershipRepo.isAgentOnRoster.mockResolvedValue(true);
+    // US-001: the agent reaches the project through `project.read`, not a roster row.
+    membershipRepo.isAgentOnRoster.mockResolvedValue(false);
 
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/tickets/KODA-1/assign')
       .send({ userId: 'user-2' });
 
     expect(res.status).toBe(200);
-    expect(membershipRepo.isAgentOnRoster).toHaveBeenCalledWith('proj-1', 'agent-1');
+    expect(can).toHaveBeenCalledWith(currentPrincipal, PROJECT_ACCESS_KEY, { projectId: 'proj-1' });
+    expect(membershipRepo.isAgentOnRoster).not.toHaveBeenCalled();
     expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
     // The route is guarded: the slug is still resolved before the handler runs.
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
   });
 
-  it('AC5 (S4c US-001): POST :ref/assign returns 403 for an agent absent from the project roster', async () => {
+  it('AC5 (S4c US-001): POST :ref/assign returns 403 for an agent without project.read', async () => {
     // #144: an agent whose roles would otherwise pass the permission check, so
-    // the only reason for the refusal is the missing AgentProject row.
+    // the only reason for the refusal is the missing project access.
     currentPrincipal = {
       actorType: 'agent',
       id: 'agent-1',
@@ -329,15 +349,15 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
       revoked: false,
       authorities: ['WORKER'],
     };
-    membershipRepo.isAgentOnRoster.mockResolvedValue(false);
-    membershipRepo.findMembershipRole.mockResolvedValue(null);
+    refusedKeys = new Set([PROJECT_ACCESS_KEY]);
+    membershipRepo.isAgentOnRoster.mockResolvedValue(true);
 
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/tickets/KODA-1/assign')
       .send({ userId: 'user-2' });
 
     expect(res.status).toBe(403);
-    expect(membershipRepo.isAgentOnRoster).toHaveBeenCalledWith('proj-1', 'agent-1');
+    expect(can).toHaveBeenCalledWith(currentPrincipal, PROJECT_ACCESS_KEY, { projectId: 'proj-1' });
     expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
     expect(ticketsService.assign).not.toHaveBeenCalled();
   });
@@ -346,8 +366,8 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
   // AC10 / AC11 — GET /api/projects/:slug
   // ---------------------------------------------------------------------------
 
-  it('AC10: GET /api/projects/:slug returns 403 for a non-member DEVELOPER user', async () => {
-    membershipRepo.findMembershipRole.mockResolvedValue(null);
+  it('AC10: GET /api/projects/:slug returns 403 for a caller without project.read', async () => {
+    refusedKeys = new Set([PROJECT_ACCESS_KEY]);
 
     const res = await request(app.getHttpServer()).get('/api/projects/alpha');
 
@@ -402,8 +422,8 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
   });
 
-  it('AC12 boundary: POST /api/projects/:slug/kb/documents returns 403 for a non-member DEVELOPER user', async () => {
-    membershipRepo.findMembershipRole.mockResolvedValue(null);
+  it('AC12 boundary: POST /api/projects/:slug/kb/documents returns 403 for a caller without project.read', async () => {
+    refusedKeys = new Set([PROJECT_ACCESS_KEY]);
 
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/kb/documents')
@@ -475,8 +495,8 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     expect(hybridRetriever.search).not.toHaveBeenCalled();
   });
 
-  it('AC14 boundary: POST /api/projects/:slug/kb/search returns 403 for a non-member DEVELOPER user', async () => {
-    membershipRepo.findMembershipRole.mockResolvedValue(null);
+  it('AC14 boundary: POST /api/projects/:slug/kb/search returns 403 for a caller without project.read', async () => {
+    refusedKeys = new Set([PROJECT_ACCESS_KEY]);
 
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/kb/search')

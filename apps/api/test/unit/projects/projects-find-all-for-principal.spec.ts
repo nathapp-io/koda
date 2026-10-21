@@ -22,6 +22,7 @@ import type { Mock } from 'vitest';
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { PrismaProjectRepository } from '../../../src/projects/prisma-project.repository';
 import { ProjectAccessService } from '../../../src/projects/project-access.service';
+import type { PermissionService } from '../../../src/permissions/permission.service';
 import { RagService } from '../../../src/rag/rag.service';
 import type { ProjectDomain } from '../../../src/projects/domain/project.domain';
 import type {
@@ -188,9 +189,14 @@ const slugsOf = (projects: { slug: string }[]): string[] => projects.map((p) => 
 describe('ProjectsService.findAllForPrincipal (US-002)', () => {
   let repo: RepoDouble;
   let service: ProjectsService;
+  /** US-001: the access service's `project.read` answers; `findAllForPrincipal` keeps its own reads. */
+  let permissions: PermissionService;
 
   beforeEach(() => {
     repo = createRepoDouble();
+    permissions = {
+      can: vi.fn(async () => ({ allowed: true, reason: 'granted' })),
+    } as unknown as PermissionService;
     service = new ProjectsService(
       repo as unknown as PrismaProjectRepository,
       {
@@ -198,7 +204,7 @@ describe('ProjectsService.findAllForPrincipal (US-002)', () => {
         clearProjectCaches: vi.fn(),
       } as unknown as RagService,
       undefined,
-      new ProjectAccessService(repo as unknown as PrismaProjectRepository),
+      new ProjectAccessService(repo as unknown as PrismaProjectRepository, permissions),
     );
   });
 
@@ -241,7 +247,7 @@ describe('ProjectsService.findAllForPrincipal (US-002)', () => {
         clearProjectCaches: vi.fn(),
       } as unknown as RagService,
       undefined,
-      new ProjectAccessService(repo as unknown as PrismaProjectRepository, {
+      new ProjectAccessService(repo as unknown as PrismaProjectRepository, permissions, {
         agentProjectScoping: false,
       } as never),
     );

@@ -2,15 +2,17 @@ import type { Mock, MockInstance } from 'vitest';
 /**
  * US-001 — ProjectMembershipGuard unit behaviour.
  *
- * The guard is exercised against the real ProjectAccessService over a stubbed
- * repository, so every membership decision comes from the fake ProjectMember
- * rows this file sets up rather than from a mocked access service.
+ * The guard is exercised against the real ProjectAccessService, whose two collaborators are doubles:
+ * a repository stub that answers only the display role (`findMembershipRole`) and a `PermissionService`
+ * double that answers `project.read`. Admission and refusal (403 `projects`) therefore follow the key,
+ * which is what this file's cases drive; the fake membership rows decide nothing but the role the guard
+ * attaches to the request.
  */
 import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { ProjectAccessService } from './project-access.service';
+import { ProjectAccessService, PROJECT_ACCESS_KEY } from './project-access.service';
 import { PrismaProjectRepository } from './prisma-project.repository';
 import { ProjectMembershipGuard } from './project-membership.guard';
 import { ProjectRoles } from './project-roles.decorator';
@@ -18,6 +20,7 @@ import { ProjectPermission } from './project-permission.decorator';
 import { ProjectSlugFrom } from './project-slug-from.decorator';
 import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 import { KodaAction } from '../auth/casl/koda-action.enum';
+import type { PermissionService } from '../permissions/permission.service';
 import {
   AgentPrincipal,
   KodaPrincipal,
@@ -150,17 +153,44 @@ describe('ProjectMembershipGuard (US-001)', () => {
   let membershipRepo: MembershipRepoStub;
   let findMembershipRoleSpy: MockInstance;
 
+  /**
+   * The catalog keys the double refuses. A case that models a caller without access to the project puts
+   * `project.read` here: that refusal is what ProjectMembershipGuard answers with 403 `projects`.
+   */
+  let refusedKeys: ReadonlySet<string>;
+  const can = vi.fn(async (principal: KodaPrincipal, key: string, ctx?: { projectId?: string }) => {
+    if (key !== PROJECT_ACCESS_KEY) {
+      return refusedKeys.has(key)
+        ? { allowed: false, reason: 'not-granted' }
+        : { allowed: true, reason: 'granted' };
+    }
+    if (refusedKeys.has(key)) return { allowed: false, reason: 'not-granted' };
+    // The global ask is what a global Owner/Admin holds: with the seeded roles that is exactly what the
+    // legacy `User.role = 'ADMIN'` claim resolves to (`PermissionService.isLegacyAdmin`).
+    if (ctx?.projectId === undefined) {
+      return principal.actorType === 'user' && principal.role === 'ADMIN'
+        ? { allowed: true, reason: 'granted' }
+        : { allowed: false, reason: 'not-granted' };
+    }
+    return { allowed: true, reason: 'granted' };
+  });
+
   const activeProject = { id: 'proj-1', slug: 'alpha', deletedAt: null };
 
   beforeEach(() => {
     membershipRepo = { findBySlug: vi.fn(), findMembershipRole: vi.fn(), isAgentOnRoster: vi.fn() };
-    access = new ProjectAccessService(membershipRepo as unknown as PrismaProjectRepository);
+    refusedKeys = new Set();
+    access = new ProjectAccessService(
+      membershipRepo as unknown as PrismaProjectRepository,
+      { can } as unknown as PermissionService,
+    );
     findMembershipRoleSpy = vi.spyOn(access, 'findMembershipRole');
     guard = new ProjectMembershipGuard(access, new Reflector());
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    can.mockClear();
   });
 
   // ---------------------------------------------------------------------------
@@ -191,48 +221,56 @@ describe('ProjectMembershipGuard (US-001)', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // AC2 — user principal with no ProjectMember row is refused
+  // AC2 — a user principal without project.read is refused
   // ---------------------------------------------------------------------------
 
-  it('AC2: throws ForbiddenAppException when a user principal has no ProjectMember row for the project', async () => {
+  it('AC2: throws a projects-scoped ForbiddenAppException when project.read is refused in the project', async () => {
     membershipRepo.findBySlug.mockResolvedValue(activeProject);
-    membershipRepo.findMembershipRole.mockResolvedValue(null);
+    refusedKeys = new Set([PROJECT_ACCESS_KEY]);
 
-    await expect(
+    await expectForbidden(
       guard.canActivate(makeExecutionContext({ params: { slug: 'alpha' }, user: memberUser })),
-    ).rejects.toBeInstanceOf(ForbiddenAppException);
+      'projects',
+    );
+    // Refused before any display-role read.
+    expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
   });
 
-  it('AC2 boundary: throws ForbiddenAppException when the membership row carries an unrecognised project role', async () => {
+  it('AC2 boundary: the membership row\'s role value no longer decides admission', async () => {
     membershipRepo.findBySlug.mockResolvedValue(activeProject);
+    // A role string the legacy allow-list rejected: the key, not the row, is the decision.
     membershipRepo.findMembershipRole.mockResolvedValue('GUEST');
 
-    await expect(
-      guard.canActivate(makeExecutionContext({ params: { slug: 'alpha' }, user: memberUser })),
-    ).rejects.toBeInstanceOf(ForbiddenAppException);
+    const result = await guard.canActivate(
+      makeExecutionContext({ params: { slug: 'alpha' }, user: memberUser }),
+    );
+
+    expect(result).toBe(true);
+    expect(can).toHaveBeenCalledWith(memberUser, PROJECT_ACCESS_KEY, { projectId: 'proj-1' });
   });
 
   // ---------------------------------------------------------------------------
-  // AC3 — agents are roster-checked (S4c US-001)
+  // AC3 — agents are decided by project.read (S4c US-001 reach, US-001 gate)
   // ---------------------------------------------------------------------------
 
-  it('AC3: returns true for a rostered agent principal without a membership lookup', async () => {
+  it('AC3: returns true for an agent principal holding project.read, without a roster lookup', async () => {
     membershipRepo.findBySlug.mockResolvedValue(activeProject);
-    membershipRepo.findMembershipRole.mockResolvedValue(null);
-    membershipRepo.isAgentOnRoster.mockResolvedValue(true);
+    membershipRepo.isAgentOnRoster.mockResolvedValue(false);
 
     const result = await guard.canActivate(
       makeExecutionContext({ params: { slug: 'alpha' }, user: agentPrincipal }),
     );
 
     expect(result).toBe(true);
-    expect(membershipRepo.isAgentOnRoster).toHaveBeenCalledWith('proj-1', 'agent-1');
+    expect(can).toHaveBeenCalledWith(agentPrincipal, PROJECT_ACCESS_KEY, { projectId: 'proj-1' });
+    expect(membershipRepo.isAgentOnRoster).not.toHaveBeenCalled();
     expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
   });
 
-  it('AC3 boundary: throws a projects-scoped ForbiddenAppException for an agent absent from the project roster', async () => {
+  it('AC3 boundary: throws a projects-scoped ForbiddenAppException for an agent without project.read', async () => {
     membershipRepo.findBySlug.mockResolvedValue(activeProject);
-    membershipRepo.isAgentOnRoster.mockResolvedValue(false);
+    membershipRepo.isAgentOnRoster.mockResolvedValue(true);
+    refusedKeys = new Set([PROJECT_ACCESS_KEY]);
 
     await expectForbidden(
       guard.canActivate(makeExecutionContext({ params: { slug: 'alpha' }, user: agentPrincipal })),
@@ -329,9 +367,8 @@ describe('ProjectMembershipGuard (US-001)', () => {
   // AC15 / AC16 — @ProjectRoles applied to a handler
   // ---------------------------------------------------------------------------
 
-  it('AC15: returns true for a rostered agent principal on a handler carrying @ProjectRoles without calling findMembershipRole', async () => {
+  it('AC15: returns true for an agent principal holding project.read on a handler carrying @ProjectRoles without calling findMembershipRole', async () => {
     membershipRepo.findBySlug.mockResolvedValue(activeProject);
-    membershipRepo.isAgentOnRoster.mockResolvedValue(true);
 
     const result = await guard.canActivate(
       makeExecutionContext(
@@ -342,6 +379,7 @@ describe('ProjectMembershipGuard (US-001)', () => {
     );
 
     expect(result).toBe(true);
+    expect(can).toHaveBeenCalledWith(agentPrincipal, PROJECT_ACCESS_KEY, { projectId: 'proj-1' });
     expect(findMembershipRoleSpy).not.toHaveBeenCalled();
     expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
   });
@@ -445,7 +483,7 @@ describe('ProjectMembershipGuard (US-001)', () => {
     beforeEach(() => {
       guardWithCasl = new ProjectMembershipGuard(access, new Reflector(), new KodaCaslAbilityFactory());
       membershipRepo.findBySlug.mockResolvedValue({ id: 'p1', slug: 'team', deletedAt: null });
-      // S4c US-001: agents are roster-checked before the permission check.
+      // US-001: agents reach the project through `project.read`; the legacy roster read is not consulted.
       membershipRepo.isAgentOnRoster.mockResolvedValue(true);
     });
 

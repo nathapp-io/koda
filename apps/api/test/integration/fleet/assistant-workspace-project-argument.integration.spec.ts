@@ -6,6 +6,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
+import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
@@ -110,8 +111,12 @@ describeIntegration('AssistantToolExecutor project argument in WORKSPACE threads
     const extra = await prisma.user.create({ data: { email: 'ws-removed@koda.test', passwordHash: 'x', role: 'MEMBER' } });
     const jobId = await workspaceJob({ repoId: sharedRepoId }, extra.id);
     await prisma.projectMember.create({ data: { projectId: bId, userId: extra.id, role: 'DEVELOPER' } });
+    await app.get(MembershipService).invalidatePermissions();
     expect((await call(jobId, 'koda_search_tickets', { project: 'b' })).isError).toBe(false);
     await prisma.projectMember.deleteMany({ where: { projectId: bId, userId: extra.id } });
+    // US-001: access is decided from the effective-permission cache, so the row removal needs an invalidation
+    // before the next call sees it.
+    await app.get(MembershipService).invalidatePermissions();
     expect(await call(jobId, 'koda_search_tickets', { project: 'b' })).toEqual({ content: 'not_found: project', isError: true });
   });
 });

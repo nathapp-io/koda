@@ -1,7 +1,8 @@
-import type { Mocked } from 'vitest';
+import type { Mock, Mocked } from 'vitest';
 import { HttpException } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
-import { ProjectAccessService } from './project-access.service';
+import { ProjectAccessService, PROJECT_ACCESS_KEY } from './project-access.service';
+import type { PermissionService } from '../permissions/permission.service';
 import { RagService } from '../rag/rag.service';
 import {
   NotFoundAppException,
@@ -27,6 +28,8 @@ describe('ProjectsService', () => {
   let service: ProjectsService;
   let ragService: Mocked<RagService>;
   let mockProjectRepo: any;
+  let can: Mock;
+  let permissions: PermissionService;
 
   beforeEach(() => {
     mockProjectRepo = {
@@ -44,11 +47,15 @@ describe('ProjectsService', () => {
       deleteAllBySourceType: vi.fn(),
     } as any;
 
+    // US-001: project access is `project.read`; each case below answers it through this double.
+    can = vi.fn(async () => ({ allowed: true, reason: 'granted' }));
+    permissions = { can } as unknown as PermissionService;
+
     service = new ProjectsService(
       mockProjectRepo as any,
       ragService,
       undefined,
-      new ProjectAccessService(mockProjectRepo as any)
+      new ProjectAccessService(mockProjectRepo as any, permissions)
     );
   });
 
@@ -230,37 +237,39 @@ describe('ProjectsService', () => {
       agentRoles: [], capabilities: [],
     } as unknown as KodaPrincipal;
 
-    it('passes without checking membership for ADMIN user', async () => {
+    it('passes a user whose project.read is granted globally, without a membership lookup', async () => {
+      // The global ask is what a global admin/Owner holds, so the display role is ADMIN.
       await expect(service.assertProjectMembership('p1', adminUser)).resolves.toBeUndefined();
+      expect(can).toHaveBeenCalledWith(adminUser, PROJECT_ACCESS_KEY, { projectId: 'p1' });
       expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
     });
 
-    it('passes a rostered agent principal without a membership lookup', async () => {
-      mockProjectRepo.isAgentOnRoster.mockResolvedValue(true);
+    it('passes an agent principal whose project.read is granted, without a roster lookup', async () => {
       await expect(service.assertProjectMembership('p1', agentPrincipal)).resolves.toBeUndefined();
-      expect(mockProjectRepo.isAgentOnRoster).toHaveBeenCalledWith('p1', 'ag1');
+      expect(can).toHaveBeenCalledWith(agentPrincipal, PROJECT_ACCESS_KEY, { projectId: 'p1' });
+      expect(mockProjectRepo.isAgentOnRoster).not.toHaveBeenCalled();
       expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
     });
 
-    it('refuses an agent principal absent from the project roster with a projects-scoped 403', async () => {
-      mockProjectRepo.isAgentOnRoster.mockResolvedValue(false);
+    it('refuses an agent principal whose project.read is refused with a projects-scoped 403', async () => {
+      can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
 
       const error = await rejectionOf(service.assertProjectMembership('p1', agentPrincipal));
 
       expect(error).toBeInstanceOf(ForbiddenAppException);
       expect((error as ForbiddenAppException).prefix).toBe('projects');
-      expect(mockProjectRepo.isAgentOnRoster).toHaveBeenCalledWith('p1', 'ag1');
+      expect(mockProjectRepo.isAgentOnRoster).not.toHaveBeenCalled();
       expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
     });
 
-    it('throws ForbiddenAppException when membership role is null', async () => {
-      mockProjectRepo.findMembershipRole.mockResolvedValue(null);
+    it('throws ForbiddenAppException when project.read is refused', async () => {
+      can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
       await expect(service.assertProjectMembership('p1', memberUser)).rejects.toBeInstanceOf(ForbiddenAppException);
     });
 
-    it('resolves when user has a valid membership role', async () => {
-      mockProjectRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
+    it('resolves when the member user holds project.read', async () => {
       await expect(service.assertProjectMembership('p1', memberUser)).resolves.toBeUndefined();
+      expect(can).toHaveBeenCalledWith(memberUser, PROJECT_ACCESS_KEY, { projectId: 'p1' });
     });
   });
 

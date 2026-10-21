@@ -166,9 +166,11 @@ describeIntegration('code-intel project-role gate (Slice 4)', () => {
   });
 
   it('AC-7/10/14: a custom project role lacking code-intel keys is refused by all route families', async () => {
+    // US-001: `project.read` is what admits the caller to the project at all; the code-intel keys are
+    // what the routes then refuse.
     const custom = await db.role.create({ data: {
       key: 'intel-ticket-only', name: 'Intel ticket-only', scope: 'PROJECT', system: false,
-      permissions: ['ticket.read'],
+      permissions: ['project.read', 'ticket.read'],
     } });
     await db.roleBinding.create({ data: {
       principalType: 'USER', principalId: userIds.custom as string, roleId: custom.id,

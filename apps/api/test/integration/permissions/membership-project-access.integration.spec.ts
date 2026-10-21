@@ -124,7 +124,7 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
     // A soft-deleted project never reaches a list, whatever sources point at it.
     await request(server).delete('/api/projects/gone').set(auth('root')).expect(204);
 
-    for (const who of ['devBind', 'viewerBind', 'legDev', 'noSource', 'globalRev', 'paBound', 'listUser']) {
+    for (const who of ['devBind', 'viewerBind', 'legDev', 'noSource', 'globalRev', 'paBound', 'listUser', 'customReader']) {
       await createUser(who);
     }
     const agentFixtures: Array<[string, string]> = [
@@ -144,6 +144,15 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
       bind(agentPrincipal('agViewer'), 'viewer', projectIds.p1),
       bind(agentPrincipal('agGlobal'), 'developer', null),
     ]);
+
+    // US-001 AC-11: a custom PROJECT role holding `ticket.read` and nothing else. It is created through
+    // the role route (the seeder owns the system roles) so the installation's own role machinery writes
+    // it, and the binding is the principal's only source in p1.
+    resetThrottle(app);
+    await request(server).post('/api/roles').set(auth('root'))
+      .send({ key: 'ticket-reader', name: 'Ticket Reader', scope: 'PROJECT', permissions: ['ticket.read'] })
+      .expect(201);
+    await bind(userPrincipal('customReader'), 'ticket-reader', projectIds.p1);
 
     // The legacy rows: a ProjectMember row for legDev (US-002 AC-5) and for listUser in p2 (AC-10),
     // plus the AgentProject row AC-14's PATCH target needs.
@@ -267,6 +276,45 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
     expect(res.status).toBe(200);
     const agent = await prisma.agent.findUniqueOrThrow({ where: { id: agents.agRoster.id } });
     expect(agent.name).toBe('Renamed Bot');
+  }, TEST_TIMEOUT_MS);
+
+  // ---------------------------------------------------------------------------
+  // US-001 — access to a project is holding `project.read` in it, while the members page keeps
+  // showing the caller's display role (`viewerRole`).
+  // ---------------------------------------------------------------------------
+
+  it('US-001 AC-11: a custom PROJECT role without project.read gets 403 projects from the guard', async () => {
+    // The custom role grants `ticket.read` and nothing else, so the route's own key would pass: a 403
+    // answered with the projects prefix can only come from ProjectMembershipGuard, before RequiresGuard.
+    expect(await prisma.projectMember.count({ where: { projectId: projectIds.p1, userId: ids.customReader } })).toBe(0);
+    expect(await prisma.roleBinding.count({ where: { projectId: projectIds.p1, principalId: ids.customReader } })).toBe(1);
+
+    const res = await send('get', '/api/projects/p1/tickets', 'customReader');
+
+    expect(res.status).toBe(403);
+    expect(res.body.ret).toBe(40003);
+    expect(res.body.message).toBe('projects.40003');
+  }, TEST_TIMEOUT_MS);
+
+  it('US-001 AC-12: a global admin with no source in p1 gets viewerRole ADMIN', async () => {
+    expect(await prisma.projectMember.count({ where: { projectId: projectIds.p1, userId: rootId } })).toBe(0);
+    expect(await prisma.roleBinding.count({ where: { projectId: projectIds.p1, principalId: rootId } })).toBe(0);
+
+    const res = await send('get', '/api/projects/p1/members', 'root');
+
+    expect(res.status).toBe(200);
+    expect(data<{ viewerRole: string }>(res).viewerRole).toBe('ADMIN');
+  }, TEST_TIMEOUT_MS);
+
+  it('US-001 AC-13: a viewer binding gets viewerRole VIEWER', async () => {
+    expect(await prisma.projectMember.count({ where: { projectId: projectIds.p1, userId: ids.viewerBind } })).toBe(0);
+
+    const res = await send('get', '/api/projects/p1/members', 'viewerBind');
+
+    expect(res.status).toBe(200);
+    expect(data<{ canManage: boolean; viewerRole: string }>(res)).toEqual(
+      expect.objectContaining({ canManage: false, viewerRole: 'VIEWER' }),
+    );
   }, TEST_TIMEOUT_MS);
 });
 

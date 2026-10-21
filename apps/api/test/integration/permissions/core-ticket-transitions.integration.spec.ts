@@ -327,16 +327,16 @@ describeIntegration('ticket transition edge keys (US-003)', () => {
   // -------------------------------------------------------------------------
 
   it('B3: a status move that outraces the PATCH between the pre-check and the transition writes no field', async () => {
-    // A caller holding ticket.update and ticket.transition.start but not verify-fix.return: the pair it
-    // asks for (CREATED -> IN_PROGRESS) is allowed on the ticket it read, and refused on the ticket the
-    // concurrent writer left behind (VERIFY_FIX -> IN_PROGRESS needs verify-fix.return).
+    // A caller holding project access, ticket.update and ticket.transition.start but not verify-fix.return:
+    // the pair it asks for (CREATED -> IN_PROGRESS) is allowed on the ticket it read, and refused on the
+    // ticket the concurrent writer left behind (VERIFY_FIX -> IN_PROGRESS needs verify-fix.return).
     await createUser('interleaved');
     const role = await db.role.create({
       data: {
         key: 'b3-starter',
         name: 'B3 Starter',
         scope: 'PROJECT',
-        permissions: ['ticket.read', 'ticket.update', 'ticket.transition.start'],
+        permissions: ['project.read', 'ticket.read', 'ticket.update', 'ticket.transition.start'],
       },
     });
     await db.roleBinding.create({

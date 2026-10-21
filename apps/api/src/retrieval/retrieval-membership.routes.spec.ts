@@ -22,7 +22,7 @@ import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify
 import request from 'supertest';
 import { RetrievalController } from './retrieval.controller';
 import { EvaluationService } from './evaluation.service';
-import { ProjectAccessService } from '../projects/project-access.service';
+import { ProjectAccessService, PROJECT_ACCESS_KEY } from '../projects/project-access.service';
 import { PrismaProjectRepository } from '../projects/prisma-project.repository';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { PermissionService } from '../permissions/permission.service';
@@ -62,9 +62,16 @@ describe('RetrievalController membership gate (US-005 AC2)', () => {
 
   /** The catalog keys the stub refuses; each case sets the ones its role does not hold (US-007). */
   let refusedKeys: ReadonlySet<string>;
-  const can = vi.fn(async (_principal: unknown, key: string) =>
-    refusedKeys.has(key) ? { allowed: false, reason: 'not-granted' } : { allowed: true, reason: 'granted' },
-  );
+  const can = vi.fn(async (_principal: unknown, key: string, ctx?: { projectId?: string }) => {
+    // US-001: a project-scoped source does not answer the global `project.read` ask, so the display
+    // role below still comes from the membership row rather than becoming ADMIN.
+    if (key === PROJECT_ACCESS_KEY && ctx?.projectId === undefined) {
+      return { allowed: false, reason: 'not-granted' };
+    }
+    return refusedKeys.has(key)
+      ? { allowed: false, reason: 'not-granted' }
+      : { allowed: true, reason: 'granted' };
+  });
 
   // Records every execution of the real guard: the only way to observe, from
   // the outside, that ProjectMembershipGuard sits in this route's guard chain.
@@ -131,8 +138,9 @@ describe('RetrievalController membership gate (US-005 AC2)', () => {
     });
   });
 
-  it('AC2: POST /api/projects/:slug/kb/evaluate/retrieval returns 403 for a non-member user', async () => {
-    projectRepo.findMembershipRole.mockResolvedValue(null);
+  it('AC2: POST /api/projects/:slug/kb/evaluate/retrieval returns 403 for a caller without project.read', async () => {
+    // US-001: project access is `project.read`, so that is the key a non-member is refused.
+    refusedKeys = new Set([PROJECT_ACCESS_KEY]);
 
     const res = await request(app.getHttpServer()).post(
       '/api/projects/alpha/kb/evaluate/retrieval',
@@ -140,9 +148,9 @@ describe('RetrievalController membership gate (US-005 AC2)', () => {
 
     expect(res.status).toBe(403);
     // The refusal happens before the handler: no evaluation is run for a
-    // principal who is not a member of the project, and the key is never asked.
+    // principal who is not a member of the project, and the route's own key is never asked.
     expect(evaluationService.runQueries).not.toHaveBeenCalled();
-    expect(can).not.toHaveBeenCalled();
+    expect(can.mock.calls.map(([, key]) => key)).toEqual([PROJECT_ACCESS_KEY]);
     // ProjectMembershipGuard — not a private controller check — produced it.
     expect(guardCanActivate).toHaveBeenCalledTimes(1);
   });

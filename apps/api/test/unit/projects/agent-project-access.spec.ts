@@ -1,10 +1,17 @@
 import type { Mock } from 'vitest';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { PrismaProjectRepository } from '../../../src/projects/prisma-project.repository';
-import { ProjectAccessService } from '../../../src/projects/project-access.service';
+import { ProjectAccessService, PROJECT_ACCESS_KEY } from '../../../src/projects/project-access.service';
+import type { PermissionService } from '../../../src/permissions/permission.service';
 import type { IAuthConfig } from '../../../src/config/auth.config';
-import type { AgentPrincipal, RunnerPrincipal } from '../../../src/auth/principal/koda-principal.types';
+import type { AgentPrincipal, KodaPrincipal, RunnerPrincipal } from '../../../src/auth/principal/koda-principal.types';
 
+/**
+ * US-001: an agent's project reach — and a runner's exemption — goes through
+ * `PermissionService.can(principal, 'project.read', { projectId })`. The repository stub below answers
+ * the legacy roster read only: the cases invert it on purpose, so an agent admitted with the roster
+ * reading `false` (and refused with it reading `true`) can only be following the key.
+ */
 const agent: AgentPrincipal = {
   actorType: 'agent', id: 'agent-a', sub: 'agent-a', slug: 'agent-a', status: 'ACTIVE',
   agentRoles: [], capabilities: [], name: 'Agent A', blacklisted: false, revoked: false,
@@ -21,16 +28,23 @@ type ProjectRepositoryDouble = {
   findMembershipRole: Mock;
 };
 
+const granted = { allowed: true, reason: 'granted' } as const;
+const refused = { allowed: false, reason: 'not-granted' } as const;
+
 function setup(authConfig?: Partial<IAuthConfig>) {
   const repo: ProjectRepositoryDouble = {
     isAgentOnRoster: vi.fn<(...args: [string, string]) => Promise<boolean>>(),
     findMembershipRole: vi.fn(),
   };
+  const can = vi.fn(async (_principal: KodaPrincipal, key: string) =>
+    key === PROJECT_ACCESS_KEY ? granted : refused,
+  );
   const service = new ProjectAccessService(
     repo as unknown as PrismaProjectRepository,
+    { can } as unknown as PermissionService,
     authConfig as IAuthConfig | undefined,
   );
-  return { repo, service };
+  return { repo, service, can };
 }
 
 /** The rejection of `promise`, asserted to be a 403 — or a test failure. */
@@ -43,51 +57,58 @@ async function refusalOf(promise: Promise<unknown>): Promise<ForbiddenAppExcepti
   return error as ForbiddenAppException;
 }
 
-describe('US-001 ProjectAccessService agent roster enforcement', () => {
-  it('US-001 AC4: allows an agent whose project roster lookup succeeds', async () => {
-    const { repo, service } = setup();
-    repo.isAgentOnRoster.mockResolvedValue(true);
+describe('US-001 ProjectAccessService agent and runner access', () => {
+  it('US-001 AC4: admits an agent whose project.read is granted, whatever the roster says', async () => {
+    const { repo, service, can } = setup();
+    repo.isAgentOnRoster.mockResolvedValue(false);
 
     await expect(service.resolveMembership('project-a', agent)).resolves.toBeNull();
-    expect(repo.isAgentOnRoster).toHaveBeenCalledWith('project-a', 'agent-a');
+    expect(can).toHaveBeenCalledWith(agent, PROJECT_ACCESS_KEY, { projectId: 'project-a' });
+    expect(repo.isAgentOnRoster).not.toHaveBeenCalled();
   });
 
-  it('US-001 AC5: forbids an agent absent from the project roster with a projects-scoped 403', async () => {
-    const { repo, service } = setup();
-    repo.isAgentOnRoster.mockResolvedValue(false);
+  it('US-001 AC5: forbids an agent whose project.read is refused with a projects-scoped 403', async () => {
+    const { repo, service, can } = setup();
+    repo.isAgentOnRoster.mockResolvedValue(true);
+    can.mockResolvedValue(refused);
 
     const error = await refusalOf(service.resolveMembership('project-a', agent));
 
     expect(error.prefix).toBe('projects');
-    expect(repo.isAgentOnRoster).toHaveBeenCalledWith('project-a', 'agent-a');
-  });
-
-  it('US-001 AC6: bypasses the roster lookup when agent project scoping is disabled', async () => {
-    const { repo, service } = setup({ agentProjectScoping: false });
-
-    await expect(service.resolveMembership('project-a', agent)).resolves.toBeNull();
+    expect(can).toHaveBeenCalledWith(agent, PROJECT_ACCESS_KEY, { projectId: 'project-a' });
     expect(repo.isAgentOnRoster).not.toHaveBeenCalled();
   });
 
-  it('US-001 AC6 boundary: an explicit scoping config of true still consults the roster', async () => {
-    const { repo, service } = setup({ agentProjectScoping: true });
-    repo.isAgentOnRoster.mockResolvedValue(true);
+  it('US-001 AC6: bypasses the permission check when agent project scoping is disabled', async () => {
+    const { repo, service, can } = setup({ agentProjectScoping: false });
 
     await expect(service.resolveMembership('project-a', agent)).resolves.toBeNull();
-    expect(repo.isAgentOnRoster).toHaveBeenCalledWith('project-a', 'agent-a');
+    expect(can).not.toHaveBeenCalled();
+    expect(repo.isAgentOnRoster).not.toHaveBeenCalled();
   });
 
-  it('US-001 AC7: leaves runner access unscoped without looking up an agent roster row', async () => {
-    const { repo, service } = setup();
+  it('US-001 AC6 boundary: an explicit scoping config of true still asks for project.read', async () => {
+    const { repo, service, can } = setup({ agentProjectScoping: true });
+
+    await expect(service.resolveMembership('project-a', agent)).resolves.toBeNull();
+    expect(can).toHaveBeenCalledWith(agent, PROJECT_ACCESS_KEY, { projectId: 'project-a' });
+    expect(repo.isAgentOnRoster).not.toHaveBeenCalled();
+  });
+
+  it('US-001 AC7: leaves runner access unscoped without asking for a key or a roster row', async () => {
+    const { repo, service, can } = setup();
 
     await expect(service.resolveMembership('project-a', runner)).resolves.toBeNull();
+    expect(can).not.toHaveBeenCalled();
     expect(repo.isAgentOnRoster).not.toHaveBeenCalled();
+    await expect(service.readsEveryProject(runner)).resolves.toBe(false);
+    expect(can).not.toHaveBeenCalled();
   });
 
-  it('US-001 AC8: surfaces a roster database error unchanged', async () => {
-    const { repo, service } = setup();
+  it('US-001 AC8: surfaces a permission database error unchanged', async () => {
+    const { service, can } = setup();
     const databaseError = new Error('roster database unavailable');
-    repo.isAgentOnRoster.mockRejectedValue(databaseError);
+    can.mockRejectedValue(databaseError);
 
     await expect(service.resolveMembership('project-a', agent)).rejects.toBe(databaseError);
   });

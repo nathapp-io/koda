@@ -153,13 +153,14 @@ describeIntegration('fleet job and ticket fleet-job route keys (US-003)', () => 
 
     await bind('viewer', 'viewer');
     await bind('developer', 'developer');
-    // AC-15: a custom role that may dispatch and read but holds no ticket edge key.
+    // AC-15: a custom role that may dispatch and read but holds no ticket edge key. US-001:
+    // `project.read` is what lets the caller reach the project at all.
     await db.role.create({
       data: {
         key: 'fleet-dispatcher',
         name: 'Fleet Dispatcher',
         scope: 'PROJECT',
-        permissions: ['fleet.job.dispatch', 'fleet.job.read', 'ticket.read'],
+        permissions: ['project.read', 'fleet.job.dispatch', 'fleet.job.read', 'ticket.read'],
       },
     });
     await bind('custom', 'fleet-dispatcher');
