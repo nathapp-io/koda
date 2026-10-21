@@ -1,3 +1,4 @@
+import { PermissionService } from '../../../src/permissions/permission.service';
 import type { Mocked } from 'vitest';
 /**
  * VCS Webhook Handler Tests (VCS-P1-004-C)
@@ -161,6 +162,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
     module = await Test.createTestingModule({
       controllers: [VcsWebhookController],
       providers: [
+        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true }) } },
         { provide: VcsConnectionService, useValue: mockVcsServiceInstance },
         { provide: VcsSyncService, useValue: mockSyncServiceInstance },
         { provide: VcsWebhookService, useValue: mockWebhookServiceInstance },
