@@ -3,7 +3,9 @@ import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-c
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { RagService } from '../rag/rag.service';
-import { AgentAuthProvider } from '../auth/agent-auth.provider';
+import { PermissionService } from '../permissions/permission.service';
+import type { PrincipalRef } from '../permissions/permissions.types';
+import { PROJECT_ACCESS_KEY } from '../projects/project-access.service';
 import { TicketEventService } from '../events/ticket-event.service';
 import { AgentEventService } from '../events/agent-event.service';
 import { DecisionEventService } from '../events/decision-event.service';
@@ -25,7 +27,7 @@ export class KodaDomainWriter {
     private readonly writerRepo: PrismaKodaDomainWriterRepository,
     private readonly ragService: RagService,
     private readonly outbox: NathappOutboxService,
-    private readonly agentAuthProvider: AgentAuthProvider,
+    private readonly permissions: PermissionService,
     private readonly ticketEventService: TicketEventService,
     private readonly agentEventService: AgentEventService,
     private readonly decisionEventService: DecisionEventService,
@@ -55,18 +57,10 @@ export class KodaDomainWriter {
     return { actorId, projectId, action, timestamp: new Date(), source, eventId };
   }
 
-  private assertActorHasEventRole(actor: { actorType: 'user' | 'agent'; projectRoles: string[] }): void {
-    if (actor.projectRoles.length === 0) {
-      if (actor.actorType === 'agent') {
-        return;
-      }
-      throw new ForbiddenAppException({}, 'koda-domain-writer');
-    }
-    const allowedRoles = ['ADMIN', 'DEVELOPER', 'REVIEWER', 'TRIAGER', 'AGENT'];
-    const hasRole = actor.projectRoles.some((role) => allowedRoles.includes(role));
-    if (!hasRole) {
-      throw new ForbiddenAppException({}, 'koda-domain-writer');
-    }
+  /** The actor must have access to the project the event belongs to: the same key project routes are gated on. */
+  private async assertActorInProject(actor: PrincipalRef, projectId: string): Promise<void> {
+    const keys = await this.permissions.effectiveKeys(actor, { projectId });
+    if (!keys.has(PROJECT_ACCESS_KEY)) throw new ForbiddenAppException({}, 'koda-domain-writer');
   }
 
   async writeTicketEvent(data: WriteTicketEventInput): Promise<WriteResult> {
@@ -77,19 +71,12 @@ export class KodaDomainWriter {
 
     await this.assertProjectExists(data.projectId);
 
-    // US-004: a user actor's project roles come from the database
-    // (User.role + ProjectMember.role), never from the event payload.
-    // Agent actors continue to load roles through AgentAuthProvider.
-    const projectRoles = data.actorType === 'agent'
-      ? await this.agentAuthProvider.loadAgentRoles(data.actorId)
-      : await this.writerRepo.findUserProjectRoles(data.projectId, data.actorId);
-    const actor = {
-      actorType: data.actorType,
-      actorId: data.actorId,
-      projectRoles,
-      resourceRoles: [],
-    };
-    this.assertActorHasEventRole(actor);
+    // Permissions P1 (US-003): the actor's access to the event's project decides, never a `role`-like
+    // field in the payload. A user actor is a USER principal, an agent actor an AGENT one.
+    await this.assertActorInProject(
+      { type: data.actorType === 'agent' ? 'AGENT' : 'USER', id: data.actorId },
+      data.projectId,
+    );
 
     return this.txManager.run(async () => {
       const event = await this.ticketEventService.create(data);
@@ -118,14 +105,7 @@ export class KodaDomainWriter {
     this.assertNonEmpty(data.agentId, 'agentId');
 
     await this.assertProjectExists(data.projectId);
-
-    const actor = {
-      actorType: 'agent' as const,
-      actorId: data.agentId,
-      projectRoles: await this.agentAuthProvider.loadAgentRoles(data.agentId),
-      resourceRoles: [],
-    };
-    this.assertActorHasEventRole(actor);
+    await this.assertActorInProject({ type: 'AGENT', id: data.agentId }, data.projectId);
 
     return this.txManager.run(async () => {
       const event = await this.agentEventService.create(data);
@@ -154,14 +134,7 @@ export class KodaDomainWriter {
     this.assertNonEmpty(data.action, 'action');
 
     await this.assertProjectExists(data.projectId);
-
-    const actor = {
-      actorType: 'agent' as const,
-      actorId: data.agentId,
-      projectRoles: await this.agentAuthProvider.loadAgentRoles(data.agentId),
-      resourceRoles: [],
-    };
-    this.assertActorHasEventRole(actor);
+    await this.assertActorInProject({ type: 'AGENT', id: data.agentId }, data.projectId);
 
     return this.txManager.run(async () => {
       const event = await this.decisionEventService.create(data);

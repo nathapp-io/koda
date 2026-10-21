@@ -1,21 +1,12 @@
 import type { Mock } from 'vitest';
 /**
- * US-004: KodaDomainWriter derives a user actor's project roles from membership.
+ * US-003: KodaDomainWriter authorizes an event's actor by its effective `project.read` key in the
+ * event's project — never by a `role`-like field in the payload, and never by a legacy actor-role
+ * allow-list.
  *
- * Acceptance Criteria:
- * 12. writeTicketEvent throws ForbiddenAppException for a non-ADMIN user actor
- *     with no ProjectMember row even when payload actorRole is 'ADMIN'.
- * 13. writeTicketEvent succeeds for a user actor with ProjectMember.role
- *     DEVELOPER and no payload role.
- * 14. writeTicketEvent succeeds for a global ADMIN user actor with no membership row.
- *
- * The first block drives the writer through the REAL
- * `PrismaKodaDomainWriterRepository` (the new
- * `findUserProjectRoles(projectId, userId)` data source) against a mocked
- * Prisma client, so the roles really are read from `User.role` /
- * `ProjectMember.role` / the user's PROJECT-scope role bindings (permissions
- * P1b US-003). The second block pins that data source's contract at the
- * writer boundary.
+ * These cases drive the writer through the REAL `PrismaKodaDomainWriterRepository` (which resolves
+ * the project row) and a `PermissionService.effectiveKeys` double, so the decision under test is the
+ * one `PermissionService` would make for the actor it is handed.
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
@@ -25,7 +16,7 @@ import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { KodaDomainWriter } from '../../../src/koda-domain-writer/koda-domain-writer.service';
 import { PrismaKodaDomainWriterRepository } from '../../../src/koda-domain-writer/prisma-koda-domain-writer.repository';
 import { RagService } from '../../../src/rag/rag.service';
-import { AgentAuthProvider } from '../../../src/auth/agent-auth.provider';
+import { PermissionService } from '../../../src/permissions/permission.service';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { AgentEventService } from '../../../src/events/agent-event.service';
 import { DecisionEventService } from '../../../src/events/decision-event.service';
@@ -33,6 +24,7 @@ import type { WriteTicketEventInput } from '../../../src/koda-domain-writer/writ
 
 const PROJECT_ID = 'proj-123';
 const USER_ID = 'user-1';
+const AGENT_ID = 'agent-1';
 
 /** The rejection of `promise`, or undefined when it resolved. */
 async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
@@ -57,275 +49,137 @@ function ticketEvent(
   };
 }
 
-describe('US-004: KodaDomainWriter role provenance', () => {
-  // ── AC 12/13/14 through the real repository ────────────────────────────────
+describe('US-003: KodaDomainWriter decides the actor with project.read', () => {
+  let writer: KodaDomainWriter;
+  let moduleRef: TestingModule;
 
-  describe('roles read from the database', () => {
-    let writer: KodaDomainWriter;
-    let moduleRef: TestingModule;
+  const prismaMock = {
+    client: {
+      project: { findUnique: vi.fn() },
+    },
+  };
 
-    const prismaMock = {
-      client: {
-        project: { findUnique: vi.fn() },
-        user: { findUnique: vi.fn(), findFirst: vi.fn() },
-        projectMember: { findUnique: vi.fn(), findFirst: vi.fn() },
-        // Permissions P1b US-003: the compatibility query reads the user's PROJECT-scope bindings.
-        roleBinding: { findMany: vi.fn() },
-      },
-    };
+  const permissionsMock = { effectiveKeys: vi.fn() };
+  const ticketEventService = { create: vi.fn() };
+  const outbox = { record: vi.fn() };
 
-    const ticketEventService = { create: vi.fn() };
-    const outbox = { record: vi.fn() };
+  /** Wire the mocked Prisma client for one live project. */
+  function givenProject(): void {
+    prismaMock.client.project.findUnique.mockResolvedValue({ id: PROJECT_ID, deletedAt: null });
+  }
 
-    /** One `RoleBinding` row as `legacy-membership.queries.ts` selects it. */
-    const bindingRow = (key: string) => ({
-      projectId: PROJECT_ID,
-      createdAt: new Date('2026-01-01T00:00:00.000Z'),
-      grantedByType: 'SYSTEM',
-      grantedById: 'test',
-      role: { key, scope: 'PROJECT' },
-    });
-
-    /** Wire the mocked Prisma client for one global role, one membership row and one binding role. */
-    function givenUser(
-      globalRole: string,
-      membershipRole: string | null,
-      bindingRoleKey: string | null = null,
-    ): void {
-      const membership =
-        membershipRole === null
-          ? null
-          : { id: 'membership-1', projectId: PROJECT_ID, userId: USER_ID, role: membershipRole };
-
-      prismaMock.client.project.findUnique.mockResolvedValue({ id: PROJECT_ID, deletedAt: null });
-      prismaMock.client.user.findUnique.mockResolvedValue({
-        id: USER_ID,
-        role: globalRole,
-        memberships: membership ? [membership] : [],
-      });
-      prismaMock.client.user.findFirst.mockResolvedValue({
-        id: USER_ID,
-        role: globalRole,
-        memberships: membership ? [membership] : [],
-      });
-      prismaMock.client.projectMember.findFirst.mockResolvedValue(membership);
-      prismaMock.client.projectMember.findUnique.mockResolvedValue(membership);
-      prismaMock.client.roleBinding.findMany.mockResolvedValue(
-        bindingRoleKey === null ? [] : [bindingRow(bindingRoleKey)],
-      );
-    }
-
-    beforeAll(async () => {
-      moduleRef = await Test.createTestingModule({
-        providers: [
-          KodaDomainWriter,
-          PrismaKodaDomainWriterRepository,
-          { provide: PrismaService, useValue: prismaMock },
-          {
-            provide: RagService,
-            useValue: { indexDocument: vi.fn(), importGraphify: vi.fn() },
+  beforeAll(async () => {
+    moduleRef = await Test.createTestingModule({
+      providers: [
+        KodaDomainWriter,
+        PrismaKodaDomainWriterRepository,
+        { provide: PrismaService, useValue: prismaMock },
+        {
+          provide: RagService,
+          useValue: { indexDocument: vi.fn(), importGraphify: vi.fn() },
+        },
+        { provide: NathappOutboxService, useValue: outbox },
+        {
+          provide: TRANSACTION_MANAGER,
+          useValue: {
+            run: vi.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: vi.fn(),
+            isInTransaction: vi.fn(() => false),
           },
-          { provide: NathappOutboxService, useValue: outbox },
-          {
-            provide: TRANSACTION_MANAGER,
-            useValue: {
-              run: vi.fn((fn: () => Promise<unknown>) => fn()),
-              getClient: vi.fn(),
-              isInTransaction: vi.fn(() => false),
-            },
-          },
-          {
-            provide: AgentAuthProvider,
-            useValue: { loadAgentRoles: vi.fn().mockResolvedValue(['AGENT']) },
-          },
-          { provide: TicketEventService, useValue: ticketEventService },
-          { provide: AgentEventService, useValue: { create: vi.fn() } },
-          { provide: DecisionEventService, useValue: { create: vi.fn() } },
-        ],
-      }).compile();
+        },
+        { provide: PermissionService, useValue: permissionsMock },
+        { provide: TicketEventService, useValue: ticketEventService },
+        { provide: AgentEventService, useValue: { create: vi.fn() } },
+        { provide: DecisionEventService, useValue: { create: vi.fn() } },
+      ],
+    }).compile();
 
-      writer = moduleRef.get<KodaDomainWriter>(KodaDomainWriter);
-    });
-
-    afterAll(async () => {
-      await moduleRef?.close();
-    });
-
-    beforeEach(() => {
-      vi.clearAllMocks();
-      ticketEventService.create.mockResolvedValue({
-        id: 'event-1',
-        action: 'TICKET_CREATED',
-        timestamp: new Date('2026-01-01T00:00:00.000Z'),
-      });
-      outbox.record.mockResolvedValue(undefined);
-    });
-
-    it('AC12: throws ForbiddenAppException for a non-ADMIN user actor with no ProjectMember row, even when payload actorRole is ADMIN', async () => {
-      givenUser('MEMBER', null);
-
-      const error = await rejectionOf(
-        writer.writeTicketEvent(
-          ticketEvent({ actorId: USER_ID, actorType: 'user', data: { actorRole: 'ADMIN' } }),
-        ),
-      );
-
-      expect(error).toBeInstanceOf(ForbiddenAppException);
-    });
-
-    it('AC12: writes no event for a non-ADMIN user actor with no ProjectMember row', async () => {
-      givenUser('MEMBER', null);
-
-      await rejectionOf(
-        writer.writeTicketEvent(
-          ticketEvent({ actorId: USER_ID, actorType: 'user', data: { actorRole: 'ADMIN' } }),
-        ),
-      );
-
-      expect(ticketEventService.create).not.toHaveBeenCalled();
-      expect(outbox.record).not.toHaveBeenCalled();
-    });
-
-    it('AC12: ignores a payload role field for a non-ADMIN user actor with no ProjectMember row', async () => {
-      givenUser('MEMBER', null);
-
-      const error = await rejectionOf(
-        writer.writeTicketEvent(
-          ticketEvent({ actorId: USER_ID, actorType: 'user', data: { role: 'DEVELOPER' } }),
-        ),
-      );
-
-      expect(error).toBeInstanceOf(ForbiddenAppException);
-    });
-
-    it('AC13: succeeds for a user actor with ProjectMember.role DEVELOPER and no payload role', async () => {
-      givenUser('MEMBER', 'DEVELOPER');
-
-      await expect(
-        writer.writeTicketEvent(ticketEvent({ actorId: USER_ID, actorType: 'user', data: {} })),
-      ).resolves.toMatchObject({ canonicalId: 'event-1' });
-      expect(ticketEventService.create).toHaveBeenCalled();
-    });
-
-    it('AC13: succeeds for a user actor whose only source in the project is a developer binding', async () => {
-      givenUser('MEMBER', null, 'developer');
-
-      await expect(
-        writer.writeTicketEvent(ticketEvent({ actorId: USER_ID, actorType: 'user', data: {} })),
-      ).resolves.toMatchObject({ canonicalId: 'event-1' });
-      expect(ticketEventService.create).toHaveBeenCalled();
-    });
-
-    it('AC14: succeeds for a global ADMIN user actor with no membership row', async () => {
-      givenUser('ADMIN', null);
-
-      await expect(
-        writer.writeTicketEvent(ticketEvent({ actorId: USER_ID, actorType: 'user', data: {} })),
-      ).resolves.toMatchObject({ canonicalId: 'event-1' });
-      expect(ticketEventService.create).toHaveBeenCalled();
-    });
-
-    it('still loads agent roles through AgentAuthProvider for agent actors', async () => {
-      const agentAuthProvider = moduleRef.get<{ loadAgentRoles: Mock }>(AgentAuthProvider);
-      prismaMock.client.project.findUnique.mockResolvedValue({ id: PROJECT_ID, deletedAt: null });
-
-      await expect(
-        writer.writeTicketEvent(ticketEvent({ actorId: 'agent-1', actorType: 'agent', data: {} })),
-      ).resolves.toMatchObject({ canonicalId: 'event-1' });
-
-      expect(agentAuthProvider.loadAgentRoles).toHaveBeenCalledWith('agent-1');
-      expect(prismaMock.client.projectMember.findFirst).not.toHaveBeenCalled();
-      expect(prismaMock.client.projectMember.findUnique).not.toHaveBeenCalled();
-      expect(prismaMock.client.roleBinding.findMany).not.toHaveBeenCalled();
-    });
+    writer = moduleRef.get<KodaDomainWriter>(KodaDomainWriter);
   });
 
-  // ── The repository contract the ACs name ──────────────────────────────────
+  afterAll(async () => {
+    await moduleRef?.close();
+  });
 
-  describe('PrismaKodaDomainWriterRepository.findUserProjectRoles contract', () => {
-    let writer: KodaDomainWriter;
-    let moduleRef: TestingModule;
-
-    const writerRepo = {
-      findProjectById: vi.fn(),
-      findUserProjectRoles: vi.fn(),
-    };
-
-    const ticketEventService = { create: vi.fn() };
-    const outbox = { record: vi.fn() };
-
-    beforeAll(async () => {
-      moduleRef = await Test.createTestingModule({
-        providers: [
-          KodaDomainWriter,
-          { provide: PrismaKodaDomainWriterRepository, useValue: writerRepo },
-          {
-            provide: RagService,
-            useValue: { indexDocument: vi.fn(), importGraphify: vi.fn() },
-          },
-          { provide: NathappOutboxService, useValue: outbox },
-          {
-            provide: TRANSACTION_MANAGER,
-            useValue: {
-              run: vi.fn((fn: () => Promise<unknown>) => fn()),
-              getClient: vi.fn(),
-              isInTransaction: vi.fn(() => false),
-            },
-          },
-          {
-            provide: AgentAuthProvider,
-            useValue: { loadAgentRoles: vi.fn().mockResolvedValue(['AGENT']) },
-          },
-          { provide: TicketEventService, useValue: ticketEventService },
-          { provide: AgentEventService, useValue: { create: vi.fn() } },
-          { provide: DecisionEventService, useValue: { create: vi.fn() } },
-        ],
-      }).compile();
-
-      writer = moduleRef.get<KodaDomainWriter>(KodaDomainWriter);
+  beforeEach(() => {
+    vi.clearAllMocks();
+    givenProject();
+    permissionsMock.effectiveKeys.mockResolvedValue(new Set(['project.read']));
+    ticketEventService.create.mockResolvedValue({
+      id: 'event-1',
+      action: 'TICKET_CREATED',
+      timestamp: new Date('2026-01-01T00:00:00.000Z'),
     });
+    outbox.record.mockResolvedValue(undefined);
+  });
 
-    afterAll(async () => {
-      await moduleRef?.close();
-    });
+  it('refuses a payload actorRole of ADMIN when the actor holds no key in the project', async () => {
+    permissionsMock.effectiveKeys.mockResolvedValue(new Set(['ticket.read']));
 
-    beforeEach(() => {
-      vi.clearAllMocks();
-      writerRepo.findProjectById.mockResolvedValue({ id: PROJECT_ID });
-      ticketEventService.create.mockResolvedValue({
-        id: 'event-1',
-        action: 'TICKET_CREATED',
-        timestamp: new Date('2026-01-01T00:00:00.000Z'),
-      });
-      outbox.record.mockResolvedValue(undefined);
-    });
+    const error = await rejectionOf(
+      writer.writeTicketEvent(
+        ticketEvent({ actorId: USER_ID, actorType: 'user', data: { actorRole: 'ADMIN' } }),
+      ),
+    );
 
-    it('AC13: asks the repository for the actor’s roles in the event’s project', async () => {
-      writerRepo.findUserProjectRoles.mockResolvedValue(['DEVELOPER']);
+    expect(error).toBeInstanceOf(ForbiddenAppException);
+    expect((error as ForbiddenAppException).prefix).toBe('koda-domain-writer');
+  });
 
-      await expect(
-        writer.writeTicketEvent(ticketEvent({ actorId: USER_ID, actorType: 'user', data: {} })),
-      ).resolves.toMatchObject({ canonicalId: 'event-1' });
+  it('writes no event and no outbox row for a refused actor', async () => {
+    permissionsMock.effectiveKeys.mockResolvedValue(new Set(['ticket.read']));
 
-      expect(writerRepo.findUserProjectRoles).toHaveBeenCalledWith(PROJECT_ID, USER_ID);
-    });
+    await rejectionOf(
+      writer.writeTicketEvent(
+        ticketEvent({ actorId: USER_ID, actorType: 'user', data: { actorRole: 'ADMIN' } }),
+      ),
+    );
 
-    it('AC13: a repository result of [] forbids the user actor', async () => {
-      writerRepo.findUserProjectRoles.mockResolvedValue([]);
+    expect(ticketEventService.create).not.toHaveBeenCalled();
+    expect(outbox.record).not.toHaveBeenCalled();
+  });
 
-      const error = await rejectionOf(
-        writer.writeTicketEvent(ticketEvent({ actorId: USER_ID, actorType: 'user', data: {} })),
-      );
+  it('ignores a payload role field when the actor holds no key in the project', async () => {
+    permissionsMock.effectiveKeys.mockResolvedValue(new Set(['ticket.read']));
 
-      expect(error).toBeInstanceOf(ForbiddenAppException);
-    });
+    const error = await rejectionOf(
+      writer.writeTicketEvent(
+        ticketEvent({ actorId: USER_ID, actorType: 'user', data: { role: 'DEVELOPER' } }),
+      ),
+    );
 
-    it('AC14: a repository result containing ADMIN allows the user actor', async () => {
-      writerRepo.findUserProjectRoles.mockResolvedValue(['ADMIN']);
+    expect(error).toBeInstanceOf(ForbiddenAppException);
+    expect(ticketEventService.create).not.toHaveBeenCalled();
+  });
 
-      await expect(
-        writer.writeTicketEvent(ticketEvent({ actorId: USER_ID, actorType: 'user', data: {} })),
-      ).resolves.toMatchObject({ canonicalId: 'event-1' });
-    });
+  it('writes the event for a user actor holding project.read, with no payload role at all', async () => {
+    await expect(
+      writer.writeTicketEvent(ticketEvent({ actorId: USER_ID, actorType: 'user', data: {} })),
+    ).resolves.toMatchObject({ canonicalId: 'event-1' });
+    expect(ticketEventService.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks for the agent actor’s keys as an AGENT principal in the event’s project', async () => {
+    await expect(
+      writer.writeTicketEvent(ticketEvent({ actorId: AGENT_ID, actorType: 'agent', data: {} })),
+    ).resolves.toMatchObject({ canonicalId: 'event-1' });
+
+    expect(permissionsMock.effectiveKeys).toHaveBeenCalledWith(
+      { type: 'AGENT', id: AGENT_ID },
+      { projectId: PROJECT_ID },
+    );
+  });
+
+  it('refuses a project id that names no project before reading any key', async () => {
+    prismaMock.client.project.findUnique.mockResolvedValue(null);
+
+    const error = await rejectionOf(
+      writer.writeTicketEvent(ticketEvent({ actorId: USER_ID, actorType: 'user', data: {} })),
+    );
+
+    expect(error).toBeInstanceOf(ForbiddenAppException);
+    expect((error as ForbiddenAppException).prefix).toBe('koda-domain-writer');
+    expect(permissionsMock.effectiveKeys).not.toHaveBeenCalled();
+    expect(ticketEventService.create as Mock).not.toHaveBeenCalled();
   });
 });
