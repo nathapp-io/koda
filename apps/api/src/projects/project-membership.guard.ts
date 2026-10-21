@@ -13,7 +13,7 @@ import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
  * Guards project-scoped routes by `params.slug`.
  *
  * Flow:
- *  1. No slug (`params.slug`, or the @ProjectSlugFrom query key): return true
+ *  1. No slug (`params.slug`, or the @ProjectSlugFrom query or body key): return true
  *     (sibling guards handle it), unless the route carries @ProjectPermission,
  *     which fails closed.
  *  2. Resolve the project (404 if missing or soft-deleted) and the caller's
@@ -57,8 +57,8 @@ export class ProjectMembershipGuard implements CanActivate {
   }
 
   /**
-   * `params.slug`, else the query key a route opted into with @ProjectSlugFrom.
-   * A missing, empty or repeated (array) query value is no slug, so a
+   * `params.slug`, else the query or body key selected by @ProjectSlugFrom.
+   * A missing, empty or non-string value (including an array) is no slug, so a
    * @ProjectPermission route fails closed instead of guessing.
    */
   private resolveSlug(ctx: ExecutionContext, req: ProjectScopedRequest): string | undefined {
@@ -68,7 +68,12 @@ export class ProjectMembershipGuard implements CanActivate {
       ctx.getClass(),
     ]);
     if (!from) return undefined;
-    const value = req.query?.[from.key];
+    const source = from.source === 'query'
+      ? req.query
+      : typeof req.body === 'object' && req.body !== null
+        ? req.body as Record<string, unknown>
+        : undefined;
+    const value = source?.[from.key];
     return typeof value === 'string' && value.length > 0 ? value : undefined;
   }
 

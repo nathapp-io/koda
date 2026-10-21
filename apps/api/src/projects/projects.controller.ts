@@ -25,7 +25,7 @@ import {
   ApiParam,
 } from '@nestjs/swagger';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
-import { Principal, CaslPermissionAction } from '@nathapp/nestjs-auth';
+import { Principal } from '@nathapp/nestjs-auth';
 import { KodaPrincipal, isAgentPrincipal } from '../auth/principal/koda-principal.types';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { AgentsService } from '../agents/agents.service';
@@ -36,7 +36,6 @@ import { PermissionService } from '../permissions/permission.service';
 import { RequiresGuard } from '../permissions/requires.guard';
 import { Requires } from '../permissions/requires.decorator';
 import { ProjectMembershipGuard } from './project-membership.guard';
-import { ProjectPermission } from './project-permission.decorator';
 import { CurrentProject } from './current-project.decorator';
 import { ProjectContext } from './project-context';
 
@@ -149,8 +148,8 @@ export class ProjectsController {
   @ApiQuery({ name: 'commitHash', required: true })
   @ApiQuery({ name: 'changedFiles', required: true })
   @ApiQuery({ name: 'ticketId', required: false })
-  @UseGuards(ProjectMembershipGuard)
-  @ProjectPermission([CaslPermissionAction.READ, 'CodeIntel'])
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @Requires('codeintel.impact.read')
   async getChangeImpact(
     @Query('repoId') repoId: string,
     @Query('commitHash') commitHash: string,

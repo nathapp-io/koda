@@ -1,16 +1,16 @@
 /**
  * Track 3 Slice 4 (M9): the webhook secret is shown on create and on rotate,
- * never on read. Rotation is project ADMIN or global ADMIN; DEVELOPER, VIEWER,
- * non-members and agents are refused.
+ * never on read. Rotation requires the rotate permission: legacy project/global
+ * admins and project-admin-bound agents may rotate; developers and viewers cannot.
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/vcs/vcs-webhook-secret.integration.spec.ts
  */
 import request from 'supertest';
-import { PrismaClient } from '../../../src/generated/prisma/client';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
+import type { PrismaClient } from '../../../src/generated/prisma/client';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const HEX_32 = /^[0-9a-f]{32}$/;
@@ -24,12 +24,14 @@ describeIntegration('VCS webhook secret (M9)', () => {
   const tokens: Record<string, string> = {};
   let createdSecret: string;
   const previousKey = process.env.VCS_ENCRYPTION_KEY;
+  const previousScoping = process.env.AGENT_PROJECT_SCOPING;
 
   const auth = (who: string) => ({ Authorization: `Bearer ${tokens[who]}` });
 
   beforeAll(async () => {
     await resetDb();
     process.env.VCS_ENCRYPTION_KEY = 'ab'.repeat(32);
+    process.env.AGENT_PROJECT_SCOPING = 'on';
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
     prisma = createTestPrismaClient(process.env.DATABASE_URL);
@@ -52,6 +54,33 @@ describeIntegration('VCS webhook secret (M9)', () => {
       .send({ name: 'Hook Agent', slug: 'hook-agent', roles: ['DEVELOPER'] }).expect(201);
     tokens.agent = data<{ apiKey: string }>(agent).apiKey;
 
+    const project = await prisma.project.findUniqueOrThrow({ where: { slug: 'hooks' } });
+    const grantor = await prisma.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } });
+    const projectAdminRole = await prisma.role.findUniqueOrThrow({ where: { key: 'project-admin' } });
+    const developerRole = await prisma.role.findUniqueOrThrow({ where: { key: 'developer' } });
+    for (const [who, roleId] of [
+      ['binding-admin-agent', projectAdminRole.id],
+      ['binding-developer-agent', developerRole.id],
+    ] as const) {
+      const response = await request(server).post('/api/agents').set(auth('root'))
+        .send({ name: who, slug: who, roles: [] }).expect(201);
+      const agent = data<{ apiKey: string }>(response);
+      tokens[who] = agent.apiKey;
+      const agentRow = await prisma.agent.findUniqueOrThrow({ where: { slug: who } });
+      await prisma.roleBinding.deleteMany({ where: { principalType: 'AGENT', principalId: agentRow.id } });
+      expect(await prisma.agentProject.count({ where: { agentId: agentRow.id } })).toBe(0);
+      expect(await prisma.agentRoleEntry.count({ where: { agentId: agentRow.id } })).toBe(0);
+      await prisma.roleBinding.create({ data: {
+        principalType: 'AGENT', principalId: agentRow.id, roleId, projectId: project.id,
+        grantedByType: 'USER', grantedById: grantor.id,
+      } });
+    }
+  });
+
+  beforeEach(async () => {
+    resetThrottle(app);
+    // Rotation cases must not change the connection observed by another case.
+    await prisma.vcsConnection.deleteMany({ where: { project: { slug: 'hooks' } } });
     const created = await request(server).post('/api/projects/hooks/vcs').set(auth('root'))
       .send({ provider: 'github', repoOwner: 'acme', repoName: 'widgets', token: 'ghp_test', syncMode: 'webhook' })
       .expect(201);
@@ -63,6 +92,8 @@ describeIntegration('VCS webhook secret (M9)', () => {
     await app?.close();
     if (previousKey === undefined) delete process.env.VCS_ENCRYPTION_KEY;
     else process.env.VCS_ENCRYPTION_KEY = previousKey;
+    if (previousScoping === undefined) delete process.env.AGENT_PROJECT_SCOPING;
+    else process.env.AGENT_PROJECT_SCOPING = previousScoping;
   });
 
   const storedSecret = async () =>
@@ -92,6 +123,23 @@ describeIntegration('VCS webhook secret (M9)', () => {
   it.each(['pdev', 'pviewer', 'outsider', 'agent'])('%s cannot rotate', async (who) => {
     const before = await storedSecret();
     await request(server).post(ROTATE).set(auth(who)).expect(403);
+    expect(await storedSecret()).toBe(before);
+  });
+
+  it('AC-11: project-admin-bound agent rotates and persists the new secret', async () => {
+    const before = await storedSecret();
+    const response = await request(server).post(ROTATE).set(auth('binding-admin-agent')).expect(200);
+    const next = data<{ webhookSecret: string }>(response).webhookSecret;
+    expect(next).toMatch(HEX_32);
+    expect(next).not.toBe(before);
+    expect(await storedSecret()).toBe(next);
+  });
+
+  it('AC-12: developer-bound agent is refused without changing the secret', async () => {
+    const before = await storedSecret();
+    const response = await request(server).post(ROTATE).set(auth('binding-developer-agent')).expect(403);
+    expect(response.body).toMatchObject({ ret: 40003 });
+    expect(response.body.message).toContain('permissions');
     expect(await storedSecret()).toBe(before);
   });
 });

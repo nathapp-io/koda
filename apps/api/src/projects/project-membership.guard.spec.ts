@@ -81,6 +81,8 @@ const routes = new TicketRoutesStub();
 
 /** Controller stub for the code-intel read routes: slug in `?projectSlug=` (Slice 4). */
 class CodeIntelRoutesStub {
+  @ProjectSlugFrom('body', 'projectSlug')
+  bodySlug(): string { return 'ok'; }
   @ProjectSlugFrom('query', 'projectSlug')
   @ProjectPermission([CaslPermissionAction.READ, 'CodeIntel'])
   searchSymbols(): string { return 'ok'; }
@@ -510,6 +512,52 @@ describe('ProjectMembershipGuard (US-001)', () => {
       const kb = new KbWriteRouteStub();
       await expect(guardWithCasl.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: memberUser }, kb.addDocument, KbWriteRouteStub))).resolves.toBe(true);
       expect(membershipRepo.findMembershipRole).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('ProjectMembershipGuard - slug sources', () => {
+    let slugGuard: ProjectMembershipGuard;
+    beforeEach(() => {
+      slugGuard = new ProjectMembershipGuard(access, new Reflector(), new KodaCaslAbilityFactory());
+      membershipRepo.findBySlug.mockResolvedValue({ id: 'p1', slug: 'p1', deletedAt: null });
+      membershipRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
+    });
+
+    const request = (body: unknown, params: Record<string, unknown> = {}, query: Record<string, unknown> = {}) => ({
+      params, query, body, user: memberUser,
+    });
+    const activate = (req: object, handler: () => string) =>
+      slugGuard.canActivate(makeExecutionContext(req, handler, CodeIntelRoutesStub));
+
+    it('US-001 AC-9: resolves body slug and attaches project context for an accessible project', async () => {
+      const req = request({ projectSlug: 'p1' });
+      await expect(activate(req, CodeIntelRoutesStub.prototype.bodySlug)).resolves.toBe(true);
+      expect(req.projectContext).toEqual({ project: { id: 'p1', slug: 'p1' }, role: 'DEVELOPER' });
+    });
+
+    it('US-001 AC-10: unknown body slug returns project 404', async () => {
+      membershipRepo.findBySlug.mockResolvedValue(null);
+      await expect(activate(request({ projectSlug: 'no-such-project' }), CodeIntelRoutesStub.prototype.bodySlug))
+        .rejects.toMatchObject({ prefix: 'projects', httpStatus: 404 });
+    });
+
+    it.each([['empty', {}], ['non-string', { projectSlug: 42 }]])('US-001 AC-11/12: %s body slug is absent', async (_label, body) => {
+      const req = request(body);
+      await expect(activate(req, CodeIntelRoutesStub.prototype.bodySlug)).resolves.toBe(true);
+      expect(req.projectContext).toBeUndefined();
+      expect(membershipRepo.findBySlug).not.toHaveBeenCalled();
+    });
+
+    it('US-001 AC-13: query slug resolution remains supported', async () => {
+      const req = request({}, {}, { projectSlug: 'p1' });
+      await expect(activate(req, CodeIntelRoutesStub.prototype.searchSymbols)).resolves.toBe(true);
+      expect(req.projectContext?.project.id).toBe('p1');
+    });
+
+    it('US-001 AC-14: params slug takes precedence over body slug', async () => {
+      const req = request({ projectSlug: 'p2' }, { slug: 'p1' });
+      await expect(activate(req, CodeIntelRoutesStub.prototype.bodySlug)).resolves.toBe(true);
+      expect(membershipRepo.findBySlug).toHaveBeenCalledWith('p1');
     });
   });
 

@@ -1,5 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
+import { IS_PUBLIC_KEY } from '@nathapp/nestjs-auth';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
+import { REQUIRES_METADATA } from '../permissions/requires.decorator';
+import { RequiresGuard } from '../permissions/requires.guard';
+import { PermissionService } from '../permissions/permission.service';
 import { AuthException, ValidationAppException } from '@nathapp/nestjs-common';
 import { createHmac } from 'node:crypto';
 import { CiWebhookController } from './ci-webhook.controller';
@@ -27,6 +32,17 @@ async function rejectionOf(promise: Promise<unknown>): Promise<HttpException> {
   }
   throw new Error('expected the call to reject');
 }
+
+describe('CiWebhookController route authorization', () => {
+  it('declares the CI intake key behind RequiresGuard while remaining public', () => {
+    const handler = CiWebhookController.prototype.handleCiWebhook;
+    expect(Reflect.getMetadata(REQUIRES_METADATA, handler)).toMatchObject({
+      keys: ['ci.webhook.ingest'],
+    });
+    expect(Reflect.getMetadata(GUARDS_METADATA, handler)).toEqual([RequiresGuard]);
+    expect(Reflect.getMetadata(IS_PUBLIC_KEY, handler)).toBe(true);
+  });
+});
 
 describe('CiWebhookController', () => {
   let controller: CiWebhookController;
@@ -61,6 +77,8 @@ describe('CiWebhookController', () => {
       providers: [
         { provide: CiWebhookService, useValue: mockCiWebhookService },
         { provide: WebhookReplayGuard, useValue: mockReplayGuard },
+        { provide: PermissionService, useValue: { can: vi.fn() } },
+        RequiresGuard,
       ],
     }).compile();
 

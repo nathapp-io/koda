@@ -72,6 +72,7 @@ describe('ProjectsController route permission metadata (US-007)', () => {
     ['addProjectAgent', ['project.agent.add'], 'guard'],
     ['removeProjectAgent', ['project.agent.remove'], 'guard'],
     ['updateProjectAgent', ['project.agent.update'], 'service'],
+    ['getChangeImpact', ['codeintel.impact.read'], 'guard'],
   ];
 
   it.each(requiresCases)('%s declares @Requires(%j, enforcedBy %s)', (handler, keys, enforcedBy) => {
@@ -110,12 +111,6 @@ describe('ProjectsController route permission metadata (US-007)', () => {
     },
   );
 
-  it('code-intel impact keeps the legacy @ProjectPermission until the integrations story moves it', () => {
-    const fn = ProjectsController.prototype.getChangeImpact as unknown as object;
-
-    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeDefined();
-    expect(Reflect.getMetadata(REQUIRES_METADATA, fn)).toBeUndefined();
-  });
 });
 
 describe('ProjectsController', () => {

@@ -1,8 +1,9 @@
 import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
-import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 import { VCS_CFG } from '../config/vcs.config';
+import { PermissionService } from '../permissions/permission.service';
 import { VcsController } from './vcs.controller';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
@@ -15,7 +16,6 @@ import { SyncResultDto } from './dto/sync-result.dto';
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
-import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 vi.mock('./factory', () => ({
   createVcsProvider: vi.fn(),
@@ -101,39 +101,6 @@ describe('VcsController', () => {
 
   const projectContext = (): ProjectContext => ({ project: { id: 'proj-1', slug: 'test-project' }, role: 'ADMIN' });
 
-  const adminUser: KodaPrincipal = {
-    actorType: 'user',
-    id: 'user-admin',
-    role: 'ADMIN',
-    email: 'admin@example.com',
-    name: 'admin@example.com',
-    blacklisted: false,
-    revoked: false,
-    authorities: ['ADMIN'],
-  } as KodaPrincipal;
-  const memberUser: KodaPrincipal = {
-    actorType: 'user',
-    id: 'user-member',
-    role: 'MEMBER',
-    email: 'member@example.com',
-    name: 'member@example.com',
-    blacklisted: false,
-    revoked: false,
-    authorities: ['MEMBER'],
-  } as KodaPrincipal;
-  const agentPrincipal: KodaPrincipal = {
-    actorType: 'agent',
-    id: 'agent-1',
-    slug: 'koda-agent',
-    status: 'ACTIVE',
-    agentRoles: ['DEVELOPER'],
-    capabilities: [],
-    name: 'koda-agent',
-    blacklisted: false,
-    revoked: false,
-    authorities: [],
-  } as unknown as KodaPrincipal;
-
   beforeEach(async () => {
     mockProjectsService = {
       findBySlug: vi.fn().mockResolvedValue(makeProjectDto()),
@@ -166,6 +133,7 @@ describe('VcsController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [VcsController],
       providers: [
+        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true }) } },
         { provide: VcsConnectionService, useValue: mockVcsService },
         { provide: VcsSyncService, useValue: mockSyncService },
         { provide: VcsPrSyncService, useValue: mockPrSyncService },
@@ -191,140 +159,77 @@ describe('VcsController', () => {
         token: 'ghp_abc',
       } as CreateVcsConnectionDto;
 
-      const result = await controller.createConnection('test-project', dto, adminUser);
+      const result = await controller.createConnection('test-project', dto);
 
       expect(mockProjectsService.findBySlug).toHaveBeenCalledWith('test-project');
-      expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminUser);
       expect(mockVcsService.create).toHaveBeenCalledWith('proj-1', encryptionKey, dto);
       expect(result.data).toMatchObject({ id: 'conn-1' });
     });
 
-    it('should reject when the principal is not a project member', async () => {
-      mockProjectsService.assertProjectMembership.mockRejectedValueOnce(
-        new ForbiddenAppException({}, 'projects'),
-      );
-
-      await expect(
-        controller.createConnection(
-          'test-project',
-          {} as CreateVcsConnectionDto,
-          memberUser,
-        ),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(mockVcsService.create).not.toHaveBeenCalled();
-    });
 
     it('should throw ValidationAppException when encryption key is not configured', async () => {
       mockVcsConfig.encryptionKey = null;
 
       await expect(
-        controller.createConnection('test-project', {} as CreateVcsConnectionDto, adminUser),
+        controller.createConnection('test-project', {} as CreateVcsConnectionDto),
       ).rejects.toThrow(ValidationAppException);
     });
   });
 
   describe('getConnection', () => {
     it('should resolve the project by slug and return the connection', async () => {
-      const result = await controller.getConnection('test-project', adminUser);
+      const result = await controller.getConnection('test-project');
 
       expect(mockProjectsService.findBySlug).toHaveBeenCalledWith('test-project');
-      expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminUser);
       expect(mockVcsService.findByProject).toHaveBeenCalledWith('proj-1');
       expect(result.data).toMatchObject({ id: 'conn-1' });
     });
 
-    it('should reject when the principal is not a project member', async () => {
-      mockProjectsService.assertProjectMembership.mockRejectedValueOnce(
-        new ForbiddenAppException({}, 'projects'),
-      );
-
-      await expect(controller.getConnection('test-project', memberUser)).rejects.toThrow(
-        ForbiddenAppException,
-      );
-    });
   });
 
   describe('updateConnection', () => {
     it('should resolve the project by slug and delegate to vcsService.update', async () => {
       const dto: UpdateVcsConnectionDto = { syncMode: 'polling' } as UpdateVcsConnectionDto;
 
-      await controller.updateConnection('test-project', dto, adminUser);
-
-      expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminUser);
+      await controller.updateConnection('test-project', dto);
       expect(mockVcsService.update).toHaveBeenCalledWith('proj-1', encryptionKey, dto);
     });
 
-    it('should reject when the principal is not a project member', async () => {
-      mockProjectsService.assertProjectMembership.mockRejectedValueOnce(
-        new ForbiddenAppException({}, 'projects'),
-      );
-
-      await expect(
-        controller.updateConnection(
-          'test-project',
-          {} as UpdateVcsConnectionDto,
-          memberUser,
-        ),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(mockVcsService.update).not.toHaveBeenCalled();
-    });
 
     it('should throw ValidationAppException when encryption key is not configured', async () => {
       mockVcsConfig.encryptionKey = null;
 
       await expect(
-        controller.updateConnection('test-project', {} as UpdateVcsConnectionDto, adminUser),
+        controller.updateConnection('test-project', {} as UpdateVcsConnectionDto),
       ).rejects.toThrow(ValidationAppException);
     });
   });
 
   describe('deleteConnection', () => {
     it('should resolve the project by slug and delete the connection', async () => {
-      await controller.deleteConnection('test-project', adminUser);
+      await controller.deleteConnection('test-project');
 
       expect(mockProjectsService.findBySlug).toHaveBeenCalledWith('test-project');
-      expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminUser);
       expect(mockVcsService.delete).toHaveBeenCalledWith('proj-1');
     });
 
-    it('should reject when the principal is not a project member', async () => {
-      mockProjectsService.assertProjectMembership.mockRejectedValueOnce(
-        new ForbiddenAppException({}, 'projects'),
-      );
-
-      await expect(controller.deleteConnection('test-project', memberUser)).rejects.toThrow(
-        ForbiddenAppException,
-      );
-      expect(mockVcsService.delete).not.toHaveBeenCalled();
-    });
   });
 
   describe('testConnection', () => {
     it('should return test result from vcsService.testConnection', async () => {
       mockVcsService.testConnection.mockResolvedValue({ ok: true, latencyMs: 100 });
 
-      const result = await controller.testConnection('test-project', adminUser);
+      const result = await controller.testConnection('test-project');
 
       expect(result.data).toMatchObject({ ok: true, latencyMs: 100 });
-      expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminUser);
       expect(mockVcsService.testConnection).toHaveBeenCalledWith('proj-1', encryptionKey);
     });
 
-    it('should reject when the principal is not a project member', async () => {
-      mockProjectsService.assertProjectMembership.mockRejectedValueOnce(
-        new ForbiddenAppException({}, 'projects'),
-      );
-
-      await expect(controller.testConnection('test-project', memberUser)).rejects.toThrow(
-        ForbiddenAppException,
-      );
-      expect(mockVcsService.testConnection).not.toHaveBeenCalled();
-    });
 
     it('should throw ValidationAppException when encryption key is not configured', async () => {
       mockVcsConfig.encryptionKey = null;
 
-      await expect(controller.testConnection('test-project', adminUser)).rejects.toThrow(ValidationAppException);
+      await expect(controller.testConnection('test-project')).rejects.toThrow(ValidationAppException);
     });
   });
 
@@ -332,18 +237,20 @@ describe('VcsController', () => {
     it('wraps the rotated secret in JsonResponse.Ok for a user', async () => {
       mockVcsService.rotateWebhookSecret.mockResolvedValue({ webhookSecret: 'b'.repeat(32) });
 
-      const result = await controller.rotateWebhookSecret(projectContext(), adminUser);
+      const result = await controller.rotateWebhookSecret(projectContext());
 
       expect(result.ret).toBe(0);
       expect(result.data).toEqual({ webhookSecret: 'b'.repeat(32) });
       expect(mockVcsService.rotateWebhookSecret).toHaveBeenCalledWith('proj-1');
     });
 
-    it('refuses agents: they never hold webhook secrets', async () => {
-      await expect(
-        controller.rotateWebhookSecret(projectContext(), agentPrincipal),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(mockVcsService.rotateWebhookSecret).not.toHaveBeenCalled();
+    it('delegates secret rotation for an agent with project context', async () => {
+      mockVcsService.rotateWebhookSecret.mockResolvedValue({ webhookSecret: 'c'.repeat(32) });
+
+      const result = await controller.rotateWebhookSecret(projectContext());
+
+      expect(result.data).toEqual({ webhookSecret: 'c'.repeat(32) });
+      expect(mockVcsService.rotateWebhookSecret).toHaveBeenCalledWith('proj-1');
     });
   });
 
@@ -368,26 +275,15 @@ describe('VcsController', () => {
 
       mockSyncService.syncIssue.mockResolvedValue({ action: 'created', ticketId: 't-1', ticketNumber: 5, ticketTitle: 'Issue title' });
 
-      const result = await controller.syncIssue('test-project', '5', adminUser);
+      const result = await controller.syncIssue('test-project', '5');
 
       expect(mockProvider.fetchIssue).toHaveBeenCalledWith(5);
-      expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminUser);
       expect(mockSyncService.syncIssue).toHaveBeenCalled();
       expect(result.data).toMatchObject({ syncType: 'manual', issuesSynced: 1 });
       expect((result.data as SyncResultDto).tickets).toHaveLength(1);
       expect((result.data as SyncResultDto).tickets[0].ref).toContain('TEST-5');
     });
 
-    it('should reject when the principal is not a project member', async () => {
-      mockProjectsService.assertProjectMembership.mockRejectedValueOnce(
-        new ForbiddenAppException({}, 'projects'),
-      );
-
-      await expect(
-        controller.syncIssue('test-project', '5', memberUser),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(mockSyncService.syncIssue).not.toHaveBeenCalled();
-    });
 
     it('should throw 409 CONFLICT when the issue is already synced', async () => {
       const mockProvider = {
@@ -409,7 +305,7 @@ describe('VcsController', () => {
 
       mockSyncService.syncIssue.mockResolvedValue({ action: 'skipped', reason: 'already exists' });
 
-      await expect(controller.syncIssue('test-project', '5', adminUser)).rejects.toThrow(
+      await expect(controller.syncIssue('test-project', '5')).rejects.toThrow(
         new HttpException('Issue already synced', HttpStatus.CONFLICT),
       );
     });
@@ -417,7 +313,7 @@ describe('VcsController', () => {
     it('should throw ValidationAppException when encryption key is not configured', async () => {
       mockVcsConfig.encryptionKey = null;
 
-      await expect(controller.syncIssue('test-project', '5', adminUser)).rejects.toThrow(ValidationAppException);
+      await expect(controller.syncIssue('test-project', '5')).rejects.toThrow(ValidationAppException);
     });
   });
 
@@ -430,29 +326,17 @@ describe('VcsController', () => {
         errors: [],
       });
 
-      const result = await controller.syncAll('test-project', adminUser);
-
-      expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminUser);
+      const result = await controller.syncAll('test-project');
       expect(result.data).toMatchObject({ syncType: 'manual', issuesSynced: 3, issuesSkipped: 1 });
       expect((result.data as SyncResultDto).tickets[0].ref).toBe('TEST-7');
       expect((result.data as SyncResultDto).tickets[0].title).toBe('Issue 7');
     });
 
-    it('should reject when the principal is not a project member', async () => {
-      mockProjectsService.assertProjectMembership.mockRejectedValueOnce(
-        new ForbiddenAppException({}, 'projects'),
-      );
-
-      await expect(controller.syncAll('test-project', memberUser)).rejects.toThrow(
-        ForbiddenAppException,
-      );
-      expect(mockSyncService.fullSync).not.toHaveBeenCalled();
-    });
 
     it('should throw ValidationAppException when encryption key is not configured', async () => {
       mockVcsConfig.encryptionKey = null;
 
-      await expect(controller.syncAll('test-project', adminUser)).rejects.toThrow(ValidationAppException);
+      await expect(controller.syncAll('test-project')).rejects.toThrow(ValidationAppException);
     });
   });
 
@@ -460,28 +344,16 @@ describe('VcsController', () => {
     it('should run PR sync and return updated count', async () => {
       mockPrSyncService.syncPrStatus.mockResolvedValue({ updated: 5, skipped: 1 });
 
-      const result = await controller.syncPr('test-project', adminUser);
-
-      expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminUser);
+      const result = await controller.syncPr('test-project');
       expect(result.data).toMatchObject({ updated: 5 });
       expect(mockPrSyncService.syncPrStatus).toHaveBeenCalled();
     });
 
-    it('should reject when the principal is not a project member', async () => {
-      mockProjectsService.assertProjectMembership.mockRejectedValueOnce(
-        new ForbiddenAppException({}, 'projects'),
-      );
-
-      await expect(controller.syncPr('test-project', memberUser)).rejects.toThrow(
-        ForbiddenAppException,
-      );
-      expect(mockPrSyncService.syncPrStatus).not.toHaveBeenCalled();
-    });
 
     it('should throw ValidationAppException when encryption key is not configured', async () => {
       mockVcsConfig.encryptionKey = null;
 
-      await expect(controller.syncPr('test-project', adminUser)).rejects.toThrow(ValidationAppException);
+      await expect(controller.syncPr('test-project')).rejects.toThrow(ValidationAppException);
     });
   });
 });

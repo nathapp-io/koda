@@ -1,6 +1,8 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { Principal, RequiredPermission } from '@nathapp/nestjs-auth';
+import { Principal } from '@nathapp/nestjs-auth';
+import { Requires } from '../permissions/requires.decorator';
+import { RequiresGuard } from '../permissions/requires.guard';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { CreateSkillSourceDto, SkillSourceDto, SkillSourceListDto } from './dto/skill-source.dto';
@@ -9,11 +11,12 @@ import { SkillsService } from './skills.service';
 @ApiTags('skills')
 @ApiBearerAuth()
 @Controller('admin/skills/sources')
+@UseGuards(RequiresGuard)
 export class AdminSkillsController {
   constructor(private readonly skills: SkillsService) {}
 
   @Get()
-  @RequiredPermission('ADMIN')
+  @Requires('skill.source.read')
   @ApiOperation({ summary: 'List registered skill sources (global admin)' })
   @ApiResponse({ status: 200, type: SkillSourceListDto })
   @ApiResponse({ status: 403, description: 'Global admin required' })
@@ -23,7 +26,7 @@ export class AdminSkillsController {
 
   @Post()
   @HttpCode(201)
-  @RequiredPermission('ADMIN')
+  @Requires('skill.source.create')
   @ApiOperation({ summary: 'Register and resolve a public GitHub skill source (global admin)' })
   @ApiResponse({ status: 201, type: SkillSourceDto })
   @ApiResponse({ status: 400, description: 'Invalid source URL or request' })
@@ -35,7 +38,7 @@ export class AdminSkillsController {
 
   @Post(':id/update')
   @HttpCode(200)
-  @RequiredPermission('ADMIN')
+  @Requires('skill.source.update')
   @ApiOperation({ summary: 'Re-resolve a registered skill source (global admin)' })
   @ApiResponse({ status: 200, type: SkillSourceDto })
   @ApiResponse({ status: 403, description: 'Global admin required' })
@@ -47,7 +50,7 @@ export class AdminSkillsController {
 
   @Delete(':id')
   @HttpCode(204)
-  @RequiredPermission('ADMIN')
+  @Requires('skill.source.delete')
   @ApiOperation({ summary: 'Delete a registered skill source (global admin)' })
   @ApiResponse({ status: 204, description: 'Skill source deleted' })
   @ApiResponse({ status: 403, description: 'Global admin required' })

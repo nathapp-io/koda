@@ -1,6 +1,8 @@
-import { Controller, Headers, HttpCode, HttpStatus, Param, Post, Req } from '@nestjs/common';
+import { Controller, Headers, HttpCode, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Public } from '@nathapp/nestjs-auth';
+import { Requires } from '../permissions/requires.decorator';
+import { RequiresGuard } from '../permissions/requires.guard';
 import { AuthException } from '@nathapp/nestjs-common';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsWebhookService, GitHubWebhookPayload, WebhookHandleResult } from './vcs-webhook.service';
@@ -20,6 +22,8 @@ export class VcsWebhookController {
   @Post('/projects/:slug/vcs-webhook')
   @HttpCode(HttpStatus.OK)
   @Public()
+  @UseGuards(RequiresGuard)
+  @Requires('vcs.webhook.ingest')
   @ApiOperation({ summary: 'Receive GitHub VCS issue webhook' })
   @ApiResponse({
     status: 200,

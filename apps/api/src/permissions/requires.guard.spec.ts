@@ -38,6 +38,9 @@ class TestController {
   @Requires('session.login')
   login(): void {}
 
+  @Requires('vcs.webhook.ingest')
+  publicIntake(): void {}
+
   @Requires('agent.read')
   agentRead(): void {}
 
@@ -167,6 +170,11 @@ describe('RequiresGuard', () => {
   it('AC-10: allows a public key for an unauthenticated request without asking can', async () => {
     await expect(guard.canActivate(contextFor(TestController.prototype.login, {}))).resolves.toBe(true);
 
+    expect(can).not.toHaveBeenCalled();
+  });
+
+  it('US-001 AC-8: allows an unauthenticated request for a public intake key without asking can', async () => {
+    await expect(guard.canActivate(contextFor(TestController.prototype.publicIntake, {}))).resolves.toBe(true);
     expect(can).not.toHaveBeenCalled();
   });
 

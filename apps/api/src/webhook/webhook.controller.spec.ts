@@ -1,4 +1,7 @@
-import { PATH_METADATA } from '@nestjs/common/constants';
+import { GUARDS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { REQUIRES_METADATA } from '../permissions/requires.decorator';
+import { ProjectMembershipGuard } from '../projects/project-membership.guard';
+import { RequiresGuard } from '../permissions/requires.guard';
 import { WebhookController } from './webhook.controller';
 
 /**
@@ -24,5 +27,25 @@ describe('WebhookController route paths', () => {
     const path = pathOf('remove');
     expect(path).toBe('webhooks/:id');
     expect(path.startsWith('api/')).toBe(false);
+  });
+
+  it.each([
+    ['register', 'webhook.create'],
+    ['list', 'webhook.read'],
+    ['update', 'webhook.update'],
+    ['removeByProject', 'webhook.delete'],
+  ] as const)('%s declares %s after project membership', (handler, key) => {
+    const method = WebhookController.prototype[handler];
+    expect(Reflect.getMetadata(REQUIRES_METADATA, method)).toMatchObject({ keys: [key] });
+    expect(Reflect.getMetadata(GUARDS_METADATA, method)).toEqual([
+      ProjectMembershipGuard,
+      RequiresGuard,
+    ]);
+  });
+
+  it('declares global deletion key without project membership', () => {
+    const method = WebhookController.prototype.remove;
+    expect(Reflect.getMetadata(REQUIRES_METADATA, method)).toMatchObject({ keys: ['webhook.delete'] });
+    expect(Reflect.getMetadata(GUARDS_METADATA, method)).toEqual([RequiresGuard]);
   });
 });

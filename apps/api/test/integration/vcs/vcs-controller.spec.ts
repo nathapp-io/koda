@@ -1,3 +1,4 @@
+import { PermissionService } from '../../../src/permissions/permission.service';
 import type { Mocked } from 'vitest';
 /**
  * VcsController REST Endpoints Tests (VCS-P1-003-C)
@@ -36,7 +37,6 @@ import { VcsConnectionResponseDto } from '../../../src/vcs/dto/vcs-connection-re
 import { TestConnectionResultDto } from '../../../src/vcs/dto/test-connection-result.dto';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
-import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 
 describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
   let controller: VcsController;
@@ -55,18 +55,6 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     defaultPollingIntervalMs: 300000,
     githubApiUrl: 'https://api.github.com',
     gitlabApiUrl: 'https://gitlab.com/api/v4',
-  };
-
-  const principal: KodaPrincipal = {
-    actorType: 'user',
-    id: 'user-1',
-    sub: 'user-1',
-    role: 'ADMIN',
-    email: 'admin@test.com',
-    name: undefined,
-    blacklisted: false,
-    revoked: false,
-    authorities: [],
   };
 
   const mockVcsConnection: VcsConnectionResponseDto = {
@@ -111,6 +99,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     module = await Test.createTestingModule({
       controllers: [VcsController],
       providers: [
+        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true }) } },
         { provide: VcsConnectionService, useValue: mockVcsServiceInstance },
         { provide: VcsSyncService, useValue: {} },
         { provide: VcsPrSyncService, useValue: {} },
@@ -148,7 +137,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       vcsService.create.mockResolvedValue({ ...mockVcsConnection, webhookSecret: 's'.repeat(32) });
 
-      const result = await controller.createConnection(projectSlug, createDto, principal);
+      const result = await controller.createConnection(projectSlug, createDto);
 
       expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
       expect(vcsService.create).toHaveBeenCalledWith(projectId, encryptionKey, createDto);
@@ -172,7 +161,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       let caught: unknown;
       try {
-        await controller.createConnection(projectSlug, createDto, principal);
+        await controller.createConnection(projectSlug, createDto);
       } catch (error) {
         caught = error;
       }
@@ -190,7 +179,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       projectsService.findBySlug.mockRejectedValue(new NotFoundAppException('Project not found', 'project_not_found'));
 
-      await expect(controller.createConnection(projectSlug, createDto, principal)).rejects.toThrow(NotFoundAppException);
+      await expect(controller.createConnection(projectSlug, createDto)).rejects.toThrow(NotFoundAppException);
     });
   });
 
@@ -202,7 +191,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     it('AC4: returns 200 with VcsConnectionResponseDto when connection exists', async () => {
       vcsService.findByProject.mockResolvedValue(mockVcsConnection);
 
-      const result = await controller.getConnection(projectSlug, principal);
+      const result = await controller.getConnection(projectSlug);
 
       expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
       expect(vcsService.findByProject).toHaveBeenCalledWith(projectId);
@@ -214,7 +203,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     it('AC5: returns 404 when no connection exists for the project', async () => {
       vcsService.findByProject.mockRejectedValue(new NotFoundAppException('No VCS connection', 'vcs_not_found'));
 
-      await expect(controller.getConnection(projectSlug, principal)).rejects.toThrow(NotFoundAppException);
+      await expect(controller.getConnection(projectSlug)).rejects.toThrow(NotFoundAppException);
       expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
     });
   });
@@ -230,7 +219,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       vcsService.update.mockResolvedValue(updatedConnection);
 
-      const result = await controller.updateConnection(projectSlug, updateDto, principal);
+      const result = await controller.updateConnection(projectSlug, updateDto);
 
       expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
       expect(vcsService.update).toHaveBeenCalledWith(projectId, encryptionKey, updateDto);
@@ -244,7 +233,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       vcsService.update.mockResolvedValue(mockVcsConnection);
 
-      const result = await controller.updateConnection(projectSlug, updateDto, principal);
+      const result = await controller.updateConnection(projectSlug, updateDto);
 
       expect(vcsService.update).toHaveBeenCalledWith(projectId, encryptionKey, updateDto);
       expect(result.data).toBeTruthy();
@@ -257,7 +246,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       vcsService.update.mockResolvedValue(updatedConnection);
 
-      const result = await controller.updateConnection(projectSlug, updateDto, principal);
+      const result = await controller.updateConnection(projectSlug, updateDto);
 
       expect(result.data).not.toHaveProperty('webhookSecret');
       expect(result.data).toMatchObject({ webhookSecretConfigured: true });
@@ -268,7 +257,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       vcsService.update.mockRejectedValue(new NotFoundAppException('No connection', 'vcs_not_found'));
 
-      await expect(controller.updateConnection(projectSlug, updateDto, principal)).rejects.toThrow(NotFoundAppException);
+      await expect(controller.updateConnection(projectSlug, updateDto)).rejects.toThrow(NotFoundAppException);
     });
   });
 
@@ -280,7 +269,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     it('AC7: returns 204 No Content when deletion succeeds', async () => {
       vcsService.delete.mockResolvedValue(undefined);
 
-      const result = await controller.deleteConnection(projectSlug, principal);
+      const result = await controller.deleteConnection(projectSlug);
 
       expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
       expect(vcsService.delete).toHaveBeenCalledWith(projectId);
@@ -290,7 +279,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     it('AC8: returns 404 when no connection exists', async () => {
       vcsService.delete.mockRejectedValue(new NotFoundAppException('No connection', 'vcs_not_found'));
 
-      await expect(controller.deleteConnection(projectSlug, principal)).rejects.toThrow(NotFoundAppException);
+      await expect(controller.deleteConnection(projectSlug)).rejects.toThrow(NotFoundAppException);
       expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
     });
   });
@@ -308,7 +297,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       vcsService.testConnection.mockResolvedValue(testResult);
 
-      const result = await controller.testConnection(projectSlug, principal);
+      const result = await controller.testConnection(projectSlug);
 
       expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
       expect(vcsService.testConnection).toHaveBeenCalledWith(projectId, encryptionKey);
@@ -327,7 +316,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       vcsService.testConnection.mockResolvedValue(testResult);
 
-      const result = await controller.testConnection(projectSlug, principal);
+      const result = await controller.testConnection(projectSlug);
 
       expect((result.data as TestConnectionResultDto).ok).toBe(true);
       expect((result.data as TestConnectionResultDto).latencyMs).toBeGreaterThanOrEqual(0);
@@ -343,7 +332,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       vcsService.testConnection.mockResolvedValue(testResult);
 
-      const result = await controller.testConnection(projectSlug, principal);
+      const result = await controller.testConnection(projectSlug);
 
       expect((result.data as TestConnectionResultDto).ok).toBe(false);
       expect((result.data as TestConnectionResultDto).error).toBe('Invalid token');
@@ -352,7 +341,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     it('throws 404 when no connection exists', async () => {
       vcsService.testConnection.mockRejectedValue(new NotFoundAppException('No connection', 'vcs_not_found'));
 
-      await expect(controller.testConnection(projectSlug, principal)).rejects.toThrow(NotFoundAppException);
+      await expect(controller.testConnection(projectSlug)).rejects.toThrow(NotFoundAppException);
       expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
     });
   });
@@ -365,7 +354,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     it('VcsConnectionResponseDto never includes token field', async () => {
       vcsService.findByProject.mockResolvedValue(mockVcsConnection);
 
-      const result = await controller.getConnection(projectSlug, principal);
+      const result = await controller.getConnection(projectSlug);
 
       expect(result.data).toHaveProperty('id');
       expect(result.data).toHaveProperty('provider');
@@ -388,7 +377,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       vcsService.testConnection.mockResolvedValue(testResult);
 
-      const result = await controller.testConnection(projectSlug, principal);
+      const result = await controller.testConnection(projectSlug);
 
       expect(result.data).toHaveProperty('ok');
       expect(result.data).toHaveProperty('latencyMs');
@@ -413,7 +402,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       projectsService.findBySlug.mockRejectedValue(new NotFoundAppException('Project not found'));
 
-      await expect(controller.createConnection(projectSlug, createDto, principal)).rejects.toThrow(NotFoundAppException);
+      await expect(controller.createConnection(projectSlug, createDto)).rejects.toThrow(NotFoundAppException);
     });
 
     it('propagates HttpException (409) from service on create', async () => {
@@ -428,7 +417,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       let caught: unknown;
       try {
-        await controller.createConnection(projectSlug, createDto, principal);
+        await controller.createConnection(projectSlug, createDto);
       } catch (error) {
         caught = error;
       }
@@ -439,13 +428,13 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     it('propagates NotFoundAppException (404) from service on get', async () => {
       vcsService.findByProject.mockRejectedValue(new NotFoundAppException('Connection not found'));
 
-      await expect(controller.getConnection(projectSlug, principal)).rejects.toThrow(NotFoundAppException);
+      await expect(controller.getConnection(projectSlug)).rejects.toThrow(NotFoundAppException);
     });
 
     it('propagates NotFoundAppException (404) from service on delete', async () => {
       vcsService.delete.mockRejectedValue(new NotFoundAppException('Connection not found'));
 
-      await expect(controller.deleteConnection(projectSlug, principal)).rejects.toThrow(NotFoundAppException);
+      await expect(controller.deleteConnection(projectSlug)).rejects.toThrow(NotFoundAppException);
     });
   });
 
@@ -464,7 +453,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       vcsService.create.mockResolvedValue({ ...mockVcsConnection, webhookSecret: 's'.repeat(32) });
 
-      await controller.createConnection(projectSlug, createDto, principal);
+      await controller.createConnection(projectSlug, createDto);
 
       expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
       expect(vcsService.create).toHaveBeenCalledWith(projectId, expect.any(String), createDto);
@@ -480,7 +469,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
         repoName: 'repo',
       };
 
-      await controller.createConnection(projectSlug, createDto, principal);
+      await controller.createConnection(projectSlug, createDto);
 
       // Verify encryption key was passed to service from VCS_CFG token
       expect(vcsService.create).toHaveBeenCalledWith(projectId, encryptionKey, createDto);
@@ -497,7 +486,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       vcsService.create.mockResolvedValue({ ...mockVcsConnection, webhookSecret: 's'.repeat(32) });
 
-      await controller.createConnection(projectSlug, createDto, principal);
+      await controller.createConnection(projectSlug, createDto);
 
       expect(vcsService.create).toHaveBeenCalledWith(projectId, encryptionKey, createDto);
     });
@@ -510,7 +499,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       vcsService.update.mockResolvedValue(mockVcsConnection);
 
-      await controller.updateConnection(projectSlug, updateDto, principal);
+      await controller.updateConnection(projectSlug, updateDto);
 
       expect(vcsService.update).toHaveBeenCalledWith(projectId, encryptionKey, updateDto);
     });

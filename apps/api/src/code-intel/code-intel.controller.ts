@@ -17,14 +17,12 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { JsonResponse, NotFoundAppException } from '@nathapp/nestjs-common';
-import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { RequiresGuard } from '../permissions/requires.guard';
+import { Requires } from '../permissions/requires.decorator';
 import { AstIndexService } from './ast-index.service';
 import { IndexCommitDto } from './dto/index-commit.dto';
 import { SearchSymbolsQueryDto } from './dto/search-symbols.dto';
-import { ProjectAccessService } from '../projects/project-access.service';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
-import { ProjectPermission } from '../projects/project-permission.decorator';
 import { ProjectSlugFrom } from '../projects/project-slug-from.decorator';
 import { CurrentProject } from '../projects/current-project.decorator';
 import { ProjectContext } from '../projects/project-context';
@@ -35,43 +33,25 @@ import { ProjectContext } from '../projects/project-context';
 export class CodeIntelController {
   private readonly logger = new Logger(CodeIntelController.name);
 
-  constructor(
-    private readonly astIndexService: AstIndexService,
-    private readonly projectAccess: ProjectAccessService,
-  ) {}
-
-  private async resolveProject(slug: string): Promise<{ id: string }> {
-    // findProjectIdBySlug throws NotFoundAppException if missing or soft-deleted
-    const id = await this.projectAccess.findProjectIdBySlug(slug);
-    return { id };
-  }
-
-  private async checkProjectMembership(
-    projectId: string,
-    principal: KodaPrincipal,
-  ): Promise<void> {
-    // assertProjectMembership throws ForbiddenAppException when access is denied
-    await this.projectAccess.assertProjectMembership(projectId, principal);
-  }
+  constructor(private readonly astIndexService: AstIndexService) {}
 
   @Post('index')
   @HttpCode(201)
   @ApiOperation({ summary: 'Index a commit for AST symbol extraction' })
   @ApiResponse({ status: 201, description: 'Indexing completed' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
-  @RequiredPermission([CaslPermissionAction.MANAGE, 'AstIndex'])
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
+  @ProjectSlugFrom('body', 'projectSlug')
+  @Requires('codeintel.index.write')
   async indexCommit(
     @Body() dto: IndexCommitDto,
-    @Principal() principal: KodaPrincipal,
+    @CurrentProject() ctx: ProjectContext,
   ) {
-    const project = await this.resolveProject(dto.projectSlug);
-    await this.checkProjectMembership(project.id, principal);
-
     const result = await this.astIndexService.indexCommit(
       dto.repoId,
       dto.commitHash,
       dto.files,
-      project.id,
+      ctx.project.id,
     );
 
     return JsonResponse.Ok(result);
@@ -82,9 +62,9 @@ export class CodeIntelController {
   @ApiResponse({ status: 200, description: 'Symbol search results' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  @UseGuards(ProjectMembershipGuard)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @ProjectSlugFrom('query', 'projectSlug')
-  @ProjectPermission([CaslPermissionAction.READ, 'CodeIntel'])
+  @Requires('codeintel.read')
   async searchSymbols(
     @Query() query: SearchSymbolsQueryDto,
     @CurrentProject() ctx: ProjectContext,
@@ -103,9 +83,9 @@ export class CodeIntelController {
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Symbol not found' })
   @ApiQuery({ name: 'projectSlug', required: true, type: String })
-  @UseGuards(ProjectMembershipGuard)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @ProjectSlugFrom('query', 'projectSlug')
-  @ProjectPermission([CaslPermissionAction.READ, 'CodeIntel'])
+  @Requires('codeintel.read')
   async getSymbol(
     @Param('symbolId') symbolId: string,
     @CurrentProject() ctx: ProjectContext,
@@ -122,9 +102,9 @@ export class CodeIntelController {
   @ApiResponse({ status: 200, description: 'List of caller symbols' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiQuery({ name: 'projectSlug', required: true, type: String })
-  @UseGuards(ProjectMembershipGuard)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @ProjectSlugFrom('query', 'projectSlug')
-  @ProjectPermission([CaslPermissionAction.READ, 'CodeIntel'])
+  @Requires('codeintel.read')
   async getCallers(
     @Param('symbolId') symbolId: string,
     @CurrentProject() ctx: ProjectContext,
@@ -138,9 +118,9 @@ export class CodeIntelController {
   @ApiResponse({ status: 200, description: 'List of callee symbols' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiQuery({ name: 'projectSlug', required: true, type: String })
-  @UseGuards(ProjectMembershipGuard)
+  @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @ProjectSlugFrom('query', 'projectSlug')
-  @ProjectPermission([CaslPermissionAction.READ, 'CodeIntel'])
+  @Requires('codeintel.read')
   async getCallees(
     @Param('symbolId') symbolId: string,
     @CurrentProject() ctx: ProjectContext,

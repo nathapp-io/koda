@@ -34,6 +34,8 @@ const PUBLIC_KEY_LIST = [
   'health.read',
   'invite.preview',
   'invite.accept',
+  'ci.webhook.ingest',
+  'vcs.webhook.ingest',
 ];
 
 const IMPLICIT_KEY_LIST = [
@@ -164,6 +166,36 @@ function expectedRisk(key: string): CatalogRisk {
 }
 
 describe('PERMISSION_CATALOG', () => {
+  it('US-001 AC-1/2: code-intel read and index keys are project role keys', () => {
+    expect(findCatalogEntry('codeintel.read')).toMatchObject({ scope: 'project', access: 'role' });
+    expect(findCatalogEntry('codeintel.index.write')).toMatchObject({ scope: 'project', access: 'role' });
+  });
+
+  it('US-001 AC-3/4: intake keys are public', () => {
+    for (const key of ['ci.webhook.ingest', 'vcs.webhook.ingest']) {
+      expect(findCatalogEntry(key)?.access).toBe('public');
+      expect(PUBLIC_KEYS.has(key)).toBe(true);
+    }
+  });
+
+  it('US-001 AC-5/6/7: seeded project role patterns expand to the intended code-intel and intake keys', async () => {
+    const { SYSTEM_ROLES } = await import('./system-roles');
+    const { expandEntries } = await import('./entry-matcher');
+    const roleKeys = (name: string) => {
+      const role = SYSTEM_ROLES.find((entry) => entry.key === name);
+      if (!role) throw new Error(`Missing seeded role: ${name}`);
+      return expandEntries(role.permissions, 'PROJECT');
+    };
+    const developer = roleKeys('developer');
+    expect(developer.has('codeintel.read')).toBe(true);
+    expect(developer.has('codeintel.index.write')).toBe(true);
+    const viewer = roleKeys('viewer');
+    expect(viewer.has('codeintel.read')).toBe(true);
+    expect(viewer.has('codeintel.index.write')).toBe(false);
+    const admin = roleKeys('project-admin');
+    expect(admin.has('ci.webhook.ingest')).toBe(false);
+    expect(admin.has('vcs.webhook.ingest')).toBe(false);
+  });
   it('AC-1: every proposed_key in the action inventory resolves to an entry with that key', () => {
     expect(INVENTORY_KEYS.length).toBeGreaterThan(200);
 

@@ -11,9 +11,10 @@ import { DnsResolver } from './outbound/dns-resolver';
 import { OutboundHttpClient } from './outbound/outbound-http-client';
 import { OutboundUrlGuard } from './outbound/outbound-url-guard';
 import { OutboxModule } from '../outbox/outbox.module';
+import { ProjectAccessModule } from '../projects/project-access.module';
 
 @Module({
-  imports: [PrismaModule, OutboxModule],
+  imports: [PrismaModule, OutboxModule, ProjectAccessModule],
   controllers: [WebhookController],
   providers: [
     PrismaWebhookRepository,
