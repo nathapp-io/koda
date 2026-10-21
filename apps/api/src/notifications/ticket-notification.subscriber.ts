@@ -1,3 +1,4 @@
+import { SystemWriter } from '../permissions/system-writer.decorator';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
 import { parseMentions } from './mentions';
@@ -41,6 +42,7 @@ interface EventContext {
  * database failure; a deleted ticket or comment ends the handler quietly (Review Focus 1).
  */
 @Injectable()
+@SystemWriter('system.notification.ticket')
 export class TicketNotificationSubscriber implements OnModuleInit {
   private readonly logger = new Logger(TicketNotificationSubscriber.name);
 

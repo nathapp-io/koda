@@ -1,3 +1,4 @@
+import { SystemWriter } from '../permissions/system-writer.decorator';
 import { HttpException, HttpStatus, Inject, Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { VcsConnectionWithProjectDomain } from './domain/vcs.domain';
@@ -73,6 +74,7 @@ export interface WebhookHandleResult {
 }
 
 @Injectable()
+@SystemWriter('system.vcs.webhook-intake')
 export class VcsWebhookService implements OnModuleDestroy {
   private readonly logger = new Logger(VcsWebhookService.name);
   private readonly recentCommitHashes = new Map<string, number>();

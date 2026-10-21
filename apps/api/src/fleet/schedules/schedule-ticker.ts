@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -49,6 +50,7 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
  * there is no distributed lock; the claim is what keeps two overlapping ticks from firing twice (plan D198).
  */
 @Injectable()
+@SystemWriter('system.schedule.dispatch')
 export class ScheduleTicker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ScheduleTicker.name);
   private timer: NodeJS.Timeout | null = null;

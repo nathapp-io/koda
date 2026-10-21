@@ -1,8 +1,10 @@
+import { SystemWriter } from '../permissions/system-writer.decorator';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EntityGraphService } from './entity-graph.service';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
 
 @Injectable()
+@SystemWriter('system.entity-graph.write')
 export class EntityGraphOutboxSubscriber implements OnModuleInit {
   private readonly logger = new Logger(EntityGraphOutboxSubscriber.name);
 

@@ -1,3 +1,4 @@
+import { SystemWriter } from '../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import type { VcsConnectionWithProjectDomain } from './domain/vcs.domain';
@@ -21,6 +22,7 @@ function cappedWarning(cursor: Date | null): string {
  * Polling service for syncing issues on a schedule
  */
 @Injectable()
+@SystemWriter('system.vcs.poll-issues')
 export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(VcsPollingService.name);
   private readonly scheduledConnectionIds = new Set<string>();

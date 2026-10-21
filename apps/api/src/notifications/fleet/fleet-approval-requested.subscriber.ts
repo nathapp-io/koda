@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { BudgetScopeLabels } from '../../fleet/budgets/budget-scope-labels';
 import { FanOutPublisher } from '../../outbox/fan-out-publisher';
@@ -22,6 +23,7 @@ const KIND_LABEL: Readonly<Record<string, string>> = Object.freeze({
  * ask that is no longer pending when it is handled creates nothing.
  */
 @Injectable()
+@SystemWriter('system.notification.fleet')
 export class FleetApprovalRequestedSubscriber implements OnModuleInit {
   private readonly logger = new Logger(FleetApprovalRequestedSubscriber.name);
 

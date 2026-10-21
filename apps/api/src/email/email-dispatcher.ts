@@ -1,3 +1,4 @@
+import { SystemWriter } from '../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import {
   INotifyService, NOTIFY_SERVICE, NotifyException, NotifyExceptionCode, PermanentNotificationError,
@@ -31,6 +32,7 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
  * tick runs about every 30 seconds and never overlaps a still-running scheduled tick.
  */
 @Injectable()
+@SystemWriter('system.email.dispatch')
 export class EmailDispatcher implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EmailDispatcher.name);
   private timer: NodeJS.Timeout | null = null;

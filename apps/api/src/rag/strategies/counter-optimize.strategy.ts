@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { IRagConfig, RAG_CFG } from '../../config/rag.config';
 import type { FtsOptimizeStrategy } from './fts-optimize-strategy.interface';
@@ -7,6 +8,7 @@ import { optimizeInBackground } from './optimize-in-background';
 type LanceTable = any;
 
 @Injectable()
+@SystemWriter('system.rag.optimize')
 export class CounterOptimizeStrategy implements FtsOptimizeStrategy {
   private readonly logger = new Logger(CounterOptimizeStrategy.name);
   private readonly threshold: number;

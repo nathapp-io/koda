@@ -1,3 +1,4 @@
+import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitterReadinessWatcher } from '@nestjs/event-emitter';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
@@ -13,6 +14,7 @@ export const INGEST_SWEEP_MS = 30_000;
  * backlog any earlier would emit to no listener and lose those outcome passes.
  */
 @Injectable()
+@SystemWriter('system.ingest.drain')
 export class BundleIngestSweeper implements OnModuleInit, OnModuleDestroy {
   private timer: NodeJS.Timeout | null = null;
   private destroyed = false;
