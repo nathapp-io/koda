@@ -44,6 +44,7 @@ import { TicketsService } from '../../../src/tickets/tickets.service';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
 import { MemoryKind, TicketStatus } from '../../../src/common/enums';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -173,10 +174,14 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
         email: 'h13-admin@koda.test',
         name: 'H13 Admin',
         passwordHash: 'not-a-real-hash',
-        role: 'ADMIN',
       },
     });
     adminUserId = admin.id;
+    // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
+    // baseline plus the global admin binding, whose mirror keeps `User.role` at `ADMIN` for the
+    // notification and mention readers.
+    await grantBaseline(prisma, { type: 'USER', id: adminUserId });
+    await grantRole(prisma, { type: 'USER', id: adminUserId }, 'admin', null);
     principal = {
       id: admin.id,
       sub: admin.id,
@@ -218,6 +223,10 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
     if (prismaService) {
       await prismaService.onModuleDestroy();
     }
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [{ type: 'USER', id: adminUserId }]);
   });
 
   it('RED baseline: the legacy partial payload shape produces zero memory items', async () => {

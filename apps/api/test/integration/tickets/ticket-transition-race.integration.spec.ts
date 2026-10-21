@@ -31,6 +31,7 @@ import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.rep
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { PermissionService } from '../../../src/permissions/permission.service';
+import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
@@ -83,6 +84,9 @@ describeIntegration('M3 ticket transition race (verify vs reject)', () => {
         passwordHash: 'hash',
       },
     });
+    // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
+    // baseline production writes for every user it creates.
+    await grantBaseline(prisma.client, { type: 'USER', id: user.id });
     principal = {
       id: user.id,
       sub: user.id,
@@ -116,6 +120,10 @@ describeIntegration('M3 ticket transition race (verify vs reject)', () => {
 
   afterAll(async () => {
     await prisma?.onModuleDestroy();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma.client, [{ type: 'USER', id: principal.id }]);
   });
 
   it('concurrent verify + reject: exactly one 2xx, one 409, no double commit', async () => {    // Barrier on the READ phase: hold both callers until both reads have

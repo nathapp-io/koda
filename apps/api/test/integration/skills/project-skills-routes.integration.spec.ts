@@ -17,6 +17,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -126,6 +127,9 @@ describeIntegration('US-005 project skill enablement routes (PG)', () => {
       .expect(201);
     tokens.root = data<{ accessToken: string }>(rootRes).accessToken;
     ids.root = (await prisma.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
+    // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
+    // baseline production writes for every user it creates.
+    await grantBaseline(prisma, { type: 'USER', id: ids.root });
 
     for (const [slug, key] of [['web', 'WEB'], ['other', 'OTHER']] as const) {
       await request(server).post('/api/projects').set(auth(tokens.root)).send({ name: slug, slug, key }).expect(201);
@@ -141,6 +145,9 @@ describeIntegration('US-005 project skill enablement routes (PG)', () => {
         .expect(201);
       tokens[who] = await loginToken(server, `${who}@koda.test`);
       ids[who] = (await prisma.user.findUniqueOrThrow({ where: { email: `${who}@koda.test` } })).id;
+      // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
+      // baseline production writes for every user it creates.
+      await grantBaseline(prisma, { type: 'USER', id: ids[who] });
     }
 
     // web: pa is ADMIN, dev is DEVELOPER. other: pa and dev are DEVELOPER, no project admin.
@@ -162,16 +169,32 @@ describeIntegration('US-005 project skill enablement routes (PG)', () => {
     const agentRes = await request(server)
       .post('/api/agents')
       .set(auth(tokens.root))
-      .send({ name: 'Skills Agent', slug: 'skills-agent', roles: ['DEVELOPER'], capabilities: ['typescript'] })
+      .send({ name: 'Skills Agent', slug: 'skills-agent', roles: [], capabilities: ['typescript'] })
       .expect(201);
     tokens.agent = data<{ apiKey: string }>(agentRes).apiKey;
     const agent = await prisma.agent.findUniqueOrThrow({ where: { slug: 'skills-agent' } });
+    ids.agent = agent.id;
     // The agent is on web's roster: AC4/AC10 still require 403 for an agent principal.
-    await prisma.agentProject.create({ data: { agentId: agent.id, projectId: webId, addedById: ids.root } });
+    // Permissions P1 US-004: the roster row is a role binding — the baseline every agent production
+    // creates carries, plus the viewer reach of the roster row and the developer role the agent's
+    // legacy `AgentRoleEntry` stood for.
+    await grantBaseline(prisma, { type: 'AGENT', id: agent.id });
+    await grantRole(prisma, { type: 'AGENT', id: agent.id }, 'viewer', webId);
+    await grantRole(prisma, { type: 'AGENT', id: agent.id }, 'developer', webId);
   }, 30_000);
 
   afterAll(async () => {
     if (app) await app.close();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: ids.root },
+      { type: 'USER', id: ids.pa },
+      { type: 'USER', id: ids.dev },
+      { type: 'USER', id: ids.outsider },
+      { type: 'AGENT', id: ids.agent },
+    ]);
   });
 
   beforeEach(async () => {

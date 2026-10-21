@@ -20,6 +20,8 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { CommonExceptionCode } from '@nathapp/nestjs-common';
+import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -47,6 +49,8 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
   let projectBSlug: string;
   let projectAId: string;
   let projectBId: string;
+  let adminUserId = '';
+  let memberUserId = '';
 
   /** Registers a webhook through the API and returns its id (201 expected). */
   async function registerWebhook(slug: string, url: string): Promise<string> {
@@ -84,7 +88,12 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
     const adminUser = await prisma.client.user.findUniqueOrThrow({
       where: { email: 'webhook-admin@koda.test' },
     });
-    await prisma.client.user.update({ where: { id: adminUser.id }, data: { role: 'ADMIN' } });
+    adminUserId = adminUser.id;
+    // Permissions P1 US-004: the global admin grant is a role binding, not a legacy `User.role` write.
+    // Its mirror keeps `User.role` at `ADMIN` for the notification and mention readers.
+    await grantRole(prisma.client, { type: 'USER', id: adminUserId }, 'admin', null);
+    // The requests that follow read the principal's keys, so the cached set is dropped first.
+    await app.get(MembershipService).invalidatePermissions();
     const loginRes = await request(httpServer)
       .post('/api/auth/login')
       .send({ email: 'webhook-admin@koda.test', password: TEST_PASSWORD })
@@ -97,6 +106,7 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
       .send({ email: 'webhook-member@koda.test', name: 'Webhook Member', password: TEST_PASSWORD })
       .expect(201);
     memberToken = body<{ accessToken: string }>(memberRes).accessToken;
+    memberUserId = (await prisma.client.user.findUniqueOrThrow({ where: { email: 'webhook-member@koda.test' } })).id;
 
     projectASlug = body<{ slug: string }>(
       await request(httpServer)
@@ -119,6 +129,13 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
 
   afterAll(async () => {
     if (app) await app.close();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma.client, [
+      { type: 'USER', id: adminUserId },
+      { type: 'USER', id: memberUserId },
+    ]);
   });
 
   it('AC9: POST with the blocked destination returns 400 and creates no webhook row', async () => {

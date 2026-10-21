@@ -31,6 +31,7 @@ import { PrismaTicketLinkRepository } from '../../../src/ticket-links/prisma-tic
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { OutboxService } from '@nathapp/nestjs-outbox';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
+import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
@@ -123,6 +124,9 @@ describeIntegration('H5 ticket tenancy', () => {
     principalId = principalUser.id;
     (principal as { id: string }).id = principalId;
     (principal as { sub: string }).sub = principalId;
+    // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
+    // baseline production writes for every user it creates.
+    await grantBaseline(prisma.client, { type: 'USER', id: principalId });
 
     // Project A has its own ticket #5 (transitionable target of OTHER-5).
     const ticketA5 = await prisma.client.ticket.create({
@@ -167,6 +171,10 @@ describeIntegration('H5 ticket tenancy', () => {
 
   afterAll(async () => {
     await prisma?.onModuleDestroy();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma.client, [{ type: 'USER', id: principalId }]);
   });
 
   it('AC-1: cross-project CUID ref → 404 on GET, while it resolves inside its own project', async () => {

@@ -9,6 +9,7 @@ import * as bcrypt from 'bcrypt';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
+import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -18,19 +19,28 @@ describeIntegration('disabled users (PG)', () => {
   let app: NathApplication;
   let prisma: PrismaService<PrismaClient>;
   let server: ReturnType<NathApplication['getHttpServer']>;
+  let disUserId = '';
 
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-    await prisma.client.user.create({
+    const dis = await prisma.client.user.create({
       data: { email: 'dis@koda.test', name: 'Dis', passwordHash: await bcrypt.hash(TEST_PASSWORD, 4) },
     });
+    disUserId = dis.id;
+    // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
+    // baseline production writes for every user it creates.
+    await grantBaseline(prisma.client, { type: 'USER', id: disUserId });
   });
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma.client, [{ type: 'USER', id: disUserId }]);
   });
 
   it('an access token issued before the disable is rejected on first use', async () => {
@@ -49,9 +59,12 @@ describeIntegration('disabled users (PG)', () => {
 
   it('logout revokes an access token that already warmed the auth-state cache', async () => {
     const email = 'logout@koda.test';
-    await prisma.client.user.create({
+    const logout = await prisma.client.user.create({
       data: { email, name: 'Logout', passwordHash: await bcrypt.hash(TEST_PASSWORD, 4) },
     });
+    // A principal this test creates gets its baseline too, but it is not a setup principal, so the
+    // sentinel above does not list it.
+    await grantBaseline(prisma.client, { type: 'USER', id: logout.id });
 
     const login = await request(server).post('/api/auth/login').send({ email, password: TEST_PASSWORD }).expect(200);
     const { accessToken } = data<{ accessToken: string }>(login);

@@ -13,6 +13,7 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 import { SKILL_RESOLVER, SkillResolveError, SkillResolver } from '../../../src/skills/skill-resolver';
+import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -24,6 +25,8 @@ describeIntegration('US-003 admin skill sources (PG)', () => {
   let member: string;
   let agentApiKey: string;
   let adminId: string;
+  let memberId: string;
+  let agentId: string;
   let resolve: Mock;
 
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -49,6 +52,9 @@ describeIntegration('US-003 admin skill sources (PG)', () => {
       .expect(201);
     admin = data<{ accessToken: string }>(adminRes).accessToken;
     adminId = (await prisma.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
+    // Permissions P1 US-004: the fixture principals are granted through bindings only — the member
+    // baseline production writes for every user it creates.
+    await grantBaseline(prisma, { type: 'USER', id: adminId });
 
     await request(server)
       .post('/api/admin/users')
@@ -56,13 +62,17 @@ describeIntegration('US-003 admin skill sources (PG)', () => {
       .send({ email: 'member@koda.test', name: 'Member', password: TEST_PASSWORD, role: 'MEMBER' })
       .expect(201);
     member = await loginToken(server, 'member@koda.test');
+    memberId = (await prisma.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } })).id;
+    await grantBaseline(prisma, { type: 'USER', id: memberId });
 
     const agentRes = await request(server)
       .post('/api/agents')
       .set(auth(admin))
-      .send({ name: 'Skill Agent', slug: 'skill-agent', roles: ['DEVELOPER'], capabilities: ['typescript'] })
+      .send({ name: 'Skill Agent', slug: 'skill-agent', roles: [], capabilities: ['typescript'] })
       .expect(201);
     agentApiKey = data<{ apiKey: string }>(agentRes).apiKey;
+    agentId = (await prisma.agent.findUniqueOrThrow({ where: { slug: 'skill-agent' } })).id;
+    await grantBaseline(prisma, { type: 'AGENT', id: agentId });
 
     const resolver = app.get<SkillResolver>(SKILL_RESOLVER, { strict: false });
     resolve = vi.spyOn(resolver, 'resolve');
@@ -70,6 +80,14 @@ describeIntegration('US-003 admin skill sources (PG)', () => {
 
   afterAll(async () => {
     if (app) await app.close();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: adminId },
+      { type: 'USER', id: memberId },
+      { type: 'AGENT', id: agentId },
+    ]);
   });
 
   beforeEach(async () => {

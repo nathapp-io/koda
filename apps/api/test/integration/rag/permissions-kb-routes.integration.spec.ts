@@ -23,6 +23,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { CommonExceptionCode } from '@nathapp/nestjs-common';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { RagService } from '../../../src/rag/rag.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
@@ -84,6 +85,9 @@ describeIntegration('knowledge-base route keys and row ownership (US-007)', () =
     ids[who] = data<{ id: string }>(created).id;
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
+    // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
+    // baseline production writes for every user it creates.
+    await grantBaseline(prisma, { type: 'USER', id: ids[who] });
   };
 
   /** The binding that is the caller's only source in p1. */
@@ -95,12 +99,15 @@ describeIntegration('knowledge-base route keys and row ownership (US-007)', () =
     await bind({ type: 'USER', id: ids[who] }, roleKey);
   };
 
-  /** An agent whose only source in p1 is one binding: a roster row plus that binding, and no agent role. */
+  /** An agent whose only source in p1 is one binding: a viewer binding plus that binding, and no agent role. */
   const createAgent = async (slug: string, roleKey: string): Promise<string> => {
     const created = await as('root', 'post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
     tokens[slug] = body.apiKey;
-    await prisma.agentProject.create({ data: { agentId: body.agent.id, projectId: p1Id } });
+    // Permissions P1 US-004: the roster row is a role binding — the baseline every agent production
+    // creates carries, plus the viewer reach the `AgentProject` row stood for.
+    await grantBaseline(prisma, { type: 'AGENT', id: body.agent.id });
+    await grantRole(prisma, { type: 'AGENT', id: body.agent.id }, 'viewer', p1Id);
     await bind({ type: 'AGENT', id: body.agent.id }, roleKey);
     // The rows are written after a principal could have been cached by an earlier check.
     await membership.invalidatePermissions();
@@ -128,6 +135,9 @@ describeIntegration('knowledge-base route keys and row ownership (US-007)', () =
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
     ids.root = (await prisma.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
+    // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
+    // baseline production writes for every user it creates.
+    await grantBaseline(prisma, { type: 'USER', id: ids.root });
 
     const project = await as('root', 'post', '/api/projects', { name: 'P1', slug: P1_SLUG, key: P1_KEY }).expect(201);
     p1Id = data<{ id: string }>(project).id;
@@ -140,6 +150,17 @@ describeIntegration('knowledge-base route keys and row ownership (US-007)', () =
   }, BOOT_TIMEOUT);
 
   afterAll(async () => { await app?.close(); });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: ids.root },
+      { type: 'USER', id: ids.dev1 },
+      { type: 'USER', id: ids.dev2 },
+      { type: 'USER', id: ids.viewer },
+      { type: 'USER', id: ids.admin },
+      { type: 'AGENT', id: ids.agent },
+    ]);
+  });
 
   // -------------------------------------------------------------------------
   // AC-1 / AC-2 — the add route's key and its source list

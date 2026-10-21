@@ -13,6 +13,7 @@ import { LiveStreamRegistry } from '../../../src/live/live-stream-registry';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 import { openSse, SseConnection, SseMessage } from '../../helpers/sse-client';
+import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -85,6 +86,10 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
     const root = await request(server).post('/api/auth/register')
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
+    ids.root = (await prisma.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
+    // Permissions P1 US-004: the fixture principals are granted through bindings only — the member
+    // baseline production writes for every user it creates.
+    await grantBaseline(prisma, { type: 'USER', id: ids.root });
     await request(server).post('/api/projects').set(auth('root')).send({ name: 'Live', slug: 'live', key: 'LIV' }).expect(201);
     await request(server).post('/api/projects').set(auth('root')).send({ name: 'Other', slug: 'other', key: 'OTH' }).expect(201);
 
@@ -93,6 +98,7 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
         .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
       ids[who] = data<{ id: string }>(res).id;
       tokens[who] = await loginToken(server, `${who}@koda.test`);
+      await grantBaseline(prisma, { type: 'USER', id: ids[who] });
     }
     for (const who of ['dev', 'capper']) {
       await request(server).post('/api/projects/live/members').set(auth('root'))
@@ -100,8 +106,10 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
     }
 
     const agent = await request(server).post('/api/agents').set(auth('root'))
-      .send({ name: 'Live Bot', slug: 'live-bot', roles: ['DEVELOPER'] }).expect(201);
+      .send({ name: 'Live Bot', slug: 'live-bot', roles: [] }).expect(201);
     tokens.agent = data<{ apiKey: string }>(agent).apiKey;
+    ids.agent = (await prisma.agent.findUniqueOrThrow({ where: { slug: 'live-bot' } })).id;
+    await grantBaseline(prisma, { type: 'AGENT', id: ids.agent });
   });
 
   afterEach(async () => {
@@ -112,6 +120,16 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: ids.root },
+      { type: 'USER', id: ids.dev },
+      { type: 'USER', id: ids.capper },
+      { type: 'USER', id: ids.outsider },
+      { type: 'AGENT', id: ids.agent },
+    ]);
   });
 
   it('a member gets ready, then created and transitioned events carrying the TicketEvent id', async () => {
