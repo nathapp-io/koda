@@ -128,8 +128,6 @@ describe('ProjectsController', () => {
       findBySlug: vi.fn(),
       update: vi.fn(),
       softDelete: vi.fn(),
-      assertProjectMembership: vi.fn(),
-      findMembershipRole: vi.fn(),
       findCiWebhookToken: vi.fn(),
     } as unknown as Mocked<ProjectsService> & { findAllForPrincipal: Mock };
 
@@ -461,7 +459,6 @@ describe('ProjectsController', () => {
       await controller.getProjectAgents('alpha');
 
       expect(projectsService.findBySlug).not.toHaveBeenCalled();
-      expect(projectsService.assertProjectMembership).not.toHaveBeenCalled();
     });
   });
 
@@ -529,7 +526,7 @@ describe('ProjectsController', () => {
       const result = await controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal, projectCtx);
 
       expect(permissions.can).toHaveBeenCalledWith(memberPrincipal, 'agent.update');
-      expect(projectsService.findMembershipRole).not.toHaveBeenCalled();
+      expect(projectsService.findBySlug).not.toHaveBeenCalled();
       expect((result as any).data.status).toBe('PAUSED');
     });
 

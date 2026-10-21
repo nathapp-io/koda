@@ -8,9 +8,8 @@ import { TICKET_LINK_REPOSITORY } from './domain/ticket-link.domain';
 
 /**
  * US-006: the controller no longer injects `ProjectsService`, so the module imports
- * `ProjectAccessModule` — the dependency `ProjectMembershipGuard` (and its
- * `KodaCaslAbilityFactory`) actually needs — instead of the whole `ProjectsModule`.
- * `PermissionService` comes from the global `PermissionsModule`.
+ * `ProjectAccessModule` — the dependency `ProjectMembershipGuard` actually needs — instead of the
+ * whole `ProjectsModule`. `PermissionService` comes from the global `PermissionsModule`.
  */
 @Module({
   imports: [PrismaModule, ProjectAccessModule],

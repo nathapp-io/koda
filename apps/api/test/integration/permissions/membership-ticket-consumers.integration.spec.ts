@@ -3,8 +3,8 @@
  * compatibility union (AC-1 .. AC-10), over real HTTP and real Postgres.
  *
  * Every principal here has exactly one kind of source in the project under test, so an AC passes only
- * when the reader consults the access sources: `PrismaTicketsRepository.findProjectMemberRole` /
- * `isAgentOnProjectRoster`, `PrismaProjectAssigneesRepository.search` and `KodaDomainWriter` (which
+ * when the reader consults the access sources: `PrismaTicketsRepository.isAgentOnProjectRoster` /
+ * the assignee's `project.read`, `PrismaProjectAssigneesRepository.search` and `KodaDomainWriter` (which
  * decides on `project.read`) on one side, and `TicketsService.assign`, `ProjectAssigneesService.search`
  * and `KodaDomainWriter.writeTicketEvent` on the other. Sources are
  * real rows — bindings through `MembershipService.createBinding` (booting the app runs

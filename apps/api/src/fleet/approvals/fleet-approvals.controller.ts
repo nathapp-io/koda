@@ -59,6 +59,6 @@ export class FleetApprovalsController {
   @ApiResponse({ status: 404, description: 'fleet.approvals: no such approval' })
   @ApiResponse({ status: 409, description: 'fleet.approvalNotPending, fleet.budgetNotPaused' })
   async decide(@Param('id') id: string, @Body() dto: DecideApprovalDto, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.approvals.decide({ id: principal.id, globalAdmin: true, principal }, ADMIN, id, dto));
+    return JsonResponse.Ok(await this.approvals.decide({ id: principal.id, principal }, ADMIN, id, dto));
   }
 }

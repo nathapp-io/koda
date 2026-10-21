@@ -293,7 +293,7 @@ describeIntegration('fleet approvals API (PG)', () => {
     // Same D228 shape as the HTTP case above: clear the pause so `evaluate` reaches the approval row.
     await prisma.budgetPolicy.update({ where: { id: policy.id }, data: { pausedAt: null, pausedWindowStart: null } });
     const [decideResult, evaluateResult] = await Promise.allSettled([
-      approvals.decide({ id: world.ids.root, globalAdmin: true, principal: rootPrincipal() }, { kind: 'admin' }, approvalId, { decision: 'raise_budget_and_resume', amountUsd: 40 }),
+      approvals.decide({ id: world.ids.root, principal: rootPrincipal() }, { kind: 'admin' }, approvalId, { decision: 'raise_budget_and_resume', amountUsd: 40 }),
       evaluator.evaluate(policy.id),
     ]);
     // The only rejection allowed is the decided-conflict, which is the same 409 the HTTP case sees. With a

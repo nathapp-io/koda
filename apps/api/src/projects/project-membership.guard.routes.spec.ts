@@ -201,8 +201,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
         // test/integration/rag/permissions-kb-routes.integration.spec.ts, so the stub allows every key except
         // the ones a case marks as refused (`refusedKeys`).
         { provide: PermissionService, useValue: { can } },
-        // Permissions P1 US-004: the membership guard no longer builds a CASL ability, so this module no
-        // longer provides KodaCaslAbilityFactory. The guard resolves the key and the project identity only.
+        // Permissions P1 US-004: the membership guard builds no ability; it resolves the project identity only.
       ],
     }).compile();
 

@@ -115,7 +115,6 @@ describe('TicketsService', () => {
     findAgentById: vi.fn(),
     isAgentOnProjectRoster: vi.fn(),
     lockProjectAgents: vi.fn(),
-    findProjectMemberRole: vi.fn(),
   };
 
   let inTx = false;
@@ -532,7 +531,7 @@ describe('TicketsService', () => {
       detail('CREATED');
       holdKeys(held);
 
-      const res = await service.findByRefWithActions('koda', 'KODA-1', { ...mockUserPrincipal, projectRole: 'DEVELOPER' });
+      const res = await service.findByRefWithActions('koda', 'KODA-1', mockUserPrincipal);
 
       expect(res.allowedActions).toEqual(expected);
       expect(res.ref).toBe('KODA-1');
@@ -1333,9 +1332,8 @@ describe('TicketsService', () => {
 
       await service.assign('koda', 'KODA-1', { userId: 'u2' });
 
+      // The key answers for the assignee — the assignee's own project.read, read through effectiveKeys.
       expect(mockTicketRepo.assignTicket).toHaveBeenCalledWith('ticket-123', expect.objectContaining({ assignedToUserId: 'u2' }));
-      // The old membership read is gone: the key answers for the assignee.
-      expect(mockTicketRepo.findProjectMemberRole).not.toHaveBeenCalled();
     });
 
     it('H13: assign emits an assigned ticket_event with the full envelope', async () => {

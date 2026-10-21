@@ -4,7 +4,7 @@ import type { FleetApprovalRecord } from './domain/approval.domain';
 
 const NOW = new Date('2026-10-23T09:00:00.000Z');
 const approval = { id: 'a1', type: 'assistant_action' } as FleetApprovalRecord;
-const caller = { id: 'u1', globalAdmin: false };
+const caller = { id: 'u1' };
 const dto = { decision: 'reject' as const };
 
 describe('AssistantActionPort (2a-D1)', () => {

@@ -140,7 +140,7 @@ describe('koda_record_decision parse (US-007)', () => {
     expect(tool.descriptor).toBe(KODA_RECORD_DECISION);
     expect(tool.descriptor.name).toBe('koda_record_decision');
     expect(tool.kind).toBe('write');
-    expect(tool.permission).toEqual({ kind: 'member' });
+    expect(tool.key).toBe('memory.decision.record');
   });
 });
 

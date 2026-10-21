@@ -81,7 +81,6 @@ class GuardModule {}
 
 const tool = (name: string, key: string): AssistantTool => ({
   descriptor: { name, description: 'd', inputSchema: {} },
-  permission: { kind: 'member' },
   key,
   parse: (input) => input,
   execute: async () => 'ok',

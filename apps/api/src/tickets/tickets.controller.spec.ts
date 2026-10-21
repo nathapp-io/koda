@@ -19,7 +19,6 @@ describe('TicketsController', () => {
 
   const mockProjectsService = {
     findProjectIdBySlug: vi.fn().mockResolvedValue('proj-123'),
-    assertProjectMembership: vi.fn().mockResolvedValue(undefined),
   };
 
   const _mockProject = {
@@ -512,15 +511,15 @@ describe('TicketsController', () => {
       ).rejects.toThrow();
     });
 
-    // US-001 AC9: the membership gate for this route now lives in
-    // ProjectMembershipGuard (applied to TicketsController). The handler performs
-    // no project lookup and no membership check of its own.
-    it('AC9: assign called directly does not call ProjectsService.assertProjectMembership', async () => {
+    // US-001 AC9: the membership gate for this route lives in ProjectMembershipGuard
+    // (applied to TicketsController). The handler performs no project lookup and no
+    // membership check of its own — it hands the request straight to the service.
+    it('AC9: assign called directly performs no project lookup and hands the call to the service', async () => {
       mockTicketsService.assign.mockResolvedValue(mockTicket);
 
       await controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockMemberUser, adminProject);
 
-      expect(mockProjectsService.assertProjectMembership).not.toHaveBeenCalled();
+      expect(mockProjectsService.findProjectIdBySlug).not.toHaveBeenCalled();
       expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', {}, mockMemberUser);
     });
 

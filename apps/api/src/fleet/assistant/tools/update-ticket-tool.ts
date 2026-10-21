@@ -2,7 +2,6 @@ import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { Priority, TicketStatus } from '../../../common/enums';
 import { UpdateTicketDto } from '../../../tickets/dto/update-ticket.dto';
 import { validateTransition } from '../../../tickets/state-machine/ticket-transitions';
-import type { TicketTransitionsService } from '../../../tickets/state-machine/ticket-transitions.service';
 import { TicketsService } from '../../../tickets/tickets.service';
 import { maskSecrets } from '../assistant-tool-safety';
 import { KODA_UPDATE_TICKET } from '../koda-tool-descriptors';
@@ -41,20 +40,11 @@ export interface UpdateTicketInput {
  * `koda_update_ticket` (2b1-D3): one ticket of the thread's project. `execute` writes through
  * `TicketsService.update`, so the usual ticket event, timeline row and outbox event fire.
  */
-export function updateTicketTool(deps: {
-  tickets: TicketsService;
-  /**
-   * Permissions P1 US-004: the start check reads `ctx.can('ticket.transition.start')` now, so
-   * `TicketTransitionsService.assertTransitionPermission` is no longer called. The dependency stays until
-   * `permissions-p1-cleanup` removes the legacy method and its callers.
-   */
-  transitions: TicketTransitionsService;
-}): AssistantTool<UpdateTicketInput> {
+export function updateTicketTool(deps: { tickets: TicketsService }): AssistantTool<UpdateTicketInput> {
   return {
     descriptor: KODA_UPDATE_TICKET,
     key: 'ticket.update',
-    // 2b1-D4: the same CASL tuple the ticket PATCH route enforces (`tickets.controller.ts`).
-    permission: { kind: 'ability', action: 'update', subject: 'Ticket' },
+    // 2b1-D4: the key the ticket PATCH route enforces (`tickets.controller.ts`).
     kind: 'write',
     parse(input: unknown): UpdateTicketInput {
       const raw = asRecord(input);

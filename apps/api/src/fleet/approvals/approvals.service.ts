@@ -7,7 +7,6 @@ import { FleetCommandType } from '../../common/enums';
 import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import { isAgentPrincipal, type KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { PermissionService } from '../../permissions/permission.service';
-import { FleetActivityService } from '../activity/fleet-activity.service';
 import { BudgetRoute, BudgetsService } from '../budgets/budgets.service';
 import { BUDGET_REPOSITORY, BudgetPolicyRecord, IBudgetRepository } from '../budgets/domain/budget.domain';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
@@ -26,7 +25,7 @@ import { FleetApprovalDto } from './dto/fleet-approval.dto';
 
 /** Which prefix a request came through (plan D230). Permissions P1 US-004: the project variant carries the project's id only. */
 export type ApprovalRoute = { kind: 'admin' } | { kind: 'project'; projectId: string };
-export interface ApprovalCaller { id: string; globalAdmin: boolean }
+export interface ApprovalCaller { id: string }
 
 /** The decide key of each approval type (permissions P1d US-006): the type, never the route, chooses it. */
 const DECIDE_KEYS = {
@@ -71,11 +70,6 @@ export class ApprovalsService {
     private readonly jobs: FleetJobsService,
     private readonly closer: ApprovalCloser,
     private readonly live: ApprovalLivePublisher,
-    // US-006: `counts` no longer reads the caller's memberships (the controller scopes it with
-    // `projectIdsWithKey`), so `FleetActivityService.memberProjectIds` has no caller left. The
-    // dependency stays, as the brief specifies (PermissionService is the only addition), and
-    // `permissions-p1-cleanup` removes `memberProjectIds` and this parameter together.
-    private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_JOB_REPOSITORY) private readonly jobRepo: Pick<IFleetJobRepository, 'lockById' | 'createCommand'>,
     private readonly notifier: RunnerNotifier,

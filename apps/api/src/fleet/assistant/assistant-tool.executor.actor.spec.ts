@@ -51,7 +51,6 @@ function setup(users: Record<string, UserRow> = {}, opts: { membership?: Error }
   const access = { findProjectIdBySlug: vi.fn(async () => 'p1'), resolveMembership };
   const tool: AssistantTool<Record<string, unknown>> = {
     descriptor: { name: 'koda_add_comment', description: 'd', inputSchema: {} },
-    permission: { kind: 'ability', action: 'create', subject: 'Comment' },
     key: 'comment.create',
     parse: vi.fn((input) => input as Record<string, unknown>),
     execute: vi.fn(async () => 'comment c1 added to OPS-1'),

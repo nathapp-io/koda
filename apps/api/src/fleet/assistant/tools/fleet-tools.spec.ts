@@ -104,8 +104,16 @@ describe('fleet read tools (US-004)', () => {
     expect(KODA_TOOL_DESCRIPTORS.map((d) => d.name)).toEqual(expect.arrayContaining([...TOOL_NAMES]));
   });
 
-  it('every fleet tool declares project membership as its permission', () => {
-    for (const name of TOOL_NAMES) expect(registry.get(name)?.permission).toEqual({ kind: 'member' });
+  it('every fleet tool declares its own read key', () => {
+    const expected: Record<string, string> = {
+      koda_list_jobs: 'fleet.job.read',
+      koda_get_job: 'fleet.job.read',
+      koda_fleet_spend: 'fleet.analytics.read',
+      koda_list_approvals: 'fleet.approval.read',
+      koda_runner_status: 'fleet.runner.read',
+      koda_job_log_excerpt: 'fleet.job.logs.read',
+    };
+    for (const name of TOOL_NAMES) expect({ name, key: registry.get(name)?.key }).toEqual({ name, key: expected[name] });
   });
 
   it('koda_list_jobs parse keeps state and feature and defaults page to 1', () => {

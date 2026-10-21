@@ -200,7 +200,7 @@ describe('koda_dispatch_job parse (US-003)', () => {
     const tool = harness().tool;
     expect(tool.descriptor).toBe(KODA_DISPATCH_JOB);
     expect(tool.kind).toBe('write');
-    expect(tool.permission).toEqual({ kind: 'ability', action: 'create', subject: 'FleetJob' });
+    expect(tool.key).toBe('fleet.job.dispatch');
   });
 });
 

@@ -13,13 +13,6 @@ export interface ToolCaller {
   disabled: boolean;
 }
 
-/**
- * What a tool used to need from the acting user: project membership, or a CASL `(action, subject)` ability on top of
- * it. Permissions P1 US-004 moved every check onto `AssistantTool.key`, so nothing reads this any more; it stays
- * declared until `permissions-p1-cleanup` removes it with the other legacy mechanisms.
- */
-export type ToolPermission = { kind: 'member' } | { kind: 'ability'; action: string; subject: string };
-
 export interface ToolContext {
   projectId: string;
   projectSlug: string;
@@ -42,10 +35,9 @@ export interface AssistantTool<I = unknown> {
   /**
    * Permissions P1 US-004: the catalog key (`src/permissions/catalog.ts`) the executor checks in the project the
    * call acts in, before the tool runs and again when a stored action is approved. A workspace-scope tool takes no
-   * check. `permission` is declared and unread until `permissions-p1-cleanup` removes it.
+   * check.
    */
   key: string;
-  permission: ToolPermission;
   /** 1d2-D3: `workspace` tools run only in WORKSPACE threads and take no `project`; absent means `project`. */
   scope?: 'project' | 'workspace';
   /** 2a-D2: a `write` tool is previewed and proposed, never executed; absent means `read`. */
@@ -82,7 +74,7 @@ export class ToolInputError extends Error {
   }
 }
 
-/** 2b1-D1: a write tool's preview refuses because the requester lacks an ability; `need` is the `<action> <subject>` pair. */
+/** 2b1-D1: a write tool's preview refuses because the requester lacks the tool's permission key; `need` is that key. */
 export class ToolForbiddenError extends Error {
   constructor(readonly need: string) {
     super(need);

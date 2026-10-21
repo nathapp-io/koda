@@ -119,7 +119,7 @@ describe('koda_create_tickets parse (US-003)', () => {
     const tool = ticketDeps().tool;
     expect(tool.descriptor).toBe(KODA_CREATE_TICKETS);
     expect(tool.kind).toBe('write');
-    expect(tool.permission).toEqual({ kind: 'ability', action: 'create', subject: 'Ticket' });
+    expect(tool.key).toBe('ticket.create');
   });
 });
 

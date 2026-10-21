@@ -41,7 +41,6 @@ import { PermissionService } from '../permissions/permission.service';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { RequiresGuard } from '../permissions/requires.guard';
 import { ProjectAccessService } from '../projects/project-access.service';
-import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 import { join } from 'node:path';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
@@ -282,7 +281,6 @@ describe('webhook routes (US-003)', () => {
         { provide: WEBHOOK_CFG, useValue: webhookConfig },
         { provide: DnsResolver, useValue: makeUnresolvableResolver() },
         ProjectMembershipGuard,
-        KodaCaslAbilityFactory,
         {
           provide: ProjectAccessService,
           useValue: {

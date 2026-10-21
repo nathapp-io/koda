@@ -35,7 +35,7 @@ describe('transitionKeyFor', () => {
     );
   });
 
-  it('AC-7: IN_PROGRESS -> VERIFIED has no key (stored rule, no route reaches it)', () => {
+  it('AC-7: IN_PROGRESS -> VERIFIED has no key (the rule is retired, US-005)', () => {
     expect(transitionKeyFor(TicketStatus.IN_PROGRESS, TicketStatus.VERIFIED)).toBeUndefined();
   });
 

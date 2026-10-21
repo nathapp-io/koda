@@ -140,7 +140,7 @@ describe('koda_requeue_job parse (US-004)', () => {
 
     expect(tool.descriptor).toBe(KODA_REQUEUE_JOB);
     expect(tool.kind).toBe('write');
-    expect(tool.permission).toEqual({ kind: 'ability', action: 'update', subject: 'FleetJob' });
+    expect(tool.key).toBe('fleet.job.requeue');
   });
 });
 

@@ -146,7 +146,7 @@ describe('koda_link_tickets parse (US-005)', () => {
     const tool = toolDeps().tool;
     expect(tool.descriptor).toBe(KODA_LINK_TICKETS);
     expect(tool.kind).toBe('write');
-    expect(tool.permission).toEqual({ kind: 'member' });
+    expect(tool.key).toBe('ticket.link.add');
   });
 });
 

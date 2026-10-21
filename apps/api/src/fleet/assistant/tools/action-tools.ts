@@ -41,8 +41,7 @@ export function addCommentTool(deps: { tickets: TicketsService; comments: Commen
     descriptor: KODA_ADD_COMMENT,
     // Permissions P1 US-004: the catalog key the comment route enforces.
     key: 'comment.create',
-    // 2a-D13: the same CASL tuple the comment route enforces; every built-in project role holds it.
-    permission: { kind: 'ability', action: 'create', subject: 'Comment' },
+    // 2a-D13: the comment route's own key; every built-in project role holds it.
     kind: 'write',
     parse(input: unknown): AddCommentInput {
       const raw = asRecord(input);
@@ -87,7 +86,6 @@ export function getActionTool(actions: Pick<PendingActionRepository, 'findScoped
     descriptor: KODA_GET_ACTION,
     // Permissions P1 US-004: implicit — every authenticated principal reads its own actions.
     key: 'assistant.action.read',
-    permission: { kind: 'member' },
     parse(input: unknown): GetActionInput {
       const id = asRecord(input)['id'];
       if (typeof id !== 'string' || id.length < 1 || id.length > MAX_ACTION_ID_CHARS) throw new ToolInputError('id');

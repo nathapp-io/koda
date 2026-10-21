@@ -56,7 +56,6 @@ export function addMemoryTool(deps: { memory: PrismaMemoryItemRepository; guard:
     descriptor: KODA_ADD_MEMORY,
     key: 'memory.create',
     // 2b1-D4: the memory write routes check project membership (`memory.controller.ts`), so this tool does too.
-    permission: { kind: 'member' },
     kind: 'write',
     /**
      * 2b1-D5, 2b-R5: only the four fields of the item are returned — a caller-supplied `ownerId` (or any other

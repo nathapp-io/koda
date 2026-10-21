@@ -32,8 +32,6 @@ describe('ProjectMembersService', () => {
     access = {
       findProjectIdBySlug: vi.fn().mockResolvedValue('p1'),
       assertProjectMembership: vi.fn(),
-      assertProjectAdmin: vi.fn(),
-      canManageMembers: vi.fn(),
       resolveMembership: vi.fn(),
     };
     const txManager = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
@@ -60,7 +58,6 @@ describe('ProjectMembersService', () => {
     const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
 
     expect(access.resolveMembership).toHaveBeenCalledTimes(1);
-    expect(access.canManageMembers).not.toHaveBeenCalled();
     // US-008: canManage is the member.add key, asked for the project the slug resolved to.
     expect(permissions.can).toHaveBeenCalledWith(projectAdmin, 'member.add', { projectId: 'p1' });
     expect(result.canManage).toBe(true);
@@ -99,8 +96,7 @@ describe('ProjectMembersService', () => {
     expect(result).toEqual(expect.objectContaining({ canManage: false, viewerRole: null }));
   });
 
-  it('writes no longer call access.assertProjectAdmin — the route key is the gate', async () => {
-    access.assertProjectAdmin.mockRejectedValue(new ForbiddenAppException({}, 'members'));
+  it('writes never assert the caller\'s admin role — the route key is the gate', async () => {
     repo.findUserByEmail.mockResolvedValue({ id: 'u1', disabled: false });
     // add reads the member once to refuse a duplicate and once to return the written row.
     repo.findMember.mockResolvedValueOnce(null).mockResolvedValueOnce(member('u1', 'DEVELOPER'));
@@ -109,8 +105,6 @@ describe('ProjectMembersService', () => {
     repo.findMember.mockResolvedValue(member('d1', 'DEVELOPER'));
     await expect(service.updateRole('proj', 'd1', { role: 'VIEWER' }, projectAdmin)).resolves.toMatchObject({ role: 'DEVELOPER' });
     await expect(service.remove('proj', 'd1', projectAdmin)).resolves.toBeUndefined();
-
-    expect(access.assertProjectAdmin).not.toHaveBeenCalled();
   });
 
   it('add: unknown email is 404, duplicate member is 409', async () => {

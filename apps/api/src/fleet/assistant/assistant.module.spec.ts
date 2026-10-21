@@ -82,7 +82,7 @@ describe('AssistantModule', () => {
 
     const tool = module.get(AssistantToolRegistry).get('koda_add_comment');
     expect(tool?.kind).toBe('write');
-    expect(tool?.permission).toEqual({ kind: 'ability', action: 'create', subject: 'Comment' });
+    expect(tool?.key).toBe('comment.create');
   });
 
   it('AC-11 (US-003): init() registers koda_create_tickets as a write tool needing create Ticket', async () => {
@@ -90,7 +90,7 @@ describe('AssistantModule', () => {
 
     const tool = module.get(AssistantToolRegistry).get('koda_create_tickets');
     expect(tool?.kind).toBe('write');
-    expect(tool?.permission).toEqual({ kind: 'ability', action: 'create', subject: 'Ticket' });
+    expect(tool?.key).toBe('ticket.create');
   });
 
   it('AC-13 (US-004): init() registers koda_update_ticket as a write tool needing update Ticket', async () => {
@@ -98,7 +98,7 @@ describe('AssistantModule', () => {
 
     const tool = module.get(AssistantToolRegistry).get('koda_update_ticket');
     expect(tool?.kind).toBe('write');
-    expect(tool?.permission).toEqual({ kind: 'ability', action: 'update', subject: 'Ticket' });
+    expect(tool?.key).toBe('ticket.update');
   });
 
   it('AC-11 (US-005): init() registers koda_link_tickets as a write tool that needs membership only', async () => {
@@ -106,7 +106,7 @@ describe('AssistantModule', () => {
 
     const tool = module.get(AssistantToolRegistry).get('koda_link_tickets');
     expect(tool?.kind).toBe('write');
-    expect(tool?.permission).toEqual({ kind: 'member' });
+    expect(tool?.key).toBe('ticket.link.add');
   });
 
   it('AC-9 (US-006): init() registers koda_add_memory as a write tool that needs membership only', async () => {
@@ -118,7 +118,7 @@ describe('AssistantModule', () => {
 
     const tool = module.get(AssistantToolRegistry).get('koda_add_memory');
     expect(tool?.kind).toBe('write');
-    expect(tool?.permission).toEqual({ kind: 'member' });
+    expect(tool?.key).toBe('memory.create');
   });
 
   it('AC-9 (US-007): init() registers koda_record_decision as a write tool that needs membership only', async () => {
@@ -131,7 +131,7 @@ describe('AssistantModule', () => {
 
     const tool = module.get(AssistantToolRegistry).get('koda_record_decision');
     expect(tool?.kind).toBe('write');
-    expect(tool?.permission).toEqual({ kind: 'member' });
+    expect(tool?.key).toBe('memory.decision.record');
   });
 
   it('AC-12 (US-003): init() registers koda_dispatch_job as a write tool needing create FleetJob', async () => {
@@ -144,7 +144,7 @@ describe('AssistantModule', () => {
 
     const tool = module.get(AssistantToolRegistry).get('koda_dispatch_job');
     expect(tool?.kind).toBe('write');
-    expect(tool?.permission).toEqual({ kind: 'ability', action: 'create', subject: 'FleetJob' });
+    expect(tool?.key).toBe('fleet.job.dispatch');
   });
 
   it('AC-11 (US-004): init() registers koda_requeue_job as a write tool needing update FleetJob', async () => {
@@ -156,7 +156,7 @@ describe('AssistantModule', () => {
 
     const tool = module.get(AssistantToolRegistry).get('koda_requeue_job');
     expect(tool?.kind).toBe('write');
-    expect(tool?.permission).toEqual({ kind: 'ability', action: 'update', subject: 'FleetJob' });
+    expect(tool?.key).toBe('fleet.job.requeue');
   });
 
   it('AC-9 (US-005): init() registers koda_cancel_job as a write tool needing update FleetJob', async () => {
@@ -168,7 +168,7 @@ describe('AssistantModule', () => {
 
     const tool = module.get(AssistantToolRegistry).get('koda_cancel_job');
     expect(tool?.kind).toBe('write');
-    expect(tool?.permission).toEqual({ kind: 'ability', action: 'update', subject: 'FleetJob' });
+    expect(tool?.key).toBe('fleet.job.cancel');
   });
 
   it('AC-16 (US-003): init() registers koda_get_action as the member-scoped read tool', async () => {
@@ -177,7 +177,7 @@ describe('AssistantModule', () => {
     const tool = module.get(AssistantToolRegistry).get('koda_get_action');
     expect(tool?.descriptor).toBe(KODA_GET_ACTION);
     expect(tool?.kind).toBeUndefined();
-    expect(tool?.permission).toEqual({ kind: 'member' });
+    expect(tool?.key).toBe('assistant.action.read');
   });
 
   it('US-007: provides the action expiry sweeper, which resolves the decide handler and the action repository', () => {
@@ -198,10 +198,10 @@ describe('AssistantModule', () => {
     const decisions = module.get(AssistantActionDecisions);
     const decide = vi.spyOn(decisions, 'decide').mockResolvedValue({ id: 'a1' } as never);
     const port = module.get(AssistantActionPort);
-    expect(() => port.decide({ id: 'u1', globalAdmin: false }, { id: 'a1' } as never, { decision: 'reject' }, new Date())).toThrow(expect.objectContaining({ prefix: 'threads.disabled' }));
+    expect(() => port.decide({ id: 'u1' }, { id: 'a1' } as never, { decision: 'reject' }, new Date())).toThrow(expect.objectContaining({ prefix: 'threads.disabled' }));
 
     await module.init();
-    await port.decide({ id: 'u1', globalAdmin: false }, { id: 'a1' } as never, { decision: 'reject' }, new Date());
+    await port.decide({ id: 'u1' }, { id: 'a1' } as never, { decision: 'reject' }, new Date());
 
     expect(decide).toHaveBeenCalledTimes(1);
   });

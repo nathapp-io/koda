@@ -558,7 +558,9 @@ describe('the kb tool descriptors (US-006)', () => {
       additionalProperties: false,
       properties: { part: { minimum: 1 }, repo: { pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' } },
     });
-    for (const name of ['koda_kb_search', 'koda_get_doc']) expect(registry.get(name)?.permission).toEqual({ kind: 'member' });
+    for (const name of ['koda_kb_search', 'koda_get_doc']) {
+      expect({ name, key: registry.get(name)?.key }).toEqual({ name, key: name === 'koda_kb_search' ? 'kb.search' : 'kb.read' });
+    }
   });
 
   it('US-006 AC-11: koda_kb_search advertises the three sources and koda_get_doc names the job citation', () => {

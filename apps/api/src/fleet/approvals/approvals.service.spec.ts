@@ -68,12 +68,8 @@ function build(approval: FleetApprovalRecord | null, policyScope: 'project' | 'p
   const jobRepo = { lockById: vi.fn(), createCommand: vi.fn() };
   const notifier = { notify: vi.fn() };
   const assistantActions = { decide: vi.fn() };
-  // US-006 no longer reads the caller's memberships (`counts` takes the key-filtered scope), but the
-  // dependency stays in place: the double is appended last, so a shifted argument list cannot pass for
-  // a behaviour change.
-  const activity = { memberProjectIds: vi.fn(async () => ['p1']) };
   const permissions = allowAllPermissions();
-  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, activity as never, tx as never, jobRepo as never, notifier as never, assistantActions as never, permissions as never);
+  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, tx as never, jobRepo as never, notifier as never, assistantActions as never, permissions as never);
   return { service, repo, budgets, jobs, budgetRepo, jobRepo, notifier, assistantActions, permissions };
 }
 
@@ -98,7 +94,7 @@ function buildBash() {
     findPendingForJob: vi.fn(async () => []),
     findProjectSlug: vi.fn(async () => 'web'),
   };
-  const activity = { record: vi.fn(async () => undefined), memberProjectIds: vi.fn(async () => ['p1']) };
+  const activity = { record: vi.fn(async () => undefined) };
   const webhooks = { dispatch: vi.fn(async () => undefined) };
   const closerLive = { event: vi.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
   const closerOutbox = { record: vi.fn(async (e: { type: string }) => ({ id: 'ob', ...e })) };
@@ -112,7 +108,7 @@ function buildBash() {
   const notifier = { notify: vi.fn() };
   const assistantActions = { decide: vi.fn() };
   const permissions = allowAllPermissions();
-  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, activity as never, tx as never, jobRepo as never, notifier as never, assistantActions as never, permissions as never);
+  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, tx as never, jobRepo as never, notifier as never, assistantActions as never, permissions as never);
   // Defaults the brief's row literals leave out but the service/DTO touch (e.g. requestedAt).
   const seed = (a: Record<string, unknown> & { id: string }) => {
     rows.set(a.id, {
@@ -125,8 +121,8 @@ function buildBash() {
 
 /** AppException carries its HTTP status in the `httpStatus` getter; 0 = resolved. */
 const statusOf = (p: Promise<unknown>): Promise<number> => p.then(() => 0, (e: { httpStatus?: number }) => e.httpStatus ?? -1);
-const ADMIN_CALLER: ApprovalCaller & { principal: KodaPrincipal } = { id: 'root', globalAdmin: true, principal: userPrincipal('root', 'ADMIN') };
-const DEV_CALLER: ApprovalCaller & { principal: KodaPrincipal } = { id: 'dev', globalAdmin: false, principal: userPrincipal('dev') };
+const ADMIN_CALLER: ApprovalCaller & { principal: KodaPrincipal } = { id: 'root', principal: userPrincipal('root', 'ADMIN') };
+const DEV_CALLER: ApprovalCaller & { principal: KodaPrincipal } = { id: 'dev', principal: userPrincipal('dev') };
 const PROJECT_ADMIN = { kind: 'project' as const, projectId: 'p1' };
 const PROJECT_DEV = { kind: 'project' as const, projectId: 'p1' };
 
@@ -275,7 +271,7 @@ describe('bash decide (S1.5 §2.3, plan D265-D267)', () => {
   it('refuses an agent deciding the ask of the job it requested (US-006 security ruling)', async () => {
     const { service, rows, seed, jobRepo } = buildBash();
     seed(pending); jobRepo.lockById.mockResolvedValue({ ...running, requestedById: 'a1', requestedByType: 'AGENT' });
-    const agentCaller: ApprovalCaller & { principal: KodaPrincipal } = { id: 'a1', globalAdmin: false, principal: agentPrincipal('a1') };
+    const agentCaller: ApprovalCaller & { principal: KodaPrincipal } = { id: 'a1', principal: agentPrincipal('a1') };
 
     const error = await service.decide(agentCaller, dev, 'a1', { decision: 'allow' }, NOW).catch((e: unknown) => e);
 
@@ -348,7 +344,7 @@ describe('ApprovalsService.get re-queue candidates', () => {
 
 describe('ApprovalsService.decide (assistant_action, 2a-D8)', () => {
   const assistant = (over: Partial<FleetApprovalRecord> = {}) => pendingBudget({ type: 'assistant_action', policyId: null, payload: { actionId: 'act1', requestedById: 'u1' }, ...over });
-  const REQUESTER: ApprovalCaller & { principal: KodaPrincipal } = { id: 'u1', globalAdmin: false, principal: userPrincipal('u1') };
+  const REQUESTER: ApprovalCaller & { principal: KodaPrincipal } = { id: 'u1', principal: userPrincipal('u1') };
 
   it('AC-20: calls AssistantActionPort.decide with the caller, the approval and the dto, and answers its approval', async () => {
     const approval = assistant();

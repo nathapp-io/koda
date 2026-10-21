@@ -54,7 +54,6 @@ type PermissionsDouble = ReturnType<typeof permissionDouble>;
 function makeTool(over: Partial<AssistantTool<string>> = {}): AssistantTool<string> {
   return {
     descriptor: { name: 'koda_fake', description: 'd', inputSchema: {} },
-    permission: { kind: 'member' },
     key: 'ticket.read',
     parse: (input) => String(input),
     execute: vi.fn(async () => 'tool text'),
@@ -315,7 +314,6 @@ const PREVIEW = 'Add a comment to WEB-1 "Fix login":\n\nhello';
 function makeWriteTool(over: Partial<AssistantTool<unknown>> = {}): AssistantTool<unknown> {
   return {
     descriptor: { name: 'koda_fake', description: 'd', inputSchema: {} },
-    permission: { kind: 'member' },
     key: 'ticket.read',
     kind: 'write',
     parse: vi.fn((input: unknown) => input),

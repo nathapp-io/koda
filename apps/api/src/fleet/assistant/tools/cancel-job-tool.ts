@@ -35,8 +35,7 @@ export function cancelJobTool(fleetJobs: FleetJobsService, knowledge: KnowledgeI
   return {
     descriptor: KODA_CANCEL_JOB,
     key: 'fleet.job.cancel',
-    // 2b2-R4: the same CASL tuple the cancel route enforces (`fleet-jobs.controller.ts`), never `create`.
-    permission: { kind: 'ability', action: 'update', subject: 'FleetJob' },
+    // 2b2-R4: the key the cancel route enforces (`fleet-jobs.controller.ts`), never `fleet.job.create`.
     kind: 'write',
     parse(input: unknown): CancelJobInput {
       const jobId = asRecord(input)['jobId'];
@@ -65,8 +64,8 @@ export function cancelJobTool(fleetJobs: FleetJobsService, knowledge: KnowledgeI
       );
     },
     /**
-     * 2b2-D6: what an approve runs, as the requester. `canOperate` is always true (2b2-R4): the ability the tool
-     * needs is what authorises the cancel, so the route's own-job path is not exposed. The service re-reads the job
+     * 2b2-D6: what an approve runs, as the requester. `canOperate` is always true (2b2-R4): the key the tool
+     * requires is what authorises the cancel, so the route's own-job path is not exposed. The service re-reads the job
      * under its row lock and refuses a state that moved since the proposal; whatever it refuses becomes the action's
      * text through `fleetWriteRefusal`, and anything the helper cannot name is rethrown, so `not_found` still
      * answers `not_found`.

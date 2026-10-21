@@ -89,9 +89,7 @@ function makeFullConnection(overrides?: Partial<VcsConnectionDomain>): VcsConnec
 
 describe('VcsController', () => {
   let controller: VcsController;
-  let mockProjectsService: Mocked<
-    Pick<ProjectsService, 'findBySlug' | 'assertProjectMembership'>
-  >;
+  let mockProjectsService: Mocked<Pick<ProjectsService, 'findBySlug'>>;
   let mockVcsService: Mocked<Pick<VcsConnectionService, 'create' | 'findByProject' | 'update' | 'delete' | 'testConnection' | 'getFullByProject' | 'rotateWebhookSecret'>>;
   let mockSyncService: Mocked<Pick<VcsSyncService, 'syncIssue' | 'fullSync'>>;
   let mockPrSyncService: Mocked<Pick<VcsPrSyncService, 'syncPrStatus'>>;
@@ -104,7 +102,6 @@ describe('VcsController', () => {
   beforeEach(async () => {
     mockProjectsService = {
       findBySlug: vi.fn().mockResolvedValue(makeProjectDto()),
-      assertProjectMembership: vi.fn().mockResolvedValue(undefined),
     };
 
     mockVcsService = {

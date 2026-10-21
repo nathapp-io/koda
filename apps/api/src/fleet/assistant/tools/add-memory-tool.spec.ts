@@ -146,7 +146,7 @@ describe('koda_add_memory parse (US-006)', () => {
     expect(tool.descriptor).toBe(KODA_ADD_MEMORY);
     expect(tool.descriptor.name).toBe('koda_add_memory');
     expect(tool.kind).toBe('write');
-    expect(tool.permission).toEqual({ kind: 'member' });
+    expect(tool.key).toBe('memory.create');
   });
 });
 

@@ -26,7 +26,6 @@ describeIntegration('AssistantToolExecutor audit and replay (PG, US-002)', () =>
 
   const tool: AssistantTool<unknown> = {
     descriptor: { name: 'koda_fake_audit', description: 'd', inputSchema: {} },
-    permission: { kind: 'member' },
     // Permissions P1 US-004: the executor checks the tool's catalog key in the job's project. The job's requester
     // here is the installation's ADMIN, who holds every project key.
     key: 'ticket.read',

@@ -18,7 +18,7 @@ function setup(workspace = false) {
     record: vi.fn(async row => { rows.push(row); }),
     findCallContext: vi.fn(async () => ({ project: { id: 'p1', slug: 'web' }, threadId: 't1', creator: { id: 'u1', email: 'dev@test', role: 'MEMBER', disabled: false } })),
   };
-  const tool: AssistantTool = { descriptor: { name: workspace ? 'koda_my_projects' : 'koda_get_ticket', description: '', inputSchema: {} }, scope: workspace ? 'workspace' : 'project', permission: { kind: 'member' }, key: workspace ? 'project.read' : 'ticket.read', parse: vi.fn(input => input), execute: vi.fn(async () => 'WEB-1') };
+  const tool: AssistantTool = { descriptor: { name: workspace ? 'koda_my_projects' : 'koda_get_ticket', description: '', inputSchema: {} }, scope: workspace ? 'workspace' : 'project', key: workspace ? 'project.read' : 'ticket.read', parse: vi.fn(input => input), execute: vi.fn(async () => 'WEB-1') };
   const registry = new AssistantToolRegistry();
   registry.register(tool);
   const access = { findProjectIdBySlug: vi.fn(async () => 'p1'), resolveMembership: vi.fn(async (): Promise<string | null> => null) };

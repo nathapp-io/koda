@@ -1,10 +1,7 @@
 import { Injectable, Optional, Logger, Inject, HttpException, HttpStatus } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
-import { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
-import { KodaAction } from '../../auth/casl/koda-action.enum';
-import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
 import { validateTransition } from './ticket-transitions';
 import { transitionKeyFor } from './transition-keys';
 import { PermissionService } from '../../permissions/permission.service';
@@ -105,10 +102,6 @@ export class TicketTransitionsService {
     // service positionally keep working; emission is skipped when absent.
     @Optional() private readonly ticketEventService?: TicketEventService,
     @Optional() private readonly outboxService?: NathappOutboxService,
-    // Legacy CASL check kept for `assertTransitionPermission` (the assistant's update-ticket
-    // preview). Optional only so legacy test harnesses can construct the service; that method fails
-    // closed when it is absent.
-    @Optional() private readonly caslAbilityFactory?: KodaCaslAbilityFactory,
   ) {}
 
   /**
@@ -561,8 +554,8 @@ export class TicketTransitionsService {
    * Permissions P1 (US-003): the edge check. The caller must hold the key of the edge that leads
    * from the ticket's *current* status to `toStatus` — the route key only says the caller may make
    * that kind of move, this says the ticket's state allows it for them. A pair with no key is not an
-   * edge (or the unreachable IN_PROGRESS -> VERIFIED rule), so nothing is checked and
-   * `validateTransition` answers for it.
+   * edge of the state machine (`CREATED -> CLOSED`), so nothing is checked and `validateTransition`
+   * answers for it.
    */
   private async assertEdgeAllowed(
     projectId: string,
@@ -600,27 +593,6 @@ export class TicketTransitionsService {
     }
 
     await this.assertEdgeAllowed(project.id, ticket.status as TicketStatus, toStatus, principal);
-  }
-
-  /**
-   * Final-review Finding B (kept until permissions-p1-cleanup): the legacy CASL
-   * `TRANSITION` check, used by the assistant's `koda_update_ticket` preview so
-   * the user is told a status change is forbidden before approving it. The
-   * routes themselves no longer come through here: Permissions P1 (US-003)
-   * replaced it with the edge keys (`assertEdgeAllowed`), and the PATCH route's
-   * route key (`ticket.update`) is checked by `RequiresGuard`.
-   *
-   * Fails closed: without the ability factory there is no way to verify
-   * TRANSITION.
-   */
-  async assertTransitionPermission(principal: KodaPrincipal): Promise<void> {
-    if (!this.caslAbilityFactory) {
-      throw new ForbiddenAppException({}, 'tickets');
-    }
-    const ability = await this.caslAbilityFactory.createForUser(principal);
-    if (!ability.can(KodaAction.TRANSITION as CaslPermissionAction, 'Ticket')) {
-      throw new ForbiddenAppException({}, 'tickets');
-    }
   }
 
   /**

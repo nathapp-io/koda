@@ -58,7 +58,6 @@ function setup(tool: AssistantTool<unknown>, opts: Options = {}) {
 function makeTool(over: Partial<AssistantTool<unknown>> = {}): AssistantTool<unknown> {
   return {
     descriptor: { name: 'koda_search_tickets', description: 'd', inputSchema: {} },
-    permission: { kind: 'member' },
     key: 'ticket.read',
     parse: vi.fn((input: unknown) => input),
     execute: vi.fn(async () => 'tool text'),
@@ -249,7 +248,6 @@ describe('1d2-D3 and 1d2-D5: workspace-scoped tools', () => {
   it('runs with no membership or key check and the home project context', async () => {
     let seen: ToolContext | undefined;
     const tool = workspaceTool({
-      permission: { kind: 'ability', action: 'create', subject: 'FleetJob' },
       execute: async (ctx: ToolContext) => { seen = ctx; return 'ok'; },
     });
     const { executor, access, rows, permissions } = setup(tool);

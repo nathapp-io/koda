@@ -163,14 +163,6 @@ export interface ITicketRepository {
    */
   lockProjectAgents(projectId: string): Promise<void>;
   /**
-   * S4c US-004: the user's legacy project role, or `null` when it has no source
-   * in the project. Permissions P1b US-003: the sources are the user's
-   * `ProjectMember` row unioned with its PROJECT-scope bindings, so a binding
-   * alone is enough. A global `ADMIN` user is exempted by the caller, which
-   * never asks this.
-   */
-  findProjectMemberRole(projectId: string, userId: string): Promise<string | null>;
-  /**
    * S5b US-005: the ref (`KEY-N`) of every named ticket that lives in `projectId` and is not
    * soft-deleted, in one read. An id of another project, of a deleted ticket or of no ticket at
    * all is simply absent from the answer — never resolved to a foreign ref.

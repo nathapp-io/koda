@@ -136,7 +136,7 @@ describe('koda_cancel_job parse (US-005)', () => {
 
     expect(tool.descriptor).toBe(KODA_CANCEL_JOB);
     expect(tool.kind).toBe('write');
-    expect(tool.permission).toEqual({ kind: 'ability', action: 'update', subject: 'FleetJob' });
+    expect(tool.key).toBe('fleet.job.cancel');
   });
 });
 

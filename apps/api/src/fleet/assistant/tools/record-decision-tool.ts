@@ -49,7 +49,6 @@ export function recordDecisionTool(deps: {
     descriptor: KODA_RECORD_DECISION,
     key: 'memory.decision.record',
     // 2b1-D4: the memory write routes check project membership (`memory.controller.ts`), so this tool does too.
-    permission: { kind: 'member' },
     kind: 'write',
     /**
      * 2b1-D5, 2b-R5: only the three fields of the decision are returned — a caller-supplied `actorId` (or any other

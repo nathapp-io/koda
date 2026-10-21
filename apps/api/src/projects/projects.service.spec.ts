@@ -1,7 +1,7 @@
 import type { Mock, Mocked } from 'vitest';
 import { HttpException } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
-import { ProjectAccessService, PROJECT_ACCESS_KEY } from './project-access.service';
+import { ProjectAccessService } from './project-access.service';
 import type { PermissionService } from '../permissions/permission.service';
 import { RagService } from '../rag/rag.service';
 import {
@@ -11,7 +11,6 @@ import {
 } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { IProjectRepository } from './domain/project.domain';
-import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 /** The rejection of `promise`, or undefined when it resolved. */
 async function rejectionOf(promise: Promise<unknown>): Promise<HttpException | undefined> {
@@ -220,56 +219,6 @@ describe('ProjectsService', () => {
         id: 'p1', slug: 'proj', deletedAt: null,
       });
       expect(await service.findProjectIdBySlug('proj')).toBe('p1');
-    });
-  });
-
-  describe('assertProjectMembership', () => {
-    const adminUser: KodaPrincipal = {
-      actorType: 'user', id: 'u1', role: 'ADMIN', email: 'a@a.com',
-    } as KodaPrincipal;
-
-    const memberUser: KodaPrincipal = {
-      actorType: 'user', id: 'u2', role: 'MEMBER', email: 'm@m.com',
-    } as KodaPrincipal;
-
-    const agentPrincipal = {
-      actorType: 'agent', id: 'ag1', slug: 'agent-1', status: 'ACTIVE',
-      agentRoles: [], capabilities: [],
-    } as unknown as KodaPrincipal;
-
-    it('passes a user whose project.read is granted globally, without a membership lookup', async () => {
-      // The global ask is what a global admin/Owner holds, so the display role is ADMIN.
-      await expect(service.assertProjectMembership('p1', adminUser)).resolves.toBeUndefined();
-      expect(can).toHaveBeenCalledWith(adminUser, PROJECT_ACCESS_KEY, { projectId: 'p1' });
-      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
-    });
-
-    it('passes an agent principal whose project.read is granted, without a roster lookup', async () => {
-      await expect(service.assertProjectMembership('p1', agentPrincipal)).resolves.toBeUndefined();
-      expect(can).toHaveBeenCalledWith(agentPrincipal, PROJECT_ACCESS_KEY, { projectId: 'p1' });
-      expect(mockProjectRepo.isAgentOnRoster).not.toHaveBeenCalled();
-      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
-    });
-
-    it('refuses an agent principal whose project.read is refused with a projects-scoped 403', async () => {
-      can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
-
-      const error = await rejectionOf(service.assertProjectMembership('p1', agentPrincipal));
-
-      expect(error).toBeInstanceOf(ForbiddenAppException);
-      expect((error as ForbiddenAppException).prefix).toBe('projects');
-      expect(mockProjectRepo.isAgentOnRoster).not.toHaveBeenCalled();
-      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
-    });
-
-    it('throws ForbiddenAppException when project.read is refused', async () => {
-      can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
-      await expect(service.assertProjectMembership('p1', memberUser)).rejects.toBeInstanceOf(ForbiddenAppException);
-    });
-
-    it('resolves when the member user holds project.read', async () => {
-      await expect(service.assertProjectMembership('p1', memberUser)).resolves.toBeUndefined();
-      expect(can).toHaveBeenCalledWith(memberUser, PROJECT_ACCESS_KEY, { projectId: 'p1' });
     });
   });
 

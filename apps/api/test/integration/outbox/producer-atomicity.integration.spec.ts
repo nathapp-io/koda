@@ -25,7 +25,6 @@ import { RagService } from '../../../src/rag/rag.service';
 import { TicketStatus, TicketType } from '../../../src/common/enums';
 import { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { resetDb } from '../../helpers/reset-db';
-import { KodaCaslAbilityFactory } from '../../../src/auth/casl/koda-casl-ability.factory';
 import { PermissionService } from '../../../src/permissions/permission.service';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
@@ -62,7 +61,6 @@ describeIntegration('producers record outbox rows atomically', () => {
       providers: [
         TicketsService,
         TicketTransitionsService,
-        KodaCaslAbilityFactory,
         // Permissions P1 (US-003): TicketTransitionsService's required third dependency. The
         // transitions these tests drive are their own subject, so the edge check allows them. The
         // domain writer reads the same service, so `effectiveKeys` answers with project access too.

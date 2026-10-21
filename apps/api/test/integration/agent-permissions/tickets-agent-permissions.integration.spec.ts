@@ -167,9 +167,9 @@ describe('TicketsService — agent permissions', () => {
     });
   });
 
-  // ── AC-4: MEMBER user is blocked (enforced by CASL guard at controller level) ──
-  // MEMBER permission blocking moved from service to KodaCaslAbilityFactory in 76cb858.
-  // Service-level tests verify ADMIN can proceed; controller-level CASL tests cover MEMBER denial.
+  // ── AC-4: MEMBER user is blocked (enforced by the route's permission key) ──
+  // The block moved out of the service in 76cb858. Service-level tests verify ADMIN can proceed;
+  // controller/route-level key tests cover MEMBER denial.
 
   describe('softDelete — AC-4: MEMBER user blocked', () => {
     it('does not throw for ADMIN user', async () => {

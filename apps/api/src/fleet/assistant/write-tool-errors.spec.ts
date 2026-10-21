@@ -39,7 +39,6 @@ function makeRepo(): { repo: AssistantToolCallRepository; rows: AssistantToolCal
 function makeWriteTool(over: Partial<AssistantTool<unknown>> = {}): AssistantTool<unknown> {
   return {
     descriptor: { name: 'w', description: 'd', inputSchema: {} },
-    permission: { kind: 'member' },
     key: 'comment.create',
     kind: 'write',
     parse: vi.fn((input: unknown) => input),

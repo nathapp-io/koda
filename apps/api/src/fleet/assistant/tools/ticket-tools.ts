@@ -99,8 +99,7 @@ export function searchTicketsTool(tickets: TicketsService): AssistantTool<Search
   return {
     descriptor: KODA_SEARCH_TICKETS,
     key: 'ticket.read',
-    // 1b-D1: the CASL tuple the REST ticket routes enforce; every user holds it through READABLE_RESOURCES.
-    permission: { kind: 'ability', action: 'read', subject: 'Ticket' },
+    // 1b-D1: the key the REST ticket routes enforce; every project role holds `ticket.read`.
     parse(input: unknown): SearchTicketsInput {
       const raw = asRecord(input);
       return {
@@ -142,7 +141,6 @@ export function getTicketTool(deps: { tickets: TicketsService; links: TicketLink
   return {
     descriptor: KODA_GET_TICKET,
     key: 'ticket.read',
-    permission: { kind: 'ability', action: 'read', subject: 'Ticket' },
     parse(input: unknown): GetTicketInput {
       const ref = asRecord(input).ref;
       if (typeof ref !== 'string' || !TICKET_REF.test(ref)) throw new ToolInputError('ref');

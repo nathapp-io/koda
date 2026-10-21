@@ -14,14 +14,9 @@ import { UserAuthState, userAuthStateCacheKey, userTokenVersionCacheTag } from '
  * We store role + email in IPrincipal.extra so they survive the principal pipeline
  * without breaking the IPrincipal contract.
  *
- * SECURITY: `projectRole` is NEVER read from the JWT. While the field existed, a
- * project-role CASL check honoured it, and the project membership role was always
- * resolved from the DB (permissions P1 US-004 removed the decorator that attached
- * it to the request). Allowing a forged JWT claim (e.g. `projectRole: 'ADMIN'`) to
- * leak into the principal would let a non-admin principal satisfy a check that
- * reads the field before any project guard runs (the global permission guard sees
- * the principal directly). We pick a curated allow-list of safe claims here so the
- * threat model stays explicit, even if a future contributor adds a JWT-driven role.
+ * SECURITY: the claim allow-list below is the whole threat model. Permission decisions read keys
+ * from `PermissionService`, never a claim; this provider still copies only `role`, `email`, `sub`
+ * and `tokenVersion` so a claim a future contributor might trust cannot reach the principal.
  */
 @Injectable()
 export class JwtAuthProvider implements AuthProvider {
@@ -31,9 +26,7 @@ export class JwtAuthProvider implements AuthProvider {
   ) {}
 
   async getPrincipal(jwtPayload: Record<string, unknown>): Promise<UserPrincipal> {
-    // SECURITY: drop `projectRole` (and any future claim the CASL factory
-    // trusts) so a forged JWT cannot escalate. Only the explicit list below
-    // survives onto the principal.
+    // The claim allow-list — see the SECURITY note above. Nothing else survives onto the principal.
     const role = ((jwtPayload['role'] as KodaUserRole | undefined) ?? 'MEMBER') as KodaUserRole;
     const id = (jwtPayload['sub'] as string) ?? '';
     const email = (jwtPayload['email'] as string) ?? id;
@@ -56,12 +49,6 @@ export class JwtAuthProvider implements AuthProvider {
       name: email,
       email,
       role,
-      // Explicitly NOT carrying `projectRole` from the JWT — see SECURITY note
-      // above. The factory would otherwise honour a forged claim on routes
-      // guarded only by the global CASL permission guard (e.g. PATCH/DELETE
-      // /api/comments/:id, where a project-role ADMIN claim would grant
-      // unconditional DELETE Comment).
-      projectRole: undefined,
       blacklisted: false,
       revoked: !state || state.disabled || state.tokenVersion > tokenVersion,
       authorities: [role],

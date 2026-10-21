@@ -3,7 +3,7 @@
  * (AC-1 .. AC-6), over real HTTP, the real ticker and real Postgres.
  *
  * Every principal here has exactly one kind of source in the project under test, so an AC passes only
- * when the reader consults the access sources: `PrismaFleetActivityRepository.findMemberProjectIds`
+ * when the reader consults the access sources: `PermissionService.projectIdsWithKey`
  * (reached through `GET /fleet/activity` and `GET /fleet/approval-counts`) and
  * `PrismaScheduleRepository.findOwnerAccess` (reached through `POST /projects/:slug/fleet/schedules/:id/enable`
  * and `ScheduleTicker.tick`) on one side, and the compatibility queries in

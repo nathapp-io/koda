@@ -106,8 +106,10 @@ describe('knowledge tools (US-004)', () => {
     expect(KODA_TOOL_DESCRIPTORS.map((descriptor) => descriptor.name)).toEqual(expect.arrayContaining([...TOOL_NAMES]));
   });
 
-  it('declares project membership as the permission of every knowledge tool', () => {
-    for (const name of TOOL_NAMES) expect(registry.get(name)?.permission).toEqual({ kind: 'member' });
+  it('declares a read key for every knowledge tool', () => {
+    for (const name of ['koda_memory_search', 'koda_timeline']) {
+      expect({ name, key: registry.get(name)?.key }).toEqual({ name, key: name === 'koda_memory_search' ? 'memory.read' : 'timeline.read' });
+    }
   });
 
   it('AC-1: the knowledge catalog names all four tools in order, and the catalog stays inside the tool limit', () => {
@@ -121,7 +123,7 @@ describe('knowledge tools (US-004)', () => {
     for (const name of ['koda_kb_search', 'koda_get_doc']) {
       const tool = registry.get(name);
       expect(tool?.descriptor).toBe(KODA_TOOL_DESCRIPTORS.find((descriptor) => descriptor.name === name));
-      expect(tool?.permission).toEqual({ kind: 'member' });
+      expect(tool?.key).toBe(name === 'koda_kb_search' ? 'kb.search' : 'kb.read');
     }
   });
 

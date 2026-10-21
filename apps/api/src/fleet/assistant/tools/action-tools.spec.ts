@@ -102,7 +102,7 @@ describe('koda_add_comment parse (US-003)', () => {
     const tool = commentDeps().tool;
     expect(tool.descriptor).toBe(KODA_ADD_COMMENT);
     expect(tool.kind).toBe('write');
-    expect(tool.permission).toEqual({ kind: 'ability', action: 'create', subject: 'Comment' });
+    expect(tool.key).toBe('comment.create');
   });
 });
 
@@ -171,7 +171,7 @@ describe('koda_get_action (US-003)', () => {
     const tool = actionDeps(null).tool;
     expect(tool.descriptor).toBe(KODA_GET_ACTION);
     expect(tool.kind).toBeUndefined();
-    expect(tool.permission).toEqual({ kind: 'member' });
+    expect(tool.key).toBe('assistant.action.read');
   });
 
   it('AC-14: an EXECUTED action answers its result through ctx.data', async () => {

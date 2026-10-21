@@ -46,8 +46,7 @@ export function createTicketsTool(deps: { tickets: TicketsService }): AssistantT
   return {
     descriptor: KODA_CREATE_TICKETS,
     key: 'ticket.create',
-    // 2b1-D4: the same CASL tuple the ticket create route enforces (`tickets.controller.ts`).
-    permission: { kind: 'ability', action: 'create', subject: 'Ticket' },
+    // 2b1-D4: the key the ticket create route enforces (`tickets.controller.ts`).
     kind: 'write',
     parse(input: unknown): CreateTicketsInput {
       const tickets = asRecord(input)['tickets'];

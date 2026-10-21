@@ -21,7 +21,7 @@ function setup() {
     record: vi.fn(async row => { rows.push(row); }),
   };
   const preview = vi.fn(async () => 'Add comment preview');
-  const tool: AssistantTool = { descriptor: { name: call.name, description: '', inputSchema: {} }, kind: 'write', permission: { kind: 'ability', action: 'create', subject: 'Comment' }, key: 'comment.create', parse: vi.fn(input => input), preview, execute: vi.fn(async () => text) };
+  const tool: AssistantTool = { descriptor: { name: call.name, description: '', inputSchema: {} }, kind: 'write', key: 'comment.create', parse: vi.fn(input => input), preview, execute: vi.fn(async () => text) };
   const registry = new AssistantToolRegistry();
   registry.register(tool);
   const actions: ActionProposer = { propose: vi.fn(async () => ({ actionId: 'p1' })), recordDirect: vi.fn(async () => ({ actionId: 'a1' })) };

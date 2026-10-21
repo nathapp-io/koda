@@ -88,7 +88,6 @@ function storingSetup(context: ToolCallContext, tool: AssistantTool) {
 function readTool(onExecute: (ctx: ToolContext) => Promise<string> = async () => 'read text'): AssistantTool<unknown> {
   return {
     descriptor: { name: 'koda_get_ticket', description: 'd', inputSchema: {} },
-    permission: { kind: 'ability', action: 'read', subject: 'Ticket' },
     key: 'ticket.read',
     parse: (input) => input,
     execute: vi.fn(onExecute),
@@ -100,7 +99,6 @@ function commentTool(): AssistantTool<unknown> {
   return {
     descriptor: { name: 'koda_add_comment', description: 'd', inputSchema: {} },
     kind: 'write',
-    permission: { kind: 'ability', action: 'create', subject: 'Comment' },
     key: 'comment.create',
     parse: (input) => input,
     preview: vi.fn(async () => 'Add comment preview'),

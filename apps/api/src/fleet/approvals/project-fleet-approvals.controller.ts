@@ -4,7 +4,6 @@ import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { parseQuery, toPageResult } from '../../common/dto/koda-page.query';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
-import { isUserPrincipal } from '../../auth/principal/koda-principal.types';
 import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
 import { CurrentProject } from '../../projects/current-project.decorator';
@@ -66,10 +65,6 @@ export class ProjectFleetApprovalsController {
   @ApiResponse({ status: 404, description: 'fleet.approvals: no such approval in this project' })
   @ApiResponse({ status: 409, description: 'fleet.approvalNotPending, fleet.budgetNotPaused' })
   async decide(@Param('id') id: string, @Body() dto: DecideApprovalDto, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    // `globalAdmin` stays what it was for this prefix; after US-006 no reader decides on it.
-    return JsonResponse.Ok(await this.approvals.decide(
-      { id: principal.id, globalAdmin: isUserPrincipal(principal) && principal.role === 'ADMIN', principal },
-      route(ctx), id, dto,
-    ));
+    return JsonResponse.Ok(await this.approvals.decide({ id: principal.id, principal }, route(ctx), id, dto));
   }
 }
