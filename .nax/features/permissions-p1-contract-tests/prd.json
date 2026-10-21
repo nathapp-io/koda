@@ -3,7 +3,7 @@
   "feature": "permissions-p1-contract-tests",
   "branchName": "feat/permissions-p1-contract-tests",
   "createdAt": "2026-10-21T00:00:00.000Z",
-  "updatedAt": "2026-10-21T08:33:47.033Z",
+  "updatedAt": "2026-10-21T08:39:41.331Z",
   "userStories": [
     {
       "id": "US-001",
@@ -117,8 +117,8 @@
         "mechanical"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -130,7 +130,19 @@
         "profileModelTier": "fast",
         "initialAgent": "native",
         "initialProfileId": "native-luna",
-        "initialModelTier": "fast"
+        "initialModelTier": "fast",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.28000000000000025,
+          "plannedProfileId": "native-luna",
+          "applied": false,
+          "decidedAt": "2026-10-21T08:33:51.439Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/permissions/requires.guard.ts",
@@ -147,7 +159,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "dd174dbe791c4dc8e83f056b60dc6ca5a4236d46"
     },
     {
       "id": "US-003",
