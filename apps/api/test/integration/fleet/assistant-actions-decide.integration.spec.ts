@@ -13,6 +13,8 @@ import request from 'supertest';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantActionService } from '../../../src/fleet/assistant/actions/assistant-action.service';
 import { ACTION_TTL_MS, type ProposeInput } from '../../../src/fleet/assistant/actions/pending-action.domain';
+import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
@@ -83,7 +85,10 @@ describeIntegration('deciding an assistant_action approval (PG, US-005)', () => 
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     actions = app.get(AssistantActionService, { strict: false });
     // A project ADMIN who is not the requester: the viewer, promoted.
-    await prisma.projectMember.updateMany({ where: { userId: world.ids.viewer, projectId: world.projectId }, data: { role: 'ADMIN' } });
+    const viewer = { type: 'USER' as const, id: world.ids.viewer };
+    await revokeProjectRoles(prisma, viewer, world.projectId);
+    await grantRole(prisma, viewer, 'project-admin', world.projectId);
+    await app.get(MembershipService).invalidatePermissions();
   }, 120_000);
 
   afterAll(async () => {
@@ -93,6 +98,21 @@ describeIntegration('deciding an assistant_action approval (PG, US-005)', () => 
       if (saved['FLEET_THREADS_ENABLED'] === undefined) delete process.env['FLEET_THREADS_ENABLED'];
       else process.env['FLEET_THREADS_ENABLED'] = saved['FLEET_THREADS_ENABLED'];
     }
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+    ]);
+    // AC-7: the setup replaced the viewer's web binding with the project-admin one.
+    const viewerBindings = await prisma.roleBinding.findMany({
+      where: { principalType: 'USER', principalId: world.ids.viewer, projectId: world.projectId },
+      include: { role: { select: { key: true } } },
+    });
+    expect(viewerBindings.map((binding) => binding.role.key)).toEqual(['project-admin']);
   });
 
   it('AC-1: the requester rejecting a pending action on the project prefix answers 200 with status rejected', async () => {

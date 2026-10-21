@@ -14,9 +14,10 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantActionService } from '../../../src/fleet/assistant/actions/assistant-action.service';
 import { PendingActionExpirySweeper } from '../../../src/fleet/assistant/actions/pending-action-expiry.sweeper';
 import type { DirectActionInput } from '../../../src/fleet/assistant/actions/pending-action.domain';
+import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
-import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { rosterFleetAgent, seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
@@ -43,7 +44,7 @@ describeIntegration('recording a direct assistant action (PG, US-004)', () => {
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     claude = await seedFleetHttpAgent(app.getHttpServer(), world.tokens.root);
-    await prisma.agentProject.create({ data: { projectId: world.projectId, agentId: claude.id } });
+    await rosterFleetAgent(prisma, claude.id, world.projectId);
     actions = app.get(AssistantActionService, { strict: false });
     sweeper = app.get(PendingActionExpirySweeper, { strict: false });
   }, 120_000);
@@ -74,6 +75,16 @@ describeIntegration('recording a direct assistant action (PG, US-004)', () => {
     const { actionId } = await actions.recordDirect(input);
     return { actionId, input };
   }
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+      { type: 'AGENT', id: claude.id },
+    ]);
+  });
 
   it('AC-4: an EXECUTED recordDirect answers an actionId naming a stored EXECUTED row with its result', async () => {
     const { actionId } = await record();

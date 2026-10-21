@@ -8,6 +8,8 @@ import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
+import { ROLE_KEY_FOR_LEGACY_ROLE, type LegacyProjectRole } from '../../../src/permissions/legacy-project-roles';
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
 import { PrismaScheduleRepository } from '../../../src/fleet/schedules/prisma-schedule.repository';
 import { ScheduleTicker } from '../../../src/fleet/schedules/schedule-ticker';
@@ -35,7 +37,8 @@ describeIntegration('schedule ticker (PG)', () => {
   /** A fresh owner with the given project role (null = not a member). */
   const owner = async (role: string | null, over: Partial<Prisma.UserUncheckedCreateInput> = {}): Promise<string> => {
     const user = await prisma.user.create({ data: { email: `owner${++n}@koda.test`, passwordHash: 'x', role: 'MEMBER', ...over } });
-    if (role) await prisma.projectMember.create({ data: { projectId: world.projectId, userId: user.id, role } });
+    await grantBaseline(prisma, { type: 'USER', id: user.id });
+    if (role) await grantRole(prisma, { type: 'USER', id: user.id }, ROLE_KEY_FOR_LEGACY_ROLE[role as LegacyProjectRole], world.projectId);
     return user.id;
   };
   const reload = (id: string) => prisma.jobSchedule.findUniqueOrThrow({ where: { id } });
@@ -64,6 +67,15 @@ describeIntegration('schedule ticker (PG)', () => {
     await prisma.jobSchedule.deleteMany();
     await prisma.outboxEvent.deleteMany();
     await prisma.fleetActivity.deleteMany();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+    ]);
   });
 
   it('dispatches a due schedule once: a QUEUED RUN linked to it, lastJobId set, nextFireAt moved to the next fire', async () => {

@@ -13,6 +13,7 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { PrismaFleetRepoRepository } from '../../../src/fleet/repos/prisma-fleet-repo.repository';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 
@@ -35,7 +36,7 @@ describeIntegration('fleet project threads (PG, US-003)', () => {
   const seedRepoLessProject = async (): Promise<string> => {
     const slug = `empty-${++seq}`;
     const project = await prisma.project.create({ data: { name: slug, slug, key: `E${seq}` } });
-    await prisma.projectMember.create({ data: { projectId: project.id, userId: world.ids.dev, role: 'DEVELOPER' } });
+    await grantRole(prisma, { type: 'USER', id: world.ids.dev }, 'developer', project.id);
     return slug;
   };
 
@@ -55,6 +56,15 @@ describeIntegration('fleet project threads (PG, US-003)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+    ]);
   });
 
   it('AC-9: findAnchor returns the project repo with the earlier createdAt', async () => {

@@ -14,6 +14,7 @@ import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { putThreadLines } from '../../helpers/thread-fixtures';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -42,7 +43,7 @@ describeIntegration('fleet project thread send (PG, US-004)', () => {
   const seedProject = async (prefix: string, key: string) => {
     const slug = `${prefix}-${++seq}`;
     const project = await prisma.project.create({ data: { name: slug, slug, key: `${key}${seq}` } });
-    await prisma.projectMember.create({ data: { projectId: project.id, userId: world.ids.dev, role: 'DEVELOPER' } });
+    await grantRole(prisma, { type: 'USER', id: world.ids.dev }, 'developer', project.id);
     return project;
   };
 
@@ -111,6 +112,15 @@ describeIntegration('fleet project thread send (PG, US-004)', () => {
       if (savedThreadsEnabled === undefined) delete process.env['FLEET_THREADS_ENABLED'];
       else process.env['FLEET_THREADS_ENABLED'] = savedThreadsEnabled;
     }
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+    ]);
   });
 
   it('AC-1: a PROJECT send creates a THREAD job on the anchor repo', async () => {

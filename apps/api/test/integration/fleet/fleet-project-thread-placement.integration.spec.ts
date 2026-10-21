@@ -16,6 +16,7 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, FleetHttpWorld, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
+import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import type { AssignPayload, RunnerCapabilities, SyncRequest, SyncResponse } from '../../../src/fleet/common/protocol';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -58,7 +59,7 @@ describeIntegration('fleet project thread placement (PG, US-005)', () => {
   const seedProject = async (prefix: string, key: string) => {
     const slug = `${prefix}-${++seq}`;
     const project = await prisma.project.create({ data: { name: slug, slug, key: `${key}${seq}` } });
-    await prisma.projectMember.create({ data: { projectId: project.id, userId: world.ids.dev, role: 'DEVELOPER' } });
+    await grantRole(prisma, { type: 'USER', id: world.ids.dev }, 'developer', project.id);
     return project;
   };
 
@@ -125,6 +126,15 @@ describeIntegration('fleet project thread placement (PG, US-005)', () => {
         else process.env[key] = value;
       }
     }
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+    ]);
   });
 
   it('AC-1/AC-2: a PROJECT send then a protocol-4 sync with projectThreads returns the PROJECT ASSIGN', async () => {

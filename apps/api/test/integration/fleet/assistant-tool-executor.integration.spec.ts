@@ -10,6 +10,7 @@ import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-to
 import { AssistantToolRegistry } from '../../../src/fleet/assistant/assistant-tool.registry';
 import type { AssistantTool } from '../../../src/fleet/assistant/assistant-tool.types';
 import { stableStringify } from '../../../src/fleet/sync/stable-json';
+import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
@@ -22,6 +23,8 @@ describeIntegration('AssistantToolExecutor audit and replay (PG, US-002)', () =>
   let executor: AssistantToolExecutor;
   let jobId: string;
   let outsiderJobId: string;
+  let adminId: string;
+  let outsiderId: string;
   const execute = vi.fn(async () => 'fake result');
 
   const tool: AssistantTool<unknown> = {
@@ -52,8 +55,11 @@ describeIntegration('AssistantToolExecutor audit and replay (PG, US-002)', () =>
     executor = app.get(AssistantToolExecutor, { strict: false });
     app.get(AssistantToolRegistry, { strict: false }).register(tool);
     const base = await seedFleetBase(prisma);
+    adminId = base.adminId;
     jobId = await seedThreadJob(base, base.adminId);
     const outsider = await prisma.user.create({ data: { email: 'outsider@koda.test', passwordHash: 'x', role: 'MEMBER' } });
+    outsiderId = outsider.id;
+    await grantBaseline(prisma, { type: 'USER', id: outsider.id });
     outsiderJobId = await seedThreadJob(base, outsider.id);
   });
   afterAll(async () => {
@@ -63,6 +69,13 @@ describeIntegration('AssistantToolExecutor audit and replay (PG, US-002)', () =>
 
   const call = (over: Partial<{ jobId: string; toolCallId: string; name: string; input: unknown }> = {}) => ({
     jobId, toolCallId: 'c1', name: 'koda_fake_audit', input: { b: 1, a: { d: 2, c: 3 } }, ...over,
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: adminId },
+      { type: 'USER', id: outsiderId },
+    ]);
   });
 
   it('AC-12: stores one row whose inputHash is the sha256 of the stable JSON of the raw input, and no input', async () => {

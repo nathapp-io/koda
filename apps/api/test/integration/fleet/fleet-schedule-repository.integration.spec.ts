@@ -8,6 +8,7 @@ import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import type { NewSchedule } from '../../../src/fleet/schedules/domain/schedule.domain';
 import { PrismaScheduleRepository } from '../../../src/fleet/schedules/prisma-schedule.repository';
 
@@ -50,6 +51,10 @@ describeIntegration('schedule repository (PG)', () => {
   beforeEach(async () => {
     await prisma.fleetJob.deleteMany();
     await prisma.jobSchedule.deleteMany();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [{ type: 'USER', id: base.adminId }]);
   });
 
   it('round-trips a schedule with the decimal as a string and the creator as updater', async () => {
@@ -122,9 +127,11 @@ describeIntegration('schedule repository (PG)', () => {
   it('findOwnerAccess reports a missing user and a disabled user, and reads no project role (US-005)', async () => {
     expect(await repo.findOwnerAccess(base.projectId, { type: 'USER', id: 'no-such-user' })).toEqual({ exists: false, disabled: false });
     const off = await prisma.user.create({ data: { email: 'off@koda.test', passwordHash: 'x', role: 'MEMBER', disabled: true } });
+    await grantBaseline(prisma, { type: 'USER', id: off.id });
     expect(await repo.findOwnerAccess(base.projectId, { type: 'USER', id: off.id })).toEqual({ exists: true, disabled: true });
     const dev = await prisma.user.create({ data: { email: 'dev-access@koda.test', passwordHash: 'x', role: 'MEMBER' } });
-    await prisma.projectMember.create({ data: { projectId: base.projectId, userId: dev.id, role: 'DEVELOPER' } });
+    await grantBaseline(prisma, { type: 'USER', id: dev.id });
+    await grantRole(prisma, { type: 'USER', id: dev.id }, 'developer', base.projectId);
     // The permission is the owner's effective keys now, so a project role is not part of this answer.
     expect(await repo.findOwnerAccess(base.projectId, { type: 'USER', id: dev.id })).toEqual({ exists: true, disabled: false });
     expect(await repo.findOwnerAccess(base.projectId, { type: 'USER', id: base.adminId })).toEqual({ exists: true, disabled: false });

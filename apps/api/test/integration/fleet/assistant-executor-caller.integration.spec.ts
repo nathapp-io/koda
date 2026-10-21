@@ -4,9 +4,10 @@ import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { AGENT_ROLES } from '../../../src/common/enums';
 import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
 import type { ToolCaller } from '../../../src/fleet/assistant/assistant-tool.types';
+import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
-import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { rosterFleetAgent, seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 describeIntegration('MCP caller project isolation (PG)', () => {
@@ -30,9 +31,17 @@ describeIntegration('MCP caller project isolation (PG)', () => {
   });
   async function seedCaller(): Promise<ToolCaller> {
     const agent = await seedFleetHttpAgent(app.getHttpServer(), world.tokens.root);
-    await prisma.agentProject.create({ data: { projectId: world.projectId, agentId: agent.id } });
+    await rosterFleetAgent(prisma, agent.id, world.projectId);
     return { principal: { actorType: 'agent', id: agent.id, slug: agent.slug, name: 'claude', status: 'ACTIVE', agentRoles: [...AGENT_ROLES], capabilities: [], authorities: [], blacklisted: false, revoked: false }, origin: { kind: 'mcp' }, disabled: false };
   }
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+    ]);
+  });
   it('AC-13, AC-15: rostered project search returns its ticket and audits the agent with no job', async () => {
     const caller = await seedCaller();
     await prisma.ticket.create({ data: { projectId: world.projectId, number: 1, type: 'TASK', title: 'MCP caller ticket' } });

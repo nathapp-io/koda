@@ -7,6 +7,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
@@ -17,6 +18,7 @@ describeIntegration('AssistantToolExecutor project argument in WORKSPACE threads
   let app: NathApplication;
   let prisma: PrismaClient;
   let executor: AssistantToolExecutor;
+  let adminId: string;
   let homeId: string;
   let bId: string;
   let creatorId: string;
@@ -44,6 +46,7 @@ describeIntegration('AssistantToolExecutor project argument in WORKSPACE threads
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
     executor = app.get(AssistantToolExecutor, { strict: false });
     const base = await seedFleetBase(prisma);
+    adminId = base.adminId;
     homeId = base.projectId;
     sharedRepoId = base.repoId;
     const b = await prisma.project.create({ data: { name: 'b', slug: 'b', key: 'B' } });
@@ -52,10 +55,9 @@ describeIntegration('AssistantToolExecutor project argument in WORKSPACE threads
     const gone = await prisma.project.create({ data: { name: 'gone', slug: 'gone', key: 'GONE', deletedAt: new Date() } });
     const creator = await prisma.user.create({ data: { email: 'ws-creator@koda.test', passwordHash: 'x', role: 'MEMBER' } });
     creatorId = creator.id;
-    await prisma.projectMember.createMany({ data: [
-      { projectId: bId, userId: creatorId, role: 'DEVELOPER' },
-      { projectId: gone.id, userId: creatorId, role: 'DEVELOPER' },
-    ] });
+    await grantBaseline(prisma, { type: 'USER', id: creatorId });
+    await grantRole(prisma, { type: 'USER', id: creatorId }, 'developer', bId);
+    await grantRole(prisma, { type: 'USER', id: creatorId }, 'developer', gone.id);
     await prisma.ticket.create({ data: { projectId: bId, number: 1, type: 'TASK', title: 'b ticket', createdByUserId: creatorId } });
     await prisma.fleetJob.create({ data: {
       projectId: bId, repoId: sharedRepoId, ref: 'main', command: 'RUN', feature: 'job-in-b', profiles: [],
@@ -71,6 +73,13 @@ describeIntegration('AssistantToolExecutor project argument in WORKSPACE threads
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: adminId },
+      { type: 'USER', id: creatorId },
+    ]);
   });
 
   it('AC-6 and AC-7: a DEVELOPER of b reads b ticket B-1, and the audit row names b', async () => {
@@ -109,12 +118,13 @@ describeIntegration('AssistantToolExecutor project argument in WORKSPACE threads
 
   it('AC-13: after the creator is removed from b, the same call answers not_found: project', async () => {
     const extra = await prisma.user.create({ data: { email: 'ws-removed@koda.test', passwordHash: 'x', role: 'MEMBER' } });
+    await grantBaseline(prisma, { type: 'USER', id: extra.id });
     const jobId = await workspaceJob({ repoId: sharedRepoId }, extra.id);
-    await prisma.projectMember.create({ data: { projectId: bId, userId: extra.id, role: 'DEVELOPER' } });
+    await grantRole(prisma, { type: 'USER', id: extra.id }, 'developer', bId);
     await app.get(MembershipService).invalidatePermissions();
     expect((await call(jobId, 'koda_search_tickets', { project: 'b' })).isError).toBe(false);
-    await prisma.projectMember.deleteMany({ where: { projectId: bId, userId: extra.id } });
-    // US-001: access is decided from the effective-permission cache, so the row removal needs an invalidation
+    await revokeProjectRoles(prisma, { type: 'USER', id: extra.id }, bId);
+    // US-001: access is decided from the effective-permission cache, so the binding removal needs an invalidation
     // before the next call sees it.
     await app.get(MembershipService).invalidatePermissions();
     expect(await call(jobId, 'koda_search_tickets', { project: 'b' })).toEqual({ content: 'not_found: project', isError: true });

@@ -16,6 +16,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
 import type { ToolResult } from '../../../src/fleet/assistant/assistant-tool.types';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
@@ -42,15 +43,21 @@ describeIntegration('koda_my_projects and workspace-scoped tools (PG, US-003)', 
   let noneJob: string;
   let adminJob: string;
   let richSlug: string;
+  /** The ids of the users the setup creates, so the sentinel can name every one of them. */
+  const createdUserIds: string[] = [];
 
   const createProject = (slug: string, name: string) =>
     prisma.project.create({ data: { name, slug, key: slug.toUpperCase() } });
 
-  const createUser = (email: string) =>
-    prisma.user.create({ data: { email, passwordHash: 'x', role: 'MEMBER' } });
+  const createUser = async (email: string) => {
+    const user = await prisma.user.create({ data: { email, passwordHash: 'x', role: 'MEMBER' } });
+    await grantBaseline(prisma, { type: 'USER', id: user.id });
+    createdUserIds.push(user.id);
+    return user;
+  };
 
   const member = (projectId: string, userId: string) =>
-    prisma.projectMember.create({ data: { projectId, userId, role: 'DEVELOPER' } });
+    grantRole(prisma, { type: 'USER', id: userId }, 'developer', projectId);
 
   /** A WORKSPACE thread of the home project, created by `userId`, with a RUNNING THREAD job on it. */
   async function workspaceJob(userId: string): Promise<string> {
@@ -171,6 +178,16 @@ describeIntegration('koda_my_projects and workspace-scoped tools (PG, US-003)', 
       if (savedThreadsFlag === undefined) delete process.env['FLEET_THREADS_ENABLED'];
       else process.env['FLEET_THREADS_ENABLED'] = savedThreadsFlag;
     }
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+      ...createdUserIds.map((id) => ({ type: 'USER' as const, id })),
+    ]);
   });
 
   it('AC-1: a creator who is a member of a and b reads /a and /b and not /c', async () => {
