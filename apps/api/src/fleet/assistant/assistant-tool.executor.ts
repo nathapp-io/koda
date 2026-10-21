@@ -1,18 +1,21 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
-import { subject } from '@casl/ability';
-import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
-import { isAgentPrincipal, type AgentPrincipal, type UserPrincipal } from '../../auth/principal/koda-principal.types';
+import { isAgentPrincipal, type AgentPrincipal, type KodaAgentStatus, type UserPrincipal } from '../../auth/principal/koda-principal.types';
+import { runWithActor } from '../../action-context/action-context';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
+import { KeyedMutex } from '../../common/utils/keyed-mutex';
+import { PermissionService } from '../../permissions/permission.service';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import { withProjectRole } from '../../projects/project-context';
 import { stableStringify } from '../sync/stable-json';
 import { MAX_PENDING_ACTIONS, type ActionProposer, type PendingActionRecord } from './actions/pending-action.domain';
 import { approvalModeFor } from './actions/approval-policy';
 import { capText, fenceData, maskSecrets } from './assistant-tool-safety';
-import { ASSISTANT_TOOL_CALL_REPOSITORY, type AssistantToolCallRecord, type AssistantToolCallRepository, type ToolCallContext, type ToolCallOutcome } from './assistant-tool-call.domain';
+import {
+  ASSISTANT_TOOL_CALL_REPOSITORY, type AgentToolCallCreator, type AssistantToolCallRecord, type AssistantToolCallRepository,
+  type ToolCallContext, type ToolCallCreator, type ToolCallOutcome, type UserToolCallCreator,
+} from './assistant-tool-call.domain';
 import { AssistantToolRegistry } from './assistant-tool.registry';
 import { ToolActionError, ToolForbiddenError, ToolInputError, type AssistantTool, type ToolCaller, type ToolContext, type ToolResult } from './assistant-tool.types';
 
@@ -41,7 +44,7 @@ interface ActionScope {
   actor: UserPrincipal;
 }
 
-/** Fleet S5b §1 (US-002): runs a koda tool for the thread's creator, with the permission the creator would have in the web. */
+/** Fleet S5b §1 (US-002): runs a koda tool for the job's requester — a user, or an agent — with the permission they would have in the web. */
 @Injectable()
 export class AssistantToolExecutor {
   private readonly logger = new Logger(AssistantToolExecutor.name);
@@ -49,11 +52,14 @@ export class AssistantToolExecutor {
   /** 2a-D1: attached by `AssistantActionService.onModuleInit`, which is how the two providers stay acyclic. */
   private actions: ActionProposer | null = null;
 
+  /** B1: one critical section per replay key, so a duplicate of a thread call awaits the winner instead of running it. */
+  private readonly replayKeys = new KeyedMutex();
+
   constructor(
     private readonly registry: AssistantToolRegistry,
     @Inject(ASSISTANT_TOOL_CALL_REPOSITORY) private readonly calls: AssistantToolCallRepository,
     private readonly access: ProjectAccessService,
-    private readonly abilities: KodaCaslAbilityFactory,
+    private readonly permissions: PermissionService,
   ) {}
 
   /** 2a-D1: the late binding of the propose side; the constructor is unchanged so no provider depends on the service. */
@@ -64,10 +70,10 @@ export class AssistantToolExecutor {
   /**
    * 2a-D8 step 5 + 3-D12: whether the requester may still run this action's tool. The requester is the action's own
    * actor — the principal that asked for the write, never the approver (3-R3) — re-read now, and their membership and
-   * ability are re-resolved against the project the action acts in (2a-D3), never the thread's home project. A tool
-   * that left the registry, an actor who is gone or disabled, an actor that is not a user (no code default produces
-   * one; koda #301), a requester outside that project and a requester without the tool's ability all answer
-   * `forbidden`, so an approve writes nothing for any of them.
+   * catalog key are re-resolved against the project the action acts in (2a-D3; permissions P1 US-004), never the
+   * thread's home project. A tool that left the registry, an actor who is gone or disabled, an actor that is not a
+   * user (no code default produces one; koda #301), a requester outside that project and a requester who no longer
+   * holds the tool's key all answer `forbidden`, so an approve writes nothing for any of them.
    */
   async checkAction(action: PendingActionRecord): Promise<'ok' | 'forbidden'> {
     return (await this.actionScope(action)) === null ? 'forbidden' : 'ok';
@@ -90,7 +96,10 @@ export class AssistantToolExecutor {
     const scope = await this.actionScope(action);
     if (!scope) return { ok: false, text: `error: ${action.tool} failed` };
     try {
-      const text = await scope.tool.execute(this.actionContext(action, scope.actor), scope.tool.parse(action.input));
+      // Permissions P1 US-001: the approve path also runs the tool inside the requester's action context, so a service
+      // the tool calls attributes its writes to that principal. `actionScope` admits users only, so the type is USER.
+      const text = await runWithActor({ type: 'USER', id: scope.actor.id }, () =>
+        scope.tool.execute(this.actionContext(action, scope.actor), scope.tool.parse(action.input)));
       return { ok: true, text: capText(maskSecrets(text), RESULT_CAP_BYTES) };
     } catch (error) {
       if (error instanceof NotFoundAppException) return { ok: false, text: 'not_found' };
@@ -105,7 +114,10 @@ export class AssistantToolExecutor {
     }
   }
 
-  /** The tool, the requester and the role an action runs with; null when any of the three gates refuses. */
+  /**
+   * The tool, the requester and the role an action runs with; null when the registry, actor, membership or key gate
+   * refuses.
+   */
   private async actionScope(action: PendingActionRecord): Promise<ActionScope | null> {
     const tool = this.registry.get(action.tool);
     if (!tool) return null;
@@ -118,11 +130,10 @@ export class AssistantToolExecutor {
     const role = await this.membership(action.projectId, principal);
     if (role === undefined) return null;
     const actor = withProjectRole(principal, role) as UserPrincipal;
-    if (tool.permission.kind === 'ability') {
-      const { action: caslAction, subject: target } = tool.permission;
-      const ability = await this.abilities.createForUser(actor);
-      if (!ability.can(caslAction as CaslPermissionAction, subject(target, {}))) return null;
-    }
+    // Permissions P1 US-004: the approve re-checks the tool's catalog key in the action's own project, exactly as
+    // the proposing call checked it, so a requester who lost the key between the proposal and the approve writes
+    // nothing. An implicit key answers allowed, as it does on the call path.
+    if (!(await this.can(actor, tool.key, action.projectId))) return null;
     return { tool, actor };
   }
 
@@ -137,14 +148,28 @@ export class AssistantToolExecutor {
       jobId: action.jobId,
       now: new Date(),
       data: (text) => fenceData(maskSecrets(text), token),
+      can: (key) => this.can(actor, key, action.projectId),
     };
   }
 
+  /**
+   * The thread call path. Its replay key `(jobId, toolCallId)` is a critical section, not a read-then-write: a stored
+   * row is answered as a replay, and a duplicate that arrives while the winner is still executing waits for it and then
+   * replays the row the winner stored (branch fix B1). Without that, two concurrent requests carrying one replay key
+   * both read no row, both ran the tool, and the later insert's unique violation only replayed the winning response —
+   * so an agent's thread write (a comment, a ticket batch, a dispatch) landed twice.
+   */
   async execute(call: ToolCall): Promise<ToolResult> {
     const inputHash = sha256(stableStringify(call.input));
-    const stored = await this.calls.findByCall(call.jobId, call.toolCallId);
-    if (stored) return this.replay(stored, call.name, inputHash);
+    return this.replayKeys.run(replayKey(call.jobId, call.toolCallId), async () => {
+      const stored = await this.calls.findByCall(call.jobId, call.toolCallId);
+      if (stored) return this.replay(stored, call.name, inputHash);
+      return this.executeUnstored(call, inputHash);
+    });
+  }
 
+  /** The execution behind a replay key nobody stored: look the tool and its requester up, then run and audit it. */
+  private async executeUnstored(call: ToolCall, inputHash: string): Promise<ToolResult> {
     const tool = this.registry.get(call.name);
     if (!tool) throw new NotFoundAppException({}, 'fleet.assistantTool');
 
@@ -152,12 +177,19 @@ export class AssistantToolExecutor {
     const context = await this.calls.findCallContext(call.jobId);
     if (!context) throw new NotFoundAppException({}, 'fleet.jobs');
 
+    const creator = context.creator;
+    // Permissions P1 US-001: `findCallContext` answers the job's requester, so an agent's turn runs as the agent and a
+    // user's as the user. `disabled` stays a user's own flag: an agent's status is liveness, not access.
+    const agent = isAgentCreator(creator);
     const caller: ToolCaller = {
-      principal: userPrincipal(context.creator),
-      disabled: context.creator.disabled,
+      principal: agent ? agentPrincipal(creator) : userPrincipal(creator),
+      disabled: agent ? false : creator.disabled,
       origin: { kind: 'thread', threadId: context.threadId, jobId: call.jobId, threadKind: context.kind ?? 'REPO', homeProject: context.project },
     };
-    return this.runAndStore(caller, call, tool, inputHash, started);
+    // Thread tool calls arrive on the runner route, which the action-context interceptor leaves outside any context, so
+    // the requester's context is established here: every service a tool calls (`FleetJobsService.dispatch` included)
+    // then attributes its writes with `actorTypeFor` to the requester.
+    return runWithActor({ type: agent ? 'AGENT' : 'USER', id: creator.id }, () => this.runAndStore(caller, call, tool, inputHash, started));
   }
 
   /** Non-thread callers have no replay key; every invocation gets its own audit row. */
@@ -257,16 +289,21 @@ export class AssistantToolExecutor {
     }
   }
 
-  /** The ability check for the role the membership answered, then the tool. */
+  /**
+   * Permissions P1 US-004: the catalog-key check, for the actor the membership answered, in the project the call
+   * acts in — then the tool. The refusal names the tool, its key and the project slug; an implicit key is allowed by
+   * `PermissionService.can` itself, so no tool has to special-case one.
+   */
   private async execParsed(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope): Promise<RunOutcome> {
-    if (tool.permission.kind === 'ability') {
-      const { action, subject: target } = tool.permission;
-      const ability = await this.abilities.createForUser(scope.actor);
-      if (!ability.can(action as CaslPermissionAction, subject(target, {}))) {
-        return { ...refusal('forbidden', `forbidden: ${tool.descriptor.name} needs ${action} ${target} on ${scope.slug}`), projectId: scope.id };
-      }
+    if (!(await this.can(scope.actor, tool.key, scope.id))) {
+      return { ...refusal('forbidden', `forbidden: ${tool.descriptor.name} needs ${tool.key} on ${scope.slug}`), projectId: scope.id };
     }
     return this.execTool(call, tool, caller, scope);
+  }
+
+  /** Whether `actor` holds `key` in `projectId`; the one place the executor reads a permission decision. */
+  private async can(actor: UserPrincipal | AgentPrincipal, key: string, projectId: string): Promise<boolean> {
+    return (await this.permissions.can(actor, key, { projectId })).allowed;
   }
 
   private async execTool(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope): Promise<RunOutcome> {
@@ -280,6 +317,7 @@ export class AssistantToolExecutor {
       jobId: caller.origin.kind === 'thread' ? caller.origin.jobId : null,
       now: new Date(),
       data: (text) => fenceData(maskSecrets(text), token),
+      can: (key) => this.can(scope.actor, key, scope.id),
     };
     if (tool.kind === 'write') return this.writeTool(call, tool, caller, scope, ctx);
     try {
@@ -294,7 +332,9 @@ export class AssistantToolExecutor {
   /** 3-D13/15: resolve policy once, after permission and before preview. Only none and thread-human are served. */
   private async writeTool(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, ctx: ToolContext): Promise<RunOutcome> {
     const name = tool.descriptor.name;
-    const mode = approvalModeFor(caller.origin, name);
+    // Permissions P1 US-001: the caller's type decides the code default — a user's thread write waits for a human, an
+    // agent's runs at once (and every MCP write runs at once, as before).
+    const mode = approvalModeFor(caller.origin, name, isAgentPrincipal(caller.principal) ? 'agent' : 'user');
     if (mode !== 'none' && !(mode === 'human' && caller.origin.kind === 'thread')) {
       this.logger.error(`koda write tool ${name} refused approval mode ${mode} for ${caller.origin.kind}`);
       return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
@@ -388,7 +428,11 @@ export class AssistantToolExecutor {
     }
   }
 
-  /** Step 8: audit and store; a concurrent duplicate answers the stored row instead. */
+  /**
+   * Step 8: audit and store. A concurrent duplicate inside this process never reaches here with the same key (the
+   * replay-key section above serializes it); a duplicate from another process loses on the `(jobId, toolCallId)`
+   * unique constraint and answers the stored row instead.
+   */
   private async store(row: AssistantToolCallRecord): Promise<ToolResult> {
     try {
       await this.calls.record(row);
@@ -405,6 +449,9 @@ export class AssistantToolExecutor {
 type RunCall = { name: string; input: unknown; jobId: string | null; toolCallId: string | null };
 
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
+
+/** B1: the audit's replay key as a mutex key. The `/` separator keeps `('j1', 'c/1')` apart from `('j1/c', '1')`. */
+const replayKey = (jobId: string, toolCallId: string): string => `${jobId}/${toolCallId}`;
 
 const refusal = (outcome: ToolCallOutcome, content: string): RunOutcome => ({ outcome, content });
 
@@ -461,7 +508,7 @@ function parseInput(tool: AssistantTool, input: unknown): { value: unknown } | {
 }
 
 /** The creator acts with the principal their login would produce, without a project role until membership resolves one. */
-function userPrincipal(creator: ToolCallContext['creator']): UserPrincipal {
+function userPrincipal(creator: UserToolCallCreator): UserPrincipal {
   const role = creator.role === 'ADMIN' ? 'ADMIN' : 'MEMBER';
   return {
     actorType: 'user',
@@ -474,5 +521,30 @@ function userPrincipal(creator: ToolCallContext['creator']): UserPrincipal {
     revoked: false,
     authorities: [role],
     extra: { sub: creator.id, email: creator.email, role },
+  };
+}
+
+/** An absent (or non-AGENT) `type` is a user's, so every creator record written before this story still reads. */
+const isAgentCreator = (creator: ToolCallCreator): creator is AgentToolCallCreator => creator.type === 'AGENT';
+
+/**
+ * Permissions P1 US-001: the agent requester acts as the agent its own API key would produce, with no roles or
+ * capabilities of its own granted here — the tool's permission check decides what it may do, as for a user. A PAUSED
+ * agent is blacklisted (the one status that removes access); `disabled` stays false because an agent's status is
+ * liveness, not access.
+ */
+function agentPrincipal(creator: AgentToolCallCreator): AgentPrincipal {
+  return {
+    actorType: 'agent',
+    id: creator.id,
+    name: creator.slug,
+    slug: creator.slug,
+    status: creator.status as KodaAgentStatus,
+    agentRoles: [],
+    capabilities: [],
+    blacklisted: creator.status === 'PAUSED',
+    revoked: false,
+    authorities: [],
+    extra: { slug: creator.slug },
   };
 }

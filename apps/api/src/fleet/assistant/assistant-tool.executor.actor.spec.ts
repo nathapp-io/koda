@@ -11,7 +11,7 @@
  * test/integration/fleet/assistant-action-actor.integration.spec.ts and the end-to-end approve is in
  * test/integration/fleet/assistant-actor-approve.integration.spec.ts.
  */
-import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
+import type { PermissionService } from '../../permissions/permission.service';
 import type { ProjectAccessService } from '../../projects/project-access.service';
 import type { PendingActionRecord } from './actions/pending-action.domain';
 import { AssistantToolExecutor } from './assistant-tool.executor';
@@ -52,13 +52,19 @@ function setup(users: Record<string, UserRow> = {}, opts: { membership?: Error }
   const tool: AssistantTool<Record<string, unknown>> = {
     descriptor: { name: 'koda_add_comment', description: 'd', inputSchema: {} },
     permission: { kind: 'ability', action: 'create', subject: 'Comment' },
+    key: 'comment.create',
     parse: vi.fn((input) => input as Record<string, unknown>),
     execute: vi.fn(async () => 'comment c1 added to OPS-1'),
   };
   const registry = new AssistantToolRegistry();
   registry.register(tool);
   return {
-    executor: new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, new KodaCaslAbilityFactory()),
+    // Permissions P1 US-004: the key check is a `PermissionService` read now; this double allows every key, so the
+    // assertions here stay about the actor the approval resolves.
+    executor: new AssistantToolExecutor(
+      registry, calls, access as unknown as ProjectAccessService,
+      { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService,
+    ),
     tool,
     readUser,
     readContext,

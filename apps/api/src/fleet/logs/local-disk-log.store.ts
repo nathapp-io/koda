@@ -6,7 +6,7 @@ import { dirname, resolve, sep } from 'path';
 import { Readable, Writable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
-import { KeyedMutex } from './keyed-mutex';
+import { KeyedMutex } from '../../common/utils/keyed-mutex';
 import type { AppendResult, LogStore } from './log-store';
 
 /** @design linux-only: the path regex matches `/` separators; the `resolve + startsWith(root + sep)` check below is the path-traversal defence and is platform-portable. */

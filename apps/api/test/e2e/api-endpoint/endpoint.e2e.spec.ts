@@ -18,6 +18,7 @@ import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { MembershipService } from '../../../src/permissions/membership.service';
 import { PrismaClient, ProjectMember } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { SKILL_RESOLVER, SkillResolver } from '../../../src/skills/skill-resolver';
@@ -3321,13 +3322,14 @@ describeIntegration('API Integration Tests', () => {
       } finally { await db().chatThread.delete({ where: { id: thread.id } }); }
     });
 
-    it('workspace POST /threads refuses repo fields and non-user principals', async () => {
+    it('workspace POST /threads refuses repo fields and a principal without thread.workspace.create', async () => {
       const res = await request(httpServer).post('/api/threads').set('Authorization', `Bearer ${world.tokens.dev}`)
         .send({ title: 'Workspace', backend: { kind: 'native' }, repoId: world.repoId }).expect(400);
       refusal(res, 'threads.input.-2', { reason: 'workspaceFields' });
       const agentRes = await request(httpServer).post('/api/threads').set('Authorization', `Bearer ${agentApiKey}`)
         .send({ title: 'Workspace', backend: { kind: 'native' } }).expect(403);
-      refusal(agentRes, 'threads.principal.403');
+      // Permissions P1 US-003: an agent is refused by the key it does not hold, not by its principal type.
+      refusal(agentRes, 'permissions.40003');
     });
 
     it('US-003 AC1: creates an active thread with repo defaults and caller identity', async () => {
@@ -3372,16 +3374,25 @@ describeIntegration('API Integration Tests', () => {
 
     it('US-003 AC5: refuses thread creation by a project viewer', async () => {
       await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.viewer } }, data: { role: 'VIEWER' } });
+      // Permissions P1 US-002: the route key is decided from the effective-permission cache, and this row is written
+      // under it rather than through a membership route, so the cache is dropped explicitly.
+      await app.get(MembershipService).invalidatePermissions();
       try {
         await createThread('viewer-denied', world.tokens.viewer).expect(403);
       } finally {
         await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'DEVELOPER' } });
+        await app.get(MembershipService).invalidatePermissions();
       }
     });
 
-    it('US-003 AC6: refuses an agent principal with the thread principal message', async () => {
-      const res = await createThread('agent-denied', agentApiKey).expect(403);
-      refusal(res, 'threads.principal.403');
+    it('US-003 AC6: creates a thread for an agent holding the developer role (thread.create, US-002)', async () => {
+      // Permissions P1 US-002: no principal-type refusal is left on the route, and this agent's AgentRoleEntry
+      // DEVELOPER reaches p1 through its roster row, so it holds thread.create and the create succeeds as an AGENT.
+      const res = await createThread('agent-thread', agentApiKey).expect(201);
+
+      expect(body<{ createdByType: string }>(res).createdByType).toBe('AGENT');
+      expect(await db().chatThread.findUniqueOrThrow({ where: { id: body<{ id: string }>(res).id }, select: { createdById: true } }))
+        .toEqual({ createdById: agentId });
     });
 
     it('US-003 AC7: refuses create when threads are disabled', async () => {
@@ -3514,16 +3525,19 @@ describeIntegration('API Integration Tests', () => {
       expect(job.maxCostUsd.toString()).toBe('2');
     });
 
-    it('US-006 AC-14: denies a thread creator whose project role no longer permits FleetJob creation', async () => {
+    it('US-006 AC-14: denies a thread creator whose project role no longer holds thread.plan (403 permissions)', async () => {
       const thread = body<{ id: string }>(await createThread('plan-viewer').expect(201));
       await db().chatThread.update({ where: { id: thread.id }, data: { specPublished: true } });
       await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'VIEWER' } });
+      // The role row is written under the effective-permission cache (US-002), so drop it explicitly.
+      await app.get(MembershipService).invalidatePermissions();
       try {
         const denied = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
           .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(403);
-        expect(denied.body.message).toBe('projects.40003');
+        refusal(denied, 'permissions.40003');
       } finally {
         await db().projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'DEVELOPER' } });
+        await app.get(MembershipService).invalidatePermissions();
       }
     });
 
@@ -3672,11 +3686,12 @@ describeIntegration('API Integration Tests', () => {
       expect(assign?.payload).not.toHaveProperty('expectBranch');
     });
 
-    it('US-007 AC-7: refuses a run by a project member who is not the thread creator', async () => {
+    it('US-007 AC-7: refuses a run by a project member who is not the thread creator (403 permissions)', async () => {
       const thread = await newThread('run-noncreator', { createdById: world.ids.root });
       const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/run`)
         .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(403);
-      threadMessage(res, 'threads.notCreator.403');
+      // US-002: a `.own` holder passes the route key and the service keeps the creator compare, now `permissions`.
+      threadMessage(res, 'permissions.40003');
     });
 
     it('US-007 AC-8: thread detail reports the run job after a run was created', async () => {
@@ -4037,11 +4052,11 @@ describeIntegration('API Integration Tests', () => {
       ]);
     });
 
-    it('US-007 AC3: stop denies a developer who is not the creator', async () => {
+    it('US-007 AC3: stop denies a developer who is not the creator (403 permissions)', async () => {
       const { thread } = await liveSession('stop-noncreator', { createdById: world.ids.root });
       const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/stop`)
         .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(403);
-      threadMessage(res, 'threads.notCreator.403');
+      threadMessage(res, 'permissions.40003');
     });
 
     it('US-007 AC4: end-session queues a close command for the live runner epoch', async () => {
@@ -4085,11 +4100,11 @@ describeIntegration('API Integration Tests', () => {
       expect(body<{ status: string }>(res).status).toBe('ARCHIVED');
     });
 
-    it('US-007 AC10: developer cannot archive another creator thread', async () => {
+    it('US-007 AC10: developer cannot archive another creator thread (403 permissions)', async () => {
       const thread = await newThread('archive-noncreator', { createdById: world.ids.root });
       const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/archive`)
         .set('Authorization', `Bearer ${world.tokens.dev}`).send({}).expect(403);
-      threadMessage(res, 'threads.notCreator.403');
+      threadMessage(res, 'permissions.40003');
     });
 
     it('US-001 AC1: thread detail answers a sendRefusal fact (null with nothing blocking)', async () => {
@@ -4200,13 +4215,14 @@ describeIntegration('API Integration Tests', () => {
           .send({ title: 'Workspace read', backend: { kind: 'native' }, homeProject: projectSlug }).expect(201)).id;
       });
 
-      it('GET /api/threads lists the caller’s workspace threads and refuses an agent key or bad query', async () => {
+      it('GET /api/threads lists the caller’s workspace threads and refuses a principal without the read key', async () => {
         const list = body<{ items: Array<Record<string, unknown>>; threadsEnabled: boolean }>(
           await request(httpServer).get('/api/threads').set('Authorization', `Bearer ${world.tokens.dev}`).expect(200));
         expect(list.items.find((item) => item.id === workspaceId)).toMatchObject({ kind: 'WORKSPACE', homeProject: { slug: projectSlug } });
         expect(list.items.every((item) => item.kind === 'WORKSPACE')).toBe(true);
         expect(list.threadsEnabled).toBe(true);
-        refusal(await request(httpServer).get('/api/threads').set('Authorization', `Bearer ${agentApiKey}`).expect(403), 'threads.principal.403');
+        // Permissions P1 US-003: the seeded agent role holds no `thread.workspace.read`, so the key refuses it.
+        refusal(await request(httpServer).get('/api/threads').set('Authorization', `Bearer ${agentApiKey}`).expect(403), 'permissions.40003');
         refusal(await request(httpServer).get('/api/threads?page=0').set('Authorization', `Bearer ${world.tokens.dev}`).expect(400), 'threads.input.400', { reason: 'page' });
       });
 

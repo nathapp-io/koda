@@ -17,7 +17,7 @@ import {
   HybridSearchResultItem,
   ScoreBreakdown,
 } from './dto/hybrid-search.dto';
-import { simpleFtsScore } from './rag.service';
+import { simpleFtsScore } from './rag-scoring';
 
 const ANSWER_WEIGHTS = {
   vectorScore: 0.4,

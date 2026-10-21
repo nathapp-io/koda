@@ -317,4 +317,165 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
       );
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Permissions P1 US-008 — ownerType and the supersede hook
+  // -------------------------------------------------------------------------
+
+  describe('ownerType (US-008)', () => {
+    /** One upsert against a client whose active-row read answers `existing`. */
+    const withClient = (existing: unknown, created: unknown = makeModelRow()) => {
+      const client = {
+        findFirst: vi.fn().mockResolvedValue(existing),
+        create: vi.fn().mockResolvedValue(created),
+        update: vi.fn().mockResolvedValue({}),
+      };
+      mockTransaction.mockImplementation((fn: (c: unknown) => Promise<unknown>) => fn({ memoryItem: client }));
+      return client;
+    };
+
+    it('maps a USER ownerType onto the domain item', async () => {
+      mockMemoryItem.findFirst.mockResolvedValue(makeModelRow({ ownerType: 'USER' }));
+
+      const found = await repository.findActive('project-123', 'FACT', 'ticket:1', 'status');
+
+      expect(found?.ownerType).toBe('USER');
+    });
+
+    it('answers null for a null ownerType and for a value outside the union', async () => {
+      for (const stored of [null, 'ROBOT']) {
+        mockMemoryItem.findFirst.mockResolvedValue(makeModelRow({ ownerType: stored }));
+
+        const found = await repository.findActive('project-123', 'FACT', 'ticket:1', 'status');
+
+        expect(found?.ownerType).toBeNull();
+      }
+    });
+
+    it('stores the ownerType an input carries', async () => {
+      const client = withClient(null);
+
+      await repository.upsert({
+        projectId: 'project-123',
+        kind: MemoryKind.FACT,
+        subject: 'ticket:1',
+        predicate: 'status',
+        ownerId: 'agent-1',
+        ownerType: 'AGENT',
+      });
+
+      expect(client.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ ownerId: 'agent-1', ownerType: 'AGENT' }) }),
+      );
+    });
+
+    it('stores null when the input names no ownerType (a system writer)', async () => {
+      const client = withClient(null);
+
+      await repository.upsert({
+        projectId: 'project-123',
+        kind: MemoryKind.FACT,
+        subject: 'ticket:1',
+        predicate: 'status',
+        ownerId: 'user-1',
+      });
+
+      expect(client.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ ownerType: null }) }),
+      );
+    });
+  });
+
+  describe('upsert beforeSupersede hook (US-008)', () => {
+    const existing = makeModelRow({ id: 'old-mem', ownerId: 'user-2', ownerType: 'USER' });
+
+    const withClient = (existingRow: unknown) => {
+      const client = {
+        findFirst: vi.fn().mockResolvedValue(existingRow),
+        create: vi.fn().mockResolvedValue(makeModelRow({ id: 'new-mem' })),
+        update: vi.fn().mockResolvedValue({}),
+      };
+      mockTransaction.mockImplementation((fn: (c: unknown) => Promise<unknown>) => fn({ memoryItem: client }));
+      return client;
+    };
+
+    it('runs the hook with the active item, after reading it and before superseding it', async () => {
+      const client = withClient(existing);
+      const seen: string[] = [];
+      let updateCallsWhenCalled = -1;
+      const beforeSupersede = vi.fn(async (item: { id: string }) => {
+        seen.push(item.id);
+        updateCallsWhenCalled = client.update.mock.calls.length;
+      });
+
+      await repository.upsert(
+        { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status', object: 'new' },
+        { beforeSupersede },
+      );
+
+      expect(seen).toEqual(['old-mem']);
+      expect(updateCallsWhenCalled).toBe(0);
+      expect(client.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'old-mem' } }),
+      );
+    });
+
+    it('writes nothing when the hook throws', async () => {
+      const client = withClient(existing);
+      const refusal = new Error('refused');
+
+      await expect(
+        repository.upsert(
+          { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status', object: 'new' },
+          { beforeSupersede: async () => { throw refusal; } },
+        ),
+      ).rejects.toBe(refusal);
+
+      expect(client.update).not.toHaveBeenCalled();
+      expect(client.create).not.toHaveBeenCalled();
+    });
+
+    it('does not run the hook on the identical-restatement no-op path', async () => {
+      const sameRow = makeModelRow({
+        object: 'active', sourceType: 'ticket_event', sourceId: 'evt-1',
+      });
+      const client = withClient(sameRow);
+      const beforeSupersede = vi.fn();
+
+      const result = await repository.upsert(
+        {
+          projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status',
+          object: 'active', sourceType: 'ticket_event', sourceId: 'evt-1',
+        },
+        { beforeSupersede },
+      );
+
+      expect(beforeSupersede).not.toHaveBeenCalled();
+      expect(client.create).not.toHaveBeenCalled();
+      expect(result.id).toBe('mem-1');
+    });
+  });
+
+  describe('ticketInProject (US-008)', () => {
+    const mockTicket = { count: vi.fn() };
+
+    beforeEach(() => {
+      (mockPrismaClient as unknown as Record<string, unknown>)['ticket'] = mockTicket;
+    });
+
+    it('counts a non-deleted ticket of that project and id', async () => {
+      mockTicket.count.mockResolvedValue(1);
+
+      await expect(repository.ticketInProject('project-123', 'ticket-9')).resolves.toBe(true);
+      expect(mockTicket.count).toHaveBeenCalledWith({
+        where: { id: 'ticket-9', projectId: 'project-123', deletedAt: null },
+      });
+    });
+
+    it('answers false when no live ticket of that project has the id', async () => {
+      mockTicket.count.mockResolvedValue(0);
+
+      await expect(repository.ticketInProject('project-123', 'ticket-other-project')).resolves.toBe(false);
+    });
+  });
 });

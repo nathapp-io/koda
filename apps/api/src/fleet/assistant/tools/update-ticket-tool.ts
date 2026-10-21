@@ -2,7 +2,7 @@ import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { Priority, TicketStatus } from '../../../common/enums';
 import { UpdateTicketDto } from '../../../tickets/dto/update-ticket.dto';
 import { validateTransition } from '../../../tickets/state-machine/ticket-transitions';
-import { TicketTransitionsService } from '../../../tickets/state-machine/ticket-transitions.service';
+import type { TicketTransitionsService } from '../../../tickets/state-machine/ticket-transitions.service';
 import { TicketsService } from '../../../tickets/tickets.service';
 import { maskSecrets } from '../assistant-tool-safety';
 import { KODA_UPDATE_TICKET } from '../koda-tool-descriptors';
@@ -23,6 +23,8 @@ const PRIORITIES: readonly string[] = Object.values(Priority);
 
 /** 2b-R3: the start move is the only status this tool sets — every other move needs a typed comment it does not take. */
 const START_STATUS: TicketStatus = TicketStatus.IN_PROGRESS;
+/** Permissions P1 US-004: the catalog key a status change needs, the same key the ticket PATCH route's edge carries. */
+const START_KEY = 'ticket.transition.start';
 
 const isPriority = (value: unknown): value is Priority => typeof value === 'string' && PRIORITIES.includes(value);
 
@@ -41,10 +43,16 @@ export interface UpdateTicketInput {
  */
 export function updateTicketTool(deps: {
   tickets: TicketsService;
+  /**
+   * Permissions P1 US-004: the start check reads `ctx.can('ticket.transition.start')` now, so
+   * `TicketTransitionsService.assertTransitionPermission` is no longer called. The dependency stays until
+   * `permissions-p1-cleanup` removes the legacy method and its callers.
+   */
   transitions: TicketTransitionsService;
 }): AssistantTool<UpdateTicketInput> {
   return {
     descriptor: KODA_UPDATE_TICKET,
+    key: 'ticket.update',
     // 2b1-D4: the same CASL tuple the ticket PATCH route enforces (`tickets.controller.ts`).
     permission: { kind: 'ability', action: 'update', subject: 'Ticket' },
     kind: 'write',
@@ -83,8 +91,8 @@ export function updateTicketTool(deps: {
       }
       if (input.priority !== undefined) lines.push(`priority: ${ticket.priority} -> ${input.priority}`);
       if (input.status !== undefined) {
-        // 2b1-D6: the ability first, so a requester without it answers `forbidden` whatever the ticket's status.
-        await assertTransitionPermission(deps, ctx);
+        // 2b1-D6 + US-004: the key first, so a requester without it answers `forbidden` whatever the ticket's status.
+        await assertTransitionKey(ctx);
         if (!canStart(ticket.status as TicketStatus)) {
           throw new ToolInputError('status', `${ticket.ref} is ${ticket.status}; only a ${orList(STARTABLE)} ticket can be started`);
         }
@@ -108,9 +116,9 @@ export function updateTicketTool(deps: {
         await deps.tickets.update(ctx.projectSlug, input.ref, toDto(input), ctx.actor);
       } catch (error) {
         // The service checks `transition` itself (Final-review Finding B), so its refusal is the same one the
-        // preview would have raised; the action quotes the ability the requester is missing.
+        // preview would have raised; the action quotes the key the requester is missing (permissions P1 US-004).
         if (error instanceof ForbiddenAppException) {
-          throw new ToolActionError(`forbidden: ${input.ref} needs transition Ticket`);
+          throw new ToolActionError(`forbidden: ${input.ref} needs ${START_KEY}`);
         }
         throw error;
       }
@@ -120,17 +128,13 @@ export function updateTicketTool(deps: {
 }
 
 /**
- * `TicketsService.update` needs `transition` for a status change and answers `ForbiddenAppException` without it.
- * The tool re-checks it in the preview so the user is told before approving; the refusal is a `ToolForbiddenError`
- * (2b1-D1), which the executor words as `forbidden: koda_update_ticket needs transition Ticket on <slug>`.
+ * `TicketsService.update` needs `ticket.transition.start` for a status change and answers `ForbiddenAppException`
+ * without it. The tool re-checks the same key in the preview so the user is told before approving; the refusal is a
+ * `ToolForbiddenError` (2b1-D1), which the executor words as
+ * `forbidden: koda_update_ticket needs ticket.transition.start on <slug>`.
  */
-async function assertTransitionPermission(deps: { transitions: TicketTransitionsService }, ctx: ToolContext): Promise<void> {
-  try {
-    await deps.transitions.assertTransitionPermission(ctx.actor);
-  } catch (error) {
-    if (error instanceof ForbiddenAppException) throw new ToolForbiddenError('transition Ticket');
-    throw error;
-  }
+async function assertTransitionKey(ctx: ToolContext): Promise<void> {
+  if (!(await ctx.can(START_KEY))) throw new ToolForbiddenError(START_KEY);
 }
 
 /**

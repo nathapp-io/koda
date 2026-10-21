@@ -9,6 +9,7 @@ import {
   ProjectMemoryQuery,
   MemoryItemInput,
   MemoryItem,
+  MemoryOwnerType,
 } from './memory-item-repository';
 
 export function buildActiveKey(_projectId: string, kind: string, subject: string, predicate: string): string {
@@ -19,6 +20,21 @@ export interface MemoryDedupKey {
   kind: string;
   subject: string;
   predicate: string;
+}
+
+/**
+ * Permissions P1 US-008: what `upsert` does inside its transaction, after reading the active item of the
+ * key and before superseding it. A throw rolls the transaction back, so a refused supersede writes
+ * nothing at all. `beforeSupersede` is not called on the identical-restatement no-op path, which
+ * supersedes nothing.
+ */
+export interface MemoryUpsertOptions {
+  beforeSupersede?: (existing: MemoryItem) => Promise<void>;
+}
+
+/** The stored owner kind, read back as the union the domain uses; anything else is a system item. */
+function ownerTypeOf(model: MemoryItemModel): MemoryOwnerType | null {
+  return model.ownerType === 'USER' || model.ownerType === 'AGENT' ? model.ownerType : null;
 }
 
 @Injectable()
@@ -45,6 +61,7 @@ export class PrismaMemoryItemRepository
       object: m.object ?? undefined,
       activeKey: m.activeKey ?? undefined,
       ownerId: m.ownerId ?? undefined,
+      ownerType: ownerTypeOf(m),
       sourceType: m.sourceType ?? undefined,
       sourceId: m.sourceId ?? undefined,
       status: m.status,
@@ -66,6 +83,7 @@ export class PrismaMemoryItemRepository
       object: domain.object ?? null,
       activeKey: domain.activeKey ?? null,
       ownerId: domain.ownerId ?? null,
+      ownerType: domain.ownerType ?? null,
       sourceType: domain.sourceType ?? null,
       sourceId: domain.sourceId ?? null,
       status: domain.status,
@@ -85,6 +103,7 @@ export class PrismaMemoryItemRepository
     if (patch.object !== undefined) data.object = patch.object ?? null;
     if (patch.activeKey !== undefined) data.activeKey = patch.activeKey ?? null;
     if (patch.ownerId !== undefined) data.ownerId = patch.ownerId ?? null;
+    if (patch.ownerType !== undefined) data.ownerType = patch.ownerType ?? null;
     if (patch.sourceType !== undefined) data.sourceType = patch.sourceType ?? null;
     if (patch.sourceId !== undefined) data.sourceId = patch.sourceId ?? null;
     if (patch.status !== undefined) data.status = patch.status;
@@ -152,7 +171,7 @@ export class PrismaMemoryItemRepository
     return models.map((m) => this.toDomain(m));
   }
 
-  async upsert(item: MemoryItemInput): Promise<MemoryItem> {
+  async upsert(item: MemoryItemInput, options?: MemoryUpsertOptions): Promise<MemoryItem> {
     return this.prisma.client.$transaction(
       async (client) => {
         const db = client as unknown as PrismaClient;
@@ -182,6 +201,11 @@ export class PrismaMemoryItemRepository
         }
 
         if (existingActive) {
+          // Permissions P1 US-008: the supersede check runs here — inside the transaction, after the active
+          // row was read and before it is touched — so a refusal rolls the whole transaction back and
+          // nothing (the supersede, the insert) is written. The no-op path above never supersedes, so it
+          // never asks.
+          await options?.beforeSupersede?.(this.toDomain(existingActive));
           await db.memoryItem.update({
             where: { id: existingActive.id },
             data: { activeKey: null, status: 'superseded', supersededBy: undefined },
@@ -197,6 +221,7 @@ export class PrismaMemoryItemRepository
             object: item.object,
             activeKey,
             ownerId: item.ownerId,
+            ownerType: item.ownerType ?? null,
             sourceType: item.sourceType,
             sourceId: item.sourceId,
             status: item.status ?? 'active',
@@ -210,6 +235,18 @@ export class PrismaMemoryItemRepository
       },
       { isolationLevel: 'Serializable' },
     );
+  }
+
+  /**
+   * Permissions P1 US-008: whether a non-deleted ticket of `projectId` has this id. `POST /memory/extract`
+   * reads it so a `ticket_event` cannot name a ticket of another project; MemoryModule does not import the
+   * tickets module, and this is the same cross-table read `prisma-canonical-state.repository.ts` makes.
+   */
+  async ticketInProject(projectId: string, ticketId: string): Promise<boolean> {
+    const count = await this.prisma.client.ticket.count({
+      where: { id: ticketId, projectId, deletedAt: null },
+    });
+    return count > 0;
   }
 
   async findActive(

@@ -574,7 +574,9 @@ describeIntegration('US-002 project membership gate (PG)', () => {
       method: 'post',
       url: () => '/api/projects/team/kb/import/graphify',
       body: () => ({ nodes: [{ id: 'us002-n1', label: 'US-002' }], links: [] }),
-      member: 'dev',
+      // US-007: `kb.graphify.import` is a Project Admin key — a Developer's grant does not reach it — so the
+      // admitted caller for this row is the global ADMIN member (who holds every project key).
+      member: 'adminMember',
     },
     {
       label: 'GET /api/projects/:slug',
@@ -598,7 +600,7 @@ describeIntegration('US-002 project membership gate (PG)', () => {
       expect(res.status).toBe(403);
     }, TEST_TIMEOUT_MS);
 
-    it(`AC12: ${matrixCase.label} returns a status other than 403 and 404 for a member DEVELOPER`, async () => {
+    it(`AC12: ${matrixCase.label} returns a status other than 403 and 404 for its admitted member`, async () => {
       const res = await send(matrixCase.method, matrixCase.url(), matrixCase.member, matrixCase.body?.());
 
       expect(res.status).not.toBe(403);

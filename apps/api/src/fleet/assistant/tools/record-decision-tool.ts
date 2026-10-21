@@ -1,9 +1,14 @@
 import { MemoryKind } from '../../../common/enums';
 import type { ExtractionService } from '../../../memory/extraction.service';
 import type { PrismaMemoryItemRepository } from '../../../memory/prisma-memory-item.repository';
+import {
+  MemoryReplaceRefusedError,
+  ownerTypeFor,
+  type MemoryWriteGuard,
+} from '../../../memory/memory-write.guard';
 import { maskSecrets } from '../assistant-tool-safety';
 import { KODA_RECORD_DECISION } from '../koda-tool-descriptors';
-import { ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
+import { ToolActionError, ToolForbiddenError, ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
 import { asRecord } from './tool-input';
 
 /**
@@ -38,9 +43,11 @@ export interface RecordDecisionInput {
 export function recordDecisionTool(deps: {
   memory: PrismaMemoryItemRepository;
   extraction: ExtractionService;
+  guard: MemoryWriteGuard;
 }): AssistantTool<RecordDecisionInput> {
   return {
     descriptor: KODA_RECORD_DECISION,
+    key: 'memory.decision.record',
     // 2b1-D4: the memory write routes check project membership (`memory.controller.ts`), so this tool does too.
     permission: { kind: 'member' },
     kind: 'write',
@@ -67,6 +74,18 @@ export function recordDecisionTool(deps: {
      * records into. The whole text is masked, because the topic, the decision and the rationale are user-written.
      */
     async preview(ctx: ToolContext, input: RecordDecisionInput): Promise<string> {
+      // Permissions P1 US-008: the decision this approval supersedes is `agent:<requester>` / the topic, so a
+      // proposal that would replace another principal's decision is refused before it exists.
+      try {
+        await deps.guard.assertMayReplace(ctx.actor, ctx.projectId, {
+          kind: MemoryKind.DECISION,
+          subject: `agent:${ctx.actor.id}`,
+          predicate: input.topic,
+        });
+      } catch (error) {
+        if (error instanceof MemoryReplaceRefusedError) throw new ToolForbiddenError('memory.update');
+        throw error;
+      }
       const lines = [`Record a decision in ${ctx.projectSlug} on "${input.topic}": ${input.decision}`];
       if (input.rationale !== undefined) lines.push(`Rationale: ${input.rationale}`);
       const active = await deps.memory.findActive(
@@ -92,17 +111,27 @@ export function recordDecisionTool(deps: {
         input.rationale === undefined
           ? input.decision
           : `${input.decision}${RATIONALE_SEPARATOR}Rationale: ${input.rationale}`;
-      const recorded = await deps.extraction.recordDecision(
-        {
-          projectId: ctx.projectId,
-          actorId: ctx.actor.id,
-          topic: input.topic,
-          decision,
-          sourceId: ctx.threadId === null ? `mcp:${ctx.actor.id}` : `thread:${ctx.threadId}`,
-        },
-        deps.memory,
-      );
-      return `decision memory:${recorded.memoryId} recorded`;
+      try {
+        const recorded = await deps.extraction.recordDecision(
+          {
+            projectId: ctx.projectId,
+            actorId: ctx.actor.id,
+            topic: input.topic,
+            decision,
+            sourceId: ctx.threadId === null ? `mcp:${ctx.actor.id}` : `thread:${ctx.threadId}`,
+            ownerType: ownerTypeFor(ctx.actor),
+          },
+          deps.memory,
+          { beforeSupersede: deps.guard.replaceCheck(ctx.actor, ctx.projectId) },
+        );
+        return `decision memory:${recorded.memoryId} recorded`;
+      } catch (error) {
+        // Permissions P1 US-008: a supersede that became forbidden between the preview and the approve.
+        if (error instanceof MemoryReplaceRefusedError) {
+          throw new ToolActionError(`forbidden: memory:${error.itemId} needs memory.update`);
+        }
+        throw error;
+      }
     },
   };
 }

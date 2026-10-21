@@ -317,18 +317,18 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
   describe('deleteBySource — AC: Invalid projectId rejection before deletion', () => {
     it('throws ForbiddenAppException when deleteBySource() is called with empty projectId', async () => {
       // Validation must occur before any delete operations
-      await expect(ragService.deleteBySource('', 'source-id')).rejects.toThrow(ForbiddenAppException);
+      await expect(ragService.deleteBySource('', 'doc', 'source-id')).rejects.toThrow(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException when deleteBySource() is called with invalid projectId format', async () => {
       // Format validation must prevent delete operations
-      await expect(ragService.deleteBySource('bad-id', 'source-id')).rejects.toThrow(ForbiddenAppException);
+      await expect(ragService.deleteBySource('bad-id', 'doc', 'source-id')).rejects.toThrow(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException when deleteBySource() is called with non-existent projectId', async () => {
       // Existence check must prevent delete operations
       const validFormatButNonExistentId = 'clgtz5zrp0000jvz4z6x8y9z9';
-      await expect(ragService.deleteBySource(validFormatButNonExistentId, 'source-id')).rejects.toThrow(ForbiddenAppException);
+      await expect(ragService.deleteBySource(validFormatButNonExistentId, 'doc', 'source-id')).rejects.toThrow(ForbiddenAppException);
     });
   });
 

@@ -98,6 +98,7 @@ function commentLines(ctx: ToolContext, comments: readonly CommentResponseDto[],
 export function searchTicketsTool(tickets: TicketsService): AssistantTool<SearchTicketsInput> {
   return {
     descriptor: KODA_SEARCH_TICKETS,
+    key: 'ticket.read',
     // 1b-D1: the CASL tuple the REST ticket routes enforce; every user holds it through READABLE_RESOURCES.
     permission: { kind: 'ability', action: 'read', subject: 'Ticket' },
     parse(input: unknown): SearchTicketsInput {
@@ -140,6 +141,7 @@ export function searchTicketsTool(tickets: TicketsService): AssistantTool<Search
 export function getTicketTool(deps: { tickets: TicketsService; links: TicketLinksService; comments: CommentsService }): AssistantTool<GetTicketInput> {
   return {
     descriptor: KODA_GET_TICKET,
+    key: 'ticket.read',
     permission: { kind: 'ability', action: 'read', subject: 'Ticket' },
     parse(input: unknown): GetTicketInput {
       const ref = asRecord(input).ref;

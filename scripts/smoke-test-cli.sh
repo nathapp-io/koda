@@ -385,8 +385,11 @@ assert "koda kb list"        "manual\|smoke\|Source\|ID"   "$(koda kb list --pro
 assert "koda kb search"      "result\|score\|deploy\|no\|found\|No"  "$(koda kb search --project koda --query 'deployment')"
 # NOTE: kb optimize/delete are admin-only endpoints. Smoke CLI runs with agent API key,
 # so expected behavior here is authorization failure, not success.
-assert "koda kb optimize (agent unauthorized)" "access denied\|forbidden" "$(koda kb optimize --project koda)"
-assert "koda kb delete (agent unauthorized)"   "access denied\|forbidden" "$(koda kb delete --project koda --source-id smoke-doc-1 --force)"
+# Permissions P1 (US-007): these routes now check the `kb.optimize` and
+# `kb.document.delete` keys, so the agent gets the `permissions` 403
+# ("You do not have permissions to perform this action").
+assert "koda kb optimize (agent unauthorized)" "You do not have permissions\|forbidden" "$(koda kb optimize --project koda)"
+assert "koda kb delete (agent unauthorized)"   "You do not have permissions\|forbidden" "$(koda kb delete --project koda --source-id smoke-doc-1 --force)"
 
 # =============================================================================
 # STEP 18: Label delete

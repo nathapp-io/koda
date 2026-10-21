@@ -1,6 +1,6 @@
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
-import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
 import type { AgentPrincipal } from '../../auth/principal/koda-principal.types';
+import type { PermissionService } from '../../permissions/permission.service';
 import type { ProjectAccessService } from '../../projects/project-access.service';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
@@ -18,11 +18,13 @@ function setup(workspace = false) {
     record: vi.fn(async row => { rows.push(row); }),
     findCallContext: vi.fn(async () => ({ project: { id: 'p1', slug: 'web' }, threadId: 't1', creator: { id: 'u1', email: 'dev@test', role: 'MEMBER', disabled: false } })),
   };
-  const tool: AssistantTool = { descriptor: { name: workspace ? 'koda_my_projects' : 'koda_get_ticket', description: '', inputSchema: {} }, scope: workspace ? 'workspace' : 'project', permission: { kind: 'member' }, parse: vi.fn(input => input), execute: vi.fn(async () => 'WEB-1') };
+  const tool: AssistantTool = { descriptor: { name: workspace ? 'koda_my_projects' : 'koda_get_ticket', description: '', inputSchema: {} }, scope: workspace ? 'workspace' : 'project', permission: { kind: 'member' }, key: workspace ? 'project.read' : 'ticket.read', parse: vi.fn(input => input), execute: vi.fn(async () => 'WEB-1') };
   const registry = new AssistantToolRegistry();
   registry.register(tool);
   const access = { findProjectIdBySlug: vi.fn(async () => 'p1'), resolveMembership: vi.fn(async (): Promise<string | null> => null) };
-  return { executor: new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, new KodaCaslAbilityFactory()), calls, rows, tool, access };
+  // Permissions P1 US-004: every key is allowed here, so each case stays about the caller's principal and origin.
+  const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
+  return { executor: new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions), calls, rows, tool, access, permissions };
 }
 const mcpCall = { name: 'koda_get_ticket', input: { project: 'web', ref: 'WEB-1' } };
 describe('caller-based executor', () => {
@@ -76,10 +78,13 @@ describe('caller-based executor', () => {
     expect(await executor.executeFor(caller, mcpCall)).toEqual({ content: 'not_found: project', isError: true });
     expect(tool.execute).not.toHaveBeenCalled();
   });
-  it('agents retain their CASL and cannot create FleetJob', async () => {
-    const { executor, tool } = setup();
-    tool.permission = { kind: 'ability', action: 'create', subject: 'FleetJob' };
-    expect(await executor.executeFor(caller, mcpCall)).toEqual({ content: 'forbidden: koda_get_ticket needs create FleetJob on web', isError: true });
+  it('an agent whose catalog key is refused is refused the call, and CASL is not consulted', async () => {
+    const { executor, tool, permissions } = setup();
+    vi.mocked(permissions.can).mockResolvedValueOnce({ allowed: false, reason: 'not-granted' });
+    tool.key = 'fleet.job.dispatch';
+    expect(await executor.executeFor(caller, mcpCall)).toEqual({ content: 'forbidden: koda_get_ticket needs fleet.job.dispatch on web', isError: true });
     expect(tool.execute).not.toHaveBeenCalled();
+    // The key is asked for the agent itself, in the project the call resolved (permissions P1 US-004).
+    expect(permissions.can).toHaveBeenCalledWith(principal, 'fleet.job.dispatch', { projectId: 'p1' });
   });
 });

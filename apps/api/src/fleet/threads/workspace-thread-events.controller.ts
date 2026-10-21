@@ -6,7 +6,7 @@ import { SkipThrottle } from '@nathapp/nestjs-throttler';
 import { Observable } from 'rxjs';
 import { kodaTokenExtractor } from '../../auth/auth.module';
 import { JwtAuthProvider } from '../../auth/jwt-auth.provider';
-import { isUserPrincipal, KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { ILiveConfig, LIVE_CFG } from '../../config/live.config';
 import { decodeJwtPayload, tokenExpiryMs } from '../../live/jwt-payload';
 import { createLiveStream } from '../../live/live-stream';
@@ -22,8 +22,9 @@ interface WorkspaceThreadEventsRequest {
 
 /**
  * Authorization and capacity checks run before Nest opens the SSE response (as `ThreadEventsGuard`). Unlike the
- * project stream there is no project membership: the workspace scope's own read already answers 404 to anyone but the
- * creator, global admins included (fleet S5b 1d-D2), and it answers before a stream slot is acquired.
+ * project stream there is no project membership and, since permissions P1 US-003, no principal-type refusal either:
+ * the workspace scope's own read already answers 404 to anyone but the creator, global admins and agents included
+ * (fleet S5b 1d-D2), and it answers before a stream slot is acquired. The JWT check below is unchanged.
  */
 @Injectable()
 export class WorkspaceThreadEventsGuard implements CanActivate {
@@ -36,7 +37,7 @@ export class WorkspaceThreadEventsGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<WorkspaceThreadEventsRequest>();
     const principal = req.user;
-    if (!principal || !isUserPrincipal(principal)) throw new ForbiddenAppException({}, 'threads.principal');
+    if (!principal) throw new ForbiddenAppException({}, 'live');
 
     await this.threads.requireOwnedThread(principal.id, req.params.id);
 

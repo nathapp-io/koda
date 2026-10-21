@@ -22,6 +22,7 @@ import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient, ProjectMember } from '../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
+import { RagService } from '../../src/rag/rag.service';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -133,16 +134,15 @@ describeIntegration('Hybrid Retriever — KB Search E2E', () => {
       });
     }
 
-    await request(httpServer)
-      .post(`/api/projects/${projectSlug}/kb/documents`)
-      .set('Authorization', `Bearer ${adminAccessToken}`)
-      .send({
-        source: 'ticket',
-        sourceId: 'HYE-1',
-        content: 'Memory leak in worker pool on high load',
-        metadata: { ref: 'HYE-1', type: 'BUG' },
-      })
-      .expect(201);
+    // US-007: `ticket` and `code` are not REST-writable sources any more, so the ticket fixture is seeded through
+    // the same internal write path the ticket indexer uses (no creator → a system row). The REST posts below stay
+    // on the user sources.
+    await app.get(RagService).indexDocument(project?.id ?? '', {
+      source: 'ticket',
+      sourceId: 'HYE-1',
+      content: 'Memory leak in worker pool on high load',
+      metadata: { ref: 'HYE-1', type: 'BUG' },
+    });
 
     await request(httpServer)
       .post(`/api/projects/${projectSlug}/kb/documents`)

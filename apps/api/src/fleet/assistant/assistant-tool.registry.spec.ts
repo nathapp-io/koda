@@ -4,6 +4,7 @@ import type { AssistantTool } from './assistant-tool.types';
 const tool = (name: string): AssistantTool => ({
   descriptor: { name, description: 'd', inputSchema: {} },
   permission: { kind: 'member' },
+  key: 'ticket.read',
   parse: (input) => input,
   execute: async () => 'ok',
 });

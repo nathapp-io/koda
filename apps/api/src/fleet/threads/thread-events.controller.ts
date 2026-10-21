@@ -8,8 +8,9 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../generated/prisma/client';
 import { kodaTokenExtractor } from '../../auth/auth.module';
 import { JwtAuthProvider } from '../../auth/jwt-auth.provider';
-import { isUserPrincipal, KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { ILiveConfig, LIVE_CFG } from '../../config/live.config';
+import { PermissionService } from '../../permissions/permission.service';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import { decodeJwtPayload, tokenExpiryMs } from '../../live/jwt-payload';
 import { createLiveStream } from '../../live/live-stream';
@@ -30,15 +31,23 @@ export class ThreadEventsGuard implements CanActivate {
     private readonly prisma: PrismaService<PrismaClient>,
     private readonly streams: LiveStreamRegistry,
     @Inject(LIVE_CFG) private readonly config: ILiveConfig,
+    private readonly permissions: PermissionService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<ThreadEventsRequest>();
     const principal = req.user;
-    if (!principal || !isUserPrincipal(principal)) throw new ForbiddenAppException({}, 'threads.principal');
+    // Permissions P1 US-002: no principal-type refusal is left on this route — the key decides, so an
+    // agent passes this guard. Authentication is the global guard's; a stream without a principal is
+    // refused with `live`, the code the stream route already answers for that state.
+    if (!principal) throw new ForbiddenAppException({}, 'live');
 
     const projectId = await this.access.findProjectIdBySlug(req.params.slug);
     await this.access.assertProjectMembership(projectId, principal);
+    // The route key, before the thread lookup (design: the route key precedes the lookups).
+    if (!(await this.permissions.can(principal, 'thread.read', { projectId })).allowed) {
+      throw new ForbiddenAppException({}, 'permissions');
+    }
     const thread = await this.prisma.client.chatThread.findFirst({
       where: { id: req.params.id, projectId, kind: { not: 'WORKSPACE' } }, select: { projectId: true },
     });

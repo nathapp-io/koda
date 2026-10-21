@@ -8,7 +8,7 @@
  * real `outcomeNote` and `deliveryText` over the answer it produced — the same three steps `AssistantActionDecisions`
  * takes after an approve.
  */
-import { KodaCaslAbilityFactory } from '../../../auth/casl/koda-casl-ability.factory';
+import type { PermissionService } from '../../../permissions/permission.service';
 import { ProjectAccessService } from '../../../projects/project-access.service';
 import { AssistantToolExecutor } from '../assistant-tool.executor';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
@@ -39,6 +39,7 @@ function makeLinkTool(execute: () => Promise<string>): AssistantTool<unknown> {
   return {
     descriptor: { name: 'koda_link_tickets', description: 'd', inputSchema: {} },
     permission: { kind: 'member' },
+    key: 'ticket.link.add',
     kind: 'write',
     parse: (input: unknown) => input,
     preview: async () => 'Link 1 URL(s) in web:',
@@ -63,7 +64,9 @@ function executorFor(tool: AssistantTool<unknown>): AssistantToolExecutor {
   };
   const registry = new AssistantToolRegistry();
   registry.register(tool);
-  const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, new KodaCaslAbilityFactory());
+  // Permissions P1 US-004: the tool's key is a `PermissionService` read now; every key is allowed here.
+  const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
+  const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions);
   // 3-D14: the port carries `recordDirect` too; this harness only drives the thread propose path.
   executor.attachActions({
     propose: async (_input: ProposeInput): Promise<ProposeResult> => ({ actionId: 'a1' }),

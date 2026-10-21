@@ -55,6 +55,7 @@ export interface DispatchJobInput {
 export function dispatchJobTool(fleetJobs: FleetJobsService, knowledge: KnowledgeIndexService): AssistantTool<DispatchJobInput> {
   return {
     descriptor: KODA_DISPATCH_JOB,
+    key: 'fleet.job.dispatch',
     // 2b2-D2: the same CASL tuple the dispatch route enforces (`fleet-jobs.controller.ts`).
     permission: { kind: 'ability', action: 'create', subject: 'FleetJob' },
     kind: 'write',

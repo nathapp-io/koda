@@ -1,8 +1,10 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
-import { ForbiddenAppException, JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
-import { isUserPrincipal, type KodaPrincipal, type UserPrincipal } from '../../auth/principal/koda-principal.types';
+import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
+import type { AgentPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
+import { Requires } from '../../permissions/requires.decorator';
+import { RequiresGuard } from '../../permissions/requires.guard';
 import { AnswerQuestionDto, ChatMessageListDto, SendMessageDto, SendMessageResultDto, UpdateThreadDto } from './dto/thread.dto';
 import { CreateWorkspaceThreadDto, WorkspaceThreadDetailDto, WorkspaceThreadDto, WorkspaceThreadListDto } from './dto/workspace-thread.dto';
 import { WorkspaceThreadsService } from './workspace-threads.service';
@@ -15,9 +17,15 @@ function intParam(raw: string | undefined, min: number, max: number): number | n
 }
 
 /**
- * The personal thread surface (fleet S5b 1d, S5b-R12): top-level `/threads`, creator only — an agent or runner
- * principal answers 403 `threads.principal` and every other caller of a `/threads/:id` route answers 404, global
- * admins included (1d-D2).
+ * The personal thread surface (fleet S5b 1d, S5b-R12), migrated onto permission keys by permissions P1
+ * US-003: top-level `/threads`, so there is no project to resolve and `RequiresGuard` runs alone.
+ *
+ * There is no principal-type refusal left — an agent may hold the workspace keys — and no CASL check. The
+ * workspace keys are decided at the guard, on the caller's global keys; the four routes that act on one
+ * thread's own rows (`PATCH`, `stop`, `end-session`, `answer`) declare their project key
+ * `enforcedBy: 'service'` because only the loaded row names the project and the creator, and
+ * `WorkspaceThreadsService` asks for it there. The workspace scope still answers 404 to anyone but the
+ * creator (1d-D2), global admins included.
  */
 @ApiTags('fleet threads')
 @ApiBearerAuth()
@@ -25,24 +33,24 @@ function intParam(raw: string | undefined, min: number, max: number): number | n
 export class WorkspaceThreadsController {
   constructor(private readonly threads: WorkspaceThreadsService) {}
 
-  private user(principal: KodaPrincipal): UserPrincipal {
-    if (!isUserPrincipal(principal)) throw new ForbiddenAppException({}, 'threads.principal');
-    return principal;
-  }
-
   @Post()
   @HttpCode(201)
-  @ApiOperation({ summary: 'Create a personal workspace chat thread' })
+  @UseGuards(RequiresGuard)
+  @Requires('thread.workspace.create')
+  @ApiOperation({ summary: 'Create a personal workspace chat thread (thread.workspace.create, hosted by the home project’s thread.create)' })
   @ApiResponse({ status: 201, type: WorkspaceThreadDto })
-  async create(@Body() dto: CreateWorkspaceThreadDto, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.threads.create(this.user(principal), dto));
+  @ApiResponse({ status: 403, description: 'thread.workspace.create is missing, or thread.create is refused in the home project' })
+  async create(@Body() dto: CreateWorkspaceThreadDto, @Principal() principal: UserPrincipal | AgentPrincipal) {
+    return JsonResponse.Ok(await this.threads.create(principal, dto));
   }
 
   @Get()
-  @ApiOperation({ summary: 'List the caller’s personal workspace chat threads' })
+  @UseGuards(RequiresGuard)
+  @Requires('thread.workspace.read')
+  @ApiOperation({ summary: 'List the caller’s personal workspace chat threads (thread.workspace.read)' })
   @ApiResponse({ status: 200, type: WorkspaceThreadListDto })
-  async list(@Query() query: Record<string, string | undefined>, @Principal() principal: KodaPrincipal) {
-    const user = this.user(principal);
+  @ApiResponse({ status: 403, description: 'thread.workspace.read is missing' })
+  async list(@Query() query: Record<string, string | undefined>, @Principal() principal: UserPrincipal | AgentPrincipal) {
     const status = query.status;
     if (status !== undefined && status !== 'ACTIVE' && status !== 'ARCHIVED') throw new ValidationAppException({ reason: 'status' }, 'threads.input');
     const page = intParam(query.page, 1, Number.MAX_SAFE_INTEGER);
@@ -50,76 +58,103 @@ export class WorkspaceThreadsController {
     if ((query.page !== undefined && page === null) || (query.size !== undefined && size === null)) throw new ValidationAppException({ reason: query.page !== undefined && page === null ? 'page' : 'size' }, 'threads.input');
     const current = page ?? 1;
     const take = size ?? 20;
-    return JsonResponse.Ok(await this.threads.list(user.id, status, (current - 1) * take, take));
+    return JsonResponse.Ok(await this.threads.list(principal.id, status, (current - 1) * take, take));
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get one of the caller’s personal workspace chat threads' })
+  @UseGuards(RequiresGuard)
+  @Requires('thread.workspace.read')
+  @ApiOperation({ summary: 'Get one of the caller’s personal workspace chat threads (thread.workspace.read)' })
   @ApiResponse({ status: 200, type: WorkspaceThreadDetailDto })
-  async get(@Param('id') id: string, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.threads.get(this.user(principal).id, id));
+  @ApiResponse({ status: 403, description: 'thread.workspace.read is missing' })
+  @ApiResponse({ status: 404, description: 'threads.notFound when the thread is not the caller’s WORKSPACE thread' })
+  async get(@Param('id') id: string, @Principal() principal: UserPrincipal | AgentPrincipal) {
+    return JsonResponse.Ok(await this.threads.get(principal.id, id));
   }
 
   @Get(':id/messages')
-  @ApiOperation({ summary: 'List the messages of one of the caller’s workspace chat threads' })
+  @UseGuards(RequiresGuard)
+  @Requires('thread.workspace.read')
+  @ApiOperation({ summary: 'List the messages of one of the caller’s workspace chat threads (thread.workspace.read)' })
   @ApiResponse({ status: 200, type: ChatMessageListDto })
-  async messages(@Param('id') id: string, @Query() query: Record<string, string | undefined>, @Principal() principal: KodaPrincipal) {
-    const user = this.user(principal);
+  @ApiResponse({ status: 403, description: 'thread.workspace.read is missing' })
+  @ApiResponse({ status: 404, description: 'threads.notFound when the thread is not the caller’s WORKSPACE thread' })
+  async messages(@Param('id') id: string, @Query() query: Record<string, string | undefined>, @Principal() principal: UserPrincipal | AgentPrincipal) {
     const after = intParam(query.afterSeq, 0, Number.MAX_SAFE_INTEGER);
     const limit = intParam(query.limit, 1, 200);
     if ((query.afterSeq !== undefined && after === null) || (query.limit !== undefined && limit === null)) throw new ValidationAppException({ reason: 'messages' }, 'threads.input');
-    return JsonResponse.Ok(await this.threads.messages(user.id, id, after ?? 0, limit ?? 100));
+    return JsonResponse.Ok(await this.threads.messages(principal.id, id, after ?? 0, limit ?? 100));
   }
 
   @Post(':id/messages')
   @HttpCode(201)
-  @ApiOperation({ summary: 'Send a message to a personal workspace chat thread' })
+  @UseGuards(RequiresGuard)
+  @Requires('thread.workspace.message.send')
+  @ApiOperation({ summary: 'Send a message to a personal workspace chat thread (thread.workspace.message.send)' })
   @ApiResponse({ status: 201, type: SendMessageResultDto })
   @ApiResponse({ status: 200, type: SendMessageResultDto })
-  async send(@Param('id') id: string, @Body() dto: SendMessageDto, @Principal() principal: KodaPrincipal, @Res({ passthrough: true }) response: { status: (code: number) => unknown }) {
-    const result = await this.threads.sendMessage(this.user(principal), id, dto);
+  @ApiResponse({ status: 403, description: 'thread.workspace.message.send is missing, or thread.create is refused in the home project' })
+  async send(@Param('id') id: string, @Body() dto: SendMessageDto, @Principal() principal: UserPrincipal | AgentPrincipal, @Res({ passthrough: true }) response: { status: (code: number) => unknown }) {
+    const result = await this.threads.sendMessage(principal, id, dto);
     if (result.deduplicated) response.status(200);
     return JsonResponse.Ok({ message: result.message, jobId: result.jobId });
   }
 
   @Post(':id/archive')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Archive a personal workspace chat thread (creator)' })
+  @UseGuards(RequiresGuard)
+  @Requires('thread.workspace.archive')
+  @ApiOperation({ summary: 'Archive a personal workspace chat thread (thread.workspace.archive)' })
   @ApiResponse({ status: 200, type: WorkspaceThreadDetailDto })
-  async archive(@Param('id') id: string, @Principal() principal: KodaPrincipal) {
-    const user = this.user(principal);
-    await this.threads.archive(user, id);
-    return JsonResponse.Ok(await this.threads.get(user.id, id));
+  @ApiResponse({ status: 403, description: 'thread.workspace.archive is missing' })
+  async archive(@Param('id') id: string, @Principal() principal: UserPrincipal | AgentPrincipal) {
+    await this.threads.archive(principal, id);
+    return JsonResponse.Ok(await this.threads.get(principal.id, id));
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update the cost cap of one of the caller’s workspace chat threads' })
+  @UseGuards(RequiresGuard)
+  @Requires('thread.cap.update', { enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Update the cost cap of one of the caller’s workspace chat threads (thread.cap.update: the creator, or the any-row key)' })
   @ApiResponse({ status: 200, type: WorkspaceThreadDto })
-  async update(@Param('id') id: string, @Body() dto: UpdateThreadDto, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.threads.updateCap(this.user(principal).id, id, dto.maxCostUsd));
+  @ApiResponse({ status: 403, description: 'The caller neither holds thread.cap.update nor created the thread' })
+  async update(@Param('id') id: string, @Body() dto: UpdateThreadDto, @Principal() principal: UserPrincipal | AgentPrincipal) {
+    return JsonResponse.Ok(await this.threads.updateCap(principal, id, dto.maxCostUsd));
   }
 
   @Post(':id/stop')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Stop the live turn of a workspace chat thread (creator)' })
-  async stop(@Param('id') id: string, @Principal() principal: KodaPrincipal) {
-    await this.threads.stop(this.user(principal).id, id);
+  @UseGuards(RequiresGuard)
+  @Requires('thread.stop', { enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Stop the live turn of a workspace chat thread (thread.stop: the creator, or the any-row key)' })
+  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 403, description: 'The caller neither holds thread.stop nor created the thread' })
+  async stop(@Param('id') id: string, @Principal() principal: UserPrincipal | AgentPrincipal) {
+    await this.threads.stop(principal, id);
     return JsonResponse.Ok({});
   }
 
   @Post(':id/end-session')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Close the live session of a workspace chat thread (creator)' })
-  async endSession(@Param('id') id: string, @Principal() principal: KodaPrincipal) {
-    await this.threads.endSession(this.user(principal).id, id);
+  @UseGuards(RequiresGuard)
+  @Requires('thread.end-session', { enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Close the live session of a workspace chat thread (thread.end-session: the creator, or the any-row key)' })
+  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 403, description: 'The caller neither holds thread.end-session nor created the thread' })
+  async endSession(@Param('id') id: string, @Principal() principal: UserPrincipal | AgentPrincipal) {
+    await this.threads.endSession(principal, id);
     return JsonResponse.Ok({});
   }
 
   @Post(':id/answer')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Answer a pending question of a workspace chat thread (creator)' })
-  async answer(@Param('id') id: string, @Body() dto: AnswerQuestionDto, @Principal() principal: KodaPrincipal) {
-    await this.threads.answer(this.user(principal).id, id, dto);
+  @UseGuards(RequiresGuard)
+  @Requires('thread.answer', { enforcedBy: 'service' })
+  @ApiOperation({ summary: 'Answer a pending question of a workspace chat thread (thread.answer: the creator, or the any-row key)' })
+  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 403, description: 'The caller neither holds thread.answer nor created the thread' })
+  async answer(@Param('id') id: string, @Body() dto: AnswerQuestionDto, @Principal() principal: UserPrincipal | AgentPrincipal) {
+    await this.threads.answer(principal, id, dto);
     return JsonResponse.Ok({});
   }
 }

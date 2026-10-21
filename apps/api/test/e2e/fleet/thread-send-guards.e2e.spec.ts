@@ -70,10 +70,12 @@ describeDb('US-005 thread send HTTP guards', () => {
     expect((await db.fleetJob.findUniqueOrThrow({ where: { id: job.id } })).state).toBe('CRASHED');
   });
 
-  it('US-005 AC3: refuses a send by a project developer who is not the creator', async () => {
+  it('US-005 AC3: refuses a send by a project developer who is not the creator with 403 permissions', async () => {
     const thread = await makeThread({ createdById: world.ids.root });
     const res = await send(thread.id).expect(403);
-    expect(res.body.message).toBe('Only the thread creator can perform this action');
+    // Permissions P1 US-002: the creator compare asks for the `thread.message.send` any-row key, so the refusal
+    // is the permissions code, not the old creator-only one.
+    expect(res.body).toEqual(expect.objectContaining({ ret: 40003, message: 'You do not have permissions to perform this action' }));
   });
 
   it('US-005 AC4: refuses creator send while threads are disabled', async () => {

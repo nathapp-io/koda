@@ -143,6 +143,7 @@ function entryLabel(entry: LogEntryView): string {
 export function listJobsTool(jobs: FleetJobsService): AssistantTool<ListJobsInput> {
   return {
     descriptor: KODA_LIST_JOBS,
+    key: 'fleet.job.read',
     permission: { kind: 'member' },
     parse(input: unknown): ListJobsInput {
       const raw = asRecord(input);
@@ -186,6 +187,7 @@ function jobResultLines(ctx: ToolContext, job: FleetJobDto): string[] {
 export function getJobTool(jobs: FleetJobsService): AssistantTool<GetJobInput> {
   return {
     descriptor: KODA_GET_JOB,
+    key: 'fleet.job.read',
     permission: { kind: 'member' },
     parse(input: unknown): GetJobInput {
       return { jobId: requiredString(asRecord(input).jobId, 'jobId') };
@@ -210,6 +212,7 @@ export function getJobTool(jobs: FleetJobsService): AssistantTool<GetJobInput> {
 export function fleetSpendTool(analytics: AnalyticsService): AssistantTool<FleetSpendInput> {
   return {
     descriptor: KODA_FLEET_SPEND,
+    key: 'fleet.analytics.read',
     permission: { kind: 'member' },
     parse(input: unknown): FleetSpendInput {
       return { days: optionalInteger(asRecord(input).days, MIN_SPEND_DAYS, MAX_SPEND_DAYS, DEFAULT_SPEND_DAYS, 'days') };
@@ -236,6 +239,7 @@ export function fleetSpendTool(analytics: AnalyticsService): AssistantTool<Fleet
 export function listApprovalsTool(approvals: ApprovalsService): AssistantTool<ListApprovalsInput> {
   return {
     descriptor: KODA_LIST_APPROVALS,
+    key: 'fleet.approval.read',
     permission: { kind: 'member' },
     parse(input: unknown): ListApprovalsInput {
       const raw = asRecord(input);
@@ -264,6 +268,7 @@ export function listApprovalsTool(approvals: ApprovalsService): AssistantTool<Li
 export function runnerStatusTool(runners: RunnersService): AssistantTool<Record<string, never>> {
   return {
     descriptor: KODA_RUNNER_STATUS,
+    key: 'fleet.runner.read',
     permission: { kind: 'member' },
     parse(): Record<string, never> {
       return {};
@@ -289,6 +294,7 @@ export function runnerStatusTool(runners: RunnersService): AssistantTool<Record<
 export function jobLogExcerptTool(logs: LogReadService): AssistantTool<JobLogExcerptInput> {
   return {
     descriptor: KODA_JOB_LOG_EXCERPT,
+    key: 'fleet.job.logs.read',
     permission: { kind: 'member' },
     parse(input: unknown): JobLogExcerptInput {
       const raw = asRecord(input);

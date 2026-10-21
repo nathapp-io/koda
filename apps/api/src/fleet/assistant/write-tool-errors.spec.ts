@@ -7,7 +7,7 @@
  * database is involved.
  */
 import { Logger } from '@nestjs/common';
-import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
+import type { PermissionService } from '../../permissions/permission.service';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import type { PendingActionRecord, ProposeInput, ProposeResult } from './actions/pending-action.domain';
 import { AssistantToolExecutor, RESULT_CAP_BYTES } from './assistant-tool.executor';
@@ -40,6 +40,7 @@ function makeWriteTool(over: Partial<AssistantTool<unknown>> = {}): AssistantToo
   return {
     descriptor: { name: 'w', description: 'd', inputSchema: {} },
     permission: { kind: 'member' },
+    key: 'comment.create',
     kind: 'write',
     parse: vi.fn((input: unknown) => input),
     preview: vi.fn(async () => 'Add a comment to WEB-1 "Fix"'),
@@ -73,7 +74,10 @@ function setup(over: Partial<AssistantTool<unknown>> = {}): Setup {
     findProjectIdBySlug: vi.fn(async () => CALL_CONTEXT.project.id),
     resolveMembership: vi.fn(async () => 'DEVELOPER'),
   };
-  const executor = new AssistantToolExecutor(registry, repo, access as unknown as ProjectAccessService, new KodaCaslAbilityFactory());
+  // Permissions P1 US-004: the tool's key is a `PermissionService` read now; every key is allowed here, so the
+  // refusal wording these cases pin stays the tool's own (input and preview failures), not a key refusal.
+  const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
+  const executor = new AssistantToolExecutor(registry, repo, access as unknown as ProjectAccessService, permissions);
   const proposer = makeProposer();
   executor.attachActions(proposer);
   return { executor, tool, proposer, rows };

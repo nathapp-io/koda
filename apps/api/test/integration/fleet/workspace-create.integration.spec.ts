@@ -6,6 +6,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { FLEET_CFG, type IFleetConfig } from '../../../src/config/fleet.config';
+import { MembershipService } from '../../../src/permissions/membership.service';
 
 const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 describeDb('workspace create HTTP', () => {
@@ -15,6 +16,7 @@ describeDb('workspace create HTTP', () => {
   let config: IFleetConfig;
   const post = (body = {}, token = world.tokens.dev) => request(app.getHttpServer()).post('/api/threads').set('Authorization', `Bearer ${token}`).send({ title: 't', backend: { kind: 'native' }, ...body });
   const message = (res: request.Response, expected: string) => { expect(res.body.ret).not.toBe(0); expect(res.body.message).toBe(expected); };
+  const invalidatePermissions = () => app.get(MembershipService).invalidatePermissions();
   beforeAll(async () => {
     await resetDb(); app = await bootHttpApp({ registrationEnabled: false });
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
@@ -27,6 +29,9 @@ describeDb('workspace create HTTP', () => {
     await prisma.project.update({ where: { id: world.opsProjectId }, data: { createdAt: new Date(2000) } });
     await prisma.projectMember.upsert({ where: { projectId_userId: { projectId: world.opsProjectId, userId: world.ids.dev } }, create: { projectId: world.opsProjectId, userId: world.ids.dev, role: 'DEVELOPER' }, update: { role: 'DEVELOPER' } });
     await prisma.projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'DEVELOPER' } });
+    // Permissions P1 US-003: the home project's `thread.create` key decides occupancy, and the rows above
+    // are written straight to the database, so the effective-key cache is dropped as a real write would.
+    await invalidatePermissions();
   });
   afterAll(async () => { await app?.close(); });
   it('AC-5: whitelist preserves refused fields', async () => { message(await post({ repoId: 'r1' }).expect(400), 'Invalid thread input: workspaceFields'); });
@@ -41,8 +46,9 @@ describeDb('workspace create HTTP', () => {
     try { expect(data<{ homeProject: { slug: string } }>(await post().expect(201)).homeProject.slug).toBe('ops'); }
     finally { await prisma.fleetRepo.create({ data: repo }); }
   });
-  it('AC-9: skips VIEWER home', async () => {
+  it('AC-9: skips a home whose thread.create key a VIEWER lacks', async () => {
     await prisma.projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'VIEWER' } });
+    await invalidatePermissions();
     expect(data<{ homeProject: { slug: string } }>(await post().expect(201)).homeProject.slug).toBe('ops');
   });
   it('AC-10: admin default requires membership', async () => {
@@ -51,7 +57,7 @@ describeDb('workspace create HTTP', () => {
     try { message(await post({}, world.tokens.root).expect(409), 'This project has no repository, so a project thread cannot run'); }
     finally { await prisma.projectMember.createMany({ data: members }); }
   });
-  it('AC-11: explicit VIEWER home', async () => { message(await post({ homeProject: 'web' }, world.tokens.viewer).expect(403), 'You cannot create jobs in this home project'); });
+  it('AC-11: explicit VIEWER home is refused with the permissions code', async () => { message(await post({ homeProject: 'web' }, world.tokens.viewer).expect(403), 'You do not have permissions to perform this action'); });
   it('AC-12: explicit home without repo', async () => {
     const repo = await prisma.fleetRepo.findUniqueOrThrow({ where: { id: world.repoId } }); await prisma.fleetRepo.delete({ where: { id: repo.id } });
     try { message(await post({ homeProject: 'web' }).expect(409), 'This project has no repository, so a project thread cannot run'); }

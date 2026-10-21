@@ -5,10 +5,14 @@ import type { Mock } from 'vitest';
  * PrismaRagRepository.findProjectMembership are deleted.
  *
  * Boots a real Fastify HTTP server (mocked providers, no database, no network)
- * so the KB write route runs behind its real guard chain. Only
- * ProjectMembershipGuard (plus its `@ProjectRoles` gate) may decide membership
- * for this route; the controller only resolves the project through
- * PrismaRagRepository.findProjectBySlug.
+ * so the KB write route runs behind its real guard chain: `ProjectMembershipGuard`
+ * (membership) then `RequiresGuard` (the permission key). The controller only
+ * resolves the project through PrismaRagRepository.findProjectBySlug.
+ *
+ * US-007: the `@ProjectRoles` gate is gone and the key decides, so the stub below
+ * refuses the keys a role does not hold. The key table itself (viewer vs developer
+ * on each of the seven routes) is covered over real HTTP by
+ * test/integration/rag/permissions-kb-routes.integration.spec.ts.
  */
 import { CanActivate, ExecutionContext } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -21,6 +25,7 @@ import { PrismaRagRepository } from './prisma-rag.repository';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { PrismaProjectRepository } from '../projects/prisma-project.repository';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
+import { PermissionService } from '../permissions/permission.service';
 import { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
 
 interface RagRepositoryStub {
@@ -29,6 +34,7 @@ interface RagRepositoryStub {
 
 interface RagServiceStub {
   indexDocument: Mock;
+  findSourceCreators: Mock;
 }
 
 interface HybridRetrieverStub {
@@ -65,6 +71,12 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
   let hybridRetriever: HybridRetrieverStub;
   let projectRepo: ProjectRepositoryStub;
 
+  /** The catalog keys the stub refuses; each case sets the ones its role does not hold (US-007). */
+  let refusedKeys: ReadonlySet<string>;
+  const can = vi.fn(async (_principal: unknown, key: string) =>
+    refusedKeys.has(key) ? { allowed: false, reason: 'not-granted' } : { allowed: true, reason: 'granted' },
+  );
+
   // Records every execution of the real guard: the guard — not a controller
   // private check — is what must decide membership on this route.
   const guardCanActivate = vi.spyOn(ProjectMembershipGuard.prototype, 'canActivate');
@@ -73,7 +85,7 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
 
   beforeAll(async () => {
     ragRepository = { findProjectBySlug: vi.fn() };
-    ragService = { indexDocument: vi.fn() };
+    ragService = { indexDocument: vi.fn(), findSourceCreators: vi.fn().mockResolvedValue([]) };
     hybridRetriever = { search: vi.fn() };
     projectRepo = { findBySlug: vi.fn(), findMembershipRole: vi.fn() };
 
@@ -87,9 +99,10 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
         // membership decision is driven by the fake ProjectMember rows below.
         ProjectAccessService,
         { provide: PrismaProjectRepository, useValue: projectRepo },
-        // Register the guard so NestJS applies it to the controller's
-        // @UseGuards(ProjectMembershipGuard) class-level decorator.
+        // Register the guards so NestJS applies them to the route's
+        // @UseGuards(ProjectMembershipGuard, RequiresGuard).
         ProjectMembershipGuard,
+        { provide: PermissionService, useValue: { can } },
       ],
     }).compile();
 
@@ -118,6 +131,7 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
     vi.clearAllMocks();
 
     currentPrincipal = developerUser;
+    refusedKeys = new Set();
 
     ragRepository.findProjectBySlug.mockResolvedValue({
       id: 'proj-1',
@@ -126,6 +140,7 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
       deletedAt: null,
     });
     ragService.indexDocument.mockResolvedValue('doc-id');
+    ragService.findSourceCreators.mockResolvedValue([]);
     projectRepo.findBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: null });
     projectRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
   });
@@ -161,13 +176,30 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
 
   it('AC1 boundary: a member whose project role is VIEWER is refused on the KB write route', async () => {
     projectRepo.findMembershipRole.mockResolvedValue('VIEWER');
+    // US-007: the key decides. A Viewer holds only `*.read`, so `kb.document.add` is refused before the handler.
+    refusedKeys = new Set(['kb.document.add']);
 
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/kb/documents')
       .send({ source: 'doc', sourceId: 'doc-1', content: 'hello world' });
 
     expect(res.status).toBe(403);
+    // No global exception filter in this bare app: the ForbiddenAppException is serialized as-is.
+    expect(res.body).toEqual(expect.objectContaining({ code: 40003, prefix: 'permissions' }));
     expect(ragService.indexDocument).not.toHaveBeenCalled();
+    expect(guardCanActivate).toHaveBeenCalledTimes(1);
+  });
+
+  it('US-007: a DEVELOPER member is admitted and records itself as the row creator', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/projects/alpha/kb/documents')
+      .send({ source: 'doc', sourceId: 'doc-2', content: 'hello world' });
+
+    expect(res.status).toBe(201);
+    expect(ragService.indexDocument).toHaveBeenCalledWith(
+      'proj-1',
+      expect.objectContaining({ createdBy: { type: 'USER', id: 'user-dev' } }),
+    );
   });
 
   it('AC1 boundary: an unknown slug returns 404 for the KB document route', async () => {

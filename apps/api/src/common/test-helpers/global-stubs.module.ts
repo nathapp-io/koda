@@ -94,6 +94,8 @@ export const mockNotifyService = {
 export const mockPermissionService = {
   can: vi.fn(async () => ({ allowed: true, reason: 'granted' })),
   effectiveKeys: vi.fn(async () => new Set<string>()),
+  // Permissions P1 US-005: McpController asks which projects hold a tool's key when it builds a request's server.
+  projectIdsWithKey: vi.fn(async () => ({ all: true as const })),
 } as unknown as PermissionService;
 
 /** Permissions P1a US-003: MembershipService is exported by the global PermissionsModule; stub it for module specs. */

@@ -28,10 +28,10 @@ describe('KbTicketLifecycleSubscriber', () => {
     expect(registry.register).toHaveBeenCalledWith('ticket_event', expect.any(Function));
   });
 
-  it('deletes the ticket KB document on TICKET_DELETED', async () => {
+  it('AC-7: deletes the ticket KB document of the ticket source on TICKET_DELETED', async () => {
     const { subscriber, ragService } = build();
     await subscriber.handleTicketEvent(deleted);
-    expect(ragService.deleteBySource).toHaveBeenCalledWith('proj-1', 'tick-1');
+    expect(ragService.deleteBySource).toHaveBeenCalledWith('proj-1', 'ticket', 'tick-1');
   });
 
   it.each(['TICKET_CREATED', 'status_changed', 'assigned', 'COMMENT_ADDED'])('ignores %s', async (action) => {

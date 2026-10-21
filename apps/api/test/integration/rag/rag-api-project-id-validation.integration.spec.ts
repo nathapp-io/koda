@@ -8,6 +8,7 @@ import { EvaluationService } from '../../../src/retrieval/evaluation.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaRagRepository } from '../../../src/rag/prisma-rag.repository';
 import { ProjectAccessService } from '../../../src/projects/project-access.service';
+import { PermissionService } from '../../../src/permissions/permission.service';
 
 /**
  * RAG API Project ID Validation Tests
@@ -86,10 +87,12 @@ describe('RagController — Project ID Validation at API Boundary (AC6)', () => 
           },
         },
         PrismaRagRepository,
-        // US-001: the class-level ProjectMembershipGuard is instantiated by the DI
-        // container even though these tests call the controller directly, so its
-        // ProjectAccessService dependency must resolve.
+        // US-001: the `@UseGuards(...)` classes are instantiated by the DI
+        // container even though these tests call the controller directly, so their
+        // ProjectAccessService (membership) and PermissionService (keys) dependencies must resolve.
         { provide: ProjectAccessService, useValue: {} },
+        // US-007: the KB routes carry permission keys; this spec asserts the slug/projectId contract only.
+        { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
       ],
     }).compile();
 

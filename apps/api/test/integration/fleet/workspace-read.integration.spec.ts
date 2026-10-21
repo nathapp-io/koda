@@ -127,10 +127,12 @@ describeDb('workspace read routes, commands and events (us-004)', () => {
     message(await request(server).get(`/api/threads/${mine}/messages`).set(as(world.tokens.root)).expect(404), 'Thread not found');
   });
 
-  it('AC-9/AC-10: an agent API key is refused on the list and create routes', async () => {
-    message(await request(server).get('/api/threads').set(as(agentKey)).expect(403), 'Only users can access chat threads');
+  it('AC-9/AC-10: an agent API key is refused on the list and create routes by the workspace key it does not hold', async () => {
+    // Permissions P1 US-003: the principal-type refusal is gone; the seeded `agent` role holds no
+    // `thread.workspace.read` or `thread.workspace.create`, so the key refuses the request.
+    message(await request(server).get('/api/threads').set(as(agentKey)).expect(403), 'You do not have permissions to perform this action');
     message(await request(server).post('/api/threads').set(as(agentKey))
-      .send({ title: 'Agent', backend: { kind: 'native' } }).expect(403), 'Only users can access chat threads');
+      .send({ title: 'Agent', backend: { kind: 'native' } }).expect(403), 'You do not have permissions to perform this action');
   });
 
   it('AC-11: the creator opens the event stream and receives thread events', async () => {

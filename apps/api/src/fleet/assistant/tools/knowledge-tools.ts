@@ -133,6 +133,7 @@ const memoryText = (item: { subject: string; predicate: string; object?: string 
 export function memorySearchTool(memory: MemoryGovernanceService): AssistantTool<MemorySearchInput> {
   return {
     descriptor: KODA_MEMORY_SEARCH,
+    key: 'memory.read',
     // 1b-D1: the memory REST routes are member-gated, so the tool declares membership rather than one ability.
     permission: { kind: 'member' },
     parse(input: unknown): MemorySearchInput {
@@ -194,6 +195,7 @@ async function ticketRefs(
 export function timelineTool(deps: { timeline: TimelineService; tickets: TicketsService }): AssistantTool<TimelineInput> {
   return {
     descriptor: KODA_TIMELINE,
+    key: 'timeline.read',
     // 1b-D1: the timeline REST route is member-gated, so the tool declares membership rather than one ability.
     permission: { kind: 'member' },
     parse(input: unknown): TimelineInput {

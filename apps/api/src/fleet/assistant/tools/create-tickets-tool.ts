@@ -45,6 +45,7 @@ const isPriority = (value: unknown): value is Priority =>
 export function createTicketsTool(deps: { tickets: TicketsService }): AssistantTool<CreateTicketsInput> {
   return {
     descriptor: KODA_CREATE_TICKETS,
+    key: 'ticket.create',
     // 2b1-D4: the same CASL tuple the ticket create route enforces (`tickets.controller.ts`).
     permission: { kind: 'ability', action: 'create', subject: 'Ticket' },
     kind: 'write',

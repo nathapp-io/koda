@@ -7,6 +7,7 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { seedFleetHttpWorld, insertRunner, FLEET_CAPS, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJob } from '../../helpers/thread-fixtures';
 import { FLEET_CFG, type IFleetConfig } from '../../../src/config/fleet.config';
+import { MembershipService } from '../../../src/permissions/membership.service';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
 import { SkillsService } from '../../../src/skills/skills.service';
 
@@ -68,11 +69,15 @@ describeDb('workspace turns and archive', () => {
     try {
       if (role) await prisma.projectMember.update({ where: { id: member.id }, data: { role } });
       else await prisma.projectMember.delete({ where: { id: member.id } });
+      // Permissions P1 US-003: hosting is the `thread.create` key, so the write above must reach the
+      // effective-key cache the way a real membership write does (MembershipService invalidates on its own).
+      await app.get(MembershipService).invalidatePermissions();
       const res = await send(thread.id).expect(403);
-      expect(res.body.message).toBe('You cannot create jobs in this home project');
+      expect(res.body.message).toBe('You do not have permissions to perform this action');
       expect(await prisma.chatMessage.count({ where: { threadId: thread.id } })).toBe(0);
     } finally {
       await prisma.projectMember.upsert({ where: { id: member.id }, create: member, update: { role: member.role } });
+      await app.get(MembershipService).invalidatePermissions();
     }
   });
   it('AC-9: even an admin cannot send after home soft deletion', async () => {
@@ -80,7 +85,8 @@ describeDb('workspace turns and archive', () => {
     try {
       await prisma.project.update({ where: { id: world.projectId }, data: { deletedAt: new Date() } });
       const res = await send(thread.id, world.tokens.root).expect(403);
-      expect(res.body.message).toBe('You cannot create jobs in this home project');
+      // The home is no longer among the caller's reachable projects, which is the same refusal as the key's.
+      expect(res.body.message).toBe('You do not have permissions to perform this action');
     } finally { await prisma.project.update({ where: { id: world.projectId }, data: { deletedAt: null } }); }
   });
   it('AC-10: no anchor answers 409 without a job', async () => {

@@ -11,6 +11,10 @@ import type { Mock } from 'vitest';
  * Before this story the controller carried a private `checkProjectMembership`
  * copy of the membership rule. After it, ProjectMembershipGuard is the only
  * place the membership rule is evaluated for this route.
+ *
+ * US-007: the route also carries `retrieval.evaluate`. Only a Project Admin holds it
+ * (through `*`): a Developer's or Viewer's `*.read` grant does not reach it, so the
+ * stub below refuses that key for those roles and the evaluate route answers 403.
  */
 import { CanActivate, ExecutionContext } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -21,6 +25,7 @@ import { EvaluationService } from './evaluation.service';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { PrismaProjectRepository } from '../projects/prisma-project.repository';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
+import { PermissionService } from '../permissions/permission.service';
 import { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
 
 interface ProjectRepositoryStub {
@@ -55,11 +60,17 @@ describe('RetrievalController membership gate (US-005 AC2)', () => {
   let projectRepo: ProjectRepositoryStub;
   let evaluationService: EvaluationServiceStub;
 
+  /** The catalog keys the stub refuses; each case sets the ones its role does not hold (US-007). */
+  let refusedKeys: ReadonlySet<string>;
+  const can = vi.fn(async (_principal: unknown, key: string) =>
+    refusedKeys.has(key) ? { allowed: false, reason: 'not-granted' } : { allowed: true, reason: 'granted' },
+  );
+
   // Records every execution of the real guard: the only way to observe, from
   // the outside, that ProjectMembershipGuard sits in this route's guard chain.
   const guardCanActivate = vi.spyOn(ProjectMembershipGuard.prototype, 'canActivate');
 
-  const developerUser = makeUserPrincipal('user-dev', 'MEMBER');
+  const projectAdminUser = makeUserPrincipal('user-project-admin', 'MEMBER');
 
   beforeAll(async () => {
     projectRepo = { findBySlug: vi.fn(), findMembershipRole: vi.fn() };
@@ -73,9 +84,10 @@ describe('RetrievalController membership gate (US-005 AC2)', () => {
         // membership decision is driven by the fake ProjectMember rows below.
         ProjectAccessService,
         { provide: PrismaProjectRepository, useValue: projectRepo },
-        // Register the guard so NestJS applies it to the controller's
-        // @UseGuards(ProjectMembershipGuard) class-level decorator.
+        // Register the guards so NestJS applies them to the route's
+        // @UseGuards(ProjectMembershipGuard, RequiresGuard).
         ProjectMembershipGuard,
+        { provide: PermissionService, useValue: { can } },
       ],
     }).compile();
 
@@ -103,11 +115,13 @@ describe('RetrievalController membership gate (US-005 AC2)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    currentPrincipal = developerUser;
+    // The caller holds `retrieval.evaluate`; membership is what this spec varies.
+    currentPrincipal = projectAdminUser;
+    refusedKeys = new Set();
 
-    // `alpha` is an active project and the caller is a DEVELOPER member.
+    // `alpha` is an active project and the caller is a PROJECT ADMIN member.
     projectRepo.findBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: null });
-    projectRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
+    projectRepo.findMembershipRole.mockResolvedValue('ADMIN');
     evaluationService.runQueries.mockResolvedValue({
       precisionAt5_avg: 1,
       precisionAt5_p50: 1,
@@ -117,7 +131,7 @@ describe('RetrievalController membership gate (US-005 AC2)', () => {
     });
   });
 
-  it('AC2: POST /api/projects/:slug/kb/evaluate/retrieval returns 403 for a non-member DEVELOPER user', async () => {
+  it('AC2: POST /api/projects/:slug/kb/evaluate/retrieval returns 403 for a non-member user', async () => {
     projectRepo.findMembershipRole.mockResolvedValue(null);
 
     const res = await request(app.getHttpServer()).post(
@@ -126,13 +140,14 @@ describe('RetrievalController membership gate (US-005 AC2)', () => {
 
     expect(res.status).toBe(403);
     // The refusal happens before the handler: no evaluation is run for a
-    // principal who is not a member of the project.
+    // principal who is not a member of the project, and the key is never asked.
     expect(evaluationService.runQueries).not.toHaveBeenCalled();
+    expect(can).not.toHaveBeenCalled();
     // ProjectMembershipGuard — not a private controller check — produced it.
     expect(guardCanActivate).toHaveBeenCalledTimes(1);
   });
 
-  it('AC2 boundary: POST /api/projects/:slug/kb/evaluate/retrieval returns 200 for a member DEVELOPER user', async () => {
+  it('AC2 boundary: POST /api/projects/:slug/kb/evaluate/retrieval returns 200 for a PROJECT ADMIN member', async () => {
     const res = await request(app.getHttpServer()).post(
       '/api/projects/alpha/kb/evaluate/retrieval',
     );
@@ -140,6 +155,7 @@ describe('RetrievalController membership gate (US-005 AC2)', () => {
     expect(res.status).toBe(200);
     expect(evaluationService.runQueries).toHaveBeenCalledTimes(1);
     expect(guardCanActivate).toHaveBeenCalledTimes(1);
+    expect(can).toHaveBeenCalledWith(projectAdminUser, 'retrieval.evaluate', { projectId: 'proj-1' });
   });
 
   it('AC2: the membership rule is evaluated exactly once per request, by ProjectMembershipGuard', async () => {
@@ -151,7 +167,7 @@ describe('RetrievalController membership gate (US-005 AC2)', () => {
     // The guard resolves the caller's ProjectMember row once. The controller's
     // deleted `checkProjectMembership` used to run the same lookup a second time.
     expect(projectRepo.findMembershipRole).toHaveBeenCalledTimes(1);
-    expect(projectRepo.findMembershipRole).toHaveBeenCalledWith('proj-1', 'user-dev');
+    expect(projectRepo.findMembershipRole).toHaveBeenCalledWith('proj-1', 'user-project-admin');
   });
 
   it('AC2 boundary: an unknown slug returns 404 (the project-existence check is preserved)', async () => {
@@ -165,14 +181,23 @@ describe('RetrievalController membership gate (US-005 AC2)', () => {
     expect(evaluationService.runQueries).not.toHaveBeenCalled();
   });
 
-  it('AC2 boundary: a member whose project role is VIEWER is admitted (this route has no @ProjectRoles gate)', async () => {
-    projectRepo.findMembershipRole.mockResolvedValue('VIEWER');
+  // US-007: `retrieval.evaluate` is a Project Admin key. A Developer's and a Viewer's `*.read` grant does not reach
+  // it, so both are refused with the permissions code before the handler runs.
+  it.each([
+    ['DEVELOPER', 'user-dev'],
+    ['VIEWER', 'user-viewer'],
+  ])('US-007: a member whose project role is %s is refused the evaluation (403 permissions)', async (role, id) => {
+    projectRepo.findMembershipRole.mockResolvedValue(role);
+    refusedKeys = new Set(['retrieval.evaluate']);
+    currentPrincipal = makeUserPrincipal(id, 'MEMBER');
 
     const res = await request(app.getHttpServer()).post(
       '/api/projects/alpha/kb/evaluate/retrieval',
     );
 
-    expect(res.status).toBe(200);
-    expect(evaluationService.runQueries).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual(expect.objectContaining({ code: 40003, prefix: 'permissions' }));
+    expect(evaluationService.runQueries).not.toHaveBeenCalled();
   });
 });
+

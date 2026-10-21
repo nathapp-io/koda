@@ -238,6 +238,7 @@ function statusLine(status: string, supersededBy: string | undefined): string {
 export function kbSearchTool(deps: KnowledgeToolDeps): AssistantTool<KbSearchInput> {
   return {
     descriptor: KODA_KB_SEARCH,
+    key: 'kb.search',
     // 1b-D1: the search route is member-gated, so the tool declares membership rather than one ability.
     permission: { kind: 'member' },
     parse(input: unknown): KbSearchInput {
@@ -371,6 +372,7 @@ async function outcomeDoc(ctx: ToolContext, input: JobDocInput, deps: KnowledgeT
 export function getDocTool(deps: KnowledgeToolDeps): AssistantTool<GetDocInput> {
   return {
     descriptor: KODA_GET_DOC,
+    key: 'kb.read',
     // 1b-D1: the search route reads the same index and is member-gated, so the tool declares membership.
     permission: { kind: 'member' },
     parse(input: unknown): GetDocInput {

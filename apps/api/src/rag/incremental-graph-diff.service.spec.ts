@@ -108,10 +108,10 @@ describe('IncrementalGraphDiffService', () => {
       expect(result.added).toBe(1);
       expect(result.removed).toBe(1);
       expect(mockGraphStore.applyDiff).toHaveBeenCalledWith(projectId, expect.objectContaining({ removedNodeIds: ['node-2'] }));
-      expect(mockVectorStore.deleteBySource).toHaveBeenCalledWith(projectId, 'node-2');
+      expect(mockVectorStore.deleteBySource).toHaveBeenCalledWith(projectId, 'code', 'node-2');
     });
 
-    it('deletes node-2 which is absent from incoming nodes', async () => {
+    it('AC-8: deletes node-2 which is absent from incoming nodes, in the code source', async () => {
       const projectId = 'test-project';
 
       mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes([
@@ -127,7 +127,7 @@ describe('IncrementalGraphDiffService', () => {
 
       expect(result.removed).toBe(1);
       expect(mockGraphStore.applyDiff).toHaveBeenCalledWith(projectId, expect.objectContaining({ removedNodeIds: ['node-2'] }));
-      expect(mockVectorStore.deleteBySource).toHaveBeenCalledWith(projectId, 'node-2');
+      expect(mockVectorStore.deleteBySource).toHaveBeenCalledWith(projectId, 'code', 'node-2');
     });
 
     it('does not re-process unchanged nodes', async () => {
@@ -206,6 +206,9 @@ describe('IncrementalGraphDiffService', () => {
       expect(result.removed).toBe(3);
       expect(mockGraphStore.applyDiff).toHaveBeenCalledWith(projectId, expect.objectContaining({ removedNodeIds: ['node-1', 'node-2', 'node-3'] }));
       expect(mockVectorStore.deleteBySource).toHaveBeenCalledTimes(3);
+      for (const call of mockVectorStore.deleteBySource.mock.calls) {
+        expect(call[1]).toBe('code');
+      }
     });
   });
 

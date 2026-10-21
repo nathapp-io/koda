@@ -1,7 +1,8 @@
 import type { ExtractionService } from '../../../memory/extraction.service';
 import type { MemoryItem } from '../../../memory/memory-item-repository';
 import type { PrismaMemoryItemRepository } from '../../../memory/prisma-memory-item.repository';
-import { ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
+import { MemoryReplaceRefusedError, MemoryWriteGuard } from '../../../memory/memory-write.guard';
+import { ToolActionError, ToolForbiddenError, ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
 import { KODA_RECORD_DECISION } from '../koda-tool-descriptors';
 import { recordDecisionTool, type RecordDecisionInput } from './record-decision-tool';
 
@@ -34,13 +35,41 @@ const TOKEN = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
 
 type RecordDecisionArgs = Parameters<ExtractionService['recordDecision']>;
 
-/** The tool over its two collaborators; the defaults answer "no active decision" and `memoryId: 'm4'`. */
-function toolDeps(over: { active?: MemoryItem | null; memoryId?: string } = {}) {
+/**
+ * The tool over its collaborators; the defaults answer "no active decision" and `memoryId: 'm4'`. `US-008` added the
+ * guard: `replaceCheck` answers a spy the record would run inside its transaction, and `refusesReplace` makes both
+ * halves of the check refuse (the preview's `assertMayReplace` and the in-transaction callback).
+ */
+function toolDeps(over: {
+  active?: MemoryItem | null;
+  memoryId?: string;
+  refusesReplace?: boolean;
+  failsReplace?: boolean;
+} = {}) {
   const findActive = vi.fn(async () => over.active ?? null);
-  const recordDecision = vi.fn(async () => ({ canonicalId: 'c1', memoryId: over.memoryId ?? 'm4' }));
+  const beforeSupersede = vi.fn(async (): Promise<void> => {
+    if (over.refusesReplace) throw new MemoryReplaceRefusedError('m2');
+  });
+  const recordDecision = vi.fn(async () => {
+    if (over.failsReplace) throw new MemoryReplaceRefusedError('m2');
+    return { canonicalId: 'c1', memoryId: over.memoryId ?? 'm4' };
+  });
+  const guard = {
+    assertMayReplace: vi.fn(async () => {
+      if (over.refusesReplace) throw new MemoryReplaceRefusedError('m2');
+    }),
+    replaceCheck: vi.fn(() => beforeSupersede),
+  };
   const memory = { findActive } as unknown as PrismaMemoryItemRepository;
   const extraction = { recordDecision } as unknown as ExtractionService;
-  return { findActive, recordDecision, memory, tool: recordDecisionTool({ memory, extraction }) };
+  return {
+    findActive,
+    recordDecision,
+    memory,
+    guard,
+    beforeSupersede,
+    tool: recordDecisionTool({ memory, extraction, guard: guard as unknown as MemoryWriteGuard }),
+  };
 }
 
 /** The `reason` a parser refuses with; fails loudly when it accepts or throws something else. */
@@ -156,11 +185,33 @@ describe('koda_record_decision preview (US-007)', () => {
     expect(preview).toContain('token=[masked]');
     expect(recordDecision).not.toHaveBeenCalled();
   });
+
+  // -------------------------------------------------------------------------
+  // Permissions P1 US-008 — the preview refuses a supersede it may not make
+  // -------------------------------------------------------------------------
+
+  it('US-008: the preview asks the guard about the requester\'s own decision key', async () => {
+    const { guard, tool } = toolDeps();
+
+    await previewOf(tool, tool.parse(draft()));
+
+    expect(guard.assertMayReplace).toHaveBeenCalledWith(ctx.actor, 'project-1', {
+      kind: 'DECISION', subject: 'agent:dev-1', predicate: 'db',
+    });
+  });
+
+  it('US-008: a refused replace is a forbidden refusal naming memory.update, not a proposal', async () => {
+    const { recordDecision, tool } = toolDeps({ refusesReplace: true });
+
+    await expect(previewOf(tool, tool.parse(draft()))).rejects.toThrow(ToolForbiddenError);
+    await expect(previewOf(tool, tool.parse(draft()))).rejects.toMatchObject({ need: 'memory.update' });
+    expect(recordDecision).not.toHaveBeenCalled();
+  });
 });
 
 describe('koda_record_decision execute (US-007)', () => {
   it('AC-6: records once, as the requester, composing the rationale into the stored decision (2b-R5, 2b1-D7)', async () => {
-    const { recordDecision, memory, tool } = toolDeps();
+    const { recordDecision, memory, beforeSupersede, tool } = toolDeps();
 
     await tool.execute(ctx, tool.parse({ topic: 'db', decision: 'use postgres', rationale: 'one engine' }));
 
@@ -172,8 +223,11 @@ describe('koda_record_decision execute (US-007)', () => {
         topic: 'db',
         decision: 'use postgres\n\nRationale: one engine',
         sourceId: 'thread:thread-1',
+        // US-008: the item records which table its owner names.
+        ownerType: 'USER',
       },
       memory,
+      { beforeSupersede },
     );
   });
 
@@ -184,7 +238,7 @@ describe('koda_record_decision execute (US-007)', () => {
 
     const input = recordDecision.mock.calls[0]?.[0] as RecordDecisionArgs[0];
     expect(input.decision).toBe('use postgres');
-    expect(Object.keys(input)).toEqual(['projectId', 'actorId', 'topic', 'decision', 'sourceId']);
+    expect(Object.keys(input)).toEqual(['projectId', 'actorId', 'topic', 'decision', 'sourceId', 'ownerType']);
   });
 
   it('AC-8: the recorded decision answers decision memory:<id> recorded', async () => {
@@ -209,5 +263,36 @@ describe('koda_record_decision execute (US-007)', () => {
 
     expect(recordDecision.mock.calls[0]?.[0].projectId).toBe('project-2');
     expect(recordDecision.mock.calls[0]?.[0].actorId).toBe('dev-2');
+  });
+
+  // -------------------------------------------------------------------------
+  // Permissions P1 US-008 — the replace check and the owner type
+  // -------------------------------------------------------------------------
+
+  it('US-008: hands the record the guard\'s replace check, for the requester\'s own decision key', async () => {
+    const { guard, recordDecision, beforeSupersede, tool } = toolDeps();
+
+    await tool.execute(ctx, tool.parse(draft()));
+
+    expect(guard.replaceCheck).toHaveBeenCalledWith(ctx.actor, 'project-1');
+    expect(recordDecision.mock.calls[0]?.[2]).toEqual({ beforeSupersede });
+  });
+
+  it('US-008: an agent records its decision with ownerType AGENT', async () => {
+    const { recordDecision, tool } = toolDeps();
+    const agentCtx = { ...ctx, actor: { ...ctx.actor, actorType: 'agent', id: 'agent-1' } } as unknown as ToolContext;
+
+    await tool.execute(agentCtx, tool.parse(draft()));
+
+    expect(recordDecision.mock.calls[0]?.[0]).toMatchObject({ actorId: 'agent-1', ownerType: 'AGENT' });
+  });
+
+  it('US-008: a supersede the store refuses is a forbidden action, never a generic failure', async () => {
+    const { tool } = toolDeps({ failsReplace: true });
+
+    await expect(tool.execute(ctx, tool.parse(draft()))).rejects.toThrow(ToolActionError);
+    await expect(tool.execute(ctx, tool.parse(draft()))).rejects.toMatchObject({
+      text: 'forbidden: memory:m2 needs memory.update',
+    });
   });
 });

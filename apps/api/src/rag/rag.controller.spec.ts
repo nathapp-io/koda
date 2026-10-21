@@ -1,12 +1,16 @@
-import type { Mocked } from 'vitest';
+import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
+import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { RagController } from './rag.controller';
 import { RagService } from './rag.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
-import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { PrismaRagRepository } from './prisma-rag.repository';
 import { ProjectAccessService } from '../projects/project-access.service';
+import { PermissionService } from '../permissions/permission.service';
+import type { PermissionDecision } from '../permissions/permissions.types';
+import type { AgentPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
 import type { ListKbDocumentsQuery } from './dto/list-kb-documents.query';
+import type { KbCreator } from './kb-creator';
 
 const mockProject = {
   id: 'proj-1',
@@ -19,10 +23,40 @@ const mockProject = {
   updatedAt: new Date(),
 };
 
+const allow: PermissionDecision = { allowed: true, reason: 'granted' };
+const notOwner: PermissionDecision = { allowed: false, reason: 'not-owner' };
+
+const devUser: UserPrincipal = {
+  actorType: 'user',
+  id: 'user-dev',
+  name: 'Dev',
+  email: 'dev@koda.dev',
+  role: 'MEMBER',
+  blacklisted: false,
+  revoked: false,
+  authorities: ['MEMBER'],
+};
+
+const agent: AgentPrincipal = {
+  actorType: 'agent',
+  id: 'agent-1',
+  name: 'Bot',
+  slug: 'bot',
+  status: 'ACTIVE',
+  agentRoles: ['DEVELOPER'],
+  capabilities: [],
+  blacklisted: false,
+  revoked: false,
+  authorities: ['WORKER'],
+};
+
+const createdBy = (id: string, type: KbCreator['type'] = 'USER'): KbCreator => ({ type, id });
+
 describe('RagController', () => {
   let controller: RagController;
   let ragService: Mocked<RagService>;
   let hybridRetrieverService: Mocked<HybridRetrieverService>;
+  let can: Mock;
 
   const mockFindProjectBySlug = vi.fn();
   const mockUpdateGraphifyLastImportedAt = vi.fn();
@@ -36,10 +70,13 @@ describe('RagController', () => {
   };
 
   beforeEach(async () => {
+    can = vi.fn().mockResolvedValue(allow);
+
     ragService = {
       indexDocument: vi.fn(),
       listDocuments: vi.fn(),
       deleteBySource: vi.fn(),
+      findSourceCreators: vi.fn().mockResolvedValue([]),
       importGraphify: vi.fn(),
       optimizeTable: vi.fn(),
     } as unknown as Mocked<RagService>;
@@ -55,10 +92,11 @@ describe('RagController', () => {
         { provide: RagService, useValue: ragService },
         { provide: HybridRetrieverService, useValue: hybridRetrieverService },
         { provide: PrismaRagRepository, useValue: mockRagRepository },
-        // US-001: the class-level ProjectMembershipGuard is instantiated by the DI
-        // container even though these tests call the handlers directly, so its
-        // ProjectAccessService dependency must resolve.
+        // US-001: the `@UseGuards(...)` classes are instantiated by the DI
+        // container even though these tests call the handlers directly, so their
+        // ProjectAccessService (membership) and PermissionService (keys) dependencies must resolve.
         { provide: ProjectAccessService, useValue: {} },
+        { provide: PermissionService, useValue: { can } },
       ],
     }).compile();
 
@@ -82,6 +120,7 @@ describe('RagController', () => {
           content: 'hello world',
           metadata: {},
         },
+        devUser,
       );
 
       expect(ragService.indexDocument).toHaveBeenCalledTimes(1);
@@ -91,6 +130,101 @@ describe('RagController', () => {
       expect((result as any).data).toEqual({ indexed: true, id: 'doc-record-1', sourceId: 'doc-1' });
     });
 
+    // US-007: the caller is the row's creator — trusted token data, never the body.
+    it('records the authenticated user as the row creator', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.indexDocument.mockResolvedValue('doc-record-2');
+
+      await controller.addDocument('alpha', { source: 'manual', sourceId: 'm-1', content: 'x' }, devUser);
+
+      expect(ragService.indexDocument).toHaveBeenCalledWith(
+        'proj-1',
+        expect.objectContaining({ createdBy: { type: 'USER', id: 'user-dev' } }),
+      );
+    });
+
+    it('records an agent principal as an AGENT creator', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.indexDocument.mockResolvedValue('doc-record-3');
+
+      await controller.addDocument('alpha', { source: 'manual', sourceId: 'm-2', content: 'x' }, agent);
+
+      expect(ragService.indexDocument).toHaveBeenCalledWith(
+        'proj-1',
+        expect.objectContaining({ createdBy: { type: 'AGENT', id: 'agent-1' } }),
+      );
+    });
+
+    it('replaces the caller\'s own row without asking for the any-row delete key', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.findSourceCreators.mockResolvedValue([createdBy('user-dev')]);
+      ragService.indexDocument.mockResolvedValue('doc-record-4');
+
+      await controller.addDocument('alpha', { source: 'doc', sourceId: 'own', content: 'x' }, devUser);
+
+      expect(can).not.toHaveBeenCalled();
+      expect(ragService.indexDocument).toHaveBeenCalledTimes(1);
+    });
+
+    it('indexes a new pair without asking for the any-row delete key', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.findSourceCreators.mockResolvedValue([]);
+      ragService.indexDocument.mockResolvedValue('doc-record-5');
+
+      await controller.addDocument('alpha', { source: 'doc', sourceId: 'fresh', content: 'x' }, devUser);
+
+      expect(ragService.findSourceCreators).toHaveBeenCalledWith('proj-1', 'doc', 'fresh');
+      expect(can).not.toHaveBeenCalled();
+    });
+
+    it('refuses to replace a row another user created, and writes nothing', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.findSourceCreators.mockResolvedValue([createdBy('user-other')]);
+      can.mockResolvedValue(notOwner);
+
+      await expect(
+        controller.addDocument('alpha', { source: 'doc', sourceId: 'theirs', content: 'y' }, devUser),
+      ).rejects.toThrow(ForbiddenAppException);
+
+      // The check is the any-row key: no resource on purpose, so an `.own` grant answers not-owner.
+      expect(can).toHaveBeenCalledWith(devUser, 'kb.document.delete', { projectId: 'proj-1' });
+      expect(ragService.indexDocument).not.toHaveBeenCalled();
+    });
+
+    it('refuses to replace a row with no creator (a pre-existing row) for a caller holding only the own key', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.findSourceCreators.mockResolvedValue([null]);
+      can.mockResolvedValue(notOwner);
+
+      await expect(
+        controller.addDocument('alpha', { source: 'doc', sourceId: 'legacy', content: 'y' }, devUser),
+      ).rejects.toThrow(ForbiddenAppException);
+
+      expect(ragService.indexDocument).not.toHaveBeenCalled();
+    });
+
+    it('replaces another user\'s row when the caller holds the any-row delete key', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.findSourceCreators.mockResolvedValue([createdBy('user-other')]);
+      can.mockResolvedValue(allow);
+      ragService.indexDocument.mockResolvedValue('doc-record-6');
+
+      await controller.addDocument('alpha', { source: 'doc', sourceId: 'theirs', content: 'y' }, devUser);
+
+      expect(ragService.indexDocument).toHaveBeenCalledTimes(1);
+    });
+
+    it('answers 400 before writing when the sourceId is not filter-safe', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.findSourceCreators.mockRejectedValue(new ValidationAppException());
+
+      await expect(
+        controller.addDocument('alpha', { source: 'doc', sourceId: "x'y", content: 'y' }, devUser),
+      ).rejects.toThrow(ValidationAppException);
+
+      expect(ragService.indexDocument).not.toHaveBeenCalled();
+    });
+
     it('throws NotFoundAppException when project not found', async () => {
       mockFindProjectBySlug.mockResolvedValue(null);
 
@@ -98,6 +232,7 @@ describe('RagController', () => {
         controller.addDocument(
           'missing',
           { source: 'doc', sourceId: 'x', content: 'y', metadata: {} },
+          devUser,
         ),
       ).rejects.toThrow(NotFoundAppException);
     });
@@ -109,28 +244,15 @@ describe('RagController', () => {
         controller.addDocument(
           'alpha',
           { source: 'doc', sourceId: 'x', content: 'y', metadata: {} },
+          devUser,
         ),
       ).rejects.toThrow(NotFoundAppException);
     });
 
-    it('allows agent principal to add a document', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.indexDocument.mockResolvedValue('doc-record-2');
-
-      const result = await controller.addDocument(
-        'alpha',
-        { source: 'doc', sourceId: 'doc-2', content: 'from agent', metadata: {} },
-      );
-
-      expect(ragService.indexDocument).toHaveBeenCalled();
-      expect(hybridRetrieverService.indexDocument).not.toHaveBeenCalled();
-      expect((result as any).data).toEqual({ indexed: true, id: 'doc-record-2', sourceId: 'doc-2' });
-    });
-
     // US-001: the membership gate for this route moved to ProjectMembershipGuard,
-    // which runs before the handler. Non-members, project VIEWERs on a write route
-    // and members are covered at the HTTP boundary in
-    // projects/project-membership.guard.routes.spec.ts.
+    // which runs before the handler. The key gate is RequiresGuard's — covered by
+    // the route-level cases in projects/project-membership.guard.routes.spec.ts and
+    // the HTTP matrix in test/integration/rag/permissions-kb-routes.integration.spec.ts.
   });
 
   describe('listDocuments', () => {
@@ -152,7 +274,7 @@ describe('RagController', () => {
       expect(ragService.listDocuments).toHaveBeenCalledWith('proj-1', 25);
     });
 
-    it('allows agent principal to list documents', async () => {
+    it('lists documents with no query at all', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.listDocuments.mockResolvedValue([]);
 
@@ -166,14 +288,94 @@ describe('RagController', () => {
   });
 
   describe('deleteDocument', () => {
-    it('deletes by sourceId for admin', async () => {
+    it('deletes the user rows of that sourceId in both user sources once every row is the caller\'s', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.findSourceCreators.mockResolvedValue([createdBy('user-dev')]);
       ragService.deleteBySource.mockResolvedValue(undefined);
 
-      const result = await controller.deleteDocument('alpha', 'doc-1');
+      const result = await controller.deleteDocument('alpha', 'doc-1', {}, devUser);
 
-      expect(ragService.deleteBySource).toHaveBeenCalledWith('proj-1', 'doc-1');
+      // US-006: the route keys deletes by (source, sourceId); without a `source` query it names both user sources
+      // and never the ticket or code rows.
+      expect(ragService.deleteBySource).toHaveBeenNthCalledWith(1, 'proj-1', 'doc', 'doc-1');
+      expect(ragService.deleteBySource).toHaveBeenNthCalledWith(2, 'proj-1', 'manual', 'doc-1');
+      expect(ragService.deleteBySource).toHaveBeenCalledTimes(2);
       expect((result as any).data).toEqual({ deleted: true });
+    });
+
+    it('answers 200 when no user row matches the id', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.findSourceCreators.mockResolvedValue([]);
+      ragService.deleteBySource.mockResolvedValue(undefined);
+
+      const result = await controller.deleteDocument('alpha', 'absent', {}, devUser);
+
+      expect((result as any).data).toEqual({ deleted: true });
+    });
+
+    it('deletes only the source the query names', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.findSourceCreators.mockResolvedValue([]);
+      ragService.deleteBySource.mockResolvedValue(undefined);
+
+      await controller.deleteDocument('alpha', 'doc-1', { source: 'manual' }, devUser);
+
+      expect(ragService.findSourceCreators).toHaveBeenCalledTimes(1);
+      expect(ragService.findSourceCreators).toHaveBeenCalledWith('proj-1', 'manual', 'doc-1');
+      expect(ragService.deleteBySource).toHaveBeenCalledTimes(1);
+      expect(ragService.deleteBySource).toHaveBeenCalledWith('proj-1', 'manual', 'doc-1');
+    });
+
+    it('refuses a row another user created, and deletes nothing', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.findSourceCreators.mockResolvedValue([createdBy('user-other')]);
+      can.mockResolvedValue(notOwner);
+
+      await expect(controller.deleteDocument('alpha', 'theirs', { source: 'doc' }, devUser)).rejects.toThrow(
+        ForbiddenAppException,
+      );
+
+      // The check names the row's creator, so a `.own` grant passes only on the caller's own rows.
+      expect(can).toHaveBeenCalledWith(devUser, 'kb.document.delete', {
+        projectId: 'proj-1',
+        resource: { createdBy: { type: 'USER', id: 'user-other' } },
+      });
+      expect(ragService.deleteBySource).not.toHaveBeenCalled();
+    });
+
+    it('refuses a system row with no creator to a caller holding only the own key', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.findSourceCreators.mockResolvedValue([null]);
+      can.mockResolvedValue(notOwner);
+
+      await expect(controller.deleteDocument('alpha', 'sys-1', {}, devUser)).rejects.toThrow(ForbiddenAppException);
+
+      expect(can).toHaveBeenCalledWith(devUser, 'kb.document.delete', {
+        projectId: 'proj-1',
+        resource: { createdBy: null },
+      });
+      expect(ragService.deleteBySource).not.toHaveBeenCalled();
+    });
+
+    it('preflights both sources before deleting either one', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      // The doc rows are the caller's; only the manual row belongs to someone else.
+      ragService.findSourceCreators.mockResolvedValueOnce([]).mockResolvedValueOnce([createdBy('user-other')]);
+      can.mockResolvedValue(notOwner);
+
+      await expect(controller.deleteDocument('alpha', 'mixed', {}, devUser)).rejects.toThrow(ForbiddenAppException);
+
+      expect(ragService.findSourceCreators).toHaveBeenCalledTimes(2);
+      expect(ragService.deleteBySource).not.toHaveBeenCalled();
+    });
+
+    it('answers 400 before deleting when the sourceId is not filter-safe', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.findSourceCreators.mockRejectedValue(new ValidationAppException());
+
+      await expect(controller.deleteDocument('alpha', "x'y", {}, devUser)).rejects.toThrow(ValidationAppException);
+
+      expect(ragService.deleteBySource).not.toHaveBeenCalled();
     });
   });
 
@@ -184,30 +386,36 @@ describe('RagController', () => {
       retrievedAt: new Date().toISOString(),
     };
 
-    it('allows agent principal to search', async () => {
+    it('searches with the project graphify flag and the requested limit', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       hybridRetrieverService.search.mockResolvedValue(mockSearchResult);
 
       const result = await controller.search('alpha', { query: 'auth bug', limit: 10 });
 
-      expect(hybridRetrieverService.search).toHaveBeenCalled();
+      expect(hybridRetrieverService.search).toHaveBeenCalledWith({
+        projectId: 'proj-1',
+        query: 'auth bug',
+        limit: 10,
+        graphifyEnabled: false,
+      });
       expect((result as any).data).toBeDefined();
     });
 
-    it('allows admin to search', async () => {
+    it('uses the default limit when the body omits it', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       hybridRetrieverService.search.mockResolvedValue(mockSearchResult);
 
       await controller.search('alpha', { query: 'test' });
 
-      expect(hybridRetrieverService.search).toHaveBeenCalled();
+      expect(hybridRetrieverService.search).toHaveBeenCalledWith(expect.objectContaining({ limit: 20 }));
     });
 
     // US-001: the membership gate for this route moved to ProjectMembershipGuard
-    // (see projects/project-membership.guard.routes.spec.ts). A project VIEWER is
-    // still allowed to search — KB reads permit VIEWER.
+    // (see projects/project-membership.guard.routes.spec.ts). US-007 moved the key
+    // gate to `kb.search` (a Developer and a Viewer both hold it through `*.read`,
+    // which is why the KB read routes admit a Viewer while the write routes do not).
 
-    it('allows member with valid project role', async () => {
+    it('returns an empty result set', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       hybridRetrieverService.search.mockResolvedValue(mockSearchResult);
 

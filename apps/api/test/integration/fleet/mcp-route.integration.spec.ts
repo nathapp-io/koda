@@ -5,6 +5,10 @@
  * `claude` is an agent created through `POST /api/agents` and rostered on `web` only. A 2025-era client is answered
  * as one SSE event, so the JSON-RPC body is read from the `data:` line.
  *
+ * Permissions P1 US-004: a tool call is refused by its catalog key, so the dispatch cases use `dispatchAgent` — an
+ * agent whose only source in `web` is a `viewer` binding (through which it holds the read keys only), with a
+ * `developer` binding in `ops` so the tool is listed for it (US-005).
+ *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/mcp-route.integration.spec.ts
  */
 import request from 'supertest';
@@ -13,8 +17,9 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
 import { mcpToolDescriptors } from '../../../src/fleet/assistant/mcp/mcp-tool-catalog';
+import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp } from '../../helpers/http-app';
+import { bootHttpApp, data } from '../../helpers/http-app';
 import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -29,6 +34,7 @@ describeIntegration('MCP route (PG, US-007)', () => {
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
   let claude: { id: string; slug: string; apiKey: string };
+  let dispatchAgent: { id: string; apiKey: string };
   let webTicket: { id: string; number: number };
   const saved = process.env.MCP_ENABLED;
 
@@ -42,8 +48,8 @@ describeIntegration('MCP route (PG, US-007)', () => {
     const dataLine = res.text.split('\n').find((l) => l.startsWith('data:')) ?? '';
     return sse ? JSON.parse(dataLine.slice(5)) : res.body;
   };
-  const callTool = async (name: string, args: Record<string, unknown>): Promise<ToolAnswer> => {
-    const res = await mcp(claude.apiKey, rpc('tools/call', { name, arguments: args })).expect(200);
+  const callTool = async (name: string, args: Record<string, unknown>, token = claude.apiKey): Promise<ToolAnswer> => {
+    const res = await mcp(token, rpc('tools/call', { name, arguments: args })).expect(200);
     return body(res).result as ToolAnswer;
   };
 
@@ -61,6 +67,16 @@ describeIntegration('MCP route (PG, US-007)', () => {
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     claude = await seedFleetHttpAgent(app.getHttpServer(), world.tokens.root);
     await prisma.agentProject.create({ data: { projectId: world.projectId, agentId: claude.id } });
+    // The viewer-only agent of AC-10/AC-11: no roster row and no agent role, so `web` answers it the viewer keys
+    // through this one binding, and `ops` answers the developer keys through the other (US-005 lists the tool).
+    const created = data<{ apiKey: string; agent: { id: string } }>(
+      await request(app.getHttpServer()).post('/api/agents').set({ Authorization: `Bearer ${world.tokens.root}` })
+        .send({ name: 'mcp-viewer', slug: 'mcp-viewer' }).expect(201),
+    );
+    dispatchAgent = { id: created.agent.id, apiKey: created.apiKey };
+    const membership = app.get(MembershipService);
+    await membership.createBinding({ principal: { type: 'AGENT', id: dispatchAgent.id }, roleKey: 'viewer', projectId: world.projectId }, { type: 'SYSTEM', id: 'test' });
+    await membership.createBinding({ principal: { type: 'AGENT', id: dispatchAgent.id }, roleKey: 'developer', projectId: world.opsProjectId }, { type: 'SYSTEM', id: 'test' });
     webTicket = await prisma.ticket.create({ data: { projectId: world.projectId, number: 501, type: 'TASK', title: 'MCP route ticket' } });
   }, 120_000);
 
@@ -154,14 +170,17 @@ describeIntegration('MCP route (PG, US-007)', () => {
     expect(comment.authorAgentId).toBe(claude.id);
   });
 
-  it('AC-10, AC-11: koda_dispatch_job is refused for the agent and leaves no job or action', async () => {
+  it('AC-10, AC-11 (US-004): koda_dispatch_job is refused for a viewer-only agent and leaves no job or action', async () => {
     const feature = 'mcp-route-us007-dispatch';
-    const answer = await callTool('koda_dispatch_job', { project: 'web', repo: 'acme/app', command: 'RUN', feature, maxCostUsd: 0.5 });
+    const answer = await callTool(
+      'koda_dispatch_job', { project: 'web', repo: 'acme/app', command: 'RUN', feature, maxCostUsd: 0.5 }, dispatchAgent.apiKey,
+    );
 
     expect(answer.isError).toBe(true);
-    expect(textOf(answer)).toBe('forbidden: koda_dispatch_job needs create FleetJob on web');
+    // Permissions P1 US-004: the refusal names the tool's catalog key, and the viewer role holds the read keys only.
+    expect(textOf(answer)).toBe('forbidden: koda_dispatch_job needs fleet.job.dispatch on web');
     expect(await prisma.fleetJob.count({ where: { feature } })).toBe(0);
-    expect(await prisma.pendingAction.count({ where: { actorId: claude.id, tool: 'koda_dispatch_job' } })).toBe(0);
+    expect(await prisma.pendingAction.count({ where: { actorId: dispatchAgent.id, tool: 'koda_dispatch_job' } })).toBe(0);
   });
 
   it('AC-12: the executor receives the agent principal and an mcp origin', async () => {

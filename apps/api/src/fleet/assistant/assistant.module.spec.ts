@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
+import { findCatalogEntry } from '../../permissions/catalog';
 import { MemoryGovernanceService } from '../../memory/memory-governance.service';
 import { ProjectsService } from '../../projects/projects.service';
 import { AssistantActionPort } from '../approvals/assistant-action.port';
@@ -10,8 +11,9 @@ import { PrismaPendingActionRepository } from './actions/prisma-pending-action.r
 import { AssistantModule } from './assistant.module';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
+import type { AssistantTool } from './assistant-tool.types';
 import { McpController } from './mcp/mcp.controller';
-import { KODA_GET_ACTION, KODA_MY_PROJECTS } from './koda-tool-descriptors';
+import { KODA_GET_ACTION, KODA_MY_PROJECTS, KODA_TOOL_DESCRIPTORS } from './koda-tool-descriptors';
 import { FleetWriteTools } from './tools/fleet-write-tools';
 import { KnowledgeTools } from './tools/knowledge-tools';
 import { MemoryWriteTools } from './tools/memory-write-tools';
@@ -29,6 +31,26 @@ describe('AssistantModule', () => {
 
   it('AC-15: compiles and resolves AssistantToolExecutor', () => {
     expect(module.get(AssistantToolExecutor)).toBeDefined();
+  });
+
+  it('AC-1 (US-004): every tool the registry holds declares a catalog key, and the three named tools name theirs', async () => {
+    // The registry answers one tool by name, so the group `onModuleInit`s are read through `register` itself.
+    const registered = vi.spyOn(AssistantToolRegistry.prototype, 'register');
+    try {
+      await module.init();
+      const tools = registered.mock.calls.flat() as AssistantTool[];
+      const registry = module.get(AssistantToolRegistry);
+
+      expect(tools.map((tool) => tool.descriptor.name).sort())
+        .toEqual([...KODA_TOOL_DESCRIPTORS.map((descriptor) => descriptor.name), KODA_MY_PROJECTS.name].sort());
+      for (const tool of tools) expect(findCatalogEntry(tool.key), tool.descriptor.name).toBeDefined();
+
+      expect(registry.get('koda_add_comment')?.key).toBe('comment.create');
+      expect(registry.get('koda_dispatch_job')?.key).toBe('fleet.job.dispatch');
+      expect(registry.get('koda_kb_search')?.key).toBe('kb.search');
+    } finally {
+      registered.mockRestore();
+    }
   });
 
   it('AC-14 (US-007): resolves McpController', () => {

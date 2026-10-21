@@ -47,6 +47,7 @@ export function linkTicketsTool(deps: {
 }): AssistantTool<LinkTicketsInput> {
   return {
     descriptor: KODA_LINK_TICKETS,
+    key: 'ticket.link.add',
     // 2b1-D4: the link route checks membership only (`ticket-links.controller.ts`), so this tool does too.
     permission: { kind: 'member' },
     kind: 'write',

@@ -10,8 +10,10 @@ import { Throttle } from '@nathapp/nestjs-throttler';
 import { mcpConfig } from '../../../config/mcp.config';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
 import { isAgentPrincipal, type AgentPrincipal, type KodaPrincipal } from '../../../auth/principal/koda-principal.types';
+import { PermissionService } from '../../../permissions/permission.service';
 import { AssistantToolExecutor } from '../assistant-tool.executor';
-import { createKodaMcpServer, kodaMcpToolRegistrations } from './mcp-server.factory';
+import { AssistantToolRegistry } from '../assistant-tool.registry';
+import { createKodaMcpServer, kodaMcpToolRegistrations, visibleMcpToolNames } from './mcp-server.factory';
 
 /** The slice of Fastify's request and reply this route uses (`fastify` is not a direct dependency of the API). */
 interface McpHttpRequest {
@@ -27,6 +29,8 @@ interface McpHttpReply {
 
 /** The principal travels from the controller to the per-request server factory in `authInfo.extra`. */
 const PRINCIPAL_KEY = 'principal';
+/** Permissions P1 US-005: this request's visible tool names travel the same way, computed per request. */
+const VISIBLE_TOOLS_KEY = 'visibleTools';
 
 /**
  * 3-D18: the koda tool layer over MCP, authenticated by the agent API key the global guard already checked.
@@ -42,12 +46,18 @@ export class McpController {
 
   constructor(
     executor: AssistantToolExecutor,
+    private readonly registry: AssistantToolRegistry,
+    private readonly permissions: PermissionService,
     @Inject(mcpConfig.KEY) private readonly cfg: ConfigType<typeof mcpConfig>,
   ) {
     this.handler = createMcpHandler(
       (ctx) => {
-        const principal = ctx.authInfo?.extra?.[PRINCIPAL_KEY] as AgentPrincipal;
-        return createKodaMcpServer(kodaMcpToolRegistrations(executor, principal));
+        const extra = ctx.authInfo?.extra;
+        const principal = extra?.[PRINCIPAL_KEY] as AgentPrincipal;
+        // Permissions P1 US-005: the request's own set, so the stateless handler registers exactly the tools this
+        // agent may see. An absent set registers nothing rather than everything.
+        const visible = (extra?.[VISIBLE_TOOLS_KEY] as ReadonlySet<string> | undefined) ?? new Set<string>();
+        return createKodaMcpServer(kodaMcpToolRegistrations(executor, principal, visible));
       },
       { responseMode: 'json' },
     );
@@ -72,12 +82,21 @@ export class McpController {
     if (!this.cfg.mcpEnabled) throw new ConflictAppException({}, 'mcp.disabled');
     if (!principal || !isAgentPrincipal(principal)) throw new ForbiddenAppException({}, 'mcp.agentOnly');
 
+    // Permissions P1 US-005: which tools this agent may see, resolved from the registry's keys before the SDK builds
+    // the server. A tool left out is never registered, so the SDK answers a call to it with its unknown-tool error.
+    const visibleTools = await visibleMcpToolNames({ registry: this.registry, permissions: this.permissions }, principal);
+
     // Fastify (production) hands over `req.raw`; the Express app the integration helper boots passes the Node request
     // itself, with its body already parsed (an empty object on GET, which a web Request refuses).
     const node = req.raw ?? (req as unknown as IncomingMessage);
     const request = await toWebRequest(node, node.method === 'POST' ? req.body : undefined);
     const response = await this.handler.fetch(request, {
-      authInfo: { token: '', clientId: principal.id, scopes: [], extra: { [PRINCIPAL_KEY]: principal } },
+      authInfo: {
+        token: '',
+        clientId: principal.id,
+        scopes: [],
+        extra: { [PRINCIPAL_KEY]: principal, [VISIBLE_TOOLS_KEY]: visibleTools },
+      },
     });
 
     // The SDK's Response is written as is: an MCP client expects JSON-RPC bodies, not the JsonResponse envelope.

@@ -27,6 +27,9 @@ describeIntegration('AssistantToolExecutor audit and replay (PG, US-002)', () =>
   const tool: AssistantTool<unknown> = {
     descriptor: { name: 'koda_fake_audit', description: 'd', inputSchema: {} },
     permission: { kind: 'member' },
+    // Permissions P1 US-004: the executor checks the tool's catalog key in the job's project. The job's requester
+    // here is the installation's ADMIN, who holds every project key.
+    key: 'ticket.read',
     parse: (input) => input,
     execute,
   };
@@ -104,5 +107,34 @@ describeIntegration('AssistantToolExecutor audit and replay (PG, US-002)', () =>
     expect(execute).not.toHaveBeenCalled();
     const row = await prisma.assistantToolCall.findUnique({ where: { jobId_toolCallId: { jobId: outsiderJobId, toolCallId: 'forbidden-1' } } });
     expect(row?.outcome).toBe('forbidden');
+  });
+
+  /**
+   * Branch fix B1: reading the audit row before executing and inserting it afterwards let two concurrent duplicates of
+   * one replay key both run the tool; the loser's insert then hit the unique constraint and merely replayed the
+   * winner's response. The replay key is a critical section now, so the duplicate awaits the winner and replays it.
+   */
+  it('B1: two concurrent calls with one replay key run the tool once and store one row', async () => {
+    let running = 0;
+    let peak = 0;
+    execute.mockImplementation(async () => {
+      running += 1;
+      peak = Math.max(peak, running);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      running -= 1;
+      return 'fake result';
+    });
+    try {
+      const concurrent = call({ toolCallId: 'concurrent-1' });
+      const [first, second] = await Promise.all([executor.execute(concurrent), executor.execute(concurrent)]);
+
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(peak).toBe(1);
+      expect(second).toEqual(first);
+      expect(first).toEqual({ content: 'fake result', isError: false });
+      expect(await prisma.assistantToolCall.count({ where: { jobId, toolCallId: 'concurrent-1' } })).toBe(1);
+    } finally {
+      execute.mockImplementation(async () => 'fake result');
+    }
   });
 });

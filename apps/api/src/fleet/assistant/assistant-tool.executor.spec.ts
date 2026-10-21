@@ -11,7 +11,7 @@ import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
 import { ToolInputError, type AssistantTool, type ToolContext } from './assistant-tool.types';
 import { ASSISTANT_TOOL_CALL_REPOSITORY, type AssistantToolCallRecord, type AssistantToolCallRepository, type ToolCallContext } from './assistant-tool-call.domain';
-import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
+import type { PermissionService } from '../../permissions/permission.service';
 import { stableStringify } from '../sync/stable-json';
 
 const GHP = `ghp_${'a1B2c3D4e5'.repeat(4).slice(0, 36)}`;
@@ -38,10 +38,24 @@ function makeRepo(ctx: ToolCallContext | null, actor: ToolCallContext['creator']
   return { repo, rows };
 }
 
+/**
+ * A `PermissionService` double (permissions P1 US-004): every key is allowed, except the ones named in `refused`.
+ * The real decision is asserted in the executor's DB-backed specs; here the double is what tells the executor's
+ * key check apart from its membership check.
+ */
+function permissionDouble(refused: readonly string[] = []) {
+  return {
+    can: vi.fn(async (_actor: unknown, key: string) => ({ allowed: !refused.includes(key), reason: 'granted' })),
+  };
+}
+
+type PermissionsDouble = ReturnType<typeof permissionDouble>;
+
 function makeTool(over: Partial<AssistantTool<string>> = {}): AssistantTool<string> {
   return {
     descriptor: { name: 'koda_fake', description: 'd', inputSchema: {} },
     permission: { kind: 'member' },
+    key: 'ticket.read',
     parse: (input) => String(input),
     execute: vi.fn(async () => 'tool text'),
     ...over,
@@ -56,8 +70,8 @@ interface SetupOptions {
   role?: string | null;
   membership?: Error;
   kind?: ToolCallContext['kind'];
-  /** A stubbed ability factory, for the permission a built-in project role always has (2a-D8 step 5). */
-  abilities?: KodaCaslAbilityFactory;
+  /** The permission decision the executor's key checks read (permissions P1 US-004); every key is allowed by default. */
+  permissions?: PermissionsDouble;
   /** The action's actor cannot be read at all (`findUserActor` answers null, as it does for a deleted user). */
   noActor?: boolean;
 }
@@ -67,6 +81,7 @@ interface Setup {
   rows: AssistantToolCallRecord[];
   repo: AssistantToolCallRepository;
   access: { findProjectIdBySlug: ReturnType<typeof vi.fn>; resolveMembership: ReturnType<typeof vi.fn> };
+  permissions: PermissionsDouble;
 }
 
 function setup(tool: AssistantTool<unknown> | null, opts: SetupOptions = {}): Setup {
@@ -84,8 +99,11 @@ function setup(tool: AssistantTool<unknown> | null, opts: SetupOptions = {}): Se
   };
   const registry = new AssistantToolRegistry();
   if (tool) registry.register(tool as AssistantTool);
-  const executor = new AssistantToolExecutor(registry, repo, access as unknown as ProjectAccessService, opts.abilities ?? new KodaCaslAbilityFactory());
-  return { executor, rows, repo, access };
+  const permissions = opts.permissions ?? permissionDouble();
+  const executor = new AssistantToolExecutor(
+    registry, repo, access as unknown as ProjectAccessService, permissions as unknown as PermissionService,
+  );
+  return { executor, rows, repo, access, permissions };
 }
 
 const call = (over: Partial<{ jobId: string; toolCallId: string; name: string; input: unknown }> = {}) => ({
@@ -140,15 +158,26 @@ describe('AssistantToolExecutor', () => {
     expect(tool.execute).not.toHaveBeenCalled();
   });
 
-  it('AC-6: an ability tool declaring create FleetJob refuses a project VIEWER', async () => {
-    const tool = makeTool({ permission: { kind: 'ability', action: 'create', subject: 'FleetJob' } });
-    const { executor } = setup(tool, { role: 'VIEWER' });
-    expect(await executor.execute(call())).toEqual({ content: 'forbidden: koda_fake needs create FleetJob on web', isError: true });
+  it('AC-4 (US-004): a tool whose key is refused answers forbidden: <tool> needs <key> on <slug> and never runs', async () => {
+    const tool = makeTool({ key: 'fleet.job.dispatch' });
+    const { executor, permissions } = setup(tool, { permissions: permissionDouble(['fleet.job.dispatch']) });
+
+    expect(await executor.execute(call())).toEqual({ content: 'forbidden: koda_fake needs fleet.job.dispatch on web', isError: true });
+    expect(tool.execute).not.toHaveBeenCalled();
+    // The check asks about the tool's own catalog key, in the project the call acts in.
+    expect(permissions.can).toHaveBeenCalledWith(expect.objectContaining({ id: 'u1' }), 'fleet.job.dispatch', { projectId: 'p1' });
+  });
+
+  it('also asks for the key of a member tool, so a member-only tool is not a bypass', async () => {
+    const tool = makeTool({ key: 'ticket.read' });
+    const { executor } = setup(tool, { permissions: permissionDouble(['ticket.read']) });
+
+    expect(await executor.execute(call())).toEqual({ content: 'forbidden: koda_fake needs ticket.read on web', isError: true });
     expect(tool.execute).not.toHaveBeenCalled();
   });
 
-  it('AC-6: the same ability tool runs for a project DEVELOPER', async () => {
-    const tool = makeTool({ permission: { kind: 'ability', action: 'create', subject: 'FleetJob' } });
+  it('runs the same keyed tool for a creator the permission service allows', async () => {
+    const tool = makeTool({ key: 'fleet.job.dispatch' });
     const { executor } = setup(tool, { role: 'DEVELOPER' });
     expect((await executor.execute(call())).isError).toBe(false);
   });
@@ -255,7 +284,10 @@ describe('AssistantToolExecutor', () => {
     });
     const registry = new AssistantToolRegistry();
     registry.register(tool as AssistantTool);
-    const executor = new AssistantToolExecutor(registry, repo, { resolveMembership: async () => 'DEVELOPER' } as unknown as ProjectAccessService, new KodaCaslAbilityFactory());
+    const executor = new AssistantToolExecutor(
+      registry, repo, { resolveMembership: async () => 'DEVELOPER' } as unknown as ProjectAccessService,
+      permissionDouble() as unknown as PermissionService,
+    );
     expect(await executor.execute(call())).toEqual({ content: 'winner', isError: false });
     expect(rows).toHaveLength(0);
   });
@@ -268,6 +300,7 @@ function makeWriteTool(over: Partial<AssistantTool<unknown>> = {}): AssistantToo
   return {
     descriptor: { name: 'koda_fake', description: 'd', inputSchema: {} },
     permission: { kind: 'member' },
+    key: 'ticket.read',
     kind: 'write',
     parse: vi.fn((input: unknown) => input),
     preview: vi.fn(async () => PREVIEW),
@@ -297,7 +330,9 @@ function writeSetup(
   return { ...base, tool, proposer };
 }
 
-const ACTION_FLEET_JOB: Partial<AssistantTool<unknown>> = { permission: { kind: 'ability', action: 'create', subject: 'FleetJob' } };
+const ACTION_FLEET_JOB: Partial<AssistantTool<unknown>> = { key: 'fleet.job.dispatch' };
+/** The harness option of every refused-write case: the dispatch key is not held in `web`. */
+const refusedDispatch = (): SetupOptions => ({ permissions: permissionDouble(['fleet.job.dispatch']) });
 
 describe('S5b 2a-D2: a write tool proposes instead of writing', () => {
   it('AC-2: a write tool never calls execute', async () => {
@@ -328,20 +363,20 @@ describe('S5b 2a-D2: a write tool proposes instead of writing', () => {
     }));
   });
 
-  it('AC-8: a VIEWER is refused a write tool whose ability is create FleetJob', async () => {
-    const { executor } = writeSetup(ACTION_FLEET_JOB, { role: 'VIEWER' });
+  it('AC-8 (US-004): a write tool whose key is refused never previews or proposes', async () => {
+    const { executor } = writeSetup(ACTION_FLEET_JOB, refusedDispatch());
     const result = await executor.execute(call());
     expect(result.isError).toBe(true);
     expect(result.content.startsWith('forbidden:')).toBe(true);
   });
 
-  it('AC-18: the refusal names the tool, the action, the subject and the project slug', async () => {
-    const { executor } = writeSetup(ACTION_FLEET_JOB, { role: 'VIEWER' });
-    expect(await executor.execute(call())).toEqual({ content: 'forbidden: koda_fake needs create FleetJob on web', isError: true });
+  it('AC-18 (US-004): the refusal names the tool, its catalog key and the project slug', async () => {
+    const { executor } = writeSetup(ACTION_FLEET_JOB, refusedDispatch());
+    expect(await executor.execute(call())).toEqual({ content: 'forbidden: koda_fake needs fleet.job.dispatch on web', isError: true });
   });
 
   it('AC-9 and AC-19: a refused write tool neither previews nor proposes', async () => {
-    const { executor, tool, proposer } = writeSetup(ACTION_FLEET_JOB, { role: 'VIEWER' });
+    const { executor, tool, proposer } = writeSetup(ACTION_FLEET_JOB, refusedDispatch());
     await executor.execute(call());
     expect(tool.preview).not.toHaveBeenCalled();
     expect(proposer.propose).not.toHaveBeenCalled();
@@ -417,23 +452,24 @@ describe('S5b 2a-D8: checkAction and executeAction', () => {
     expect(await executor.checkAction(pendingAction())).toBe('forbidden');
   });
 
-  it('AC-13: checkAction answers forbidden when the requester\'s project role is denied create Comment', async () => {
-    const can = vi.fn(() => false);
-    const abilities = { createForUser: vi.fn(async () => ({ can })) } as unknown as KodaCaslAbilityFactory;
-    const tool = makeTool({ permission: { kind: 'ability', action: 'create', subject: 'Comment' } });
-    const { executor } = setup(tool, { abilities });
+  it('AC-8 (US-004): checkAction answers forbidden when the requester\'s tool key is refused in the action\'s project', async () => {
+    const permissions = permissionDouble(['comment.create']);
+    const tool = makeTool({ key: 'comment.create' });
+    const { executor } = setup(tool, { permissions });
 
     expect(await executor.checkAction(pendingAction())).toBe('forbidden');
-    // The tool's own tuple is the one the ability is asked about, for the requester acting with the project role.
-    expect(can).toHaveBeenCalledWith('create', expect.anything());
-    expect(abilities.createForUser).toHaveBeenCalledWith(expect.objectContaining({ id: 'u1', projectRole: 'DEVELOPER' }));
+    // The tool's own catalog key, asked for the requester acting with the action project's role (never the thread's).
+    expect(permissions.can).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'u1', projectRole: 'DEVELOPER' }), 'comment.create', { projectId: 'p2' },
+    );
   });
 
-  it('AC-13 boundary: the same tool is allowed with the real ability factory', async () => {
-    const tool = makeTool({ permission: { kind: 'ability', action: 'create', subject: 'Comment' } });
-    const { executor } = setup(tool);
+  it('AC-8 boundary: the same action is approved when the requester holds the key', async () => {
+    const tool = makeTool({ key: 'comment.create' });
+    const { executor, permissions } = setup(tool);
 
     expect(await executor.checkAction(pendingAction())).toBe('ok');
+    expect(permissions.can).toHaveBeenCalledWith(expect.anything(), 'comment.create', { projectId: 'p2' });
   });
 
   it('AC-12 boundary: checkAction answers forbidden for a requester who is not a member of the action\'s project', async () => {

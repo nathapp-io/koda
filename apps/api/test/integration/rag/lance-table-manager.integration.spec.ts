@@ -15,8 +15,8 @@
  * path, one per-table write mutex across both services, sentinel-row createTable
  * fallback, InMemoryTable fallback). Both services delegate table open/create and
  * all writes to it; the controller indexes through RagService only, and
- * manager.addRecord additionally replaces rows with the same source_id so
- * re-indexing is idempotent.
+ * manager.addRecord additionally replaces the row with the same
+ * (source, source_id) so re-indexing is idempotent.
  *
  * RED-phase evidence (pre-fix, captured before implementing):
  *   - real-LanceDB describe, test 1: expected 1 row for doc-b, received 2
@@ -186,7 +186,7 @@ describe('RAG shared LanceDB write path — real LanceDB mode', () => {
   });
 
   it('delete via VectorStore removes the document for HybridRetriever too', async () => {
-    await vectorStore.deleteBySource(projectId, 'doc-b');
+    await vectorStore.deleteBySource(projectId, 'doc', 'doc-b');
 
     const searchResult = await hybrid.search({ projectId, query: 'zebra' });
     expect(rowsForSourceId(searchResult.results, 'doc-b')).toBe(0);
@@ -241,7 +241,7 @@ describe('RAG shared LanceDB write path — in-memory fallback mode', () => {
       }),
     ]);
 
-    await vectorStore.deleteBySource(projectId, 'doc-d');
+    await vectorStore.deleteBySource(projectId, 'doc', 'doc-d');
 
     const searchResult = await hybrid.search({ projectId, query: 'walrus' });
     expect(rowsForSourceId(searchResult.results, 'doc-d')).toBe(0);
@@ -304,7 +304,7 @@ describe('LanceTableManager', () => {
     expect(aFinished).toBe(true);
   });
 
-  it('addRecord replaces rows with the same source_id (idempotent re-index)', async () => {
+  it('addRecord replaces the row with the same (source, source_id) and keeps other sources', async () => {
     const manager = new LanceTableManager(makeRagConfig(tmpDir, true));
     const table = await manager.getOrCreateTable('project_p2');
 
@@ -321,8 +321,10 @@ describe('LanceTableManager', () => {
     await manager.addRecord('project_p2', table, { ...base, id: 'id-1', source_id: 'same-source' });
     await manager.addRecord('project_p2', table, { ...base, id: 'id-2', source_id: 'same-source' });
     await manager.addRecord('project_p2', table, { ...base, id: 'id-3', source_id: 'other-source' });
+    // US-006: the replace step is keyed by the pair, so a second source with the same id is a different row.
+    await manager.addRecord('project_p2', table, { ...base, id: 'id-4', source: 'ticket', source_id: 'same-source' });
 
-    expect(await table.countRows()).toBe(2);
+    expect(await table.countRows()).toBe(3);
   });
 
   it('falls back to an InMemoryTable when the native module is unavailable and delete filters work', async () => {

@@ -3,7 +3,8 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
 import { AssistantToolCall as AssistantToolCallModel, PrismaClient } from '../../generated/prisma/client';
 import type {
-  AssistantToolCallRecord, AssistantToolCallRepository, ProjectCounts, ProjectCountsReader, ToolCallContext, ToolCallOutcome,
+  AssistantToolCallRecord, AssistantToolCallRepository, ProjectCounts, ProjectCountsReader, ToolCallContext, ToolCallCreator,
+  ToolCallOutcome, UserToolCallCreator,
 } from './assistant-tool-call.domain';
 
 type Persisted = Omit<AssistantToolCallModel, 'id' | 'createdAt'>;
@@ -21,9 +22,9 @@ interface GroupCount {
 
 /**
  * The audit rows of koda tool calls. Module-private (never exported). `findCallContext` is the one escape-hatch read
- * across FleetJob, ChatThread, User and Project (1b-D6): no exported service returns a job's thread creator with the
- * user's role and disabled flag beside the project's slug. `findProjectCounts` is the second (1d2-D7): the counts of
- * many projects in three reads, which no exported service answers together.
+ * across FleetJob, ChatThread, User, Agent and Project (1b-D6): no exported service returns a job's requester (a user
+ * or an agent) beside the thread and the project's slug. `findProjectCounts` is the second (1d2-D7): the counts of many
+ * projects in three reads, which no exported service answers together.
  */
 @Injectable()
 export class PrismaAssistantToolCallRepository
@@ -75,28 +76,50 @@ export class PrismaAssistantToolCallRepository
     await this.prisma.client.assistantToolCall.create({ data: this.toPersistenceCreate(row) });
   }
 
-  async findUserActor(userId: string): Promise<ToolCallContext['creator'] | null> {
+  async findUserActor(userId: string): Promise<UserToolCallCreator | null> {
     return this.prisma.client.user.findUnique({
       where: { id: userId }, select: { id: true, email: true, role: true, disabled: true },
     });
   }
 
+  /**
+   * The job's project, thread and requester (permissions P1 US-001). The requester is read from the job — the message's
+   * sender or the caller of publish/discard — never from the thread's creator, so an agent's turn answers the agent.
+   * A requester row that no longer exists (a deleted agent, a deleted user) answers null, exactly as a job with no
+   * thread does: the executor then refuses the call with 404 `fleet.jobs`.
+   */
   async findCallContext(jobId: string): Promise<ToolCallContext | null> {
     const job = await this.prisma.client.fleetJob.findUnique({
       where: { id: jobId },
       select: {
         project: { select: { id: true, slug: true } },
-        thread: { select: { id: true, kind: true, createdBy: { select: { id: true, email: true, role: true, disabled: true } } } },
+        requestedById: true,
+        requestedByType: true,
+        thread: { select: { id: true, kind: true } },
       },
     });
     if (!job?.thread) return null;
+    const creator = await this.requester(job.requestedById, job.requestedByType);
+    if (!creator) return null;
     const kind = job.thread.kind;
     return {
       project: job.project,
       threadId: job.thread.id,
-      creator: job.thread.createdBy,
+      creator,
       kind: kind === 'PROJECT' || kind === 'WORKSPACE' ? kind : 'REPO',
     };
+  }
+
+  /** The job's requester as a creator: the `Agent` row for an AGENT job, else the `User` row. */
+  private async requester(requesterId: string, requesterType: string): Promise<ToolCallCreator | null> {
+    if (requesterType !== 'AGENT') {
+      const user = await this.findUserActor(requesterId);
+      return user === null ? null : { ...user, type: 'USER' };
+    }
+    const agent = await this.prisma.client.agent.findUnique({
+      where: { id: requesterId }, select: { id: true, slug: true, status: true },
+    });
+    return agent === null ? null : { type: 'AGENT', ...agent };
   }
 
   /**
