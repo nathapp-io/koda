@@ -117,7 +117,9 @@ describe('US-004: project conflict responses', () => {
       },
     };
     app.useGlobalGuards(principalInjector);
-    await app.init();
+    // Keep one port reserved until app.close(). Letting Supertest listen/close for
+    // each request permits ephemeral-port reuse by parallel HTTP test suites.
+    await app.listen(0, '127.0.0.1');
     httpServer = app.getHttpServer();
   });
 
@@ -132,6 +134,10 @@ describe('US-004: project conflict responses', () => {
       ...data,
     }));
     projectRepo.updateBySlug.mockResolvedValue(ALPHA_PROJECT);
+  });
+
+  it('keeps a dedicated HTTP listener open for the suite', () => {
+    expect(httpServer.listening).toBe(true);
   });
 
   describe('POST /projects', () => {
@@ -164,6 +170,8 @@ describe('US-004: project conflict responses', () => {
         .send({ name: 'Beta Project', slug: 'beta-project', key: 'ALPH' });
 
       expect(res.status).toBe(409);
+      expect(projectRepo.findByKey).toHaveBeenCalledWith('ALPH');
+      expect(projectRepo.createProject).not.toHaveBeenCalled();
     });
 
     it('AC2: does not create the project when the key already exists', async () => {
