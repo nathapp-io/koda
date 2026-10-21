@@ -3,7 +3,7 @@
   "feature": "permissions-p1-retire-checks",
   "branchName": "feat/permissions-p1-retire-checks",
   "createdAt": "2026-10-21T00:00:00Z",
-  "updatedAt": "2026-10-21T13:13:08.067Z",
+  "updatedAt": "2026-10-21T13:49:01.191Z",
   "userStories": [
     {
       "id": "US-001",
@@ -350,8 +350,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -363,7 +363,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.1200000000000001,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-21T13:13:11.826Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/projects/project-membership.guard.ts",
@@ -446,7 +458,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "9ec7a254313e3dc94da1a6434000ec2bbd5295ab"
     },
     {
       "id": "US-005",
