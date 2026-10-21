@@ -3,7 +3,7 @@
  * `PendingAction` with no thread, no requester, no approver and no approval, and the expiry sweeper leaves it alone.
  *
  * Fixtures follow `assistant-actions-decide.integration.spec.ts`: `seedFleetHttpWorld`, agent `claude` from
- * `seedFleetHttpAgent` with an `AgentProject` row for `web`, `FLEET_THREADS_ENABLED=true` before boot. No thread is
+ * `seedFleetHttpAgent` rostered in `web` through role bindings, `FLEET_THREADS_ENABLED=true` before boot. No thread is
  * seeded: 3-D14's whole point is that a direct action has none.
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/assistant-direct-action-record.integration.spec.ts

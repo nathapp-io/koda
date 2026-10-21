@@ -68,8 +68,9 @@ describeIntegration('MCP route (PG, US-007)', () => {
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     claude = await seedFleetHttpAgent(app.getHttpServer(), world.tokens.root);
     await rosterFleetAgent(prisma, claude.id, world.projectId);
-    // The viewer-only agent of AC-10/AC-11: no roster row and no agent role, so `web` answers it the viewer keys
-    // through this one binding, and `ops` answers the developer keys through the other (US-005 lists the tool).
+    // The viewer-only agent of AC-10/AC-11: no roster reach of its own and no agent role, so `web` answers it the
+    // viewer keys through this one binding, and `ops` answers the developer keys through the other (US-005 lists
+    // the tool).
     const created = data<{ apiKey: string; agent: { id: string } }>(
       await request(app.getHttpServer()).post('/api/agents').set({ Authorization: `Bearer ${world.tokens.root}` })
         .send({ name: 'mcp-viewer', slug: 'mcp-viewer' }).expect(201),

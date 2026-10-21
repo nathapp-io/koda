@@ -5,8 +5,9 @@
  * Every tool call below enters a real route: the thread tools through
  * `POST /fleet/runner/jobs/:jobId/tools/:name?leaseEpoch=1` with the real key of the runner that holds the job, and
  * the MCP tools through `POST /api/mcp`. Each caller has exactly one kind of source in project `p1` — one
- * PROJECT-scope binding (users, no `ProjectMember` row anywhere), one binding plus its legacy `AgentProject` roster
- * row (agents), or a roster row with no role entry at all (AC-12) — so no refusal below is decided by a fixture.
+ * PROJECT-scope binding (users, no `ProjectMember` row anywhere), one binding plus the roster's viewer
+ * binding (agents), or the roster's viewer binding with no role binding at all (AC-12) — so no refusal below is
+ * decided by a fixture.
  *
  * The thread jobs are RUNNING and their runner is offline (a `lastSeenAt` no placement window accepts), so a
  * dispatched job stays QUEUED for AC-6 and AC-14 to read.
@@ -207,16 +208,16 @@ describeIntegration('assistant tools check their key (US-004)', () => {
     await createUserWithBinding('noComment', NO_COMMENT_ROLE);
     await createUserWithBinding('updater', UPDATER_ROLE);
 
-    // AC-9: an agent whose only source in p1 is a viewer binding (and its roster row).
+    // AC-9: an agent whose only source in p1 is a viewer binding (and the roster's viewer binding).
     await createAgent('p1-viewer-agent', { role: 'viewer', roster: true });
-    // AC-10 and AC-14: an agent whose only source in p1 is a developer binding (and its roster row).
+    // AC-10 and AC-14: an agent whose only source in p1 is a developer binding (and the roster's viewer binding).
     await createAgent('p1-dev-agent', { role: 'developer', roster: true });
     // AC-5: a viewer binding in p1 and a developer binding in p2, so US-005 keeps listing the tool for it.
     await createAgent('p1-mcp-viewer-agent', { role: 'viewer', roster: true });
     await bind({ type: 'AGENT', id: ids['p1-mcp-viewer-agent'] }, 'developer', p2Id);
     // AC-6: a developer binding in p1, and nothing else.
     await createAgent('p1-mcp-dev-agent', { role: 'developer', roster: true });
-    // AC-12: a roster row with no role entry and no binding at all.
+    // AC-12: the roster's viewer binding with no role binding at all.
     await createAgent('p1-roster-agent', { roster: true });
 
     // The rows were written after a principal could have been cached by an earlier check.

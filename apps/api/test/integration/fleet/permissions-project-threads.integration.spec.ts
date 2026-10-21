@@ -4,7 +4,7 @@
  * (AC-1 .. AC-13, AC-15 .. AC-17, over real HTTP and real Postgres).
  *
  * Every caller below has exactly one kind of source in `p1`: one PROJECT-scope binding (users, no
- * `ProjectMember` row anywhere) or one legacy `AgentProject` roster row plus a binding (agents). No test
+ * `ProjectMember` row anywhere) or the roster's viewer binding plus a binding (agents). No test
  * asserts through a bypass: the refusals are the routes' and the repository's own.
  *
  * Run: cd apps/api && bun run test:db:up &&

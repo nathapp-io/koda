@@ -32,7 +32,7 @@ describeIntegration('fleet project threads (PG, US-003)', () => {
   const cfg = () => app.get<IFleetConfig>(FLEET_CFG, { strict: false });
   const asDev = () => ({ Authorization: `Bearer ${world.tokens.dev}` });
 
-  /** A project with no fleet repo at all, with `dev` as a DEVELOPER member so the create route reaches the service. */
+  /** A project with no fleet repo at all, with `dev` holding a developer binding so the create route reaches the service. */
   const seedRepoLessProject = async (): Promise<string> => {
     const slug = `empty-${++seq}`;
     const project = await prisma.project.create({ data: { name: slug, slug, key: `E${seq}` } });

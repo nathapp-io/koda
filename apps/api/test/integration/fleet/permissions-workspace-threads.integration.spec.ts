@@ -4,7 +4,7 @@
  * over real HTTP and real Postgres).
  *
  * Every caller below has exactly one kind of source in `p1`: one PROJECT-scope binding (users, no
- * `ProjectMember` row anywhere) or one legacy `AgentProject` roster row plus a binding (agents). The
+ * `ProjectMember` row anywhere) or the roster's viewer binding plus a binding (agents). The
  * workspace routes carry no project slug, so the six workspace keys are decided by `RequiresGuard`
  * against the caller's global keys, and the four `S` routes (`PATCH`, `stop`, `end-session`,
  * `answer`) are decided by `WorkspaceThreadsService` in the thread's home project, on the thread's

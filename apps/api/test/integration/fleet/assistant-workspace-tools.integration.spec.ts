@@ -116,7 +116,7 @@ describeIntegration('koda_my_projects and workspace-scoped tools (PG, US-003)', 
     const aOne = await createProject('a-one', 'Alpha One');
     const rich = await createProject('rich', 'Rich');
     richSlug = rich.slug;
-    // A soft-deleted project `dev` holds a member row for: it must never be listed (AC-7).
+    // A soft-deleted project `dev` holds a developer binding for: it must never be listed (AC-7).
     const deleted = await prisma.project.create({
       data: { name: 'Retired', slug: 'retired', key: 'RETIRED', deletedAt: new Date() },
     });

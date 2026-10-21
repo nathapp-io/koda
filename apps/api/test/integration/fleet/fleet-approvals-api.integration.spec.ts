@@ -133,8 +133,9 @@ describeIntegration('fleet approvals API (PG)', () => {
     const { approvalId } = await stopped();
     const url = endpoint === 'list' ? PROJECT : `${PROJECT}/${approvalId}`;
     await request(server).get(url).set(tok('viewer')).expect(200);
-    // Permissions P1d US-006 (R10 retired for approvals): the agent's roster row and legacy roles hold
-    // `fleet.approval.read` in this project, so the route key admits it like a member.
+    // Permissions P1d US-006 (R10 retired for approvals): the agent's project bindings (the roster's
+    // viewer reach and its agent roles) hold `fleet.approval.read` in this project, so the route key admits it
+    // like a member.
     const res = await request(server).get(url).set(as(agent.apiKey)).expect(200);
     if (endpoint === 'get') expect(data<Approval>(res).id).toBe(approvalId);
   });
