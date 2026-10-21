@@ -94,7 +94,7 @@ describeIntegration('permission fixture bindings (PG)', () => {
     let lookups = 0;
     let releaseLookups!: () => void;
     const allLookups = new Promise<void>((resolve) => { releaseLookups = resolve; });
-    const concurrentDb = new Proxy(db, {
+    const instrument = (client: PrismaClient): PrismaClient => new Proxy(client, {
       get(target, property, receiver) {
         if (property !== 'roleBinding') return Reflect.get(target, property, receiver) as unknown;
         const bindingDelegate = Reflect.get(target, property, receiver) as PrismaClient['roleBinding'];
@@ -102,7 +102,8 @@ describeIntegration('permission fixture bindings (PG)', () => {
           get(delegate, method, delegateReceiver) {
             if (method !== 'findFirst') return Reflect.get(delegate, method, delegateReceiver) as unknown;
             return async (args: Parameters<PrismaClient['roleBinding']['findFirst']>[0]) => {
-              const result = await db.roleBinding.findFirst(args);
+              const query = Reflect.get(delegate, method, delegateReceiver) as (input: typeof args) => Promise<Awaited<ReturnType<PrismaClient['roleBinding']['findFirst']>>>;
+              const result = await query(args);
               lookups += 1;
               if (lookups === 2) releaseLookups();
               await allLookups;
@@ -111,8 +112,19 @@ describeIntegration('permission fixture bindings (PG)', () => {
           },
         });
       },
+    });
+    const concurrentDb = new Proxy(db, {
+      get(target, property, receiver) {
+        if (property !== '$transaction') return Reflect.get(target, property, receiver) as unknown;
+        const transact = Reflect.get(target, property, receiver) as (callback: (tx: PrismaClient) => Promise<unknown>) => Promise<unknown>;
+        return (callback: (tx: PrismaClient) => Promise<unknown>) => transact.call(
+          target,
+          (tx) => callback(instrument(tx as PrismaClient)),
+        );
+      },
     }) as PrismaClient;
     const results = await Promise.all([grantRole(concurrentDb, ref(u.id), 'developer', p.id), grantRole(concurrentDb, ref(u.id), 'developer', p.id)]);
+    expect(lookups).toBe(2);
     expect(results[0]?.id).toBe(results[1]?.id);
     expect(await db.roleBinding.count({ where: { principalId: u.id, projectId: p.id } })).toBe(1);
   });
