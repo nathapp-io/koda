@@ -68,7 +68,12 @@ export class ProjectMembershipGuard implements CanActivate {
       ctx.getClass(),
     ]);
     if (!from) return undefined;
-    const value = req.query?.[from.key];
+    const source = from.source === 'query'
+      ? req.query
+      : typeof req.body === 'object' && req.body !== null
+        ? req.body as Record<string, unknown>
+        : undefined;
+    const value = source?.[from.key];
     return typeof value === 'string' && value.length > 0 ? value : undefined;
   }
 

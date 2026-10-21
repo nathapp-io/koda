@@ -14,6 +14,7 @@ export interface ProjectContext {
 export interface ProjectScopedRequest {
   params?: { slug?: string };
   query?: Record<string, unknown>;
+  body?: unknown;
   user?: KodaPrincipal;
   projectContext?: ProjectContext;
 }

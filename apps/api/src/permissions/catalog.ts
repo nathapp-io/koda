@@ -43,6 +43,8 @@ export const PUBLIC_KEYS: ReadonlySet<string> = new Set([
   'health.read',
   'invite.preview',
   'invite.accept',
+  'ci.webhook.ingest',
+  'vcs.webhook.ingest',
 ]);
 
 /** Keys every authenticated principal holds on its own data; they cannot be removed by role edits. */
@@ -141,9 +143,9 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'session.refresh': ['public'],
   'auth.me.read': ['own'],
   'session.logout': ['own'],
-  'ci.webhook.ingest': ['project'],
-  'codeintel.index.write': ['global'],
-  'codeintel.read': ['global'],
+  'ci.webhook.ingest': ['public'],
+  'codeintel.index.write': ['project'],
+  'codeintel.read': ['project'],
   'comment.create': ['project'],
   'comment.read': ['project'],
   'comment.update': ['global'],
@@ -297,7 +299,7 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'user.read': ['global'],
   'user.create': ['global'],
   'user.update': ['global'],
-  'vcs.webhook.ingest': ['project'],
+  'vcs.webhook.ingest': ['public'],
   'vcs.connection.create': ['project'],
   'vcs.connection.read': ['project'],
   'vcs.connection.update': ['project'],

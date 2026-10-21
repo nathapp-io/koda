@@ -8,9 +8,9 @@ import { SetMetadata } from '@nestjs/common';
 export const PROJECT_SLUG_FROM_KEY = 'koda:projectSlugFrom';
 
 export interface ProjectSlugSource {
-  source: 'query';
+  source: 'query' | 'body';
   key: string;
 }
 
-export const ProjectSlugFrom = (source: 'query', key: string) =>
+export const ProjectSlugFrom = (source: 'query' | 'body', key: string) =>
   SetMetadata<string, ProjectSlugSource>(PROJECT_SLUG_FROM_KEY, { source, key });
