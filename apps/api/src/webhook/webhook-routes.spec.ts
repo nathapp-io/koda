@@ -7,11 +7,10 @@
  * uses) and the DNS seam is stubbed, so nothing here opens a socket: requests go through
  * Fastify's in-process `inject()`.
  *
- * The ADMIN gate is the production `PermissionAuthGuard` over `DefaultPermissionProvider`
- * — the same library code `NathApplication.useAppGlobalGuards()` installs, driven by the
- * principal `authorities`; the principal injector stands in for the global
- * `CombinedAuthGuard` exactly as `src/projects/project-membership.guard.routes.spec.ts`
- * does.
+ * The actual `ProjectMembershipGuard` and `RequiresGuard` run on the route methods. ProjectAccessService
+ * and PermissionService are test doubles: the former resolves fixture project access, and the latter
+ * grants the designated admin and viewer read key while refusing other keys/principals. The principal
+ * injector stands in for the global CombinedAuthGuard.
  *
  * ACs covered here:
  *  AC9  POST with a blocked destination -> 400, no webhook row for the project
@@ -33,6 +32,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import {
   CommonExceptionCode,
+  ForbiddenAppException,
   GlobalExceptionsFilter,
   I18nCoreModule,
   I18nWrapper,
@@ -121,13 +121,19 @@ function makeFakeClient(target: FakeStore): Record<string, unknown> {
       findUnique: async ({ where }: { where: { id: string } }) =>
         target.webhooks.find((row) => row.id === where.id) ?? null,
       findMany: async ({ where }: { where?: { projectId?: string } } = {}) =>
-        target.webhooks.filter(
-          (row) => where?.projectId === undefined || row.projectId === where.projectId,
-        ),
+        target.webhooks
+          .filter((row) => where?.projectId === undefined || row.projectId === where.projectId)
+          .map(({ id, projectId, url, events, createdAt }) => ({ id, projectId, url, events, createdAt })),
       update: async ({ where, data }: { where: { id: string }; data: Partial<WebhookRow> }) => {
         const row = target.webhooks.find((candidate) => candidate.id === where.id);
         if (!row) throw new Error(`webhook ${where.id} does not exist`);
         Object.assign(row, data);
+        return row;
+      },
+      delete: async ({ where }: { where: { id: string } }) => {
+        const index = target.webhooks.findIndex((row) => row.id === where.id);
+        if (index < 0) throw new Error(`webhook ${where.id} does not exist`);
+        const [row] = target.webhooks.splice(index, 1);
         return row;
       },
     },
@@ -172,6 +178,27 @@ const memberPrincipal: UserPrincipal = {
   authorities: ['MEMBER'],
 };
 
+const viewerPrincipal: UserPrincipal = {
+  ...memberPrincipal,
+  id: 'user-viewer',
+  name: 'viewer@koda.dev',
+  email: 'viewer@koda.dev',
+};
+
+const projectAdminPrincipal: UserPrincipal = {
+  ...memberPrincipal,
+  id: 'user-project-admin',
+  name: 'project-admin@koda.dev',
+  email: 'project-admin@koda.dev',
+};
+
+const outsiderPrincipal: UserPrincipal = {
+  ...memberPrincipal,
+  id: 'user-outsider',
+  name: 'outsider@koda.dev',
+  email: 'outsider@koda.dev',
+};
+
 /** Seeds a webhook row directly, the way a row created before US-003 would already exist. */
 function seedWebhook(projectId: string, url: string): WebhookRow {
   const row: WebhookRow = {
@@ -198,12 +225,12 @@ describe('webhook routes (US-003)', () => {
 
   /** Drives one request through the real pipeline (pipes, guards, filters) in-process. */
   async function callApi(
-    method: 'GET' | 'POST' | 'PATCH',
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     url: string,
     payload?: Record<string, unknown>,
   ): Promise<ApiResponse> {
     const res = await app.inject({ method, url, payload });
-    const parsed = (res.json() ?? {}) as {
+    const parsed = (res.statusCode === 204 ? {} : res.json()) as {
       ret?: number;
       message?: string;
       data?: Record<string, unknown>;
@@ -246,16 +273,26 @@ describe('webhook routes (US-003)', () => {
               const project = [projectA, projectB].find((row) => row.slug === slug);
               return project?.id ?? 'missing';
             },
-            resolveMembership: async () => 'MEMBER',
+            resolveMembership: async (_projectId: string, principal: KodaPrincipal) => {
+              if (principal.actorType === 'user' && principal.id === outsiderPrincipal.id) {
+                throw new ForbiddenAppException({}, 'projects');
+              }
+              return 'MEMBER';
+            },
           },
         },
         {
           provide: PermissionService,
           useValue: {
-            can: async (principal: KodaPrincipal, _key: string) => ({
-              allowed: principal.actorType === 'user' && principal.id === adminPrincipal.id,
-              reason: principal.actorType === 'user' && principal.id === adminPrincipal.id ? 'granted' : 'role-missing',
-            }),
+            can: async (principal: KodaPrincipal, key: string, context: { projectId?: string } = {}) => {
+              const isUser = principal.actorType === 'user';
+              const allowed = isUser && (
+                principal.id === adminPrincipal.id ||
+                (principal.id === projectAdminPrincipal.id && context.projectId !== undefined) ||
+                (principal.id === viewerPrincipal.id && key === 'webhook.read')
+              );
+              return { allowed, reason: allowed ? 'granted' : 'role-missing' };
+            },
           },
         },
         RequiresGuard,
@@ -293,6 +330,65 @@ describe('webhook routes (US-003)', () => {
   beforeEach(() => {
     store.webhooks.length = 0;
     currentPrincipal = adminPrincipal;
+  });
+
+  it('AC-3: a viewer lists project webhooks without secret fields', async () => {
+    seedWebhook(projectA.id, 'https://93.184.215.14/hook');
+    currentPrincipal = viewerPrincipal;
+
+    const res = await callApi('GET', '/api/projects/alpha/webhooks');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0]).not.toHaveProperty('secret');
+  });
+
+  it('AC-6: a project-admin deletes its project webhook', async () => {
+    const webhook = seedWebhook(projectA.id, 'https://93.184.215.14/hook');
+    currentPrincipal = projectAdminPrincipal;
+
+    const res = await callApi('DELETE', `/api/projects/alpha/webhooks/${webhook.id}`);
+
+    expect(res.status).toBe(204);
+    expect(rowOf(webhook.id)).toBeUndefined();
+  });
+
+  it('AC-7: a developer cannot delete its project webhook', async () => {
+    const webhook = seedWebhook(projectA.id, 'https://93.184.215.14/hook');
+    currentPrincipal = memberPrincipal;
+
+    const res = await callApi('DELETE', `/api/projects/alpha/webhooks/${webhook.id}`);
+
+    expect(res.status).toBe(403);
+    expect(rowOf(webhook.id)).toBeDefined();
+  });
+
+  it('AC-8: a project-admin cannot use global webhook deletion', async () => {
+    const webhook = seedWebhook(projectA.id, 'https://93.184.215.14/hook');
+    currentPrincipal = projectAdminPrincipal;
+
+    const res = await callApi('DELETE', `/api/webhooks/${webhook.id}`);
+
+    expect(res.status).toBe(403);
+    expect(rowOf(webhook.id)).toBeDefined();
+  });
+
+  it('AC-9: a global admin can delete a webhook through the global route', async () => {
+    const webhook = seedWebhook(projectA.id, 'https://93.184.215.14/hook');
+
+    const res = await callApi('DELETE', `/api/webhooks/${webhook.id}`);
+
+    expect(res.status).toBe(204);
+    expect(rowOf(webhook.id)).toBeUndefined();
+  });
+
+  it('AC-10: a principal with no project access is refused before permission evaluation', async () => {
+    currentPrincipal = outsiderPrincipal;
+
+    const res = await callApi('GET', '/api/projects/alpha/webhooks');
+
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe('projects.40003');
   });
 
   it('AC9: POST with the blocked destination https://10.0.0.5/hook returns 400 and leaves no webhook row', async () => {
