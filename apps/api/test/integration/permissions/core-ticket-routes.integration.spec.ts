@@ -4,9 +4,9 @@
  * (AC-1 .. AC-16).
  *
  * One booted application for the whole file. The first registration is the installation's Owner, so
- * the fixtures (users, project, tickets, agent roster rows) are built as that Owner; every assertion
- * below acts as a principal whose only source in `p1` is one role binding (users) or one legacy
- * `AgentProject` row, with and without an `AgentRoleEntry` (agents). No test asserts through a bypass.
+ * the fixtures (users, project, tickets, agent bindings) are built as that Owner; every assertion
+ * below acts as a principal whose only source in `p1` is one role binding (users and agents, with and
+ * without a second agent role binding). No test asserts through a bypass.
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/permissions/core-ticket-routes.integration.spec.ts
  */
@@ -17,6 +17,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -34,6 +35,14 @@ const PERMISSIONS_REFUSED = (
 
 type RoleKey = 'reviewer' | 'triager' | 'developer' | 'viewer' | 'project-admin';
 type TicketState = 'CREATED' | 'VERIFIED' | 'IN_PROGRESS' | 'VERIFY_FIX';
+
+/** The role key an agent's legacy `AgentRoleEntry` role is read as (the union's own mapping). */
+const ROLE_KEY_FOR_AGENT_ROLE: Record<'DEVELOPER' | 'REVIEWER' | 'VERIFIER' | 'TRIAGER', string> = {
+  DEVELOPER: 'developer',
+  REVIEWER: 'reviewer',
+  VERIFIER: 'verifier',
+  TRIAGER: 'triager',
+};
 
 interface TicketDetail {
   ref: string;
@@ -53,6 +62,8 @@ describeIntegration('ticket CRUD route keys (US-004)', () => {
   const userIds: Record<string, string> = {};
   let p1Id = '';
   let counter = 0;
+  let rootId = '';
+  const agentIds: string[] = [];
 
   const auth = (who: string) => ({ Authorization: `Bearer ${tokens[who]}` });
   const asRoot = (method: 'get' | 'post' | 'patch' | 'delete', url: string, body?: Record<string, unknown>) => {
@@ -114,14 +125,16 @@ describeIntegration('ticket CRUD route keys (US-004)', () => {
     return data<{ total: number }>(res).total;
   };
 
-  /** A rostered agent: the roster row is its only source in p1 until `legacyRole` adds one. */
-  const createAgent = async (slug: string, legacyRole?: 'REVIEWER' | 'DEVELOPER'): Promise<string> => {
+  /** A rostered agent: a `viewer` binding in p1 is its only source there until `agentRole` adds one. */
+  const createAgent = async (slug: string, agentRole?: 'REVIEWER' | 'DEVELOPER'): Promise<string> => {
     const created = await asRoot('post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
-    await db.agentProject.create({ data: { agentId: body.agent.id, projectId: p1Id } });
-    if (legacyRole) await db.agentRoleEntry.create({ data: { agentId: body.agent.id, role: legacyRole } });
+    const agent = { type: 'AGENT' as const, id: body.agent.id };
+    await grantBaseline(db, agent);
+    await grantRole(db, agent, 'viewer', p1Id);
+    if (agentRole) await grantRole(db, agent, ROLE_KEY_FOR_AGENT_ROLE[agentRole], p1Id);
     tokens[slug] = body.apiKey;
-    // The legacy rows are written after the principal could have been cached by an earlier check.
+    // The bindings are written after the principal could have been cached by an earlier check.
     await membership.invalidatePermissions();
     return body.agent.id;
   };
@@ -138,6 +151,7 @@ describeIntegration('ticket CRUD route keys (US-004)', () => {
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD })
       .expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
+    rootId = (await db.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
 
     for (const who of ['viewer', 'developer', 'triager', 'reviewer', 'padmin']) await createUser(who);
 
@@ -154,14 +168,30 @@ describeIntegration('ticket CRUD route keys (US-004)', () => {
     await bind('reviewer', 'reviewer');
     await bind('padmin', 'project-admin');
 
-    // AC-3: a roster row and no AgentRoleEntry.
-    await createAgent('p1-legacy-agent');
-    // AC-8: a roster row and a legacy DEVELOPER entry.
-    await createAgent('p1-developer-agent', 'DEVELOPER');
+    // AC-3: a viewer binding in p1 and no agent role.
+    agentIds.push(await createAgent('p1-legacy-agent'));
+    // AC-8: a viewer binding plus a developer binding in p1.
+    agentIds.push(await createAgent('p1-developer-agent', 'DEVELOPER'));
   }, BOOT_TIMEOUT);
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every fixture principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(db, [
+      { type: 'USER', id: rootId },
+      { type: 'USER', id: userIds.viewer },
+      { type: 'USER', id: userIds.developer },
+      { type: 'USER', id: userIds.triager },
+      { type: 'USER', id: userIds.reviewer },
+      { type: 'USER', id: userIds.padmin },
+      ...agentIds.map((id) => ({ type: 'AGENT' as const, id })),
+    ]);
   });
 
   // -------------------------------------------------------------------------

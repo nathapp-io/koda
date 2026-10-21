@@ -5,9 +5,8 @@
  * (AC-1 .. AC-23, AC-26, AC-27).
  *
  * Every caller below has exactly one kind of source in `p1`: one PROJECT-scope binding (users, no
- * `ProjectMember` row anywhere) or one legacy `AgentProject` roster row plus the `AgentRoleEntry` roles
- * the AC names (agents). No test asserts through a bypass: the refusals are the routes' and the
- * service's own.
+ * `ProjectMember` row anywhere) or one `viewer` binding plus the role bindings the AC names (agents).
+ * No test asserts through a bypass: the refusals are the routes' and the service's own.
  *
  * Run: cd apps/api && bun run test:db:up &&
  *      bun run test:scoped test/integration/permissions/enforce-fleet-approvals-budgets.integration.spec.ts
@@ -19,6 +18,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -58,6 +58,15 @@ interface Counts {
   unscoped: number;
   projects: Array<{ projectId: string; slug: string; pending: number }>;
 }
+
+/** The role key an agent's legacy `AgentRoleEntry` role is read as (the union's own mapping). */
+type AgentRole = 'DEVELOPER' | 'REVIEWER' | 'VERIFIER' | 'TRIAGER';
+const ROLE_KEY_FOR_AGENT_ROLE: Record<AgentRole, string> = {
+  DEVELOPER: 'developer',
+  REVIEWER: 'reviewer',
+  VERIFIER: 'verifier',
+  TRIAGER: 'triager',
+};
 
 describeIntegration('fleet approval and budget keys (US-006)', () => {
   let app: NathApplication;
@@ -111,15 +120,18 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
     );
 
   /**
-   * A rostered agent: its only key source in `p1` is the roster row plus the `AgentRoleEntry` roles
+   * A rostered agent: its only key source in `p1` is the `viewer` binding plus the role bindings
    * `roles` names (none when it is empty).
    */
-  const createAgent = async (slug: string, roles: string[] = []): Promise<string> => {
-    const created = await asRoot('post', '/api/agents', { name: slug, slug, ...(roles.length > 0 ? { roles } : {}) }).expect(201);
+  const createAgent = async (slug: string, roles: AgentRole[] = []): Promise<string> => {
+    const created = await asRoot('post', '/api/agents', { name: slug, slug, roles: [] }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
-    await prisma.agentProject.create({ data: { agentId: body.agent.id, projectId: p1Id } });
+    const agent = { type: 'AGENT' as const, id: body.agent.id };
+    await grantBaseline(prisma, agent);
+    await grantRole(prisma, agent, 'viewer', p1Id);
+    for (const role of roles) await grantRole(prisma, agent, ROLE_KEY_FOR_AGENT_ROLE[role], p1Id);
     tokens[slug] = body.apiKey;
-    // The rows are written after a principal could have been cached by an earlier check.
+    // The bindings are written after a principal could have been cached by an earlier check.
     await membership.invalidatePermissions();
     return body.agent.id;
   };
@@ -265,6 +277,22 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
     await prisma.budgetPolicy.deleteMany();
     await prisma.outboxEvent.deleteMany();
     await prisma.fleetActivity.deleteMany();
+  });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every fixture principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: ids.root },
+      { type: 'USER', id: ids.other },
+      { type: 'USER', id: ids.devBind },
+      { type: 'USER', id: ids.viewerBind },
+      { type: 'USER', id: ids.adminBind },
+      { type: 'AGENT', id: ids.rosterAgent },
+      { type: 'AGENT', id: ids.devAgent },
+    ]);
   });
 
   // -------------------------------------------------------------------------

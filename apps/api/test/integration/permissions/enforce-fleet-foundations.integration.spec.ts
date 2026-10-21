@@ -15,6 +15,7 @@ import { AppModule } from '../../../src/app.module';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { PermissionService } from '../../../src/permissions/permission.service';
+import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -32,9 +33,12 @@ describeIntegration('enforce-fleet foundations (PG)', () => {
 
   const newUser = async () => {
     counter += 1;
-    return prisma.user.create({
+    const user = await prisma.user.create({
       data: { email: `u${counter}@koda.test`, name: `U${counter}`, passwordHash: 'x', role: 'MEMBER' },
     });
+    // The baseline binding production writes on a user create, so the fixture holds no legacy grant.
+    await grantBaseline(prisma, { type: 'USER', id: user.id });
+    return user;
   };
   const newProject = async () => {
     counter += 1;
@@ -71,6 +75,12 @@ describeIntegration('enforce-fleet foundations (PG)', () => {
     await prisma.agent.deleteMany({});
     await prisma.user.deleteMany({});
     await prisma.project.deleteMany({});
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    const user = await newUser();
+
+    await expectBindingOnlyFixtures(prisma, [{ type: 'USER', id: user.id }]);
   });
 
   it('AC-15: a binding-only developer is not-owner of fleet.schedule.update without a resource', async () => {

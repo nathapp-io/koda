@@ -4,8 +4,8 @@
  * `fleet.job.dispatch` over real HTTP, the real ticker and real Postgres (AC-1 .. AC-20, AC-25, AC-26).
  *
  * Every caller below has exactly one kind of source in `p1`: one PROJECT-scope binding (users, no
- * `ProjectMember` row anywhere) or one legacy `AgentProject` roster row plus `AgentRoleEntry` roles
- * (agents). No test asserts through a bypass: the refusals are the routes' and the ticker's own.
+ * `ProjectMember` row anywhere) or one `viewer` binding plus a role binding (agents). No test asserts
+ * through a bypass: the refusals are the routes' and the ticker's own.
  *
  * Run: cd apps/api && bun run test:db:up &&
  *      bun run test:scoped test/integration/permissions/enforce-fleet-schedules.integration.spec.ts
@@ -19,6 +19,7 @@ import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { ScheduleTicker } from '../../../src/fleet/schedules/schedule-ticker';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import type { PrincipalRef } from '../../../src/permissions/permissions.types';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -97,13 +98,16 @@ describeIntegration('fleet schedule keys and ownership (US-005)', () => {
       { type: 'SYSTEM', id: 'test' },
     );
 
-  /** A roster-only agent: its one key source in p1 is the roster row plus its `AgentRoleEntry` roles. */
+  /** A roster-only agent: its one key source in p1 is the `viewer` binding plus its role binding. */
   const createAgent = async (slug: string): Promise<string> => {
-    const created = await asRoot('post', '/api/agents', { name: slug, slug, roles: ['DEVELOPER'] }).expect(201);
+    const created = await asRoot('post', '/api/agents', { name: slug, slug, roles: [] }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
-    await prisma.agentProject.create({ data: { agentId: body.agent.id, projectId: p1Id } });
+    const agent = { type: 'AGENT' as const, id: body.agent.id };
+    await grantBaseline(prisma, agent);
+    await grantRole(prisma, agent, 'viewer', p1Id);
+    await grantRole(prisma, agent, 'developer', p1Id);
     tokens[slug] = body.apiKey;
-    // The rows are written after a principal could have been cached by an earlier check.
+    // The bindings are written after a principal could have been cached by an earlier check.
     await membership.invalidatePermissions();
     return body.agent.id;
   };
@@ -171,6 +175,22 @@ describeIntegration('fleet schedule keys and ownership (US-005)', () => {
     await prisma.jobSchedule.deleteMany();
     await prisma.budgetPolicy.deleteMany();
     await prisma.fleetActivity.deleteMany();
+  });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every fixture principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: ids.root },
+      { type: 'USER', id: ids.other },
+      { type: 'USER', id: ids.devBind },
+      { type: 'USER', id: ids.viewerBind },
+      { type: 'USER', id: ids.adminBind },
+      { type: 'USER', id: ids.disabledOwner },
+      { type: 'AGENT', id: ids.agent },
+    ]);
   });
 
   // -------------------------------------------------------------------------

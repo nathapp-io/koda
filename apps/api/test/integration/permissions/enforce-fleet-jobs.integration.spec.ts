@@ -1,12 +1,12 @@
 /**
  * Permissions P1d US-003 — the job routes and the ticket fleet-job routes check catalog keys, and a
  * RUN dispatch starts its linked tickets without asking the dispatcher for the ticket's edge key,
- * over real HTTP + Postgres (AC-1 .. AC-23).
+ * over real HTTP + Postgres (AC-1 .. AC-24).
  *
  * One booted application for the whole file. The first registration is the installation's Owner, so
- * the fixtures (users, project, tickets, agent roster rows) are built as that Owner; every assertion
- * below acts as a principal whose only source in `p1` is one role binding (users) or one legacy
- * `AgentProject` row with (or without) an `AgentRoleEntry` (agents). No test asserts through a bypass.
+ * the fixtures (users, project, tickets, agent bindings) are built as that Owner; every assertion
+ * below acts as a principal whose only source in `p1` is one role binding (users) or a `viewer`
+ * binding with (or without) a role binding (agents). No test asserts through a bypass.
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/permissions/enforce-fleet-jobs.integration.spec.ts
  */
@@ -17,6 +17,8 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { PermissionService } from '../../../src/permissions/permission.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -40,17 +42,27 @@ interface JobRow {
   requestedByType: string;
 }
 
+/** The role key an agent's legacy `AgentRoleEntry` role is read as (the union's own mapping). */
+const ROLE_KEY_FOR_AGENT_ROLE: Record<'DEVELOPER' | 'REVIEWER' | 'VERIFIER' | 'TRIAGER', string> = {
+  DEVELOPER: 'developer',
+  REVIEWER: 'reviewer',
+  VERIFIER: 'verifier',
+  TRIAGER: 'triager',
+};
+
 describeIntegration('fleet job and ticket fleet-job route keys (US-003)', () => {
   let app: NathApplication;
   let server: ReturnType<NathApplication['getHttpServer']>;
   let db: PrismaClient;
   let membership: MembershipService;
+  let permissions: PermissionService;
 
   const tokens: Record<string, string> = {};
   const userIds: Record<string, string> = {};
   let p1Id = '';
   let repoId = '';
   let counter = 0;
+  let rootId = '';
   let developerAgentId = '';
   let rosterAgentId = '';
 
@@ -86,14 +98,16 @@ describeIntegration('fleet job and ticket fleet-job route keys (US-003)', () => 
       { type: 'SYSTEM', id: 'test' },
     );
 
-  /** A rostered agent whose only key source is the `AgentRoleEntry` rows given (none by default). */
-  const createAgent = async (slug: string, legacyRole?: 'DEVELOPER'): Promise<string> => {
+  /** A rostered agent whose only key source is the `viewer` binding plus the role binding given. */
+  const createAgent = async (slug: string, agentRole?: 'DEVELOPER'): Promise<string> => {
     const created = await asRoot('post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
-    await db.agentProject.create({ data: { agentId: body.agent.id, projectId: p1Id } });
-    if (legacyRole) await db.agentRoleEntry.create({ data: { agentId: body.agent.id, role: legacyRole } });
+    const agent = { type: 'AGENT' as const, id: body.agent.id };
+    await grantBaseline(db, agent);
+    await grantRole(db, agent, 'viewer', p1Id);
+    if (agentRole) await grantRole(db, agent, ROLE_KEY_FOR_AGENT_ROLE[agentRole], p1Id);
     tokens[slug] = body.apiKey;
-    // The legacy rows are written after the principal could have been cached by an earlier check.
+    // The bindings are written after the principal could have been cached by an earlier check.
     await membership.invalidatePermissions();
     return body.agent.id;
   };
@@ -134,13 +148,14 @@ describeIntegration('fleet job and ticket fleet-job route keys (US-003)', () => 
     server = app.getHttpServer();
     db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
     membership = app.get(MembershipService);
+    permissions = app.get(PermissionService);
 
     const root = await request(server)
       .post('/api/auth/register')
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD })
       .expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
-    const rootId = (await db.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
+    rootId = (await db.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
 
     for (const who of ['viewer', 'developer', 'other', 'outsider', 'custom']) await createUser(who);
 
@@ -172,6 +187,43 @@ describeIntegration('fleet job and ticket fleet-job route keys (US-003)', () => 
   afterAll(async () => {
     await app?.close();
   });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every fixture principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(db, [
+      { type: 'USER', id: rootId },
+      { type: 'USER', id: userIds.viewer },
+      { type: 'USER', id: userIds.developer },
+      { type: 'USER', id: userIds.other },
+      { type: 'USER', id: userIds.outsider },
+      { type: 'USER', id: userIds.custom },
+      { type: 'AGENT', id: developerAgentId },
+      { type: 'AGENT', id: rosterAgentId },
+    ]);
+  });
+
+  // -------------------------------------------------------------------------
+  // AC-24 (US-003 AC-2) — the developer's ticket.create key stays in the project it is bound in
+  // -------------------------------------------------------------------------
+
+  it('AC-24: the developer agent holds ticket.create in p1 through its binding and not in p2', async () => {
+    const p2 = await asRoot('post', '/api/projects', { name: 'P2', slug: 'p2', key: 'PTWO' }).expect(201);
+    const p2Id = data<{ id: string }>(p2).id;
+    const agent = { type: 'AGENT' as const, id: developerAgentId };
+
+    // The access comes from the project's bindings, not from a legacy roster row.
+    const bindings = await db.roleBinding.findMany({
+      where: { principalType: 'AGENT', principalId: developerAgentId, projectId: p1Id },
+      select: { role: { select: { key: true } } },
+    });
+    expect(bindings.map((row) => row.role.key).sort()).toEqual(['developer', 'viewer']);
+
+    expect((await permissions.effectiveKeys(agent, { projectId: p1Id })).has('ticket.create')).toBe(true);
+    expect((await permissions.effectiveKeys(agent, { projectId: p2Id })).has('ticket.create')).toBe(false);
+  }, TIMEOUT);
 
   // -------------------------------------------------------------------------
   // AC-1 / AC-2 / AC-3 — dispatch needs fleet.job.dispatch

@@ -18,6 +18,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { runWithActor } from '../../../src/action-context/action-context';
 import { AppModule } from '../../../src/app.module';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { FleetJobTicketEffects } from '../../../src/fleet/tickets/fleet-job-ticket.effects';
 import { FleetTicketEventRecorder } from '../../../src/fleet/tickets/fleet-ticket-event.recorder';
 import { FleetJobOutcomeRecorder } from '../../../src/fleet/jobs/job-outcome.recorder';
@@ -107,10 +108,15 @@ describeIntegration('enforce-fleet requesters (PG)', () => {
     key = `P${counter}`;
     const project = await prisma.project.create({ data: { name: slug, slug, key } });
     projectId = project.id;
-    const user = await prisma.user.create({ data: { email: `u${counter}@koda.test`, name: 'U', passwordHash: 'x', role: 'ADMIN' } });
+    const user = await prisma.user.create({ data: { email: `u${counter}@koda.test`, name: 'U', passwordHash: 'x', role: 'MEMBER' } });
     userId = user.id;
+    // The admin is an admin through bindings only: the baseline plus the global admin binding, whose
+    // mirror keeps `User.role` at `ADMIN`.
+    await grantBaseline(prisma, { type: 'USER', id: userId });
+    await grantRole(prisma, { type: 'USER', id: userId }, 'admin', null);
     const agent = await prisma.agent.create({ data: { name: 'Builder', slug: `builder${counter}`, apiKeyHash: `hash-${counter}` } });
     agentId = agent.id;
+    await grantBaseline(prisma, { type: 'AGENT', id: agentId });
     const repo = await prisma.fleetRepo.create({
       data: { projectId, provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'trunk', githubInstallationId: BigInt(77), createdById: userId },
     });
@@ -132,6 +138,17 @@ describeIntegration('enforce-fleet requesters (PG)', () => {
     forge.routes.set('POST /app/installations/77/access_tokens', () => ({ status: 201, body: { token: 'ghs_1', expires_at: '2099-01-01T00:00:00Z' } }));
     forge.routes.set('GET /repos/acme/app/git/ref/heads/trunk', () => ({ status: 200, body: { object: { sha: HEAD } } }));
     forge.routes.set(`GET /repos/acme/app/git/trees/${HEAD}`, () => ({ status: 200, body: { truncated: false, tree: [] } }));
+  });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every fixture principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: userId },
+      { type: 'AGENT', id: agentId },
+    ]);
   });
 
   it('AC-1: an agent dispatch stores requestedById the agent and requestedByType AGENT', async () => {

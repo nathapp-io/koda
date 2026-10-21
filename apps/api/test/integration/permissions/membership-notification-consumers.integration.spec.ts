@@ -7,8 +7,9 @@
  * `NotificationEligibility.filter`), `TicketMentionResolver.mentionedUserIds` and
  * `EmailContentBuilder.build` for MEMBER_ADDED on one side, and the compatibility queries in
  * `src/permissions/legacy-membership.queries.ts` on the other. Sources are real rows — bindings
- * through `MembershipService.createBinding` (booting `AppModule` runs `SystemRoleSeeder`, so the
- * seeded role keys exist), and deliberately no legacy `ProjectMember` row anywhere in this spec.
+ * through `MembershipService.createBinding` and the fixture module's `grantRole`/`grantBaseline`
+ * (booting `AppModule` runs `SystemRoleSeeder`, so the seeded role keys exist), and deliberately no
+ * legacy `ProjectMember` row anywhere in this spec.
  *
  * The actor of every draft is a user of its own, so the "never the actor" filter is out of the way of
  * the ACs and only the recipient's sources decide.
@@ -28,6 +29,7 @@ import { TicketMentionResolver } from '../../../src/notifications/ticket-mention
 import type { NotificationDraft } from '../../../src/notifications/notification.types';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import type { PrincipalRef } from '../../../src/permissions/permissions.types';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 
@@ -60,12 +62,18 @@ describeIntegration('notification, mention and email consumers read bindings (US
   const bind = (principal: PrincipalRef, roleKey: string, projectId: string | null) =>
     membership.createBinding({ principal, roleKey, projectId }, { type: 'USER', id: ids.granter as string });
 
-  const makeUser = async (who: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<string> =>
-    (
-      await prisma.user.create({
-        data: { email: `${who}-${randomUUID()}@koda.test`, name: who, passwordHash: 'x', role },
-      })
-    ).id;
+  /**
+   * A user of the fixture: the member baseline every principal production creates carries, plus the
+   * global admin binding for the admins (whose mirror keeps `User.role` at `ADMIN`).
+   */
+  const makeUser = async (who: string, admin = false): Promise<string> => {
+    const user = await prisma.user.create({
+      data: { email: `${who}-${randomUUID()}@koda.test`, name: who, passwordHash: 'x', role: 'MEMBER' },
+    });
+    await grantBaseline(prisma, { type: 'USER', id: user.id });
+    if (admin) await grantRole(prisma, { type: 'USER', id: user.id }, 'admin', null);
+    return user.id;
+  };
 
   /**
    * The principal's **access sources from bindings**: the PROJECT-scope bindings it holds, in the
@@ -142,7 +150,7 @@ describeIntegration('notification, mention and email consumers read bindings (US
     p1Id = (await prisma.project.create({ data: { name: 'Project p1', slug: P1_SLUG, key: P1_KEY } })).id;
 
     for (const who of ['granter', 'actor', 'devBind', 'globalBind', 'outsider']) ids[who] = await makeUser(who);
-    ids.admin = await makeUser('admin', 'ADMIN');
+    ids.admin = await makeUser('admin', true);
 
     await Promise.all([
       // The only source of devBind in p1. No legacy row, no GLOBAL-scope binding of its own.
@@ -156,6 +164,35 @@ describeIntegration('notification, mention and email consumers read bindings (US
     await app?.close();
     if (previousWebPublicUrl === undefined) delete process.env['WEB_PUBLIC_URL'];
     else process.env['WEB_PUBLIC_URL'] = previousWebPublicUrl;
+  });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every fixture principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(
+      prisma,
+      [
+        { type: 'USER', id: ids.granter as string },
+        { type: 'USER', id: ids.actor as string },
+        { type: 'USER', id: ids.devBind as string },
+        { type: 'USER', id: ids.globalBind as string },
+        { type: 'USER', id: ids.outsider as string },
+        { type: 'USER', id: ids.admin as string },
+      ],
+      // The globalBind user's fixture under test is a projectId-null viewer binding: a PROJECT-scope
+      // role bound globally, which the sentinel would otherwise refuse.
+      { globalProjectRoles: [userPrincipal('globalBind')] },
+    );
+
+    // The exempt user still holds the global viewer binding this spec is about: a PROJECT-scope role
+    // bound with no project, next to its GLOBAL-scope member baseline.
+    const globalBindings = await prisma.roleBinding.findMany({
+      where: { principalType: 'USER', principalId: ids.globalBind, projectId: null, role: { scope: 'PROJECT' } },
+      select: { role: { select: { key: true } } },
+    });
+    expect(globalBindings.map((row) => row.role.key)).toEqual(['viewer']);
   });
 
   it('AC-1: deliver inserts a notification for a user whose only source in p1 is a developer binding', async () => {
