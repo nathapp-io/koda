@@ -149,6 +149,9 @@ describe('AgentsService', () => {
     mockAgentRepo.isOnProjectRoster.mockResolvedValue(true);
     // Permissions P1 (US-009): the pickup target holds `agent.pickup` unless a test says otherwise.
     mockPermissions.effectiveKeys.mockResolvedValue(new Set<string>(['agent.pickup']));
+    // Permissions P1 (US-002): `can` decides acting for another agent. Reset it at this outer scope too, so a case
+    // that installs its own implementation (AC-9 installs a throwing one) cannot leak into a later describe.
+    mockPermissions.can.mockReset().mockResolvedValue({ allowed: true, reason: 'granted' });
   });
 
   afterEach(() => {

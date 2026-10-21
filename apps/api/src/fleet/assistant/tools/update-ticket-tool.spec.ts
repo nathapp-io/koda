@@ -20,7 +20,7 @@ const can = vi.fn(async (_key: string) => true);
 const ctx = {
   projectId: 'project-1',
   projectSlug: 'web',
-  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test', projectRole: 'DEVELOPER' },
+  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test' },
   threadId: 'thread-1',
   jobId: 'job-1',
   now: new Date('2026-10-23T09:00:00.000Z'),
@@ -146,7 +146,6 @@ describe('koda_update_ticket parse (US-004)', () => {
     const tool = toolDeps().tool;
     expect(tool.descriptor).toBe(KODA_UPDATE_TICKET);
     expect(tool.kind).toBe('write');
-    expect(tool.key).toBe('ticket.update');
     expect(tool.key).toBe('ticket.update');
   });
 });

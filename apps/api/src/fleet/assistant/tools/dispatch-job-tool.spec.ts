@@ -17,7 +17,7 @@ import { dispatchJobTool, type DispatchJobInput } from './dispatch-job-tool';
 const ctx = {
   projectId: 'p-web',
   projectSlug: 'web',
-  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test', projectRole: 'DEVELOPER' },
+  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test' },
   threadId: 'thread-1',
   jobId: 'job-thread',
   now: new Date('2026-10-23T09:00:00.000Z'),

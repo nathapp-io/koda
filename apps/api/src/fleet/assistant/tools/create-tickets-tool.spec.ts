@@ -13,7 +13,7 @@ import { createTicketsTool } from './create-tickets-tool';
 const ctx = {
   projectId: 'project-1',
   projectSlug: 'web',
-  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test', projectRole: 'DEVELOPER' },
+  actor: { id: 'dev-1', actorType: 'user', email: 'dev@koda.test' },
   threadId: 'thread-1',
   jobId: 'job-1',
   now: new Date('2026-10-23T09:00:00.000Z'),

@@ -13,9 +13,8 @@
  * AC-5: Event creation is included in the WriteResult.provenance output.
  * AC-6: Creating an event with a non-existent projectId throws ForbiddenError with code PROJECT_NOT_FOUND.
  * AC-7: ActorResolver maps current Koda auth and agent context into the Phase 1 actor model before permission checks run.
- * AC-8: Only an actor with `project.read` in the target project can call the event write operations,
- *       and GET /admin/outbox requires admin. (Permissions P1 US-003: the legacy admin/developer/agent
- *       allow-list is the effective `project.read` key.)
+ * AC-8: Only an actor with `project.read` in the target project can call the event write operations.
+ *       (Permissions P1 US-003: the legacy admin/developer/agent allow-list became that key.)
  */
 
 import { Test, TestingModule } from '@nestjs/testing';

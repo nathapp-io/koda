@@ -371,8 +371,8 @@ async function outcomeDoc(ctx: ToolContext, input: JobDocInput, deps: KnowledgeT
 export function getDocTool(deps: KnowledgeToolDeps): AssistantTool<GetDocInput> {
   return {
     descriptor: KODA_GET_DOC,
+    // 1b-D1: the search route reads the same index, so this tool's gate is its own catalog key, `kb.read`.
     key: 'kb.read',
-    // 1b-D1: the search route reads the same index and is member-gated, so the tool declares membership.
     parse(input: unknown): GetDocInput {
       const raw = asRecord(input);
       const citation = raw['citation'];

@@ -114,8 +114,7 @@ export class AssistantToolExecutor {
   }
 
   /**
-   * The tool, the requester and the role an action runs with; null when the registry, actor, membership or key gate
-   * refuses.
+   * The tool and the requester an action runs as; null when the registry, actor, membership or key gate refuses.
    */
   private async actionScope(action: PendingActionRecord): Promise<ActionScope | null> {
     const tool = this.registry.get(action.tool);
@@ -291,8 +290,8 @@ export class AssistantToolExecutor {
   }
 
   /**
-   * Permissions P1 US-004: the catalog-key check, for the actor the membership answered, in the project the call
-   * acts in — then the tool. The refusal names the tool, its key and the project slug; an implicit key is allowed by
+   * Permissions P1 US-004: the catalog-key check, for the caller's own principal, in the project the call acts in —
+   * then the tool. The refusal names the tool, its key and the project slug; an implicit key is allowed by
    * `PermissionService.can` itself, so no tool has to special-case one.
    */
   private async execParsed(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope): Promise<RunOutcome> {

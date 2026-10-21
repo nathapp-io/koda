@@ -270,17 +270,19 @@ describe('ProjectMembershipGuard (US-001)', () => {
     expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
   });
 
-  it('AC2 boundary: the membership row\'s role value no longer decides admission', async () => {
+  it('AC2 boundary: a membership row\'s role value does not decide admission on its own', async () => {
     membershipRepo.findBySlug.mockResolvedValue(activeProject);
-    // A role string the legacy allow-list rejected: the key, not the row, is the decision.
-    membershipRepo.findMembershipRole.mockResolvedValue('GUEST');
+    // A stored role the legacy allow-list accepted: the caller is refused all the same, and the row is never
+    // read — `project.read` is the decision, `findMembershipRole` only supplies the display role after admission.
+    membershipRepo.findMembershipRole.mockResolvedValue('ADMIN');
+    refusedKeys = new Set([PROJECT_ACCESS_KEY]);
 
-    const result = await guard.canActivate(
-      makeExecutionContext({ params: { slug: 'alpha' }, user: memberUser }),
+    await expectForbidden(
+      guard.canActivate(makeExecutionContext({ params: { slug: 'alpha' }, user: memberUser })),
+      'projects',
     );
-
-    expect(result).toBe(true);
     expect(can).toHaveBeenCalledWith(memberUser, PROJECT_ACCESS_KEY, { projectId: 'proj-1' });
+    expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
   });
 
   // ---------------------------------------------------------------------------

@@ -1313,9 +1313,14 @@ describe('TicketsService', () => {
       // The claim says ADMIN; the key says no. The key decides.
       mockPermissions.effectiveKeys.mockResolvedValue(new Set<string>(['ticket.read']));
 
-      await expect(
-        service.assign('koda', 'KODA-1', { userId: 'u2' })
-      ).rejects.toThrow(ForbiddenAppException);
+      const error = await service
+        .assign('koda', 'KODA-1', { userId: 'u2' })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      // AC-10 names the code: the refusal is the `tickets` namespace, not `permissions`.
+      expect((error as ForbiddenAppException).prefix).toBe('tickets');
+      expect((error as ForbiddenAppException).httpStatus).toBe(403);
       expect(mockPermissions.effectiveKeys).toHaveBeenCalledWith(
         { type: 'USER', id: 'u2' },
         { projectId: 'proj-123' },
