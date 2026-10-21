@@ -47,6 +47,20 @@ export const PUBLIC_KEYS: ReadonlySet<string> = new Set([
   'vcs.webhook.ingest',
 ]);
 
+/**
+ * Role keys whose surface arrives in a later phase: approvals and their policies (P3), the audit log (P2),
+ * and deciding an assistant action as an approval type (P3). No route, tool or system writer declares
+ * them yet; the catalog contract test refuses an undeclared key unless it is listed here, and refuses a
+ * listed key once a surface declares it, so the list shrinks as P2 and P3 land.
+ */
+export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
+  'approval.decide',
+  'approval.policy.read',
+  'approval.policy.manage',
+  'audit.read',
+  'fleet.approval.decide.assistant',
+]);
+
 /** Keys every authenticated principal holds on its own data; they cannot be removed by role edits. */
 export const IMPLICIT_KEYS: ReadonlySet<string> = new Set([
   'auth.me.read',
