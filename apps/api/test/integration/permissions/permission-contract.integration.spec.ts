@@ -1,0 +1,81 @@
+/**
+ * US-007 — the permission contract over the booted API.
+ *
+ * The contract test is the safety net of the permissions P1 catalog: every route, every registered
+ * assistant tool and every system writer must declare a catalog key, no catalog key may stay
+ * undeclared, and a guard-enforced route must actually register `RequiresGuard`. This file boots
+ * the real application (one boot for the whole suite), collects the declarations off the live
+ * Nest container and asserts the contract holds.
+ *
+ * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/permissions/permission-contract.integration.spec.ts
+ */
+import { ModulesContainer } from '@nestjs/core';
+import type { NathApplication } from '@nathapp/nestjs-app';
+import { AssistantToolRegistry } from '../../../src/fleet/assistant/assistant-tool.registry';
+import {
+  collectPermissionDeclarations,
+  findContractViolations,
+  type PermissionDeclarations,
+} from '../../../src/permissions/test-helpers/permission-contract';
+import { bootHttpApp } from '../../helpers/http-app';
+import { resetDb } from '../../helpers/reset-db';
+
+const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+const TIMEOUT = 120_000;
+
+describeIntegration('permission contract over the booted API (US-007)', () => {
+  let app: NathApplication;
+  let declarations: PermissionDeclarations;
+  const previousStrategy = process.env.FTS_OPTIMIZE_STRATEGY;
+
+  beforeAll(async () => {
+    // The default strategy is `counter`; pin it so the factory-built writer assertion holds on a
+    // machine that exports another strategy. The previous value is restored in `afterAll`.
+    process.env.FTS_OPTIMIZE_STRATEGY = 'counter';
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: false });
+    // Collected after `init`, so the tool groups have registered their tools and the factories
+    // have built their instances.
+    declarations = collectPermissionDeclarations(
+      app.get(ModulesContainer),
+      app.get(AssistantToolRegistry),
+    );
+  }, TIMEOUT);
+
+  afterAll(async () => {
+    if (previousStrategy === undefined) delete process.env.FTS_OPTIMIZE_STRATEGY;
+    else process.env.FTS_OPTIMIZE_STRATEGY = previousStrategy;
+    await app?.close();
+  });
+
+  it('AC-6: finds no contract violation in the booted app', () => {
+    // The walk must cover the whole app: an empty collection would report every catalog key as
+    // unused, but a partial one could hide a route. These counts keep the assertion honest.
+    expect(declarations.routes.length).toBeGreaterThan(200);
+    expect(declarations.tools.length).toBeGreaterThan(0);
+    expect(declarations.systemWriters.length).toBeGreaterThanOrEqual(30);
+    expect(findContractViolations(declarations)).toEqual([]);
+  });
+
+  it('AC-7: declares runner.sync, thread.read, role.binding.owner and system.schedule.dispatch', () => {
+    const keys = new Set([
+      ...declarations.routes.flatMap((route) => route.requires?.keys ?? []),
+      ...declarations.systemWriters.map((writer) => writer.key),
+    ]);
+    for (const key of [
+      'runner.sync',
+      'thread.read',
+      'role.binding.owner',
+      'system.schedule.dispatch',
+    ]) {
+      expect(keys.has(key), `declared key ${key}`).toBe(true);
+    }
+  });
+
+  it('AC-8: collects the factory-built CounterOptimizeStrategy as a system writer', () => {
+    expect(declarations.systemWriters).toContainEqual({
+      writer: 'CounterOptimizeStrategy',
+      key: 'system.rag.optimize',
+    });
+  });
+});

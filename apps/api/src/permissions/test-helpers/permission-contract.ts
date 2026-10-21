@@ -1,5 +1,11 @@
+import { RequestMethod } from '@nestjs/common';
+import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import type { ModulesContainer } from '@nestjs/core';
+import { AssistantToolRegistry } from '../../fleet/assistant/assistant-tool.registry';
 import { PERMISSION_CATALOG, PENDING_SURFACE_KEYS, type PermissionCatalogEntry } from '../catalog';
-import type { RequiresMetadata } from '../requires.decorator';
+import { REQUIRES_METADATA, type RequiresMetadata } from '../requires.decorator';
+import { RequiresGuard } from '../requires.guard';
+import { SYSTEM_WRITER_METADATA } from '../system-writer.decorator';
 
 export interface RouteDeclaration {
   /** `"<METHOD> /<controller path>/<handler path>"`, for violation messages. */
@@ -32,6 +38,141 @@ export type ContractViolation =
   | { kind: 'guard-missing'; route: string }
   | { kind: 'unused-key'; key: string }
   | { kind: 'pending-key-declared'; source: string; key: string };
+
+/** The parts of Nest's `InstanceWrapper` the collector reads. */
+interface ProviderWrapper {
+  readonly metatype: unknown;
+  readonly instance: unknown;
+}
+
+/** A system writer class and the catalog key it declares. */
+interface SystemWriterMatch {
+  clazz: Function;
+  key: string;
+}
+
+/** `true` for the `RequiresGuard` class itself and for an instance of it. */
+function isRequiresGuard(guard: unknown): boolean {
+  if (guard === RequiresGuard) return true;
+  return (
+    typeof guard === 'object' &&
+    guard !== null &&
+    (guard as { constructor?: unknown }).constructor === RequiresGuard
+  );
+}
+
+/** The controller path and the handler path, joined without duplicated separators. */
+function joinRoutePath(...parts: readonly (string | undefined)[]): string {
+  const segments = parts
+    .map((part) => (part ?? '').trim())
+    .map((part) => part.replace(/^\/+/, '').replace(/\/+$/, ''))
+    .filter((part) => part.length > 0);
+  return segments.length > 0 ? `/${segments.join('/')}` : '/';
+}
+
+/** `GET`, `POST`, ... for Nest's `RequestMethod` value. */
+function methodName(method: RequestMethod): string {
+  return RequestMethod[method] ?? 'UNKNOWN';
+}
+
+/**
+ * One declaration per routed handler of a controller.
+ *
+ * The Requires metadata is read exactly as `RequiresGuard` reads it: the handler's own metadata
+ * first, the controller's second. The guard flag is true when `RequiresGuard` is among the
+ * controller's or the handler's `@UseGuards`, because Nest applies both.
+ */
+function collectControllerRoutes(controller: Function): RouteDeclaration[] {
+  const prototype = (controller as { prototype?: Record<string, unknown> }).prototype;
+  if (!prototype) return [];
+
+  const classPath = Reflect.getMetadata(PATH_METADATA, controller) as string | undefined;
+  const classGuards = Reflect.getMetadata(GUARDS_METADATA, controller) as unknown[] | undefined;
+  const classRequires = Reflect.getMetadata(REQUIRES_METADATA, controller) as
+    | RequiresMetadata
+    | undefined;
+  const routes: RouteDeclaration[] = [];
+
+  for (const name of Object.getOwnPropertyNames(prototype)) {
+    if (name === 'constructor') continue;
+    const handler = prototype[name];
+    if (typeof handler !== 'function') continue;
+
+    const method = Reflect.getMetadata(METHOD_METADATA, handler) as RequestMethod | undefined;
+    if (method === undefined) continue;
+
+    const handlerPath = Reflect.getMetadata(PATH_METADATA, handler) as string | undefined;
+    const handlerGuards = Reflect.getMetadata(GUARDS_METADATA, handler) as unknown[] | undefined;
+    const handlerRequires = Reflect.getMetadata(REQUIRES_METADATA, handler) as
+      | RequiresMetadata
+      | undefined;
+
+    routes.push({
+      route: `${methodName(method)} ${joinRoutePath(classPath, handlerPath)}`,
+      requires: handlerRequires !== undefined ? handlerRequires : classRequires,
+      hasRequiresGuard: [...(classGuards ?? []), ...(handlerGuards ?? [])].some(isRequiresGuard),
+    });
+  }
+
+  return routes;
+}
+
+/**
+ * The system writer a provider wrapper declares, if any.
+ *
+ * The class is looked up on the wrapper's metatype first and on the initialized instance's
+ * constructor second: a factory-built provider (the FTS optimize strategy) has no metatype of its
+ * own, only the class its factory returned.
+ */
+function collectSystemWriter(wrapper: ProviderWrapper): SystemWriterMatch | undefined {
+  const instance = wrapper.instance as { constructor?: unknown } | null | undefined;
+  for (const candidate of [wrapper.metatype, instance?.constructor]) {
+    if (typeof candidate !== 'function') continue;
+    const key = Reflect.getMetadata(SYSTEM_WRITER_METADATA, candidate) as unknown;
+    if (typeof key === 'string') return { clazz: candidate, key };
+  }
+  return undefined;
+}
+
+/**
+ * Walks a booted Nest app's controllers and providers, and the tool registry, and reads back every
+ * permission key they declare.
+ *
+ * A class reached through several wrappers (a `useExisting` alias, a re-export) is reported once:
+ * the wrappers are deduplicated by class identity, not by key, because distinct classes may
+ * legitimately declare the same key.
+ */
+export function collectPermissionDeclarations(
+  modules: ModulesContainer,
+  registry: AssistantToolRegistry,
+): PermissionDeclarations {
+  const routes: RouteDeclaration[] = [];
+  const systemWriters: SystemWriterDeclaration[] = [];
+  const seenControllers = new Set<Function>();
+  const seenWriters = new Set<Function>();
+
+  for (const module of modules.values()) {
+    for (const wrapper of module.controllers.values()) {
+      const metatype = wrapper.metatype;
+      if (typeof metatype !== 'function' || seenControllers.has(metatype)) continue;
+      seenControllers.add(metatype);
+      routes.push(...collectControllerRoutes(metatype));
+    }
+
+    for (const wrapper of module.providers.values()) {
+      const writer = collectSystemWriter(wrapper);
+      if (!writer || seenWriters.has(writer.clazz)) continue;
+      seenWriters.add(writer.clazz);
+      systemWriters.push({ writer: writer.clazz.name, key: writer.key });
+    }
+  }
+
+  const tools = registry
+    .list()
+    .map((tool) => ({ tool: tool.descriptor.name, key: tool.key }));
+
+  return { routes, tools, systemWriters };
+}
 
 /** Returns every permission declaration contract violation. */
 export function findContractViolations(

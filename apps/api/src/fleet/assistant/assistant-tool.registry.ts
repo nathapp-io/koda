@@ -17,4 +17,12 @@ export class AssistantToolRegistry {
   get(name: string): AssistantTool | undefined {
     return this.tools.get(name);
   }
+
+  /**
+   * The registered tools in registration order (permissions P1 US-007: the catalog contract test
+   * reads every tool's key back through this list).
+   */
+  list(): readonly AssistantTool[] {
+    return [...this.tools.values()];
+  }
 }
