@@ -72,6 +72,7 @@ describe('ProjectsController route permission metadata (US-007)', () => {
     ['addProjectAgent', ['project.agent.add'], 'guard'],
     ['removeProjectAgent', ['project.agent.remove'], 'guard'],
     ['updateProjectAgent', ['project.agent.update'], 'service'],
+    ['getChangeImpact', ['codeintel.impact.read'], 'guard'],
   ];
 
   it.each(requiresCases)('%s declares @Requires(%j, enforcedBy %s)', (handler, keys, enforcedBy) => {
@@ -110,12 +111,6 @@ describe('ProjectsController route permission metadata (US-007)', () => {
     },
   );
 
-  it('code-intel impact requires its project-scoped key', () => {
-    const fn = ProjectsController.prototype.getChangeImpact as unknown as object;
-
-    expect(Reflect.getMetadata(REQUIRES_METADATA, fn)).toMatchObject({ keys: ['codeintel.impact.read'] });
-    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toBeUndefined();
-  });
 });
 
 describe('ProjectsController', () => {
