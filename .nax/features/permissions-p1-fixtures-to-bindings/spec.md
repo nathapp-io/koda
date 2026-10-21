@@ -367,7 +367,7 @@ None. US-001 only creates the fixture module and its spec; no existing assertion
 
 ### Seams
 
-- **US-001 → US-002..US-005:** `grantRole`, `grantBaseline`, `revokeProjectRoles` and `fixtureGrantReport` are consumed by every converted spec. US-001 AC 12 proves a binding written by `grantRole` is what `PermissionService` decides on, and US-002 AC 1 that an HTTP route decides on it; each consuming story's sentinel AC calls `fixtureGrantReport` on its fixtures.
+- **US-001 → US-002..US-005:** `grantRole`, `grantBaseline`, `revokeProjectRoles` and `fixtureGrantReport` are consumed by every converted spec. US-001 AC 14 proves a binding written by `grantRole` is what `PermissionService` decides on, and US-002 AC 1 that an HTTP route decides on it; each consuming story's sentinel AC calls `fixtureGrantReport` on its fixtures.
 - **US-002 → US-004:** `home-api.integration.spec.ts` uses `seedFleetHttpWorld` and `seedFleetHttpAgent`, converted in US-002; its sentinel test (US-004 AC 1) needs the converted helpers.
 - **US-001 → US-005:** `seedE2e` uses `grantBaseline` and `grantRole`; US-005 AC 1 observes the admin's bindings after a run on a reset database.
 
