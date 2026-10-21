@@ -13,6 +13,7 @@ import { decodeJwtPayload, tokenExpiryMs } from './jwt-payload';
 import { createLiveStream } from './live-stream';
 import { LiveStreamRegistry } from './live-stream-registry';
 import { ProjectEventBus } from './project-event-bus';
+import { Requires } from '../permissions/requires.decorator';
 
 /**
  * Track 1 Slice 5: browser live updates for one project over SSE.
@@ -30,6 +31,7 @@ export class LiveController {
   ) {}
 
   @Sse()
+  @Requires('project.read', { enforcedBy: 'service' })
   @SkipThrottle()
   @ApiExcludeEndpoint()
   async events(

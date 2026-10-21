@@ -60,6 +60,7 @@ describe('McpController routes', () => {
   let currentPrincipal: KodaPrincipal | undefined;
   const executeFor = vi.fn();
   const projectIdsWithKey = vi.fn();
+  const can = vi.fn();
 
   async function boot(enabled: boolean): Promise<void> {
     if (enabled) process.env.MCP_ENABLED = 'true';
@@ -72,7 +73,7 @@ describe('McpController routes', () => {
         // US-005: the controller reads each tool's key from the registry and the agent's projects from the
         // permission service, so its isolated module provides both instead of the whole assistant graph.
         { provide: AssistantToolRegistry, useValue: registry },
-        { provide: PermissionService, useValue: { projectIdsWithKey } },
+        { provide: PermissionService, useValue: { projectIdsWithKey, can } },
       ],
     }).compile();
     app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -90,6 +91,8 @@ describe('McpController routes', () => {
 
   beforeEach(() => {
     currentPrincipal = agent;
+    can.mockReset();
+    can.mockResolvedValue({ allowed: true, reason: 'implicit' });
     executeFor.mockReset();
     executeFor.mockResolvedValue({ content: 'found WEB-1', isError: false });
     // The default: this agent holds every project key everywhere, so the listing is the whole catalog.

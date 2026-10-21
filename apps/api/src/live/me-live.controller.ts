@@ -12,6 +12,7 @@ import { decodeJwtPayload, tokenExpiryMs } from './jwt-payload';
 import { createLiveStream } from './live-stream';
 import { LiveStreamRegistry } from './live-stream-registry';
 import { UserEventBus, UserLiveEvent } from './user-event-bus';
+import { Requires } from '../permissions/requires.decorator';
 
 /**
  * Fleet S4a §4: the caller's own notification signal over SSE. Users only (agents and runners
@@ -28,6 +29,7 @@ export class MeLiveController {
   ) {}
 
   @Sse()
+  @Requires('notification.read', { enforcedBy: 'service' })
   @SkipThrottle()
   @ApiExcludeEndpoint()
   async events(@Principal() principal: KodaPrincipal, @Req() req: unknown): Promise<Observable<MessageEvent>> {

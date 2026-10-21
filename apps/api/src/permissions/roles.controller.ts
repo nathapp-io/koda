@@ -5,6 +5,7 @@ import { JsonResponse } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { RoleDto, CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
 import { RoleAdminService } from './role-admin.service';
+import { Requires } from './requires.decorator';
 
 /**
  * Permissions P1a: role administration.
@@ -21,6 +22,7 @@ export class RolesController {
   constructor(private readonly roles: RoleAdminService) {}
 
   @Get()
+  @Requires('role.read', { enforcedBy: 'service' })
   @ApiOperation({ summary: 'List every role, system roles first' })
   @ApiResponse({ status: 200, type: [RoleDto] })
   @ApiResponse({ status: 403, description: 'role.read permission required' })
@@ -30,6 +32,7 @@ export class RolesController {
   }
 
   @Post()
+  @Requires('role.manage', { enforcedBy: 'service' })
   @HttpCode(201)
   @ApiOperation({ summary: 'Create a role (role.manage)' })
   @ApiResponse({ status: 201, type: RoleDto })
@@ -42,6 +45,7 @@ export class RolesController {
   }
 
   @Patch(':id')
+  @Requires('role.manage', { enforcedBy: 'service' })
   @ApiOperation({ summary: 'Change a role\'s name, description or permissions (role.manage)' })
   @ApiResponse({ status: 200, type: RoleDto })
   @ApiResponse({ status: 400, description: 'Unknown or out-of-scope permission entry, or a system-role rename' })
@@ -57,6 +61,7 @@ export class RolesController {
   }
 
   @Delete(':id')
+  @Requires('role.manage', { enforcedBy: 'service' })
   @HttpCode(204)
   @ApiOperation({ summary: 'Delete a role no binding uses (role.manage)' })
   @ApiResponse({ status: 204, description: 'Deleted' })
