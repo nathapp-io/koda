@@ -1,0 +1,587 @@
+{
+  "project": "koda",
+  "feature": "permissions-p1-retire-checks",
+  "branchName": "feat/permissions-p1-retire-checks",
+  "createdAt": "2026-10-21T00:00:00Z",
+  "updatedAt": "2026-10-21T11:27:04.799Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Project access through project.read",
+      "description": "**Goal** \u2014 Make ProjectAccessService decide access through project.read while preserving the members page's display role.\n\n**Motivation** \u2014 A custom project role cannot narrow or widen access.\n\n**Approach** \u2014 Project access (US-001)\n\n`apps/api/src/projects/project-access.service.ts`:\n\n```ts\n/** The key whose holding in a project is access to it (design \u00a72 \"Project access\"; ruling 2026-10-21). */\nexport const PROJECT_ACCESS_KEY = 'project.read';\n\nconstructor(\n  private projectRepo: PrismaProjectRepository,\n  private readonly permissions: PermissionService,\n  @Optional() @Inject(AUTH_CFG) private authConfig?: IAuthConfig,\n) {}\n\n/**\n * The access gate, and the caller's display role for the members page (`viewerRole`, read by the web until\n * permissions-p1-web). A runner is not checked (unchanged; `CombinedAuthGuard` keeps runners off project routes),\n * and an agent passes while AGENT_PROJECT_SCOPING is off (unchanged until drop-legacy).\n */\nasync resolveMembership(projectId: string, principal: KodaPrincipal): Promise<string | null> {\n  if (principal.actorType === 'runner') return null;\n  if (isAgentPrincipal(principal) && !this.agentScopingEnabled()) return null;\n  const decision = await this.permissions.can(principal, PROJECT_ACCESS_KEY, { projectId });\n  if (!decision.allowed) throw new ForbiddenAppException({}, 'projects');\n  if (!isUserPrincipal(principal)) return null;\n  if (await this.readsEveryProject(principal)) return ActorRole.ADMIN;\n  return this.projectRepo.findMembershipRole(projectId, principal.id);\n}\n\n/** Whether the principal holds `project.read` globally (with the seeded roles: a global Owner or Admin). */\nasync readsEveryProject(principal: KodaPrincipal): Promise<boolean> {\n  if (principal.actorType === 'runner') return false;\n  return (await this.permissions.can(principal, PROJECT_ACCESS_KEY)).allowed;\n}\n```\n\n- `assertProjectMembership` keeps delegating to `resolveMembership`, so every caller is unchanged: `ProjectMembershipGuard`, `CommentsService`, `ProjectMembersService.list`, `AssistantToolExecutor`, `WorkspaceThreadsService`, `MemoryController`, `LiveController` and `ThreadEventsGuard`.\n- **Derivation, executed against the committed role matrix** (`apps/api/src/permissions/__snapshots__/role-matrix.json`, contract-tests):\n  - `project.read` is `granted` globally only for `owner` and `admin`;\n  - it is `granted` in `p1` for all seven PROJECT roles (and for `owner` and `admin`);\n  - it is `not-granted` for `member` and `agent`.\n- The legacy `User.role = 'ADMIN'` users keep access because `PermissionService` adds the `admin` role's keys for them (`isLegacyAdmin`).\n- `findMembershipRole` stays: `resolveMembership` uses it for the display role, and `WorkspaceThreadsService.hasMembership` uses it as today. drop-legacy removes it.\n\n**Scope** \u2014 In: the central access key, required PermissionService constructor slot, global access query, compatibility display roles, and the existing gate/route/service harness updates listed in analysis. Out: migrating the individual admin shortcuts (US-002), writer authorization (US-003), guard/request role removal (US-004), and deleting the dead admin helpers (US-005). Do not remove the PermissionService legacy union, baseline fallback, findMembershipRole or scoping flag; do not replace viewerRole or convert legacy fixtures.\n\n**Interface** \u2014 `PROJECT_ACCESS_KEY`, the constructor, `resolveMembership(projectId: string, principal: KodaPrincipal): Promise<string | null>` and `readsEveryProject(principal: KodaPrincipal): Promise<boolean>` are declared verbatim above. `assertProjectMembership` retains its existing public signature.\n\n**Implementation and verification notes** \u2014 Use required PermissionService injection from the global module, not @Optional(). Database errors from can propagate unchanged. A project route without project.read must fail 403 projects in ProjectMembershipGuard before RequiresGuard. Update direct ProjectAccessService constructors, including (repo, config) callers, to (repo, permissions, config). Stub permission answers rather than membership/roster answers to model admission; only display-role reads remain relevant. Preserve existing scoping-off/runner bypasses and slug/404 behavior. Real-DB fixtures must seed system roles after resetDb or boot the app, and invalidate permission caches after direct row mutations. Extend existing suites rather than creating fixture-conversion work.",
+      "acceptanceCriteria": [
+        "[unit] ProjectAccessService.resolveMembership('p1', user) for a user principal with role: 'MEMBER', with can allowing ('project.read', { projectId: 'p1' }), refusing the global 'project.read' ask, and findMembershipRole resolving 'DEVELOPER', returns 'DEVELOPER'.",
+        "[unit] resolveMembership('p1', user) for a user principal with role: 'MEMBER', with can allowing both the project and the global 'project.read' asks, returns 'ADMIN'.",
+        "[unit] resolveMembership('p1', user) for a user principal with role: 'ADMIN', with can refusing ('project.read', { projectId: 'p1' }), rejects with ForbiddenAppException with code projects.",
+        "[unit] resolveMembership('p1', agent) for an agent principal with scoping on, whose repository stub's isAgentOnRoster resolves false, resolves null when can allows ('project.read', { projectId: 'p1' }).",
+        "[unit] resolveMembership('p1', agent) for an agent principal with scoping on, whose repository stub's isAgentOnRoster resolves true, rejects with ForbiddenAppException with code projects when can refuses ('project.read', { projectId: 'p1' }).",
+        "[unit] resolveMembership('p1', agent) for an agent principal, when the service's auth config sets agentProjectScoping: false, resolves null with a can double that throws when called.",
+        "[unit] resolveMembership('p1', runner) for a runner principal resolves null with a can double that throws when called.",
+        "[unit] resolveMembership('p1', user) when can rejects with an Error('db down') rejects with that same error.",
+        "[unit] ProjectAccessService.readsEveryProject(user) returns true when can allows exactly the two arguments (user, 'project.read'), and false when it refuses them.",
+        "[unit] readsEveryProject(runner) returns false with a can double that throws when called.",
+        "[integration] A user whose only source in p1 is a binding to a custom PROJECT role with ['ticket.read'] gets 403 with error code projects from GET /projects/p1/tickets, from ProjectMembershipGuard before RequiresGuard.",
+        "[integration] A global admin with no source in p1 gets viewerRole 'ADMIN' in the 200 response of GET /projects/p1/members.",
+        "[integration] A user whose only source in p1 is a viewer binding gets viewerRole 'VIEWER' in the 200 response of GET /projects/p1/members."
+      ],
+      "tags": [
+        "refactor",
+        "security",
+        "api",
+        "permissions",
+        "project-access"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The production change is localized to ProjectAccessService and uses the existing PermissionService and display-role reader; caller changes are constructor/mock updates rather than new abstractions. Authorization behavior still mandates strict three-session TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/projects/project-access.service.ts",
+        "apps/api/src/permissions/permission.service.ts",
+        "apps/api/src/projects/project-membership.guard.ts",
+        "apps/api/src/permissions/__snapshots__/role-matrix.json",
+        "apps/api/test/integration/permissions/membership-project-access.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "resolveMembership('p1', user) returns null when project.read is granted in p1, refused globally, and findMembershipRole returns null for access supplied only by a custom role.",
+        "resolveMembership('p1', user) returns 'MEMBER' when a legacy MEMBER membership maps to a viewer permission grant and no global project.read is held.",
+        "A globally admin-bound agent with no roster entry receives 200 from GET /projects/p1/tickets."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/project-access.service.spec.ts",
+          "reason": "it builds `new ProjectAccessService(mockProjectRepo)`, and its `assertProjectMembership` / `resolveMembership` cases decide through `findMembershipRole`, `isAgentOnRoster` and `role: 'ADMIN'`, for example \"passes without checking membership for ADMIN user\" and \"returns ADMIN for a global ADMIN without a membership lookup\". The replacing invariant: the service is built with a `PermissionService` double as its second argument. Access follows the double's answer for `('project.read', { projectId })`. `'ADMIN'` is returned when the double allows the global `'project.read'` ask. The member-role return still comes from `findMembershipRole`. Agents and runners keep their scoping-off and unchecked cases. The `assertProjectAdmin` / `canManageMembers` describes only get the new constructor argument here (US-005 deletes them)."
+        },
+        {
+          "path": "apps/api/test/unit/projects/agent-project-access.spec.ts",
+          "reason": "it builds `new ProjectAccessService(repo, config)`, AC4/AC5 admit or refuse through `isAgentOnRoster`, and AC8 surfaces a roster lookup error. The replacing invariant: the constructor takes a `PermissionService` double second. AC4/AC5 follow the double's `project.read` answer. AC8 surfaces a rejection of `can` unchanged. AC6 (scoping off) and AC7 (runner) still never call `can` or the roster."
+        },
+        {
+          "path": "apps/api/src/projects/projects.service.spec.ts",
+          "reason": "it builds `new ProjectAccessService(...)` without a `PermissionService`, and \"passes without checking membership for ADMIN user\" relies on `role: 'ADMIN'` skipping the lookup. The replacing invariant: the access service gets a `PermissionService` double whose `can` answers per case, and the ADMIN case passes because the double allows `project.read`. The `ProjectsService` wrapper cases otherwise keep their outcomes until US-005."
+        },
+        {
+          "path": "apps/api/src/projects/project-membership.guard.spec.ts",
+          "reason": "it builds the real `ProjectAccessService` from a repository stub, so member and non-member outcomes follow `findMembershipRole` / `isAgentOnRoster`, and the global ADMIN case expects no lookup. The replacing invariant: the access service gets a `PermissionService` double, and admit or refuse (403 `projects`) follows that double's `project.read` answer for the request's principal. The slug-resolution, 404 and `projectContext` cases are unchanged here (US-004 edits them)."
+        },
+        {
+          "path": "apps/api/src/projects/project-membership.guard.routes.spec.ts",
+          "reason": "its non-member cases (AC7, AC8, AC10, AC12 boundary, AC14 boundary) get 403 from `findMembershipRole` resolving `null`. The agent cases expect `isAgentOnRoster` to be called, and AC4 expects a global ADMIN to cause no lookup. The replacing invariant: a non-member is modelled by putting `'project.read'` in `refusedKeys`, and still gets 403. The rostered-agent and global-ADMIN cases are admitted by the stub's allowed `project.read`. The unrostered-agent case puts `'project.read'` in `refusedKeys`. Assertions on `isAgentOnRoster` / `findMembershipRole` calls become assertions that `can` was called with `'project.read'` and `{ projectId: 'proj-1' }`."
+        },
+        {
+          "path": "apps/api/src/retrieval/retrieval-membership.routes.spec.ts",
+          "reason": "AC2's non-member gets 403 from `findMembershipRole` resolving `null`, and a case asserts `findMembershipRole` was called once with `('proj-1', 'user-project-admin')`. The replacing invariant: the non-member case refuses `'project.read'` through `refusedKeys` and still gets 403. The call assertion checks that `can` was asked `'project.read'` with `{ projectId: 'proj-1' }`. The US-007 key-refusal cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/rag/kb-documents-membership.routes.spec.ts",
+          "reason": "AC1's non-member gets 403 from `findMembershipRole` resolving `null`. The replacing invariant: the non-member case refuses `'project.read'` through `refusedKeys` and still gets 403. The VIEWER/DEVELOPER key cases are unchanged."
+        },
+        {
+          "path": "apps/api/test/unit/projects/projects-find-all-for-principal.spec.ts",
+          "reason": "it builds `new ProjectAccessService(...)` without a `PermissionService`. The replacing invariant: the access service gets a `PermissionService` double. Every case keeps its expected rows in this story (US-002 changes the global-admin case)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Replace the remaining legacy decisions with keys",
+      "description": "**Goal** \u2014 Replace the remaining admin-claim shortcuts with their declared capabilities and enforce the workspace stream read key.\n\n**Motivation** \u2014 Listing projects, the home dashboard, pickup on another agent's behalf, the last-admin override and assignee eligibility each read `role === 'ADMIN'` from a principal or a user row.\n\n**Approach** \u2014 The remaining decisions (US-002)\n\n| Site | Baseline (locate only) | Target |\n|:--|:--|:--|\n| `ProjectsService.findAllForPrincipal` | `principal.actorType === 'user' && principal.role === 'ADMIN'` \u2192 `findAll()` | `await this.access.readsEveryProject(principal)` \u2192 `findAll()`, checked first. The agent branch (roster, or every project when scoping is off) and the user branch (`findAllForUser`) are unchanged. |\n| `HomeController.get` | `globalAdmin: principal.role === 'ADMIN'` | `globalAdmin: (await this.permissions.can(principal, 'project.read')).allowed`. The constructor gains `PermissionService` as its second parameter. The agent refusal is unchanged. |\n| `AgentsService.suggestTicket` | `isGlobalAdmin = principal.actorType === 'user' && principal.role === 'ADMIN'` | A caller that is not the owning agent passes when `(await this.permissions.can(principal, 'agent.update')).allowed`; otherwise 403 `agents`, as today. `can` is not asked for the owning agent. |\n| `TicketsService.assign`, user assignee | skip the check when `user.role === 'ADMIN'`, else 403 `tickets` when `findProjectMemberRole` is null | 403 `tickets` unless `(await this.permissions.effectiveKeys({ type: 'USER', id: user.id }, { projectId: project.id })).has('project.read')`. The not-found, disabled and agent-assignee checks are unchanged. |\n| `ProjectMembersService.assertKeepsAnAdmin` | `isGlobalAdmin(principal)` (`principal.role === 'ADMIN'`) skips the last-admin count | Only when the change loses an active admin, `(await this.permissions.can(principal, 'role.binding.global')).allowed` skips the count; a change that loses no admin asks nothing. The module-level `isGlobalAdmin` is deleted. |\n| `WorkspaceThreadEventsController` | `@UseGuards(WorkspaceThreadEventsGuard)`; `@Requires('thread.workspace.read', { enforcedBy: 'service' })` | `@UseGuards(RequiresGuard, WorkspaceThreadEventsGuard)` at the class level, in that order; `@Requires('thread.workspace.read')` (guard). `WorkspaceThreadEventsGuard`'s ownership fence (404 `threads.notFound`), JWT and stream-slot checks are unchanged. |\n\n- The workspace REST reads already declare `thread.workspace.read` with `RequiresGuard`. `RequiresGuard` passes a caller holding only `thread.workspace.read.own` (reason `not-owner`), so a Member's own stream behaves as today.\n- `agent.update` and `role.binding.global` are `granted` only for `owner` and `admin` in the role matrix, globally and in `p1`.\n\n**Scope** \u2014 In: the six sites above, their existing service/route/declaration test harnesses, and the custom GLOBAL project.read project-list integration. Out: the central access gate (US-001), domain writer (US-003), role-bearing request/context removal (US-004), and deleting the now-unused repository method and helper mechanisms (US-005). Do not change home content beyond the globalAdmin source or make home/me-events serve agents. Do not migrate ProjectAssigneesService.search, recipient selection, legacy fixture sources or the compatibility union.\n\n**Interface** \u2014 Preserve the existing signatures of `ProjectsService.findAllForPrincipal`, `HomeController.get`, `AgentsService.suggestTicket`, `TicketsService.assign`, `ProjectMembersService.assertKeepsAnAdmin` and `WorkspaceThreadEventsController.events`. The exact key calls, constructor addition and decorator forms are specified verbatim in the table. Use US-001's `readsEveryProject(principal: KodaPrincipal): Promise<boolean>` rather than recreating its logic.\n\n**Implementation and verification notes** \u2014 PermissionService is required and globally available. Check caller agent.update before looking up target-agent keys; owning-agent pickup never asks can but still checks the target's agent.pickup. Preserve disabled/not-found user checks, agent roster locking, transactional assignment and all event envelopes. A user lacking project.read must not be assigned. The last-admin override asks nothing for a change that loses no active admin. Guard ordering must refuse the workspace read key before ownership, JWT capacity acquisition or SSE opening; baseline-agent-only own threads now get 403 permissions. Keep .own pass-through and the ownership 404 fence for otherwise admitted callers. Update allow-all permission doubles in unauthorized pickup/last-admin cases to refuse the exact key, add effectiveKeys to assignment doubles including the outbox-envelope integration harness, and switch only the workspace-stream row of remaining-route-declarations.spec.ts to guard mode. Run the project-list integration with system roles seeded and a MEMBER user holding both member and a custom GLOBAL ['project.read'] binding but no project source.",
+      "acceptanceCriteria": [
+        "[unit] ProjectsService.findAllForPrincipal for a user principal with role: 'MEMBER', when ProjectAccessService.readsEveryProject resolves true, returns the rows of projectRepo.findAll().",
+        "[unit] findAllForPrincipal for a user principal with role: 'ADMIN', when readsEveryProject resolves false, returns the rows of findAllForUser(principal.id).",
+        "[unit] findAllForPrincipal for an agent principal with scoping on, when readsEveryProject resolves true, returns the rows of projectRepo.findAll().",
+        "[unit] HomeController.get for a user principal with role: 'MEMBER', when can(user, 'project.read') allows, calls home.snapshot with { id: user.id, globalAdmin: true }.",
+        "[unit] HomeController.get for a user principal with role: 'ADMIN', when can(user, 'project.read') refuses, calls home.snapshot with { id: user.id, globalAdmin: false }.",
+        "[unit] AgentsService.suggestTicket('bot', 'koda', user) for a user principal with role: 'MEMBER', when can(user, 'agent.update') allows and the target agent's effective keys hold agent.pickup, returns a suggestion.",
+        "[unit] suggestTicket('bot', 'koda', user) for a user principal with role: 'ADMIN', when can(user, 'agent.update') refuses, rejects with ForbiddenAppException with code agents before any target-agent key read.",
+        "[unit] suggestTicket('bot', 'koda', other) for an agent principal whose slug is other, when can(other, 'agent.update') refuses, rejects with ForbiddenAppException with code agents before any target-agent key read.",
+        "[unit] suggestTicket('bot', 'koda', bot) for the agent principal whose slug is bot, with a can double that throws when called, returns a suggestion.",
+        "[unit] TicketsService.assign('koda', 'KODA-1', { userId: 'u2' }) for an enabled user u2 with role: 'ADMIN', whose effectiveKeys({ type: 'USER', id: 'u2' }, { projectId }) lacks project.read, rejects with ForbiddenAppException with code tickets without assigning the ticket.",
+        "[unit] TicketsService.assign for an enabled user u2 with role: 'MEMBER', whose effective keys hold project.read, calls assignTicket with assignedToUserId: 'u2'.",
+        "[unit] ProjectMembersService.remove('proj', 'pa', caller) of the only active project ADMIN by a caller with role: 'MEMBER', when can(caller, 'role.binding.global') allows, deletes the member.",
+        "[unit] ProjectMembersService.remove('proj', 'pa', caller) of the only active project ADMIN by a caller with role: 'ADMIN', when can(caller, 'role.binding.global') refuses and countProjectAdmins resolves 1, rejects with ConflictAppException with code members.lastAdmin.",
+        "[unit] On a Nest testing app serving WorkspaceThreadEventsController with a PermissionService double that refuses thread.workspace.read (reason not-granted), GET /threads/t1/events answers 403 with error code permissions before the ownership fence or stream-slot acquisition, and the WorkspaceThreadsService double's requireOwnedThread is not called.",
+        "[integration] In the booted app, GET /projects by a user who has a member binding and a binding to a custom GLOBAL role with ['project.read'], and no project source, lists every non-deleted project."
+      ],
+      "tags": [
+        "refactor",
+        "security",
+        "api",
+        "permissions",
+        "integration"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Six authorization sites across projects, home, agents, tickets, membership and SSE require exact key scopes, short-circuiting and guard order. The patterns are specified but cross-module; access control mandates strict three-session TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/projects/projects.service.ts",
+        "apps/api/src/home/home.controller.ts",
+        "apps/api/src/agents/agents.service.ts",
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/projects/members/project-members.service.ts"
+      ],
+      "suggestedCriteria": [
+        "ProjectMembersService.remove of a disabled ADMIN member does not ask role.binding.global or countProjectAdmins.",
+        "GET /threads/t1/events by a caller holding only thread.workspace.read.own reaches the ownership fence, and another principal's workspace thread still answers 404 threads.notFound.",
+        "TicketsService.assign for a disabled user whose keys hold project.read still rejects with the existing tickets.userDisabled conflict."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/unit/projects/projects-find-all-for-principal.spec.ts",
+          "reason": "AC7 and the AC9 boundary give \"a global ADMIN user principal\" every project through `role: 'ADMIN'`, and the repository double's `rowsForSelector` treats `role === 'ADMIN'` as cross-project. The replacing invariant: the global case is a principal for which the `PermissionService` double allows the global `'project.read'` ask, and it gets every non-deleted project. A user with `role: 'ADMIN'` whose global `project.read` is refused gets only their membership projects. The agent and member cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/home/home.controller.spec.ts",
+          "reason": "`setup()` builds `new HomeController(home)`, and the dashboard case expects `globalAdmin: false` from `role: 'MEMBER'`. The replacing invariant: the controller is built with a `PermissionService` double second, and `globalAdmin` equals that double's answer for `can(user, 'project.read')`. The agent refusal and the `home.read` declaration are unchanged."
+        },
+        {
+          "path": "apps/api/src/agents/agents-pickup.routes.spec.ts",
+          "reason": "AC10 expects 403 for `agentPrincipal('other-agent')`, and AC11 expects 403 for `userPrincipal('MEMBER')`, while the `PermissionService` double's `can` allows every key. AC12 expects 200 for `userPrincipal('ADMIN')`. The replacing invariant: AC10's and AC11's double refuses `'agent.update'` (403 `agents`, no ticket read). AC12's double allows `'agent.update'` (200). The US-009 target-key cases are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/memory/outbox-envelope.integration.spec.ts",
+          "reason": "it builds `TicketsService` positionally with a `PermissionService` double holding only `can`, and its assign case (`ticketsService.assign('h13-project', 'HKK-2', { userId: adminUserId }, principal)`) now reaches `effectiveKeys`. The replacing invariant: the double also has `effectiveKeys` resolving a set holding `'project.read'`, and every envelope assertion is unchanged."
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.service.spec.ts",
+          "reason": "the assign cases decide user-assignee eligibility through `findProjectMemberRole` and `role: 'ADMIN'`. Examples: \"should return 403 when the assigned user is not a project member (BUG-2)\", \"should skip the membership check for ADMIN assignees (BUG-17)\", and the cases asserting `findProjectMemberRole` was or was not called. `mockPermissions` has only `can`. The replacing invariant: `mockPermissions` also has `effectiveKeys`. A user assignee is eligible exactly when it resolves a set holding `'project.read'` for `({ type: 'USER', id }, { projectId })`. The BUG-17 case becomes \"an assignee whose keys hold project.read is assigned without a membership read\". BUG-2 becomes \"an assignee whose keys lack project.read gets 403 tickets\". Agent-assignee cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/projects/members/project-members.service.spec.ts",
+          "reason": "\"a project admin cannot demote or remove the last project ADMIN\" expects the count, and so 409 `members.lastAdmin`, for a principal with `role` other than `ADMIN`, while the `permissions` double allows every key. The replacing invariant: that case's double refuses `'role.binding.global'`, and the count and the 409 happen as before. \"a global ADMIN may remove the last project ADMIN\" passes because the double allows `'role.binding.global'`."
+        },
+        {
+          "path": "apps/api/src/permissions/remaining-route-declarations.spec.ts",
+          "reason": "its table pins `[WorkspaceThreadEventsController, 'events', ['thread.workspace.read'], 'all', 'service']`. The replacing invariant: that row's mode is `'guard'`; every other row is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Authorize domain event writers through project access",
+      "description": "**Goal** \u2014 Replace KodaDomainWriter's legacy actor-role allow-list with the actor's effective project.read key before each event transaction.\n\n**Motivation** \u2014 It omits `VERIFIER`, so the `TICKET_SUGGESTED` event of a pickup by an agent whose only legacy role is `VERIFIER` is refused after the pickup itself was allowed.\n\n**Approach** \u2014 The domain writer (US-003)\n\n`apps/api/src/koda-domain-writer/koda-domain-writer.service.ts`:\n- `KodaDomainWriter`'s fourth constructor parameter changes from `AgentAuthProvider` to `PermissionService`. The other parameters keep their positions.\n- `assertActorHasEventRole` is replaced:\n\n```ts\n/** The actor must have access to the project the event belongs to: the same key project routes are gated on. */\nprivate async assertActorInProject(actor: PrincipalRef, projectId: string): Promise<void> {\n  const keys = await this.permissions.effectiveKeys(actor, { projectId });\n  if (!keys.has(PROJECT_ACCESS_KEY)) throw new ForbiddenAppException({}, 'koda-domain-writer');\n}\n```\n\n- The actor of each write:\n  - `writeTicketEvent`: `{ type: data.actorType === 'agent' ? 'AGENT' : 'USER', id: data.actorId }`;\n  - `writeAgentAction` and `writeDecisionEvent`: `{ type: 'AGENT', id: data.agentId }`.\n- Each write checks the actor after `assertProjectExists` and before its transaction, as the role check did.\n- `PrismaKodaDomainWriterRepository.findUserProjectRoles` is deleted.\n- `KodaDomainWriterModule` drops its `AuthModule` import, which served only `AgentAuthProvider`.\n- The legacy-membership compat doc already lists the domain writer as a reader of who may act in a project. The key is the same decision, so drop-legacy has nothing left to move here.\n\n**Scope** \u2014 In: the three actor-scoped event writes, constructor/provider replacement, deletion of the obsolete repository reader and reader-only tests, plus viewer/no-source and VERIFIER pickup integration regressions. Out: the access service implementation (US-001), caller pickup shortcut and assignee checks (US-002), request/context cleanup (US-004), and remaining CASL/tool/helper deletions (US-005). Do not remove AgentAuthProvider.loadAgentRoles elsewhere, migrate legacy fixture sources or change approval/audit policies. Do not add actor authorization to indexDocument/importGraphify beyond this story's specified three event writes.\n\n**Interface** \u2014 `private async assertActorInProject(actor: PrincipalRef, projectId: string): Promise<void>` is declared verbatim above; the fourth KodaDomainWriter constructor parameter is PermissionService and all other positions remain unchanged. Use `PrincipalRef` from permissions/permissions.types.ts and `PROJECT_ACCESS_KEY` exported by US-001.\n\n**Implementation and verification notes** \u2014 Refuse without the key using 403 koda-domain-writer, regardless of supplied payload role, legacy actor role list or ADMIN claim. Refusal must create no event and no outbox row; missing project must fail before effectiveKeys. Preserve validation, canonical IDs, provenance, event envelopes and atomic commit/rollback semantics. The viewer-only binding now grants event writing; an agent with no legacy roles no longer bypasses project access. Replace AgentAuthProvider doubles in the writer service/provenance/event operations/writer integration suites with PermissionService.effectiveKeys doubles, remove find-user-project-roles.spec.ts and its obsolete contract describe, and add effectiveKeys to producer-atomicity's existing permission double. In membership-ticket-consumers, change only the viewer refusal expectation to a stored event and introduce the no-source refusal. Seed roles before DB cases and invalidate cached keys after direct fixture writes. The pickup integration must boot the real app and authenticate the rostered VERIFIER-only agent with its own API key.",
+      "acceptanceCriteria": [
+        "[unit] KodaDomainWriter.writeTicketEvent for a user actor, with effectiveKeys resolving a set holding project.read, calls ticketEventService.create once.",
+        "[unit] writeTicketEvent for a user actor u1 in project p1 calls effectiveKeys with exactly ({ type: 'USER', id: 'u1' }, { projectId: 'p1' }).",
+        "[unit] writeTicketEvent for a user actor, with effectiveKeys resolving a set without project.read, rejects with ForbiddenAppException with code koda-domain-writer and does not call ticketEventService.create.",
+        "[unit] writeTicketEvent with actorType 'agent' and actorId a1 calls effectiveKeys with ({ type: 'AGENT', id: 'a1' }, { projectId }).",
+        "[unit] writeAgentAction for agent a1 in project p1 calls effectiveKeys with ({ type: 'AGENT', id: 'a1' }, { projectId: 'p1' }) and, with project.read in the set, calls agentEventService.create once.",
+        "[unit] writeAgentAction, with effectiveKeys resolving a set without project.read, rejects with ForbiddenAppException with code koda-domain-writer and does not call agentEventService.create.",
+        "[unit] writeDecisionEvent, with effectiveKeys resolving a set without project.read, rejects with ForbiddenAppException with code koda-domain-writer and does not call decisionEventService.create.",
+        "[unit] writeTicketEvent for a project id that names no project rejects with ForbiddenAppException with code koda-domain-writer and does not call effectiveKeys.",
+        "[integration] In the booted app, KodaDomainWriter.writeTicketEvent for a user whose only source in p1 is a viewer binding stores one TicketEvent row.",
+        "[integration] In the booted app, writeTicketEvent for a user with no source in p1 rejects with ForbiddenAppException with code koda-domain-writer, and no TicketEvent row exists for it.",
+        "[integration] In the booted app, an agent whose only legacy role is an AgentRoleEntry VERIFIER, on p1's AgentProject roster, gets 200 from GET /agents/<its slug>/pickup?project=p1 with its own API key while p1 has a VERIFIED unassigned ticket, and an AgentEvent with action TICKET_SUGGESTED exists for it.",
+        "[unit] For each of KodaDomainWriter.writeTicketEvent, writeAgentAction and writeDecisionEvent, when effectiveKeys for that method's actor and project lacks project.read, the invocation rejects with ForbiddenAppException code koda-domain-writer before any event-service create or outbox.record call."
+      ],
+      "tags": [
+        "fix",
+        "security",
+        "api",
+        "permissions",
+        "events",
+        "outbox"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three source files replace an existing authorization collaborator with a specified key lookup; constructor ordering, actor identity and pre-transaction refusal need careful integration regressions. Access control overrides the medium default to strict three-session TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts",
+        "apps/api/src/koda-domain-writer/prisma-koda-domain-writer.repository.ts",
+        "apps/api/src/koda-domain-writer/koda-domain-writer.module.ts",
+        "apps/api/src/agents/agents.service.ts",
+        "apps/api/src/projects/project-access.service.ts"
+      ],
+      "suggestedCriteria": [
+        "writeDecisionEvent for agent a1 in project p1 checks effectiveKeys({ type: 'AGENT', id: 'a1' }, { projectId: 'p1' }) and creates a decision event when project.read is held.",
+        "writeAgentAction propagates an effectiveKeys database error unchanged without recording an event or outbox row."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/koda-domain-writer/koda-domain-writer.service.spec.ts",
+          "reason": "its module provides an `AgentAuthProvider` double with `loadAgentRoles` and no `PermissionService`. The replacing invariant: the module provides a `PermissionService` double whose `effectiveKeys` resolves a set holding `'project.read'`. The project-not-found, validation and envelope cases keep their outcomes."
+        },
+        {
+          "path": "apps/api/test/unit/koda-domain-writer/koda-domain-writer-role-provenance.spec.ts",
+          "reason": "its AC12-AC14 cases refuse or allow by legacy roles. Examples: \"throws ForbiddenAppException for a non-ADMIN user actor with no ProjectMember row\", \"still loads agent roles through AgentAuthProvider for agent actors\", and the `findUserProjectRoles` contract describe. The replacing invariant: the writer is decided by the `PermissionService` double's `effectiveKeys` for the actor ref in the event's project. A user actor with `project.read` writes, whatever its payload role. A user actor without it is refused 403 `koda-domain-writer` and writes no event. Agent actors are checked with `{ type: 'AGENT', id }`. The repository contract describe is deleted with `findUserProjectRoles`."
+        },
+        {
+          "path": "apps/api/test/unit/koda-domain-writer/find-user-project-roles.spec.ts",
+          "reason": "it tests only `PrismaKodaDomainWriterRepository.findUserProjectRoles`, which this story deletes. The replacing invariant: the file is deleted."
+        },
+        {
+          "path": "apps/api/test/integration/events/event-write-operations.integration.spec.ts",
+          "reason": "its module provides `AgentAuthProvider` and no `PermissionService`. \"should allow actors with admin role\" / \"developer role\" seed legacy rows, and \"should deny actors without admin, developer, or agent role\" expects 403 for a `MEMBER` user. The replacing invariant: the module provides a `PermissionService` double. The allow cases resolve a set holding `'project.read'`. The deny case resolves a set without it and still expects `ForbiddenAppException` and no event row. The project-not-found cases are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/koda-domain-writer/koda-domain-writer.integration.spec.ts",
+          "reason": "its module provides an `AgentAuthProvider` double and no `PermissionService`. The replacing invariant: it provides a `PermissionService` double whose `effectiveKeys` resolves a set holding `'project.read'`, and every case keeps its outcome."
+        },
+        {
+          "path": "apps/api/test/integration/outbox/producer-atomicity.integration.spec.ts",
+          "reason": "its `PermissionService` double has only `can`, and `writer.writeAgentAction` now calls `effectiveKeys`. The replacing invariant: the double also has `effectiveKeys` resolving a set holding `'project.read'`. Both `writeAgentAction` cases keep their commit and rollback outcomes."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-ticket-consumers.integration.spec.ts",
+          "reason": "\"AC-9: the writer refuses a user whose only source is a viewer binding and records no event\" expects 403. The replacing invariant (ruling: the writer gates on project access): that user's `writeTicketEvent` records the event. A new refusal case uses a user with no source in the project, expecting 403 `koda-domain-writer` and no event. AC-8 is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Remove project roles from the guard and request context",
+      "description": "**Goal** \u2014 Reduce ProjectMembershipGuard to key-based access and project identity, removing role injection from handlers, tools and approval routes.\n\n**Motivation** \u2014 They still carry a parallel permission vocabulary, so a future change could revive one by accident.\n\n**Approach** \u2014 The guard and the request without a project role (US-004)\n\n`ProjectMembershipGuard` (`apps/api/src/projects/project-membership.guard.ts`):\n\nTarget:\n```ts\nconstructor(\n  private readonly access: ProjectAccessService,\n  private readonly reflector: Reflector,\n) {}\n\nasync canActivate(ctx: ExecutionContext): Promise<boolean> {\n  const req = ctx.switchToHttp().getRequest<ProjectScopedRequest>();\n  const slug = this.resolveSlug(ctx, req);\n  if (!slug) return true;\n  if (!req.user) throw new ForbiddenAppException({}, 'projects');\n  const projectId = await this.access.findProjectIdBySlug(slug);\n  await this.access.resolveMembership(projectId, req.user);\n  req.projectContext = { project: { id: projectId, slug } };\n  return true;\n}\n```\n\n- `resolveSlug` (`params.slug`, else `@ProjectSlugFrom`) is unchanged.\n- The guard keeps calling `resolveMembership` rather than `assertProjectMembership`, because route specs stub that method.\n- Deleted:\n  - `project-permission.decorator.ts` (`ProjectPermission`, `PROJECT_PERMISSION_KEY`, `ProjectPermissionMetadata`, `ProjectPermissionTuple`, `exemptAgents`);\n  - `project-roles.decorator.ts` (`ProjectRoles`, `PROJECT_ROLES_KEY`);\n  - the guard's `assertProjectRoles` / `assertProjectPermission` and its `KodaCaslAbilityFactory` parameter.\n- `ProjectContext` (`apps/api/src/projects/project-context.ts`) becomes `{ project: { id: string; slug: string } }`, and `withProjectRole` is deleted.\n- **Callers:**\n  - `TicketsController` passes `principal` where it passed `withProjectRole(principal, project.role)` (eleven handlers);\n  - `AssistantToolExecutor` uses the principal itself as the tool actor: the requester principal `actionScope` builds, and `caller.principal` at the two `execParsed` call sites. Its `userPrincipal()` builder no longer sets a `projectRole` property;\n  - `ApprovalRoute`'s project variant becomes `{ kind: 'project'; projectId: string }`, so `ProjectFleetApprovalsController`'s `route()` and the `koda_list_approvals` tool (`fleet-tools.ts`) build it without a role.\n- Doc comments that name the deleted symbols are reworded:\n  - `allowed-actions.ts` (the comment above `canOverrideClose`, deleted in US-005);\n  - `tickets.service.ts` (the `findByRefWithActions` doc);\n  - `project-access.service.ts`.\n\n**Scope** \u2014 In: the simplified guard, decorator-file deletions, role-free ProjectContext/ApprovalRoute, direct principal forwarding, assistant requester attribution, obsolete helper-only test deletion and affected expectations/imports. Out: changing the access gate (US-001), remaining admin/key decisions and workspace SSE guard registration (US-002), writer authorization (US-003), and deleting the factory, UserPrincipal.projectRole, ApprovalCaller.globalAdmin or other dead mechanisms (US-005). Preserve the JWT role claim, viewerRole, PermissionService union and display membership reader.\n\n**Interface** \u2014 The two-argument guard constructor and canActivate algorithm are declared verbatim above. `ProjectContext` becomes `{ project: { id: string; slug: string } }`; the project variant of `ApprovalRoute` becomes `{ kind: 'project'; projectId: string }`. `ProjectScopedRequest` otherwise retains its current request fields. TicketsController handlers keep their `@CurrentProject()` parameters even where they no longer read them (oxlint `no-unused-vars` is off), so positional calls in existing specs stay valid.\n\n**Implementation and verification notes** \u2014 Attach projectContext only after access succeeds, retain slug/query/body source precedence and missing/deleted-project 404, and ignore obsolete role/permission metadata rather than interpreting it. Preserve Requires declarations and service-owned ownership/edge checks. Pass the exact principal object, not a spread copy, from all eleven ticket handlers. Continue assistant membership checks but stop using their display-role return to decorate actors; stored-action execution remains attributed to the requester. Update controller/tool routes to exact role-free objects. Delete src/projects/project-context.spec.ts; remove legacy gate/CASL describes from the guard spec, constructing raw SetMetadata fixtures for the two obsolete-metadata behavior cases. Remove imports and absence assertions referencing PROJECT_PERMISSION_KEY throughout the existing controller specs, but retain all REQUIRES_METADATA assertions. Update the ticket principal-identity, approval route, origin-tools, executor workspace and approved-actor expectations without weakening their key refusals or requester attribution.",
+      "acceptanceCriteria": [
+        "[unit] ProjectMembershipGuard.canActivate for a member's request on a route with params.slug 'alpha' sets request.projectContext to exactly { project: { id: 'proj-1', slug: 'alpha' } }.",
+        "[unit] ProjectMembershipGuard.canActivate for a user principal with role: 'MEMBER' for which resolveMembership resolves 'VIEWER', on a handler carrying metadata 'koda:projectRoles' = ['ADMIN'] set with SetMetadata, resolves true.",
+        "[unit] ProjectMembershipGuard.canActivate on a handler with no slug source and metadata 'koda:projectPermission' set with SetMetadata, resolves true without calling findProjectIdBySlug.",
+        "[unit] ProjectMembershipGuard.canActivate for a principal that resolveMembership refuses with ForbiddenAppException code projects rejects with that exception, and request.projectContext stays unset.",
+        "[unit] TicketsController.start('koda', 'KODA-1', principal, ctx) calls transitionsService.start with ('koda', 'KODA-1', principal), where the third argument is the same object as the principal passed in.",
+        "[unit] TicketsController.assign calls ticketsService.assign with the received principal object itself as the last argument.",
+        "[unit] ProjectFleetApprovalsController.list with ctx.project.id 'p1' calls approvals.list with a route equal to exactly { kind: 'project', projectId: 'p1' }.",
+        "[unit] The koda_list_approvals tool's execute for a user actor in project project-1 calls approvals.list with a route equal to exactly { kind: 'project', projectId: 'project-1' }.",
+        "[unit] AssistantToolExecutor running a project tool for a user caller that resolveMembership admits passes the tool a ToolContext whose actor has no projectRole property.",
+        "[unit] AssistantToolExecutor approving a stored action passes the tool an actor that has no projectRole property."
+      ],
+      "tags": [
+        "refactor",
+        "security",
+        "api",
+        "permissions",
+        "assistant",
+        "guards"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Guard metadata deletion and principal/context identity changes propagate through controllers, assistant execution and approval routes. The refactor spans modules and authorization attribution, so strict security TDD is required.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/projects/project-membership.guard.ts",
+        "apps/api/src/projects/project-context.ts",
+        "apps/api/src/tickets/tickets.controller.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+        "apps/api/src/fleet/approvals/approvals.service.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/project-membership.guard.spec.ts",
+          "reason": "its test controllers use `@ProjectRoles(...)` and `@ProjectPermission([...], { exemptAgents })` with `KodaAction`, and it builds guards with `new KodaCaslAbilityFactory()` as a third argument. Its `projectContext` assertions include `role`. The replacing invariant: the role-gate, permission-gate and CASL describes are deleted. The guard is built with `(access, reflector)`. `request.projectContext` equals `{ project: { id, slug } }` exactly. The slug-resolution, 404, missing-principal and access cases keep their outcomes."
+        },
+        {
+          "path": "apps/api/src/projects/project-context.spec.ts",
+          "reason": "it tests only `withProjectRole`, which this story deletes. The replacing invariant: the file is deleted."
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.controller.spec.ts",
+          "reason": "it imports `withProjectRole` and `PROJECT_PERMISSION_KEY`. It expects `service.assign` and `transitions.start` to be called with `withProjectRole(user, 'ADMIN')` (lines 526, 640, 649), and lines 329, 591, 664 and 694 expect services to be called with `{ ...mockMemberUser, projectRole: <'DEVELOPER' or 'ADMIN'> }`. Its `projectContext` fixtures carry `role`. The replacing invariant: the handlers are called with the principal itself (`mockMemberUser` / `mockAdminUser`, no `projectRole`). The `PROJECT_PERMISSION_KEY` absence assertion and both imports are removed. The `REQUIRES_METADATA` assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/comments/comments.controller.spec.ts",
+          "reason": "it imports `PROJECT_PERMISSION_KEY` from the deleted file to assert the key's absence. The replacing invariant: that import and assertion are removed, and the `REQUIRES_METADATA` assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/projects/projects.controller.spec.ts",
+          "reason": "it imports `PROJECT_PERMISSION_KEY` from the deleted file to assert the key's absence, and its `projectContext` fixtures carry `role`. The replacing invariant: that import and assertion are removed, the fixtures drop `role`, and the `REQUIRES_METADATA` assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/projects/assignees/project-assignees.controller.spec.ts",
+          "reason": "it imports `PROJECT_PERMISSION_KEY` from the deleted file to assert the key's absence. The replacing invariant: that import and assertion are removed, and the `REQUIRES_METADATA` assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/labels/labels.controller.spec.ts",
+          "reason": "it imports `PROJECT_PERMISSION_KEY` from the deleted file to assert the key's absence. The replacing invariant: that import and assertion are removed, and the `REQUIRES_METADATA` assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/ticket-links/ticket-links.controller.spec.ts",
+          "reason": "it imports `PROJECT_PERMISSION_KEY` from the deleted file to assert the key's absence. The replacing invariant: that import and assertion are removed, and the `REQUIRES_METADATA` assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/repo-config/project-job-config-edit.controller.spec.ts",
+          "reason": "it imports `PROJECT_PERMISSION_KEY` from the deleted file to assert the key's absence. The replacing invariant: that import and assertion are removed, and the `REQUIRES_METADATA` assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/repo-config/project-repo-config.controller.spec.ts",
+          "reason": "it imports `PROJECT_PERMISSION_KEY` from the deleted file to assert the key's absence. The replacing invariant: that import and assertion are removed, and the `REQUIRES_METADATA` assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/notifications/ticket-watch.controller.spec.ts",
+          "reason": "it imports `PROJECT_PERMISSION_KEY` from the deleted file to assert the key's absence. The replacing invariant: that import and assertion are removed, and the `REQUIRES_METADATA` assertions are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/ast-index/code-intel-controller-permissions.integration.spec.ts",
+          "reason": "it imports `PROJECT_PERMISSION_KEY` from the deleted file to assert the key's absence on two handlers. The replacing invariant: that import and those assertions are removed, and its `REQUIRES_METADATA` assertions are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/fleet-tools.spec.ts",
+          "reason": "it expects `approvals.list` to be called with `{ kind: 'project', projectId: 'project-1', role: 'DEVELOPER' }`. The replacing invariant: the route is exactly `{ kind: 'project', projectId: 'project-1' }`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/origin-tools.spec.ts",
+          "reason": "it expects `approvals.list` to be called with routes carrying `role: null` and `role: 'DEVELOPER'`. The replacing invariant: both routes are exactly `{ kind: 'project', projectId: 'p1' }`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.spec.ts",
+          "reason": "lines 234, 463 and 530 expect the tool context actor and the `can` principal to carry `projectRole: 'DEVELOPER'`. The replacing invariant: they are the caller principal with no `projectRole` property (the expectations drop `projectRole`). Every refusal and key-check outcome is unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.workspace.spec.ts",
+          "reason": "line 165 expects `seen.actor.projectRole` to be `'VIEWER'`, line 214 expects `can` to be called with an actor carrying `projectRole: 'VIEWER'`, and line 253 matches `actor: { id: 'u1', projectRole: undefined }`. The replacing invariant: the actor has no `projectRole` property, `can` is called with the caller principal, and line 253 matches `actor: { id: 'u1' }`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.actor.spec.ts",
+          "reason": "line 141 expects the approved action's actor to carry `projectRole: 'DEVELOPER'`. The replacing invariant: the actor is the requester principal with no `projectRole` property."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Retire CASL and the dead legacy permission mechanisms",
+      "description": "**Goal** \u2014 Delete the custom CASL factory and unused legacy permission mechanisms after their live decision paths have migrated.\n\n**Motivation** \u2014 The CASL factory, the project-permission decorators and their guard steps, the tool `permission` field, `assertTransitionPermission`, `canOverrideClose` and several helpers have no live caller.\n\n**Approach** \u2014 Dead mechanisms (US-005)\n\n| Symbol | File(s) under `apps/api/src/` | Target |\n|:--|:--|:--|\n| `KodaCaslAbilityFactory`, its spec | `auth/casl/koda-casl-ability.factory.ts`, `auth/casl/koda-casl-ability.factory.spec.ts` | deleted |\n| `KodaAction`, `KodaSubject` | `auth/casl/koda-action.enum.ts` | deleted |\n| CASL registration | `auth/auth.module.ts` | `caslAbilityFactory` option, provider and export removed; nestjs-auth then provides its default `JwtCaslAbilityFactory` |\n| CASL provider | `projects/project-access.module.ts` | `KodaCaslAbilityFactory` provider, export and comment removed |\n| `UserPrincipal.projectRole` | `auth/principal/koda-principal.types.ts`, `auth/jwt-auth.provider.ts` | field removed; `JwtAuthProvider.getPrincipal` sets no `projectRole` property, and its SECURITY comments are reduced to the claim allow-list |\n| `TicketTransitionsService.assertTransitionPermission`, `caslAbilityFactory` parameter | `tickets/state-machine/ticket-transitions.service.ts` | removed (the last constructor parameter, `@Optional()`) |\n| `updateTicketTool` `transitions` dependency | `fleet/assistant/tools/update-ticket-tool.ts`, `fleet/assistant/tools/ticket-write-tools.ts` | `updateTicketTool({ tickets })`; `TicketWriteTools` drops its `TicketTransitionsService` parameter |\n| `ToolPermission`, `AssistantTool.permission` | `fleet/assistant/assistant-tool.types.ts` and the 14 tool files under `fleet/assistant/tools/` that set `permission:` | removed; `ToolForbiddenError`'s doc names a key, not an ability |\n| `canOverrideClose` | `tickets/state-machine/allowed-actions.ts` | deleted |\n| `ProjectAccessService.assertProjectAdmin`, `canManageMembers` | `projects/project-access.service.ts` | deleted |\n| `ProjectsService.assertProjectMembership`, `assertProjectAdmin`, `findMembershipRole` | `projects/projects.service.ts` | deleted (no caller) |\n| `ITicketRepository.findProjectMemberRole` | `tickets/domain/ticket.domain.ts`, `tickets/prisma-tickets.repository.ts` | deleted (no caller after US-002) |\n| `FleetActivityService.memberProjectIds`, `findMemberProjectIds` | `fleet/activity/fleet-activity.service.ts`, `fleet/activity/domain/fleet-activity.domain.ts`, `fleet/activity/prisma-fleet-activity.repository.ts` | deleted |\n| `ApprovalsService`'s `activity` parameter | `fleet/approvals/approvals.service.ts` | removed (the seventh parameter, after `live`; `txManager` and the later ones move up one place) |\n| `ApprovalCaller.globalAdmin` | `fleet/approvals/approvals.service.ts`, `fleet/approvals/fleet-approvals.controller.ts`, `fleet/approvals/project-fleet-approvals.controller.ts` | field removed; both controllers pass `{ id, principal }` |\n| IN_PROGRESS \u2192 VERIFIED rule | `tickets/state-machine/ticket-transitions.ts` | removed from `TRANSITION_RULES` with its comment; the comments in `transition-keys.ts` and `ticket-transitions.service.ts` that name it are reworded |\n| `skills.principal`, `skills.projectPrincipal` | `i18n/en/skills.json`, `i18n/zh/skills.json` | removed (no code reads them since enforce-integrations) |\n| comments naming the factory | `common/enums.ts`, `ticket-links/ticket-links.module.ts` | reworded |\n\n- `PATCH` with `status: 'VERIFIED'` on an `IN_PROGRESS` ticket still answers 400 `tickets`: `validateTransition` throws the same `ValidationAppException` for a missing rule as for a missing comment.\n- The CASL-only test files are deleted (see Modifies). They test only the factory's grants.\n\n**Scope** \u2014 In: every deletion/reduction in the table, obsolete-only test file/describe removal, positional constructor corrections, tool key assertion preservation, default Nathapp factory integration and the rejected-transition regression. Out: the live access/key migrations (US-001/002/003), guard/decorator/context cleanup (US-004), fixture conversion, legacy schema/union/fallback removal, findMembershipRole on the access service/repository, AgentPrincipal.agentRoles, AgentAuthProvider.loadAgentRoles, scoping flag/update-roles route, JWT role claim changes, notification-recipient selection and web viewerRole replacement. Do not delete the placeholder context-controller.integration.spec.ts or change approval policies, the audit log or ActionContext.\n\n**Interface** \u2014 `updateTicketTool({ tickets })` replaces the old dependency object. The project route is already `{ kind: 'project'; projectId: string }` from US-004; approval controllers now pass `{ id, principal }` without globalAdmin. Retain UserPrincipal.role but omit any own projectRole field from JwtAuthProvider results. Deleting the optional last TicketTransitionsService parameter must not alter earlier constructor positions; deleting ApprovalsService parameter seven moves all later positional arguments up one place.\n\n**Implementation and verification notes** \u2014 Delete the custom factory implementation, action/subject enum file, colocated factory spec, test/unit/auth/koda-casl-ability.factory.spec.ts, test/integration/ast-index/ast-index-casl-permissions.integration.spec.ts, test/integration/code-intel/codeintel-casl-permissions.integration.spec.ts and test/integration/rag/import-graphify-permission.integration.spec.ts. Remove obsolete factory imports/provider entries from webhook routes, transitions service, project guard routes, producer atomicity and ticket tenancy harnesses, preserving every non-CASL outcome. Remove only the describes for assertTransitionPermission, canOverrideClose, findMemberProjectIds, the access admin helpers and ProjectsService wrappers. The access service's own assertProjectMembership and findMembershipRole remain live. Drop update-ticket-tool's unused transitions harness/assertion and replace all tool.permission assertions in the listed tool specs and assistant.module.spec.ts with each tool's already-declared key (add a key assertion when absent). Preserve all live tool key checks and behavior. JWT security tests must check absence of an own projectRole property rather than just an undefined value; role, authorities, extra and revocation behavior remain. The two former GENERAL-comment transition acceptance cases now reject, and all other transition outcomes stay.\nVerify deletion completeness by review and bun run --cwd apps/api type-check, bun run --cwd apps/api lint and bun run --cwd apps/api test, with deleted files actually absent. Runtime integration uses bootHttpApp to observe the default JwtCaslAbilityFactory and 400 tickets without status mutation. The catalog contract and committed role matrix remain regression anchors, not snapshots to update for cleanup. Real DB cases seed system roles after resetDb or boot the app; direct membership/binding fixture mutations require MembershipService.invalidatePermissions. Only existing e2e cases broken by the correct implementation are edited; do not expand this deletion story into new endpoint-e2e coverage.",
+      "acceptanceCriteria": [
+        "[unit] validateTransition(TicketStatus.IN_PROGRESS, TicketStatus.VERIFIED, CommentType.GENERAL) throws ValidationAppException.",
+        "[unit] The keys of TRANSITION_RULES[TicketStatus.IN_PROGRESS] equal exactly [TicketStatus.VERIFY_FIX].",
+        "[unit] JwtAuthProvider.getPrincipal for a JWT payload { sub, email, role: 'MEMBER', tokenVersion: 0, projectRole: 'ADMIN' } returns a principal equal to the one it returns for the same payload without projectRole.",
+        "[integration] In the app booted by bootHttpApp, app.get(CaslAbilityFactory, { strict: false }) from @nathapp/nestjs-auth is an instance of JwtCaslAbilityFactory.",
+        "[integration] In the booted app, PATCH /projects/p1/tickets/<ref> with { status: 'VERIFIED' } on an IN_PROGRESS ticket by a global admin answers 400 with error code tickets, and the ticket stays IN_PROGRESS."
+      ],
+      "tags": [
+        "delete",
+        "refactor",
+        "security",
+        "api",
+        "permissions",
+        "auth"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-003",
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A specified but broad deletion sweep crosses auth DI defaults, JWT principal shape, transition behavior, assistant registrations and positional approval dependencies. Runtime security effects make this more than a mechanical codemod and require strict three-session TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/auth/auth.module.ts",
+        "apps/api/src/auth/principal/koda-principal.types.ts",
+        "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.types.ts",
+        "apps/api/src/tickets/state-machine/ticket-transitions.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/auth/casl/koda-casl-ability.factory.spec.ts",
+          "reason": "it tests only the deleted factory. The replacing invariant: the file is deleted."
+        },
+        {
+          "path": "apps/api/test/unit/auth/koda-casl-ability.factory.spec.ts",
+          "reason": "it tests only the deleted factory's `ProjectContext` grants. The replacing invariant: the file is deleted."
+        },
+        {
+          "path": "apps/api/test/integration/ast-index/ast-index-casl-permissions.integration.spec.ts",
+          "reason": "it tests only the deleted factory's AstIndex grants. The replacing invariant: the file is deleted."
+        },
+        {
+          "path": "apps/api/test/integration/code-intel/codeintel-casl-permissions.integration.spec.ts",
+          "reason": "it tests only the deleted factory's CodeIntel grants. The replacing invariant: the file is deleted."
+        },
+        {
+          "path": "apps/api/test/integration/rag/import-graphify-permission.integration.spec.ts",
+          "reason": "it tests only the deleted factory and `KodaAction.IMPORT`. The replacing invariant: the file is deleted, since the route's key is pinned by the catalog contract test."
+        },
+        {
+          "path": "apps/api/src/webhook/webhook-routes.spec.ts",
+          "reason": "it imports `KodaCaslAbilityFactory` and lists it as a provider. The replacing invariant: the import and provider entry are removed, and every case keeps its outcome."
+        },
+        {
+          "path": "apps/api/src/tickets/state-machine/ticket-transitions.service.spec.ts",
+          "reason": "it imports `KodaCaslAbilityFactory`, lists it as a provider, and its describe \"assertTransitionPermission (legacy CASL check, still used by the assistant tool)\" tests the deleted method. The replacing invariant: the import, the provider entry and that describe are removed, and every other case keeps its outcome."
+        },
+        {
+          "path": "apps/api/src/projects/project-membership.guard.routes.spec.ts",
+          "reason": "it imports `KodaCaslAbilityFactory` and lists it as a provider. The replacing invariant: the import and provider entry are removed, and every case keeps its outcome."
+        },
+        {
+          "path": "apps/api/test/integration/outbox/producer-atomicity.integration.spec.ts",
+          "reason": "it imports `KodaCaslAbilityFactory` and lists it as a provider. The replacing invariant: the import and provider entry are removed, and every case keeps its outcome."
+        },
+        {
+          "path": "apps/api/test/integration/tickets/ticket-tenancy.integration.spec.ts",
+          "reason": "it imports `KodaCaslAbilityFactory` and lists it as a provider. The replacing invariant: the import and provider entry are removed, and every case keeps its outcome."
+        },
+        {
+          "path": "apps/api/src/auth/jwt-auth.provider.spec.ts",
+          "reason": "its SECURITY cases assert `principal.projectRole` is `undefined` for a forged or garbage `projectRole` claim. The replacing invariant: the principal has no own `projectRole` property for those claims, and the claim allow-list cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/tickets/state-machine/allowed-actions.spec.ts",
+          "reason": "it imports `canOverrideClose` and its describe tests it. The replacing invariant: the import and describe are removed, and the `allowedActions` cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/tickets/state-machine/ticket-transitions.spec.ts",
+          "reason": "\"allows IN_PROGRESS \u2192 VERIFIED with GENERAL comment (sent back)\" and \"accepts GENERAL for IN_PROGRESS \u2192 VERIFIED\" expect no throw. The replacing invariant: both expect `validateTransition` to throw `ValidationAppException`. The two IN_PROGRESS \u2192 VERIFIED throw cases still throw."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/update-ticket-tool.spec.ts",
+          "reason": "`toolDeps()` builds `updateTicketTool({ tickets, transitions })`, a case asserts `assertTransitionPermission` is not called, and line 152 asserts `tool.permission` equals `{ kind: 'ability', ... }`. The replacing invariant: the tool is built with `{ tickets }`, that case and the `permission` assertion are removed, the `key` assertion stands, and every other case keeps its outcome."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/link-tickets-tool.spec.ts",
+          "reason": "line 149 asserts `tool.permission` equals `{ kind: 'member' }`. The replacing invariant: the `permission` assertion is removed and the tool's `key` assertion stands (added if absent, with the key the tool file declares)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/requeue-job-tool.spec.ts",
+          "reason": "line 143 asserts `tool.permission` equals a `{ kind: 'ability', ... }` value. The replacing invariant: the `permission` assertion is removed and the tool's `key` assertion stands (added if absent, with the key the tool file declares)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/action-tools.spec.ts",
+          "reason": "lines 105 and 174 assert `tool.permission` values. The replacing invariant: both `permission` assertions are removed and the tools' `key` assertions stand (added if absent, with the keys the tool file declares)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/create-tickets-tool.spec.ts",
+          "reason": "line 122 asserts `tool.permission` equals a `{ kind: 'ability', ... }` value. The replacing invariant: the `permission` assertion is removed and the tool's `key` assertion stands (added if absent, with the key the tool file declares)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/add-memory-tool.spec.ts",
+          "reason": "line 149 asserts `tool.permission` equals `{ kind: 'member' }`. The replacing invariant: the `permission` assertion is removed and the tool's `key` assertion stands (added if absent, with the key the tool file declares)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/knowledge-tools.spec.ts",
+          "reason": "lines 110 and 124 assert the registered tools' `permission` equals `{ kind: 'member' }`. The replacing invariant: both `permission` assertions are removed and the tools' `key` assertions stand (added if absent, with the keys the tool file declares)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/record-decision-tool.spec.ts",
+          "reason": "line 143 asserts `tool.permission` equals `{ kind: 'member' }`. The replacing invariant: the `permission` assertion is removed and the tool's `key` assertion stands (added if absent, with the key the tool file declares)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/dispatch-job-tool.spec.ts",
+          "reason": "line 203 asserts `tool.permission` equals a `{ kind: 'ability', ... }` value. The replacing invariant: the `permission` assertion is removed and the tool's `key` assertion stands (added if absent, with the key the tool file declares)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/cancel-job-tool.spec.ts",
+          "reason": "line 139 asserts `tool.permission` equals a `{ kind: 'ability', ... }` value. The replacing invariant: the `permission` assertion is removed and the tool's `key` assertion stands (added if absent, with the key the tool file declares)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/kb-tools.spec.ts",
+          "reason": "line 561 asserts the registered `koda_kb_search` and `koda_get_doc` tools' `permission` values. The replacing invariant: the `permission` assertion is removed and the tools' `key` assertions stand (added if absent, with the keys the tool file declares)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/fleet-tools.spec.ts",
+          "reason": "line 108 asserts the registered fleet tools' `permission` values. The replacing invariant: the `permission` assertion is removed and the tools' `key` assertions stand (added if absent, with the keys the tool file declares)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.spec.ts",
+          "reason": "it asserts `tool?.permission` equals a `{ kind: ... }` value for ten tools. The replacing invariant: those assertions are removed, and the tools' `key` assertions (added if absent, with the key each tool file declares) stand in their place."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.service.spec.ts",
+          "reason": "it builds `new ApprovalsService(...)` positionally with an `activity` double (`memberProjectIds`) as the seventh argument (after `live`). The replacing invariant: the constructor calls drop that argument and the later ones move up one place, and every case keeps its outcome."
+        },
+        {
+          "path": "apps/api/src/fleet/activity/prisma-fleet-activity.repository.spec.ts",
+          "reason": "its describe \"PrismaFleetActivityRepository \u2014 findMemberProjectIds (US-004)\" tests the deleted method. The replacing invariant: that describe is removed, and the other cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/projects/project-access.service.spec.ts",
+          "reason": "its `assertProjectAdmin` and `canManageMembers` describes test deleted methods. The replacing invariant: both describes are removed, and the US-001 cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/projects/projects.service.spec.ts",
+          "reason": "its cases for `ProjectsService.assertProjectMembership`, `assertProjectAdmin` and `findMembershipRole` test deleted wrappers. The replacing invariant: those cases are removed, and the other cases are unchanged."
+        }
+      ]
+    }
+  ],
+  "analysis": "EXPLORATION AND ARCHITECTURE\nCodebase-memory MCP is unavailable in this session; findings were verified by direct file reads and targeted text searches. This is an existing API refactor, not greenfield work. All implementation is scoped to apps/api. The supplied auto-detected Express/Next.js labels are not the architecture authority: .nax/mono/apps/api/context.md:13 and :27 identify the system-of-record API as NestJS 12 + Fastify, Prisma 7, Vitest and oxlint; the web is a separate Nuxt client per repository guidance. apps/api/package.json:10-24 confirms Vitest unit/scoped/DB scripts, oxlint and tsc --noEmit; :46-56 and :69-71 show the installed Nathapp and Nest dependencies. Do not introduce a framework or dependency migration. Read nathapp-nestjs-patterns before implementation; no skill file matching that name is exposed inside this checkout. .nax/rules/api-auth.md:10-28 and .nax/rules/api-core.md:17-22 already describe the intended key-based architecture; do not restore CASL or role-based authorization to match old tests.\n\nREFINE AUDIT AND FIXTURE DEFINITIONS\nAll 54 numbered spec criteria are retained in their original stories and order: US-001 criteria 1-13, US-002 criteria 1-15, US-003 criteria 1-11, US-004 criteria 1-10 and US-005 criteria 1-5. Their concrete identifiers, principal/object identity requirements, fixture conditions and qualifying clauses remain intact. The additional US-003 criterion explicitly covers the failure table's no-event/no-outbox outcome for the three event-write methods only; it does not extend authorization to indexDocument or importGraphify. All six failure-table rows map to observable criteria: US-001 8 (same database error), US-001 11 (projects refusal before RequiresGuard), US-002 7/8 (agents refusal before target keys), US-002 10 (tickets refusal without assignment), US-003 3/6/7/10/12 (writer refusal with no writes), US-002 14 (permissions refusal before ownership/stream slot). Every story already has a negative path and regression anchors; no invented failure criterion is needed. The eleven feature exclusions are preserved verbatim in outOfScope. All five contextFiles lists match the spec's five primary recommendations; none is newly created or removed by an upstream story. Binding dependencies remain unchanged. Security-critical three-session-tdd remains mandatory for all stories; US-001 is medium rather than complex because its production algorithm is localized to one existing service with established collaborators.\nFixture wording is binding: a user whose only source in p1 is a <role> binding has that RoleBinding in p1, no ProjectMember row, and User.role = 'MEMBER'. A global admin is a user with a global admin binding. A custom PROJECT role with [...] is a Role row with scope PROJECT, system: false and exactly those permission entries. Unit permission answers come from PermissionService doubles; DB-backed cases seed system roles after resetDb or boot the app. Use the real project id in permission contexts, not the slug. Distinguish omitted context in direct global can calls from RequiresGuard's existing empty-context call; do not change RequiresGuard to force two-argument calls. Re-reading ProjectMembersService.remove confirms its first argument is a slug (apps/api/src/projects/members/project-members.service.ts:96-103): the AC's 'proj' is resolved to projectId through access.findProjectIdBySlug before the key/count checks. Re-reading AssistantToolExecutor confirms that null display role is admitted and only undefined denotes refused membership (apps/api/src/fleet/assistant/assistant-tool.executor.ts:130-135, :255-269 and :283-289); preserve that distinction while removing role decoration.\n\nGOAL AND DEPENDENCY ORDER\nThis is one capability, the eighth P1 feature, following contract-tests (PR #317). Preserve exactly US-001 through US-005: US-001 establishes project.read access and the global query; US-002, US-003 and US-004 each depend on US-001; US-005 depends on all three. Cleanup order is contract-tests, retire-checks, fixtures-to-bindings, drop-legacy; permissions-p1-web runs in parallel and must land before drop-legacy, not before this feature. The design document predates the split and is not to be edited. No schema/data migration, approval-policy change, audit change, ActionContext work or fixture conversion is part of this run.\n\nSHARED AUTHORIZATION CONTRACT\napps/api/src/permissions/permissions.module.ts:21-34 explains the global module; :49-54 provides and exports PermissionService, MembershipService and RoleAdminService. Consumers inject PermissionService as required, without @Optional(). apps/api/src/permissions/permission.service.ts:32-40 documents the legacy-row/binding/baseline union and caching; :53-87 implements can and effectiveKeys, and :121-149 preserves legacy compatibility. Keep that union, fallback and isLegacyAdmin untouched. A refused catalog key normally uses new ForbiddenAppException({}, 'permissions'), while the project access gate retains 403 projects. Existing specialized refusals remain agents, tickets and koda-domain-writer as explicitly specified. PermissionService errors propagate, never become invented 403s. effectiveKeys takes PrincipalRef plus { projectId } (or 'global'); can takes the principal and optionally a context. Global capability checks must omit projectId rather than infer them from a project grant.\nThe committed matrix confirms project.read global grants at apps/api/src/permissions/__snapshots__/role-matrix.json:132 and :355, baseline refusals at :578 and :801, and project grants at :1024, :1247, :1470, :1693, :1916, :2139 and :2362. agent.update and role.binding.global are granted only to owner/admin, e.g. :7, :217, :230, :440 versus :453 and :663. Do not update the matrix or catalog to make cleanup pass.\nBehavior remains the same for seeded roles except the explicit rulings: a viewer or legacy VERIFIER-only actor with project access may write domain events; a no-role agent now needs project.read for those writes; principal role claims no longer override bindings; a legacy ProjectMember role such as MEMBER is admitted through its viewer virtual binding; globally bound owner/admin agents or custom GLOBAL project.read agents gain all-project access/listing; workspace streams require thread.workspace.read or its .own capability before the ownership fence; viewerRole stays unchanged for previously admitted users and becomes ADMIN for any global project.read holder, otherwise the stored legacy/display role or null. Keep UserPrincipal.role, JWT role claims, AgentPrincipal.agentRoles, findMembershipRole, AGENT_PROJECT_SCOPING and disabled/not-found/agent-roster invariants.\n\nUS-001 FINDINGS AND IMPACT\napps/api/src/projects/project-access.service.ts:10-13 currently accepts (projectRepo, optional authConfig); :45-64 uses the user's ADMIN claim and a stored-role allow-list, or agent roster reads, to admit. Replace this one decision with the specified can(project.read, { projectId }); runners and scoping-off agents bypass the ask. Add required PermissionService in position two, shift auth config to position three, export PROJECT_ACCESS_KEY, and add readsEveryProject with a runner false shortcut. Display role still comes from the repository unless global project.read is held. assertProjectMembership at :66-68 remains a delegation, so guard, comments, members, assistant, memory and live/thread-stream callers adopt the key gate without per-caller rewrites. findMembershipRole at :75-77 must stay. The two dead admin helpers at :83-97 remain until US-005 to keep the dependency sequence coherent. The central gate has a broad security blast radius: an apparently harmless constructor or mock change can accidentally admit all principals or invent a fallback.\nTests to adapt in US-001: src/projects/project-access.service.spec.ts; test/unit/projects/agent-project-access.spec.ts; src/projects/projects.service.spec.ts; src/projects/project-membership.guard.spec.ts; src/projects/project-membership.guard.routes.spec.ts; src/retrieval/retrieval-membership.routes.spec.ts; src/rag/kb-documents-membership.routes.spec.ts; test/unit/projects/projects-find-all-for-principal.spec.ts (all paths under apps/api). Supply PermissionService doubles in the new constructor slot. Model refusals with project.read in refusedKeys rather than null membership/false roster answers. Replace admission-related roster/repository call assertions with can(principal, 'project.read', { projectId }) assertions; retain actual display-role reads. Agent scoping-off and runner cases never ask can. Existing wrapper/admin-helper test outcomes remain until US-005. apps/api/test/integration/permissions/membership-project-access.integration.spec.ts:1-18 is the real-HTTP compatibility suite; :76-77 creates bindings through MembershipService and :103-108 boots after resetDb. Extend existing integration fixtures for custom no-project.read roles and viewerRole regressions, without converting legacy fixture sources.\n\nUS-002 FINDINGS AND IMPACT\napps/api/src/projects/projects.service.ts:80-89 checks user ADMIN before the agent branch: replace that first condition with await access.readsEveryProject(principal) for both users and agents; keep remaining roster/scoping/user queries. apps/api/src/home/home.controller.ts:23 and :31-33 require a second constructor dependency and await can(user, 'project.read') for globalAdmin; agents remain refused and home.read remains implicit. apps/api/src/agents/agents.service.ts:386-396 currently authorizes another agent's pickup by the user ADMIN claim. Replace only that caller shortcut with agent.update; owning agents short-circuit and never call can. Preserve the target effectiveKeys(agent.pickup) check at :408-414 and perform no target lookup/key read when caller authority fails. The suggested-ticket event at :438-443 is the integration seam into US-003. apps/api/src/tickets/tickets.service.ts:412-468 performs assignment inside txManager.run, with disabled-user check before role/member eligibility at :446-460. Replace just that eligibility with the assignee's effectiveKeys({ type: 'USER', id }, { projectId }).has('project.read'); do not change the agent-roster lock, disabled-user conflict, not-found outcomes, event envelopes or transactional assignment. apps/api/src/projects/members/project-members.service.ts:119-131 computes losesAdmin, then applies the legacy override: only ask role.binding.global when losesAdmin, otherwise do not ask it or count admins. Remove the module-level isGlobalAdmin helper.\napps/api/src/fleet/threads/workspace-thread-events.controller.ts:40-50 currently checks ownership, JWT and capacity in its guard; :59 and :69 register only that guard and service-mode Requires. Put RequiresGuard before WorkspaceThreadEventsGuard at class level and switch the declaration to guard mode; denied callers must not reach requireOwnedThread or consume a slot. apps/api/src/permissions/requires.guard.ts:35-59 already accepts reason not-owner to let X.own holders reach the service fence; no new guard algorithm is needed. apps/api/src/permissions/remaining-route-declarations.spec.ts:21 pins this stream to service mode and must change to guard, with other rows preserved.\nTests to adapt in US-002: test/unit/projects/projects-find-all-for-principal.spec.ts (global query decided by double, including ADMIN-claim refusal); src/home/home.controller.spec.ts (second constructor argument); src/agents/agents-pickup.routes.spec.ts (refuse agent.update for unauthorized callers instead of using an allow-all double); src/tickets/tickets.service.spec.ts (add effectiveKeys and replace role/member eligibility assertions); src/projects/members/project-members.service.spec.ts (refuse role.binding.global in last-admin protection cases); src/permissions/remaining-route-declarations.spec.ts; test/integration/memory/outbox-envelope.integration.spec.ts (add effectiveKeys holding project.read to its positional TicketsService harness). Preserve the existing route-level keys and their refusal cases. The all-project integration uses a MEMBER user plus member and custom GLOBAL project.read bindings, no project source, and verifies soft-deleted projects stay excluded.\nWorkspace home selection is a subtle downstream effect, not a new algorithm: apps/api/src/fleet/threads/workspace-threads.service.ts:43-59 gets reachable projects from ProjectsService, and :76-85 keeps a user display-membership lookup but delegates the agent membership branch to resolveMembership. Therefore globally privileged agents gain home-project reach through US-001/002. Keep the user branch and findMembershipRole; its old roster/global-reach comments must not be mistaken for the new agent gate.\n\nUS-003 FINDINGS AND IMPACT\napps/api/src/koda-domain-writer/koda-domain-writer.service.ts:23-32 fixes constructor order; parameter four is AgentAuthProvider today and becomes PermissionService while all others retain positions. :58-70 implements the parallel legacy allow-list that excludes VERIFIER, while :78-94, :126-135 and :163-172 load legacy roles before event transactions. Replace those three paths with assertActorInProject using the exported PROJECT_ACCESS_KEY and the correct USER/AGENT ref. Validate input and project existence first; permission failure happens before opening a transaction, creating an event or recording outbox data. Keep event/outbox atomicity and provenance unchanged. Delete PrismaKodaDomainWriterRepository.findUserProjectRoles (located at apps/api/src/koda-domain-writer/prisma-koda-domain-writer.repository.ts:28). apps/api/src/koda-domain-writer/koda-domain-writer.module.ts:9-12 imports AuthModule only for that old provider and must drop it; rely on the global permissions module. Do not expand the story into indexDocument/importGraphify behavior changes.\nTests to adapt in US-003: src/koda-domain-writer/koda-domain-writer.service.spec.ts; test/unit/koda-domain-writer/koda-domain-writer-role-provenance.spec.ts; test/integration/events/event-write-operations.integration.spec.ts; test/integration/koda-domain-writer/koda-domain-writer.integration.spec.ts now provide PermissionService/effectiveKeys instead of AgentAuthProvider. Remove the findUserProjectRoles contract describe and delete test/unit/koda-domain-writer/find-user-project-roles.spec.ts. Add effectiveKeys to the existing can-only double in test/integration/outbox/producer-atomicity.integration.spec.ts and keep its commit/rollback assertions. Update test/integration/permissions/membership-ticket-consumers.integration.spec.ts: viewer-only binding now records a TicketEvent; no-source actor supplies the refusal and no-event case. Exercise the real pickup with a rostered VERIFIER-only agent and a VERIFIED unassigned ticket; require the TICKET_SUGGESTED AgentEvent, not just HTTP 200.\n\nUS-004 FINDINGS AND IMPACT\napps/api/src/projects/project-membership.guard.ts:31-56 shows the optional CASL constructor dependency, legacy metadata reads, role-bearing projectContext and the two follow-on gates. :64-79 resolves slug sources and must retain that behavior; delete :81-99 legacy role/ability gates and their decorator files. The no-slug branch becomes true regardless of old permission metadata. Preserve missing-principal 403 projects, missing/deleted project 404, access failure propagation, and request context assignment only after admission. Keep calling resolveMembership because existing route harnesses stub that method. apps/api/src/projects/project-context.ts:9-12 and :26-30 carry role and withProjectRole today; reduce the context to project identity and delete the helper.\nThe eleven TicketsController uses are at apps/api/src/tickets/tickets.controller.ts:178, :213, :232, :249, :270, :291, :311, :332, :359, :387 and :409. Pass the received principal itself in every case but retain @CurrentProject parameters and positional handler signatures. AssistantToolExecutor uses withProjectRole in actionScope at apps/api/src/fleet/assistant/assistant-tool.executor.ts:132 and execParsed calls at :257 and :269, and sets projectRole in userPrincipal at :519. Continue membership checks but stop decorating tool actors; approved actions must use the requester principal, never the approver. apps/api/src/fleet/approvals/approvals.service.ts:27-29 defines the role-bearing project ApprovalRoute; remove its role and update project-fleet-approvals.controller.ts and assistant/tools/fleet-tools.ts callers. ApprovalCaller.globalAdmin belongs to US-005, not this step.\nTests to adapt in US-004: src/projects/project-membership.guard.spec.ts loses decorator/CASL describes, uses a two-argument guard, asserts the exact role-free context and uses raw SetMetadata for obsolete-metadata ignore cases. Delete src/projects/project-context.spec.ts. src/tickets/tickets.controller.spec.ts switches decorated-principal expectations to identity and drops context roles. Remove PROJECT_PERMISSION_KEY imports/absence assertions while retaining REQUIRES_METADATA assertions in src/comments/comments.controller.spec.ts, src/projects/projects.controller.spec.ts, src/projects/assignees/project-assignees.controller.spec.ts, src/labels/labels.controller.spec.ts, src/ticket-links/ticket-links.controller.spec.ts, src/fleet/repo-config/project-job-config-edit.controller.spec.ts, src/fleet/repo-config/project-repo-config.controller.spec.ts, src/notifications/ticket-watch.controller.spec.ts and test/integration/ast-index/code-intel-controller-permissions.integration.spec.ts. Update role-free route expectations in src/fleet/assistant/tools/fleet-tools.spec.ts and origin-tools.spec.ts. Drop actor.projectRole expectations in assistant-tool.executor.spec.ts, assistant-tool.executor.workspace.spec.ts and assistant-tool.executor.actor.spec.ts while keeping all key-check/refusal and requester-provenance assertions.\n\nUS-005 FINDINGS AND IMPACT\napps/api/src/auth/auth.module.ts:10, :109, :145 and :148 imports/registers/provides/exports the custom CASL factory; remove those registrations so Nathapp supplies JwtCaslAbilityFactory. apps/api/src/projects/project-access.module.ts:7, :15 and :23-28 also exposes it to the guard and must lose those entries after US-004. apps/api/src/auth/principal/koda-principal.types.ts:8-15 includes projectRole while role at :12 remains. apps/api/src/auth/jwt-auth.provider.ts:16-24, :34-36 and :59-64 contains CASL-specific SECURITY prose and explicitly emits projectRole: undefined; remove that own property and reduce comments to the curated claim allow-list. Preserve role, authorities, extra, tokenVersion caching and revocation semantics.\napps/api/src/tickets/state-machine/ticket-transitions.service.ts:108-111 has the last optional CASL constructor parameter; :616 contains the dead assertTransitionPermission method. Delete these and related imports, not the live required PermissionService at :95-97. apps/api/src/fleet/assistant/assistant-tool.types.ts:16-21 and :44-50 retains the dead ToolPermission/permission vocabulary; delete it and the permission entries in the fourteen tool files, retain each live key, and reword ToolForbiddenError's ability-based documentation at :85. update-ticket-tool.ts retains an unused transitions dependency (comment at :48); remove it and the TicketWriteTools constructor parameter. apps/api/src/tickets/state-machine/ticket-transitions.ts:11-12 and :23-26 keeps the unreachable IN_PROGRESS -> VERIFIED rule; delete it, retaining only VERIFY_FIX from IN_PROGRESS. Missing-rule and missing-comment errors both use ValidationAppException({}, 'tickets') at :46-67, so the existing PATCH rejection remains 400 with no mutation.\nDelete the dead helpers and repository contracts named in the story, not their still-live parent services. Relevant references found: allowed-actions.ts:10 canOverrideClose; fleet/activity/fleet-activity.service.ts:51-52 memberProjectIds; fleet/activity/domain/fleet-activity.domain.ts:48 and prisma-fleet-activity.repository.ts:39 findMemberProjectIds; projects/projects.service.ts:193-209 three wrappers. The latter's findProjectIdBySlug remains. ApprovalsService's unused FleetActivityService is parameter seven at apps/api/src/fleet/approvals/approvals.service.ts:74-79; removing it shifts txManager and later positional arguments. Drop ApprovalCaller.globalAdmin and pass { id, principal } from both approval controllers, leaving approval decisions/policies intact. Remove the two unused skills messages in both languages and stale factory/transition documentation in the files listed by the story.\nDelete only CASL-exclusive tests: src/auth/casl/koda-casl-ability.factory.spec.ts, test/unit/auth/koda-casl-ability.factory.spec.ts, test/integration/ast-index/ast-index-casl-permissions.integration.spec.ts, test/integration/code-intel/codeintel-casl-permissions.integration.spec.ts, test/integration/rag/import-graphify-permission.integration.spec.ts. Remove stale CASL providers/imports from src/webhook/webhook-routes.spec.ts, src/tickets/state-machine/ticket-transitions.service.spec.ts, src/projects/project-membership.guard.routes.spec.ts, test/integration/outbox/producer-atomicity.integration.spec.ts and test/integration/tickets/ticket-tenancy.integration.spec.ts, preserving non-CASL outcomes. Delete the assertTransitionPermission describe, canOverrideClose describe, access admin-helper describes, ProjectsService wrapper cases and fleet activity findMemberProjectIds describe. Update jwt-auth.provider.spec.ts to assert no own projectRole property and ticket-transitions.spec.ts to reject the two former GENERAL-comment acceptance cases. Drop the transitions harness/dead-call assertion from update-ticket-tool.spec.ts. Across tool specs (update-ticket, link-tickets, requeue-job, action-tools, create-tickets, add-memory, knowledge-tools, record-decision, dispatch-job, cancel-job, kb-tools, fleet-tools) and assistant.module.spec.ts, replace permission-field assertions with the exact key already declared by each tool; do not weaken registration/execution coverage. Update positional ApprovalsService harnesses in approvals.service.spec.ts.\n\nTEST EXECUTION AND MIGRATION SAFETY\nAll five stories are security-critical and use three-session-tdd with strict test/implementation isolation. Use PermissionService doubles for claim/binding-disagreement unit cases: a real User.role ADMIN row intentionally still grants legacy admin compatibility through PermissionService. Real HTTP integration should use resetDb then bootHttpApp or explicitly run SystemRoleSeeder.onApplicationBootstrap after reset; otherwise role lookups silently grant nothing. apps/api/test/helpers/http-app.ts:26-39 boots AppModule with CombinedAuthGuard and real pipes/filters/guards, :50-65 resets throttle and :68-72 unwraps the Nathapp envelope. When changing membership/binding rows directly between requests, call MembershipService.invalidatePermissions; old access-source reads were live but the new gate is cached. This invalidation is fixture hygiene, not permission to change caching behavior. Booted-app role-matrix/catalog contracts must remain stable. Module/DI wiring regression tests should be colocated unit specs with external collaborators mocked, not new DB-only wiring suites.\nRun targeted specs with bun run --cwd apps/api test:scoped <paths>; DB paths require KODA_DB_TESTS=1, which scoped execution enables. Test Postgres must already be available (bun run --cwd apps/api test:db:up outside a Docker-less agent sandbox); never accept a skipped DB suite as validation and never run destructive reset-based suites concurrently against the same database. Default unit scripts exclude integration/e2e. Generated feature acceptance tests, if provided by the pipeline, run only through vitest.nax.config.ts with KODA_DB_TESTS=1 and per-story AC filtering; do not edit/copy those files. No new production or test files are mandated: extend the existing suites identified above; all new behavior belongs to these code-change stories. Completion includes deleted files actually absent and bun run --cwd apps/api type-check, bun run --cwd apps/api lint and bun run --cwd apps/api test passing, plus the specified PG-backed route/event regressions. These commands are verification strategy, not acceptance criteria. Only edit existing e2e cases a correct implementation breaks; do not add unrelated endpoint-e2e expansion. No public DTO/route shape changes or generated-client edits are intended; keep handler signatures and viewerRole compatibility, and do not manually edit openapi.json or generated clients. The remaining migration to binding-only fixtures/data and removal of legacy tables/claims is explicitly deferred.",
+  "outOfScope": [
+    "Moving test fixtures from `ProjectMember`, `AgentProject`, `AgentRoleEntry` and `User.role` rows to role bindings is out of scope (`permissions-p1-fixtures-to-bindings`).",
+    "Removing the legacy union and the baseline fallback in `PermissionService`, dropping the legacy tables and columns, `findMembershipRole`, `AgentPrincipal.agentRoles`, `AgentAuthProvider.loadAgentRoles`, `AGENT_PROJECT_SCOPING` and `PATCH /agents/:slug/update-roles` is out of scope (`permissions-p1-drop-legacy`).",
+    "Rewriting the recipient selection of notifications and mentions (`notification-eligibility.ts`, `ticket-mention.resolver.ts`), which reads `User.role` of recipients rather than deciding for a caller, is out of scope (`permissions-p1-drop-legacy`).",
+    "Replacing the members list's `viewerRole` and the web's role-based UI checks with keys is out of scope (`permissions-p1-web`); `viewerRole` keeps today's values for every user who had access.",
+    "Moving the assignee search (`ProjectAssigneesService.search`), which still offers users by access source, onto `project.read` is out of scope (`permissions-p1-drop-legacy`); only `assign` checks the key.",
+    "Making the home dashboard (`GET /home`) and `GET /me/events` serve agents is out of scope: both are user-only surfaces (users-only `/me/*` notifications), and their refusals stay.",
+    "US-002 only: changing what the home dashboard shows beyond the source of its `globalAdmin` flag is out of scope.",
+    "Changing the `role` claim in the JWT, `UsersAdminService`'s role writes and `MembershipService.isGlobalAdmin` is out of scope; this feature only stops deciding on the claim.",
+    "The placeholder `test/integration/context/context-controller.integration.spec.ts`, which asserts on a string literal and imports nothing from the CASL files, is out of scope.",
+    "Updating the design doc's phasing section for the four-way cleanup split is out of scope for the run; it is a manual doc edit.",
+    "Approval policies, the audit log and `ActionContext` are out of scope (P3, P2)."
+  ],
+  "routingProfile": "cross-agent"
+}
