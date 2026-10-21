@@ -3,7 +3,7 @@
   "feature": "permissions-p1-fixtures-to-bindings",
   "branchName": "feat/permissions-p1-fixtures-to-bindings",
   "createdAt": "2026-10-22T00:00:00.000Z",
-  "updatedAt": "2026-10-21T19:48:32.228Z",
+  "updatedAt": "2026-10-21T20:07:56.947Z",
   "userStories": [
     {
       "id": "US-001",
@@ -341,14 +341,17 @@
         "US-001",
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Twenty suites span domain readers, nested memberships, direct baseline creation and exact-binding exemptions; depends on shared fleet conversion and requires the access-control security override."
+        "reasoning": "Twenty suites span domain readers, nested memberships, direct baseline creation and exact-binding exemptions; depends on shared fleet conversion and requires the access-control security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/permissions/test-helpers/permission-fixtures.ts",
@@ -442,7 +445,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4b05dd20084f577ccc3bba08ccda9ce160e05cfc"
     },
     {
       "id": "US-005",
