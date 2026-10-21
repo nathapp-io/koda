@@ -19,17 +19,17 @@ import {
   ApiParam,
   ApiResponse,
 } from '@nestjs/swagger';
-import { Principal, RequiredPermission } from '@nathapp/nestjs-auth';
-import { JsonResponse, ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { ProjectsService } from '../projects/projects.service';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
-import { ProjectRoles } from '../projects/project-roles.decorator';
 import { CurrentProject } from '../projects/current-project.decorator';
 import { ProjectContext } from '../projects/project-context';
+import { Requires } from '../permissions/requires.decorator';
+import { RequiresGuard } from '../permissions/requires.guard';
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
 import {
@@ -42,12 +42,11 @@ import { TestConnectionResultDto } from './dto/test-connection-result.dto';
 import { SyncResultDto } from './dto/sync-result.dto';
 import { decryptToken } from '../common/utils/encryption.util';
 import { providerForConnection } from './provider-for-connection';
-import { isUserPrincipal } from '../auth/principal/koda-principal.types';
-import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 @ApiTags('vcs')
 @ApiBearerAuth()
 @Controller('/projects/:slug/vcs')
+@UseGuards(ProjectMembershipGuard, RequiresGuard)
 export class VcsController {
   constructor(
     private readonly vcsService: VcsConnectionService,
@@ -66,7 +65,7 @@ export class VcsController {
    * Create a new VCS connection for a project
    */
   @Post()
-  @RequiredPermission('ADMIN')
+  @Requires('vcs.connection.create')
   @ApiOperation({ summary: 'Create a VCS connection for a project' })
   @ApiResponse({ status: 201, type: VcsConnectionCreatedResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -75,11 +74,9 @@ export class VcsController {
   async createConnection(
     @Param('slug') slug: string,
     @Body() dto: CreateVcsConnectionDto,
-    @Principal() principal: KodaPrincipal,
   ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
-    await this.projectsService.assertProjectMembership(project.id, principal);
 
     // Get encryption key from config
     const encryptionKey = this.vcsConfig.encryptionKey;
@@ -95,18 +92,16 @@ export class VcsController {
    * Get VCS connection for a project
    */
   @Get()
-  @RequiredPermission('ADMIN')
+  @Requires('vcs.connection.read')
   @ApiOperation({ summary: 'Get VCS connection for a project' })
   @ApiResponse({ status: 200, type: VcsConnectionResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role or project membership required' })
   async getConnection(
     @Param('slug') slug: string,
-    @Principal() principal: KodaPrincipal,
   ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
-    await this.projectsService.assertProjectMembership(project.id, principal);
 
     return JsonResponse.Ok(await this.vcsService.findByProject(project.id));
   }
@@ -116,7 +111,7 @@ export class VcsController {
    * Update VCS connection for a project
    */
   @Patch()
-  @RequiredPermission('ADMIN')
+  @Requires('vcs.connection.update')
   @ApiOperation({ summary: 'Update VCS connection for a project' })
   @ApiResponse({ status: 200, type: VcsConnectionUpdatedResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -124,11 +119,9 @@ export class VcsController {
   async updateConnection(
     @Param('slug') slug: string,
     @Body() dto: UpdateVcsConnectionDto,
-    @Principal() principal: KodaPrincipal,
   ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
-    await this.projectsService.assertProjectMembership(project.id, principal);
 
     // Get encryption key from config
     const encryptionKey = this.vcsConfig.encryptionKey;
@@ -144,18 +137,16 @@ export class VcsController {
    * Delete VCS connection for a project
    */
   @Delete()
-  @RequiredPermission('ADMIN')
+  @Requires('vcs.connection.delete')
   @ApiOperation({ summary: 'Delete VCS connection for a project' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role or project membership required' })
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteConnection(
     @Param('slug') slug: string,
-    @Principal() principal: KodaPrincipal,
   ): Promise<void> {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
-    await this.projectsService.assertProjectMembership(project.id, principal);
 
     return this.vcsService.delete(project.id);
   }
@@ -165,18 +156,16 @@ export class VcsController {
    * Test the VCS connection
    */
   @Post('/test')
-  @RequiredPermission('ADMIN')
+  @Requires('vcs.connection.test')
   @ApiOperation({ summary: 'Test the VCS connection for a project' })
   @ApiResponse({ status: 200, type: TestConnectionResultDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role or project membership required' })
   async testConnection(
     @Param('slug') slug: string,
-    @Principal() principal: KodaPrincipal,
   ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
-    await this.projectsService.assertProjectMembership(project.id, principal);
 
     // Get encryption key from config
     const encryptionKey = this.vcsConfig.encryptionKey;
@@ -193,8 +182,7 @@ export class VcsController {
    * ProjectRoles lets agents through, so the handler refuses them.
    */
   @Post('/webhook-secret/rotate')
-  @UseGuards(ProjectMembershipGuard)
-  @ProjectRoles('ADMIN')
+  @Requires('vcs.webhook-secret.rotate')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Rotate the VCS webhook secret and return the new secret once' })
   @ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
@@ -204,11 +192,7 @@ export class VcsController {
   @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
   async rotateWebhookSecret(
     @CurrentProject() ctx: ProjectContext,
-    @Principal() principal: KodaPrincipal,
   ) {
-    if (!isUserPrincipal(principal)) {
-      throw new ForbiddenAppException({}, 'projects');
-    }
     return JsonResponse.Ok(await this.vcsService.rotateWebhookSecret(ctx.project.id));
   }
 
@@ -217,7 +201,7 @@ export class VcsController {
    * Manually sync a specific issue
    */
   @Post('/sync/:issueNumber')
-  @RequiredPermission('ADMIN')
+  @Requires('vcs.sync.issue')
   @ApiOperation({ summary: 'Manually sync a specific issue by number' })
   @ApiResponse({ status: 200, description: 'Issue synced successfully', type: SyncResultDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -227,11 +211,9 @@ export class VcsController {
   async syncIssue(
     @Param('slug') slug: string,
     @Param('issueNumber') issueNumber: string,
-    @Principal() principal: KodaPrincipal,
   ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
-    await this.projectsService.assertProjectMembership(project.id, principal);
 
     // Get encryption key from config
     const encryptionKey = this.vcsConfig.encryptionKey;
@@ -280,7 +262,7 @@ export class VcsController {
    * Trigger full sync run
    */
   @Post('/sync')
-  @RequiredPermission('ADMIN')
+  @Requires('vcs.sync.all')
   @ApiOperation({ summary: 'Trigger a full sync of all issues from the VCS provider' })
   @ApiResponse({ status: 200, description: 'Full sync completed', type: SyncResultDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -288,11 +270,9 @@ export class VcsController {
   @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
   async syncAll(
     @Param('slug') slug: string,
-    @Principal() principal: KodaPrincipal,
   ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
-    await this.projectsService.assertProjectMembership(project.id, principal);
 
     // Get encryption key from config
     const encryptionKey = this.vcsConfig.encryptionKey;
@@ -322,7 +302,7 @@ export class VcsController {
    * Trigger manual PR status sync for all active PRs
    */
   @Post('/sync-pr')
-  @RequiredPermission('ADMIN')
+  @Requires('vcs.sync.pr')
   @ApiOperation({ summary: 'Manually sync PR status for all active pull requests' })
   @ApiResponse({ status: 200, description: 'PR sync completed', type: Object })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -330,11 +310,9 @@ export class VcsController {
   @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
   async syncPr(
     @Param('slug') slug: string,
-    @Principal() principal: KodaPrincipal,
   ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
-    await this.projectsService.assertProjectMembership(project.id, principal);
 
     // Get encryption key from config
     const encryptionKey = this.vcsConfig.encryptionKey;

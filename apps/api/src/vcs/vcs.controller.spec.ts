@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { VCS_CFG } from '../config/vcs.config';
+import { RequiresGuard } from '../permissions/requires.guard';
 import { VcsController } from './vcs.controller';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
@@ -166,6 +167,7 @@ describe('VcsController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [VcsController],
       providers: [
+        { provide: RequiresGuard, useValue: { canActivate: () => true } },
         { provide: VcsConnectionService, useValue: mockVcsService },
         { provide: VcsSyncService, useValue: mockSyncService },
         { provide: VcsPrSyncService, useValue: mockPrSyncService },
@@ -339,11 +341,13 @@ describe('VcsController', () => {
       expect(mockVcsService.rotateWebhookSecret).toHaveBeenCalledWith('proj-1');
     });
 
-    it('refuses agents: they never hold webhook secrets', async () => {
-      await expect(
-        controller.rotateWebhookSecret(projectContext(), agentPrincipal),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(mockVcsService.rotateWebhookSecret).not.toHaveBeenCalled();
+    it('delegates secret rotation for an agent with project context', async () => {
+      mockVcsService.rotateWebhookSecret.mockResolvedValue({ webhookSecret: 'c'.repeat(32) });
+
+      const result = await controller.rotateWebhookSecret(projectContext());
+
+      expect(result.data).toEqual({ webhookSecret: 'c'.repeat(32) });
+      expect(mockVcsService.rotateWebhookSecret).toHaveBeenCalledWith('proj-1');
     });
   });
 
