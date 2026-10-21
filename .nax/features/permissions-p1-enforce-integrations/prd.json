@@ -3,7 +3,7 @@
   "feature": "permissions-p1-enforce-integrations",
   "branchName": "feat/permissions-p1-enforce-integrations",
   "createdAt": "2026-10-21T00:00:00.000Z",
-  "updatedAt": "2026-10-21T04:17:28.989Z",
+  "updatedAt": "2026-10-21T04:29:54.604Z",
   "userStories": [
     {
       "id": "US-001",
@@ -165,14 +165,17 @@
         "context"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "A bounded existing-controller migration with preserved query building; role-based context-query restriction and response precedence require strict security TDD."
+        "reasoning": "A bounded existing-controller migration with preserved query building; role-based context-query restriction and response precedence require strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/context/context.controller.ts",
@@ -191,7 +194,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "932b3b0ecd555fe55accff341f08a17537973cf5"
     },
     {
       "id": "US-004",
