@@ -3,7 +3,7 @@
   "feature": "permissions-p1-enforce-integrations",
   "branchName": "feat/permissions-p1-enforce-integrations",
   "createdAt": "2026-10-21T00:00:00.000Z",
-  "updatedAt": "2026-10-21T04:01:41.488Z",
+  "updatedAt": "2026-10-21T04:17:28.989Z",
   "userStories": [
     {
       "id": "US-001",
@@ -95,14 +95,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two existing controllers adopt established key and context decorators without a new abstraction; project-scoped authorization and indexing isolation require the security TDD override."
+        "reasoning": "Two existing controllers adopt established key and context decorators without a new abstraction; project-scoped authorization and indexing isolation require the security TDD override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/code-intel/code-intel.controller.ts",
@@ -137,7 +140,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "904e9529d7bc8e4e2d32e90077a64be5098bcf5b"
     },
     {
       "id": "US-003",
