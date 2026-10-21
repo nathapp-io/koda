@@ -1,12 +1,11 @@
 /**
  * Track 3 Slice 4 (M9): the webhook secret is shown on create and on rotate,
- * never on read. Rotation is project ADMIN or global ADMIN; DEVELOPER, VIEWER,
- * non-members and agents are refused.
+ * never on read. Rotation requires the rotate permission: legacy project/global
+ * admins and project-admin-bound agents may rotate; developers and viewers cannot.
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/vcs/vcs-webhook-secret.integration.spec.ts
  */
 import request from 'supertest';
-import { PrismaClient } from '../../../src/generated/prisma/client';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
@@ -23,7 +22,6 @@ describeIntegration('VCS webhook secret (M9)', () => {
   let server: Parameters<typeof request>[0];
   let prisma: PrismaClient;
   const tokens: Record<string, string> = {};
-  const agentIds: Record<string, string> = {};
   let createdSecret: string;
   const previousKey = process.env.VCS_ENCRYPTION_KEY;
 
@@ -63,9 +61,9 @@ describeIntegration('VCS webhook secret (M9)', () => {
     const grantor = await prisma.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } });
     const projectAdminRole = await prisma.role.findUniqueOrThrow({ where: { key: 'project-admin' } });
     const developerRole = await prisma.role.findUniqueOrThrow({ where: { key: 'developer' } });
-    for (const [who, roleKey, roleId] of [
-      ['binding-admin-agent', 'project-admin', projectAdminRole.id],
-      ['binding-developer-agent', 'developer', developerRole.id],
+    for (const [who, roleId] of [
+      ['binding-admin-agent', projectAdminRole.id],
+      ['binding-developer-agent', developerRole.id],
     ] as const) {
       const response = await request(server).post('/api/agents').set(auth('root'))
         .send({ name: who, slug: who, roles: [] }).expect(201);
