@@ -18,9 +18,10 @@ import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
 import { mcpToolDescriptors } from '../../../src/fleet/assistant/mcp/mcp-tool-catalog';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
-import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { rosterFleetAgent, seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 vi.setConfig({ testTimeout: 20_000 });
@@ -66,7 +67,7 @@ describeIntegration('MCP route (PG, US-007)', () => {
     await boot(true);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     claude = await seedFleetHttpAgent(app.getHttpServer(), world.tokens.root);
-    await prisma.agentProject.create({ data: { projectId: world.projectId, agentId: claude.id } });
+    await rosterFleetAgent(prisma, claude.id, world.projectId);
     // The viewer-only agent of AC-10/AC-11: no roster row and no agent role, so `web` answers it the viewer keys
     // through this one binding, and `ops` answers the developer keys through the other (US-005 lists the tool).
     const created = data<{ apiKey: string; agent: { id: string } }>(
@@ -84,6 +85,17 @@ describeIntegration('MCP route (PG, US-007)', () => {
     await app?.close();
     if (saved === undefined) delete process.env.MCP_ENABLED;
     else process.env.MCP_ENABLED = saved;
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+      { type: 'AGENT', id: claude.id },
+      { type: 'AGENT', id: dispatchAgent.id },
+    ]);
   });
 
   it('AC-3: answers 401 with no Authorization header', async () => {

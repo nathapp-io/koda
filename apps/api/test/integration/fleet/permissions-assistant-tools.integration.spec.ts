@@ -19,6 +19,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { enrollRunner } from '../../helpers/fleet-fixtures';
@@ -94,14 +95,15 @@ describeIntegration('assistant tools check their key (US-004)', () => {
 
   /**
    * An agent with no agent role of its own. `role` is the binding that is its only permission source in `p1`, and
-   * `roster` also gives it the legacy `AgentProject` row (an agent whose only source is a binding needs none).
+   * `roster` also gives it the viewer reach of the roster (a binding in the project).
    */
   const createAgent = async (who: string, opts: { role?: string; roster?: boolean; projectId?: string } = {}): Promise<void> => {
     const created = await as('root', 'post', '/api/agents', { name: who, slug: who }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
     ids[who] = body.agent.id;
     agentKeys[who] = body.apiKey;
-    if (opts.roster) await prisma.agentProject.create({ data: { agentId: body.agent.id, projectId: opts.projectId ?? p1Id } });
+    await grantBaseline(prisma, { type: 'AGENT', id: body.agent.id });
+    if (opts.roster) await grantRole(prisma, { type: 'AGENT', id: body.agent.id }, 'viewer', opts.projectId ?? p1Id);
     if (opts.role) await bind({ type: 'AGENT', id: body.agent.id }, opts.role, opts.projectId ?? p1Id);
   };
 
@@ -168,6 +170,7 @@ describeIntegration('assistant tools check their key (US-004)', () => {
     const root = await request(server).post('/api/auth/register')
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
+    ids.root = (await prisma.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
 
     p1Id = data<{ id: string }>(await as('root', 'post', '/api/projects', { name: 'P1', slug: P1_SLUG, key: P1_KEY }).expect(201)).id;
     p2Id = data<{ id: string }>(await as('root', 'post', '/api/projects', { name: 'P2', slug: P2_SLUG, key: P2_KEY }).expect(201)).id;
@@ -229,6 +232,20 @@ describeIntegration('assistant tools check their key (US-004)', () => {
         else process.env[key] = saved[key];
       }
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    const users = ['viewerBind', 'devBind', 'demoted', 'noComment', 'updater'];
+    const agents = ['p1-viewer-agent', 'p1-dev-agent', 'p1-mcp-viewer-agent', 'p1-mcp-dev-agent', 'p1-roster-agent'];
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: ids.root },
+      ...users.map((who) => ({ type: 'USER' as const, id: ids[who] })),
+      ...agents.map((who) => ({ type: 'AGENT' as const, id: ids[who] })),
+    ]);
   });
 
   // -------------------------------------------------------------------------

@@ -10,6 +10,7 @@ import { FLEET_CFG, type IFleetConfig } from '../../../src/config/fleet.config';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
 import { SkillsService } from '../../../src/skills/skills.service';
+import { expectBindingOnlyFixtures, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 describeDb('workspace turns and archive', () => {
@@ -27,6 +28,15 @@ describeDb('workspace turns and archive', () => {
     app.get<IFleetConfig>(FLEET_CFG, { strict: false }).threadsEnabled = true;
   }, 60000);
   afterAll(async () => { await app?.close(); });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+    ]);
+  });
 
   it('AC-1/2/3: sends on the home anchor, with workspace-only instructions, and deduplicates', async () => {
     const newer = await prisma.fleetRepo.create({ data: { projectId: world.projectId, provider: 'github', owner: 'acme', name: 'newer', defaultBranch: 'main', githubInstallationId: BigInt(77), createdById: world.ids.root, createdAt: new Date(Date.now() + 1000) } });
@@ -65,10 +75,10 @@ describeDb('workspace turns and archive', () => {
   });
   it.each(['VIEWER', null])('AC-7/8: refuses lost hosting permission (%s)', async (role) => {
     const thread = await create();
-    const member = await prisma.projectMember.findFirstOrThrow({ where: { projectId: world.projectId, userId: world.ids.dev } });
+    const dev = { type: 'USER' as const, id: world.ids.dev };
     try {
-      if (role) await prisma.projectMember.update({ where: { id: member.id }, data: { role } });
-      else await prisma.projectMember.delete({ where: { id: member.id } });
+      await revokeProjectRoles(prisma, dev, world.projectId);
+      if (role) await grantRole(prisma, dev, role === 'VIEWER' ? 'viewer' : role, world.projectId);
       // Permissions P1 US-003: hosting is the `thread.create` key, so the write above must reach the
       // effective-key cache the way a real membership write does (MembershipService invalidates on its own).
       await app.get(MembershipService).invalidatePermissions();
@@ -76,7 +86,8 @@ describeDb('workspace turns and archive', () => {
       expect(res.body.message).toBe('You do not have permissions to perform this action');
       expect(await prisma.chatMessage.count({ where: { threadId: thread.id } })).toBe(0);
     } finally {
-      await prisma.projectMember.upsert({ where: { id: member.id }, create: member, update: { role: member.role } });
+      await revokeProjectRoles(prisma, dev, world.projectId);
+      await grantRole(prisma, dev, 'developer', world.projectId);
       await app.get(MembershipService).invalidatePermissions();
     }
   });
