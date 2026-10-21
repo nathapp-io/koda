@@ -3,7 +3,7 @@
   "feature": "permissions-p1-contract-tests",
   "branchName": "feat/permissions-p1-contract-tests",
   "createdAt": "2026-10-21T00:00:00.000Z",
-  "updatedAt": "2026-10-21T08:45:28.209Z",
+  "updatedAt": "2026-10-21T08:49:50.781Z",
   "userStories": [
     {
       "id": "US-001",
@@ -250,8 +250,8 @@
         "codemod"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -263,7 +263,19 @@
         "profileModelTier": "fast",
         "initialAgent": "native",
         "initialProfileId": "native-luna",
-        "initialModelTier": "fast"
+        "initialModelTier": "fast",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.56,
+          "plannedProfileId": "native-luna",
+          "applied": false,
+          "decidedAt": "2026-10-21T08:45:32.197Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/permissions/catalog.ts",
@@ -280,7 +292,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4ab04c9d094dc4df75054c873544db242dc3aa17"
     },
     {
       "id": "US-005",
