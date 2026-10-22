@@ -72,6 +72,7 @@
     "settings": "设置",
     "slos": "SLO 指标",
     "users": "用户",
+    "roles": "角色",
     "fleetRunners": "执行机",
     "fleetRepos": "仓库",
     "fleetJobs": "Fleet 任务",
@@ -100,6 +101,47 @@
     "toggleTheme": "切换浅色/深色主题"
   },
   "admin": {
+    "roles": {
+      "title": "角色",
+      "subtitle": "创建角色并选择每个角色授予的权限。",
+      "create": "新建角色",
+      "edit": "编辑",
+      "view": "查看",
+      "delete": "删除",
+      "adminOnly": "你没有查看角色的权限。",
+      "deleteConfirm": "确定删除角色“{name}”？",
+      "table": { "name": "名称", "key": "标识", "scope": "范围" },
+      "scope": { "GLOBAL": "全局", "PROJECT": "项目" },
+      "badge": { "system": "系统", "locked": "已锁定" },
+      "risk": { "low": "低", "medium": "中", "high": "高", "critical": "严重" },
+      "matrix": { "none": "无", "own": "仅自己的", "any": "全部", "covered": "已覆盖" },
+      "entries": {
+        "title": "通配符与排除项",
+        "hint": "*.read、prefix.* 或 !ticket.delete 这类条目会按原样、按此顺序保存。",
+        "placeholder": "例如 ticket.transition.*",
+        "add": "添加",
+        "remove": "移除 {entry}"
+      },
+      "form": {
+        "createTitle": "新建角色",
+        "editTitle": "编辑角色 {name}",
+        "viewTitle": "角色 {name}",
+        "lockedHint": "此角色已锁定，无法修改。",
+        "key": "标识",
+        "keyHint": "小写字母、数字和连字符，2 至 49 个字符，创建后不可更改。",
+        "keyFormat": "请使用小写字母、数字和连字符，并以字母开头（2 至 49 个字符）",
+        "name": "名称",
+        "nameRequired": "名称为必填项",
+        "nameTooLong": "名称最多 100 个字符",
+        "description": "描述",
+        "descriptionTooLong": "描述最多 500 个字符",
+        "scope": "范围",
+        "permissions": "权限",
+        "save": "保存角色",
+        "saving": "保存中…"
+      },
+      "toast": { "saved": "角色已保存", "deleted": "角色已删除" }
+    },
     "users": {
       "title": "用户",
       "subtitle": "创建账号、调整全局角色、停用访问。",

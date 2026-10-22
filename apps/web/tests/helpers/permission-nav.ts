@@ -64,6 +64,7 @@ export function fakeAsyncData<T>(
 /** Every admin nav entry's global key, in sidebar order. */
 export const ADMIN_NAV_KEYS = [
   'user.read',
+  'role.read',
   'fleet.dashboard.read',
   'fleet.runner.read',
   'fleet.repo.read',
@@ -108,6 +109,7 @@ export function adminNavFlags(keys: readonly string[]): Record<string, boolean> 
   const held = permissionSet(keys)
   const flags = {
     canReadUsers: held.has('user.read'),
+    canReadRoles: held.has('role.read'),
     canReadFleetDashboard: held.has('fleet.dashboard.read'),
     canReadFleetRunners: held.has('fleet.runner.read'),
     canReadFleetRepos: held.has('fleet.repo.read'),

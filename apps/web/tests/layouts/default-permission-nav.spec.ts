@@ -23,6 +23,7 @@ const layoutTemplate = layoutSource.match(/<template>([\s\S]*)<\/template>/)?.[1
 /** Every admin link the gate table lists, with the global key it needs. */
 const ADMIN_LINKS: ReadonlyArray<readonly [href: string, key: string]> = [
   ['/admin/users', 'user.read'],
+  ['/admin/roles', 'role.read'],
   ['/admin/fleet', 'fleet.dashboard.read'],
   ['/admin/fleet/runners', 'fleet.runner.read'],
   ['/admin/fleet/repos', 'fleet.repo.read'],
@@ -190,7 +191,7 @@ describe('US-006 AC-8: an ADMIN role with no keys renders no admin navigation', 
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('US-006 AC-9: the fleet and skills keys each render their link', () => {
-  const fleetKeys = ALL_ADMIN_KEYS.filter((key) => key !== 'user.read')
+  const fleetKeys = ALL_ADMIN_KEYS.filter((key) => key !== 'user.read' && key !== 'role.read')
 
   test('AC-9: all seven fleet/skills links render without user.read', async () => {
     const nav = primaryNav(await renderLayout({ keys: fleetKeys }))
@@ -203,6 +204,7 @@ describe('US-006 AC-9: the fleet and skills keys each render their link', () => 
     expect(hasLink(nav, '/admin/fleet/analytics')).toBe(true)
     expect(hasLink(nav, '/admin/skills')).toBe(true)
     expect(hasLink(nav, '/admin/users')).toBe(false)
+    expect(hasLink(nav, '/admin/roles')).toBe(false)
   })
 
   test('AC-9 (edge): a single fleet key renders only its own link', async () => {
@@ -233,5 +235,33 @@ describe('US-006 AC-12: a pending global fetch renders no admin navigation', () 
 
     for (const [href] of ADMIN_LINKS) expect(hasLink(nav, href)).toBe(false)
     expect(nav).not.toContain('nav.sectionAdmin')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// US-010 AC-12 — role.read alone shows the Roles link
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('US-010 AC-12: /admin/roles follows the global role.read key', () => {
+  test('AC-12: role.read alone renders /admin/roles and the Admin section label, and no other admin link', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ['role.read'] }))
+
+    expect(hasLink(nav, '/admin/roles')).toBe(true)
+    expect(nav).toContain('nav.sectionAdmin')
+    for (const [href] of ADMIN_LINKS) if (href !== '/admin/roles') expect(hasLink(nav, href)).toBe(false)
+  })
+
+  test('AC-12: without role.read there is no /admin/roles link, whatever else is held', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ALL_ADMIN_KEYS.filter((key) => key !== 'role.read') }))
+
+    expect(hasLink(nav, '/admin/roles')).toBe(false)
+    expect(hasLink(nav, '/admin/users')).toBe(true)
+  })
+
+  test('AC-12: the Roles link sits after Users and before the fleet links', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ALL_ADMIN_KEYS }))
+
+    expect(nav.indexOf('href="/admin/users"')).toBeLessThan(nav.indexOf('href="/admin/roles"'))
+    expect(nav.indexOf('href="/admin/roles"')).toBeLessThan(nav.indexOf('href="/admin/fleet"'))
   })
 })

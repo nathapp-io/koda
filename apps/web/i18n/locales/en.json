@@ -72,6 +72,7 @@
     "settings": "Settings",
     "slos": "SLOs",
     "users": "Users",
+    "roles": "Roles",
     "fleetRunners": "Runners",
     "fleetRepos": "Repos",
     "fleetJobs": "Fleet jobs",
@@ -100,6 +101,47 @@
     "toggleTheme": "Toggle light/dark theme"
   },
   "admin": {
+    "roles": {
+      "title": "Roles",
+      "subtitle": "Create roles and choose which permissions each one grants.",
+      "create": "New role",
+      "edit": "Edit",
+      "view": "View",
+      "delete": "Delete",
+      "adminOnly": "You do not have permission to view roles.",
+      "deleteConfirm": "Delete the role \"{name}\"?",
+      "table": { "name": "Name", "key": "Key", "scope": "Scope" },
+      "scope": { "GLOBAL": "Global", "PROJECT": "Project" },
+      "badge": { "system": "System", "locked": "Locked" },
+      "risk": { "low": "Low", "medium": "Medium", "high": "High", "critical": "Critical" },
+      "matrix": { "none": "None", "own": "Own", "any": "Any", "covered": "covered" },
+      "entries": {
+        "title": "Wildcards and exclusions",
+        "hint": "Entries such as *.read, prefix.* or !ticket.delete are kept as written, in this order.",
+        "placeholder": "e.g. ticket.transition.*",
+        "add": "Add",
+        "remove": "Remove {entry}"
+      },
+      "form": {
+        "createTitle": "New role",
+        "editTitle": "Edit role {name}",
+        "viewTitle": "Role {name}",
+        "lockedHint": "This role is locked and cannot be changed.",
+        "key": "Key",
+        "keyHint": "Lowercase letters, digits and hyphens, 2 to 49 characters. Cannot change later.",
+        "keyFormat": "Use lowercase letters, digits and hyphens, starting with a letter (2 to 49 characters)",
+        "name": "Name",
+        "nameRequired": "Name is required",
+        "nameTooLong": "Name must be at most 100 characters",
+        "description": "Description",
+        "descriptionTooLong": "Description must be at most 500 characters",
+        "scope": "Scope",
+        "permissions": "Permissions",
+        "save": "Save role",
+        "saving": "Saving…"
+      },
+      "toast": { "saved": "Role saved", "deleted": "Role deleted" }
+    },
     "users": {
       "title": "Users",
       "subtitle": "Create accounts, change global roles and disable access.",

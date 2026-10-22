@@ -136,6 +136,8 @@ const NUXT_AUTO_IMPORTS = [
   // Permissions P1 US-006: every gated control reads its keys through one of these two, so any spec
   // that mounts a component holding one must override it through `globals`.
   'useGlobalPermissions', 'useProjectPermissions',
+  // Permissions P1 US-010: the Admin -> Roles page and its editor read the roles API through this.
+  'useRoles',
 ] as const
 
 /** Defaults for auto-imports a test did not supply; `definePageMeta` is a compile-time no-op macro. */
