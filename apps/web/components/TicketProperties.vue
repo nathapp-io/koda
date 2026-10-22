@@ -392,7 +392,7 @@ async function removeLink(linkId: string) {
       </div>
     </details>
 
-    <details v-if="hasLinkedSection" :class="panelClass" open>
+    <details v-if="hasLinkedSection || canLink" :class="panelClass" open>
       <summary :class="[panelHeadingClass, 'cursor-pointer list-none lg:pointer-events-none']">
         {{ t('tickets.detail.linked') }}
         <ChevronDown :class="summaryChevronClass" aria-hidden="true" />

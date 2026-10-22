@@ -269,6 +269,25 @@ describe('US-007 AC-3: the link form and the delete button each follow their own
     app.unmount()
   })
 
+  test('AC-3: ticket.link.add renders the link form on a ticket with no links yet', async () => {
+    // The first link is the one the holder of ticket.link.add must be able to add: the Linked panel
+    // may not be gated on already having a link.
+    const { app } = mountTicketPage({ project: ['ticket.link.add'], ticket: { links: [] } })
+    await settle()
+
+    expect(app.text()).toContain('Linked')
+    expect(buttonByText(app, 'Add Link')).toBeDefined()
+    app.unmount()
+  })
+
+  test('AC-3: without ticket.link.add an empty Linked section does not render at all', async () => {
+    const { app } = mountTicketPage({ project: [], ticket: { links: [] } })
+    await settle()
+
+    expect(buttonByText(app, 'Add Link')).toBeUndefined()
+    app.unmount()
+  })
+
   test('AC-3: without ticket.link.add the form is gone', async () => {
     const { app } = mountTicketPage({ project: [], ticket: linked })
     await settle()
@@ -825,7 +844,12 @@ const AGENT_ITEM = {
   addedBy: null,
 }
 
-function mountProjectAgentsPage(global: readonly string[]): Mounted {
+interface AgentViewer {
+  canManage: boolean
+  viewerRole: string | null
+}
+
+function mountProjectAgentsPage(global: readonly string[], viewer: AgentViewer): Mounted {
   // The page imports the real useProjectAgents, so the roster arrives through its GET.
   const get = permissionsApi({ global, routes: { '/projects/web/agents': { scoping: true, items: [AGENT_ITEM] } } })
   installPermissionsRuntime(get)
@@ -853,17 +877,21 @@ function mountProjectAgentsPage(global: readonly string[]): Mounted {
       useAsyncData: fakeAsyncData,
       useGlobalPermissions,
       useProjectAgents: () => agents,
-      // The roster columns stay gated by the project role until US-015 removes them; the status menu
-      // is what AC-12 isolates.
-      useProjectViewerRole: () => ({ data: ref({ canManage: true, viewerRole: 'ADMIN' }), pending: ref(false), error: ref(null), refresh: jest.fn(async () => undefined) }),
+      // The legacy roster controls (add dialog, addedBy/addedAt, Remove) keep this gate until US-015;
+      // the status menu is what AC-12 isolates, and it must not depend on these flags.
+      useProjectViewerRole: () => ({ data: ref({ canManage: viewer.canManage, viewerRole: viewer.viewerRole }), pending: ref(false), error: ref(null), refresh: jest.fn(async () => undefined) }),
       useRoute: () => ({ params: { project: 'web' }, path: '/web/agents' }),
     },
   })
 }
 
 describe('US-007 AC-12: the project agents status menu follows the global agent.update', () => {
+  /** The legacy project-management flags `useProjectViewerRole` answers (US-015 removes this gate use). */
+  const ADMIN_VIEWER = { canManage: true, viewerRole: 'ADMIN' }
+  const DEVELOPER_VIEWER = { canManage: false, viewerRole: 'DEVELOPER' }
+
   test('AC-12: agent.update in the global set renders each row\'s status menu', async () => {
-    const app = mountProjectAgentsPage(['agent.update'])
+    const app = mountProjectAgentsPage(['agent.update'], ADMIN_VIEWER)
     await settle()
 
     const row = app.find('[data-stub="tr"]').find((node) => app.textOf(node).includes('builder'))
@@ -872,8 +900,32 @@ describe('US-007 AC-12: the project agents status menu follows the global agent.
     app.unmount()
   })
 
+  test('AC-12: a non-admin holding agent.update still gets the status menu', async () => {
+    // The menu follows the GLOBAL key, not the legacy project-management gate: a custom role that
+    // may update agents must be able to do it without project-manager rights.
+    const app = mountProjectAgentsPage(['agent.update'], DEVELOPER_VIEWER)
+    await settle()
+
+    const row = app.find('[data-stub="tr"]').find((node) => app.textOf(node).includes('builder'))
+    expect(row).toBeDefined()
+    expect(app.find('select', row)[0]).toBeDefined()
+    // The roster controls keep the legacy gate, so no Remove button renders for this viewer.
+    expect(app.find('[data-stub="button"]', row).map((button) => app.textOf(button))).not.toContain('Remove')
+    app.unmount()
+  })
+
   test('AC-12: without agent.update the status menu is gone', async () => {
-    const app = mountProjectAgentsPage([])
+    const app = mountProjectAgentsPage([], ADMIN_VIEWER)
+    await settle()
+
+    const row = app.find('[data-stub="tr"]').find((node) => app.textOf(node).includes('builder'))
+    expect(row).toBeDefined()
+    expect(app.find('select', row)).toHaveLength(0)
+    app.unmount()
+  })
+
+  test('AC-12 (edge): without agent.update and without project management the actions column is gone', async () => {
+    const app = mountProjectAgentsPage([], DEVELOPER_VIEWER)
     await settle()
 
     const row = app.find('[data-stub="tr"]').find((node) => app.textOf(node).includes('builder'))

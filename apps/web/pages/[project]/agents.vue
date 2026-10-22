@@ -229,7 +229,7 @@ async function removeAgent(agent: ProjectAgent): Promise<void> {
           <TableHead>{{ t('agents.columns.openTickets') }}</TableHead>
           <TableHead v-if="canManageComputed">{{ t('agents.columns.addedBy') }}</TableHead>
           <TableHead v-if="canManageComputed">{{ t('agents.columns.addedAt') }}</TableHead>
-          <TableHead v-if="canManageComputed">{{ t('agents.columns.actions') }}</TableHead>
+          <TableHead v-if="canManageComputed || canUpdateAgentStatus">{{ t('agents.columns.actions') }}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -275,7 +275,7 @@ async function removeAgent(agent: ProjectAgent): Promise<void> {
           <TableCell v-if="canManageComputed">
             <span class="text-sm tabular-nums">{{ agent.addedAt ? agent.addedAt.slice(0, 10) : '' }}</span>
           </TableCell>
-          <TableCell v-if="canManageComputed">
+          <TableCell v-if="canManageComputed || canUpdateAgentStatus">
             <div class="flex flex-col gap-1">
               <select
                 v-if="canUpdateAgentStatus"
@@ -290,6 +290,7 @@ async function removeAgent(agent: ProjectAgent): Promise<void> {
                 </option>
               </select>
               <Button
+                v-if="canManageComputed"
                 variant="ghost"
                 size="sm"
                 :disabled="busySlug === agent.slug"
@@ -297,7 +298,7 @@ async function removeAgent(agent: ProjectAgent): Promise<void> {
               >
                 {{ t('agents.removeProjectAgent.remove') }}
               </Button>
-              <div v-if="blockedAgentSlug === agent.slug" class="flex flex-col gap-0.5">
+              <div v-if="canManageComputed && blockedAgentSlug === agent.slug" class="flex flex-col gap-0.5">
                 <p
                   class="text-xs text-muted-foreground"
                   data-testid="project-agents-blocked-message"
