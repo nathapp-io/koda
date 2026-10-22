@@ -1,18 +1,63 @@
 /**
  * Shared doubles for the layouts/permission specs (Permissions P1 US-006).
  *
- * Two shapes are needed:
+ * Three shapes are needed:
  * - `globalPermissionsStub`: a `useGlobalPermissions` double for harnesses that run the real layout
  *   `<script setup>` and only need a fixed global key set.
  * - `adminNavFlags`: the template bindings `layouts/default.vue` derives from that set, for the older
  *   harnesses that render the template with a hand-written setup instead of running the real one.
+ * - `fakeAsyncData`: Nuxt's `useAsyncData` in miniature, for specs that run the real permissions
+ *   composables by injecting their auto-imports.
  *
  * `adminNavFlags` mirrors the layout's mapping, so it is only a convenience for those synthetic
  * contexts: `tests/layouts/default-permission-nav.spec.ts` runs the real setup and is the spec that
  * pins the layout itself.
  */
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
+import type { Ref } from 'vue'
 import { permissionSet } from '~/lib/permissions'
+
+/** One `fakeAsyncData` call: its key, its options, and what the handler resolved with. */
+export interface AsyncCall {
+  key: string
+  options?: { default?: () => unknown }
+  /** Exactly what Nuxt would put in the hydration payload. */
+  resolved?: unknown
+}
+
+/** Every `fakeAsyncData` call recorded since the last `resetAsyncCalls()`. */
+export const asyncCalls: AsyncCall[] = []
+
+export function resetAsyncCalls(): void {
+  asyncCalls.length = 0
+}
+
+/**
+ * Nuxt's `useAsyncData` in miniature: `data` is a shallow ref that starts at the `default` option,
+ * `pending` is set synchronously when a fetch (or a refresh) starts, a rejection lands in `error`
+ * and leaves `data` where it was, and `refresh` runs the handler again.
+ */
+export function fakeAsyncData<T>(
+  key: string,
+  run: () => Promise<T>,
+  options?: { default?: () => T },
+): { data: Ref<T | null>; pending: Ref<boolean>; error: Ref<unknown>; refresh: () => Promise<void> } {
+  const call: AsyncCall = { key, options }
+  asyncCalls.push(call)
+  const data = shallowRef<T | null>(options?.default ? options.default() : null) as Ref<T | null>
+  const pending = ref(true)
+  const error = ref<unknown>(null)
+  const load = (): Promise<void> => {
+    pending.value = true
+    error.value = null
+    return run().then(
+      (value) => { call.resolved = value; data.value = value; pending.value = false },
+      (err: unknown) => { error.value = err; pending.value = false },
+    )
+  }
+  void load()
+  return { data, pending, error, refresh: load }
+}
 
 /** Every admin nav entry's global key, in sidebar order. */
 export const ADMIN_NAV_KEYS = [

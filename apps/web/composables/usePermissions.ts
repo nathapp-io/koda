@@ -9,6 +9,11 @@
  * Fail closed: a pending, failed or not-yet-requested fetch exposes `EMPTY_PERMISSIONS`, so every
  * gated control is hidden. A control that never renders is the safe direction; the API still
  * refuses anything the caller may not do, and the caller still surfaces its answer.
+ *
+ * What `useAsyncData` holds is the raw key list, not a `PermissionSet`: Nuxt serialises each async
+ * data result into the hydration payload with `devalue`, which cannot stringify a function. The set
+ * (whose `has`/`hasOwn` are functions) is therefore built in the computed -- on the server for SSR
+ * and again on the client after hydration.
  */
 import { computed } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
@@ -22,8 +27,11 @@ interface MePermissionsResponse {
   keys?: string[]
 }
 
+/** What `useAsyncData` stores: the keys exactly as the API sent them, so the payload stays JSON. */
+type PermissionKeys = string[]
+
 export interface Permissions {
-  /** The caller's keys, or `EMPTY_PERMISSIONS` until they are known. */
+  /** The caller's keys, or `EMPTY_PERMISSIONS` while they are unknown or being re-read. */
   permissions: ComputedRef<PermissionSet>
   /** True while a fetch is in flight. */
   pending: Ref<boolean>
@@ -38,22 +46,25 @@ export interface Permissions {
  * route without the query — the API answers global keys when no project is named.
  */
 function usePermissionsFor(key: string, project: string | null): Permissions {
-  const { data, pending, error, refresh } = useAsyncData<PermissionSet>(
+  const { data, pending, error, refresh } = useAsyncData<PermissionKeys>(
     key,
     async () => {
       const { $api } = useApi()
       const response = project === null
         ? await $api.get<MePermissionsResponse>('/me/permissions')
         : await $api.get<MePermissionsResponse>('/me/permissions', { query: { project } })
-      return permissionSet(response?.keys ?? [])
+      const keys = response?.keys
+      // A malformed answer closes every gate instead of unlocking anything.
+      return Array.isArray(keys) ? [...keys] : []
     },
-    { default: () => EMPTY_PERMISSIONS },
+    { default: () => [] },
   )
 
   return {
-    // `data` keeps its default (the empty set) until the first success, so a pending or failed
-    // fetch leaves every gate closed.
-    permissions: computed(() => data.value ?? EMPTY_PERMISSIONS),
+    // Any fetch in flight fails closed, a refresh included: Nuxt keeps the previous `data` while a
+    // refresh runs, so reading `data` alone would show keys the caller may already have lost.
+    permissions: computed(() =>
+      pending.value || error.value ? EMPTY_PERMISSIONS : permissionSet(data.value ?? [])),
     pending,
     error,
     refresh: async () => { await refresh() },

@@ -1,60 +1,24 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals'
-import { ref, shallowRef } from 'vue'
-import type { Ref } from 'vue'
+import { serialize } from 'v8'
 import { EMPTY_PERMISSIONS } from '~/lib/permissions'
 import { useGlobalPermissions, useProjectPermissions } from '~/composables/usePermissions'
+import { asyncCalls, fakeAsyncData, resetAsyncCalls } from '../helpers/permission-nav'
 
 /**
  * US-006: `useGlobalPermissions` / `useProjectPermissions`.
  *
  * The composable is loaded as the real module; its two Nuxt auto-imports (`useAsyncData`, `useApi`)
  * are supplied on `globalThis`, which is where an undeclared auto-import identifier resolves at
- * runtime. So these tests exercise the composable's own code, not a re-implementation of it.
+ * runtime. So these tests exercise the composable's own code, not a re-implementation of it, and
+ * `fakeAsyncData` (tests/helpers/permission-nav.ts) records what each fetch stored.
  */
-
-interface AsyncCall {
-  key: string
-  options?: { default?: () => unknown }
-}
-
-let asyncCalls: AsyncCall[] = []
-
-interface AsyncData<T> {
-  data: Ref<T | null>
-  pending: Ref<boolean>
-  error: Ref<unknown>
-  refresh: () => Promise<void>
-}
-
-/**
- * Nuxt's `useAsyncData` in miniature: `data` is a shallow ref that starts at the `default` option,
- * the handler runs at once, a rejection lands in `error` and leaves `data` where it was, and
- * `refresh` runs it again.
- */
-function fakeUseAsyncData<T>(
-  key: string,
-  run: () => Promise<T>,
-  options?: { default?: () => T },
-): AsyncData<T> {
-  asyncCalls.push({ key, options })
-  const data = shallowRef<T | null>(options?.default ? options.default() : null) as Ref<T | null>
-  const pending = ref(true)
-  const error = ref<unknown>(null)
-  const load = (): Promise<void> =>
-    run().then(
-      (value) => { data.value = value; pending.value = false },
-      (err: unknown) => { error.value = err; pending.value = false },
-    )
-  void load()
-  return { data, pending, error, refresh: load }
-}
 
 const globals = globalThis as unknown as Record<string, unknown>
 
 /** Installs the auto-import doubles for one test; returns the `$api.get` spy. */
 function install(handler: (path: string, options?: Record<string, unknown>) => Promise<unknown>) {
   const get = jest.fn(handler)
-  globals.useAsyncData = fakeUseAsyncData
+  globals.useAsyncData = fakeAsyncData
   globals.useApi = () => ({ $api: { get } })
   return get
 }
@@ -64,7 +28,7 @@ const settle = async (): Promise<void> => {
 }
 
 beforeEach(() => {
-  asyncCalls = []
+  resetAsyncCalls()
 })
 
 afterEach(() => {
@@ -200,5 +164,121 @@ describe('US-006: refresh re-reads the keys', () => {
     await settle()
 
     expect(permissions.value.has('fleet.ingest.read')).toBe(true)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fix round 1 / F1 — the value handed to useAsyncData must survive the SSR payload
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Nuxt serialises each `useAsyncData` result into the hydration payload (`devalue`, which throws
+ * `Cannot stringify a function`). `devalue` ships ESM only and this Jest project is CommonJS, so the
+ * automated check uses Node's own structured-clone serializer, which rejects exactly the construct
+ * that broke the payload: a function. The devalue probe itself is recorded in the story report.
+ */
+describe('F1: the useAsyncData payload is serializable', () => {
+  test('F1: the resolved value and the default both survive serialisation, so SSR hydration works', async () => {
+    install(async () => ({ scope: 'global', projectSlug: null, keys: ['user.read'] }))
+
+    useGlobalPermissions()
+    await settle()
+
+    const call = asyncCalls[0]
+    expect(() => serialize({ [call.key]: call.options?.default?.() })).not.toThrow()
+    expect(() => serialize({ [call.key]: call.resolved })).not.toThrow()
+    // The payload carries the keys themselves; the PermissionSet is built on the client.
+    expect(call.resolved).toEqual(['user.read'])
+  })
+
+  test('F1 (project scope): the payload is the project keys, not a set of functions', async () => {
+    install(async () => ({ scope: 'project', projectSlug: 'web', keys: ['ticket.create'] }))
+
+    useProjectPermissions('web')
+    await settle()
+
+    const call = asyncCalls[0]
+    expect(call.resolved).toEqual(['ticket.create'])
+    expect(() => serialize({ [call.key]: call.resolved })).not.toThrow()
+  })
+
+  test('F1 (edge): a payload holding a function is rejected by the same check', () => {
+    // Guards the assertion itself: if this did not throw, F1 would pass on the broken shape.
+    expect(() => serialize({ 'permissions-global': { has: () => false } })).toThrow()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fix round 1 / F2 — a refresh in flight fails closed, like the initial fetch
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('F2: a refresh in flight exposes EMPTY_PERMISSIONS', () => {
+  /** A fetch whose behaviour the test switches between granting, deferring and failing. */
+  function stagedGet() {
+    let phase: 'grant' | 'defer' | 'fail' = 'grant'
+    const get = install(() => {
+      if (phase === 'defer') return new Promise(() => undefined)
+      if (phase === 'fail') return Promise.reject(new Error('boom'))
+      return Promise.resolve({ scope: 'global', projectSlug: null, keys: ['user.read', 'fleet.ingest.read'] })
+    })
+    return { get, set: (next: 'grant' | 'defer' | 'fail') => { phase = next } }
+  }
+
+  test('F2 (global): after a grant, a deferred refresh closes every gate again', async () => {
+    const staged = stagedGet()
+    const { permissions, pending, refresh } = useGlobalPermissions()
+    await settle()
+    expect(permissions.value.has('user.read')).toBe(true)
+
+    staged.set('defer')
+    void refresh()
+    await settle()
+
+    expect(pending.value).toBe(true)
+    expect(permissions.value).toBe(EMPTY_PERMISSIONS)
+  })
+
+  test('F2 (project): the same holds for the project scope', async () => {
+    const staged = stagedGet()
+    const { permissions, pending, refresh } = useProjectPermissions('web')
+    await settle()
+    expect(permissions.value.has('fleet.ingest.read')).toBe(true)
+
+    staged.set('defer')
+    void refresh()
+    await settle()
+
+    expect(pending.value).toBe(true)
+    expect(permissions.value).toBe(EMPTY_PERMISSIONS)
+  })
+
+  test('F2 (edge): a refresh that fails keeps failing closed', async () => {
+    const staged = stagedGet()
+    const { permissions, error, refresh } = useGlobalPermissions()
+    await settle()
+    expect(permissions.value.has('user.read')).toBe(true)
+
+    staged.set('fail')
+    await refresh()
+    await settle()
+
+    expect(error.value).toBeInstanceOf(Error)
+    expect(permissions.value).toBe(EMPTY_PERMISSIONS)
+  })
+
+  test('F2: once the refresh resolves the gates come back', async () => {
+    const staged = stagedGet()
+    const { permissions, refresh } = useGlobalPermissions()
+    await settle()
+
+    staged.set('defer')
+    void refresh()
+    await settle()
+    expect(permissions.value).toBe(EMPTY_PERMISSIONS)
+
+    staged.set('grant')
+    await refresh()
+    await settle()
+    expect(permissions.value.has('user.read')).toBe(true)
   })
 })

@@ -1,14 +1,16 @@
 import { describe, test, expect, jest, afterAll } from '@jest/globals'
 import * as Vue from 'vue'
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { permissionSet } from '~/lib/permissions'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import type { FakeNode } from '../helpers/mount-sfc'
 import { uiStubs, enI18n } from '../helpers/fleet-harness'
-import { permissionSet } from '~/lib/permissions'
+import { fakeAsyncData } from '../helpers/permission-nav'
 import * as apiModule from '../../composables/useApi'
+import * as permissionsModule from '../../composables/usePermissions'
 
 const realPalette = webFile('components', 'CommandPalette.vue')
 
@@ -158,5 +160,91 @@ describe('CommandPalette skills entry (US-006 AC-10)', () => {
 
     expect(optionIds()).not.toContain('skills')
     unmount()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fix round 1 / F2 — a mounted control hides while a permission refresh runs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Flushes the fetch microtasks and the re-render they trigger. */
+const settle = async (): Promise<void> => {
+  for (let i = 0; i < 4; i += 1) {
+    await new Promise((resolve) => { setImmediate(resolve) })
+    await nextTick()
+  }
+}
+
+describe('F2: the mounted skills command follows a real refresh', () => {
+  afterEach(() => {
+    const host = globalThis as unknown as Record<string, unknown>
+    delete host.useAsyncData
+    delete host.useApi
+  })
+
+  test('F2: the skills command disappears while the refresh is outstanding and returns with the new keys', async () => {
+    let phase: 'grant' | 'defer' = 'grant'
+    const get = jest.fn(() =>
+      (phase === 'defer'
+        ? new Promise(() => undefined)
+        : Promise.resolve({ scope: 'global', projectSlug: null, keys: SKILLS_KEYS })))
+
+    // The real composable is loaded by Jest, so its auto-imports resolve through `globalThis`.
+    const host = globalThis as unknown as Record<string, unknown>
+    host.useAsyncData = fakeAsyncData
+    host.useApi = () => ({ $api: { get } })
+
+    let handle: { refresh: () => Promise<void> } | undefined
+    const app = mountSfc(paletteCopy, {
+      props: { open: true },
+      components: {
+        ...uiStubs,
+        Dialog: dialogStub,
+        DialogContent: slotStub('dialog-content'),
+        DialogTitle: hiddenStub('dialog-title'),
+        DialogDescription: hiddenStub('dialog-description'),
+      },
+      alias: { '~/composables/useApi': apiModule },
+      globals: {
+        ref, computed, watch, nextTick,
+        useI18n: () => enI18n(),
+        useApi: () => ({ $api: { get: jest.fn(async () => []) } }),
+        useColorMode: () => ({ value: 'light', preference: 'light' }),
+        navigateTo: () => undefined,
+        // The palette's own binding is the real composable, so the gate under test is the real one.
+        useGlobalPermissions: () => {
+          const permissions = permissionsModule.useGlobalPermissions()
+          handle = permissions
+          return permissions
+        },
+      },
+    })
+
+    const optionIds = (): string[] =>
+      app.find('[role="option"]').map((li) => String(li.props.id).replace(/^palette-/, ''))
+    /** Starts a refresh without waiting for it (the deferred phase never resolves). */
+    const startRefresh = (): void => {
+      if (handle === undefined) throw new Error('the palette never read the global permissions')
+      void handle.refresh()
+    }
+
+    await settle()
+    expect(get).toHaveBeenCalledWith('/me/permissions')
+    expect(optionIds()).toContain('skills')
+
+    // A refresh in flight: the previous answer is no longer trusted.
+    phase = 'defer'
+    startRefresh()
+    await settle()
+    expect(optionIds()).not.toContain('skills')
+
+    // ...and the command comes back once the API answers again.
+    phase = 'grant'
+    startRefresh()
+    await settle()
+    expect(get).toHaveBeenCalledTimes(3)
+    expect(optionIds()).toContain('skills')
+
+    app.unmount()
   })
 })
