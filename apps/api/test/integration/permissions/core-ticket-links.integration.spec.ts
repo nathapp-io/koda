@@ -4,9 +4,9 @@
  * `ticket.link.remove.own` is honoured), over real HTTP + Postgres (AC-1 .. AC-12).
  *
  * One booted application for the whole file. The first registration is the installation's Owner, so
- * the fixtures (users, project, tickets, agent rows) are built as that Owner; every assertion below
- * acts as a principal whose only source in `p1` is one role binding (users) or one legacy
- * `AgentProject` row with an `AgentRoleEntry` (agents). No test asserts through a bypass.
+ * the fixtures (users, project, tickets, agent bindings) are built as that Owner; every assertion
+ * below acts as a principal whose only source in `p1` is one role binding (users and agents). No
+ * test asserts through a bypass.
  *
  * The creator columns are internal (`TicketLinkResponseDto` does not expose them), so the "what was
  * stored" half of AC-1 .. AC-4 reads the row through Prisma.
@@ -20,6 +20,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { TicketLinksService } from '../../../src/ticket-links/ticket-links.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
@@ -58,6 +59,7 @@ describeIntegration('ticket link creators and route keys (US-006)', () => {
   const userIds: Record<string, string> = {};
   let p1Id = '';
   let counter = 0;
+  let rootId = '';
   let agentId = '';
 
   const auth = (who: string) => ({ Authorization: `Bearer ${tokens[who]}` });
@@ -136,14 +138,16 @@ describeIntegration('ticket link creators and route keys (US-006)', () => {
     return result.link.id;
   };
 
-  /** A rostered agent with a legacy DEVELOPER entry — its only source of p1 keys. */
+  /** A rostered agent with a `developer` binding in p1 — its only source of p1 keys. */
   const createDeveloperAgent = async (slug: string): Promise<string> => {
     const created = await asRoot('post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
-    await db.agentProject.create({ data: { agentId: body.agent.id, projectId: p1Id } });
-    await db.agentRoleEntry.create({ data: { agentId: body.agent.id, role: 'DEVELOPER' } });
+    const agent = { type: 'AGENT' as const, id: body.agent.id };
+    await grantBaseline(db, agent);
+    await grantRole(db, agent, 'viewer', p1Id);
+    await grantRole(db, agent, 'developer', p1Id);
     tokens[slug] = body.apiKey;
-    // The legacy rows are written after the principal could have been cached by an earlier check.
+    // The bindings are written after the principal could have been cached by an earlier check.
     await membership.invalidatePermissions();
     return body.agent.id;
   };
@@ -161,6 +165,7 @@ describeIntegration('ticket link creators and route keys (US-006)', () => {
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD })
       .expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
+    rootId = (await db.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
 
     for (const who of ['developer', 'developer2', 'viewer', 'padmin', 'outsider']) {
       await createUser(who);
@@ -179,12 +184,28 @@ describeIntegration('ticket link creators and route keys (US-006)', () => {
     await bind('padmin', 'project-admin');
     // AC-11's caller keeps no source in p1 at all.
 
-    // AC-2's caller: a roster row plus a legacy DEVELOPER entry, and no binding.
+    // AC-2's caller: a viewer binding plus a developer binding in p1.
     agentId = await createDeveloperAgent('p1-links-agent');
   }, BOOT_TIMEOUT);
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every fixture principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(db, [
+      { type: 'USER', id: rootId },
+      { type: 'USER', id: userIds.developer },
+      { type: 'USER', id: userIds.developer2 },
+      { type: 'USER', id: userIds.viewer },
+      { type: 'USER', id: userIds.padmin },
+      { type: 'USER', id: userIds.outsider },
+      { type: 'AGENT', id: agentId },
+    ]);
   });
 
   // -------------------------------------------------------------------------

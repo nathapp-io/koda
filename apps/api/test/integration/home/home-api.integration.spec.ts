@@ -9,6 +9,7 @@ import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -88,15 +89,26 @@ describeIntegration('home dashboard API (PG)', () => {
     await prisma.decisionEvent.create({ data: { projectId: webId, agentId: 'agent-x', action: 'decided', decision: 'decided', source: 'internal' } });
     await prisma.ticketEvent.create({ data: { projectId: opsId, action: 'CREATED', actorId: world.ids.root, actorType: 'user', source: 'api' } });
 
-    // A soft-deleted project never shows, whatever its membership rows say.
+    // A soft-deleted project never shows, whatever its grants say.
     const gone = await prisma.project.create({
-      data: { name: 'gone', slug: 'gone', key: 'GONE', deletedAt: new Date(), members: { create: { userId: world.ids.dev, role: 'ADMIN' } } },
+      data: { name: 'gone', slug: 'gone', key: 'GONE', deletedAt: new Date() },
     });
+    // Permissions P1 US-004: the project grant is a role binding, not a legacy membership row.
+    await grantRole(prisma, { type: 'USER', id: world.ids.dev }, 'project-admin', gone.id);
     await ticket(gone.id, { status: 'IN_PROGRESS', assignedToUserId: world.ids.dev });
   });
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+    ]);
   });
 
   it('scopes a member to their projects: web only, with web-only needs-you', async () => {

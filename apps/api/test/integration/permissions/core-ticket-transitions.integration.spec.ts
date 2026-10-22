@@ -3,9 +3,9 @@
  * state-machine edge, over real HTTP + Postgres (AC-9 .. AC-20).
  *
  * One booted application for the whole file. The first registration is the installation's Owner, so
- * the fixtures (users, project, tickets, agent roster rows) are built as that Owner; every assertion
- * below acts as an ordinary principal whose only source in `p1` is one role binding (users) or one
- * legacy `AgentProject` + `AgentRoleEntry` pair (agents). No test asserts through a bypass.
+ * the fixtures (users, project, tickets, agent bindings) are built as that Owner; every assertion
+ * below acts as an ordinary principal whose only source in `p1` is one role binding (users) or a
+ * viewer plus an agent role binding (agents). No test asserts through a bypass.
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/permissions/core-ticket-transitions.integration.spec.ts
  */
@@ -16,6 +16,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
@@ -39,6 +40,14 @@ const INVALID_TRANSITION = (
 type RoleKey = 'reviewer' | 'triager' | 'developer' | 'viewer';
 type TicketState = 'CREATED' | 'VERIFIED' | 'IN_PROGRESS' | 'VERIFY_FIX';
 
+/** The role key an agent's legacy `AgentRoleEntry` role is read as (the union's own mapping). */
+const ROLE_KEY_FOR_AGENT_ROLE: Record<'DEVELOPER' | 'REVIEWER' | 'VERIFIER' | 'TRIAGER', string> = {
+  DEVELOPER: 'developer',
+  REVIEWER: 'reviewer',
+  VERIFIER: 'verifier',
+  TRIAGER: 'triager',
+};
+
 describeIntegration('ticket transition edge keys (US-003)', () => {
   let app: NathApplication;
   let server: ReturnType<NathApplication['getHttpServer']>;
@@ -49,6 +58,8 @@ describeIntegration('ticket transition edge keys (US-003)', () => {
   const userIds: Record<string, string> = {};
   let p1Id = '';
   let counter = 0;
+  let rootId = '';
+  const agentIds: string[] = [];
 
   const auth = (who: string) => ({ Authorization: `Bearer ${tokens[who]}` });
   const asRoot = (method: 'get' | 'post' | 'patch' | 'delete', url: string, body?: Record<string, unknown>) => {
@@ -106,14 +117,16 @@ describeIntegration('ticket transition edge keys (US-003)', () => {
     return data<{ status: string; title: string }>(res);
   };
 
-  /** A rostered agent with one legacy `AgentRoleEntry`: the agent's only source in p1. */
-  const createAgent = async (slug: string, legacyRole: 'REVIEWER' | 'DEVELOPER'): Promise<string> => {
+  /** A rostered agent with a `viewer` binding plus its role binding in p1: its only sources there. */
+  const createAgent = async (slug: string, agentRole: 'REVIEWER' | 'DEVELOPER'): Promise<string> => {
     const created = await asRoot('post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
-    await db.agentProject.create({ data: { agentId: body.agent.id, projectId: p1Id } });
-    await db.agentRoleEntry.create({ data: { agentId: body.agent.id, role: legacyRole } });
+    const agent = { type: 'AGENT' as const, id: body.agent.id };
+    await grantBaseline(db, agent);
+    await grantRole(db, agent, 'viewer', p1Id);
+    await grantRole(db, agent, ROLE_KEY_FOR_AGENT_ROLE[agentRole], p1Id);
     tokens[slug] = body.apiKey;
-    // The legacy rows are written after the principal could have been cached by an earlier check.
+    // The bindings are written after the principal could have been cached by an earlier check.
     await membership.invalidatePermissions();
     return body.agent.id;
   };
@@ -130,6 +143,7 @@ describeIntegration('ticket transition edge keys (US-003)', () => {
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD })
       .expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
+    rootId = (await db.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
 
     for (const who of ['reviewer', 'triager', 'developer', 'viewer']) await createUser(who);
 
@@ -145,12 +159,27 @@ describeIntegration('ticket transition edge keys (US-003)', () => {
     await bind('developer', 'developer');
     await bind('viewer', 'viewer');
 
-    await createAgent('p1-reviewer-agent', 'REVIEWER');
-    await createAgent('p1-developer-agent', 'DEVELOPER');
+    agentIds.push(await createAgent('p1-reviewer-agent', 'REVIEWER'));
+    agentIds.push(await createAgent('p1-developer-agent', 'DEVELOPER'));
   }, BOOT_TIMEOUT);
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every fixture principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(db, [
+      { type: 'USER', id: rootId },
+      { type: 'USER', id: userIds.reviewer },
+      { type: 'USER', id: userIds.triager },
+      { type: 'USER', id: userIds.developer },
+      { type: 'USER', id: userIds.viewer },
+      ...agentIds.map((id) => ({ type: 'AGENT' as const, id })),
+    ]);
   });
 
   // -------------------------------------------------------------------------

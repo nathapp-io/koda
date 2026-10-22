@@ -9,9 +9,9 @@
  * `memory.update` decision on the item's owner.
  *
  * Every caller below has exactly one permission source in `p1`: one PROJECT-scope binding and no
- * `ProjectMember` row (users), or that binding plus its legacy `AgentProject` roster row (agents). No
- * test asserts through a bypass — the refusals are the guard's and the controller's own, and the stored
- * rows are read back from the database the handlers write.
+ * `ProjectMember` row (users), or that binding plus the `viewer` binding its `AgentProject` roster row
+ * stood for (agents). No test asserts through a bypass — the refusals are the guard's and the
+ * controller's own, and the stored rows are read back from the database the handlers write.
  *
  * Run: cd apps/api && bun run test:db:up &&
  *      bun run test:scoped test/integration/memory/permissions-memory-routes.integration.spec.ts
@@ -23,6 +23,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
@@ -111,6 +112,9 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
     ids[who] = data<{ id: string }>(created).id;
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
+    // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
+    // baseline production writes for every user it creates.
+    await grantBaseline(prisma, { type: 'USER', id: ids[who] });
   };
 
   /** The binding that is the caller's only permission source in p1. */
@@ -122,7 +126,7 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
     await bind({ type: 'USER', id: ids[who] }, roleKey);
   };
 
-  /** An agent whose only permission source in p1 is one binding: a roster row plus that binding, no agent role. */
+  /** An agent whose only permission source in p1 is one binding: a viewer binding plus that binding, no agent role. */
   const createAgent = async (slug: string, roleKey: string): Promise<void> => {
     const created = await as('root', 'post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
@@ -130,7 +134,10 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
     // The agent's key authenticates as the agent on every route, as a user's JWT does (`CombinedAuthGuard`).
     tokens[slug] = body.apiKey;
     agentKeys[slug] = body.apiKey;
-    await prisma.agentProject.create({ data: { agentId: body.agent.id, projectId: p1Id } });
+    // Permissions P1 US-004: the roster row is a role binding — the baseline every agent production
+    // creates carries, plus the viewer reach the `AgentProject` row stood for.
+    await grantBaseline(prisma, { type: 'AGENT', id: body.agent.id });
+    await grantRole(prisma, { type: 'AGENT', id: body.agent.id }, 'viewer', p1Id);
     await bind({ type: 'AGENT', id: body.agent.id }, roleKey);
   };
 
@@ -163,6 +170,9 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
     ids.root = (await prisma.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
+    // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
+    // baseline production writes for every user it creates.
+    await grantBaseline(prisma, { type: 'USER', id: ids.root });
 
     p1Id = data<{ id: string }>(await as('root', 'post', '/api/projects', { name: 'P1', slug: P1_SLUG, key: P1_KEY }).expect(201)).id;
     p2Id = data<{ id: string }>(await as('root', 'post', '/api/projects', { name: 'P2', slug: P2_SLUG, key: P2_KEY }).expect(201)).id;
@@ -200,6 +210,22 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
       if (savedMcpEnabled === undefined) delete process.env[MCP_ENABLED];
       else process.env[MCP_ENABLED] = savedMcpEnabled;
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every fixture principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: ids.root },
+      { type: 'USER', id: ids.dev1 },
+      { type: 'USER', id: ids.dev2 },
+      { type: 'USER', id: ids.viewer },
+      { type: 'USER', id: ids.padmin },
+      { type: 'USER', id: ids.reader },
+      { type: 'AGENT', id: ids['p1-mem-agent'] },
+    ]);
   });
 
   // -------------------------------------------------------------------------

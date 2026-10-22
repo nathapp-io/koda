@@ -15,6 +15,7 @@ priority: 80
 - Cover happy path and at least one error case per endpoint
 - Assert exact status codes
 - When mocking DB access in unit/integration tests, use official mock helpers as provider values
+- DB fixtures grant access through role bindings with `src/permissions/test-helpers/permission-fixtures.ts` (`grantRole`, `grantBaseline`, `revokeProjectRoles`). Outside specs that test the legacy rows themselves, never write `ProjectMember`, `AgentProject`, `AgentRoleEntry` or `User.role = 'ADMIN'` (or pass `roles` to `POST /api/agents` for a fixture agent) to give an actor access; give every user or agent created through Prisma its baseline binding
 
 ## Module Registration / DI Tests
 - Module-compilation and dependency-injection wiring tests are **unit tests**, never integration tests

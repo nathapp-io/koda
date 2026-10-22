@@ -1,7 +1,7 @@
 import { PrismaClient } from '../../src/generated/prisma/client';
 import request from 'supertest';
 import type { RunnerCapabilities, SyncRequest } from '../../src/fleet/common/protocol';
-import { AGENT_ROLES } from '../../src/common/enums';
+import { grantBaseline, grantRole } from '../../src/permissions/test-helpers/permission-fixtures';
 import { data, loginToken, TEST_PASSWORD } from './http-app';
 
 export const FLEET_CAPS: RunnerCapabilities = {
@@ -17,7 +17,11 @@ let seq = 0;
 
 /** An admin, a project `web` and a GitHub fleet repo acme/app, straight into PG. */
 export async function seedFleetBase(prisma: PrismaClient): Promise<{ adminId: string; projectId: string; projectSlug: string; repoId: string }> {
-  const admin = await prisma.user.create({ data: { email: `admin${++seq}@koda.test`, passwordHash: 'x', role: 'ADMIN' } });
+  const admin = await prisma.user.create({ data: { email: `admin${++seq}@koda.test`, passwordHash: 'x' } });
+  // Permissions P1 US-002: the admin is a member of the installation through bindings only — the
+  // baseline plus the global admin binding, whose mirror keeps `User.role` at `ADMIN`.
+  await grantBaseline(prisma, { type: 'USER', id: admin.id });
+  await grantRole(prisma, { type: 'USER', id: admin.id }, 'admin', null);
   const slug = `web${seq}`;
   const project = await prisma.project.create({ data: { name: slug, slug, key: `W${seq}` } });
   const repo = await prisma.fleetRepo.create({
@@ -52,10 +56,13 @@ export interface FleetHttpWorld {
 }
 
 /**
- * Root admin (registered), projects `web` and `ops`, users dev (DEVELOPER on web), viewer
- * (VIEWER on web) and outsider (no membership), GitHub fleet repos acme/app on web (default
+ * Root admin (registered), projects `web` and `ops`, users dev (a developer on web), viewer
+ * (a viewer on web) and outsider (no project grant), GitHub fleet repos acme/app on web (default
  * branch `trunk`) and acme/ops on ops, inserted directly (registration is covered by slice 1).
  * Logs in four times: within the 5/min login throttle.
+ *
+ * Permissions P1 US-002: the project grants are role bindings, not legacy membership rows. They are
+ * written before either user's first project request, so the effective-key cache is still cold.
  */
 export async function seedFleetHttpWorld(server: Parameters<typeof request>[0], prisma: PrismaClient): Promise<FleetHttpWorld> {
   const tokens = {} as Record<Who, string>;
@@ -67,19 +74,18 @@ export async function seedFleetHttpWorld(server: Parameters<typeof request>[0], 
   for (const slug of ['web', 'ops']) {
     await request(server).post('/api/projects').set(asRoot).send({ name: slug, slug, key: slug.toUpperCase() }).expect(201);
   }
-  for (const [who, role] of [['dev', 'DEVELOPER'], ['viewer', 'VIEWER'], ['outsider', null]] as const) {
+  const web = await prisma.project.findUniqueOrThrow({ where: { slug: 'web' } });
+  for (const [who, role] of [['dev', 'developer'], ['viewer', 'viewer'], ['outsider', null]] as const) {
     await request(server).post('/api/admin/users').set(asRoot).send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
     if (role) {
       const user = await prisma.user.findUniqueOrThrow({ where: { email: `${who}@koda.test` } });
-      const project = await prisma.project.findUniqueOrThrow({ where: { slug: 'web' } });
-      await prisma.projectMember.create({ data: { projectId: project.id, userId: user.id, role } });
+      await grantRole(prisma, { type: 'USER', id: user.id }, role, web.id);
     }
   }
   for (const who of ['root', 'dev', 'viewer', 'outsider'] as const) {
     ids[who] = (await prisma.user.findUniqueOrThrow({ where: { email: `${who}@koda.test` } })).id;
   }
-  const web = await prisma.project.findUniqueOrThrow({ where: { slug: 'web' } });
   const ops = await prisma.project.findUniqueOrThrow({ where: { slug: 'ops' } });
   const repo = (projectId: string, name: string, defaultBranch: string) => prisma.fleetRepo.create({
     data: { projectId, provider: 'github', owner: 'acme', name, defaultBranch, githubInstallationId: BigInt(77), createdById: ids.root },
@@ -91,7 +97,12 @@ export async function seedFleetHttpWorld(server: Parameters<typeof request>[0], 
   };
 }
 
-/** Creates an active agent with all permitted roles and a real API key, without changing the user-only world seed. */
+/**
+ * Creates an active agent with a real API key, without changing the user-only world seed.
+ *
+ * Permissions P1 US-002: the agent is created with no legacy role (`roles: []`); the roles it acts
+ * with are role bindings in the projects it is rostered in (see `rosterFleetAgent`).
+ */
 export async function seedFleetHttpAgent(
   server: Parameters<typeof request>[0],
   adminToken: string,
@@ -99,9 +110,25 @@ export async function seedFleetHttpAgent(
   const slug = `fleet-agent-${++seq}`;
   const created = data<{ apiKey: string; agent: { id: string; slug: string } }>(
     await request(server).post('/api/agents').set({ Authorization: `Bearer ${adminToken}` })
-      .send({ name: slug, slug, roles: [...AGENT_ROLES], capabilities: ['typescript', 'nestjs'] }).expect(201),
+      .send({ name: slug, slug, roles: [], capabilities: ['typescript', 'nestjs'] }).expect(201),
   );
   return { id: created.agent.id, slug: created.agent.slug, apiKey: created.apiKey };
+}
+
+/**
+ * Roster an agent in a project through role bindings.
+ *
+ * Permissions P1 US-002: this is what a fixture agent's `AgentProject` roster row and its legacy
+ * agent roles held before — the viewer reach of the roster plus the four agent roles, in that
+ * project only. The agent keeps its global baseline binding, so it holds nothing in any other
+ * project.
+ */
+export async function rosterFleetAgent(db: PrismaClient, agentId: string, projectId: string): Promise<void> {
+  const principal = { type: 'AGENT', id: agentId } as const;
+  await grantRole(db, principal, 'viewer', projectId);
+  for (const roleKey of ['developer', 'reviewer', 'verifier', 'triager'] as const) {
+    await grantRole(db, principal, roleKey, projectId);
+  }
 }
 
 /** Issues an enrollment token as admin and enrolls a runner over HTTP (enroll is throttled 10/min). */

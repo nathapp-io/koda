@@ -716,10 +716,9 @@ describe('RoleAdminService', () => {
       });
 
       it('AC-22 (unit): removing the last owner binding is refused by the owner lock', async () => {
-        // A caller holding every key the owner role confers — its entry list **and** the synthetic
-        // project authority every global admin binding carries — without holding an owner binding
-        // itself: only such a caller gets past the escalation rule and reaches the owner lock. The
-        // legacy `User.role = 'ADMIN'` supplies the project half, the custom `*` role the owner key.
+        // A caller holding every key the owner role confers — its entry list **and** the project
+        // authority supplied by a global admin binding — without holding an owner binding itself:
+        // only such a caller gets past escalation and reaches the owner lock.
         store.roles.push({
           id: 'role-superuser',
           key: 'superuser',
@@ -730,8 +729,9 @@ describe('RoleAdminService', () => {
           locked: false,
           permissions: ['*'],
         });
-        store.addUser('grantor-2', 'ADMIN');
+        store.addUser('grantor-2');
         store.bind(USER('grantor-2'), 'superuser', null);
+        store.bind(USER('grantor-2'), 'admin', null);
         // The store's only owner binding belongs to someone else, so removing it is the last one.
         store.bindings = store.bindings.filter((entry) => entry.roleId !== store.roleByKey('owner').id);
         store.addUser('owner-2');

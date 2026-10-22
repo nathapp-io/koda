@@ -3,9 +3,10 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
 import type { ToolCaller } from '../../../src/fleet/assistant/assistant-tool.types';
+import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
-import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { rosterFleetAgent, seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 describeIntegration('direct assistant actions (PG)', () => {
@@ -30,12 +31,20 @@ describeIntegration('direct assistant actions (PG)', () => {
   });
   async function seedCaller(): Promise<ToolCaller> {
     const agent = await seedFleetHttpAgent(app.getHttpServer(), world.tokens.root);
-    await prisma.agentProject.create({ data: { projectId: world.projectId, agentId: agent.id } });
+    await rosterFleetAgent(prisma, agent.id, world.projectId);
     return { principal: { actorType: 'agent', id: agent.id, slug: agent.slug, name: 'claude', status: 'ACTIVE', agentRoles: ['DEVELOPER'], capabilities: [], authorities: [], blacklisted: false, revoked: false }, origin: { kind: 'mcp' }, disabled: false };
   }
   async function seedTicket(projectId = world.projectId) {
     return prisma.ticket.create({ data: { projectId, number: ++number, type: 'TASK', title: 'Direct action ticket' } });
   }
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+    ]);
+  });
   it('AC-12, AC-13: creates an agent-authored comment and one terminal none-mode action', async () => {
     const caller = await seedCaller();
     const ticket = await seedTicket();

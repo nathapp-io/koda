@@ -8,9 +8,10 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
-import { FleetHttpWorld, insertRunner, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { FleetHttpWorld, insertRunner, rosterFleetAgent, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { ApprovalsService } from '../../../src/fleet/approvals/approvals.service';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
+import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers/permission-fixtures';
 import enFleet from '../../../src/i18n/en/fleet.json';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -33,6 +34,7 @@ describeIntegration('fleet approvals API (PG)', () => {
   let evaluator: BudgetEvaluator;
   let approvals: ApprovalsService;
   let padmin: string;
+  let padminId: string;
   let n = 0;
   const as = (token: string) => ({ Authorization: `Bearer ${token}` });
   const tok = (who: keyof FleetHttpWorld['tokens']) => as(world.tokens[who]);
@@ -71,8 +73,8 @@ describeIntegration('fleet approvals API (PG)', () => {
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
     world = await seedFleetHttpWorld(server, prisma);
     agent = await seedFleetHttpAgent(server, world.tokens.root);
-    // S4c US-001: an AgentProject row is the agent's project association.
-    await prisma.agentProject.create({ data: { projectId: world.projectId, agentId: agent.id } });
+    // S4c US-001: the agent's project association is a role binding in the project.
+    await rosterFleetAgent(prisma, agent.id, world.projectId);
     // Only anchors an already-running bash ask; keep it out of placement for the budget requeue cases.
     runner = await insertRunner(prisma, { createdById: world.ids.root, enabled: false });
     await prisma.ticket.create({ data: {
@@ -89,6 +91,7 @@ describeIntegration('fleet approvals API (PG)', () => {
     await request(server).post('/api/admin/users').set(tok('root')).send({ email: 'padmin@koda.test', name: 'padmin', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
     await request(server).post('/api/projects/web/members').set(tok('root')).send({ email: 'padmin@koda.test', role: 'ADMIN' }).expect(201);
     padmin = await loginToken(server, 'padmin@koda.test');
+    padminId = (await prisma.user.findUniqueOrThrow({ where: { email: 'padmin@koda.test' } })).id;
     await prisma.webhook.create({
       data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['fleet.approval.requested', 'fleet.approval.resolved']) },
     });
@@ -102,6 +105,17 @@ describeIntegration('fleet approvals API (PG)', () => {
     await prisma.fleetCommand.deleteMany();
     await prisma.fleetJob.deleteMany();
     await prisma.outboxEvent.deleteMany();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+      { type: 'USER', id: padminId },
+      { type: 'AGENT', id: agent.id },
+    ]);
   });
 
   it('members list and get; outsiders get 403; candidates on a pending budget approval', async () => {
@@ -119,8 +133,9 @@ describeIntegration('fleet approvals API (PG)', () => {
     const { approvalId } = await stopped();
     const url = endpoint === 'list' ? PROJECT : `${PROJECT}/${approvalId}`;
     await request(server).get(url).set(tok('viewer')).expect(200);
-    // Permissions P1d US-006 (R10 retired for approvals): the agent's roster row and legacy roles hold
-    // `fleet.approval.read` in this project, so the route key admits it like a member.
+    // Permissions P1d US-006 (R10 retired for approvals): the agent's project bindings (the roster's
+    // viewer reach and its agent roles) hold `fleet.approval.read` in this project, so the route key admits it
+    // like a member.
     const res = await request(server).get(url).set(as(agent.apiKey)).expect(200);
     if (endpoint === 'get') expect(data<Approval>(res).id).toBe(approvalId);
   });

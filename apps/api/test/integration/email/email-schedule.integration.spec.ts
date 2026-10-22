@@ -12,6 +12,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { AppModule } from '../../../src/app.module';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { EmailScheduleService } from '../../../src/email/schedule/email-schedule.service';
+import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -101,6 +102,15 @@ describeIntegration('EmailScheduleService (PG) (S4b US-001)', () => {
     await prisma.$executeRawUnsafe(`DELETE FROM "EmailSchedule"`);
   });
 
+  it('fixtures grant through bindings only', async () => {
+    // The only principal this file creates is the AC6 case's own user, which the design's
+    // setup-versus-single-test rule keeps out of the setup sentinel; what the sentinel can check
+    // here is that the fixture left no legacy grant row behind.
+    await expectBindingOnlyFixtures(prisma, []);
+    expect(await prisma.projectMember.count()).toBe(0);
+    expect(await prisma.agentRoleEntry.count()).toBe(0);
+  });
+
   it('US-001 AC1: two concurrent claimDue(now, 20) calls over 30 due rows never return a shared id', async () => {
     for (let i = 0; i < 30; i++) await seed({ toEmail: `u${i}@x.io` });
     const [a, b] = await Promise.all([service.claimDue(min(1), 20), service.claimDue(min(1), 20)]);
@@ -140,6 +150,10 @@ describeIntegration('EmailScheduleService (PG) (S4b US-001)', () => {
 
   it('US-001 AC6: scheduleNotifications called twice with one notificationId leaves exactly one row', async () => {
     const user = await prisma.user.create({ data: { email: `sched-${randomUUID()}@k.t`, passwordHash: 'x' } });
+    // Permissions P1 US-004: the principal this case creates is granted through bindings only — the
+    // member baseline production writes for every user it creates. It is a single-test-local
+    // principal, so the setup sentinel above does not list it.
+    await grantBaseline(prisma, { type: 'USER', id: user.id });
     const notification = await prisma.notification.create({
       data: {
         userId: user.id, category: 'ASSIGNED', kind: 'ticket_assigned', title: 't', link: '/x',

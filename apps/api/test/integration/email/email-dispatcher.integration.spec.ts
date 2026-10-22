@@ -15,6 +15,7 @@ import { NotificationWriter } from '../../../src/notifications/notification-writ
 import { MeNotificationsService } from '../../../src/notifications/me-notifications.service';
 import type { NotificationDraft } from '../../../src/notifications/notification.types';
 import { PrismaClient } from '../../../src/generated/prisma/client';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -55,7 +56,13 @@ describeIntegration('EmailDispatcher end-to-end (PG) (S4b US-002)', () => {
     ids.b = (await prisma.user.create({ data: { email: ids.bEmail, name: 'B', passwordHash: 'x' } })).id;
     ids.actor = (await prisma.user.create({ data: { email: `actor-${unique}@k.t`, name: 'Actor', passwordHash: 'x' } })).id;
     ids.project = (await prisma.project.create({ data: { name: 'P', slug: `p-${unique}`, key: 'PP' } })).id;
-    await prisma.projectMember.create({ data: { projectId: ids.project, userId: ids.b, role: 'DEVELOPER' } });
+    // Permissions P1 US-004: the fixture principals are granted through bindings only — the member
+    // baseline every user production creates carries, plus the developer binding that replaces the
+    // legacy `ProjectMember` row. The recipient's eligibility reads those bindings through
+    // `principalIdsWithAccess`.
+    await grantBaseline(prisma, { type: 'USER', id: ids.b });
+    await grantBaseline(prisma, { type: 'USER', id: ids.actor });
+    await grantRole(prisma, { type: 'USER', id: ids.b }, 'developer', ids.project);
   });
 
   afterAll(async () => {
@@ -64,6 +71,13 @@ describeIntegration('EmailDispatcher end-to-end (PG) (S4b US-002)', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: ids.b },
+      { type: 'USER', id: ids.actor },
+    ]);
   });
 
   it('US-002 AC28: an assigned notification is scheduled at createdAt + EMAIL_DELAY_SEC and sent once to the member address', async () => {

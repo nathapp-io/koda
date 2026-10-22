@@ -5,9 +5,9 @@
  * holding nothing but `ticket.read` is refused with the `permissions` code.
  *
  * One booted application for the whole file. The first registration is the installation's Owner, so
- * the fixtures (users, project, repo, log bytes, bundle bytes, agent roster rows) are built as that
+ * the fixtures (users, project, repo, log bytes, bundle bytes, agent bindings) are built as that
  * Owner; every assertion below acts as a principal whose only source in `p1` is one role binding
- * (users) or one legacy `AgentProject` row (agents). No test asserts through a bypass.
+ * (users and agents). No test asserts through a bypass.
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/permissions/enforce-fleet-project-reads.integration.spec.ts
  */
@@ -20,6 +20,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -55,6 +56,8 @@ describeIntegration('fleet project read keys (US-004)', () => {
   let p1Id = '';
   let repoId = '';
   let counter = 0;
+  let rootId = '';
+  let rosterAgentId = '';
 
   const auth = (who: string) => ({ Authorization: `Bearer ${tokens[who]}` });
   const asRoot = (method: 'get' | 'post' | 'patch' | 'delete', url: string, body?: Record<string, unknown>) => {
@@ -89,13 +92,15 @@ describeIntegration('fleet project read keys (US-004)', () => {
       { type: 'SYSTEM', id: 'test' },
     );
 
-  /** A rostered agent with no `AgentRoleEntry`: its only key source in p1 is the roster row. */
+  /** A rostered agent with no agent role: its only key source in p1 is the `viewer` binding. */
   const createRosterAgent = async (slug: string): Promise<string> => {
     const created = await asRoot('post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
-    await db.agentProject.create({ data: { agentId: body.agent.id, projectId: p1Id } });
+    const agent = { type: 'AGENT' as const, id: body.agent.id };
+    await grantBaseline(db, agent);
+    await grantRole(db, agent, 'viewer', p1Id);
     tokens[slug] = body.apiKey;
-    // The roster row is written after the principal could have been cached by an earlier check.
+    // The binding is written after the principal could have been cached by an earlier check.
     await membership.invalidatePermissions();
     return body.agent.id;
   };
@@ -155,7 +160,7 @@ describeIntegration('fleet project read keys (US-004)', () => {
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD })
       .expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
-    const rootId = (await db.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
+    rootId = (await db.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
 
     for (const who of ['viewer', 'other', 'custom']) await createUser(who);
 
@@ -180,7 +185,7 @@ describeIntegration('fleet project read keys (US-004)', () => {
     });
     await bind('custom', 'ticket-reader');
 
-    await createRosterAgent('p1-roster-agent');
+    rosterAgentId = await createRosterAgent('p1-roster-agent');
   }, BOOT_TIMEOUT);
 
   afterAll(async () => {
@@ -188,6 +193,20 @@ describeIntegration('fleet project read keys (US-004)', () => {
     if (savedArtifactDir === undefined) delete process.env.FLEET_ARTIFACT_DIR;
     else process.env.FLEET_ARTIFACT_DIR = savedArtifactDir;
     if (artifactDir !== '') rmSync(artifactDir, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every fixture principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(db, [
+      { type: 'USER', id: rootId },
+      { type: 'USER', id: userIds.viewer },
+      { type: 'USER', id: userIds.other },
+      { type: 'USER', id: userIds.custom },
+      { type: 'AGENT', id: rosterAgentId },
+    ]);
   });
 
   // -------------------------------------------------------------------------

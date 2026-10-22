@@ -2,60 +2,21 @@
  * E2E test database seed.
  * WIPES all test data, then creates a fresh admin user for Playwright E2E tests.
  *
+ * The seed body lives in `prisma/seed-e2e-data.ts` (`seedE2e`), so it can be imported and asserted
+ * on without running a script; this file is the runner that owns the client and the messages.
+ *
  * Run via: bun run seed:e2e (DATABASE_URL=file:./prisma/koda-e2e.db)
  */
 import { PrismaClient } from '../src/generated/prisma/client';
 import { createPgAdapter } from '../src/prisma/pg-adapter';
-import * as bcrypt from 'bcrypt';
+import { seedE2e } from './seed-e2e-data';
 
 const prisma = new PrismaClient({ adapter: createPgAdapter(process.env.DATABASE_URL ?? '') });
 
 async function main() {
   console.log('🌱 Seeding E2E test database...');
 
-  // Wipe all test data so hardcoded keys/slugs do not conflict across runs.
-  // Order: deepest relations first to satisfy FK constraints.
-  // Fleet first: jobs reference projects, repos and runners (events, commands, artifacts cascade).
-  await prisma.fleetJob.deleteMany();
-  await prisma.fleetRepo.deleteMany();
-  await prisma.runner.deleteMany();
-  await prisma.runnerEnrollment.deleteMany();
-  await prisma.fleetActivity.deleteMany();
-  await prisma.ticketActivity.deleteMany();
-  await prisma.comment.deleteMany();
-  await prisma.ticketLabel.deleteMany();
-  await prisma.ticket.deleteMany();
-  await prisma.label.deleteMany();
-  await prisma.agentRoleEntry.deleteMany();
-  await prisma.agentCapabilityEntry.deleteMany();
-  await prisma.webhook.deleteMany();
-  await prisma.project.deleteMany();
-  await prisma.agent.deleteMany();
-  await prisma.user.deleteMany();
-
-  const passwordHash = await bcrypt.hash('E2ePassword1!', 12);
-
-  const admin = await prisma.user.create({
-    data: {
-      email: 'admin@koda-e2e.test',
-      name: 'E2E Admin',
-      passwordHash,
-      role: 'ADMIN',
-    },
-  });
-
-  // Fleet slice 4c (D138): registering a repo needs a live forge (GitHub App or GitLab token),
-  // which e2e has not got, so the fleet project and its repo are seeded directly.
-  const fleetProject = await prisma.project.create({
-    data: { name: 'E2E Fleet', slug: 'fleet-e2e', key: 'FLTE' },
-  });
-  await prisma.projectMember.create({ data: { projectId: fleetProject.id, userId: admin.id, role: 'ADMIN' } });
-  await prisma.fleetRepo.create({
-    data: {
-      projectId: fleetProject.id, provider: 'github', owner: 'acme', name: 'e2e-app', defaultBranch: 'main',
-      githubInstallationId: BigInt(1), createdById: admin.id,
-    },
-  });
+  await seedE2e(prisma);
 
   console.log('✅ E2E seed complete — admin@koda-e2e.test / E2ePassword1!');
 }

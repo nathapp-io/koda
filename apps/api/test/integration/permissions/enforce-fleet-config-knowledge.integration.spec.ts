@@ -3,10 +3,9 @@
  * decide with catalog keys, over real HTTP + Postgres (AC-1 .. AC-14).
  *
  * One booted application for the whole file. The first registration is the installation's Owner, so
- * the fixtures (users, project, repo, knowledge patterns, agent roster rows) are built as that Owner;
+ * the fixtures (users, project, repo, knowledge patterns, agent bindings) are built as that Owner;
  * every assertion below acts as a principal whose only source in `p1` is one role binding (users) or
- * one legacy `AgentProject` row with (or without) an `AgentRoleEntry` (agents). No test asserts
- * through a bypass.
+ * a `viewer` binding with (or without) a role binding (agents). No test asserts through a bypass.
  *
  * The forge is not part of what this story decides: the `FLEET_REPO_FILES_READER` the app resolved is
  * spied on, so the handler's own repo-ownership lookup and validation still run, and only the HTTP
@@ -25,6 +24,7 @@ import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { KnowledgeIndexQueue } from '../../../src/fleet/knowledge/knowledge-index.queue';
 import { FLEET_REPO_FILES_READER, type FleetRepoFilesReader } from '../../../src/fleet/repo-config/fleet-repo-files.reader';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -39,6 +39,14 @@ const BASE_SHA = 'b'.repeat(40);
 
 const readI18n = (file: string): Record<string, string> =>
   JSON.parse(readFileSync(join(__dirname, `../../../src/i18n/en/${file}.json`), 'utf8')) as Record<string, string>;
+
+/** The role key an agent's legacy `AgentRoleEntry` role is read as (the union's own mapping). */
+const ROLE_KEY_FOR_AGENT_ROLE: Record<'DEVELOPER' | 'REVIEWER' | 'VERIFIER' | 'TRIAGER', string> = {
+  DEVELOPER: 'developer',
+  REVIEWER: 'reviewer',
+  VERIFIER: 'verifier',
+  TRIAGER: 'triager',
+};
 
 /** `permissions.40003`, the sentence every refused key carries. */
 const PERMISSIONS_REFUSED = readI18n('permissions')['40003'];
@@ -65,7 +73,9 @@ describeIntegration('repo config and fleet knowledge route keys (US-007)', () =>
   let p1Id = '';
   let repoId = '';
   let counter = 0;
+  let rootId = '';
   let developerAgentId = '';
+  const agentIds: string[] = [];
 
   const auth = (who: string) => ({ Authorization: `Bearer ${tokens[who]}` });
   /** The fleet config the booted app's controllers read, so a case can turn indexing on and put it back. */
@@ -106,14 +116,16 @@ describeIntegration('repo config and fleet knowledge route keys (US-007)', () =>
       { type: 'SYSTEM', id: 'test' },
     );
 
-  /** A rostered agent whose only key source is the `AgentRoleEntry` rows given (none by default). */
-  const createAgent = async (slug: string, legacyRole?: 'DEVELOPER'): Promise<string> => {
+  /** A rostered agent whose only key source is the `viewer` binding plus the role binding given. */
+  const createAgent = async (slug: string, agentRole?: 'DEVELOPER'): Promise<string> => {
     const created = await asRoot('post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
-    await db.agentProject.create({ data: { agentId: body.agent.id, projectId: p1Id } });
-    if (legacyRole) await db.agentRoleEntry.create({ data: { agentId: body.agent.id, role: legacyRole } });
+    const agent = { type: 'AGENT' as const, id: body.agent.id };
+    await grantBaseline(db, agent);
+    await grantRole(db, agent, 'viewer', p1Id);
+    if (agentRole) await grantRole(db, agent, ROLE_KEY_FOR_AGENT_ROLE[agentRole], p1Id);
     tokens[slug] = body.apiKey;
-    // The legacy rows are written after the principal could have been cached by an earlier check.
+    // The bindings are written after the principal could have been cached by an earlier check.
     await membership.invalidatePermissions();
     return body.agent.id;
   };
@@ -179,7 +191,7 @@ describeIntegration('repo config and fleet knowledge route keys (US-007)', () =>
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD })
       .expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
-    const rootId = (await db.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
+    rootId = (await db.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
 
     for (const who of ['viewer', 'developer', 'padmin', 'other', 'outsider', 'custom']) await createUser(who);
 
@@ -207,7 +219,8 @@ describeIntegration('repo config and fleet knowledge route keys (US-007)', () =>
     await bind('custom', 'ticket-reader');
 
     developerAgentId = await createAgent('p1-developer-agent', 'DEVELOPER');
-    await createAgent('p1-roster-agent');
+    agentIds.push(developerAgentId);
+    agentIds.push(await createAgent('p1-roster-agent'));
   }, BOOT_TIMEOUT);
 
   afterAll(async () => {
@@ -215,6 +228,23 @@ describeIntegration('repo config and fleet knowledge route keys (US-007)', () =>
     enqueueSpy?.mockRestore();
     vi.restoreAllMocks();
     if (enabledBefore !== undefined) fleetConfig().knowledgeIndexEnabled = enabledBefore;
+  });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every fixture principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(db, [
+      { type: 'USER', id: rootId },
+      { type: 'USER', id: userIds.viewer },
+      { type: 'USER', id: userIds.developer },
+      { type: 'USER', id: userIds.padmin },
+      { type: 'USER', id: userIds.other },
+      { type: 'USER', id: userIds.outsider },
+      { type: 'USER', id: userIds.custom },
+      ...agentIds.map((id) => ({ type: 'AGENT' as const, id })),
+    ]);
   });
 
   // -------------------------------------------------------------------------

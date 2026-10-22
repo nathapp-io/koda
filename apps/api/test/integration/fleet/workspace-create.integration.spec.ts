@@ -7,6 +7,7 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { FLEET_CFG, type IFleetConfig } from '../../../src/config/fleet.config';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 describeDb('workspace create HTTP', () => {
@@ -17,6 +18,8 @@ describeDb('workspace create HTTP', () => {
   const post = (body = {}, token = world.tokens.dev) => request(app.getHttpServer()).post('/api/threads').set('Authorization', `Bearer ${token}`).send({ title: 't', backend: { kind: 'native' }, ...body });
   const message = (res: request.Response, expected: string) => { expect(res.body.ret).not.toBe(0); expect(res.body.message).toBe(expected); };
   const invalidatePermissions = () => app.get(MembershipService).invalidatePermissions();
+  const dev = () => ({ type: 'USER' as const, id: world.ids.dev });
+  const root = () => ({ type: 'USER' as const, id: world.ids.root });
   beforeAll(async () => {
     await resetDb(); app = await bootHttpApp({ registrationEnabled: false });
     prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
@@ -27,13 +30,22 @@ describeDb('workspace create HTTP', () => {
     config.threadsEnabled = true;
     await prisma.project.update({ where: { id: world.projectId }, data: { createdAt: new Date(1000) } });
     await prisma.project.update({ where: { id: world.opsProjectId }, data: { createdAt: new Date(2000) } });
-    await prisma.projectMember.upsert({ where: { projectId_userId: { projectId: world.opsProjectId, userId: world.ids.dev } }, create: { projectId: world.opsProjectId, userId: world.ids.dev, role: 'DEVELOPER' }, update: { role: 'DEVELOPER' } });
-    await prisma.projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'DEVELOPER' } });
+    await grantRole(prisma, dev(), 'developer', world.opsProjectId);
+    await revokeProjectRoles(prisma, dev(), world.projectId);
+    await grantRole(prisma, dev(), 'developer', world.projectId);
     // Permissions P1 US-003: the home project's `thread.create` key decides occupancy, and the rows above
     // are written straight to the database, so the effective-key cache is dropped as a real write would.
     await invalidatePermissions();
   });
   afterAll(async () => { await app?.close(); });
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+    ]);
+  });
   it('AC-5: whitelist preserves refused fields', async () => { message(await post({ repoId: 'r1' }).expect(400), 'Invalid thread input: workspaceFields'); });
   it('AC-6/7: oldest eligible home and persisted workspace row', async () => {
     const thread = data<{ id: string; homeProject: { slug: string } }>(await post().expect(201));
@@ -47,15 +59,24 @@ describeDb('workspace create HTTP', () => {
     finally { await prisma.fleetRepo.create({ data: repo }); }
   });
   it('AC-9: skips a home whose thread.create key a VIEWER lacks', async () => {
-    await prisma.projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'VIEWER' } });
+    await revokeProjectRoles(prisma, dev(), world.projectId);
+    await grantRole(prisma, dev(), 'viewer', world.projectId);
     await invalidatePermissions();
     expect(data<{ homeProject: { slug: string } }>(await post().expect(201)).homeProject.slug).toBe('ops');
   });
   it('AC-10: admin default requires membership', async () => {
-    const members = await prisma.projectMember.findMany({ where: { userId: world.ids.root } });
-    await prisma.projectMember.deleteMany({ where: { userId: world.ids.root } });
+    // The admin's reach is not membership: with no project binding of its own, the default home is refused.
+    const bindings = await prisma.roleBinding.findMany({
+      where: { principalType: 'USER', principalId: root().id, projectId: { in: [world.projectId, world.opsProjectId] } },
+      include: { role: { select: { key: true } } },
+    });
+    await revokeProjectRoles(prisma, root(), world.projectId);
+    await revokeProjectRoles(prisma, root(), world.opsProjectId);
     try { message(await post({}, world.tokens.root).expect(409), 'This project has no repository, so a project thread cannot run'); }
-    finally { await prisma.projectMember.createMany({ data: members }); }
+    finally {
+      for (const binding of bindings) await grantRole(prisma, root(), binding.role.key, binding.projectId);
+      await invalidatePermissions();
+    }
   });
   it('AC-11: explicit VIEWER home is refused with the permissions code', async () => { message(await post({ homeProject: 'web' }, world.tokens.viewer).expect(403), 'You do not have permissions to perform this action'); });
   it('AC-12: explicit home without repo', async () => {

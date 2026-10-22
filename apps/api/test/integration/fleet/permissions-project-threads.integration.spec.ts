@@ -4,7 +4,7 @@
  * (AC-1 .. AC-13, AC-15 .. AC-17, over real HTTP and real Postgres).
  *
  * Every caller below has exactly one kind of source in `p1`: one PROJECT-scope binding (users, no
- * `ProjectMember` row anywhere) or one legacy `AgentProject` roster row plus a binding (agents). No test
+ * `ProjectMember` row anywhere) or the roster's viewer binding plus a binding (agents). No test
  * asserts through a bypass: the refusals are the routes' and the repository's own.
  *
  * Run: cd apps/api && bun run test:db:up &&
@@ -18,6 +18,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { FLEET_CFG, type IFleetConfig } from '../../../src/config/fleet.config';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { FLEET_CAPS } from '../../helpers/fleet-fixtures';
@@ -89,12 +90,13 @@ describeIntegration('project thread keys and ownership (US-002)', () => {
     await bind({ type: 'USER', id: ids[who] }, roleKey);
   };
 
-  /** An agent whose only source in p1 is one binding: a roster row plus that binding, and no agent role. */
+  /** An agent whose only source in p1 is one binding: the viewer reach plus that binding, and no agent role. */
   const createAgent = async (slug: string, roleKey: string): Promise<string> => {
     const created = await as('root', 'post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
     tokens[slug] = body.apiKey;
-    await prisma.agentProject.create({ data: { agentId: body.agent.id, projectId: p1Id } });
+    await grantBaseline(prisma, { type: 'AGENT', id: body.agent.id });
+    await grantRole(prisma, { type: 'AGENT', id: body.agent.id }, 'viewer', p1Id);
     await bind({ type: 'AGENT', id: body.agent.id }, roleKey);
     // The rows are written after a principal could have been cached by an earlier check.
     await membership.invalidatePermissions();
@@ -166,6 +168,21 @@ describeIntegration('project thread keys and ownership (US-002)', () => {
   }, BOOT_TIMEOUT);
 
   afterAll(async () => { await app?.close(); });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: ids.root },
+      { type: 'USER', id: ids.other },
+      { type: 'USER', id: ids.devBind },
+      { type: 'USER', id: ids.viewerBind },
+      { type: 'USER', id: ids.adminBind },
+      { type: 'AGENT', id: ids.agent },
+    ]);
+  });
 
   // -------------------------------------------------------------------------
   // AC-1 / AC-2 / AC-3 — thread.create

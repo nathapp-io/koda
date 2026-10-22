@@ -5,8 +5,9 @@
  * Every tool call below enters a real route: the thread tools through
  * `POST /fleet/runner/jobs/:jobId/tools/:name?leaseEpoch=1` with the real key of the runner that holds the job, and
  * the MCP tools through `POST /api/mcp`. Each caller has exactly one kind of source in project `p1` — one
- * PROJECT-scope binding (users, no `ProjectMember` row anywhere), one binding plus its legacy `AgentProject` roster
- * row (agents), or a roster row with no role entry at all (AC-12) — so no refusal below is decided by a fixture.
+ * PROJECT-scope binding (users, no `ProjectMember` row anywhere), one binding plus the roster's viewer
+ * binding (agents), or the roster's viewer binding with no role binding at all (AC-12) — so no refusal below is
+ * decided by a fixture.
  *
  * The thread jobs are RUNNING and their runner is offline (a `lastSeenAt` no placement window accepts), so a
  * dispatched job stays QUEUED for AC-6 and AC-14 to read.
@@ -19,6 +20,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { enrollRunner } from '../../helpers/fleet-fixtures';
@@ -94,14 +96,15 @@ describeIntegration('assistant tools check their key (US-004)', () => {
 
   /**
    * An agent with no agent role of its own. `role` is the binding that is its only permission source in `p1`, and
-   * `roster` also gives it the legacy `AgentProject` row (an agent whose only source is a binding needs none).
+   * `roster` also gives it the viewer reach of the roster (a binding in the project).
    */
   const createAgent = async (who: string, opts: { role?: string; roster?: boolean; projectId?: string } = {}): Promise<void> => {
     const created = await as('root', 'post', '/api/agents', { name: who, slug: who }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
     ids[who] = body.agent.id;
     agentKeys[who] = body.apiKey;
-    if (opts.roster) await prisma.agentProject.create({ data: { agentId: body.agent.id, projectId: opts.projectId ?? p1Id } });
+    await grantBaseline(prisma, { type: 'AGENT', id: body.agent.id });
+    if (opts.roster) await grantRole(prisma, { type: 'AGENT', id: body.agent.id }, 'viewer', opts.projectId ?? p1Id);
     if (opts.role) await bind({ type: 'AGENT', id: body.agent.id }, opts.role, opts.projectId ?? p1Id);
   };
 
@@ -168,6 +171,7 @@ describeIntegration('assistant tools check their key (US-004)', () => {
     const root = await request(server).post('/api/auth/register')
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
+    ids.root = (await prisma.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
 
     p1Id = data<{ id: string }>(await as('root', 'post', '/api/projects', { name: 'P1', slug: P1_SLUG, key: P1_KEY }).expect(201)).id;
     p2Id = data<{ id: string }>(await as('root', 'post', '/api/projects', { name: 'P2', slug: P2_SLUG, key: P2_KEY }).expect(201)).id;
@@ -204,16 +208,16 @@ describeIntegration('assistant tools check their key (US-004)', () => {
     await createUserWithBinding('noComment', NO_COMMENT_ROLE);
     await createUserWithBinding('updater', UPDATER_ROLE);
 
-    // AC-9: an agent whose only source in p1 is a viewer binding (and its roster row).
+    // AC-9: an agent whose only source in p1 is a viewer binding (and the roster's viewer binding).
     await createAgent('p1-viewer-agent', { role: 'viewer', roster: true });
-    // AC-10 and AC-14: an agent whose only source in p1 is a developer binding (and its roster row).
+    // AC-10 and AC-14: an agent whose only source in p1 is a developer binding (and the roster's viewer binding).
     await createAgent('p1-dev-agent', { role: 'developer', roster: true });
     // AC-5: a viewer binding in p1 and a developer binding in p2, so US-005 keeps listing the tool for it.
     await createAgent('p1-mcp-viewer-agent', { role: 'viewer', roster: true });
     await bind({ type: 'AGENT', id: ids['p1-mcp-viewer-agent'] }, 'developer', p2Id);
     // AC-6: a developer binding in p1, and nothing else.
     await createAgent('p1-mcp-dev-agent', { role: 'developer', roster: true });
-    // AC-12: a roster row with no role entry and no binding at all.
+    // AC-12: the roster's viewer binding with no role binding at all.
     await createAgent('p1-roster-agent', { roster: true });
 
     // The rows were written after a principal could have been cached by an earlier check.
@@ -229,6 +233,20 @@ describeIntegration('assistant tools check their key (US-004)', () => {
         else process.env[key] = saved[key];
       }
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    const users = ['viewerBind', 'devBind', 'demoted', 'noComment', 'updater'];
+    const agents = ['p1-viewer-agent', 'p1-dev-agent', 'p1-mcp-viewer-agent', 'p1-mcp-dev-agent', 'p1-roster-agent'];
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: ids.root },
+      ...users.map((who) => ({ type: 'USER' as const, id: ids[who] })),
+      ...agents.map((who) => ({ type: 'AGENT' as const, id: ids[who] })),
+    ]);
   });
 
   // -------------------------------------------------------------------------

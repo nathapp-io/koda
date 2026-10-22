@@ -11,6 +11,7 @@ import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { SchedulesService } from '../../../src/fleet/schedules/schedules.service';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -29,6 +30,7 @@ describeIntegration('fleet schedules API (PG)', () => {
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
   let dev2: string;
+  let dev2Id: string;
   let n = 0;
   const as = (token: string) => ({ Authorization: `Bearer ${token}` });
   const tok = (who: keyof FleetHttpWorld['tokens']) => as(world.tokens[who]);
@@ -49,6 +51,7 @@ describeIntegration('fleet schedules API (PG)', () => {
     await request(server).post('/api/admin/users').set(tok('root')).send({ email: 'dev2@koda.test', name: 'dev2', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
     await request(server).post('/api/projects/web/members').set(tok('root')).send({ email: 'dev2@koda.test', role: 'DEVELOPER' }).expect(201);
     dev2 = await loginToken(server, 'dev2@koda.test');
+    dev2Id = (await prisma.user.findUniqueOrThrow({ where: { email: 'dev2@koda.test' } })).id;
   });
   afterAll(async () => {
     await app.close();
@@ -57,6 +60,16 @@ describeIntegration('fleet schedules API (PG)', () => {
     await prisma.fleetJob.deleteMany();
     await prisma.jobSchedule.deleteMany();
     await prisma.fleetActivity.deleteMany();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+      { type: 'USER', id: dev2Id },
+    ]);
   });
 
   it('a developer creates a schedule: normalised template, repo default branch, next fire in the future, owner recorded', async () => {
@@ -127,6 +140,7 @@ describeIntegration('fleet schedules API (PG)', () => {
 
   it('enable is refused with 409 when the owner can no longer dispatch, and enabling a healthy schedule still works (plan D211, US-005)', async () => {
     const lost = await prisma.user.create({ data: { email: 'lost@koda.test', passwordHash: 'x', role: 'MEMBER' } });
+    await grantBaseline(prisma, { type: 'USER', id: lost.id });
     const off = await prisma.jobSchedule.create({
       data: {
         projectId: world.projectId, repoId: world.repoId, name: 'orphaned', cron: '0 9 * * *', timezone: 'UTC', feature: `own${++n}`, ref: 'trunk',
@@ -138,10 +152,10 @@ describeIntegration('fleet schedules API (PG)', () => {
     expect(res.body.message).toContain('owner');
     expect(await prisma.jobSchedule.findUniqueOrThrow({ where: { id: off.id } })).toEqual(expect.objectContaining({ enabled: false, disabledReason: 'owner_lost_access' }));
     await prisma.user.update({ where: { id: lost.id }, data: { disabled: true } });
-    await prisma.projectMember.create({ data: { projectId: world.projectId, userId: lost.id, role: 'DEVELOPER' } });
+    await grantRole(prisma, { type: 'USER', id: lost.id }, 'developer', world.projectId);
     await request(server).post(`${BASE}/${off.id}/enable`).set(tok('root')).expect(409);
     await prisma.user.update({ where: { id: lost.id }, data: { disabled: false } });
-    // US-005: the dispatch permission is the owner's effective keys, so the DEVELOPER row must be visible
+    // US-005: the dispatch permission is the owner's effective keys, so the developer binding must be visible
     // to them. Written directly above (not through `MembershipService`, which invalidates on its own), it
     // leaves the cached key set stale until this invalidation.
     await app.get(MembershipService).invalidatePermissions();

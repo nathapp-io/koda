@@ -11,6 +11,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
+import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const HEX_32 = /^[0-9a-f]{32}$/;
@@ -22,6 +23,7 @@ describeIntegration('VCS webhook secret (M9)', () => {
   let server: Parameters<typeof request>[0];
   let prisma: PrismaClient;
   const tokens: Record<string, string> = {};
+  const ids: Record<string, string> = {};
   let createdSecret: string;
   const previousKey = process.env.VCS_ENCRYPTION_KEY;
   const previousScoping = process.env.AGENT_PROJECT_SCOPING;
@@ -39,11 +41,13 @@ describeIntegration('VCS webhook secret (M9)', () => {
     const root = await request(server).post('/api/auth/register')
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
+    ids.root = (await prisma.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
 
     for (const who of ['padmin', 'pdev', 'pviewer', 'outsider']) {
       await request(server).post('/api/admin/users').set(auth('root'))
         .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
       tokens[who] = await loginToken(server, `${who}@koda.test`);
+      ids[who] = (await prisma.user.findUniqueOrThrow({ where: { email: `${who}@koda.test` } })).id;
     }
     await request(server).post('/api/projects').set(auth('root')).send({ name: 'Hooks', slug: 'hooks', key: 'HOOK' }).expect(201);
     for (const [who, role] of [['padmin', 'ADMIN'], ['pdev', 'DEVELOPER'], ['pviewer', 'VIEWER']]) {
@@ -51,8 +55,9 @@ describeIntegration('VCS webhook secret (M9)', () => {
         .send({ email: `${who}@koda.test`, role }).expect(201);
     }
     const agent = await request(server).post('/api/agents').set(auth('root'))
-      .send({ name: 'Hook Agent', slug: 'hook-agent', roles: ['DEVELOPER'] }).expect(201);
+      .send({ name: 'Hook Agent', slug: 'hook-agent', roles: [] }).expect(201);
     tokens.agent = data<{ apiKey: string }>(agent).apiKey;
+    ids.agent = (await prisma.agent.findUniqueOrThrow({ where: { slug: 'hook-agent' } })).id;
 
     const project = await prisma.project.findUniqueOrThrow({ where: { slug: 'hooks' } });
     const grantor = await prisma.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } });
@@ -67,6 +72,7 @@ describeIntegration('VCS webhook secret (M9)', () => {
       const agent = data<{ apiKey: string }>(response);
       tokens[who] = agent.apiKey;
       const agentRow = await prisma.agent.findUniqueOrThrow({ where: { slug: who } });
+      ids[who] = agentRow.id;
       await prisma.roleBinding.deleteMany({ where: { principalType: 'AGENT', principalId: agentRow.id } });
       expect(await prisma.agentProject.count({ where: { agentId: agentRow.id } })).toBe(0);
       expect(await prisma.agentRoleEntry.count({ where: { agentId: agentRow.id } })).toBe(0);
@@ -98,6 +104,34 @@ describeIntegration('VCS webhook secret (M9)', () => {
 
   const storedSecret = async () =>
     (await prisma.vcsConnection.findFirstOrThrow({ where: { project: { slug: 'hooks' } } })).webhookSecret;
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(
+      prisma,
+      [
+        { type: 'USER', id: ids.root },
+        { type: 'USER', id: ids.padmin },
+        { type: 'USER', id: ids.pdev },
+        { type: 'USER', id: ids.pviewer },
+        { type: 'USER', id: ids.outsider },
+        { type: 'AGENT', id: ids.agent },
+        { type: 'AGENT', id: ids['binding-admin-agent'] },
+        { type: 'AGENT', id: ids['binding-developer-agent'] },
+      ],
+      // The two binding agents hold exactly one project binding each — their baseline binding is
+      // deleted on purpose, so they are the principals with no global binding.
+      {
+        noBaseline: [
+          { type: 'AGENT', id: ids['binding-admin-agent'] },
+          { type: 'AGENT', id: ids['binding-developer-agent'] },
+        ],
+      },
+    );
+
+    // The hook agent holds no legacy role: its `roles` are empty, so production wrote no
+    // `AgentRoleEntry` row for it.
+    expect(await prisma.agentRoleEntry.count({ where: { agentId: ids.agent } })).toBe(0);
+  });
 
   it('create returned the stored secret', async () => {
     expect(createdSecret).toMatch(HEX_32);

@@ -35,6 +35,7 @@ import type {
 } from '../../../src/auth/principal/koda-principal.types';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -120,6 +121,9 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     const id = data<{ id: string }>(created).id;
     ids[who] = id;
     tokens[who] = await loginToken(server, `${who}@koda.test`);
+    // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
+    // baseline production writes for every user it creates.
+    await grantBaseline(prisma, { type: 'USER', id });
     return id;
   };
 
@@ -173,6 +177,9 @@ describeIntegration('US-002 project membership gate (PG)', () => {
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
     rootUserId = (await prisma.user.findUnique({ where: { email: 'root@koda.test' } }))?.id ?? '';
+    // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
+    // baseline production writes for every user it creates.
+    await grantBaseline(prisma, { type: 'USER', id: rootUserId });
 
     // dev/outside/author/multi are plain users; adminMember carries the global
     // role the project CASL factory needs for Ticket/Label writes.
@@ -236,20 +243,23 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     otherCommentBaseline = 'comment in another project';
 
     const createdAgent = await request(server).post('/api/agents').set(auth('root'))
-      .send({ name: 'Team Bot', slug: 'team-bot', roles: ['DEVELOPER'] }).expect(201);
+      .send({ name: 'Team Bot', slug: 'team-bot', roles: [] }).expect(201);
     const agentPayload = data<{ apiKey: string; agent: { id: string; slug: string } }>(createdAgent);
     agent.id = agentPayload.agent.id;
     agent.slug = agentPayload.agent.slug;
     agent.apiKey = agentPayload.apiKey;
-    // S4c US-001: the agent's project reach comes from AgentProject roster rows,
-    // not from ticket assignments.
+    // Permissions P1 US-004: the agent's project reach comes from role bindings, not from ticket
+    // assignments: the viewer reach of the roster row plus the developer role its legacy
+    // `AgentRoleEntry` stood for, in each rostered project and nowhere else.
     const rosterProjects = await prisma.project.findMany({
       where: { slug: { in: ['team', 'other'] } },
       select: { id: true },
     });
-    await prisma.agentProject.createMany({
-      data: rosterProjects.map((project) => ({ projectId: project.id, agentId: agent.id })),
-    });
+    await grantBaseline(prisma, { type: 'AGENT', id: agent.id });
+    for (const project of rosterProjects) {
+      await grantRole(prisma, { type: 'AGENT', id: agent.id }, 'viewer', project.id);
+      await grantRole(prisma, { type: 'AGENT', id: agent.id }, 'developer', project.id);
+    }
     // Assigned so `AgentsService.findByProject('team')` lists it for the
     // PATCH /projects/:slug/agents/:agentSlug route.
     await request(server).post(`/api/projects/team/tickets/${refs.agent}/assign`).set(auth('root'))
@@ -261,6 +271,18 @@ describeIntegration('US-002 project membership gate (PG)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: rootUserId },
+      { type: 'USER', id: ids.dev },
+      { type: 'USER', id: ids.outside },
+      { type: 'USER', id: ids.author },
+      { type: 'USER', id: ids.multi },
+      { type: 'USER', id: ids.adminMember },
+      { type: 'AGENT', id: agent.id },
+    ]);
   });
 
   // -------------------------------------------------------------------------

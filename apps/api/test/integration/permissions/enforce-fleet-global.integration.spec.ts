@@ -5,7 +5,7 @@
  *
  * Every caller below has exactly one kind of source: one GLOBAL-scope binding (the agent that reads
  * the runner list as a global admin), one PROJECT-scope binding (the users and the agent's roles), or
- * one legacy `AgentProject` roster row (the agent that only reads p1). `plain` has no source at all.
+ * one `viewer` binding (the agent that only reads p1). `plain` has no source at all.
  * No test asserts through a bypass: the refusals are the routes' and the filter is the controller's.
  *
  * The application boots with `FLEET_TEST_HOOKS=true`, because AC-13 fires a schedule through the
@@ -21,6 +21,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -41,6 +42,14 @@ const PERMISSIONS_REFUSED = readI18n('permissions')['40003'] as string;
 
 interface ActivityItem { id: string; action: string; actorType: string; actorId: string; projectId: string | null }
 interface RunnerItem { id: string; enabled: boolean }
+
+/** The role key an agent's legacy `AgentRoleEntry` role is read as (the union's own mapping). */
+const ROLE_KEY_FOR_AGENT_ROLE: Record<'DEVELOPER' | 'REVIEWER' | 'VERIFIER' | 'TRIAGER', string> = {
+  DEVELOPER: 'developer',
+  REVIEWER: 'reviewer',
+  VERIFIER: 'verifier',
+  TRIAGER: 'triager',
+};
 
 describeIntegration('global fleet route keys and the key-filtered activity feed (US-008)', () => {
   let app: NathApplication;
@@ -90,14 +99,16 @@ describeIntegration('global fleet route keys and the key-filtered activity feed 
     projectId: string | null,
   ): Promise<unknown> => membership.createBinding({ principal, roleKey, projectId }, { type: 'SYSTEM', id: 'test' });
 
-  /** A rostered agent: its only key source in p1 is the roster row plus the `AgentRoleEntry` roles given. */
-  const createAgent = async (slug: string, legacyRole?: 'DEVELOPER'): Promise<string> => {
+  /** A rostered agent: its only key source in p1 is the `viewer` binding plus the role binding given. */
+  const createAgent = async (slug: string, agentRole?: 'DEVELOPER'): Promise<string> => {
     const created = await asRoot('post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
-    await prisma.agentProject.create({ data: { agentId: body.agent.id, projectId: p1Id } });
-    if (legacyRole) await prisma.agentRoleEntry.create({ data: { agentId: body.agent.id, role: legacyRole } });
+    const agent = { type: 'AGENT' as const, id: body.agent.id };
+    await grantBaseline(prisma, agent);
+    await grantRole(prisma, agent, 'viewer', p1Id);
+    if (agentRole) await grantRole(prisma, agent, ROLE_KEY_FOR_AGENT_ROLE[agentRole], p1Id);
     tokens[slug] = body.apiKey;
-    // The legacy rows are written after the principal could have been cached by an earlier check.
+    // The bindings are written after the principal could have been cached by an earlier check.
     await membership.invalidatePermissions();
     return body.agent.id;
   };
@@ -193,6 +204,22 @@ describeIntegration('global fleet route keys and the key-filtered activity feed 
     await prisma.fleetCommand.deleteMany();
     await prisma.jobSchedule.deleteMany();
     await prisma.fleetActivity.deleteMany();
+  });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every fixture principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: ids.root },
+      { type: 'USER', id: ids.plain },
+      { type: 'USER', id: ids.projectAdmin },
+      { type: 'USER', id: ids.devBind },
+      { type: 'AGENT', id: ids.rosterAgent },
+      { type: 'AGENT', id: ids.devAgent },
+      { type: 'AGENT', id: ids.globalAdminAgent },
+    ]);
   });
 
   // -------------------------------------------------------------------------

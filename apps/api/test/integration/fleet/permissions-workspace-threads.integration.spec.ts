@@ -4,7 +4,7 @@
  * over real HTTP and real Postgres).
  *
  * Every caller below has exactly one kind of source in `p1`: one PROJECT-scope binding (users, no
- * `ProjectMember` row anywhere) or one legacy `AgentProject` roster row plus a binding (agents). The
+ * `ProjectMember` row anywhere) or the roster's viewer binding plus a binding (agents). The
  * workspace routes carry no project slug, so the six workspace keys are decided by `RequiresGuard`
  * against the caller's global keys, and the four `S` routes (`PATCH`, `stop`, `end-session`,
  * `answer`) are decided by `WorkspaceThreadsService` in the thread's home project, on the thread's
@@ -22,6 +22,7 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { FLEET_CFG, type IFleetConfig } from '../../../src/config/fleet.config';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import type { PrincipalRef } from '../../../src/permissions/permissions.types';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { FLEET_CAPS } from '../../helpers/fleet-fixtures';
@@ -95,13 +96,14 @@ describeIntegration('workspace thread keys and hosting (US-003)', () => {
   const bind = (principal: PrincipalRef, roleKey: string, projectId: string | null): Promise<unknown> =>
     membership.createBinding({ principal, roleKey, projectId }, { type: 'SYSTEM', id: 'test' });
 
-  /** An agent with a real API key, its roster rows and its bindings; no legacy `AgentRoleEntry`. */
+  /** An agent with a real API key, its project bindings and its baseline; no legacy `AgentRoleEntry`. */
   const createAgent = async (slug: string, roster: string[], bindings: Array<{ roleKey: string; projectId: string | null }>): Promise<string> => {
     resetThrottle(app);
     const created = await as('root', 'post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
     tokens[slug] = body.apiKey;
-    await prisma.agentProject.createMany({ data: roster.map((projectId) => ({ agentId: body.agent.id, projectId })) });
+    await grantBaseline(prisma, { type: 'AGENT', id: body.agent.id });
+    for (const projectId of roster) await grantRole(prisma, { type: 'AGENT', id: body.agent.id }, 'viewer', projectId);
     for (const binding of bindings) await bind({ type: 'AGENT', id: body.agent.id }, binding.roleKey, binding.projectId);
     // The rows are written after a principal could have been cached by an earlier check.
     await membership.invalidatePermissions();
@@ -209,6 +211,22 @@ describeIntegration('workspace thread keys and hosting (US-003)', () => {
 
   const createBody = (homeProject?: string) => ({
     title: 'Workspace', backend: { kind: 'native', model: 'm1' }, ...(homeProject === undefined ? {} : { homeProject }),
+  });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: ids.root },
+      { type: 'USER', id: ids.devBind },
+      { type: 'USER', id: ids.viewerBind },
+      { type: 'USER', id: ids.viewerCreator },
+      { type: 'AGENT', id: ids.plainAgent },
+      { type: 'AGENT', id: ids.hostAgent },
+      { type: 'AGENT', id: ids.homeAgent },
+    ]);
   });
 
   // -------------------------------------------------------------------------

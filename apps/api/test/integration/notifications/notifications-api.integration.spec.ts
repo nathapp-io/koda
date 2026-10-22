@@ -12,6 +12,7 @@ import { TicketNotificationSubscriber } from '../../../src/notifications/ticket-
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 import { openSse, SseConnection } from '../../helpers/sse-client';
+import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -54,6 +55,9 @@ describeIntegration('notifications API (PG)', () => {
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
     ids.root = (await prisma.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
+    // Permissions P1 US-004: the fixture principals are granted through bindings only — the member
+    // baseline production writes for every user it creates.
+    await grantBaseline(prisma, { type: 'USER', id: ids.root });
     await request(server).post('/api/projects').set(auth('root')).send({ name: 'Notif', slug: 'notif', key: 'NTF' }).expect(201);
 
     for (const who of ['dev', 'watcher', 'outsider']) {
@@ -61,14 +65,17 @@ describeIntegration('notifications API (PG)', () => {
         .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
       ids[who] = data<{ id: string }>(res).id;
       tokens[who] = await loginToken(server, `${who}@koda.test`);
+      await grantBaseline(prisma, { type: 'USER', id: ids[who] });
     }
     for (const who of ['dev', 'watcher']) {
       await request(server).post('/api/projects/notif/members').set(auth('root'))
         .send({ email: `${who}@koda.test`, role: 'DEVELOPER' }).expect(201);
     }
     const agent = await request(server).post('/api/agents').set(auth('root'))
-      .send({ name: 'Notif Bot', slug: 'notif-bot', roles: ['DEVELOPER'] }).expect(201);
+      .send({ name: 'Notif Bot', slug: 'notif-bot', roles: [] }).expect(201);
     tokens.agent = data<{ apiKey: string }>(agent).apiKey;
+    ids.agent = (await prisma.agent.findUniqueOrThrow({ where: { slug: 'notif-bot' } })).id;
+    await grantBaseline(prisma, { type: 'AGENT', id: ids.agent });
 
     await request(server).post('/api/projects/notif/tickets').set(auth('root')).send({ type: 'BUG', title: 'First' }).expect(201);
     await drain();
@@ -81,6 +88,16 @@ describeIntegration('notifications API (PG)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: ids.root },
+      { type: 'USER', id: ids.dev },
+      { type: 'USER', id: ids.watcher },
+      { type: 'USER', id: ids.outsider },
+      { type: 'AGENT', id: ids.agent },
+    ]);
   });
 
   it('assignment notifies the assignee live, never the actor (criterion 1)', async () => {

@@ -10,6 +10,8 @@ import { PrismaChatThreadRepository } from '../../../src/fleet/threads/prisma-ch
 import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-job.repository';
 import { LiveStreamRegistry } from '../../../src/live/live-stream-registry';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
+import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 describeDb('thread scope isolation', () => {
@@ -30,8 +32,14 @@ describeDb('thread scope isolation', () => {
     world = await seedFleetHttpWorld(server(), prisma);
     app.get<IFleetConfig>(FLEET_CFG, { strict: false }).threadsEnabled = true;
     repo = app.get(PrismaChatThreadRepository, { strict: false });
-    await prisma.projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.dev } }, data: { role: 'ADMIN' } });
-    await prisma.projectMember.update({ where: { projectId_userId: { projectId: world.projectId, userId: world.ids.viewer } }, data: { role: 'ADMIN' } });
+    // Both principals are project admins in web: the setup replaces their world grants with the
+    // project-admin binding.
+    for (const userId of [world.ids.dev, world.ids.viewer]) {
+      const principal = { type: 'USER' as const, id: userId };
+      await revokeProjectRoles(prisma, principal, world.projectId);
+      await grantRole(prisma, principal, 'project-admin', world.projectId);
+    }
+    await app.get(MembershipService).invalidatePermissions();
     const seed = async (kind: string, createdById: string, at: number) => prisma.chatThread.create({ data: {
       projectId: world.projectId, kind, createdById, title: 'Scope fixture', backend: { kind: 'native', model: 'm1' }, skills: [], lastActivityAt: new Date(at),
     } });
@@ -40,6 +48,22 @@ describeDb('thread scope isolation', () => {
     await seed('WORKSPACE', world.ids.root, 4000);
   }, 60_000);
   afterAll(async () => { await app?.close(); });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+    ]);
+    // AC-8: the setup promoted dev and viewer to the project admin, one binding each.
+    const roleOf = async (userId: string) => (await prisma.roleBinding.findMany({
+      where: { principalType: 'USER', principalId: userId, projectId: world.projectId },
+      include: { role: { select: { key: true } } },
+    })).map((binding) => binding.role.key);
+    expect(await roleOf(world.ids.dev)).toEqual(['project-admin']);
+    expect(await roleOf(world.ids.viewer)).toEqual(['project-admin']);
+  });
 
   it('AC-1: project list excludes workspace rows', async () => {
     const ids = (await repo.list(projectScope(), undefined, 0, 20)).map(t => t.id);

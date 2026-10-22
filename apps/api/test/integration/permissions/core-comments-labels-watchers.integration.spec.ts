@@ -4,9 +4,9 @@
  * (AC-1 .. AC-17).
  *
  * One booted application for the whole file. The first registration is the installation's Owner, so
- * the fixtures (users, project, tickets, labels, agent roster rows) are built as that Owner; every
- * assertion below acts as a principal whose only source in `p1` is one role binding (users) or one
- * legacy `AgentProject` row (agents). No test asserts through a bypass.
+ * the fixtures (users, project, tickets, labels, agent bindings) are built as that Owner; every
+ * assertion below acts as a principal whose only source in `p1` is one role binding (users and
+ * agents). No test asserts through a bypass.
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/permissions/core-comments-labels-watchers.integration.spec.ts
  */
@@ -17,6 +17,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -56,6 +57,8 @@ describeIntegration('comment, label and watcher route keys (US-005)', () => {
   const userIds: Record<string, string> = {};
   let p1Id = '';
   let counter = 0;
+  let rootId = '';
+  let agentId = '';
 
   const auth = (who: string) => ({ Authorization: `Bearer ${tokens[who]}` });
   const asRoot = (method: 'get' | 'post' | 'patch' | 'delete', url: string, body?: Record<string, unknown>) => {
@@ -132,13 +135,15 @@ describeIntegration('comment, label and watcher route keys (US-005)', () => {
     return data<LabelDto[]>(res);
   };
 
-  /** A rostered agent: the roster row is its only source in p1 (no AgentRoleEntry). */
+  /** A rostered agent: a `viewer` binding in p1 is its only source there (no agent role). */
   const createAgent = async (slug: string): Promise<string> => {
     const created = await asRoot('post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
-    await db.agentProject.create({ data: { agentId: body.agent.id, projectId: p1Id } });
+    const agent = { type: 'AGENT' as const, id: body.agent.id };
+    await grantBaseline(db, agent);
+    await grantRole(db, agent, 'viewer', p1Id);
     tokens[slug] = body.apiKey;
-    // The legacy row is written after the principal could have been cached by an earlier check.
+    // The binding is written after the principal could have been cached by an earlier check.
     await membership.invalidatePermissions();
     return body.agent.id;
   };
@@ -155,6 +160,7 @@ describeIntegration('comment, label and watcher route keys (US-005)', () => {
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD })
       .expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
+    rootId = (await db.user.findUniqueOrThrow({ where: { email: 'root@koda.test' } })).id;
 
     for (const who of ['viewer', 'approver', 'developer', 'padmin', 'triager', 'reviewer', 'outsider']) {
       await createUser(who);
@@ -175,12 +181,30 @@ describeIntegration('comment, label and watcher route keys (US-005)', () => {
     await bind('reviewer', 'reviewer');
     // AC-8's caller keeps no source in p1 at all.
 
-    // AC-9 / AC-14: a roster row and no AgentRoleEntry.
-    await createAgent('p1-legacy-agent');
+    // AC-9 / AC-14: a viewer binding in p1 and no agent role.
+    agentId = await createAgent('p1-legacy-agent');
   }, BOOT_TIMEOUT);
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every fixture principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(db, [
+      { type: 'USER', id: rootId },
+      { type: 'USER', id: userIds.viewer },
+      { type: 'USER', id: userIds.approver },
+      { type: 'USER', id: userIds.developer },
+      { type: 'USER', id: userIds.padmin },
+      { type: 'USER', id: userIds.triager },
+      { type: 'USER', id: userIds.reviewer },
+      { type: 'USER', id: userIds.outsider },
+      { type: 'AGENT', id: agentId },
+    ]);
   });
 
   // -------------------------------------------------------------------------

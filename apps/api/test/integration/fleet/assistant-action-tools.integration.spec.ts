@@ -18,6 +18,7 @@ import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
+import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, enrollRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
@@ -89,7 +90,7 @@ describeIntegration('fleet assistant action tools (PG, US-003)', () => {
       data: { projectId: world.opsProjectId, number: 1, type: 'BUG', status: 'CREATED', priority: 'MEDIUM', title: 'ops ticket' },
     });
     // The workspace AC proposes in `ops`, so the thread creator is a member there too.
-    await prisma.projectMember.create({ data: { projectId: world.opsProjectId, userId: world.ids.dev, role: 'DEVELOPER' } });
+    await grantRole(prisma, { type: 'USER', id: world.ids.dev }, 'developer', world.opsProjectId);
     const runner = await enrollRunner(server, world.tokens.root, 'action-tools-runner');
     await prisma.runner.update({
       where: { id: runner.runnerId }, data: { protocolVersion: 4, enabled: true, lastSeenAt: new Date() },
@@ -110,6 +111,15 @@ describeIntegration('fleet assistant action tools (PG, US-003)', () => {
         else process.env[key] = saved[key];
       }
     }
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma, [
+      { type: 'USER', id: world.ids.root },
+      { type: 'USER', id: world.ids.dev },
+      { type: 'USER', id: world.ids.viewer },
+      { type: 'USER', id: world.ids.outsider },
+    ]);
   });
 
   it('AC-4: a runner holding a RUNNING REPO THREAD job proposes a comment and is answered pending', async () => {

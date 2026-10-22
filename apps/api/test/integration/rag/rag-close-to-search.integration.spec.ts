@@ -26,6 +26,7 @@ import { TicketStatus } from '../../../src/common/enums';
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
 import { PermissionService } from '../../../src/permissions/permission.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { testDatabaseUrl } from '../../helpers/test-prisma';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 import { PrismaClient } from '../../../src/generated/prisma/client';
@@ -147,16 +148,24 @@ describe('RAG close-to-search integration', () => {
         email: `rag-test-${Date.now()}@koda.test`,
         name: 'Rag Tester',
         passwordHash: 'x',
-        role: 'ADMIN',
       },
     });
     principalId = user.id;
+    // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
+    // baseline plus the global admin binding, whose mirror keeps `User.role` at `ADMIN` for the
+    // notification and mention readers.
+    await grantBaseline(prisma.client, { type: 'USER', id: principalId });
+    await grantRole(prisma.client, { type: 'USER', id: principalId }, 'admin', null);
   });
 
   afterAll(async () => {
     await prisma.client.$disconnect();
     await module.close();
     rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma.client, [{ type: 'USER', id: principalId }]);
   });
 
   it('closes a ticket and the KB search finds it', async () => {

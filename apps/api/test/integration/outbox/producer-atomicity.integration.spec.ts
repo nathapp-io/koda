@@ -26,6 +26,7 @@ import { TicketStatus, TicketType } from '../../../src/common/enums';
 import { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { resetDb } from '../../helpers/reset-db';
 import { PermissionService } from '../../../src/permissions/permission.service';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -41,6 +42,7 @@ describeIntegration('producers record outbox rows atomically', () => {
   let principal: KodaPrincipal;
   let projectId: string;
   let agentId: string;
+  let userId: string;
   let agentActionInput: {
     projectId: string;
     agentId: string;
@@ -94,12 +96,19 @@ describeIntegration('producers record outbox rows atomically', () => {
     const project = await prisma.client.project.create({ data: { name: 'Atomic', slug: 'atomic', key: 'ATM' } });
     projectId = project.id;
     const user = await prisma.client.user.create({
-      data: { email: 'atomic@koda.test', name: 'Atomic', passwordHash: 'x', role: 'ADMIN' },
+      data: { email: 'atomic@koda.test', name: 'Atomic', passwordHash: 'x' },
     });
+    userId = user.id;
+    // Permissions P1 US-004: the fixture principals are granted through bindings only — the member
+    // baseline plus the global admin binding, whose mirror keeps `User.role` at `ADMIN` for the
+    // notification and mention readers.
+    await grantBaseline(prisma.client, { type: 'USER', id: userId });
+    await grantRole(prisma.client, { type: 'USER', id: userId }, 'admin', null);
     const agent = await prisma.client.agent.create({
       data: { name: 'Atomic Agent', slug: 'atomic-agent', apiKeyHash: 'atomic-agent-key', status: 'ACTIVE' },
     });
     agentId = agent.id;
+    await grantBaseline(prisma.client, { type: 'AGENT', id: agentId });
     agentActionInput = {
       projectId,
       agentId,
@@ -134,6 +143,13 @@ describeIntegration('producers record outbox rows atomically', () => {
   afterAll(async () => {
     await prisma?.onModuleDestroy();
     await module?.close();
+  });
+
+  it('fixtures grant through bindings only', async () => {
+    await expectBindingOnlyFixtures(prisma.client, [
+      { type: 'USER', id: userId },
+      { type: 'AGENT', id: agentId },
+    ]);
   });
 
   it('ticket create commits the ticket, its TicketEvent and exactly one ticket_event row', async () => {
