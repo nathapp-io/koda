@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import type { TransformFnParams } from 'class-transformer';
-import { IsEmail, IsIn, IsOptional, Matches, MaxLength } from 'class-validator';
+import { IsEmail, IsIn, Matches, MaxLength, ValidateIf } from 'class-validator';
 import { ROLE_KEY_PATTERN } from '../../../permissions/dto/role.dto';
 import { ProjectMemberRole } from '../../members/domain/project-member.domain';
 import { INVITE_ROLES } from '../domain/project-invite.domain';
@@ -23,12 +23,13 @@ export class CreateInviteDto {
   declare email: string;
 
   @ApiPropertyOptional({ enum: INVITE_ROLES, description: 'Legacy role; mutually exclusive with roleKey' })
-  @IsOptional()
+  // Absent is allowed; an explicit null is not (`@IsOptional` would skip it), so it fails the check below.
+  @ValidateIf((dto: CreateInviteDto) => dto.role !== undefined)
   @IsIn(INVITE_ROLES, { message: '$t(common.validation.isEnum)' })
   declare role?: ProjectMemberRole;
 
   @ApiPropertyOptional({ example: 'triager', description: 'kebab-case role key; mutually exclusive with role' })
-  @IsOptional()
+  @ValidateIf((dto: CreateInviteDto) => dto.roleKey !== undefined)
   @Matches(ROLE_KEY_PATTERN, { message: '$t(common.validation.keyFormat)' })
   declare roleKey?: string;
 }

@@ -193,6 +193,19 @@ describeIntegration('invite role keys (US-005)', () => {
     expect(await invitesFor('ac3@koda.test')).toEqual([]);
   }, TIMEOUT);
 
+  it('AC-3: an explicit null roleKey or role is a 400 validation error, not a 500, and creates no invite', async () => {
+    for (const body of [
+      { email: 'ac3null@koda.test', roleKey: null },
+      { email: 'ac3null@koda.test', role: null },
+      { email: 'ac3null@koda.test', role: null, roleKey: 'viewer' },
+    ]) {
+      const res = await invite('padmin').send(body);
+      expect(res.status).toBe(400);
+      expect(res.body.ret).toBe(CODE.validation);
+    }
+    expect(await invitesFor('ac3null@koda.test')).toEqual([]);
+  }, TIMEOUT);
+
   it('AC-4 and AC-10: an existing user is ADDED with a verifier binding, returned as the only chip', async () => {
     const res = await invite('padmin').send({ email: 'verifier-target@koda.test', roleKey: 'verifier' });
 

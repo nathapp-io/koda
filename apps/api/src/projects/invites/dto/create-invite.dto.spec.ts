@@ -42,4 +42,14 @@ describe('CreateInviteDto (S4b US-004)', () => {
       { property: 'role', rules: ['isIn'] },
     ]);
   });
+
+  it('US-005: role and roleKey may both be absent here (the service decides), but an explicit null is rejected', async () => {
+    const absent = await validate(plainToInstance(CreateInviteDto, { email: 'a@x.io' }));
+    const nullRole = await validate(plainToInstance(CreateInviteDto, { email: 'a@x.io', role: null }));
+    const nullKey = await validate(plainToInstance(CreateInviteDto, { email: 'a@x.io', roleKey: null }));
+
+    expect(absent).toEqual([]);
+    expect(nullRole.map((error) => error.property)).toEqual(['role']);
+    expect(nullKey.map((error) => error.property)).toEqual(['roleKey']);
+  });
 });
