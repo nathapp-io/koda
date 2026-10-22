@@ -1,13 +1,6 @@
 import { ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
 
-/**
- * Fleet S4b US-007's legacy invite roles. Permissions P1 US-014 stops reading them: the select
- * offers the project roles instead. They stay exported until US-015 deletes the last consumer.
- */
-export const INVITE_ROLES = ['ADMIN', 'DEVELOPER', 'VIEWER'] as const
-export type InviteRole = (typeof INVITE_ROLES)[number]
-
 export type InviteStatus = 'PENDING' | 'ACCEPTED' | 'EXPIRED' | 'CANCELLED'
 
 /**

@@ -1,13 +1,11 @@
 import { ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
 
-export type GlobalRole = 'MEMBER' | 'ADMIN'
-
 export interface AdminUser {
   id: string
   email: string
   name: string | null
-  role: GlobalRole
+  role: string
   disabled: boolean
   createdAt: string
 }
@@ -25,12 +23,6 @@ export interface NewUser {
   email: string
   name: string
   password: string
-  /**
-   * US-011: optional. The admin page no longer picks a global role — a new account is created
-   * role-less and roles are bound afterwards — but the legacy field stays accepted until US-015
-   * deletes the legacy role UI.
-   */
-  role?: GlobalRole
 }
 
 export function buildUserQuery(filters: { email?: string; page?: number }): Record<string, string> {
@@ -74,9 +66,5 @@ export function useAdminUsers() {
     replace(await $api.patch<AdminUser>(apiPath`/admin/users/${id}`, { disabled }))
   }
 
-  async function setRole(id: string, role: GlobalRole): Promise<void> {
-    replace(await $api.patch<AdminUser>(apiPath`/admin/users/${id}`, { role }))
-  }
-
-  return { users, total, page, hasNext, pending, load, createUser, setDisabled, setRole }
+  return { users, total, page, hasNext, pending, load, createUser, setDisabled }
 }

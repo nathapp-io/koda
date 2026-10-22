@@ -122,7 +122,7 @@ const VUE_HELPERS = ['ref', 'computed', 'reactive', 'watch', 'onMounted', 'onBef
 const NUXT_AUTO_IMPORTS = [
   'useI18n', 'useAppToast', 'useState', 'useHead', 'navigateTo', 'useApi', 'useColorMode', 'useRuntimeConfig', 'definePageMeta',
   'useAsyncData', 'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute', 'useRouter',
-  'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole', 'useProjectMembers',
+  'useFleetDispatchOptions', 'useFleetJobs', 'useProjectMembers',
   // The ticket page reads the live comment list through useNuxtData (US-007 mounts it for real).
   'useNuxtData',
   'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames', 'useFleetJobLogs',

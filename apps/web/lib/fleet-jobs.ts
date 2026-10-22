@@ -13,17 +13,6 @@ export const isTerminalJobState = (state: string): boolean => (TERMINAL_JOB_STAT
 export const mayHaveBundle = (state: string): boolean => state === 'UPLOADING' || isTerminalJobState(state)
 
 /**
- * Dispatch and requeue by role: project ADMIN (`canManage`) or DEVELOPER (S1 spec §2.2).
- *
- * @deprecated Permissions P1 US-008: every fleet job control now reads the key its route requires
- * (`fleet.job.cancel`, `fleet.job.requeue`, `fleet.job.dispatch`) through `JobViewer`. The schedule
- * and approval viewers still use this until US-009 moves them, and US-015 deletes it.
- */
-export function canWorkOnFleet(role: { canManage: boolean; viewerRole: string | null }): boolean {
-  return role.canManage || role.viewerRole === 'DEVELOPER'
-}
-
-/**
  * The caller's fleet job rights, one flag per key the job routes require (Permissions P1 US-008).
  * A role holding `fleet.job.*` alone now works; no flag is derived from a role name.
  */

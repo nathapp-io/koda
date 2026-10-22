@@ -3,7 +3,6 @@ import {
   bundleFileName,
   canCancelJob,
   canRequeueJob,
-  canWorkOnFleet,
   extractProgress,
   formatUsd,
   isActiveJobState,
@@ -43,13 +42,6 @@ describe('state groups', () => {
 })
 
 describe('permissions', () => {
-  test('canWorkOnFleet: project ADMIN (canManage) or DEVELOPER', () => {
-    expect(canWorkOnFleet({ canManage: true, viewerRole: 'ADMIN' })).toBe(true)
-    expect(canWorkOnFleet({ canManage: false, viewerRole: 'DEVELOPER' })).toBe(true)
-    expect(canWorkOnFleet({ canManage: false, viewerRole: 'VIEWER' })).toBe(false)
-    expect(canWorkOnFleet({ canManage: false, viewerRole: null })).toBe(false)
-  })
-
   // Permissions P1 US-008: one flag per key the job routes require.
   const dev = { userId: 'u2', canCancel: true, canRequeue: true, canDispatch: true }
   const viewer = { userId: 'u3', canCancel: false, canRequeue: false, canDispatch: false }

@@ -48,17 +48,4 @@ describe('useAdminUsers', () => {
     expect(before[1].disabled).toBe(false)
   })
 
-  test('setRole patches the role', async () => {
-    const get = jest.fn(async () => ({ records: [u('a')], total: 1, current: 1, size: 20, hasNext: false, hasPrev: false }))
-    const patch = jest.fn(async () => u('a', { role: 'ADMIN' }))
-    withApi({ get, patch })
-    const { useAdminUsers } = await import(composablePath)
-    const users = useAdminUsers()
-    await users.load()
-
-    await users.setRole('a', 'ADMIN')
-
-    expect(patch).toHaveBeenCalledWith('/admin/users/a', { role: 'ADMIN' })
-    expect(users.users.value[0].role).toBe('ADMIN')
-  })
 })

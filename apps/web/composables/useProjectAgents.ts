@@ -20,20 +20,10 @@ export interface ProjectAgentListDto {
 }
 
 /**
- * Roster read/add/remove for one project. The page never calls the endpoint
- * directly: this composable owns the roster state, exposes the add/remove
- * verbs the page and the AddProjectAgentDialog need, and reloads after a
- * mutation so stale counts (open tickets, status) refresh.
- *
- * `add` and `remove` re-throw API errors so the caller can show the
- * extracted message and decide whether to keep state open (dialog stays
- * open on add failure; 409 on remove reloads the roster to refresh stale
- * counts).
+ * Read and status actions for one project's agent roster.
  */
 export function useProjectAgents(slug: string) {
   const { $api } = useApi()
-  const base = apiPath`/projects/${slug}/agents`
-
   const items = ref<ProjectAgent[]>([])
   const scoping = ref(true)
   const pending = ref(false)
@@ -42,7 +32,7 @@ export function useProjectAgents(slug: string) {
   async function load(): Promise<void> {
     pending.value = true
     try {
-      const res = await $api.get<ProjectAgentListDto>(base)
+      const res = await $api.get<ProjectAgentListDto>(apiPath`/projects/${slug}/agents`)
       items.value = Array.isArray(res?.items) ? res.items : []
       scoping.value = res?.scoping !== false
       error.value = null
@@ -57,17 +47,9 @@ export function useProjectAgents(slug: string) {
     await load()
   }
 
-  async function add(agentSlug: string): Promise<void> {
-    await $api.post(base, { agentSlug })
-  }
-
-  async function remove(agentSlug: string): Promise<void> {
-    await $api.delete(apiPath`/projects/${slug}/agents/${agentSlug}`)
-  }
-
   async function changeStatus(agentSlug: string, status: string): Promise<void> {
     await $api.patch(apiPath`/projects/${slug}/agents/${agentSlug}`, { status })
   }
 
-  return { items, scoping, pending, error, load, refresh, add, remove, changeStatus }
+  return { items, scoping, pending, error, load, refresh, changeStatus }
 }
