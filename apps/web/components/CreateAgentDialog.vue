@@ -103,6 +103,7 @@ import * as z from 'zod'
 import { ref, watch } from 'vue'
 import { LucideX } from 'lucide-vue-next'
 import { normalizeCapabilities } from '~/lib/utils'
+import { extractApiError } from '~/composables/useApi'
 
 const props = defineProps<{
   open: boolean
@@ -227,10 +228,12 @@ function handleDone() {
 
 const onSubmit = handleSubmit(async (formValues) => {
   try {
-    const response = await $api.post('/agents', formValues as Record<string, unknown>); const agentApiKey = (response as { apiKey: string }).apiKey; apiKey.value = agentApiKey
+    const response = await $api.post('/agents', formValues as Record<string, unknown>)
+    apiKey.value = (response as { apiKey: string }).apiKey
     toast.success(t('agents.toast.created'))
-  } catch {
-    toast.error(t('agents.toast.createFailed'))
+  } catch (err: unknown) {
+    // The API owns the rules (who may create an agent, slug uniqueness); show what it said.
+    toast.error(extractApiError(err))
   }
 })
 </script>

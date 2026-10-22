@@ -10,6 +10,7 @@ import { apiPath } from '~/lib/api-path'
 import { bindingChips, chipLabel } from '~/lib/role-bindings'
 import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS } from '~/lib/ticket-chips'
 import type { BindingChip } from '~/lib/role-bindings'
+import type { Role } from '~/composables/useRoles'
 import type { RoleBinding } from '~/composables/useRoleBindings'
 
 definePageMeta({ layout: 'default' })
@@ -47,8 +48,8 @@ const { $api } = useApi()
 const { t } = useI18n()
 const toast = useAppToast()
 const { permissions } = useGlobalPermissions()
-const { roles, load: loadRoles } = useRoles()
-const { bindings, listGlobal } = useRoleBindings()
+const { load: loadRoles } = useRoles()
+const { listGlobal } = useRoleBindings()
 
 const { data: agentsData, pending, error, refresh } = useAsyncData(
   'agents',
@@ -107,12 +108,21 @@ const deleteDialogAgent = ref<Agent | null>(null)
 const rolesError = ref('')
 const bindingsError = ref('')
 
+/**
+ * The page's own copy of the two listings the column joins. Kept here — rather than reading the
+ * composables' refs — because publication has to be gated on the newest reload: a composable assigns
+ * its records as soon as its own request settles, which would let an older, slower reload overwrite
+ * the snapshot a newer one already published (see `reloadRoleData`).
+ */
+const roles = ref<Role[]>([])
+const globalBindings = ref<RoleBinding[]>([])
+
 /** The column shows one load error, whichever of the two listings failed. */
 const roleColumnError = computed(() => rolesError.value || bindingsError.value)
 
 /** One agent's project-less bindings: what the dialog edits and what the column's chips show. */
 function globalBindingsFor(agent: Agent): RoleBinding[] {
-  return bindings.value.filter((binding) =>
+  return globalBindings.value.filter((binding) =>
     binding.principalType === 'AGENT' && binding.principalId === agent.id && binding.projectId === null)
 }
 
@@ -137,28 +147,38 @@ const rolesDialogBindings = computed(() =>
   (rolesDialogAgent.value ? globalBindingsFor(rolesDialogAgent.value) : []))
 
 /**
- * The two listings the column joins. Each failure is recorded and toasted the moment it lands, and
- * the column shows the error instead of chips: a chip without its role would show a raw key where a
- * name belongs. The errors are cleared only by the latest started run, and only if both of its
- * listings succeeded — an older success must not certify a newer failure.
+ * The two listings the column joins, re-read together. Every run carries a generation and only the
+ * newest one publishes — records *and* failures. Overlapping runs are reachable in normal use (two
+ * binding writes landing one after the other, reopening the dialog on a failed snapshot, a key
+ * refresh), and without the gate an older answer decides the snapshot: an older rejection landing
+ * last re-blocks a column a newer run already filled, and an older success rewinds the chips.
+ *
+ * A failure is recorded and toasted the moment it lands rather than when the pair settles: one
+ * listing can hang, and until then the page would keep publishing a snapshot it already knows is
+ * broken. A run that is no longer the newest publishes nothing at all — neither data nor errors.
  */
 let roleDataGeneration = 0
 async function reloadRoleData(): Promise<void> {
   if (!canManageRoles.value) return
   const generation = ++roleDataGeneration
-  const record = (target: Ref<string>) => (err: unknown): false => {
+  const isLatest = (): boolean => generation === roleDataGeneration
+  const onFailure = (target: Ref<string>) => (err: unknown): void => {
+    if (!isLatest()) return
     target.value = extractApiError(err)
     toast.error(extractApiError(err))
-    return false
   }
-  const [rolesOk, bindingsOk] = await Promise.all([
-    loadRoles().then(() => true, record(rolesError)),
-    listGlobal('AGENT').then(() => true, record(bindingsError)),
+  await Promise.all([
+    loadRoles().then((records) => {
+      if (!isLatest()) return
+      roles.value = records
+      rolesError.value = ''
+    }, onFailure(rolesError)),
+    listGlobal('AGENT').then((records) => {
+      if (!isLatest()) return
+      globalBindings.value = records
+      bindingsError.value = ''
+    }, onFailure(bindingsError)),
   ])
-  if (generation === roleDataGeneration && rolesOk && bindingsOk) {
-    rolesError.value = ''
-    bindingsError.value = ''
-  }
 }
 
 // The keys are their own request, so they can land after the agent list: the watch — not the mount —
@@ -230,13 +250,20 @@ async function changeStatus(agent: Agent, newStatus: 'ACTIVE' | 'PAUSED' | 'OFFL
     await $api.patch(apiPath`/agents/${agent.slug}`, { status: newStatus })
     toast.success(t('agents.toast.statusUpdated', { status: newStatus }))
     refresh()
-  } catch {
-    toast.error(t('agents.toast.statusFailed'))
+  } catch (err: unknown) {
+    // The API owns the rules (who may update an agent, and what a status change needs); show what it said.
+    toast.error(extractApiError(err))
   }
 }
 
-function handleAgentCreated() {
-  refresh()
+/**
+ * US-012 (fix round 1, F1): `POST /agents` also binds the agent's baseline role
+ * (`MembershipService.bindBaseline` — the global `agent` role) inside the create transaction, so the
+ * binding listing has to be re-read too. Without it the new row would claim "No roles" and its
+ * dialog would offer the role it already holds.
+ */
+async function handleAgentCreated() {
+  await Promise.all([refresh(), reloadRoleData()])
   isCreateDialogOpen.value = false
 }
 </script>

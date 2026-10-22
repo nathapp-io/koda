@@ -38,6 +38,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
+import { extractApiError } from '~/composables/useApi'
 
 interface Agent {
   id: string
@@ -71,8 +72,9 @@ async function onConfirm() {
   try {
     const response = await $api.post(apiPath`/agents/${props.agent.slug}/rotate-key`, {}) as { apiKey: string }
     apiKey.value = response.apiKey
-  } catch {
-    toast.error(t('agents.rotateKey.failed'))
+  } catch (err: unknown) {
+    // The API owns the rules (who may rotate a key); show what it said.
+    toast.error(extractApiError(err))
   } finally {
     isSubmitting.value = false
   }

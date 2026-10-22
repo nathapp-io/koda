@@ -33,6 +33,11 @@ const MEMBER = role({ id: 'r1', key: 'member', name: 'Member' })
 const DEVELOPER = role({ id: 'r2', key: 'developer', name: 'Developer', scope: 'PROJECT' })
 const REVIEWER = role({ id: 'r3', key: 'reviewer', name: 'Reviewer' })
 const OWNER = role({ id: 'r4', key: 'owner', name: 'Owner', locked: true })
+/**
+ * The baseline role the API binds to a new agent (`MembershipService.bindBaseline` uses the `agent`
+ * key for an AGENT principal). Kept out of the default listing so the AC-3 offer set stays exact.
+ */
+const AGENT_ROLE = role({ id: 'r5', key: 'agent', name: 'Agent' })
 const ROLES = [MEMBER, DEVELOPER, REVIEWER, OWNER]
 
 /**
@@ -458,3 +463,194 @@ describe('AC-6: a refused binding write', () => {
     expect(allById(m.app, 'agent-role-chip', rowFor(m.app, 'a1'))).toHaveLength(2)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fix round 1
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('F1: a created agent shows the baseline binding the API granted', () => {
+  test('creating reloads the bindings, so the new row carries the agent role', async () => {
+    const rows = [...AGENTS]
+    const bindings = [...BINDINGS]
+    const m = await mountPage({
+      keys: [...ROLE_MANAGER_KEYS, 'agent.create'],
+      api: {
+        get: jest.fn(async (path: string) => {
+          if (path === '/agents') return rows.map((row) => ({ ...row }))
+          if (path === '/roles') return [...ROLES, AGENT_ROLE]
+          if (path === '/role-bindings') return bindingsPage(bindings)
+          throw new Error(`unexpected GET ${path}`)
+        }),
+        post: jest.fn(async () => {
+          const created = agent('a9', { name: 'New Bot', slug: 'new-bot' })
+          rows.push(created)
+          // AgentsService.generateApiKey binds the baseline 'agent' role inside the create
+          // transaction, so the new principal already holds a global binding.
+          bindings.push(binding('b9', { principalId: 'a9', roleId: AGENT_ROLE.id, roleKey: AGENT_ROLE.key }))
+          return { apiKey: 'koda_key_123', ...created }
+        }),
+      },
+    })
+
+    const form = byId(m.app, 'create-agent-form')
+    const inputs = m.app.find('input', form)
+    call(inputs[0], 'onInput', { target: { value: 'New Bot' } })
+    call(inputs[1], 'onInput', { target: { value: 'new-bot' } })
+    await settle()
+    await (form.props.onSubmit as (event: Event) => Promise<void>)({ preventDefault: () => undefined } as unknown as Event)
+    await settle()
+
+    // The dialog reveals the key; dismissing it is what emits `created` and puts the row on the page.
+    const done = m.app.find('[data-stub="button"]')
+      .find((button) => m.app.textOf(button) === enI18n().t('common.done'))
+    expect(done).toBeDefined()
+    call(done as FakeNode, 'onClick')
+    await settle()
+
+    // The binding listing is re-read after the create, so the new row is joined like any other.
+    expect(bindingListCalls(m.api)).toBe(2)
+    const row = rowFor(m.app, 'a9')
+    const chips = allById(m.app, 'agent-role-chip', row)
+    expect(chips).toHaveLength(1)
+    expect(m.app.textOf(chips[0])).toBe(AGENT_ROLE.name)
+
+    // And the dialog for the new agent does not offer the role it already holds.
+    call(byId(m.app, 'agent-edit-roles', row), 'onClick')
+    await settle()
+    expect(m.app.find('option').map((option) => String(option.props.value))).not.toContain(AGENT_ROLE.key)
+  })
+})
+
+describe('F2: every gated agent action shows the API refusal', () => {
+  test('a refused create toasts the extracted API error', async () => {
+    const err = new ApiError(40003, 'You may not create agents')
+    const m = await mountPage({ keys: ['agent.create'], api: { post: jest.fn(async () => { throw err }) } })
+
+    const form = byId(m.app, 'create-agent-form')
+    const inputs = m.app.find('input', form)
+    call(inputs[0], 'onInput', { target: { value: 'New Bot' } })
+    call(inputs[1], 'onInput', { target: { value: 'new-bot' } })
+    await settle()
+    await (form.props.onSubmit as (event: Event) => Promise<void>)({ preventDefault: () => undefined } as unknown as Event)
+    await settle()
+
+    expect(m.toast.error).toHaveBeenCalledWith(extractApiError(err))
+    // The form stays up so the admin can retry, and the key is never revealed.
+    expect(allById(m.app, 'create-agent-form')).toHaveLength(1)
+  })
+
+  test('a refused status change toasts the extracted API error', async () => {
+    const err = new ApiError(40003, 'You may not change this agent')
+    const m = await mountPage({ keys: ['agent.update'], api: { patch: jest.fn(async () => { throw err }) } })
+
+    call(byId(m.app, 'agent-status-PAUSED', rowFor(m.app, 'a1')), 'onClick')
+    await settle()
+
+    expect(m.api.patch).toHaveBeenCalledWith('/agents/agent-a1', { status: 'PAUSED' })
+    expect(m.toast.error).toHaveBeenCalledWith(extractApiError(err))
+  })
+})
+
+describe('F3: overlapping reloads publish only the latest snapshot', () => {
+  /** A deferred `$api.get` queue, so a spec can settle two reloads in the order it chooses. */
+  function deferredGet() {
+    const queue: Array<{
+      promise: Promise<unknown>
+      resolve: (value: unknown) => void
+      reject: (err: unknown) => void
+    }> = []
+    const deferred = () => {
+      let resolve!: (value: unknown) => void
+      let reject!: (err: unknown) => void
+      const promise = new Promise<unknown>((yes, no) => { resolve = yes; reject = no })
+      const entry = { promise, resolve, reject }
+      queue.push(entry)
+      return entry
+    }
+    return { queue, deferred }
+  }
+
+  /**
+   * Reads the page's listing requests through a `$api.get` that answers the first pass immediately
+   * and every later pass from the deferred queue, one pair per reload (roles, then bindings).
+   */
+  async function mountWithQueuedReloads() {
+    const roles = deferredGet()
+    const bindings = deferredGet()
+    let pass = 0
+    const m = await mountPage({
+      keys: ROLE_MANAGER_KEYS,
+      api: {
+        get: jest.fn(async (path: string) => {
+          if (path === '/agents') return agents()
+          if (path === '/roles') {
+            pass += 1
+            return pass === 1 ? [...ROLES] : roles.deferred().promise
+          }
+          if (path === '/role-bindings') return pass === 1 ? bindingsPage() : bindings.deferred().promise
+          throw new Error(`unexpected GET ${path}`)
+        }),
+      },
+    })
+    expect(pass).toBe(1)
+    return { m, roles, bindings }
+  }
+
+  /** Two successive binding writes: each success emits `changed`, which reloads the listings. */
+  async function addReviewer(m: Mount): Promise<void> {
+    call(byId(m.app, 'binding-role-select'), 'onChange', { target: { value: 'reviewer' } })
+    await settle()
+    call(byId(m.app, 'binding-add'), 'onClick')
+    await settle()
+  }
+
+  test('an older rejection cannot re-block a newer successful snapshot', async () => {
+    const { m, roles, bindings } = await mountWithQueuedReloads()
+    call(byId(m.app, 'agent-edit-roles', rowFor(m.app, 'a1')), 'onClick')
+    await settle()
+    expect(allById(m.app, 'binding-chip')).toHaveLength(2)
+
+    await addReviewer(m) // reload A: both listings pending
+    await addReviewer(m) // reload B: both listings pending
+    expect(roles.queue).toHaveLength(2)
+    expect(bindings.queue).toHaveLength(2)
+
+    // The newer run lands first, with the reviewer binding the writes added.
+    bindings.queue[1].resolve(bindingsPage([...BINDINGS, binding('b3', { roleId: REVIEWER.id, roleKey: 'reviewer' })]))
+    roles.queue[1].resolve([...ROLES])
+    await settle()
+    expect(allById(m.app, 'agent-role-chip', rowFor(m.app, 'a1'))).toHaveLength(3)
+
+    // Then the older run is refused. It is stale, so it neither re-blocks the column nor the dialog.
+    roles.queue[0].reject(new ApiError(50000, 'the older roles read failed'))
+    bindings.queue[0].reject(new ApiError(50000, 'the older bindings read failed'))
+    await settle()
+
+    expect(allById(m.app, 'agent-roles-error')).toHaveLength(0)
+    expect(allById(m.app, 'agent-role-chip', rowFor(m.app, 'a1'))).toHaveLength(3)
+    expect(allById(m.app, 'binding-chip')).toHaveLength(3)
+    expect(byId(m.app, 'binding-role-select').props.disabled).toBe(false)
+  })
+
+  test('an older success cannot overwrite the newer snapshot', async () => {
+    const { m, roles, bindings } = await mountWithQueuedReloads()
+    call(byId(m.app, 'agent-edit-roles', rowFor(m.app, 'a1')), 'onClick')
+    await settle()
+
+    await addReviewer(m) // reload A
+    await addReviewer(m) // reload B
+
+    // B lands with three chips, then A lands with the two-record listing it read earlier.
+    bindings.queue[1].resolve(bindingsPage([...BINDINGS, binding('b3', { roleId: REVIEWER.id, roleKey: 'reviewer' })]))
+    roles.queue[1].resolve([...ROLES])
+    await settle()
+    bindings.queue[0].resolve(bindingsPage(BINDINGS))
+    roles.queue[0].resolve([...ROLES])
+    await settle()
+
+    expect(allById(m.app, 'agent-role-chip', rowFor(m.app, 'a1'))).toHaveLength(3)
+    expect(allById(m.app, 'binding-chip')).toHaveLength(3)
+    expect(allById(m.app, 'agent-roles-error')).toHaveLength(0)
+  })
+})
+

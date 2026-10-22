@@ -176,10 +176,10 @@ describe('CreateAgentDialog: API submission', () => {
     expect(source).toContain('agents.toast.created')
   })
 
-  test('source shows error toast on failure', () => {
+  test('source shows the extracted API error on failure', () => {
     const source = getSource()
-    expect(source).toContain('toast.error(')
-    expect(source).toContain('agents.toast.createFailed')
+    expect(source).toMatch(/toast\.error\(extractApiError\(err\)\)/)
+    expect(source).toContain("import { extractApiError } from '~/composables/useApi'")
   })
 
   test('source wraps API call in try-catch', () => {
