@@ -10,9 +10,6 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient, Role as RoleModel } from '../generated/prisma/client';
 import type { RoleDomain, RoleRepository, RoleScope } from './permissions.types';
 
-/** Upper bound of a role list read; the table is small and admin-written. */
-const ROLE_SCAN_LIMIT = 500;
-
 /** The page size of a read that must answer *every* role of a scope, whatever the table holds. */
 const ROLE_READ_PAGE = 500;
 
@@ -92,15 +89,16 @@ export class PrismaRoleRepository
   }
 
   /**
-   * The whole role list, system roles first (`Role` is an admin-written table, so it is small).
-   * `take` is the bounded-read rule of `.nax/rules/api-data.md`: never a bare `findMany`.
+   * **Every** role, system roles first, then by key, in keyset pages (see `findRolesByScope`). `GET /roles`
+   * is the admin's only view of the table and role creation is unbounded, so a capped read would hide
+   * roles past the cap from the editor and the delete control.
    */
   async findRoles(): Promise<RoleDomain[]> {
-    const models = await this.db.role.findMany({
-      orderBy: [{ system: 'desc' }, { key: 'asc' }],
-      take: ROLE_SCAN_LIMIT,
-    });
-    return models.map((model: RoleModel) => this.toDomain(model));
+    const [system, custom] = await Promise.all([
+      this.readRolesOfScope(undefined, true),
+      this.readRolesOfScope(undefined, false),
+    ]);
+    return [...system, ...custom];
   }
 
   /**
@@ -122,14 +120,14 @@ export class PrismaRoleRepository
     return [...system, ...custom];
   }
 
-  /** One `(scope, system)` group, keyset-paged on `key` until a short page ends it. */
-  private async readRolesOfScope(scope: RoleScope, system: boolean): Promise<RoleDomain[]> {
+  /** One `(scope?, system)` group, keyset-paged on `key` until a short page ends it. */
+  private async readRolesOfScope(scope: RoleScope | undefined, system: boolean): Promise<RoleDomain[]> {
     const roles: RoleDomain[] = [];
     let cursor: string | undefined;
 
     for (let page = 1; page <= MAX_ROLE_READ_PAGES; page += 1) {
       const models = await this.db.role.findMany({
-        where: { scope, system, ...(cursor === undefined ? {} : { key: { gt: cursor } }) },
+        where: { ...(scope === undefined ? {} : { scope }), system, ...(cursor === undefined ? {} : { key: { gt: cursor } }) },
         orderBy: { key: 'asc' },
         take: ROLE_READ_PAGE,
       });
@@ -139,7 +137,7 @@ export class PrismaRoleRepository
       cursor = (models[models.length - 1] as RoleModel).key;
       if (page === MAX_ROLE_READ_PAGES) {
         logger.error(
-          `findRolesByScope reached its ${MAX_ROLE_READ_PAGES}-page bound for ${scope}/${system ? 'system' : 'custom'} after ${roles.length} roles; refusing to answer a partial role list`,
+          `findRolesByScope reached its ${MAX_ROLE_READ_PAGES}-page bound for ${scope ?? 'all scopes'}/${system ? 'system' : 'custom'} after ${roles.length} roles; refusing to answer a partial role list`,
         );
         throw new InternalAppException({ count: roles.length }, 'permissions');
       }

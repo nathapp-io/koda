@@ -304,3 +304,88 @@ describe('AC-10: a refused save keeps the dialog open', () => {
     expect(CATALOG.length).toBeGreaterThan(0)
   })
 })
+
+describe('fix round 1 F1: saving before the catalog arrives cannot erase permissions', () => {
+  test('while the catalog request is pending, save is disabled and a submit sends nothing', async () => {
+    let release: (entries: typeof CATALOG) => void = () => undefined
+    const pending = new Promise<typeof CATALOG>((resolve) => { release = resolve })
+    const m = await mountDialog({ role: savedRole() }, {
+      get: jest.fn(async (path: string) => (path === '/permissions/catalog' ? pending : [])) as never,
+    })
+
+    expect(byId(m.app, 'role-save').props.disabled).toBe(true)
+    typeInto(byId(m.app, 'role-description'), 'changed')
+    await settle()
+    await submit(m)
+    expect(m.api.patch).not.toHaveBeenCalled()
+
+    release(CATALOG)
+    await settle()
+    expect(byId(m.app, 'role-save').props.disabled).toBeFalsy()
+    await submit(m)
+
+    expect(m.api.patch).toHaveBeenCalledTimes(1)
+    const body = (m.api.patch.mock.calls[0] as [string, Record<string, unknown>])[1]
+    expect(body.description).toBe('changed')
+    expect(body.permissions).toEqual(['*.read', 'ticket.create'])
+  })
+
+  test('a failed catalog load still unlocks save and keeps every stored entry', async () => {
+    const m = await mountDialog({ role: savedRole() }, {
+      get: jest.fn(async () => { throw new ApiError(50000, 'down') }) as never,
+    })
+
+    expect(byId(m.app, 'role-save').props.disabled).toBeFalsy()
+    await submit(m)
+
+    const body = (m.api.patch.mock.calls[0] as [string, Record<string, unknown>])[1]
+    expect(body.permissions).toEqual(['*.read', 'ticket.create'])
+  })
+})
+
+describe('fix round 1 F2: covered rows come from the saved entries, not the current choices', () => {
+  test('unchecking a saved explicit checkbox leaves it unchecked and enabled, and the PATCH drops it', async () => {
+    const m = await mountDialog({ role: savedRole() })
+
+    check(m.app, 'ticket.create', false)
+    await settle()
+    expect(byId(m.app, 'perm-ticket.create').props.checked).toBe(false)
+    expect(byId(m.app, 'perm-ticket.create').props.disabled).toBeFalsy()
+
+    check(m.app, 'ticket.create', true)
+    await settle()
+    expect(byId(m.app, 'perm-ticket.create').props.checked).toBe(true)
+
+    check(m.app, 'ticket.create', false)
+    await settle()
+    await submit(m)
+    const body = (m.api.patch.mock.calls[0] as [string, Record<string, unknown>])[1]
+    expect(body.permissions).toEqual(['*.read'])
+  })
+
+  test('choosing none on a saved bare ownable permission stays none and editable, and the PATCH drops it', async () => {
+    const m = await mountDialog({ role: role({ permissions: ['comment.update'], expandedKeys: ['comment.update'] }) })
+
+    choose(m.app, 'comment.update', 'none')
+    await settle()
+    expect(byId(m.app, 'perm-comment.update-none').props.checked).toBe(true)
+    expect(byId(m.app, 'perm-comment.update-any').props.checked).toBe(false)
+    expect(byId(m.app, 'perm-comment.update-none').props.disabled).toBeFalsy()
+
+    choose(m.app, 'comment.update', 'own')
+    await settle()
+    await submit(m)
+    const body = (m.api.patch.mock.calls[0] as [string, Record<string, unknown>])[1]
+    expect(body.permissions).toEqual(['comment.update.own'])
+  })
+
+  test('a wildcard-covered row stays covered while other rows change', async () => {
+    const m = await mountDialog({ role: savedRole() })
+
+    check(m.app, 'ticket.create', false)
+    await settle()
+
+    expect(byId(m.app, 'perm-ticket.read').props.checked).toBe(true)
+    expect(byId(m.app, 'perm-ticket.read').props.disabled).toBe(true)
+  })
+})

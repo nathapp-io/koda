@@ -88,7 +88,7 @@
 
         <div class="flex justify-end gap-2">
           <Button type="button" variant="outline" @click="$emit('update:open', false)">{{ t('common.cancel') }}</Button>
-          <Button v-if="!readOnly" type="submit" data-testid="role-save" :disabled="isSubmitting">
+          <Button v-if="!readOnly" type="submit" data-testid="role-save" :disabled="isSubmitting || !ready">
             {{ isSubmitting ? t('admin.roles.form.saving') : t('admin.roles.form.save') }}
           </Button>
         </div>
@@ -153,10 +153,14 @@ const [scope] = defineField('scope')
 const catalog = ref<CatalogEntry[]>([])
 const chips = ref<string[]>([])
 const selection = ref<MatrixSelection>({})
+/** The explicit rows the saved role lists: what "covered" is measured against, whatever the user toggles. */
+const savedSelection = ref<MatrixSelection>({})
+/** False from open until the stored permissions are read into the chips and matrix. */
+const ready = ref(false)
 const entryText = ref('')
 
 const rows = computed(() => rowsFor(catalog.value, scope.value ?? 'PROJECT'))
-const covered = computed(() => (props.role ? coveredKeys(props.role.expandedKeys, selection.value, rows.value) : []))
+const covered = computed(() => (props.role ? coveredKeys(props.role.expandedKeys, savedSelection.value, rows.value) : []))
 
 let initialisation = 0
 
@@ -168,8 +172,10 @@ async function initialise(): Promise<void> {
     values: { key: role?.key ?? '', name: role?.name ?? '', description: role?.description ?? '', scope: role?.scope ?? 'PROJECT' },
   })
   entryText.value = ''
+  ready.value = false
   chips.value = []
   selection.value = {}
+  savedSelection.value = {}
   let entries: CatalogEntry[] = []
   try {
     entries = await loadCatalog()
@@ -182,6 +188,8 @@ async function initialise(): Promise<void> {
   const split = splitPermissions(role?.permissions ?? [], rows.value)
   chips.value = split.chips
   selection.value = split.selection
+  savedSelection.value = split.selection
+  ready.value = true
 }
 
 watch(() => ({ open: props.open, role: props.role }), (state) => {
@@ -215,7 +223,8 @@ function removeEntry(entry: string): void {
 }
 
 const onSubmit = handleSubmit(async (values) => {
-  if (readOnly.value) return
+  // Until the stored entries are loaded the chips and matrix are empty, and a save would replace them.
+  if (readOnly.value || !ready.value) return
   const permissions = buildPermissions(chips.value, selection.value, rows.value)
   try {
     if (props.role) {

@@ -95,12 +95,12 @@ export function buildPermissions(
   return [...chips, ...keys]
 }
 
-/** Rows a saved role covers without listing them (via a wildcard, say): in `expandedKeys`, not explicit. */
+/** Rows a saved role covers without listing them (via a wildcard, say): in `expandedKeys`, not among its saved explicit rows (`saved`, not the live choices). */
 export function coveredKeys(
   expandedKeys: readonly string[],
-  selection: MatrixSelection,
+  saved: MatrixSelection,
   rows: readonly CatalogEntry[],
 ): string[] {
   const expanded = new Set(expandedKeys)
-  return rows.filter((row) => expanded.has(row.key) && selection[row.key] === undefined).map((row) => row.key)
+  return rows.filter((row) => expanded.has(row.key) && saved[row.key] === undefined).map((row) => row.key)
 }
