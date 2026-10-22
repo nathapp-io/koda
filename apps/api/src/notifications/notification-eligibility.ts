@@ -6,6 +6,7 @@ import { MEMBERSHIP_READ_CAP } from '../permissions/membership.queries';
 import type { NotificationDraft } from './notification.types';
 
 const unique = (values: readonly string[]): string[] => [...new Set(values)];
+const PERMISSION_READ_CONCURRENCY = 10;
 
 /**
  * Fleet S4a §2.1 step 1: who may receive a draft. Never the actor; never a disabled or unknown user
@@ -35,11 +36,17 @@ export class NotificationEligibility {
     const projectPairs = unique(candidates.flatMap((draft) =>
       draft.projectId !== null && enabledIds.has(draft.userId) ? [`${draft.projectId}\u0000${draft.userId}`] : [],
     ));
-    const keys = await Promise.all(projectPairs.map(async (pair) => {
-      const [projectId, id] = pair.split('\u0000');
-      return [pair, (await this.permissions.effectiveKeys({ type: 'USER', id: id as string }, { projectId: projectId as string })).has('project.read')] as const;
-    }));
-    const readable = new Set(keys.filter(([, hasKey]) => hasKey).map(([pair]) => pair));
+    const readable = new Set<string>();
+    // Bound cold-cache reads even when a ticket has thousands of watchers. A failed chunk rejects
+    // the whole filter unchanged, without starting later chunks or returning a partial result.
+    for (let offset = 0; offset < projectPairs.length; offset += PERMISSION_READ_CONCURRENCY) {
+      const chunk = projectPairs.slice(offset, offset + PERMISSION_READ_CONCURRENCY);
+      const keys = await Promise.all(chunk.map(async (pair) => {
+        const [projectId, id] = pair.split('\u0000');
+        return [pair, (await this.permissions.effectiveKeys({ type: 'USER', id: id as string }, { projectId: projectId as string })).has('project.read')] as const;
+      }));
+      for (const [pair, hasKey] of keys) if (hasKey) readable.add(pair);
+    }
     return candidates.filter((draft) => enabledIds.has(draft.userId) && (
       draft.projectId === null || readable.has(`${draft.projectId}\u0000${draft.userId}`)
     ));
