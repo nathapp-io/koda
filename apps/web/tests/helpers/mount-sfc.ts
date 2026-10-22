@@ -141,6 +141,9 @@ const NUXT_AUTO_IMPORTS = [
   // Permissions P1 US-011: the principal-roles dialog and the Admin -> Users page read and write
   // bindings through this, so any spec mounting them overrides it through `globals`.
   'useRoleBindings',
+  // Permissions P1 US-013: the project members panel lists the project roles through this, so its
+  // spec injects the real composable the same way.
+  'useProjectRoles',
 ] as const
 
 /** Defaults for auto-imports a test did not supply; `definePageMeta` is a compile-time no-op macro. */

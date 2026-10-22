@@ -235,11 +235,19 @@
       "addEmail": "Email of an existing user",
       "add": "Add member",
       "remove": "Remove",
-      "removeConfirm": "Remove {email} from this project?",
+      "removeConfirm": "Remove {name} from this project?",
       "empty": "No members yet.",
       "disabledBadge": "Disabled",
       "roleLabel": "Role",
       "loadMore": "Load more",
+      "agentBadge": "Agent",
+      "agentLabel": "Agent",
+      "agentPlaceholder": "Choose an agent",
+      "addAgent": "Add agent",
+      "noAgents": "Every agent is already a member of this project.",
+      "addRole": "Add role",
+      "selectRole": "Choose a role",
+      "removeRole": "Remove {name}",
       "roles": {
         "ADMIN": "Admin",
         "DEVELOPER": "Developer",
@@ -249,7 +257,9 @@
       "toast": {
         "added": "Member added",
         "removed": "Member removed",
-        "roleChanged": "Role updated"
+        "agentAdded": "Agent added",
+        "roleAdded": "Role added",
+        "roleRemoved": "Role removed"
       }
     },
     "invites": {
