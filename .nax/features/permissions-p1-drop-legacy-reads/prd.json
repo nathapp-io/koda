@@ -3,7 +3,7 @@
   "feature": "permissions-p1-drop-legacy-reads",
   "branchName": "feat/permissions-p1-drop-legacy-reads",
   "createdAt": "2026-10-22T00:00:00.000Z",
-  "updatedAt": "2026-10-22T16:03:23.233Z",
+  "updatedAt": "2026-10-22T16:19:44.381Z",
   "userStories": [
     {
       "id": "US-001",
@@ -143,14 +143,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Binding-only membership changes security-sensitive local/access-source semantics, provenance and twelve consumer modules while preserving paging/error behavior and route shapes."
+        "reasoning": "Binding-only membership changes security-sensitive local/access-source semantics, provenance and twelve consumer modules while preserving paging/error behavior and route shapes.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/permissions/legacy-membership.queries.ts",
@@ -234,7 +237,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d9777d7f5d284a05f53090dfa8a1b09cc5920f1a"
     },
     {
       "id": "US-003",
