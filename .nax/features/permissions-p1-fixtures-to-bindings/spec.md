@@ -381,15 +381,15 @@ Fixture wording:
 ### US-001: The permission fixture module (`Workdir: apps/api`)
 
 1. [integration] `ensureSystemRoles(db)` on a reset database creates `Role` rows whose keys are exactly the eleven `SYSTEM_ROLES` keys.
-2. [integration] After `ensureSystemRoles(db)`, every `Role` row's `scope`, `locked`, `system` and `permissions` equal its `SYSTEM_ROLES` seed, and a second call leaves the row count at eleven.
+2. [integration] After `ensureSystemRoles(db)`, every `Role` row's `scope` and `permissions` equal its `SYSTEM_ROLES` seed, `locked` equals `seed.locked ?? false` and `system` equals `seed.system ?? true`, and a second call leaves the row count at eleven.
 3. [integration] After `ensureSystemRoles(db)`, setting the locked `owner` role's `permissions` to `['ticket.read']` and calling `ensureSystemRoles(db)` again restores the seed's permissions.
 4. [integration] `grantRole(db, { type: 'USER', id: u }, 'developer', p)` on a reset database writes one `RoleBinding` with the `developer` role's id, `projectId` `p`, `grantedByType` `'SYSTEM'` and `grantedById` `'test'`.
 5. [integration] Calling `grantRole(db, user, 'developer', p)` twice returns the same `id` both times and leaves one matching `RoleBinding` row.
 6. [integration] `grantRole(db, user, 'no-such-role', p)` rejects with an `Error` whose message is `no role no-such-role`, and no `RoleBinding` row exists for that user.
-7. [integration] `grantRole(db, user, 'admin', null)` for a user created with `role: 'MEMBER'` sets that user's `User.role` to `'ADMIN'`, and `grantRole(db, user, 'developer', p)` leaves it `'MEMBER'`.
+7. [integration] Given two users created with `role: 'MEMBER'`, `grantRole(db, firstUser, 'admin', null)` sets the first user's `User.role` to `'ADMIN'`, whereas `grantRole(db, secondUser, 'developer', p)` leaves the second user's `User.role` `'MEMBER'`.
 8. [integration] `grantBaseline(db, { type: 'USER', id: u })` writes a global binding of the `member` role, `grantBaseline(db, { type: 'AGENT', id: a })` a global binding of the `agent` role, and a second `grantBaseline` for the same user returns the first binding's id.
 9. [integration] `revokeProjectRoles(db, user, p)` for a user bound to `developer` and `viewer` in `p`, `viewer` in `q` and `member` globally returns `2` and leaves exactly the `q` and global bindings.
-10. [integration] `fixtureGrantReport` for a user with one `ProjectMember` row and `User.role = 'ADMIN'` but no global `admin` binding reports `legacyMemberships: 2`, and after a global `admin` binding is granted and the `ProjectMember` row deleted reports `legacyMemberships: 0`.
+10. [integration] `fixtureGrantReport` for a user with one `ProjectMember` row and `User.role = 'ADMIN'` but no global `owner` or `admin` binding reports `legacyMemberships: 2`, and after a global `admin` binding is granted and the `ProjectMember` row deleted reports `legacyMemberships: 0`.
 11. [integration] `fixtureGrantReport` for an agent with one `AgentProject` row, one `AgentRoleEntry` row and a global `developer` binding reports `{ legacyMemberships: 1, agentRoleEntries: 1, hasGlobalBinding: true, globalProjectRoleBindings: 1 }`.
 12. [integration] `expectBindingOnlyFixtures(db, [user, agent])` rejects with an `Error` whose message contains the agent's id and `agentRoleEntries` when the agent has one `AgentRoleEntry` row, and resolves when the same call passes `{ agentRoleEntries: [agent] }` and both principals are otherwise clean.
 13. [integration] `expectBindingOnlyFixtures(db, [user])` rejects with an `Error` whose message contains the user's id and `hasGlobalBinding` for a user with no binding, and resolves with `{ noBaseline: [user] }`.
