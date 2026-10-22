@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { MePermissionsController } from './me-permissions.controller';
 import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
 import { AgentsService } from '../agents/agents.service';
@@ -12,7 +13,9 @@ describe('ProjectsModule — DI wiring', () => {
 
   beforeEach(async () => {
     module = await Test.createTestingModule({
-      controllers: [ProjectsController],
+      // US-001: `MePermissionsController` is registered in `ProjectsModule`, so its two service
+      // dependencies must resolve from the same container as the projects controller's.
+      controllers: [ProjectsController, MePermissionsController],
       providers: [
         { provide: ProjectsService, useValue: {} },
         { provide: AgentsService, useValue: {} },
@@ -35,5 +38,9 @@ describe('ProjectsModule — DI wiring', () => {
   it('ProjectsController resolves with MemoryGovernanceService injected', () => {
     const controller = module.get(ProjectsController);
     expect(controller).toBeDefined();
+  });
+
+  it('MePermissionsController resolves with ProjectAccessService and PermissionService injected', () => {
+    expect(module.get(MePermissionsController)).toBeInstanceOf(MePermissionsController);
   });
 });

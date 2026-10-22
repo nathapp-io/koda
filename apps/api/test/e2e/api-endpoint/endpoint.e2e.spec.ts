@@ -5074,6 +5074,52 @@ describeIntegration('API Integration Tests', () => {
     });
   });
 
+  // ─────────────────────────────────────────────────────────────────
+  // Permissions P1 US-001 — the caller's own effective keys
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Me permissions API (permissions P1 US-001)', () => {
+    const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+    const mePermissions = (token: string, query = '') =>
+      request(httpServer).get(`/api/me/permissions${query}`).set(auth(token));
+
+    it('GET /api/me/permissions — 200 answers the global scope of the caller', async () => {
+      const res = await mePermissions(nonAdminUserAccessToken).expect(200);
+
+      const payload = body<{ scope: string; projectSlug: string | null; keys: string[] }>(res);
+      expect(payload.scope).toBe('global');
+      expect(payload.projectSlug).toBeNull();
+      // The baseline `member` role grants agent.read; the list arrives ascending and carries no
+      // implicit key (`auth.me.read` is always allowed and never listed).
+      expect(payload.keys).toContain('agent.read');
+      expect(payload.keys).not.toContain('auth.me.read');
+      expect(payload.keys).toEqual([...payload.keys].sort());
+    });
+
+    it('GET /api/me/permissions — 200 answers the project scope of a project the caller can read', async () => {
+      const res = await mePermissions(userAccessToken, `?project=${projectSlug}`).expect(200);
+
+      const payload = body<{ scope: string; projectSlug: string | null; keys: string[] }>(res);
+      expect(payload.scope).toBe('project');
+      expect(payload.projectSlug).toBe(projectSlug);
+      // The installation owner holds every project key in every project.
+      expect(payload.keys).toContain('ticket.delete');
+    });
+
+    it('GET /api/me/permissions — 404 for an unknown project slug', async () => {
+      const res = await mePermissions(nonAdminUserAccessToken, '?project=no-such-project').expect(404);
+
+      refusal(res, 'projects.404');
+    });
+
+    it('GET /api/me/permissions — 400 for an empty project value', async () => {
+      const res = await mePermissions(nonAdminUserAccessToken, '?project=').expect(400);
+
+      expect(res.body.ret).toBe(-2);
+      expect(res.body).not.toHaveProperty('data');
+    });
+  });
+
   // The sentinel runs last: the principals of this file are created across its tests, and it lists the
   // ones that still exist here. `temp-agent` is left out — the file deletes it.
   it('fixtures grant through bindings only', async () => {

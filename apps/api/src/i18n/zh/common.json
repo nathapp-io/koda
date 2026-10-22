@@ -5,6 +5,7 @@
     "minLength": "Must be at least {min} characters long",
     "maxLength": "Must be at most {max} characters long",
     "isString": "Must be a string",
+    "isNotEmpty": "不能为空",
     "isEnum": "Invalid value",
     "isUrl": "Must be a valid URL",
     "isBoolean": "Must be a boolean",

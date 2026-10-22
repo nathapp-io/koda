@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
+import { MePermissionsController } from './me-permissions.controller';
 import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
 import { PrismaProjectRepository } from './prisma-project.repository';
@@ -22,7 +23,9 @@ import { AgentsModule } from '../agents/agents.module';
     // forwardRef) reproduces a circular-dependency e2e failure.
     forwardRef(() => AgentsModule),
   ],
-  controllers: [ProjectsController],
+  // MePermissionsController lives here, not in PermissionsModule: it needs ProjectAccessService and
+  // PermissionsModule is global, so the reverse import would be a cycle for one route.
+  controllers: [ProjectsController, MePermissionsController],
   providers: [
     PrismaProjectRepository,
     { provide: PROJECT_REPOSITORY, useExisting: PrismaProjectRepository },
