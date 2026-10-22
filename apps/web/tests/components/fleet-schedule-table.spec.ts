@@ -34,13 +34,16 @@ function mountTable(schedules: ScheduleDto[], viewer: ScheduleViewer) {
   return { app, row, buttons }
 }
 
-const OWNER: ScheduleViewer = { userId: 'owner', canWork: true, canManage: false }
-const OTHER_DEV: ScheduleViewer = { userId: 'dev2', canWork: true, canManage: false }
-const ADMIN: ScheduleViewer = { userId: 'admin', canWork: true, canManage: true }
-const VIEWER: ScheduleViewer = { userId: 'v', canWork: false, canManage: false }
+/** Permissions P1 US-009: the row asks the viewer for its keys; `noKeys` is the fail-closed set. */
+const noKeys = { canCreate: false, canUpdateAny: false, canUpdateOwn: false, canDeleteAny: false, canDeleteOwn: false }
+const OWNER: ScheduleViewer = { userId: 'owner', ...noKeys, canUpdateOwn: true, canDeleteOwn: true }
+const OWNER_NO_DELETE: ScheduleViewer = { userId: 'owner', ...noKeys, canUpdateOwn: true }
+const OTHER_DEV: ScheduleViewer = { userId: 'dev2', ...noKeys, canUpdateOwn: true, canDeleteOwn: true }
+const ADMIN: ScheduleViewer = { userId: 'admin', ...noKeys, canUpdateAny: true, canDeleteAny: true }
+const VIEWER: ScheduleViewer = { userId: 'v', ...noKeys }
 
 describe('FleetScheduleTable', () => {
-  test('owner and project admin get Disable, Edit, Delete; another developer and a viewer get nothing (Review Focus 2)', () => {
+  test('the owner and a holder of the any-row keys get Disable, Edit, Delete; others get nothing (Review Focus 2, US-009)', () => {
     for (const [viewer, expected] of [
       [OWNER, ['fleet-schedule-disable', 'fleet-schedule-edit', 'fleet-schedule-delete']],
       [ADMIN, ['fleet-schedule-disable', 'fleet-schedule-edit', 'fleet-schedule-delete']],
@@ -51,6 +54,12 @@ describe('FleetScheduleTable', () => {
       expect(m.buttons('a')).toEqual(expected)
       m.app.unmount()
     }
+  })
+
+  test('US-009: update.own without a delete key leaves the row changeable but not deletable', () => {
+    const m = mountTable([schedule('a')], OWNER_NO_DELETE)
+    expect(m.buttons('a')).toEqual(['fleet-schedule-disable', 'fleet-schedule-edit'])
+    m.app.unmount()
   })
 
   test('a disabled schedule offers Enable, shows "-" for next fire and its reason (Review Focus 3)', () => {

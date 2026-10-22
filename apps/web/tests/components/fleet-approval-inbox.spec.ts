@@ -69,7 +69,7 @@ function mount(opts: {
     },
     props: {
       base: { kind: 'project', slug: 'koda' },
-      viewer: { kind: 'project', canManage: true, canWork: true, userId: 'u1' },
+      viewer: { kind: 'project', canDecideBudget: true, canDecideBash: true, userId: 'u1' },
       scopeLabel: () => 'koda',
       nameOf: (id: string) => (id === 'u1' ? 'Ada' : null),
       jobLink: (_p: string, j: string) => `/koda/fleet/jobs/${j}`,
@@ -272,7 +272,7 @@ describe('FleetApprovalInbox', () => {
 
   test('a reader without the right sees no decide buttons (Review Focus 5)', async () => {
     const get = jest.fn(async (path: string) => (path.endsWith('/a1') ? row('a1', { requeueCandidates: [] }) : page([row('a1')])))
-    const m = mount({ get, props: { viewer: { kind: 'project', canManage: false, canWork: false, userId: 'u1' } } })
+    const m = mount({ get, props: { viewer: { kind: 'project', canDecideBudget: false, canDecideBash: false, userId: 'u1' } } })
     await m.settle()
     await m.toggle('a1')
     expect(m.byId('fleet-approval-readonly')).toHaveLength(1)
@@ -305,7 +305,7 @@ describe('FleetApprovalInbox', () => {
     let stored: FleetApprovalDto = bash
     const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? stored : page(stored.status === 'pending' ? [stored] : [])))
     const post = jest.fn(async () => { stored = decided; return decided })
-    const m = mount({ get, post, props: { viewer: { kind: 'project', canManage: false, canWork: true, userId: 'u1' } } })
+    const m = mount({ get, post, props: { viewer: { kind: 'project', canDecideBudget: false, canDecideBash: true, userId: 'u1' } } })
     await m.settle()
     await m.toggle('b1')
     ;(m.byId('fleet-approval-bash-allow')[0].props.onClick as () => void)()
@@ -426,7 +426,7 @@ describe('FleetApprovalInbox', () => {
       let stored: FleetApprovalDto = pending
       const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? stored : page(stored.status === 'pending' ? [stored] : [])))
       const post = jest.fn(async () => { stored = decided; return decided })
-      const m = mount({ get, post, wallNow: Date.parse('2026-10-04T12:00:00.000Z'), props: { viewer: { kind: 'project', canManage: false, canWork: true, userId: 'u1' } } })
+      const m = mount({ get, post, wallNow: Date.parse('2026-10-04T12:00:00.000Z'), props: { viewer: { kind: 'project', canDecideBudget: false, canDecideBash: true, userId: 'u1' } } })
       await m.settle()
       await m.toggle('b1')
       ;(m.byId('fleet-approval-bash-allow')[0].props.onClick as () => void)()
@@ -484,13 +484,13 @@ describe('FleetApprovalInbox', () => {
     const bash = bashRow('b1')
     const budgetRow = row('a1', { requeueCandidates: [] })
     const get = jest.fn(async (path: string) => (path.endsWith('/b1') ? bash : path.endsWith('/a1') ? budgetRow : page([bash, row('a1')])))
-    const viewerOnly = mount({ get, props: { viewer: { kind: 'project', canManage: false, canWork: false, userId: 'u1' } } })
+    const viewerOnly = mount({ get, props: { viewer: { kind: 'project', canDecideBudget: false, canDecideBash: false, userId: 'u1' } } })
     await viewerOnly.settle()
     await viewerOnly.toggle('b1')
     expect(viewerOnly.byId('fleet-approval-readonly')).toHaveLength(1)
     expect(viewerOnly.byId('fleet-approval-bash-deny')).toHaveLength(0)
     viewerOnly.app.unmount()
-    const developer = mount({ get, props: { viewer: { kind: 'project', canManage: false, canWork: true, userId: 'u1' } } })
+    const developer = mount({ get, props: { viewer: { kind: 'project', canDecideBudget: false, canDecideBash: true, userId: 'u1' } } })
     await developer.settle()
     await developer.toggle('b1')
     expect(developer.byId('fleet-approval-bash-deny')).toHaveLength(1)
@@ -502,7 +502,7 @@ describe('FleetApprovalInbox', () => {
 
   test('the admin inbox reports a 403 and stops (no rows, no toast)', async () => {
     const get = jest.fn(async () => { throw new ApiError(40003, 'Forbidden') })
-    const m = mount({ get, props: { base: { kind: 'admin' }, viewer: { kind: 'admin', userId: null } } })
+    const m = mount({ get, props: { base: { kind: 'admin' }, viewer: { kind: 'admin', canDecideBudget: true, canDecideBash: true, userId: null } } })
     await m.settle()
     expect(m.forbidden).toEqual([true])
     expect(m.toast.errors).toEqual([])
@@ -511,7 +511,7 @@ describe('FleetApprovalInbox', () => {
 
   test('the admin inbox shows each row\'s project', async () => {
     const get = jest.fn(async () => page([row('a1'), row('g1', { projectId: null })]))
-    const m = mount({ get, props: { base: { kind: 'admin' }, viewer: { kind: 'admin', userId: null }, projectName: (id: string | null) => (id === null ? 'Fleet-wide' : 'koda') } })
+    const m = mount({ get, props: { base: { kind: 'admin' }, viewer: { kind: 'admin', canDecideBudget: true, canDecideBash: true, userId: null }, projectName: (id: string | null) => (id === null ? 'Fleet-wide' : 'koda') } })
     await m.settle()
     expect(m.app.textOf(m.rowEl('a1'))).toContain('koda')
     expect(m.app.textOf(m.rowEl('g1'))).toContain('Fleet-wide')
@@ -537,7 +537,7 @@ describe('FleetApprovalInbox', () => {
     await project.settle()
     expect(project.live()?.onFleetApproval).toBeDefined()
     project.app.unmount()
-    const admin = mount({ get: jest.fn(async () => page([])), props: { base: { kind: 'admin' }, viewer: { kind: 'admin', userId: null } } })
+    const admin = mount({ get: jest.fn(async () => page([])), props: { base: { kind: 'admin' }, viewer: { kind: 'admin', canDecideBudget: true, canDecideBash: true, userId: null } } })
     await admin.settle()
     expect(admin.live()).toBeNull()
     admin.app.unmount()
@@ -664,7 +664,7 @@ describe('FleetApprovalInbox keyboard (slice 4)', () => {
     const m = mount({
       get: get as unknown as jest.Mock,
       post,
-      props: { viewer: opts.viewer ?? { kind: 'project', canManage: true, canWork: true, userId: 'u1' } },
+      props: { viewer: opts.viewer ?? { kind: 'project', canDecideBudget: true, canDecideBash: true, userId: 'u1' } },
     })
     await m.settle()
     return { ...m, post, press: fake.press, listenerCount: fake.count }
@@ -741,7 +741,7 @@ describe('FleetApprovalInbox keyboard (slice 4)', () => {
 
   test('keys ignore typing targets and a viewer without rights; A/D do nothing without an open ask', async () => {
     const post = jest.fn(async () => bashRow('b1', { status: 'approved' }))
-    const m = await mountKeyboard([bashRow('b1')], { post, viewer: { kind: 'project', canManage: false, canWork: false, userId: 'u1' } })
+    const m = await mountKeyboard([bashRow('b1')], { post, viewer: { kind: 'project', canDecideBudget: false, canDecideBash: false, userId: 'u1' } })
     m.press('Enter')
     await m.settle()
     m.press('a', { target: { tagName: 'INPUT' } })

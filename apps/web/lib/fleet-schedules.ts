@@ -220,17 +220,35 @@ export type ScheduleStatusKey = 'enabled' | ScheduleDisabledReason
 export const scheduleStatusKey = (s: Pick<ScheduleDto, 'enabled' | 'disabledReason'>): ScheduleStatusKey =>
   s.enabled ? 'enabled' : (s.disabledReason ?? 'manual')
 
+/**
+ * Permissions P1 US-009: what the signed-in caller may do with a schedule, read from the project's
+ * keys, never from a role name. `canUpdateAny`/`canDeleteAny` are the plain key (`has`); the `.own`
+ * pair is `hasOwn`, which also answers true for the plain key — the page binds each one directly.
+ */
 export interface ScheduleViewer {
   userId: string | null
-  /** Project ADMIN or DEVELOPER (canWorkOnFleet). */
-  canWork: boolean
-  /** Project ADMIN, or a global ADMIN (the members endpoint reports both as canManage). */
-  canManage: boolean
+  /** `fleet.schedule.create`. */
+  canCreate: boolean
+  /** `fleet.schedule.update` — any row. */
+  canUpdateAny: boolean
+  /** `fleet.schedule.update.own` — only the caller's own rows. */
+  canUpdateOwn: boolean
+  /** `fleet.schedule.delete` — any row. */
+  canDeleteAny: boolean
+  /** `fleet.schedule.delete.own` — only the caller's own rows. */
+  canDeleteOwn: boolean
 }
 
-/** Edit, enable, disable, delete (3a D202): DEVELOPER+ and the owner or a project ADMIN. */
+const ownsSchedule = (s: Pick<ScheduleDto, 'createdById'>, viewer: ScheduleViewer): boolean =>
+  viewer.userId !== null && viewer.userId === s.createdById
+
+/** Edit, enable, disable: `fleet.schedule.update` on any row, or on the caller's own with `.own`. */
 export const canChangeSchedule = (s: Pick<ScheduleDto, 'createdById'>, viewer: ScheduleViewer): boolean =>
-  viewer.canWork && (viewer.canManage || (viewer.userId !== null && viewer.userId === s.createdById))
+  viewer.canUpdateAny || (viewer.canUpdateOwn && ownsSchedule(s, viewer))
+
+/** Delete: `fleet.schedule.delete` on any row, or on the caller's own with `.own` (never implied by update). */
+export const canDeleteSchedule = (s: Pick<ScheduleDto, 'createdById'>, viewer: ScheduleViewer): boolean =>
+  viewer.canDeleteAny || (viewer.canDeleteOwn && ownsSchedule(s, viewer))
 
 export const sortSchedules = (schedules: readonly ScheduleDto[]): ScheduleDto[] =>
   [...schedules].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))

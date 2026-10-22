@@ -38,18 +38,20 @@
           </TableCell>
           <TableCell>{{ ownerName(s.createdById) ?? t('fleet.schedules.detail.unknownOwner') }}</TableCell>
           <TableCell class="space-x-1 whitespace-nowrap text-right">
-            <template v-if="canChangeSchedule(s, viewer)">
-              <Button
-                size="sm"
-                variant="outline"
-                :disabled="busy"
-                :data-testid="s.enabled ? 'fleet-schedule-disable' : 'fleet-schedule-enable'"
-                @click="$emit('toggle', s, !s.enabled)"
-              >
-                {{ s.enabled ? t('fleet.schedules.actions.disable') : t('fleet.schedules.actions.enable') }}
-              </Button>
-              <Button size="sm" variant="outline" :disabled="busy" data-testid="fleet-schedule-edit" @click="$emit('edit', s)">{{ t('fleet.schedules.actions.edit') }}</Button>
-              <Button size="sm" variant="destructive" :disabled="busy" data-testid="fleet-schedule-delete" @click="$emit('remove', s)">{{ t('fleet.schedules.actions.delete') }}</Button>
+            <template v-if="canChange(s) || canDelete(s)">
+              <template v-if="canChange(s)">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  :disabled="busy"
+                  :data-testid="s.enabled ? 'fleet-schedule-disable' : 'fleet-schedule-enable'"
+                  @click="$emit('toggle', s, !s.enabled)"
+                >
+                  {{ s.enabled ? t('fleet.schedules.actions.disable') : t('fleet.schedules.actions.enable') }}
+                </Button>
+                <Button size="sm" variant="outline" :disabled="busy" data-testid="fleet-schedule-edit" @click="$emit('edit', s)">{{ t('fleet.schedules.actions.edit') }}</Button>
+              </template>
+              <Button v-if="canDelete(s)" size="sm" variant="destructive" :disabled="busy" data-testid="fleet-schedule-delete" @click="$emit('remove', s)">{{ t('fleet.schedules.actions.delete') }}</Button>
             </template>
           </TableCell>
         </TableRow>
@@ -59,11 +61,11 @@
 </template>
 
 <script setup lang="ts">
-import { canChangeSchedule, formatInZone, scheduleStatusKey } from '~/lib/fleet-schedules'
+import { canChangeSchedule, canDeleteSchedule, formatInZone, scheduleStatusKey } from '~/lib/fleet-schedules'
 import type { ScheduleViewer } from '~/lib/fleet-schedules'
 import type { ScheduleDto } from '~/lib/fleet-types'
 
-defineProps<{
+const props = defineProps<{
   schedules: ScheduleDto[]
   slug: string
   viewer: ScheduleViewer
@@ -72,6 +74,10 @@ defineProps<{
   ownerName: (id: string) => string | null
   busy: boolean
 }>()
+
+/** US-009: edit/enable/disable and delete are separate keys, so each row asks twice. */
+const canChange = (s: ScheduleDto): boolean => canChangeSchedule(s, props.viewer)
+const canDelete = (s: ScheduleDto): boolean => canDeleteSchedule(s, props.viewer)
 
 defineEmits<{
   (e: 'edit', schedule: ScheduleDto): void

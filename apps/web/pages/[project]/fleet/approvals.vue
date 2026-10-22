@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { scopeName } from '~/lib/fleet-budgets'
-import { canWorkOnFleet } from '~/lib/fleet-jobs'
 import type { ApprovalBase, ApprovalViewer, BudgetApprovalPayload } from '~/lib/fleet-approvals'
 
 definePageMeta({ layout: 'default' })
@@ -11,14 +10,18 @@ const slug = route.params.project as string
 const base: ApprovalBase = { kind: 'project', slug }
 const { t } = useI18n()
 const auth = useAuth()
-const { data: role } = useProjectViewerRole(slug)
 const people = useProjectMemberNames(slug)
 const options = useFleetDispatchOptions(slug)
 
-// D244 / D290: canManage is project ADMIN (a global ADMIN resolves to it); canWork is DEVELOPER+.
-// 2aw-D6: an assistant_action is decided by its requester alone, so the viewer carries the signed-in user id.
+// Permissions P1 US-009: each approval kind has the key its decide route requires, so the viewer carries
+// both of them from the project's set. 2aw-D6: an assistant_action is decided by its requester alone, so the
+// viewer also carries the signed-in user id.
+const { permissions } = useProjectPermissions(slug)
 const viewer = computed<ApprovalViewer>(() => ({
-  kind: 'project', canManage: role.value.canManage, canWork: canWorkOnFleet(role.value), userId: auth.user.value?.id ?? null,
+  kind: 'project',
+  userId: auth.user.value?.id ?? null,
+  canDecideBudget: permissions.value.has('fleet.approval.decide.budget'),
+  canDecideBash: permissions.value.has('fleet.approval.decide.bash'),
 }))
 const scopeLabel = (p: BudgetApprovalPayload): string | null =>
   scopeName(p, { project: slug, repo: options.repoName, runner: (id) => id })

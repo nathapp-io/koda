@@ -206,14 +206,15 @@ describe('display (D220, Review Focus 3)', () => {
   })
 })
 
-describe('permissions (D217, Review Focus 2)', () => {
+describe('permissions (D217, Review Focus 2; Permissions P1 US-009)', () => {
   const s = schedule({ createdById: 'owner' })
+  const noKeys = { canCreate: false, canUpdateAny: false, canUpdateOwn: false, canDeleteAny: false, canDeleteOwn: false }
   test.each([
-    ['the owner who can work', { userId: 'owner', canWork: true, canManage: false }, true],
-    ['a project admin', { userId: 'admin', canWork: true, canManage: true }, true],
-    ['another developer', { userId: 'dev2', canWork: true, canManage: false }, false],
-    ['the owner, demoted to viewer', { userId: 'owner', canWork: false, canManage: false }, false],
-    ['nobody signed in', { userId: null, canWork: false, canManage: false }, false],
+    ['the owner holding update.own', { userId: 'owner', ...noKeys, canUpdateOwn: true }, true],
+    ['a holder of the any-row update key', { userId: 'admin', ...noKeys, canUpdateAny: true }, true],
+    ['another developer holding only update.own', { userId: 'dev2', ...noKeys, canUpdateOwn: true }, false],
+    ['the owner holding no key', { userId: 'owner', ...noKeys }, false],
+    ['nobody signed in holding update.own', { userId: null, ...noKeys, canUpdateOwn: true }, false],
   ])('%s -> %s', (_name, viewer, expected) => {
     expect(canChangeSchedule(s, viewer)).toBe(expected)
   })

@@ -1,13 +1,20 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { scopeName } from '~/lib/fleet-budgets'
 import type { ApprovalBase, ApprovalViewer, BudgetApprovalPayload } from '~/lib/fleet-approvals'
 
 definePageMeta({ layout: 'default' })
 
 const base: ApprovalBase = { kind: 'admin' }
+// Permissions P1 US-009: the admin inbox decides from the global keys, one per approval kind.
 // 2aw-D6: an assistant_action is decided by its requester alone, so the viewer carries the signed-in user id.
-const viewer: ApprovalViewer = { kind: 'admin', userId: useAuth().user.value?.id ?? null }
+const { permissions } = useGlobalPermissions()
+const viewer = computed<ApprovalViewer>(() => ({
+  kind: 'admin',
+  userId: useAuth().user.value?.id ?? null,
+  canDecideBudget: permissions.value.has('fleet.approval.decide.budget'),
+  canDecideBash: permissions.value.has('fleet.approval.decide.bash'),
+}))
 const { t } = useI18n()
 const repos = useFleetRepos()
 const runnersApi = useFleetRunners()

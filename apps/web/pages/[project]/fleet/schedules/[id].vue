@@ -4,9 +4,9 @@ import { ApiError, extractApiError } from '~/composables/useApi'
 import { useFleetScheduleActions } from '~/composables/useFleetScheduleActions'
 import { useFleetSchedules } from '~/composables/useFleetSchedules'
 import { createDebouncer } from '~/lib/debounce'
-import { canWorkOnFleet, formatUsd } from '~/lib/fleet-jobs'
+import { formatUsd } from '~/lib/fleet-jobs'
 import { bashSummary } from '~/lib/fleet-bash-mode'
-import { canChangeSchedule, formatInZone, historyRows, placementOf, scheduleStatusKey } from '~/lib/fleet-schedules'
+import { canChangeSchedule, canDeleteSchedule, formatInZone, historyRows, placementOf, scheduleStatusKey } from '~/lib/fleet-schedules'
 import type { ScheduleViewer } from '~/lib/fleet-schedules'
 import type { ScheduleDto } from '~/lib/fleet-types'
 
@@ -21,7 +21,8 @@ const scheduleId = route.params.id as string
 const { t } = useI18n()
 const toast = useAppToast()
 const auth = useAuth()
-const { data: viewerRole } = useProjectViewerRole(slug)
+// Permissions P1 US-009: change and delete are separate keys, so they are read separately.
+const { permissions } = useProjectPermissions(slug)
 const options = useFleetDispatchOptions(slug)
 const people = useProjectMemberNames(slug)
 const api = useFleetSchedules(slug)
@@ -36,10 +37,14 @@ const editOpen = ref(false)
 
 const viewer = computed<ScheduleViewer>(() => ({
   userId: auth.user.value?.id ?? null,
-  canWork: canWorkOnFleet(viewerRole.value),
-  canManage: viewerRole.value.canManage,
+  canCreate: permissions.value.has('fleet.schedule.create'),
+  canUpdateAny: permissions.value.has('fleet.schedule.update'),
+  canUpdateOwn: permissions.value.hasOwn('fleet.schedule.update'),
+  canDeleteAny: permissions.value.has('fleet.schedule.delete'),
+  canDeleteOwn: permissions.value.hasOwn('fleet.schedule.delete'),
 }))
 const canChange = computed(() => schedule.value !== null && canChangeSchedule(schedule.value, viewer.value))
+const canDelete = computed(() => schedule.value !== null && canDeleteSchedule(schedule.value, viewer.value))
 const rows = computed(() => historyRows(jobsApi.jobs.value, !jobsApi.hasNext.value))
 
 const placementText = computed((): string => {
@@ -154,8 +159,8 @@ const runnerOptions = computed(() => options.runners.value.map((r) => ({ value: 
               {{ schedule.enabled ? t('fleet.schedules.actions.disable') : t('fleet.schedules.actions.enable') }}
             </Button>
             <Button variant="outline" data-testid="fleet-schedule-edit" @click="editOpen = true">{{ t('fleet.schedules.actions.edit') }}</Button>
-            <Button variant="destructive" :disabled="actions.busy.value" data-testid="fleet-schedule-delete" @click="remove()">{{ t('fleet.schedules.actions.delete') }}</Button>
           </template>
+          <Button v-if="canDelete" variant="destructive" :disabled="actions.busy.value" data-testid="fleet-schedule-delete" @click="remove()">{{ t('fleet.schedules.actions.delete') }}</Button>
         </template>
       </PageHeader>
 
