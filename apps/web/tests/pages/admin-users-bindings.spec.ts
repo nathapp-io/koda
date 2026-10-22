@@ -537,3 +537,29 @@ describe('F5 (round 2): a permission refresh does not reopen a failed snapshot',
     expect(m.app.textOf(chips[0])).toBe('Member')
   })
 })
+
+describe('F5 (round 2): opening the dialog on an invalid snapshot retries the listings', () => {
+  test('Edit roles re-reads roles and bindings, so the dialog unblocks once they succeed', async () => {
+    const err = new ApiError(50000, 'roles are down')
+    let rolesFail = true
+    const m = await mountPage({
+      api: {
+        get: jest.fn(async (path: string) => {
+          if (path === '/admin/users') return usersPage()
+          if (path === '/role-bindings') return bindingsPage()
+          if (rolesFail) throw err
+          return ROLES
+        }),
+      },
+    })
+    // The first attempt failed, so the column and the dialog are blocked.
+    expect(m.app.textOf(byId(m.app, 'user-roles-error', rowFor(m.app, 'u2')))).toBe(extractApiError(err))
+
+    rolesFail = false
+    call(allById(m.app, 'user-edit-roles', rowFor(m.app, 'u2'))[0], 'onClick')
+    await settle()
+
+    expect(allById(m.app, 'principal-roles-error')).toHaveLength(0)
+    expect(allById(m.app, 'binding-chip')).toHaveLength(2)
+  })
+})

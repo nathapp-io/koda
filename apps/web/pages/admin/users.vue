@@ -137,6 +137,9 @@ const roleDataBlocked = computed(() => !canManageRoles.value || roleColumnError.
 function openRoles(user: AdminUser): void {
   editing.value = user
   rolesDialogOpen.value = true
+  // Opening the dialog on an invalid snapshot is the admin's natural retry: without it a failed
+  // listing would leave the dialog blocked until the page itself is reloaded.
+  if (roleColumnError.value !== '') void reloadRoleData()
 }
 
 /** A created account gets a baseline binding from the API, so the chips need a fresh read too. */
