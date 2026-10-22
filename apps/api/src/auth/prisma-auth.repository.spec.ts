@@ -9,7 +9,6 @@ describe('PrismaAuthRepository agent methods', () => {
   const prisma = createMock<PrismaService>({
     client: {
       agent: { findFirst: vi.fn().mockResolvedValue(mockAgent) },
-      agentRoleEntry: { findMany: vi.fn().mockResolvedValue([{ role: 'DEVELOPER' }]) },
       agentCapabilityEntry: { findMany: vi.fn().mockResolvedValue([{ capability: 'read:tickets' }]) },
     } as any,
   });
@@ -23,10 +22,6 @@ describe('PrismaAuthRepository agent methods', () => {
   it('findAgentByKeyHash returns AgentDomain', async () => {
     const result = await repo.findAgentByKeyHash('hash123');
     expect(result).toEqual({ id: 'a1', slug: 'bot', status: 'ACTIVE', apiKeyHash: 'hash123' });
-  });
-
-  it('findAgentRoles returns role strings', async () => {
-    expect(await repo.findAgentRoles('a1')).toEqual(['DEVELOPER']);
   });
 
   it('findAgentCapabilities returns capability strings', async () => {

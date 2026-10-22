@@ -3,7 +3,6 @@ import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { PrismaProjectRepository } from '../../../src/projects/prisma-project.repository';
 import { ProjectAccessService, PROJECT_ACCESS_KEY } from '../../../src/projects/project-access.service';
 import type { PermissionService } from '../../../src/permissions/permission.service';
-import type { IAuthConfig } from '../../../src/config/auth.config';
 import type { AgentPrincipal, KodaPrincipal, RunnerPrincipal } from '../../../src/auth/principal/koda-principal.types';
 
 /**
@@ -31,7 +30,7 @@ type ProjectRepositoryDouble = {
 const granted = { allowed: true, reason: 'granted' } as const;
 const refused = { allowed: false, reason: 'not-granted' } as const;
 
-function setup(authConfig?: Partial<IAuthConfig>) {
+function setup() {
   const repo: ProjectRepositoryDouble = {
     isAgentOnRoster: vi.fn<(...args: [string, string]) => Promise<boolean>>(),
     findMembershipRole: vi.fn(),
@@ -42,7 +41,6 @@ function setup(authConfig?: Partial<IAuthConfig>) {
   const service = new ProjectAccessService(
     repo as unknown as PrismaProjectRepository,
     { can } as unknown as PermissionService,
-    authConfig as IAuthConfig | undefined,
   );
   return { repo, service, can };
 }
@@ -75,22 +73,6 @@ describe('US-001 ProjectAccessService agent and runner access', () => {
     const error = await refusalOf(service.resolveMembership('project-a', agent));
 
     expect(error.prefix).toBe('projects');
-    expect(can).toHaveBeenCalledWith(agent, PROJECT_ACCESS_KEY, { projectId: 'project-a' });
-    expect(repo.isAgentOnRoster).not.toHaveBeenCalled();
-  });
-
-  it('US-001 AC6: bypasses the permission check when agent project scoping is disabled', async () => {
-    const { repo, service, can } = setup({ agentProjectScoping: false });
-
-    await expect(service.resolveMembership('project-a', agent)).resolves.toBeNull();
-    expect(can).not.toHaveBeenCalled();
-    expect(repo.isAgentOnRoster).not.toHaveBeenCalled();
-  });
-
-  it('US-001 AC6 boundary: an explicit scoping config of true still asks for project.read', async () => {
-    const { repo, service, can } = setup({ agentProjectScoping: true });
-
-    await expect(service.resolveMembership('project-a', agent)).resolves.toBeNull();
     expect(can).toHaveBeenCalledWith(agent, PROJECT_ACCESS_KEY, { projectId: 'project-a' });
     expect(repo.isAgentOnRoster).not.toHaveBeenCalled();
   });

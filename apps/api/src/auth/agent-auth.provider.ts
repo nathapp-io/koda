@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { CacheManager } from '@nathapp/nestjs-cache';
-import { AgentPrincipal, KodaAgentRole, KodaAgentStatus } from './principal/koda-principal.types';
+import { AgentPrincipal, KodaAgentStatus } from './principal/koda-principal.types';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import type { AgentDomain } from './domain/auth.domain';
 
@@ -15,10 +15,7 @@ export class AgentAuthProvider {
     return this.cache.get<AgentPrincipal>(
       ['agent-principal', agent.id, agent.status],
       async () => {
-        const [agentRoles, capabilities] = await Promise.all([
-          this.loadAgentRoles(agent.id),
-          this.loadAgentCapabilities(agent.id),
-        ]);
+        const capabilities = await this.loadAgentCapabilities(agent.id);
 
         return {
           actorType: 'agent',
@@ -26,11 +23,10 @@ export class AgentAuthProvider {
           name: agent.slug,
           slug: agent.slug,
           status: agent.status as KodaAgentStatus,
-          agentRoles,
           capabilities,
           blacklisted: agent.status === 'PAUSED',
           revoked: false,
-          authorities: agentRoles,
+          authorities: [],
           extra: {
             slug: agent.slug,
           },
@@ -41,11 +37,6 @@ export class AgentAuthProvider {
         tags: [`AGENT:${agent.id}`, `AGENT:${agent.id}:PRINCIPAL`],
       },
     );
-  }
-
-  async loadAgentRoles(agentId: string): Promise<KodaAgentRole[]> {
-    const roles = await this.authRepo.findAgentRoles(agentId);
-    return roles as KodaAgentRole[];
   }
 
   async loadAgentCapabilities(agentId: string): Promise<string[]> {

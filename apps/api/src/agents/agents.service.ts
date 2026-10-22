@@ -203,10 +203,7 @@ export class AgentsService {
    * roster row do not. Throws 404 when the project is missing or soft-deleted
    * so callers can surface a stable error without guessing from an empty list.
    *
-   * `scoping` reflects `AGENT_PROJECT_SCOPING` — the same flag the
-   * ProjectAccessService reads to gate agent reach. Off = the response carries
-   * `scoping: false`; the caller still gets the rostered list (post-001
-   * state, just without the gate).
+   * `scoping` is always true: agent project reach is decided by `project.read`.
    */
   async listProjectRoster(projectSlug: string): Promise<ProjectAgentListDto> {
     const project = await this.agentRepo.findProjectBySlug(projectSlug);
@@ -215,7 +212,7 @@ export class AgentsService {
     }
 
     const records = await this.agentRepo.findProjectRoster(project.id);
-    return ProjectAgentListDto.from(records, this.agentScopingEnabled());
+    return ProjectAgentListDto.from(records, true);
   }
 
   /**
@@ -323,10 +320,7 @@ export class AgentsService {
     const validatedRoles = AgentsService.validateAgentRoles(updateData.roles);
 
     await this.agentRepo.replaceRoles(agentId, validatedRoles);
-    // Permissions P1 (US-009): `AgentRoleEntry` is a legacy row the permission union reads but
-    // `MembershipService` does not write, so the role change invalidates the cached effective keys
-    // itself. Without it, the change stays invisible until the entry ages out — the AC's "the agent's
-    // next ticket.create answers 201" is the observable consequence.
+    // Legacy roles remain display-only. Keep the existing cache invalidation on this write path.
     await this.membership.invalidatePermissions();
 
     // Return updated agent with roles
@@ -366,14 +360,6 @@ export class AgentsService {
   };
 
   /**
-   * S4c US-001 (D528): an absent flag means scoping is on. Only an explicit
-   * `agentProjectScoping: false` restores the pre-S4c agent reach.
-   */
-  agentScopingEnabled(): boolean {
-    return this.authConfig.agentProjectScoping !== false;
-  }
-
-  /**
    * US-003: ticket pickup is gated to the agent itself, or to a caller that holds `agent.update`
    * (with the seeded roles: an Owner or an Admin). 403 for everyone else; 404 when the project is
    * missing or soft-deleted.
@@ -385,8 +371,7 @@ export class AgentsService {
    * S4c US-001: a pickup is the target agent's act inside the project, so the
    * target agent must hold `agent.pickup` there. Permissions P1 (US-009): that is
    * the target agent's effective project keys, not the caller's — a global ADMIN
-   * cannot pick up on behalf of an agent that has no source in the project (with
-   * scoping on, such an agent holds no project key at all).
+   * cannot pick up on behalf of an agent whose bindings grant no pickup key in the project.
    */
   async suggestTicket(
     agentSlug: string,

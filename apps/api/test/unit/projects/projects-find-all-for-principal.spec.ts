@@ -7,10 +7,7 @@ import type { Mock } from 'vitest';
  *   AC8  … every non-deleted project for an agent principal
  *   AC9  … never a soft-deleted project, even for a member of it
  *
- * S4c US-001 changes AC8 for agents: while `AGENT_PROJECT_SCOPING` is on
- * (the default) an agent gets exactly the non-deleted projects on its
- * `AgentProject` roster (AC11); only an explicit `off` — and the pre-S4c agent
- * reach — returns every non-deleted project (AC12).
+ * Agents without global project.read receive only their accessible non-deleted projects.
  *
  * The repository double mirrors `PrismaProjectRepository`: it yields only
  * non-deleted rows, a membership-scoped selector yields only the caller's rows
@@ -254,25 +251,6 @@ describe('ProjectsService.findAllForPrincipal (US-002)', () => {
     // `delta` is on the roster but soft-deleted: the roster never resurrects it.
     expect(slugsOf(projects)).not.toContain('delta');
     expect(repo.findAllForAgent).toHaveBeenCalledWith('agent-1');
-  });
-
-  it('AC12 (S4c US-001): with scoping off an agent gets every non-deleted project', async () => {
-    const unscoped = new ProjectsService(
-      repo as unknown as PrismaProjectRepository,
-      {
-        deleteAllBySourceType: vi.fn(),
-        clearProjectCaches: vi.fn(),
-      } as unknown as RagService,
-      undefined,
-      new ProjectAccessService(repo as unknown as PrismaProjectRepository, permissions, {
-        agentProjectScoping: false,
-      } as never),
-    );
-
-    const projects = await unscoped.findAllForPrincipal(AGENT_PRINCIPAL);
-
-    expect(slugsOf(projects)).toEqual(['alpha', 'bravo', 'charlie']);
-    expect(repo.findAllForAgent).not.toHaveBeenCalled();
   });
 
   it('AC9: never returns a soft-deleted project, even for a member of it', async () => {

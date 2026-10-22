@@ -1715,7 +1715,7 @@ describeIntegration('API Integration Tests', () => {
 
       // US-002: the response shape is { scoping, items: ProjectAgentDto[] }
       const data = body<{ scoping: boolean; items: { slug: string; status: string }[] }>(res);
-      expect(data).toHaveProperty('scoping');
+      expect(data.scoping).toBe(true);
       expect(Array.isArray(data.items)).toBe(true);
       // agentSlug has an assigned ticket (set up in beforeAll) and is on the
       // roster (also in beforeAll), so it must appear in items.

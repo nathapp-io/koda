@@ -83,9 +83,8 @@ export class PermissionService {
    * it holds `key`, ascending.
    *
    * The filtered listings (`GET /fleet/activity`, `GET /fleet/approval-counts`) use this to scope the
-   * rows they return. A runner principal holds nothing. The candidates are the principal's access
-   * sources — the roster and binding projects — not every project, which is also what an agent gets
-   * with `AGENT_PROJECT_SCOPING=off`.
+   * rows they return. A runner principal holds nothing. The candidates are the principal's role
+   * bindings' project scopes, not every project.
    */
   async projectIdsWithKey(
     principal: KodaPrincipal,

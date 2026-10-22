@@ -14,8 +14,6 @@ const envSchema = Joi.object({
   JWT_REFRESH_SECRET: Joi.string().required().invalid(Joi.ref('JWT_SECRET')),
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('7d'),
   API_KEY_SECRET: Joi.string().required(),
-  // S4c US-001 (D528): agent project scoping defaults to 'on' (fail closed).
-  AGENT_PROJECT_SCOPING: Joi.string().valid('on', 'off').default('on'),
   VCS_ENCRYPTION_KEY: Joi.string().hex().length(64).optional(),
   VCS_DEFAULT_POLLING_INTERVAL_MS: Joi.number().integer().min(60000).optional(),
   GITHUB_API_URL: Joi.string().uri().optional(),

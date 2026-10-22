@@ -122,7 +122,7 @@ describe('AssistantToolExecutor as the thread requester (US-001)', () => {
     const [ctx] = vi.mocked(tool.execute).mock.calls[0] as [ToolContext, unknown];
     expect(ctx.actor).toEqual({
       actorType: 'agent', id: 'a1', name: 'claude', slug: 'claude', status: 'ACTIVE',
-      agentRoles: [], capabilities: [], blacklisted: false, revoked: false, authorities: [], extra: { slug: 'claude' },
+      capabilities: [], blacklisted: false, revoked: false, authorities: [], extra: { slug: 'claude' },
     });
   });
 

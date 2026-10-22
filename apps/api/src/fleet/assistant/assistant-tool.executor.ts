@@ -539,7 +539,6 @@ function agentPrincipal(creator: AgentToolCallCreator): AgentPrincipal {
     name: creator.slug,
     slug: creator.slug,
     status: creator.status as KodaAgentStatus,
-    agentRoles: [],
     capabilities: [],
     blacklisted: creator.status === 'PAUSED',
     revoked: false,

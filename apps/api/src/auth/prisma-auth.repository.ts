@@ -104,11 +104,6 @@ export class PrismaAuthRepository {
     return m ?? null;
   }
 
-  async findAgentRoles(agentId: string): Promise<string[]> {
-    const rows = await this.db.agentRoleEntry.findMany({ where: { agentId }, select: { role: true } });
-    return rows.map((r) => r.role);
-  }
-
   async findAgentCapabilities(agentId: string): Promise<string[]> {
     const rows = await this.db.agentCapabilityEntry.findMany({ where: { agentId }, select: { capability: true } });
     return rows.map((c) => c.capability);

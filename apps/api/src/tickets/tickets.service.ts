@@ -425,9 +425,8 @@ export class TicketsService {
     // project's roster lock before reading the roster, the same lock
     // `AgentsService.removeFromProject` holds, so a concurrent removal and
     // assignment serialize and a ticket can never end up assigned to an agent
-    // that was just taken off the roster. Roster eligibility holds in both
-    // AGENT_PROJECT_SCOPING modes (D528): the flag gates agent reach, never who
-    // a project may assign its tickets to.
+    // that was just taken off the roster. Assignment eligibility is checked independently
+    // of the calling agent's project access.
     const updated = await this.txManager.run(async () => {
       const ticket = await this.ticketRepo.findTicketScoped(project.id, project.key, ref);
       if (!ticket || ticket.deletedAt) {

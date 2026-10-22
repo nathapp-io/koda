@@ -10,9 +10,6 @@
  * `SystemRoleSeeder`, so the seeded keys exist), legacy rows through Prisma, which is what a
  * pre-bindings installation looks like.
  *
- * `agent project scoping` is a boot-time config flag, so AC-12 (scoping off) boots its own app, as
- * `bootstrap-baselines.integration.spec.ts` does for `KODA_OWNER_EMAIL`.
- *
  * Run: cd apps/api && bun run test:db:up &&
  *      bun run test:scoped test/integration/permissions/membership-project-access.integration.spec.ts
  */
@@ -336,59 +333,6 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
     expect(data<{ canManage: boolean; viewerRole: string }>(res)).toEqual(
       expect.objectContaining({ canManage: false, viewerRole: 'VIEWER' }),
     );
-  }, TEST_TIMEOUT_MS);
-});
-
-/**
- * AC-12 needs `AGENT_PROJECT_SCOPING=off`, which is read once at `AppFactory.create`: its own app and
- * its own world, reset and re-seeded by this describe.
- */
-describeIntegration('project lists with agent project scoping off (US-002 AC-12, PG)', () => {
-  let app: NathApplication;
-  let server: ReturnType<NathApplication['getHttpServer']>;
-  let prisma: PrismaClient;
-  let agentKey = '';
-  let accessToken = '';
-
-  beforeAll(async () => {
-    await resetDb();
-    // `AGENT_PROJECT_SCOPING` is read once, at `AppFactory.create`.
-    const previousScoping = process.env.AGENT_PROJECT_SCOPING;
-    process.env.AGENT_PROJECT_SCOPING = 'off';
-    try {
-      app = await bootHttpApp({ registrationEnabled: false });
-    } finally {
-      if (previousScoping === undefined) delete process.env.AGENT_PROJECT_SCOPING;
-      else process.env.AGENT_PROJECT_SCOPING = previousScoping;
-    }
-    server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
-
-    const root = await request(server).post('/api/auth/register')
-      .send({ email: 'scoping-root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
-    accessToken = data<{ accessToken: string }>(root).accessToken;
-
-    for (const [index, slug] of (['p1', 'p2'] as const).entries()) {
-      await request(server).post('/api/projects').set({ Authorization: `Bearer ${accessToken}` })
-        .send({ name: `Project ${slug}`, slug, key: ['SA', 'SB'][index] }).expect(201);
-    }
-
-    const created = await request(server).post('/api/agents').set({ Authorization: `Bearer ${accessToken}` })
-      .send({ name: 'Unscoped Agent', slug: 'unscoped-agent', roles: ['DEVELOPER'] }).expect(201);
-    agentKey = data<{ apiKey: string }>(created).apiKey;
-    // No AgentProject row, no binding: the agent has no membership source at all.
-    expect(await prisma.agentProject.count()).toBe(0);
-  }, 120_000);
-
-  afterAll(async () => {
-    await app?.close();
-  });
-
-  it('AC-12: with scoping off, an unscoped agent lists every non-deleted project', async () => {
-    const res = await request(server).get('/api/projects').set({ Authorization: `Bearer ${agentKey}` });
-
-    expect(res.status).toBe(200);
-    expect(data<{ slug: string }[]>(res).map((project) => project.slug).sort()).toEqual(['p1', 'p2']);
   }, TEST_TIMEOUT_MS);
 });
 
