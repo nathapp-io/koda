@@ -565,8 +565,92 @@ describe('F5 (round 2): opening the dialog on an invalid snapshot retries the li
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Fix round 3
+// Fix rounds 3 and 4: immediate failures and overlapping reloads
 // ─────────────────────────────────────────────────────────────────────────────
+
+describe('F7: overlapping reloads cannot erase a newer failure', () => {
+  test.each(['/roles', '/role-bindings'] as const)('an older success cannot clear the newer %s rejection', async (failedPath) => {
+    const deferred = () => {
+      let resolve!: (value: unknown) => void
+      let reject!: (err: unknown) => void
+      const promise = new Promise<unknown>((yes, no) => { resolve = yes; reject = no })
+      return { promise, resolve, reject }
+    }
+    const older = { '/roles': deferred(), '/role-bindings': deferred() }
+    const newer = { '/roles': deferred(), '/role-bindings': deferred() }
+    let active: typeof older | null = null
+    const err = new ApiError(50000, `${failedPath} is down`)
+    const m = await mountPage({
+      api: {
+        get: jest.fn(async (path: string) => {
+          if (path === '/admin/users') return usersPage()
+          if (path === '/roles' || path === '/role-bindings') {
+            if (active) return active[path].promise
+            return path === '/roles' ? [...ROLES] : bindingsPage()
+          }
+          throw new Error(`unexpected GET ${path}`)
+        }),
+      },
+    })
+    call(byId(m.app, 'user-edit-roles'), 'onClick')
+    await settle()
+    expect(allById(m.app, 'binding-chip')).toHaveLength(2)
+
+    const refreshPermissions = async () => {
+      for (const handle of m.permissionData) handle.pending.value = true
+      await settle()
+      for (const handle of m.permissionData) handle.pending.value = false
+      await settle()
+    }
+    active = older
+    await refreshPermissions() // Start A, leaving both listings pending.
+    active = newer
+    await refreshPermissions() // Start B before A finishes.
+    expect(m.api.get.mock.calls.filter(([path]) => path === '/roles')).toHaveLength(3)
+    expect(m.api.get.mock.calls.filter(([path]) => path === '/role-bindings')).toHaveLength(3)
+
+    const assertBlocked = () => {
+      expect(m.app.textOf(byId(m.app, 'user-roles-error', rowFor(m.app, 'u2')))).toBe(extractApiError(err))
+      expect(m.app.textOf(byId(m.app, 'principal-roles-error'))).toBe(extractApiError(err))
+      expect(allById(m.app, 'user-role-chip')).toHaveLength(0)
+      expect(allById(m.app, 'binding-chip')).toHaveLength(0)
+      expect(allById(m.app, 'binding-remove')).toHaveLength(0)
+      expect(byId(m.app, 'binding-role-select').props.disabled).toBe(true)
+      expect(byId(m.app, 'binding-add').props.disabled).toBe(true)
+    }
+    // B fails while its other listing remains pending: the error must appear immediately.
+    newer[failedPath].reject(err)
+    await settle()
+    expect(m.toast.error).toHaveBeenCalledWith(extractApiError(err))
+    assertBlocked()
+
+    // Both A listings succeed after B's rejection. A must not certify B's failed snapshot.
+    older['/roles'].resolve([...ROLES])
+    older['/role-bindings'].resolve(bindingsPage())
+    await settle()
+    assertBlocked()
+
+    // B's remaining success must not leave the failure permanently erased either.
+    const remainingPath = failedPath === '/roles' ? '/role-bindings' : '/roles'
+    newer[remainingPath].resolve(remainingPath === '/roles' ? [...ROLES] : bindingsPage())
+    await settle()
+    assertBlocked()
+    call(byId(m.app, 'binding-role-select'), 'onChange', { target: { value: 'owner' } })
+    await settle()
+    call(byId(m.app, 'binding-add'), 'onClick')
+    await settle()
+    expect(m.api.post).not.toHaveBeenCalled()
+
+    // A subsequent fully successful reload still repairs the snapshot.
+    active = null
+    await refreshPermissions()
+    expect(allById(m.app, 'user-roles-error')).toHaveLength(0)
+    expect(allById(m.app, 'principal-roles-error')).toHaveLength(0)
+    expect(allById(m.app, 'user-role-chip', rowFor(m.app, 'u2'))).toHaveLength(2)
+    expect(allById(m.app, 'binding-chip')).toHaveLength(2)
+    expect(byId(m.app, 'binding-role-select').props.disabled).toBe(false)
+  })
+})
 
 describe('F6: a rejection is recorded and toasted the moment it happens', () => {
   test('a failing /roles while /role-bindings is still pending invalidates the snapshot at once', async () => {

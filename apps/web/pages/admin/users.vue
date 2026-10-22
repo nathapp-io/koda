@@ -94,11 +94,14 @@ async function reload(targetPage = 1): Promise<void> {
  *
  * Each rejection is recorded and toasted the moment it lands, not when the pair settles: one listing
  * can hang, and until then the page would keep publishing a snapshot it already knows is broken. The
- * errors are cleared only by a run in which both listings succeeded, so a success cannot paper over a
- * failure either.
+ * errors are cleared only by the latest started run, and only if both its listings succeeded. An
+ * older successful run must not erase a failure already recorded by a newer run. Failures from any
+ * run still invalidate immediately; a subsequent full success is needed to repair the snapshot.
  */
+let roleDataGeneration = 0
 async function reloadRoleData(): Promise<void> {
   if (!canManageRoles.value || adminOnly.value) return
+  const generation = ++roleDataGeneration
   const record = (target: Ref<string>) => (err: unknown): false => {
     target.value = extractApiError(err)
     toast.error(extractApiError(err))
@@ -108,7 +111,7 @@ async function reloadRoleData(): Promise<void> {
     loadRoles().then(() => true, record(rolesError)),
     listGlobal('USER').then(() => true, record(bindingsError)),
   ])
-  if (rolesOk && bindingsOk) {
+  if (generation === roleDataGeneration && rolesOk && bindingsOk) {
     rolesError.value = ''
     bindingsError.value = ''
   }
