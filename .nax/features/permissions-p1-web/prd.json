@@ -3,7 +3,7 @@
   "feature": "permissions-p1-web",
   "branchName": "feat/permissions-p1-web",
   "createdAt": "2026-07-14T00:00:00.000Z",
-  "updatedAt": "2026-10-22T08:10:40.719Z",
+  "updatedAt": "2026-10-22T08:35:20.259Z",
   "userStories": [
     {
       "id": "US-001",
@@ -767,8 +767,8 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -780,7 +780,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "claude-sonnet",
+          "confidence": 0.2999999999999998,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T08:10:45.129Z"
+        }
       },
       "contextFiles": [
         "apps/web/lib/permissions.ts",
@@ -838,7 +850,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "b99ef86d314c167e8002c719d70aa67c713052c9"
     },
     {
       "id": "US-009",
