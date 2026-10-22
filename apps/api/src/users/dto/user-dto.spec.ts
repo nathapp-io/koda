@@ -17,6 +17,13 @@ describe('user admin DTOs', () => {
     expect(await errorsOf(CreateUserDto, { ...ok, email: 'nope' })).toContain('email');
   });
 
+  it('US-004: CreateUserDto accepts an absent role, and an unknown one is still refused', async () => {
+    const withoutRole = { email: 'a@koda.test', name: 'A', password: 'Admin1234!Aa' };
+    expect(await errorsOf(CreateUserDto, withoutRole)).toEqual([]);
+    expect(await errorsOf(CreateUserDto, { ...withoutRole, role: 'ADMIN' })).toEqual([]);
+    expect(await errorsOf(CreateUserDto, { ...withoutRole, role: 'OWNER' })).toContain('role');
+  });
+
   it('UpdateUserDto allows an empty patch and rejects non-boolean disabled', async () => {
     expect(await errorsOf(UpdateUserDto, {})).toEqual([]);
     expect(await errorsOf(UpdateUserDto, { disabled: 'yes' })).toContain('disabled');

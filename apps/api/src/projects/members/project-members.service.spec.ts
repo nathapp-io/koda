@@ -1,5 +1,5 @@
 import type { Mock } from 'vitest';
-import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ProjectMembersService } from './project-members.service';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
@@ -26,6 +26,7 @@ describe('ProjectMembersService', () => {
   let service: ProjectMembersService;
   let membership: Record<string, Mock>;
   let permissions: Record<string, Mock>;
+  let roles: { assertMayGrant: Mock };
 
   beforeEach(() => {
     repo = {
@@ -52,12 +53,14 @@ describe('ProjectMembersService', () => {
       removeProjectBindings: vi.fn(),
     };
     permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) };
+    roles = { assertMayGrant: vi.fn(async (): Promise<{ key: string }> => ({ key: 'viewer' })) };
     service = new ProjectMembersService(
       repo as never,
       access as never,
       txManager as never,
       membership as never,
       permissions as never,
+      roles as never,
     );
   });
 
@@ -146,6 +149,112 @@ describe('ProjectMembersService', () => {
     repo.findMember.mockResolvedValueOnce(null).mockResolvedValueOnce(member('u1', 'DEVELOPER'));
     expect(await service.add('proj', { email: 'u1@k.t', role: 'DEVELOPER' }, projectAdmin)).toMatchObject({ role: 'DEVELOPER' });
     expect(membership.createBinding).toHaveBeenCalledWith({ principal: { type: 'USER', id: 'u1' }, projectId: 'p1', roleKey: 'developer' }, { type: 'USER', id: 'pa' });
+  });
+
+  /**
+   * US-004: every add runs the shared grant rules before it writes. The route's `member.add` key is the
+   * gate, so the service asks `assertMayGrant` — role, scope, principal type, self-binding, escalation —
+   * and only then binds.
+   */
+  describe('US-004: role keys through the grant rules', () => {
+    beforeEach(() => {
+      repo.findUserByEmail.mockResolvedValue({ id: 'u1', disabled: false });
+      repo.findMember.mockResolvedValueOnce(null).mockResolvedValueOnce(member('u1', 'DEVELOPER'));
+    });
+
+    it('AC-3: calls assertMayGrant once with the requested key and the target, before createBinding', async () => {
+      await service.add('proj', { email: 'u1@k.t', roleKey: 'triager' }, projectAdmin);
+
+      expect(roles.assertMayGrant).toHaveBeenCalledTimes(1);
+      expect(roles.assertMayGrant).toHaveBeenCalledWith(projectAdmin, {
+        roleKey: 'triager',
+        projectId: 'p1',
+        principalType: 'USER',
+        principalId: 'u1',
+      });
+      expect(roles.assertMayGrant.mock.invocationCallOrder[0]).toBeLessThan(
+        membership.createBinding.mock.invocationCallOrder[0] as number,
+      );
+      expect(membership.createBinding).toHaveBeenCalledWith(
+        { principal: { type: 'USER', id: 'u1' }, projectId: 'p1', roleKey: 'triager' },
+        { type: 'USER', id: 'pa' },
+      );
+    });
+
+    it('AC-3: an assertMayGrant rejection prevents createBinding', async () => {
+      roles.assertMayGrant.mockRejectedValue(new ForbiddenAppException({}, 'permissions.escalation'));
+
+      const error = await service.add('proj', { email: 'u1@k.t', roleKey: 'developer' }, projectAdmin)
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      expect((error as ForbiddenAppException).prefix).toBe('permissions.escalation');
+      expect(membership.createBinding).not.toHaveBeenCalled();
+    });
+
+    it('the legacy role field is granted through the same rules, mapped to its role key', async () => {
+      await service.add('proj', { email: 'u1@k.t', role: 'DEVELOPER' }, projectAdmin);
+
+      expect(roles.assertMayGrant).toHaveBeenCalledWith(projectAdmin, {
+        roleKey: 'developer',
+        projectId: 'p1',
+        principalType: 'USER',
+        principalId: 'u1',
+      });
+      expect(membership.createBinding).toHaveBeenCalledWith(
+        { principal: { type: 'USER', id: 'u1' }, projectId: 'p1', roleKey: 'developer' },
+        { type: 'USER', id: 'pa' },
+      );
+    });
+
+    it('neither field grants viewer, and it is still granted through the rules', async () => {
+      await service.add('proj', { email: 'u1@k.t' }, projectAdmin);
+
+      expect(roles.assertMayGrant).toHaveBeenCalledWith(projectAdmin, {
+        roleKey: 'viewer',
+        projectId: 'p1',
+        principalType: 'USER',
+        principalId: 'u1',
+      });
+      expect(membership.createBinding).toHaveBeenCalledWith(
+        { principal: { type: 'USER', id: 'u1' }, projectId: 'p1', roleKey: 'viewer' },
+        { type: 'USER', id: 'pa' },
+      );
+    });
+
+    it('both fields is 400 members.roleAndRoleKey, before any lookup or write', async () => {
+      const error = await service.add('proj', { email: 'u1@k.t', role: 'DEVELOPER', roleKey: 'developer' }, projectAdmin)
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ValidationAppException);
+      expect((error as ValidationAppException).prefix).toBe('members.roleAndRoleKey');
+      expect((error as ValidationAppException).httpStatus).toBe(400);
+      expect(roles.assertMayGrant).not.toHaveBeenCalled();
+      expect(membership.createBinding).not.toHaveBeenCalled();
+    });
+
+    it('the user lookup and the disabled refusal come before the grant rules', async () => {
+      repo.findUserByEmail.mockResolvedValueOnce(null);
+      await expect(service.add('proj', { email: 'ghost@k.t', roleKey: 'triager' }, projectAdmin))
+        .rejects.toMatchObject({ prefix: 'members.user', httpStatus: 404 });
+
+      repo.findUserByEmail.mockResolvedValueOnce({ id: 'u1', disabled: true });
+      await expect(service.add('proj', { email: 'u1@k.t', roleKey: 'triager' }, projectAdmin))
+        .rejects.toMatchObject({ prefix: 'members.userDisabled', httpStatus: 409 });
+
+      expect(roles.assertMayGrant).not.toHaveBeenCalled();
+    });
+
+    it('the existing-member 409 comes after the grant rules', async () => {
+      repo.findMember.mockReset();
+      repo.findMember.mockResolvedValue(member('u1', 'DEVELOPER'));
+
+      await expect(service.add('proj', { email: 'u1@k.t', roleKey: 'triager' }, projectAdmin))
+        .rejects.toMatchObject({ prefix: 'members', httpStatus: 409 });
+
+      expect(roles.assertMayGrant).toHaveBeenCalledTimes(1);
+      expect(membership.createBinding).not.toHaveBeenCalled();
+    });
   });
 
   it('AC14: refuses to add a disabled user without creating membership', async () => {

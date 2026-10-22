@@ -22,7 +22,8 @@ import { ProjectMembersService } from './project-members.service';
     // class-level) and needs the global PermissionService.
     { provide: PermissionService, useValue: { can: vi.fn() } },
     // US-003: ProjectRolesController reads the PROJECT-scope roles through the global RoleAdminService.
-    { provide: RoleAdminService, useValue: { listProjectRoles: vi.fn() } },
+    // US-004: ProjectMembersService.add runs its grant rules through the same service.
+    { provide: RoleAdminService, useValue: { listProjectRoles: vi.fn(), assertMayGrant: vi.fn() } },
     { provide: PrismaService, useValue: { client: {} } },
     {
       provide: TRANSACTION_MANAGER,
