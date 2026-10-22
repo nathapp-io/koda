@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Pencil, UserPlus } from 'lucide-vue-next'
+import type { Ref } from 'vue'
 import PrincipalRolesDialog from '~/components/PrincipalRolesDialog.vue'
 import { ApiError, extractApiError } from '~/composables/useApi'
 import { bindingChips, chipLabel } from '~/lib/role-bindings'
@@ -91,25 +92,23 @@ async function reload(targetPage = 1): Promise<void> {
  * separately: an unjoined chip would show a key where a name belongs, so a failure renders the load
  * error instead of chips — and the dialog, which shows the same rows, is told about it too.
  *
- * The error state is only decided by a completed attempt, and only a run in which both listings
- * succeeded clears it. Clearing it when a request *starts* (or when the permission gate flickers)
- * would re-publish the stale snapshot the failure was about.
+ * Each rejection is recorded and toasted the moment it lands, not when the pair settles: one listing
+ * can hang, and until then the page would keep publishing a snapshot it already knows is broken. The
+ * errors are cleared only by a run in which both listings succeeded, so a success cannot paper over a
+ * failure either.
  */
 async function reloadRoleData(): Promise<void> {
   if (!canManageRoles.value || adminOnly.value) return
-  const [rolesFailure, bindingsFailure] = await Promise.all([
-    loadRoles().then(() => null, (err: unknown) => extractApiError(err)),
-    listGlobal('USER').then(() => null, (err: unknown) => extractApiError(err)),
+  const record = (target: Ref<string>) => (err: unknown): false => {
+    target.value = extractApiError(err)
+    toast.error(extractApiError(err))
+    return false
+  }
+  const [rolesOk, bindingsOk] = await Promise.all([
+    loadRoles().then(() => true, record(rolesError)),
+    listGlobal('USER').then(() => true, record(bindingsError)),
   ])
-  if (rolesFailure !== null) {
-    rolesError.value = rolesFailure
-    toast.error(rolesFailure)
-  }
-  if (bindingsFailure !== null) {
-    bindingsError.value = bindingsFailure
-    toast.error(bindingsFailure)
-  }
-  if (rolesFailure === null && bindingsFailure === null) {
+  if (rolesOk && bindingsOk) {
     rolesError.value = ''
     bindingsError.value = ''
   }

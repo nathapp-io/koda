@@ -563,3 +563,52 @@ describe('F5 (round 2): opening the dialog on an invalid snapshot retries the li
     expect(allById(m.app, 'binding-chip')).toHaveLength(2)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fix round 3
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('F6: a rejection is recorded and toasted the moment it happens', () => {
+  test('a failing /roles while /role-bindings is still pending invalidates the snapshot at once', async () => {
+    const err = new ApiError(50000, 'roles are down')
+    let rolesMode: 'ok' | 'fail' = 'ok'
+    let bindingsGate: { promise: Promise<unknown>; resolve: (value: unknown) => void } | null = null
+    const m = await mountPage({
+      api: {
+        get: jest.fn(async (path: string) => {
+          if (path === '/admin/users') return usersPage()
+          if (path === '/roles') {
+            if (rolesMode === 'fail') throw err
+            return ROLES
+          }
+          if (bindingsGate) return bindingsGate.promise
+          return bindingsPage()
+        }),
+      },
+    })
+
+    // A healthy first load: the dialog has the two chips.
+    call(allById(m.app, 'user-edit-roles', rowFor(m.app, 'u2'))[0], 'onClick')
+    await settle()
+    expect(allById(m.app, 'binding-chip')).toHaveLength(2)
+
+    // The next reload: /roles rejects immediately, /role-bindings never answers.
+    rolesMode = 'fail'
+    let release!: (value: unknown) => void
+    bindingsGate = { promise: new Promise((resolve) => { release = resolve }), resolve: () => undefined }
+    call(byId(m.app, 'binding-remove'), 'onClick')
+    await settle()
+
+    expect(m.api.get.mock.calls.filter(([path]) => path === '/role-bindings')).toHaveLength(2)
+    // Recorded and toasted straight away, while the other listing is still in flight.
+    expect(m.toast.error).toHaveBeenCalledWith(extractApiError(err))
+    expect(allById(m.app, 'binding-chip')).toHaveLength(0)
+    expect(m.app.textOf(byId(m.app, 'principal-roles-error'))).toBe(extractApiError(err))
+
+    // The late answer cannot un-invalidate the snapshot while /roles still fails.
+    release(bindingsPage())
+    await settle()
+    expect(allById(m.app, 'binding-chip')).toHaveLength(0)
+    expect(m.app.textOf(byId(m.app, 'principal-roles-error'))).toBe(extractApiError(err))
+  })
+})
