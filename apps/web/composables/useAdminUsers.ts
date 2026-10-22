@@ -25,7 +25,12 @@ export interface NewUser {
   email: string
   name: string
   password: string
-  role: GlobalRole
+  /**
+   * US-011: optional. The admin page no longer picks a global role — a new account is created
+   * role-less and roles are bound afterwards — but the legacy field stays accepted until US-015
+   * deletes the legacy role UI.
+   */
+  role?: GlobalRole
 }
 
 export function buildUserQuery(filters: { email?: string; page?: number }): Record<string, string> {

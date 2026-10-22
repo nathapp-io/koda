@@ -142,6 +142,17 @@
       },
       "toast": { "saved": "Role saved", "deleted": "Role deleted" }
     },
+    "bindings": {
+      "title": "Roles for {name}",
+      "addRole": "Add a role",
+      "selectRole": "Select a role",
+      "add": "Add",
+      "empty": "No roles bound yet",
+      "noRoles": "Every role is already bound",
+      "remove": "Remove {name}",
+      "chip": { "allProjects": "{name} (all projects)" },
+      "toast": { "added": "Role added", "removed": "Role removed" }
+    },
     "users": {
       "title": "Users",
       "subtitle": "Create accounts, change global roles and disable access.",
@@ -152,6 +163,8 @@
       "you": "you",
       "enable": "Enable",
       "disable": "Disable",
+      "editRoles": "Edit roles",
+      "noRoles": "No roles",
       "prev": "Previous",
       "next": "Next",
       "table": { "email": "Email", "name": "Name", "role": "Role", "status": "Status" },

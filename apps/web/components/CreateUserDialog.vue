@@ -5,7 +5,7 @@
         <DialogTitle>{{ t('admin.users.form.title') }}</DialogTitle>
       </DialogHeader>
 
-      <form class="space-y-4" @submit="onSubmit">
+      <form class="space-y-4" data-testid="create-user-form" @submit="onSubmit">
         <FormField v-slot="{ componentField }" name="email">
           <FormItem>
             <FormLabel>{{ t('admin.users.form.email') }}</FormLabel>
@@ -27,23 +27,6 @@
             <FormLabel>{{ t('admin.users.form.password') }}</FormLabel>
             <FormControl><Input type="password" autocomplete="new-password" v-bind="componentField" /></FormControl>
             <p class="text-xs text-muted-foreground">{{ t('admin.users.form.passwordHint') }}</p>
-            <FormMessage />
-          </FormItem>
-        </FormField>
-
-        <FormField v-slot="{ componentField }" name="role">
-          <FormItem>
-            <FormLabel>{{ t('admin.users.form.role') }}</FormLabel>
-            <FormControl>
-              <FleetNativeSelect
-                v-bind="componentField"
-                id="role"
-                :options="[
-                  { value: 'MEMBER', label: t('admin.users.roles.MEMBER') },
-                  { value: 'ADMIN', label: t('admin.users.roles.ADMIN') },
-                ]"
-              />
-            </FormControl>
             <FormMessage />
           </FormItem>
         </FormField>
@@ -83,16 +66,17 @@ const formSchema = toTypedSchema(z.object({
   email: z.string().min(1, t('auth.validation.emailRequired')).email(t('auth.validation.emailInvalid')),
   name: z.string().min(1, t('auth.validation.nameRequired')),
   password: z.string().min(8, t('auth.validation.passwordMin')).regex(PASSWORD_COMPLEXITY, t('admin.users.form.passwordComplexity')),
-  role: z.enum(['MEMBER', 'ADMIN']),
 }))
 
 const { handleSubmit, isSubmitting, resetForm } = useForm({
   validationSchema: formSchema,
-  initialValues: { email: '', name: '', password: '', role: 'MEMBER' as const },
+  initialValues: { email: '', name: '', password: '' },
 })
 
 const onSubmit = handleSubmit(async (values) => {
   try {
+    // US-011: a new account is created role-less (the API grants the baseline member role); the
+    // admin binds roles afterwards through PrincipalRolesDialog.
     await createUser(values)
     toast.success(t('admin.users.toast.created'))
     emit('created')
