@@ -284,9 +284,11 @@ describe('US-006 project agent roster page', () => {
     expect(note).toHaveLength(1)
   })
 
-  test('AC3: roster has no add/remove controls or added-by/added-at columns', async () => {
-    const m = mountPage({ rosterResponse: makeRoster({ items: [item] }) })
+  test('AC3: admin roster has no add/remove controls or added-by/added-at columns', async () => {
+    const m = mountPage({ role: 'ADMIN', globalAdmin: true, rosterResponse: makeRoster({ items: [item] }) })
     await m.settle()
+    expect(m.rows()).toHaveLength(1)
+    expect(m.app.textOf(m.app.root)).toContain('Build Agent')
     const pageText = m.app.textOf(m.app.root)
     expect(pageText).not.toMatch(/Add agent|Remove/)
     expect(pageText).not.toMatch(/Added by|Added at/)

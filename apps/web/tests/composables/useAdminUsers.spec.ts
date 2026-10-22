@@ -32,6 +32,12 @@ describe('useAdminUsers', () => {
     expect(users.hasNext.value).toBe(true)
   })
 
+  test('returns no legacy setRole action', async () => {
+    withApi({ get: jest.fn(async () => ({})) })
+    const { useAdminUsers } = await import(composablePath)
+    expect(useAdminUsers()).not.toHaveProperty('setRole')
+  })
+
   test('setDisabled patches and replaces the row without mutating the old array', async () => {
     const get = jest.fn(async () => ({ records: [u('a'), u('b')], total: 2, current: 1, size: 20, hasNext: false, hasPrev: false }))
     const patch = jest.fn(async () => u('b', { disabled: true }))

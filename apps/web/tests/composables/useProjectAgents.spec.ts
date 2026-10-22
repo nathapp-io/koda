@@ -16,6 +16,32 @@ describe('useProjectAgents', () => {
     expect(get).toHaveBeenCalledWith('/projects/acme/agents'); expect(roster.items.value.map(a => a.slug)).toEqual(['builder'])
     expect(roster.scoping.value).toBe(true); expect(roster.error.value).toBeNull()
   })
+  test('load uses scoping false when response says false', async () => {
+    withApi({ get: jest.fn(async () => list({ scoping: false, items: [agent('builder')] })) })
+    const { useProjectAgents } = await import(composablePath)
+    const roster = useProjectAgents('acme')
+    await roster.load()
+    expect(roster.scoping.value).toBe(false)
+  })
+  test('load maps malformed items to an empty roster', async () => {
+    withApi({ get: jest.fn(async () => ({ scoping: true, items: 'not-an-array' })) })
+    const { useProjectAgents } = await import(composablePath)
+    const roster = useProjectAgents('acme')
+    await roster.load()
+    expect(roster.items.value).toEqual([])
+  })
+  test('load toggles pending while request is outstanding', async () => {
+    let resolveGet: (value: unknown) => void = () => undefined
+    const get = jest.fn(() => new Promise(resolve => { resolveGet = resolve }))
+    withApi({ get })
+    const { useProjectAgents } = await import(composablePath)
+    const roster = useProjectAgents('acme')
+    const pendingRequest = roster.load()
+    expect(roster.pending.value).toBe(true)
+    resolveGet(list({ items: [agent('builder')] }))
+    await pendingRequest
+    expect(roster.pending.value).toBe(false)
+  })
   test('load defaults scoping to true for an empty response', async () => {
     withApi({ get: jest.fn(async () => ({})) }); const { useProjectAgents } = await import(composablePath); const roster = useProjectAgents('acme')
     await roster.load(); expect(roster.scoping.value).toBe(true); expect(roster.items.value).toEqual([])

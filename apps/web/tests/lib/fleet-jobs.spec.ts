@@ -1,4 +1,5 @@
 import { describe, expect, test } from '@jest/globals'
+import * as fleetJobs from '~/lib/fleet-jobs'
 import {
   bundleFileName,
   canCancelJob,
@@ -27,6 +28,13 @@ const job = (over: Partial<FleetJobDto> = {}): FleetJobDto => ({
   progress: null, currentStoryId: null, currentPhase: null, costSpentUsd: '0', lastHeartbeatAt: null,
   finishResult: null, escalationReason: null, exitCode: null, resultBranch: null, resultSha: null, resultPrUrl: null, wipPush: null, stories: null, storiesTruncated: false, postRun: null,
   ...over,
+})
+
+describe('legacy role exports', () => {
+  test('fleet-jobs has no canWorkOnFleet export and agent-roles cannot be resolved', () => {
+    expect('canWorkOnFleet' in fleetJobs).toBe(false)
+    expect(() => require.resolve('../../lib/agent-roles')).toThrow()
+  })
 })
 
 describe('state groups', () => {
