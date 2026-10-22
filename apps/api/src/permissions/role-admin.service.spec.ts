@@ -147,8 +147,29 @@ describe('RoleAdminService', () => {
       expect(roles.map((entry) => entry.key)).toContain('developer');
       expect(roles.map((entry) => entry.key)).not.toContain('owner');
       expect(roles.map((entry) => entry.key)).not.toContain('member');
+      // System roles first, then by key — the custom role the store holds sorts after the seeded seven.
+      const seeded = roles.filter((entry) => entry.system).map((entry) => entry.key);
+      expect(seeded).toEqual([...seeded].sort());
+      expect(roles.slice(0, seeded.length).every((entry) => entry.system)).toBe(true);
       // The route's `member.read` guard is the gate: the service asks no key of any caller.
       expect(cache.invalidations).toEqual([]);
+    });
+
+    it('reads through the scope-filtered, exhaustive repository reader — not a filtered capped list', async () => {
+      // A custom PROJECT role and a custom GLOBAL role: only the first is assignable in a project, and the
+      // reader is asked for the scope rather than for every role and filtered afterwards.
+      store.roles.push(
+        { id: 'role-qa', key: 'qa', name: 'QA', description: '', scope: 'PROJECT', system: false, locked: false, permissions: [] },
+        { id: 'role-auditor', key: 'auditor', name: 'Auditor', description: '', scope: 'GLOBAL', system: false, locked: false, permissions: [] },
+      );
+
+      const roles = await service.listProjectRoles();
+
+      expect(store.calls).toContain('find-roles-by-scope:PROJECT');
+      expect(store.calls).not.toContain('find-roles');
+      expect(roles.map((entry) => entry.key)).toContain('qa');
+      expect(roles.map((entry) => entry.key)).not.toContain('auditor');
+      expect(roles[roles.length - 1]?.key).toBe('qa');
     });
   });
 

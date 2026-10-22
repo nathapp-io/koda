@@ -228,6 +228,39 @@ describeIntegration('project roles and the unified members list (US-003)', () =>
     expect(body.slice(0, seeded.length).every((role) => role.system)).toBe(true);
   }, TIMEOUT);
 
+  it('AC-1 (scan limit): 501 PROJECT roles are all answered — the route is not limited to one read page', async () => {
+    // Neither role creation nor storage bounds the `Role` table, so a capped read decides how many roles a
+    // project admin can see. 501 PROJECT roles is one more than a single 500-row read answers.
+    const bulk = Array.from({ length: 501 }, (_, index) => ({
+      key: `bulk-${String(index).padStart(3, '0')}`,
+      name: `Bulk role ${index}`,
+      description: '',
+      scope: 'PROJECT',
+      system: false,
+      locked: false,
+      permissions: [],
+    }));
+
+    try {
+      await db.role.createMany({ data: bulk });
+
+      const body = data<ProjectRole[]>(await roles(PROJECT.slug, 'viewer').expect(200));
+
+      const stored = await db.role.findMany({ where: { scope: 'PROJECT' }, select: { key: true } });
+      expect(body).toHaveLength(stored.length);
+      expect(body.map((role) => role.key).sort()).toEqual(stored.map((role) => role.key).sort());
+      // Ordering survives the paging: every system role first, then keys ascending within each group.
+      const systemCount = body.filter((role) => role.system).length;
+      expect(body.slice(0, systemCount).every((role) => role.system)).toBe(true);
+      expect(body.slice(systemCount).some((role) => role.system)).toBe(false);
+      const custom = body.slice(systemCount).map((role) => role.key);
+      expect(custom).toEqual([...custom].sort());
+      expect(custom).toContain('bulk-500');
+    } finally {
+      await db.role.deleteMany({ where: { key: { startsWith: 'bulk-' } } });
+    }
+  }, TIMEOUT);
+
   it('AC-2: with RoleAdminService.listProjectRoles spied to resolve one role, GET /api/projects/<p.slug>/roles as a viewer calls the spy once and returns that one role', async () => {
     const roleAdmin = app.get(RoleAdminService);
     const stored = await db.role.findUniqueOrThrow({ where: { key: 'developer' } });
@@ -394,4 +427,94 @@ describeIntegration('project roles and the unified members list (US-003)', () =>
     const users = await page(THIN_PROJECT.slug, 'thinone', '?size=100');
     expect(users.records.map((record) => record.principalId)).toEqual([userIds.thinone, userIds.thintwo]);
   }, TIMEOUT);
+
+  it('AC-6 (scan limit): a full mixed page whose chips exceed one read keeps every binding', async () => {
+    // The worst legitimate page: 50 users + 50 agents on one `size=100` page, each holding 51 project
+    // bindings — 5 100 chips. No membership source is near its own cap, so a read capped at 5 000 rows
+    // would silently truncate the page's chips (and the last agent would come back with none).
+    const CHIP_ROLES = 51;
+    const PRINCIPALS = 50;
+    const chipRoleKeys = Array.from({ length: CHIP_ROLES }, (_, index) => `chip-${String(index).padStart(2, '0')}`);
+    const chipProjectId = await createProject({ slug: 'pchips', key: 'PCHIP' });
+
+    try {
+      await db.role.createMany({
+        data: chipRoleKeys.map((key) => ({
+          key, name: key, description: '', scope: 'PROJECT', system: false, locked: false, permissions: [],
+        })),
+      });
+      const chipRoles = await db.role.findMany({ where: { key: { in: chipRoleKeys } }, select: { id: true } });
+      expect(chipRoles).toHaveLength(CHIP_ROLES);
+
+      await db.user.createMany({
+        data: Array.from({ length: PRINCIPALS }, (_, index) => ({
+          email: `chip-user-${index}@koda.test`, name: `chip user ${index}`, passwordHash: 'not-a-real-hash', role: 'MEMBER',
+        })),
+      });
+      await db.agent.createMany({
+        data: Array.from({ length: PRINCIPALS }, (_, index) => ({
+          name: `Chip Agent ${index}`, slug: `chip-agent-${index}`, apiKeyHash: `chip-agent-hash-${index}`,
+        })),
+      });
+      const chipUsers = await db.user.findMany({
+        where: { email: { startsWith: 'chip-user-' } }, select: { id: true },
+      });
+      const chipAgents = await db.agent.findMany({
+        where: { slug: { startsWith: 'chip-agent-' } }, select: { id: true },
+      });
+      expect([chipUsers.length, chipAgents.length]).toEqual([PRINCIPALS, PRINCIPALS]);
+
+      // Their baseline global bindings, as every principal created through the API gets.
+      const [memberRole, agentRole] = await Promise.all([
+        db.role.findUniqueOrThrow({ where: { key: 'member' }, select: { id: true } }),
+        db.role.findUniqueOrThrow({ where: { key: 'agent' }, select: { id: true } }),
+      ]);
+      await db.roleBinding.createMany({
+        data: [
+          ...chipUsers.map((user) => ({ principalType: 'USER', principalId: user.id, roleId: memberRole.id, projectId: null, grantedByType: 'SYSTEM', grantedById: 'test' })),
+          ...chipAgents.map((agent) => ({ principalType: 'AGENT', principalId: agent.id, roleId: agentRole.id, projectId: null, grantedByType: 'SYSTEM', grantedById: 'test' })),
+        ],
+      });
+
+      // 100 principals × 51 project bindings = 5 100 rows, written in batches (a single statement would
+      // approach the driver's parameter limit).
+      const chipBindings = [
+        ...chipUsers.flatMap((user) => chipRoles.map((role) => ({
+          principalType: 'USER', principalId: user.id, roleId: role.id, projectId: chipProjectId,
+          grantedByType: 'SYSTEM', grantedById: 'test',
+        }))),
+        ...chipAgents.flatMap((agent) => chipRoles.map((role) => ({
+          principalType: 'AGENT', principalId: agent.id, roleId: role.id, projectId: chipProjectId,
+          grantedByType: 'SYSTEM', grantedById: 'test',
+        }))),
+      ];
+      for (let index = 0; index < chipBindings.length; index += 1000) {
+        await db.roleBinding.createMany({ data: chipBindings.slice(index, index + 1000) });
+      }
+      await expect(
+        db.roleBinding.count({ where: { projectId: chipProjectId } }),
+      ).resolves.toBe(PRINCIPALS * 2 * CHIP_ROLES);
+
+      const body = await page('pchips', 'root', '?principals=all&size=100');
+
+      expect(body.total).toBe(PRINCIPALS * 2);
+      expect(body.records).toHaveLength(PRINCIPALS * 2);
+      expect(body.records.map((record) => record.principalType))
+        .toEqual([...Array.from({ length: PRINCIPALS }, () => 'USER'), ...Array.from({ length: PRINCIPALS }, () => 'AGENT')]);
+      // Every row keeps all 51 chips: no record is short, and the last agent is not the one that loses them.
+      expect(body.records.map((record) => record.bindings.length)).toEqual(
+        Array.from({ length: PRINCIPALS * 2 }, () => CHIP_ROLES),
+      );
+      expect(body.records.at(-1)?.bindings).toHaveLength(CHIP_ROLES);
+      expect(body.records.flatMap((record) => record.bindings)).toHaveLength(PRINCIPALS * 2 * CHIP_ROLES);
+      // The chips are the 51 roles themselves, not 51 copies of one.
+      for (const record of body.records) {
+        expect(record.bindings.map((binding) => binding.roleKey).sort()).toEqual([...chipRoleKeys].sort());
+      }
+    } finally {
+      // Keep the shared fixture clean: the chip roles and their bindings are this case's own.
+      await db.roleBinding.deleteMany({ where: { projectId: chipProjectId } });
+      await db.role.deleteMany({ where: { key: { startsWith: 'chip-' } } });
+    }
+  }, 60_000);
 });

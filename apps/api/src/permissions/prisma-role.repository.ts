@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { InternalAppException } from '@nathapp/nestjs-common';
 import {
   AbstractPrismaRepository,
   PrismaClientLike,
@@ -11,6 +12,18 @@ import type { RoleDomain, RoleRepository, RoleScope } from './permissions.types'
 
 /** Upper bound of a role list read; the table is small and admin-written. */
 const ROLE_SCAN_LIMIT = 500;
+
+/** The page size of a read that must answer *every* role of a scope, whatever the table holds. */
+const ROLE_READ_PAGE = 500;
+
+/**
+ * The safety bound of that read (`.nax/rules/api-data.md`: an unbounded loop needs a hard iteration cap).
+ * Five hundred thousand roles is a defect, not a size: reaching it fails instead of answering a partial list,
+ * so "every PROJECT role" is never quietly wrong.
+ */
+const MAX_ROLE_READ_PAGES = 1000;
+
+const logger = new Logger('PrismaRoleRepository');
 
 /**
  * Permissions P1a: the only code that reads or writes `Role` through Prisma.
@@ -88,6 +101,50 @@ export class PrismaRoleRepository
       take: ROLE_SCAN_LIMIT,
     });
     return models.map((model: RoleModel) => this.toDomain(model));
+  }
+
+  /**
+   * **Every** role of one scope — system roles first, then by key — read in `ROLE_READ_PAGE`-sized keyset
+   * pages instead of one capped `findMany`. The scope is a filter, not a cap: `GET /projects/:slug/roles`
+   * must answer every PROJECT role a project admin can hand out, and neither role creation nor storage
+   * bounds the table, so a single capped read would silently hide the roles past it (and a GLOBAL role would
+   * consume a slot of it).
+   *
+   * Two independent keyset scans (system, then custom) rather than one over `(system, key)`: `Role.key` is
+   * unique, so `key > last` is a total order inside each group, and the groups concatenate into exactly the
+   * system-first-then-by-key order the route documents.
+   */
+  async findRolesByScope(scope: RoleScope): Promise<RoleDomain[]> {
+    const [system, custom] = await Promise.all([
+      this.readRolesOfScope(scope, true),
+      this.readRolesOfScope(scope, false),
+    ]);
+    return [...system, ...custom];
+  }
+
+  /** One `(scope, system)` group, keyset-paged on `key` until a short page ends it. */
+  private async readRolesOfScope(scope: RoleScope, system: boolean): Promise<RoleDomain[]> {
+    const roles: RoleDomain[] = [];
+    let cursor: string | undefined;
+
+    for (let page = 1; page <= MAX_ROLE_READ_PAGES; page += 1) {
+      const models = await this.db.role.findMany({
+        where: { scope, system, ...(cursor === undefined ? {} : { key: { gt: cursor } }) },
+        orderBy: { key: 'asc' },
+        take: ROLE_READ_PAGE,
+      });
+      roles.push(...models.map((model: RoleModel) => this.toDomain(model)));
+      if (models.length < ROLE_READ_PAGE) return roles;
+
+      cursor = (models[models.length - 1] as RoleModel).key;
+      if (page === MAX_ROLE_READ_PAGES) {
+        logger.error(
+          `findRolesByScope reached its ${MAX_ROLE_READ_PAGES}-page bound for ${scope}/${system ? 'system' : 'custom'} after ${roles.length} roles; refusing to answer a partial role list`,
+        );
+        throw new InternalAppException({ count: roles.length }, 'permissions');
+      }
+    }
+    return roles;
   }
 
   private get db() {

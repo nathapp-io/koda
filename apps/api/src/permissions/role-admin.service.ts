@@ -100,16 +100,16 @@ export class RoleAdminService {
   }
 
   /**
-   * Every role a project can hand out — `scope = 'PROJECT'`, system roles first, then by key — which is
-   * the order `findRoles` already answers in, filtered.
+   * Every role a project can hand out — `scope = 'PROJECT'`, system roles first, then by key — read to
+   * exhaustion rather than filtered out of a capped list, so a project with more roles than one read answers
+   * still sees them all.
    *
    * No key is checked here: `GET /projects/:slug/roles` carries `member.read` behind the project gate,
    * because `role.read` is global and a Project Admin does not hold it. A caller that may read the
    * project's roles may list them.
    */
   async listProjectRoles(): Promise<RoleDomain[]> {
-    const roles = await this.roles.findRoles();
-    return roles.filter((role) => role.scope === PROJECT_SCOPE);
+    return this.roles.findRolesByScope(PROJECT_SCOPE);
   }
 
   async createRole(principal: KodaPrincipal, input: CreateRoleInput): Promise<RoleDomain> {
