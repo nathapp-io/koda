@@ -184,10 +184,11 @@ describe('US-002-5 AC3: On API success, dialog switches to key-reveal view with 
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC4 — On empty roles validation failure, $api.post is NOT called
+// AC4 — On a validation failure, $api.post is NOT called
+// (US-012 removed the roles field: the required-field case is now a missing name)
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-002-5 AC4: On empty roles validation failure, $api.post is NOT called', () => {
+describe('US-012 AC4: on a validation failure, $api.post is NOT called', () => {
   test('source uses vee-validate handleSubmit which validates before calling onSubmit', () => {
     const source = getSource()
     // handleSubmit from vee-validate only calls the async function if validation passes
@@ -196,13 +197,11 @@ describe('US-002-5 AC4: On empty roles validation failure, $api.post is NOT call
     expect(usesHandleSubmit).not.toBeNull()
   })
 
-  test('source has validation schema with roles min(1) requirement', () => {
+  test('source has a validation schema that requires a name and no roles list', () => {
     const source = getSource()
-    // The zod schema should have roles with min(1) to require at least one role
-    // Looking for: roles: z.array(z.string()).min(1, ...)
-    const hasRolesMinValidation =
-      source.includes('roles: z.array(z.string()).min(1,')
-    expect(hasRolesMinValidation).toBe(true)
+    const hasNameRequirement = source.includes('name: z.string().min(1,')
+    expect(hasNameRequirement).toBe(true)
+    expect(source).not.toContain('roles: z.array(z.string()).min(1,')
   })
 
   test('source does NOT call $api.post outside of valid form submission', () => {

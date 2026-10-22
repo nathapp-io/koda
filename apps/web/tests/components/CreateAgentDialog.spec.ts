@@ -76,10 +76,11 @@ describe('CreateAgentDialog: form fields', () => {
     expect(source).toContain("regex(/^[a-z0-9-]+$/")
   })
 
-  test('source has roles field requiring at least one selection', () => {
+  test('source has no roles field (US-012: agents are created role-less)', () => {
     const source = getSource()
-    expect(source).toMatch(/FormField\s+name="roles"/)
-    expect(source).toContain('z.array(z.string()).min(1')
+    expect(source).not.toMatch(/FormField\s+name="roles"/)
+    expect(source).not.toContain('z.array(z.string()).min(1')
+    expect(source).not.toMatch(/roles:\s*z\.array/)
   })
 
   test('source has capabilities field as optional array', () => {
@@ -150,15 +151,16 @@ describe('CreateAgentDialog: capabilities tag input', () => {
   })
 })
 
-describe('CreateAgentDialog: uses AGENT_ROLES constant', () => {
-  test('source imports AGENT_ROLES from lib/agent-roles', () => {
+describe('CreateAgentDialog: the legacy role list is gone (Permissions P1 US-012)', () => {
+  test('source does not import AGENT_ROLES from lib/agent-roles', () => {
     const source = getSource()
-    expect(source).toMatch(/import\s*\{\s*AGENT_ROLES\s*\}\s*from\s*['"]~\/lib\/agent-roles['"]/)
+    expect(source).not.toContain('~/lib/agent-roles')
+    expect(source).not.toContain('AGENT_ROLES')
   })
 
-  test('availableRoles is assigned from AGENT_ROLES', () => {
+  test('source has no availableRoles list to render', () => {
     const source = getSource()
-    expect(source).toMatch(/availableRoles\s*=\s*AGENT_ROLES/)
+    expect(source).not.toContain('availableRoles')
   })
 })
 

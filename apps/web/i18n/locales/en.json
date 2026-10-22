@@ -479,6 +479,7 @@
     "title": "Agents",
     "createAgent": "Create Agent",
     "empty": "No agents yet.",
+    "noRoles": "No roles",
     "project": {
       "empty": "No agents on this project yet.",
       "scopingOff": "Project agent scoping is disabled on this instance. Roster changes may be ignored.",

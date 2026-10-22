@@ -1,11 +1,16 @@
 <script setup lang="ts">
+import type { Ref } from 'vue'
 import CreateAgentDialog from '~/components/CreateAgentDialog.vue'
-import EditAgentRolesDialog from '~/components/EditAgentRolesDialog.vue'
+import PrincipalRolesDialog from '~/components/PrincipalRolesDialog.vue'
 import EditAgentCapabilitiesDialog from '~/components/EditAgentCapabilitiesDialog.vue'
 import RotateKeyDialog from '~/components/RotateKeyDialog.vue'
 import DeleteAgentDialog from '~/components/DeleteAgentDialog.vue'
+import { extractApiError } from '~/composables/useApi'
 import { apiPath } from '~/lib/api-path'
+import { bindingChips, chipLabel } from '~/lib/role-bindings'
 import { TICKET_CHIP_CLASS, TICKET_DOT_CLASS } from '~/lib/ticket-chips'
+import type { BindingChip } from '~/lib/role-bindings'
+import type { RoleBinding } from '~/composables/useRoleBindings'
 
 definePageMeta({ layout: 'default' })
 
@@ -41,6 +46,9 @@ function capabilityLabel(capability: string | { capability: string }) {
 const { $api } = useApi()
 const { t } = useI18n()
 const toast = useAppToast()
+const { permissions } = useGlobalPermissions()
+const { roles, load: loadRoles } = useRoles()
+const { bindings, listGlobal } = useRoleBindings()
 
 const { data: agentsData, pending, error, refresh } = useAsyncData(
   'agents',
@@ -55,9 +63,32 @@ const agents = computed<Agent[]>(() =>
   })),
 )
 
+/**
+ * US-012: every control on this page is gated on the global key its API route requires. Roles are
+ * data now (`agent.roles` is the legacy field, still on the wire until US-015), so the roles column
+ * and "Edit roles" ask the binding routes' own keys. A gate only hides a control: the API still
+ * refuses a write, and every refusal is toasted with `extractApiError`.
+ */
+const can = (key: string): boolean => permissions.value.has(key)
+
+const canCreateAgent = computed(() => can('agent.create'))
+const canUpdateStatus = computed(() => can('agent.update'))
+const canUpdateCapabilities = computed(() => can('agent.capabilities.update'))
+const canRotateKey = computed(() => can('agent.key.rotate'))
+const canDeleteAgent = computed(() => can('agent.delete'))
+const canManageRoles = computed(() => can('role.read') && can('role.binding.global'))
+
+/** Whether the row's actions menu has anything in it at all (an empty menu is not a control). */
+const hasRowActions = computed(() =>
+  canManageRoles.value || canUpdateStatus.value || canUpdateCapabilities.value
+  || canRotateKey.value || canDeleteAgent.value)
+
+/** The role-editing half of the menu (roles, capabilities), which is also where its dividers go. */
+const showsRoleActions = computed(() => canManageRoles.value || canUpdateCapabilities.value)
+
 const isCreateDialogOpen = ref(false)
 
-// Dialog state for Edit Roles
+// Dialog state for Edit Roles (the shared principal-roles dialog)
 const isRolesDialogOpen = ref(false)
 const rolesDialogAgent = ref<Agent | null>(null)
 
@@ -73,9 +104,80 @@ const rotateDialogAgent = ref<Agent | null>(null)
 const isDeleteDialogOpen = ref(false)
 const deleteDialogAgent = ref<Agent | null>(null)
 
+const rolesError = ref('')
+const bindingsError = ref('')
+
+/** The column shows one load error, whichever of the two listings failed. */
+const roleColumnError = computed(() => rolesError.value || bindingsError.value)
+
+/** One agent's project-less bindings: what the dialog edits and what the column's chips show. */
+function globalBindingsFor(agent: Agent): RoleBinding[] {
+  return bindings.value.filter((binding) =>
+    binding.principalType === 'AGENT' && binding.principalId === agent.id && binding.projectId === null)
+}
+
+/** The chips for every listed row, joined once per (agents, bindings, roles) change, not per render. */
+const chipsByAgent = computed(() => {
+  const joined = new Map<string, BindingChip[]>()
+  for (const agent of agents.value) joined.set(agent.id, bindingChips(globalBindingsFor(agent), roles.value))
+  return joined
+})
+
+function chipsFor(agent: Agent): BindingChip[] {
+  return chipsByAgent.value.get(agent.id) ?? []
+}
+
+const rolesPrincipal = computed(() => ({
+  type: 'AGENT' as const,
+  id: rolesDialogAgent.value?.id ?? '',
+  label: rolesDialogAgent.value?.name || rolesDialogAgent.value?.slug || '',
+}))
+
+const rolesDialogBindings = computed(() =>
+  (rolesDialogAgent.value ? globalBindingsFor(rolesDialogAgent.value) : []))
+
+/**
+ * The two listings the column joins. Each failure is recorded and toasted the moment it lands, and
+ * the column shows the error instead of chips: a chip without its role would show a raw key where a
+ * name belongs. The errors are cleared only by the latest started run, and only if both of its
+ * listings succeeded — an older success must not certify a newer failure.
+ */
+let roleDataGeneration = 0
+async function reloadRoleData(): Promise<void> {
+  if (!canManageRoles.value) return
+  const generation = ++roleDataGeneration
+  const record = (target: Ref<string>) => (err: unknown): false => {
+    target.value = extractApiError(err)
+    toast.error(extractApiError(err))
+    return false
+  }
+  const [rolesOk, bindingsOk] = await Promise.all([
+    loadRoles().then(() => true, record(rolesError)),
+    listGlobal('AGENT').then(() => true, record(bindingsError)),
+  ])
+  if (generation === roleDataGeneration && rolesOk && bindingsOk) {
+    rolesError.value = ''
+    bindingsError.value = ''
+  }
+}
+
+// The keys are their own request, so they can land after the agent list: the watch — not the mount —
+// is what loads the role data, so the column and "Edit roles" fill in whenever the keys arrive.
+watch(canManageRoles, (allowed) => {
+  if (allowed) void reloadRoleData()
+}, { immediate: true })
+
+/**
+ * True while the page cannot vouch for the role snapshot: the keys are unknown (pending or failed) or
+ * the last listing attempt failed. The dialog hides its chips and offers no write in this state.
+ */
+const roleDataBlocked = computed(() => !canManageRoles.value || roleColumnError.value !== '')
+
 function openRolesDialog(agent: Agent) {
   rolesDialogAgent.value = agent
   isRolesDialogOpen.value = true
+  // Opening the dialog on an invalid snapshot is the admin's natural retry.
+  if (roleColumnError.value !== '') void reloadRoleData()
 }
 
 function openCapabilitiesDialog(agent: Agent) {
@@ -91,11 +193,6 @@ function openRotateKeyDialog(agent: Agent) {
 function openDeleteDialog(agent: Agent) {
   deleteDialogAgent.value = agent
   isDeleteDialogOpen.value = true
-}
-
-function handleRolesUpdated() {
-  refresh()
-  isRolesDialogOpen.value = false
 }
 
 function handleCapabilitiesUpdated() {
@@ -126,6 +223,8 @@ function agentStatusDot(status: string) {
   return AGENT_STATUS_DOT[status] ?? 'bg-muted-foreground'
 }
 
+const AGENT_STATUSES = ['ACTIVE', 'PAUSED', 'OFFLINE'] as const
+
 async function changeStatus(agent: Agent, newStatus: 'ACTIVE' | 'PAUSED' | 'OFFLINE') {
   try {
     await $api.patch(apiPath`/agents/${agent.slug}`, { status: newStatus })
@@ -146,9 +245,9 @@ function handleAgentCreated() {
   <div class="space-y-6">
     <PageHeader :title="t('agents.title')">
       <template #actions>
-        <Dialog :open="isCreateDialogOpen" @update:open="isCreateDialogOpen = $event">
+        <Dialog v-if="canCreateAgent" :open="isCreateDialogOpen" @update:open="isCreateDialogOpen = $event">
           <DialogTrigger as-child>
-            <Button>{{ t('agents.createAgent') }}</Button>
+            <Button data-testid="agent-create">{{ t('agents.createAgent') }}</Button>
           </DialogTrigger>
           <CreateAgentDialog :open="isCreateDialogOpen" @created="handleAgentCreated" />
         </Dialog>
@@ -163,27 +262,35 @@ function handleAgentCreated() {
         <TableRow>
           <TableHead>{{ t('agents.columns.name') }}</TableHead>
           <TableHead>{{ t('agents.columns.slug') }}</TableHead>
-          <TableHead>{{ t('agents.columns.roles') }}</TableHead>
+          <TableHead v-if="canManageRoles">{{ t('agents.columns.roles') }}</TableHead>
           <TableHead>{{ t('agents.columns.capabilities') }}</TableHead>
           <TableHead>{{ t('agents.columns.status') }}</TableHead>
           <TableHead>{{ t('agents.columns.actions') }}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        <TableRow v-for="agent in agents" :key="agent.id">
+        <TableRow v-for="agent in agents" :key="agent.id" data-testid="agent-row" :data-agent="agent.id">
           <TableCell>{{ agent.name }}</TableCell>
           <TableCell>{{ agent.slug }}</TableCell>
-          <TableCell>
-            <div class="flex flex-wrap gap-1">
+          <TableCell v-if="canManageRoles" data-testid="agent-roles-cell">
+            <span v-if="roleColumnError" class="text-sm text-status-rejected" data-testid="agent-roles-error">
+              {{ roleColumnError }}
+            </span>
+            <div v-else-if="chipsFor(agent).length > 0" class="flex flex-wrap gap-1">
               <Badge
-                v-for="role in agent.roles"
-                :key="role"
+                v-for="chip in chipsFor(agent)"
+                :key="chip.id"
                 variant="outline"
                 class="text-xs"
+                data-testid="agent-role-chip"
+                :data-role="chip.roleKey"
               >
-                {{ role }}
+                {{ chipLabel(chip, t) }}
               </Badge>
             </div>
+            <span v-else class="text-xs text-muted-foreground" data-testid="agent-roles-empty">
+              {{ t('agents.noRoles') }}
+            </span>
           </TableCell>
           <TableCell>
             <div class="flex flex-wrap gap-1">
@@ -204,34 +311,35 @@ function handleAgentCreated() {
             </span>
           </TableCell>
           <TableCell>
-            <DropdownMenu>
+            <DropdownMenu v-if="hasRowActions">
               <DropdownMenuTrigger as-child>
-                <Button variant="ghost" size="sm">{{ t('common.changeStatus') }}</Button>
+                <Button variant="ghost" size="sm" data-testid="agent-actions">{{ t('common.changeStatus') }}</Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
-                <DropdownMenuItem @click="openRotateKeyDialog(agent)">
+                <DropdownMenuItem v-if="canRotateKey" data-testid="agent-rotate-key" @click="openRotateKeyDialog(agent)">
                   {{ t('agents.actions.rotateKey') }}
                 </DropdownMenuItem>
-                <DropdownMenuItem @click="openDeleteDialog(agent)">
+                <DropdownMenuItem v-if="canDeleteAgent" data-testid="agent-delete" @click="openDeleteDialog(agent)">
                   {{ t('agents.actions.delete') }}
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem @click="openRolesDialog(agent)">
+                <DropdownMenuSeparator v-if="showsRoleActions && (canRotateKey || canDeleteAgent)" />
+                <DropdownMenuItem v-if="canManageRoles" data-testid="agent-edit-roles" @click="openRolesDialog(agent)">
                   {{ t('agents.actions.editRoles') }}
                 </DropdownMenuItem>
-                <DropdownMenuItem @click="openCapabilitiesDialog(agent)">
+                <DropdownMenuItem v-if="canUpdateCapabilities" data-testid="agent-edit-capabilities" @click="openCapabilitiesDialog(agent)">
                   {{ t('agents.actions.editCapabilities') }}
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem @click="changeStatus(agent, 'ACTIVE')">
-                  {{ t('agents.status.ACTIVE') }}
-                </DropdownMenuItem>
-                <DropdownMenuItem @click="changeStatus(agent, 'PAUSED')">
-                  {{ t('agents.status.PAUSED') }}
-                </DropdownMenuItem>
-                <DropdownMenuItem @click="changeStatus(agent, 'OFFLINE')">
-                  {{ t('agents.status.OFFLINE') }}
-                </DropdownMenuItem>
+                <template v-if="canUpdateStatus">
+                  <DropdownMenuSeparator v-if="showsRoleActions || canRotateKey || canDeleteAgent" />
+                  <DropdownMenuItem
+                    v-for="status in AGENT_STATUSES"
+                    :key="status"
+                    :data-testid="`agent-status-${status}`"
+                    @click="changeStatus(agent, status)"
+                  >
+                    {{ t(`agents.status.${status}`) }}
+                  </DropdownMenuItem>
+                </template>
               </DropdownMenuContent>
             </DropdownMenu>
           </TableCell>
@@ -239,12 +347,15 @@ function handleAgentCreated() {
       </TableBody>
     </Table>
 
-    <EditAgentRolesDialog
+    <PrincipalRolesDialog
       v-if="rolesDialogAgent"
-      :open="isRolesDialogOpen"
-      :agent="rolesDialogAgent"
-      @update:open="isRolesDialogOpen = $event"
-      @updated="handleRolesUpdated"
+      v-model:open="isRolesDialogOpen"
+      :principal="rolesPrincipal"
+      :bindings="rolesDialogBindings"
+      :roles="roles"
+      :load-error="roleColumnError"
+      :blocked="roleDataBlocked"
+      @changed="reloadRoleData"
     />
 
     <EditAgentCapabilitiesDialog

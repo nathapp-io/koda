@@ -479,6 +479,7 @@
     "title": "代理",
     "createAgent": "创建代理",
     "empty": "暂无代理。",
+    "noRoles": "无角色",
     "project": {
       "empty": "该项目暂无代理。",
       "scopingOff": "本实例已禁用项目代理范围。名单更改可能不会生效。",

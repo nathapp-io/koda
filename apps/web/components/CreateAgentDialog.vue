@@ -5,7 +5,7 @@
         <DialogTitle>{{ t('agents.form.title') }}</DialogTitle>
       </DialogHeader>
 
-      <form v-if="!apiKey" @submit="onSubmit" class="space-y-4">
+      <form v-if="!apiKey" data-testid="create-agent-form" @submit="onSubmit" class="space-y-4">
         <FormField name="name" v-slot="{ componentField }">
           <FormItem>
             <FormLabel>{{ t('agents.form.name') }}</FormLabel>
@@ -22,33 +22,6 @@
             <FormControl>
               <Input :placeholder="t('agents.form.slugPlaceholder')" v-bind="componentField" />
             </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
-
-        <FormField name="roles" v-slot="{ componentField }">
-          <FormItem>
-            <FormLabel>{{ t('agents.form.roles') }}</FormLabel>
-            <div class="flex flex-col gap-2">
-              <label v-for="role in availableRoles" :key="role" class="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  :value="role"
-                  :checked="((Array.isArray(componentField.modelValue) ? componentField.modelValue : []) as string[]).indexOf(role as string) !== -1"
-                  @change="(e) => {
-                    const target = e.target as HTMLInputElement
-                    const currentValues = Array.isArray(componentField.modelValue) ? componentField.modelValue : []
-                    if (target.checked) {
-                      componentField['onUpdate:modelValue']([...currentValues, role])
-                    } else {
-                      componentField['onUpdate:modelValue'](currentValues.filter((v: string) => v !== role))
-                    }
-                  }"
-                  class="h-4 w-4 rounded border-border"
-                />
-                <span class="text-sm">{{ role }}</span>
-              </label>
-            </div>
             <FormMessage />
           </FormItem>
         </FormField>
@@ -130,7 +103,6 @@ import * as z from 'zod'
 import { ref, watch } from 'vue'
 import { LucideX } from 'lucide-vue-next'
 import { normalizeCapabilities } from '~/lib/utils'
-import { AGENT_ROLES } from '~/lib/agent-roles'
 
 const props = defineProps<{
   open: boolean
@@ -143,8 +115,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const toast = useAppToast()
-
-const availableRoles = AGENT_ROLES
 
 // Tag input state for capabilities
 const capabilitiesTags = ref<string[]>([])
@@ -167,11 +137,12 @@ const isSlugManuallyEdited = computed(() => {
 const apiKey = ref<string | null>(null)
 const copyButtonText = ref(t('agents.rotateKey.apiKeyReveal.copy'))
 
+// US-012: a new agent is created role-less. Roles are data now, and the API no longer takes a
+// `roles` list on create; the admin binds roles afterwards through PrincipalRolesDialog.
 const formSchema = toTypedSchema(
   z.object({
     name: z.string().min(1, t('agents.form.validation.nameRequired')),
     slug: z.string().min(1, t('agents.form.validation.slugRequired')).regex(/^[a-z0-9-]+$/, t('agents.form.validation.slugFormat')),
-    roles: z.array(z.string()).min(1, t('agents.form.validation.rolesRequired')),
     capabilities: z.array(z.string()).default([]),
     maxConcurrentTickets: z.number().int().min(1).default(3),
   })
@@ -182,7 +153,6 @@ const { handleSubmit, isSubmitting, resetForm, setFieldValue, values } = useForm
   initialValues: {
     name: '',
     slug: '',
-    roles: [] as string[],
     capabilities: [] as string[],
     maxConcurrentTickets: 3,
   },

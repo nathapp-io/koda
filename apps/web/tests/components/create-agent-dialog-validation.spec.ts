@@ -91,42 +91,36 @@ describe('US-002-1 AC3: slug field validates against pattern /^[a-z0-9-]+$/', ()
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC4 — roles field requires at least one checkbox selected
-//        (DEVELOPER, REVIEWER, VERIFIER, TRIAGER — sourced from lib/agent-roles.ts)
+// AC4 — US-012 replaced the roles field: an agent is created role-less and roles
+//        are bound afterwards through PrincipalRolesDialog. AGENT_ROLES (still in
+//        lib/agent-roles.ts for US-015's deletion) no longer reaches this dialog.
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-002-1 AC4: roles field requires at least one checkbox selected (sourced from AGENT_ROLES)', () => {
-  test('source contains FormField with name="roles"', () => {
+describe('US-012: the create form has no roles field', () => {
+  test('source contains no FormField with name="roles"', () => {
     const source = readFileSync(componentPath, 'utf-8')
-    expect(source).toMatch(/FormField\s+name="roles"/)
+    expect(source).not.toMatch(/FormField\s+name="roles"/)
   })
 
-  test('source defines roles field with min(1) validation', () => {
+  test('source defines no roles field with min(1) validation', () => {
     const source = readFileSync(componentPath, 'utf-8')
-    // Roles should have a min validation to ensure at least one is selected
-    expect(source).toContain('z.array(z.string()).min(1')
+    expect(source).not.toContain('z.array(z.string()).min(1')
+    expect(source).not.toMatch(/roles:\s*z\.array/)
   })
 
-  test('dialog uses shared AGENT_ROLES constant from lib/agent-roles.ts', () => {
+  test('dialog no longer uses the shared AGENT_ROLES constant', () => {
     const source = readFileSync(componentPath, 'utf-8')
-    expect(source).toMatch(/import\s*\{\s*AGENT_ROLES\s*\}\s*from\s*['"]~\/lib\/agent-roles['"]/)
-    expect(source).toMatch(/availableRoles\s*=\s*AGENT_ROLES/)
+    expect(source).not.toContain('AGENT_ROLES')
+    expect(source).not.toContain('availableRoles')
   })
 
-  test('shared AGENT_ROLES enumerates DEVELOPER, REVIEWER, VERIFIER, TRIAGER', () => {
+  test('shared AGENT_ROLES still enumerates DEVELOPER, REVIEWER, VERIFIER, TRIAGER', () => {
     const rolesPath = join(webDir, 'lib', 'agent-roles.ts')
     const rolesSource = readFileSync(rolesPath, 'utf-8')
     expect(rolesSource).toContain('DEVELOPER')
     expect(rolesSource).toContain('REVIEWER')
     expect(rolesSource).toContain('VERIFIER')
     expect(rolesSource).toContain('TRIAGER')
-  })
-
-  test('source includes FormMessage for roles field error display', () => {
-    const source = readFileSync(componentPath, 'utf-8')
-    const rolesFieldMatch = source.match(/FormField\s+name="roles"[\s\S]*?<\/FormField>/)
-    expect(rolesFieldMatch).not.toBeNull()
-    expect(rolesFieldMatch?.[0] ?? '').toContain('FormMessage')
   })
 })
 
@@ -196,10 +190,10 @@ describe('US-002-1 AC7: Validation errors are shown inline for each field on sub
     const source = readFileSync(componentPath, 'utf-8')
     // Count FormMessage occurrences - should have one for each field
     const formMessageMatches = source.match(/<FormMessage\s*\/?>/g)
-    // We have 5 fields: name, slug, roles, capabilities, maxConcurrentTickets
+    // We have 4 fields: name, slug, capabilities, maxConcurrentTickets
     // Each should have a FormMessage
     expect(formMessageMatches).not.toBeNull()
-    expect(formMessageMatches?.length ?? 0).toBeGreaterThanOrEqual(5)
+    expect(formMessageMatches?.length ?? 0).toBeGreaterThanOrEqual(4)
   })
 
   test('form uses handleSubmit for submission', () => {
