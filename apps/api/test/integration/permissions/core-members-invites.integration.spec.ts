@@ -12,6 +12,7 @@
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -158,8 +159,9 @@ describeIntegration('member and invite route keys (US-008)', () => {
       .expect(201);
     const payload = data<{ agent: { id: string; slug: string }; apiKey: string }>(createdAgent);
     agent = { ...payload.agent, apiKey: payload.apiKey };
-    // AC-13: a legacy `AgentProject` roster row is the agent's whole source in p1 — no role binding.
+    // AC-13: viewer reach lets the agent reach the permissions guard, which refuses member writes.
     await db.agentProject.create({ data: { projectId: p1Id, agentId: agent.id } });
+    await grantRole(db, { type: 'AGENT', id: agent.id }, 'viewer', p1Id);
   }, BOOT_TIMEOUT);
 
   afterAll(async () => {
@@ -368,13 +370,11 @@ describeIntegration('member and invite route keys (US-008)', () => {
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
-  // B2 (whole-branch review) — a legacy-only member removal invalidates the cache
+  // B2 (whole-branch review) — a binding member removal invalidates the cache
   // -------------------------------------------------------------------------
-  it('B2: removing a member whose only source is a legacy ProjectMember row ends its warmed project keys', async () => {
-    // No RoleBinding at all, so the route's binding delete removes nothing: the legacy row is the whole
-    // source, and before this fix the warmed effective keys survived the removal for the full cache TTL.
+  it('B2: removing a member whose project source is a developer binding ends its warmed project keys', async () => {
     await createUser('legacymember');
-    await db.projectMember.create({ data: { projectId: p1Id, userId: userIds.legacymember, role: 'DEVELOPER' } });
+    await grantRole(db, { type: 'USER', id: userIds.legacymember }, 'developer', p1Id);
     const permissions = app.get(PermissionService);
     const members = app.get(ProjectMembersService);
     const principal = {

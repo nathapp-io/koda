@@ -14,7 +14,7 @@ const user = (over: Partial<UserAdminRecord> = {}): UserAdminRecord => ({
 describe('UsersAdminService', () => {
   let repo: Record<string, Mock>;
   let cache: { invalidate: Mock };
-  let membership: { bindBaseline: Mock; setGlobalAdmin: Mock; afterCommit: Mock };
+  let membership: { bindBaseline: Mock; setGlobalAdmin: Mock; isGlobalAdmin: Mock; afterCommit: Mock };
   let service: UsersAdminService;
   /** The row `findById`/`updateUser` serve, so the service's reads reflect what was stored. */
   let stored: UserAdminRecord;
@@ -34,6 +34,7 @@ describe('UsersAdminService', () => {
     membership = {
       bindBaseline: vi.fn(),
       setGlobalAdmin: vi.fn(),
+      isGlobalAdmin: vi.fn().mockResolvedValue(false),
       // B3/B4: the writes run inside `update`'s transaction and `create`'s own one; the stub runs the
       // callback and flushes nothing, exactly as the real service does when it defers nothing.
       afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
@@ -148,7 +149,8 @@ describe('UsersAdminService', () => {
     });
 
     it('refuses to remove the last active admin, under the lock', async () => {
-      repo.findById.mockResolvedValue(user({ role: 'ADMIN' }));
+      stored = user({ role: 'ADMIN' });
+      membership.isGlobalAdmin.mockResolvedValue(true);
       repo.countActiveAdmins.mockResolvedValue(1);
 
       await expect(service.update('u1', 'u2', { role: 'MEMBER' })).rejects.toBeInstanceOf(ConflictAppException);
@@ -160,7 +162,8 @@ describe('UsersAdminService', () => {
     });
 
     it('disables an admin when another active admin remains, bumping tokenVersion', async () => {
-      repo.findById.mockResolvedValue(user({ role: 'ADMIN' }));
+      stored = user({ role: 'ADMIN' });
+      membership.isGlobalAdmin.mockResolvedValue(true);
       repo.countActiveAdmins.mockResolvedValue(2);
 
       await service.update('u1', 'u2', { disabled: true });
@@ -185,6 +188,7 @@ describe('UsersAdminService', () => {
 
     it('removes the admin binding through setGlobalAdmin on a demotion', async () => {
       stored = user({ role: 'ADMIN' });
+      membership.isGlobalAdmin.mockResolvedValue(true);
       repo.countActiveAdmins.mockResolvedValue(2);
 
       await service.update('u1', 'u2', { role: 'MEMBER' });
@@ -196,6 +200,7 @@ describe('UsersAdminService', () => {
     it('returns the stored role after a requested demotion of an Owner', async () => {
       // setGlobalAdmin refuses to touch an owner's binding, so `User.role` stays ADMIN.
       stored = user({ role: 'ADMIN' });
+      membership.isGlobalAdmin.mockResolvedValue(true);
       repo.countActiveAdmins.mockResolvedValue(2);
 
       const updated = await service.update('u1', 'u2', { role: 'MEMBER' });
@@ -205,6 +210,7 @@ describe('UsersAdminService', () => {
 
     it('bumps tokenVersion on re-enable, not on a role change', async () => {
       stored = user({ role: 'ADMIN' });
+      membership.isGlobalAdmin.mockResolvedValue(true);
       repo.countActiveAdmins.mockResolvedValue(2);
       await service.update('u1', 'u2', { role: 'MEMBER' });
       expect(repo.updateUser).toHaveBeenLastCalledWith('u2', { disabled: undefined, bumpTokenVersion: false });
@@ -214,8 +220,9 @@ describe('UsersAdminService', () => {
       expect(repo.updateUser).toHaveBeenLastCalledWith('u2', { disabled: false, bumpTokenVersion: false });
     });
 
-    it('does not count admins for a MEMBER target', async () => {
-      repo.findById.mockResolvedValue(user({ role: 'MEMBER' }));
+    it('does not count admins when isGlobalAdmin is false, even for legacy ADMIN', async () => {
+      stored = user({ role: 'ADMIN' });
+      membership.isGlobalAdmin.mockResolvedValue(false);
       await service.update('u1', 'u2', { disabled: true });
       expect(repo.countActiveAdmins).not.toHaveBeenCalled();
     });

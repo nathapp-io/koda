@@ -362,8 +362,8 @@ export class RoleAdminService {
    * The keys a role confers where it is being written: its own entries, plus the authority a global
    * `owner` or `admin` binding carries whatever its entry list says. Escalation that read only the
    * editable entries could be defeated — a caller holding `role.manage` and `role.binding.global`
-   * clears `admin.permissions`, binds the emptied role, and `MembershipService` mirrors that binding
-   * into a legacy `User.role = 'ADMIN'`, which is every project key in every project.
+   * clears `admin.permissions` and binds the emptied role, which still grants every project key
+   * in every project through its global admin binding.
    *
    * `globallyBound` is true for a `projectId`-null binding and for a role write (a role's own scope is
    * global, whatever the caller's project). An invalid stored entry list contributes nothing, so the
@@ -420,9 +420,9 @@ function scopeOf(projectId: string | null): PermissionScope {
 /**
  * What a global `owner`/`admin` binding confers on top of its role's editable entries, straight from
  * the rules `PermissionService` applies: such a binding also gives its principal every key in
- * `expandEntries(['*'], 'PROJECT')`, in every project, and its legacy `User.role = 'ADMIN'` carries
- * the admin role's own global authority. `owner` therefore holds `role.binding.owner` and `admin`
- * does not, exactly as the seeded entries say.
+ * `expandEntries(['*'], 'PROJECT')`, in every project. This conservative escalation check also
+ * reserves the seeded global authority of these privileged roles; it does not grant keys from
+ * the legacy role mirror.
  *
  * `null` for every other role: a custom GLOBAL role — even one holding `*` — confers only what its
  * entries expand to, because `PermissionService` grants the synthetic project set to `owner`/`admin`

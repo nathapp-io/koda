@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
-import type { IAuthConfig } from '../config/auth.config';
 import { OWNABLE_KEYS, PERMISSION_CATALOG } from './catalog';
 import { PermissionCache } from './permission-cache';
 import { PermissionService } from './permission.service';
@@ -21,9 +20,6 @@ import { FakeCacheManager, InMemoryPermissionStore } from './test-helpers/in-mem
  * The pinned cells below are the ones the design's Appendix A states, so the committed matrix is
  * also checked against the design itself and not only against the file.
  */
-
-/** Agent project scoping on, the installation default (`authConfig.agentProjectScoping !== false`). */
-const AUTH_CONFIG = { agentProjectScoping: true } as IAuthConfig;
 
 /** The project every project-scope cell is measured in. */
 const PROJECT_ID = 'p1';
@@ -69,7 +65,6 @@ function buildRow(seed: RoleSeed): Row {
     store.roleRepo() as never,
     store.bindingRepo() as never,
     permissionCache,
-    AUTH_CONFIG,
   );
   store.projects.add(PROJECT_ID);
 

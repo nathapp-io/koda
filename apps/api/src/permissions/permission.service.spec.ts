@@ -1,5 +1,4 @@
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
-import type { IAuthConfig } from '../config/auth.config';
 import { PermissionCache } from './permission-cache';
 import { PermissionService } from './permission.service';
 import { FakeCacheManager, InMemoryPermissionStore } from './test-helpers/in-memory-permissions';
@@ -8,9 +7,6 @@ import { FakeCacheManager, InMemoryPermissionStore } from './test-helpers/in-mem
  * US-003 — PermissionService.can rules 1-10 and the cached effective keys, without a database.
  * The integration spec covers the same acceptance criteria against Postgres.
  */
-
-/** Agent project scoping on, the installation default (`authConfig.agentProjectScoping !== false`). */
-const AUTH_CONFIG = { agentProjectScoping: true } as IAuthConfig;
 
 const user = (id: string): KodaPrincipal =>
   ({ actorType: 'user', id, role: 'MEMBER', email: `${id}@x.test` }) as KodaPrincipal;
@@ -31,11 +27,23 @@ describe('PermissionService', () => {
       store.roleRepo() as never,
       store.bindingRepo() as never,
       permissionCache,
-      AUTH_CONFIG,
     );
     store.addUser('u1');
     store.projects.add('p1');
     store.projects.add('p2');
+  });
+
+  it('bindings-only AC-8: three arguments and no legacy repository methods are needed', async () => {
+    const findEffectiveBindings = vi.fn(async () => [{
+      binding: { projectId: null }, roleKey: 'member', roleScope: 'GLOBAL', rolePermissions: ['agent.read'],
+    }]);
+    const bindings = { findEffectiveBindings, findAccessibleProjectIds: vi.fn() };
+    const roles = {};
+    const passThrough = { remember: async (_parts: string[], load: () => Promise<string[]>) => load() };
+    const subject = new PermissionService(roles as never, bindings as never, passThrough as never);
+    expect(await subject.can(user('u1'), 'agent.read')).toEqual({ allowed: true, reason: 'granted' });
+    expect(findEffectiveBindings).toHaveBeenCalledExactlyOnceWith({ type: 'USER', id: 'u1' }, null);
+    expect(bindings.findAccessibleProjectIds).not.toHaveBeenCalled();
   });
 
   it('AC-1: a developer binding in p1 grants ticket.create there', async () => {
@@ -76,9 +84,11 @@ describe('PermissionService', () => {
     expect((await service.can(user('u1'), 'role.binding.owner')).allowed).toBe(false);
   });
 
-  it('AC-7: legacy User.role ADMIN with no bindings grants user.create', async () => {
+  it('AC-7: legacy User.role ADMIN with no bindings grants nothing', async () => {
     store.addUser('legacy', 'ADMIN');
-    expect((await service.can(user('legacy'), 'user.create')).allowed).toBe(true);
+    expect(await service.can(user('legacy'), 'user.create')).toEqual({ allowed: false, reason: 'not-granted' });
+    expect(await service.effectiveKeys({ type: 'USER', id: 'legacy' }, 'global')).toEqual(new Set());
+    expect((await service.effectiveKeys({ type: 'USER', id: 'legacy' }, { projectId: 'p1' })).has('ticket.delete')).toBe(false);
   });
 
   it('AC-8: an implicit key is allowed with reason implicit', async () => {
@@ -170,11 +180,10 @@ describe('PermissionService', () => {
       }
     });
 
-    it('the global set of an owner or legacy admin also holds project keys', async () => {
+    it('the global set of an owner also holds project keys', async () => {
       store.addUser('owner1');
       store.bind({ type: 'USER', id: 'owner1' }, 'owner', null);
-      store.addUser('legacy', 'ADMIN');
-      for (const id of ['owner1', 'legacy']) {
+      for (const id of ['owner1']) {
         const keys = await service.effectiveKeys({ type: 'USER', id }, 'global');
         expect(keys.has('ticket.delete')).toBe(true);
         const inProject = await service.effectiveKeys({ type: 'USER', id }, { projectId: 'p1' });

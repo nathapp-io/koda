@@ -1,6 +1,6 @@
 /**
  * Permissions P1 US-009 — the `/agents` routes check their catalog keys, pickup is authorized by the
- * **target** agent's project keys, and a role change is visible on the next request (AC-1 .. AC-20),
+ * **target** agent's project keys, and legacy role changes grant no keys (AC-1 .. AC-20),
  * over real HTTP + Postgres.
  *
  * One booted application for the whole file. The first registration is the installation's Owner, so
@@ -16,6 +16,7 @@
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -104,8 +105,8 @@ describeIntegration('agent route keys (US-009)', () => {
     );
 
   /**
-   * An agent created through the route as the Owner, then given its legacy rows directly: a
-   * `AgentProject` roster row (`roster: 'p1'`) and/or an `AgentRoleEntry` (`legacyRole`). The rows are
+   * An agent created through the route as the Owner, then given explicit
+   * viewer/developer bindings (`roster: 'p1'`) and inert `AgentRoleEntry` data (`legacyRole`). The rows are
    * written after the agent could already have been cached by an earlier check, so the permission
    * cache is invalidated afterwards.
    */
@@ -123,7 +124,8 @@ describeIntegration('agent route keys (US-009)', () => {
     tokens[slug] = body.apiKey;
 
     if (legacy.roster) {
-      await db.agentProject.create({ data: { agentId: fixture.id, projectId: p1Id } });
+      await grantRole(db, { type: 'AGENT', id: fixture.id }, 'viewer', p1Id);
+      if (legacy.legacyRole) await grantRole(db, { type: 'AGENT', id: fixture.id }, 'developer', p1Id);
     }
     if (legacy.legacyRole) {
       await db.agentRoleEntry.create({ data: { agentId: fixture.id, role: legacy.legacyRole } });
@@ -361,8 +363,8 @@ describeIntegration('agent route keys (US-009)', () => {
     ).resolves.toEqual([expect.objectContaining({ role: 'DEVELOPER' })]);
   }, TIMEOUT);
 
-  it('AC-12: the next POST …/tickets by that agent answers 201 after the role write, demonstrating cache invalidation', async () => {
-    const agent = await createAgent('cache-agent', { roster: 'p1' });
+  it('AC-12: updating legacy roles grants no key on the next ticket create', async () => {
+    await createAgent('cache-agent', { roster: 'p1' });
 
     const refused = await createTicketAs('cache-agent');
     expectPermissionsRefusal(refused);
@@ -373,8 +375,7 @@ describeIntegration('agent route keys (US-009)', () => {
       .send({ roles: ['DEVELOPER'] })
       .expect(200);
 
-    const accepted = await createTicketAs('cache-agent').expect(201);
-    expect(data<{ createdByAgentId: string | null }>(accepted).createdByAgentId).toBe(agent.id);
+    expectPermissionsRefusal(await createTicketAs('cache-agent'));
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
@@ -449,7 +450,8 @@ describeIntegration('agent route keys (US-009)', () => {
       .set(auth('gadmin'));
     expectPermissionsRefusal(refused);
 
-    await db.agentProject.create({ data: { agentId: agent.id, projectId: p1Id } });
+    await grantRole(db, { type: 'AGENT', id: agent.id }, 'viewer', p1Id);
+    await grantRole(db, { type: 'AGENT', id: agent.id }, 'developer', p1Id);
     await membership.invalidatePermissions();
 
     const res = await request(server)
@@ -462,13 +464,11 @@ describeIntegration('agent route keys (US-009)', () => {
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
-  // B2 (whole-branch review) — removing a legacy-only agent ends its pickup at once
+  // B2 (whole-branch review) — removing a bound agent ends its pickup at once
   // -------------------------------------------------------------------------
 
-  it('B2: a warmed-up rostered agent is refused its own pickup right after a legacy-only roster removal', async () => {
-    // Its only sources in p1 are the legacy rows — no RoleBinding — so the removal deletes zero bindings
-    // and the roster row is what ends its access. AC-14's cache gap was exactly this: the removal skipped
-    // the invalidation, so the pickup kept answering 200 from the warmed entry for the whole TTL.
+  it('B2: a warmed-up rostered agent is refused its own pickup right after a binding roster removal', async () => {
+    // Warm the binding-based decision, then remove through the roster route.
     const agent = await createAgent('b2-removed-agent', { roster: 'p1', legacyRole: 'DEVELOPER' });
 
     await request(server)

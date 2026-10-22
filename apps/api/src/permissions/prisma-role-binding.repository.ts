@@ -10,7 +10,7 @@ import { Paginate } from '@nathapp/nestjs-prisma';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient, Role as RoleModel, RoleBinding as RoleBindingModel } from '../generated/prisma/client';
-import { accessibleProjectIds, legacyRoleKeys } from './legacy-membership.queries';
+import { accessibleProjectIds } from './legacy-membership.queries';
 import type {
   BindingFilter,
   BindingWithRole,
@@ -139,22 +139,6 @@ export class PrismaRoleBindingRepository
       take: OWNER_BINDING_SCAN_LIMIT,
     });
     return rows.map((row: BindingWithRoleModel) => this.toBindingWithRole(row));
-  }
-
-  /**
-   * The system role keys the principal's legacy rows stand for in `projectId` (`null` = the global
-   * scope, which answers none): its `ProjectMember.role` for a USER, its `AgentProject` roster row and
-   * `AgentRoleEntry` roles for an AGENT. The union itself lives in `legacy-membership.queries.ts`,
-   * which is the one place that reads the compatibility rows; this method is the read
-   * `PermissionService` reaches it through, so the permission layer keeps its repository-only Prisma
-   * access.
-   */
-  async findLegacyRoleKeys(
-    principal: PrincipalRef,
-    projectId: string | null,
-    agentScoping: boolean,
-  ): Promise<string[]> {
-    return legacyRoleKeys(this.db, principal, projectId, agentScoping);
   }
 
   /**

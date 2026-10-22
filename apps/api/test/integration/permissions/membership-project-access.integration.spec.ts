@@ -212,10 +212,10 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
     expect(res.status).toBe(403);
   }, TEST_TIMEOUT_MS);
 
-  it('AC-5: a legacy ProjectMember DEVELOPER row keeps its access', async () => {
+  it('AC-5: a legacy ProjectMember DEVELOPER row grants no access', async () => {
     const res = await send('get', '/api/projects/p1/tickets', 'legDev');
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
   }, TEST_TIMEOUT_MS);
 
   it('AC-6: with scoping on, a viewer binding gives an agent project reach', async () => {

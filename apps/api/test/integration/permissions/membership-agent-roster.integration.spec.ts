@@ -1,3 +1,4 @@
+import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -184,9 +185,11 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
       addedBy: { id: adminId, name: 'Roster Admin' } });
     expect(rows.find(row => row.slug === b.slug)?.addedBy).toBeNull();
   });
-  it('AC-10: viewer-only agent can pick up from project', async () => {
+  it('AC-10: explicitly bound developer agent can pick up from project', async () => {
     const a = await agent('pickup-bound-bot');
     await bind(a);
+    await grantRole(db, { type: 'AGENT', id: a.id }, 'developer', projects.p1);
+    await membership.invalidatePermissions();
     await request(server).get(`/api/agents/${a.slug}/pickup?project=p1`).set({ Authorization: `Bearer ${a.apiKey}` }).expect(200);
   });
   it('AC-11: agent without access cannot pick up from project', async () => {
@@ -198,19 +201,15 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
   // VERIFIER, so a VERIFIER-only agent's pickup was refused *after* the pickup itself was allowed.
   it('US-003 AC-11: a rostered VERIFIER-only agent picks up and its TICKET_SUGGESTED event is stored', async () => {
     const a = await agent('pickup-verifier-bot', 'Pickup Verifier', ['VERIFIER']);
-    // Its only legacy membership source is the AgentProject roster row; its only legacy role is the
-    // VERIFIER AgentRoleEntry. No binding, no ProjectMember row (agents have none).
-    await legacy(a);
-    expect(await db.agentRoleEntry.findMany({ where: { agentId: a.id }, select: { role: true } }))
-      .toEqual([{ role: 'VERIFIER' }]);
-    expect(await bindings(a)).toEqual([]);
+    await bind(a);
+    await bind(a, projects.p1, 'verifier');
     const ticket = await db.ticket.create({
       data: {
         projectId: projects.p1, number: 900, title: 'Verifier pickup', type: 'BUG',
         status: 'VERIFIED', createdByUserId: adminId,
       },
     });
-    // The roster row and the ticket were written behind the API's back, so drop the cached keys.
+    // Recompute keys after the fixture writes.
     await membership.invalidatePermissions();
 
     const res = await request(server).get(`/api/agents/${a.slug}/pickup?project=p1`)

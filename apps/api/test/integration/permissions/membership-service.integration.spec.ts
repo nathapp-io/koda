@@ -266,7 +266,6 @@ describeIntegration('MembershipService (PG)', () => {
           new PrismaRoleRepository(tx as never, { client: outside } as never),
           new PrismaRoleBindingRepository(tx as never, { client: outside } as never),
           cache,
-          { agentProjectScoping: true } as never,
         ),
         close: () => outside.$disconnect(),
       };
@@ -278,7 +277,8 @@ describeIntegration('MembershipService (PG)', () => {
       const reader = anotherRequest(cache);
 
       try {
-        const user = await newUser('ADMIN');
+        const user = await newUser();
+        await bindGlobal(user.id, 'admin');
         const principal = { type: 'USER' as const, id: user.id };
         // Warm the cache from a request that is not inside any transaction.
         expect((await reader.service.effectiveKeys(principal, 'global')).has('user.create')).toBe(true);

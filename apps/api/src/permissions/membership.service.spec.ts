@@ -166,7 +166,6 @@ describe('MembershipService', () => {
         store.roleRepo() as never,
         store.bindingRepo() as never,
         permissionCache,
-        { agentProjectScoping: true } as never,
       );
       const key = { type: 'USER' as const, id: 'u1' };
       expect((await service2.effectiveKeys(key, { projectId: 'p1' })).has('ticket.create')).toBe(false);
@@ -393,7 +392,6 @@ describe('MembershipService', () => {
         store.roleRepo() as never,
         store.bindingRepo() as never,
         permissionCache,
-        { agentProjectScoping: true } as never,
       );
       const principal = {
         actorType: 'user',
@@ -416,36 +414,6 @@ describe('MembershipService', () => {
       expect(await service.removeProjectBindings(USER('u1'), 'p1')).toBe(0);
 
       expect(cache.invalidations).toContain('permissions#tag');
-    });
-
-    it('B2: a legacy-only removal leaves the next decision without access', async () => {
-      // A member whose only source in the project is a legacy `ProjectMember` row: `removeProjectBindings`
-      // deletes nothing, and the caller's legacy delete is what ends their access.
-      let legacy: string[] = ['developer'];
-      bindingRepo.findLegacyRoleKeys = async () => legacy;
-      const permissionService = new (await import('./permission.service')).PermissionService(
-        store.roleRepo() as never,
-        bindingRepo as never,
-        permissionCache,
-        { agentProjectScoping: true } as never,
-      );
-      const principal = {
-        actorType: 'user',
-        id: 'u1',
-        role: 'MEMBER',
-        email: 'u1@koda.test',
-      } as unknown as KodaPrincipal;
-      expect((await permissionService.can(principal, 'ticket.create', { projectId: 'p1' })).allowed).toBe(true);
-
-      // The caller's transaction: the binding delete (nothing), then the legacy row goes away.
-      await service.afterCommit(async () => {
-        expect(await service.removeProjectBindings(USER('u1'), 'p1')).toBe(0);
-        legacy = [];
-        expect(cache.invalidations).toEqual([]);
-      });
-
-      expect(cache.invalidations).toContain('permissions#tag');
-      expect((await permissionService.can(principal, 'ticket.create', { projectId: 'p1' })).allowed).toBe(false);
     });
 
     it('locks the user row and runs inside a transaction', async () => {
@@ -507,10 +475,10 @@ describe('MembershipService', () => {
   });
 
   describe('isGlobalAdmin', () => {
-    it('is the union of an owner or admin binding and legacy User.role ADMIN', async () => {
+    it('uses owner or admin bindings, not legacy User.role ADMIN', async () => {
       expect(await service.isGlobalAdmin('u1')).toBe(false);
       store.addUser('legacy', 'ADMIN');
-      expect(await service.isGlobalAdmin('legacy')).toBe(true);
+      expect(await service.isGlobalAdmin('legacy')).toBe(false);
       store.bind(USER('u2'), 'owner', null);
       expect(await service.isGlobalAdmin('u2')).toBe(true);
     });
