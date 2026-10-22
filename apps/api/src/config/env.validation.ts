@@ -71,9 +71,6 @@ const envSchema = Joi.object({
   GITHUB_APP_PRIVATE_KEY_FILE: Joi.string().optional(),
   GITHUB_APP_SLUG: Joi.string().pattern(/^[a-z0-9-]+$/).optional(),
   FLEET_ENROLLMENT_TTL_SEC: Joi.number().integer().min(60).max(604_800).optional(),
-  // The runner-enrollment throttle limit (10/min in production). The E2E run raises it, because
-  // the whole Playwright suite shares one API instance and enrolls a runner per fleet spec.
-  FLEET_ENROLL_THROTTLE_LIMIT: Joi.number().integer().min(1).max(1_000_000).optional(),
   FLEET_HTTP_TIMEOUT_MS: Joi.number().integer().min(1000).max(60_000).optional(),
   FLEET_RUNNER_OFFLINE_SEC: Joi.number().integer().min(10).max(3_600).optional(),
   FLEET_JOB_CRASH_SEC: Joi.number().integer().min(30).max(86_400).optional(),

@@ -62,21 +62,14 @@ export default defineConfig({
         EMBEDDING_PROVIDER: process.env['EMBEDDING_PROVIDER'] ?? 'fake',
         // Keep e2e vectors out of the dev ./lancedb (CI sets this too).
         RAG_IN_MEMORY_ONLY: process.env['RAG_IN_MEMORY_ONLY'] ?? 'true',
-        // #144: raise the auth login throttle from 5/min to 200/min so the
+        // #144: raise the auth login throttle from 5/min to 50/min so the
         // cumulative logins across the whole e2e suite (all spec files share
         // a single client IP) stay under the limit even with CI retries that
-        // restart workers and clear the per-worker session cache. A throttled
-        // login fails fast (the 30 s hook timeout cannot absorb the wait), so
-        // one flake would otherwise cascade into every later spec.
-        AUTH_LOGIN_THROTTLE_LIMIT: process.env['AUTH_LOGIN_THROTTLE_LIMIT'] ?? '200',
+        // restart workers and clear the per-worker session cache.
+        AUTH_LOGIN_THROTTLE_LIMIT: process.env['AUTH_LOGIN_THROTTLE_LIMIT'] ?? '50',
         // Every spec shares one client IP; the S4a notification bell adds two API reads per page load,
         // which pushes a full run past the production 100/min default throttle.
         THROTTLE_LIMIT: process.env['THROTTLE_LIMIT'] ?? '1000',
-        // The runner-enrollment route keeps its own 10/min limit in production, which the e2e
-        // run cannot raise on its own: the whole suite shares one API instance and enrolls a
-        // runner per fleet spec, and a throttled enrollment makes the fixture wait for the
-        // window — a wait that does not fit the 30 s `beforeAll` hook timeout.
-        FLEET_ENROLL_THROTTLE_LIMIT: process.env['FLEET_ENROLL_THROTTLE_LIMIT'] ?? '1000',
         // Fleet slice 4c: the scripted runner's idle sync returns within 1 s instead of
         // long-polling 25 s, and job bundles land outside the repo.
         FLEET_SYNC_WAIT_MS: '1000',

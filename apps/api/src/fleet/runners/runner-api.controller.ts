@@ -9,7 +9,6 @@ import { Requires } from '../../permissions/requires.decorator';
 import type { RunnerPrincipal } from '../../auth/principal/koda-principal.types';
 import { EnrollmentService } from './enrollment.service';
 import { EnrollDto } from './dto/enroll.dto';
-import { FLEET_ENROLL_LIMIT, FLEET_ENROLL_TTL_MS } from './enroll-throttle';
 
 /** Runner-facing routes (spec §3). Only runner keys work here (CombinedAuthGuard). */
 @ApiTags('fleet-runner')
@@ -24,7 +23,7 @@ export class RunnerApiController {
   @Requires('runner.enroll', { enforcedBy: 'service' })
   @HttpCode(201)
   @Public()
-  @Throttle({ default: { limit: FLEET_ENROLL_LIMIT, ttl: FLEET_ENROLL_TTL_MS } })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Enroll a runner with a single-use token; returns its API key once' })
   @ApiResponse({ status: 201, description: '{ runnerId, apiKey }' })
   @ApiResponse({ status: 401, description: 'Token invalid, used or expired' })
