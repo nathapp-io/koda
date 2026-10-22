@@ -1,35 +1,35 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaClient } from '../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { principalIdsWithAccess } from '../permissions/membership.queries';
+import { PermissionService } from '../permissions/permission.service';
 import { parseMentions } from './mentions';
 
 /**
- * Fleet S4a §2.3 (slice 3): who a text mentions. Only enabled project members and enabled global admins count;
- * a token for anyone else is ignored (D504). Order follows the text.
+ * Fleet S4a §2.3 (slice 3): who a text mentions. Only enabled users holding `project.read` in the
+ * project count; a token for anyone else is ignored (D504). Order follows the text.
  *
- * Permissions P1b US-005: "a project member" has PROJECT-scope bindings, in the project and
- * `projectId`-null — while the global-admin branch stays on `User.role`. The project's member ids are
- * read once per call and intersected with the mentioned ones; nothing is cached.
+ * Permissions P1b US-005: each mentioned enabled user is checked by effective project keys; nothing
+ * is cached.
  */
 @Injectable()
 export class TicketMentionResolver {
-  constructor(private readonly prisma: PrismaService<PrismaClient>) {}
+  constructor(
+    private readonly prisma: PrismaService<PrismaClient>,
+    private readonly permissions: PermissionService,
+  ) {}
 
   async mentionedUserIds(projectId: string, text: string | null): Promise<readonly string[]> {
     const ids = parseMentions(text);
     if (ids.length === 0) return [];
-    const [users, projectUserIds] = await Promise.all([
-      this.prisma.client.user.findMany({
-        where: { id: { in: [...ids] }, disabled: false },
-        select: { id: true, role: true },
-      }),
-      principalIdsWithAccess(this.prisma.client, projectId, 'USER'),
-    ]);
-    const inProject = new Set(projectUserIds);
-    const allowed = new Set(
-      users.filter((user) => user.role === 'ADMIN' || inProject.has(user.id)).map((user) => user.id),
-    );
-    return ids.filter((userId) => allowed.has(userId));
+    const users = await this.prisma.client.user.findMany({
+      where: { id: { in: [...ids] }, disabled: false },
+      select: { id: true },
+    });
+    const enabledIds = new Set(users.map((user) => user.id));
+    const access = await Promise.all([...enabledIds].map(async (id) =>
+      [id, (await this.permissions.effectiveKeys({ type: 'USER', id }, { projectId })).has('project.read')] as const,
+    ));
+    const readable = new Set(access.filter(([, hasKey]) => hasKey).map(([id]) => id));
+    return ids.filter((userId) => readable.has(userId));
   }
 }
