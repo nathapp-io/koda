@@ -3,7 +3,7 @@
   "feature": "permissions-p1-web",
   "branchName": "feat/permissions-p1-web",
   "createdAt": "2026-07-14T00:00:00.000Z",
-  "updatedAt": "2026-10-22T09:23:33.339Z",
+  "updatedAt": "2026-10-22T09:47:55.145Z",
   "userStories": [
     {
       "id": "US-001",
@@ -1011,8 +1011,8 @@
         "US-002",
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -1024,7 +1024,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "claude",
         "initialProfileId": "claude-sonnet",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "claude-sonnet",
+          "confidence": 0.7000000000000002,
+          "plannedProfileId": "claude-sonnet",
+          "applied": false,
+          "decidedAt": "2026-10-22T09:23:37.634Z"
+        }
       },
       "contextFiles": [
         "apps/web/pages/admin/users.vue",
@@ -1063,7 +1075,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3c8b098df6080ff0809f9fdf3c927be4f0d08494"
     },
     {
       "id": "US-011",
