@@ -101,23 +101,46 @@ async function run(action: () => Promise<unknown>, successKey?: string): Promise
 }
 
 /**
- * `GET /agents` minus the agents already listed here. A failed read empties the picker, loudly.
+ * `GET /agents` minus the agents already listed here. A failed read empties the picker, loudly, and
+ * answers false so the caller may offer to retry it.
  */
-async function loadAgentChoices(): Promise<void> {
+async function loadAgentChoices(): Promise<boolean> {
   try {
     const res = await $api.get<AgentChoice[]>('/agents')
     agentChoices.value = Array.isArray(res)
       ? res.filter((agent) => typeof agent?.id === 'string' && typeof agent.name === 'string')
       : []
+    // Only a successful read may claim "every agent is already a member".
+    agentsLoaded.value = true
+    return true
   }
   catch (err: unknown) {
     agentChoices.value = []
     toast.error(extractApiError(err))
-  }
-  finally {
-    agentsLoaded.value = true
+    return false
   }
 }
+
+/**
+ * The agent candidates, fetched at most once. The gate below can open more than once (a re-resolved
+ * key set), and a page reload is not a reason to ask again.
+ */
+let agentChoicesRequested = false
+async function ensureAgentChoices(): Promise<void> {
+  if (agentChoicesRequested) return
+  agentChoicesRequested = true
+  if (!(await loadAgentChoices())) agentChoicesRequested = false
+}
+
+/**
+ * The project key set arrives asynchronously: `useProjectPermissions` reads `/me/permissions` in an
+ * async data fetch, which on a client navigation resolves after the members and roles pages. The
+ * picker is therefore fetched when the gate opens, not once at mount — otherwise the form would
+ * appear with an empty, permanently unusable select.
+ */
+watch(canManageBindings, (allowed) => {
+  if (allowed) void ensureAgentChoices()
+}, { immediate: true })
 
 async function onAddMember(): Promise<void> {
   const email = newEmail.value.trim()
@@ -237,8 +260,6 @@ onMounted(async () => {
   await run(load)
   loading.value = false
   await run(loadRoles)
-  // The picker is only offered with role.binding.manage, so it is only fetched then.
-  if (canManageBindings.value) await loadAgentChoices()
 })
 </script>
 
@@ -400,6 +421,8 @@ onMounted(async () => {
       </li>
     </ul>
 
-    <Button v-if="hasNext" variant="outline" size="sm" @click="run(loadMore)">{{ t('projects.members.loadMore') }}</Button>
+    <Button v-if="hasNext" data-testid="member-load-more" variant="outline" size="sm" @click="run(loadMore)">
+      {{ t('projects.members.loadMore') }}
+    </Button>
   </div>
 </template>

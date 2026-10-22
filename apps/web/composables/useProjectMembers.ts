@@ -134,9 +134,31 @@ export function useProjectMembers(slug: string) {
     await fetchInto(1, false)
   }
 
-  /** Refetch the page currently shown, without resetting pagination. */
+  /**
+   * Refetch the list the way the caller is looking at it: pages 1..current, re-read in order, so a
+   * write that lands after "Load more" refreshes the whole accumulated list instead of replacing it
+   * with the last page alone.
+   *
+   * The pages can also shrink between reads — removing the only row of the last page leaves one page
+   * behind — so the walk stops as soon as a page reports no successor and the pagination describes
+   * what was actually read: the earlier members stay listed and reachable, and no empty page is kept.
+   */
   async function reload(): Promise<void> {
-    await fetchInto(current.value, false)
+    const pages = current.value
+    const collected: ProjectPrincipalRow[] = []
+    let last: PrincipalPage | null = null
+    let read = 0
+    for (let pageNumber = 1; pageNumber <= pages; pageNumber += 1) {
+      last = await fetchPage(pageNumber)
+      const records = Array.isArray(last?.records) ? last.records.map(toRow) : []
+      collected.push(...records)
+      read = pageNumber
+      if (pageNumber < pages && last.hasNext !== true) break
+    }
+    members.value = collected
+    total.value = last?.total ?? collected.length
+    current.value = read
+    hasNext.value = last?.hasNext === true
   }
 
   async function loadMore(): Promise<void> {

@@ -73,21 +73,61 @@ describe('useProjectMembers', () => {
     expect(members.members.value.map((x: { principalId: string }) => x.principalId)).toEqual(['a'])
   })
 
-  test('reload refetches the current page instead of resetting to page 1', async () => {
-    const get = jest.fn()
-      .mockImplementationOnce(async () => pageOf([row()], { total: 2, hasNext: true }))
-      .mockImplementationOnce(async () => pageOf([row({ principalId: 'b', userId: 'b' })], { total: 2, current: 2 }))
-      .mockImplementationOnce(async () => pageOf([row({ principalId: 'b', userId: 'b' })], { total: 2, current: 2 }))
+  test('reload re-reads every loaded page, so the accumulated list survives', async () => {
+    const pages: Record<string, unknown> = {
+      '1': pageOf([row()], { total: 2, hasNext: true }),
+      '2': pageOf([row({ principalId: 'b', userId: 'b' })], { total: 2, current: 2 }),
+    }
+    const get = jest.fn(async (_path: string, request?: { query?: Record<string, string> }) =>
+      pages[request?.query?.current ?? '1'])
     withApi({ get })
     const { useProjectMembers } = await import(composablePath)
     const members = useProjectMembers('team')
 
     await members.load()
     await members.loadMore()
+    get.mockClear()
     await members.reload()
 
-    expect(get).toHaveBeenNthCalledWith(3, '/projects/team/members', { query: { principals: 'all', current: '2' } })
-    expect(members.members.value.map((x: { principalId: string }) => x.principalId)).toEqual(['b'])
+    // Fix round 1 / F2: both pages are re-read, in order, and the list keeps what it had.
+    expect(get.mock.calls.map((args) => (args[1] as { query: Record<string, string> }).query)).toEqual([
+      { principals: 'all' },
+      { principals: 'all', current: '2' },
+    ])
+    expect(members.members.value.map((x: { principalId: string }) => x.principalId)).toEqual(['a', 'b'])
+    expect(members.hasNext.value).toBe(false)
+  })
+
+  test('reload after removing the last row of the last page keeps the earlier members reachable', async () => {
+    // Page 2 held the only removable row; once it is gone the server has one page left.
+    const pages: Record<string, unknown> = {
+      '1': pageOf([row(), row({ principalId: 'b', userId: 'b' })], { total: 3, hasNext: true }),
+      '2': pageOf([row({ principalId: 'c', userId: 'c' })], { total: 3, current: 2 }),
+    }
+    const get = jest.fn(async (_path: string, request?: { query?: Record<string, string> }) =>
+      pages[request?.query?.current ?? '1'])
+    withApi({ get })
+    const { useProjectMembers } = await import(composablePath)
+    const members = useProjectMembers('team')
+
+    await members.load()
+    await members.loadMore()
+    expect(members.members.value).toHaveLength(3)
+
+    // The API removed the row `c`: one page remains.
+    pages['1'] = pageOf([row(), row({ principalId: 'b', userId: 'b' })], { total: 2, hasNext: false })
+    pages['2'] = pageOf([], { total: 2, current: 2 })
+    get.mockClear()
+    await members.reload()
+
+    // The list is not emptied and "load more" is not lost: the earlier members stay and the
+    // pagination now describes the shorter list.
+    expect(members.members.value.map((x: { principalId: string }) => x.principalId)).toEqual(['a', 'b'])
+    expect(members.total.value).toBe(2)
+    expect(members.current.value).toBe(1)
+    expect(members.hasNext.value).toBe(false)
+    // The shortened list stops the walk: page 2 is not asked for again.
+    expect(get).toHaveBeenCalledTimes(1)
   })
 
   test('an agent row keeps its own principal identity', async () => {

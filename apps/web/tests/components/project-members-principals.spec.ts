@@ -97,6 +97,16 @@ interface MountOptions {
   /** Forced outcomes for the write routes. */
   post?: jest.Mock
   delete?: jest.Mock
+  /**
+   * Held open to keep `GET /me/permissions` pending while the listings resolve — the client-navigation
+   * order, where the project keys arrive after the members and roles pages.
+   */
+  permissionsGate?: Promise<void>
+  /**
+   * A paginated members listing: `pages[n]` answers `?current=n+1`. Used by the "Load more" and reload
+   * specs; when absent the single-page `rows` fixture answers every request.
+   */
+  pages?: Array<{ rows: RowFixture[]; hasNext: boolean; total?: number }>
 }
 
 interface Mount {
@@ -114,14 +124,28 @@ interface Mount {
 async function mountPanel(options: MountOptions = {}): Promise<Mount> {
   const keys = options.keys ?? ['member.add', 'role.binding.manage']
   const rows = [...(options.rows ?? [userRow()])]
+  const pages = options.pages
   const agents = options.agents ?? AGENTS
   const memberCalls: Array<{ path: string; query?: Record<string, string> }> = []
 
   const get = jest.fn(async (path: string, request?: { query?: Record<string, string> }) => {
-    if (path === '/me/permissions') return { scope: 'project', projectSlug: 'web', keys: [...keys] }
+    if (path === '/me/permissions') {
+      if (options.permissionsGate) await options.permissionsGate
+      return { scope: 'project', projectSlug: 'web', keys: [...keys] }
+    }
     if (path === '/projects/web/members') {
       memberCalls.push({ path, query: request?.query })
-      return pageOf(rows)
+      if (!pages) return pageOf(rows)
+      const pageNumber = Number(request?.query?.current ?? '1')
+      const page = pages[pageNumber - 1] ?? { rows: [], hasNext: false }
+      return {
+        records: page.rows,
+        total: page.total ?? pages.reduce((sum, entry) => sum + entry.rows.length, 0),
+        current: pageNumber,
+        size: 20,
+        hasNext: page.hasNext,
+        hasPrev: pageNumber > 1,
+      }
     }
     if (path === '/projects/web/roles') return ROLES
     if (path === '/agents') return agents
@@ -306,6 +330,58 @@ describe('AC-4: adding an agent that is not listed yet', () => {
     expect(m.memberCalls.length).toBeGreaterThan(reloadsBefore)
     m.app.unmount()
   })
+
+  // Fix round 1 / F1: the project keys can resolve AFTER the members and roles pages (a client
+  // navigation, or a slow /me/permissions). The picker then appears later, so /agents has to be
+  // fetched when the gate opens rather than once at mount.
+  test('the picker still loads when the project keys arrive after both listings', async () => {
+    let openGate = (): void => undefined
+    const gate = new Promise<void>((resolve) => { openGate = resolve })
+    const m = await mountPanel({ rows: [userRow(), agentRow()], permissionsGate: gate })
+
+    // The listings resolved while the keys were still pending: no picker, and no wasted request.
+    expect(m.memberCalls).toHaveLength(1)
+    expect(allById(m.app, 'agent-add-form')).toHaveLength(0)
+    expect(m.get.mock.calls.map((args) => args[0])).not.toContain('/agents')
+
+    openGate()
+    await settle()
+
+    expect(allById(m.app, 'agent-add-form')).toHaveLength(1)
+    expect(m.get.mock.calls.filter((args) => args[0] === '/agents')).toHaveLength(1)
+    const offered = m.app.find('option', byId(m.app, 'agent-add-select')).map((option) => String(option.props.value))
+    expect(offered).toContain('a2')
+    expect(offered).not.toContain('a1')
+
+    // Deduplicated: a later re-render must not fire a second /agents request.
+    await settle()
+    expect(m.get.mock.calls.filter((args) => args[0] === '/agents')).toHaveLength(1)
+    m.app.unmount()
+  })
+
+  test('an agent can be granted after the delayed permission answer (the picker is usable)', async () => {
+    let openGate = (): void => undefined
+    const gate = new Promise<void>((resolve) => { openGate = resolve })
+    const m = await mountPanel({ rows: [userRow(), agentRow()], permissionsGate: gate })
+    openGate()
+    await settle()
+
+    // A usable picker, not just a visible form: the candidates are there to choose from.
+    const offered = m.app.find('option', byId(m.app, 'agent-add-select')).map((option) => String(option.props.value))
+    expect(offered).toContain('a2')
+
+    call(byId(m.app, 'agent-add-select'), 'onChange', { target: { value: 'a2' } })
+    await settle()
+    call(byId(m.app, 'agent-add-role'), 'onChange', { target: { value: 'reviewer' } })
+    await settle()
+    submitForm(m.app, 'agent-add-form')
+    await settle()
+
+    expect(m.post).toHaveBeenCalledWith('/role-bindings', {
+      principalType: 'AGENT', principalId: 'a2', roleKey: 'reviewer', projectId: 'p1',
+    })
+    m.app.unmount()
+  })
 })
 
 describe('AC-5: adding and removing a role chip on a row', () => {
@@ -367,6 +443,46 @@ describe('AC-6: removing a row deletes each real binding and reloads', () => {
 
     expect(m.del.mock.calls.map((args) => args[0])).toEqual(['/role-bindings/b1', '/role-bindings/b2'])
     expect(m.memberCalls.length).toBeGreaterThan(reloadsBefore)
+    m.app.unmount()
+  })
+
+  // Fix round 1 / F2: the reload after a removal used to replace the accumulated list with the last
+  // page alone, so removing the only row of the last page emptied the panel while earlier members
+  // still existed.
+  test('removing the only row of the last loaded page keeps the earlier members listed', async () => {
+    const pages = [
+      {
+        rows: [
+          userRow(),
+          userRow({ principalId: 'u2', userId: 'u2', email: 'u2@example.test', name: 'User Two', bindings: [{ id: 'b2', roleKey: 'developer', roleName: 'Developer' }] }),
+        ],
+        hasNext: true,
+        total: 3,
+      },
+      {
+        rows: [userRow({ principalId: 'u3', userId: 'u3', email: 'u3@example.test', name: 'User Three', bindings: [{ id: 'b3', roleKey: 'developer', roleName: 'Developer' }] })],
+        hasNext: false,
+        total: 3,
+      },
+    ]
+    const m = await mountPanel({ pages })
+    call(byId(m.app, 'member-load-more'), 'onClick')
+    await settle()
+    expect(rows(m.app)).toHaveLength(3)
+
+    // The API now holds two members in one page: `b3` was the last row of the last page.
+    const firstPage = pages[0]
+    if (!firstPage) throw new Error('page 1 fixture missing')
+    pages[0] = { rows: firstPage.rows, hasNext: false, total: 2 }
+    pages[1] = { rows: [], hasNext: false, total: 2 }
+
+    call(byId(m.app, 'member-row-remove', rowOf(m.app, 'User Three')), 'onClick')
+    await settle()
+
+    expect(m.del.mock.calls.map((args) => args[0])).toEqual(['/role-bindings/b3'])
+    // The earlier members survive and the list does not claim another page.
+    expect(rows(m.app).map((row) => m.app.textOf(byId(m.app, 'member-name', row)))).toEqual(['User One', 'User Two'])
+    expect(allById(m.app, 'member-load-more')).toHaveLength(0)
     m.app.unmount()
   })
 })
