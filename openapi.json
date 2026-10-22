@@ -2523,7 +2523,17 @@
     "/api/projects/{slug}/roles": {
       "get": {
         "operationId": "ProjectRolesController_list",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Project slug"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Every PROJECT-scope role, system roles first then by key",
@@ -2581,6 +2591,15 @@
               "default": 20,
               "type": "number"
             }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Project slug"
           }
         ],
         "responses": {

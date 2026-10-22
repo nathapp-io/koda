@@ -5,7 +5,7 @@ import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-com
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { userAuthStateCacheKey, userTokenVersionCacheTag } from '../auth/token-version.cache';
-import { isUniqueViolation } from '../common/utils/prisma-errors';
+import { isForeignKeyViolation, isUniqueViolation } from '../common/utils/prisma-errors';
 import { AfterCommitService } from './after-commit.service';
 import { PermissionCache } from './permission-cache';
 import { ROLE_BINDING_REPOSITORY, ROLE_REPOSITORY } from './permissions.tokens';
@@ -128,6 +128,45 @@ export class MembershipService {
   ): Promise<RoleBindingView> {
     const role = await this.roles.findOne({ key: input.roleKey });
     if (!role) throw new NotFoundAppException({}, 'permissions.roleNotFound');
+    return this.bindRole(role, input, by);
+  }
+
+  /**
+   * `createBinding` for a role the caller already identifies **by id** — the invite acceptance path,
+   * which binds the role the invite persisted and never whatever role owns that key now.
+   *
+   * Answers `null`, having written nothing, when the role row is gone. A custom role deleted after the
+   * invite was read frees its key, so resolving the key here would grant its successor's permissions
+   * instead of the ones the invite named; the foreign key closes the last window, because a delete that
+   * commits between the read below and the insert makes the insert fail rather than bind a role this
+   * call never saw.
+   *
+   * That failure is a constraint violation inside the current transaction, which Postgres has already
+   * aborted: a caller must answer the request immediately after a `null`, not keep writing.
+   */
+  async createBindingForRole(
+    input: { principal: PrincipalRef; roleId: string; projectId: string | null },
+    by: Granter,
+  ): Promise<RoleBindingView | null> {
+    const role = await this.roles.findById(input.roleId);
+    if (!role) return null;
+    try {
+      return await this.bindRole(role, input, by);
+    } catch (error) {
+      if (isForeignKeyViolation(error, 'roleId')) return null;
+      throw error;
+    }
+  }
+
+  /**
+   * The write every binding route shares once the role row is known: the target checks, the insert and
+   * the after-commit invalidation. Concurrent identical inserts are reconciled against the winner.
+   */
+  private async bindRole(
+    role: RoleDomain,
+    input: { principal: PrincipalRef; projectId: string | null },
+    by: Granter,
+  ): Promise<RoleBindingView> {
     await this.assertTargetsExist(input.principal, input.projectId);
 
     try {

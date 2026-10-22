@@ -206,13 +206,12 @@ async function onRemoveChip(row: ProjectPrincipalRow, binding: MemberBinding): P
   busyRow.value = rowKey(row)
   try {
     await removeBinding(id)
-    // Only the binding row was deleted, so the chip goes and the principal stays.
-    members.value = members.value.map((current) => (
-      rowKey(current) === rowKey(row)
-        ? { ...current, bindings: current.bindings.filter((held) => held.id !== id) }
-        : current
-    ))
     toast.success(t('projects.members.toast.roleRemoved'))
+    // The chip that goes is not always the only change: deleting a binding can uncover the same-key
+    // legacy membership the API was suppressing behind it, and a binding-only principal loses its row
+    // with its last binding. Only the server's answer says which, so the list is re-read rather than
+    // patched, exactly as a row removal does.
+    await run(reload)
   }
   catch (err: unknown) {
     toast.error(extractApiError(err))

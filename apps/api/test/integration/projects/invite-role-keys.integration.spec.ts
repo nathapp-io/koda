@@ -15,6 +15,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { hashInviteToken } from '../../../src/projects/invites/invite-token';
+import { PrismaProjectInvitesRepository } from '../../../src/projects/invites/prisma-project-invites.repository';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -270,6 +271,44 @@ describeIntegration('invite role keys (US-005)', () => {
     expect(res.body.message).toBe(sentence('invites', 'roleGone', CODE.conflict));
     expect(await db.user.count({ where: { email: 'ac7@koda.test' } })).toBe(0);
     expect(await db.roleBinding.count()).toBe(bindingsBefore);
+  }, TIMEOUT);
+
+  it('AC-7: a role deleted and its key reused mid-accept is 409 invites.roleGone, never the replacement role', async () => {
+    // The invite is issued for a custom role; the acceptance then reads that invite, and a concurrent
+    // admin deletes the role and creates a broader one under the same key before the claim. Binding the
+    // *key* would have granted the replacement role's permissions; the persisted roleId is what binds.
+    const original = await createRole('swap', ['project.read']);
+    const created = data<CreateBody>(await invite('owner').send({ email: 'ac7swap@koda.test', roleKey: 'swap' }).expect(201));
+    const bindingsBefore = await db.roleBinding.count();
+
+    const repo = app.get(PrismaProjectInvitesRepository);
+    const read = repo.findByTokenHash.bind(repo);
+    const spy = vi.spyOn(repo, 'findByTokenHash').mockImplementation(async (tokenHash: string) => {
+      // The invite as it was issued, captured before the deletion below commits.
+      const snapshot = await read(tokenHash);
+      await request(server).delete(`/api/roles/${original.id}`).set(auth('owner')).expect(204);
+      const replacement = await createRole('swap', ['project.read', 'ticket.read']);
+      expect(replacement.id).not.toBe(original.id);
+      return snapshot;
+    });
+
+    let res: request.Response;
+    try {
+      res = await accept(tokenFrom(created.invitePath));
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(res.status).toBe(409);
+    expect(res.body.ret).toBe(CODE.conflict);
+    expect(res.body.message).toBe(sentence('invites', 'roleGone', CODE.conflict));
+    // Nothing was created: the account and the claimed invite rolled back with the refused binding.
+    expect(await db.user.count({ where: { email: 'ac7swap@koda.test' } })).toBe(0);
+    expect(await db.roleBinding.count()).toBe(bindingsBefore);
+    expect(await db.roleBinding.count({ where: { role: { key: 'swap' } } })).toBe(0);
+    const stored = await db.projectInvite.findFirstOrThrow({ where: { projectId, email: 'ac7swap@koda.test' } });
+    expect(stored.status).toBe('PENDING');
+    expect(stored.roleId).toBeNull();
   }, TIMEOUT);
 
   it('AC-8: deleting the custom role named by an unaccepted invite is 204 and nulls the invite roleId', async () => {

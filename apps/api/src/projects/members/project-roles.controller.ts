@@ -1,5 +1,5 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
@@ -20,6 +20,9 @@ import { ProjectRoleDto } from './dto/project-role.dto';
  */
 @ApiTags('projects')
 @ApiBearerAuth()
+// The path template's `slug` is documented explicitly: the handler takes no `@Param`, so without this
+// the exported operation carried no `slug` parameter and a generated client could not build the request.
+@ApiParam({ name: 'slug', required: true, schema: { type: 'string' }, description: 'Project slug' })
 @Controller('projects/:slug/roles')
 @UseGuards(ProjectMembershipGuard, RequiresGuard)
 export class ProjectRolesController {

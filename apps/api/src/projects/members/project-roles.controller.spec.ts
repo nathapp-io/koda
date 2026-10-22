@@ -39,6 +39,20 @@ describe('US-003 project roles route', () => {
     ]);
   });
 
+  it('documents the required slug path parameter on the exported operation (B3)', () => {
+    // The handler has no `@Param('slug')`, so Swagger only learns the path variable from this metadata.
+    // Without it `openapi.json` published an operation with no parameters and no client could send a slug.
+    // A class-level `@ApiParam` copies the parameter onto each API method, so that is where it lands.
+    const params = (Reflect.getMetadata('swagger/apiParameters', ProjectRolesController.prototype.list) ??
+      []) as Array<Record<string, unknown>>;
+
+    expect(params).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'slug', in: 'path', required: true }),
+      ]),
+    );
+  });
+
   it('answers the five project-role fields of every role the service lists', async () => {
     const roles = { listProjectRoles: vi.fn().mockResolvedValue([role]) };
     const controller = new ProjectRolesController(roles as never);

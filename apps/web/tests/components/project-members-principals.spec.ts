@@ -162,7 +162,11 @@ async function mountPanel(options: MountOptions = {}): Promise<Mount> {
     if (path === '/role-bindings') return binding('b7', body)
     throw new Error(`unexpected POST ${path}`)
   })
-  const del = options.delete ?? jest.fn(async () => undefined)
+  // The delete double models the server: the binding row leaves the listing the panel re-reads.
+  const del = options.delete ?? jest.fn(async (path: string) => {
+    const id = path.split('/').pop()
+    rows.forEach((row) => { row.bindings = row.bindings.filter((held) => held.id !== id) })
+  })
   const toast = { success: jest.fn(), error: jest.fn() }
 
   const host = globalThis as Record<string, unknown>
@@ -413,12 +417,60 @@ describe('AC-5: adding and removing a role chip on a row', () => {
   test('removing a chip deletes its binding and drops the chip', async () => {
     const m = await mountPanel()
     const row = rowOf(m.app, 'User One')
+    const readsBefore = m.memberCalls.length
 
     call(byId(m.app, 'member-chip-remove', row), 'onClick')
     await settle()
 
     expect(m.del).toHaveBeenCalledWith('/role-bindings/b1')
     expect(allById(m.app, 'member-chip', rowOf(m.app, 'User One'))).toHaveLength(0)
+    // The rows are the server's answer, not a local edit: the list is re-read after the delete.
+    expect(m.memberCalls.length).toBeGreaterThan(readsBefore)
+    m.app.unmount()
+  })
+
+  // Fix round 2 / B2: the chip that goes is not the only change. Deleting a real binding can uncover a
+  // same-key legacy membership the API was suppressing behind it, so a local filter would show no role
+  // and report success while the principal still holds the legacy authority.
+  test('a legacy same-key chip the API suppressed appears once the real binding is deleted', async () => {
+    const del = jest.fn(async () => undefined)
+    const m = await mountPanel({ delete: del })
+    // The legacy DEVELOPER membership is hidden behind the same-key binding; the delete leaves it as
+    // the principal's only source in the project, which the API then reports as a null-id chip.
+    del.mockImplementation(async () => {
+      const row = m.rows[0]
+      if (!row) throw new Error('row fixture missing')
+      row.bindings = [{ id: null, roleKey: 'developer', roleName: 'Developer' }]
+    })
+
+    call(byId(m.app, 'member-chip-remove', rowOf(m.app, 'User One')), 'onClick')
+    await settle()
+
+    expect(del).toHaveBeenCalledWith('/role-bindings/b1')
+    const chips = allById(m.app, 'member-chip', rowOf(m.app, 'User One'))
+    expect(chips.map((chip) => m.app.textOf(chip))).toEqual(['Developer'])
+    // ...and the uncovered legacy chip has no remove control.
+    expect(allById(m.app, 'member-chip-remove', rowOf(m.app, 'User One'))).toHaveLength(0)
+    m.app.unmount()
+  })
+
+  // Fix round 2 / B2: a principal that exists *only* through its bindings loses its row with its last
+  // binding, so patching the chip list locally left a member on screen that the API no longer lists.
+  test('a binding-only agent disappears when its last binding is deleted', async () => {
+    const del = jest.fn(async () => undefined)
+    const m = await mountPanel({
+      rows: [userRow(), agentRow({ bindings: [{ id: 'b7', roleKey: 'reviewer', roleName: 'Reviewer' }] })],
+      delete: del,
+    })
+    del.mockImplementation(async () => {
+      m.rows.splice(m.rows.findIndex((row) => row.principalId === 'a1'), 1)
+    })
+
+    call(byId(m.app, 'member-chip-remove', rowOf(m.app, 'Listed Bot')), 'onClick')
+    await settle()
+
+    expect(del).toHaveBeenCalledWith('/role-bindings/b7')
+    expect(rows(m.app).map((row) => m.app.textOf(byId(m.app, 'member-name', row)))).toEqual(['User One'])
     m.app.unmount()
   })
 })

@@ -8,6 +8,7 @@ import { UserDomain } from '../../auth/domain/auth.domain';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { MembershipService } from '../../permissions/membership.service';
+import type { RoleBindingView } from '../../permissions/permissions.types';
 import { hashInviteToken } from './invite-token';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { InvitePreviewDto } from './dto/invite-preview.dto';
@@ -18,6 +19,25 @@ import { PrismaProjectInvitesMembersRepository } from './prisma-project-invites-
 const BCRYPT_ROUNDS = 12;
 /** Register's fallback display name when the body omits one (BUG-8: never the email local part). */
 const DEFAULT_NAME = 'User';
+
+/**
+ * How acceptance names the invite's role: the persisted row when the invite has one, the legacy key a
+ * pre-migration invite stands for otherwise.
+ */
+type InvitedRole = { roleId: string } | { roleKey: string };
+
+/**
+ * US-005 (AC-7): the role identity the invite *persisted*, never the key it displays.
+ *
+ * A row with a `roleId` binds that id. A pre-migration row (no `roleId`) binds the role its legacy enum
+ * maps to, which the repository already resolved into `roleKey`. A row with neither names no role at all
+ * — the custom role it carried was deleted before acceptance — and `null` makes the accept answer 409
+ * `invites.roleGone`.
+ */
+function invitedRole(invite: ProjectInvitePreview): InvitedRole | null {
+  if (invite.roleId !== null) return { roleId: invite.roleId };
+  return invite.roleKey === null ? null : { roleKey: invite.roleKey };
+}
 
 /**
  * Fleet S4b US-005: the anonymous side of project invites. A token is single-use — the accept
@@ -60,9 +80,11 @@ export class InviteAcceptanceService {
       const invite = await this.invites.findByTokenHash(tokenHash);
       if (!this.usable(invite, now)) throw this.notFound();
 
-      // The role the invite names is gone (a custom role deleted before acceptance) and no legacy role
-      // stands in for it: nothing is granted, so nothing is claimed and no account is created.
-      if (invite.roleKey === null) throw new ConflictAppException({}, 'invites.roleGone');
+      // The role the invite names is gone (a custom role deleted after the invite was issued, which
+      // clears `roleId`, and no legacy role stands in for it): nothing is granted, so nothing is claimed
+      // and no account is created (AC-7).
+      const roleRef = invitedRole(invite);
+      if (roleRef === null) throw new ConflictAppException({}, 'invites.roleGone');
 
       // The single-use gate (AC-7): exactly one concurrent accept sees count 1, the other rolls back.
       // The hash is re-checked inside the claim, so a resend that rotated it in between (AC-8) leaves
@@ -77,16 +99,35 @@ export class InviteAcceptanceService {
 
       const created = await this.createUser(invite.email, dto.name, passwordHash);
       await this.invites.setAcceptedBy(invite.id, created.id, now);
-      await this.membership.createBinding(
-        { principal: { type: 'USER', id: created.id }, projectId: invite.projectId, roleKey: invite.roleKey },
-        { type: 'SYSTEM', id: 'invite' },
-      );
+      // US-005 (AC-7): the persisted role identity binds — its id when the row has one, so a role deleted
+      // and its key reused after the invite's read answers roleGone instead of granting the successor.
+      if ((await this.bindInvitedRole(invite.projectId, created.id, roleRef)) === null) {
+        throw new ConflictAppException({}, 'invites.roleGone');
+      }
       await this.membership.bindBaseline({ type: 'USER', id: created.id });
       return created;
     }));
 
     // Issued after commit: a rolled-back accept never hands out a token for a user that does not exist.
     return this.auth.issueSession(user);
+  }
+
+  /**
+   * The project binding of the invited account, by the role's **id** whenever the invite persisted one:
+   * resolving the key instead would let a role created under a deleted role's key after the invite's read
+   * hand out permissions the invite never named. `null` means that role is gone and nothing was written;
+   * the accept transaction then rolls back the claimed invite and the created account with it.
+   */
+  private bindInvitedRole(
+    projectId: string,
+    userId: string,
+    role: InvitedRole,
+  ): Promise<RoleBindingView | null> {
+    const principal = { type: 'USER' as const, id: userId };
+    const grantedBy = { type: 'SYSTEM' as const, id: 'invite' };
+    return 'roleId' in role
+      ? this.membership.createBindingForRole({ principal, roleId: role.roleId, projectId }, grantedBy)
+      : this.membership.createBinding({ principal, roleKey: role.roleKey, projectId }, grantedBy);
   }
 
   private async createUser(email: string, name: string | undefined, passwordHash: string): Promise<UserDomain> {

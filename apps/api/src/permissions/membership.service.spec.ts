@@ -175,6 +175,45 @@ describe('MembershipService', () => {
     });
   });
 
+  describe('createBindingForRole (US-005 AC-7)', () => {
+    it('binds the role named by its id and returns the view', async () => {
+      const role = store.roleByKey('developer');
+
+      const view = await service.createBindingForRole(
+        { principal: USER('u1'), roleId: role.id, projectId: 'p1' },
+        BY,
+      );
+
+      expect(view).toMatchObject({
+        principalType: 'USER', principalId: 'u1', roleId: role.id, roleKey: 'developer', projectId: 'p1',
+      });
+      expect(store.bindings).toHaveLength(1);
+    });
+
+    it('never rebinds a deleted role key to the role that reused it', async () => {
+      const original = store.roleByKey('triager');
+      // A concurrent admin deletes the role and creates a broader one under the same key.
+      store.roles = store.roles.filter((role) => role.id !== original.id);
+      const replacement: typeof original = { ...original, id: 'role-replacement', permissions: ['*'] };
+      store.roles.push(replacement);
+
+      // The invite's persisted id is what binds: the key resolution would have granted the replacement.
+      expect(await service.createBindingForRole({ principal: USER('u1'), roleId: original.id, projectId: 'p1' }, BY))
+        .toBeNull();
+      expect(store.bindings).toHaveLength(0);
+
+      await service.createBinding({ principal: USER('u1'), roleKey: 'triager', projectId: 'p1' }, BY);
+      expect(store.bindings[0]?.roleId).toBe(replacement.id);
+    });
+
+    it('answers null, writing nothing, when the role id is unknown', async () => {
+      expect(await service.createBindingForRole({ principal: USER('u1'), roleId: 'ghost', projectId: 'p1' }, BY))
+        .toBeNull();
+      expect(store.bindings).toHaveLength(0);
+      expect(txRuns).toBe(0);
+    });
+  });
+
   describe('removeBinding', () => {
     it('AC-15: removes the binding and invalidates the permissions cache', async () => {
       const view = await service.createBinding({ principal: USER('u1'), roleKey: 'developer', projectId: 'p1' }, BY);
