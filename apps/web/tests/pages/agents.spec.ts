@@ -42,13 +42,6 @@ const item: ProjectAgent = {
   addedBy: null,
 }
 
-const blocked: ProjectAgent = {
-  ...item,
-  slug: 'blocked',
-  openTicketCount: 2,
-  openTicketRefs: ['KODA-11', 'KODA-12'],
-}
-
 interface FetchCall { method: string; url: string; body?: unknown }
 interface DialogStub { added: (slug: string) => void; close: () => void }
 
