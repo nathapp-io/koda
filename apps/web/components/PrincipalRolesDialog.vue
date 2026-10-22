@@ -6,31 +6,34 @@
       </DialogHeader>
 
       <div class="space-y-4" data-testid="principal-roles-body">
-        <div class="flex flex-wrap gap-2" data-testid="binding-chips">
-          <Badge
-            v-for="chip in chips"
-            :key="chip.id"
-            variant="secondary"
-            class="gap-1"
-            data-testid="binding-chip"
-            :data-role="chip.roleKey"
-          >
-            <span>{{ chipLabel(chip, t) }}</span>
-            <button
-              type="button"
-              class="text-muted-foreground hover:text-foreground"
-              data-testid="binding-remove"
-              :disabled="removingId !== null"
-              :aria-label="t('admin.bindings.remove', { name: chip.name })"
-              @click="removeBindingById(chip.id)"
+        <p v-if="writeBlocked" class="text-sm text-status-rejected" data-testid="principal-roles-error">{{ loadError }}</p>
+        <template v-else>
+          <div class="flex flex-wrap gap-2" data-testid="binding-chips">
+            <Badge
+              v-for="chip in chips"
+              :key="chip.id"
+              variant="secondary"
+              class="gap-1"
+              data-testid="binding-chip"
+              :data-role="chip.roleKey"
             >
-              <X class="h-3 w-3" />
-            </button>
-          </Badge>
-        </div>
-        <p v-if="chips.length === 0" class="text-sm text-muted-foreground" data-testid="binding-empty">
-          {{ t('admin.bindings.empty') }}
-        </p>
+              <span>{{ chipLabel(chip, t) }}</span>
+              <button
+                type="button"
+                class="text-muted-foreground hover:text-foreground"
+                data-testid="binding-remove"
+                :disabled="removingId !== null"
+                :aria-label="t('admin.bindings.remove', { name: chip.name })"
+                @click="removeBindingById(chip.id)"
+              >
+                <X class="h-3 w-3" />
+              </button>
+            </Badge>
+          </div>
+          <p v-if="chips.length === 0" class="text-sm text-muted-foreground" data-testid="binding-empty">
+            {{ t('admin.bindings.empty') }}
+          </p>
+        </template>
 
         <div class="flex items-end gap-2">
           <label class="flex-1 space-y-1">
@@ -39,6 +42,7 @@
               :value="selectedRoleKey"
               data-testid="binding-role-select"
               class="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              :disabled="writeBlocked"
               @change="selectedRoleKey = ($event.target as HTMLSelectElement).value"
             >
               <option value="">{{ t('admin.bindings.selectRole') }}</option>
@@ -49,14 +53,14 @@
             type="button"
             variant="outline"
             data-testid="binding-add"
-            :disabled="adding || selectedRoleKey === ''"
+            :disabled="adding || selectedRoleKey === '' || writeBlocked"
             @click="addBinding"
           >
             {{ t('admin.bindings.add') }}
           </Button>
         </div>
 
-        <p v-if="offerable.length === 0" class="text-xs text-muted-foreground" data-testid="binding-no-roles">
+        <p v-if="!writeBlocked && offerable.length === 0" class="text-xs text-muted-foreground" data-testid="binding-no-roles">
           {{ t('admin.bindings.noRoles') }}
         </p>
 
@@ -92,6 +96,12 @@ const props = defineProps<{
   bindings: RoleBinding[]
   /** The roles `GET /roles` returned, joined against each binding's `roleKey`. */
   roles: Role[]
+  /**
+   * The owner page's load failure, if its last `GET /roles` or `GET /role-bindings` failed. A stale
+   * or unjoined snapshot is not something to act on, so while this is set the dialog shows the error
+   * instead of chips and offers no write.
+   */
+  loadError?: string
 }>()
 
 const emit = defineEmits<{
@@ -110,6 +120,9 @@ const removingId = ref<string | null>(null)
 
 const chips = computed(() => bindingChips(props.bindings, props.roles))
 
+/** A load error leaves nothing to act on: no chips to remove, no role to add. */
+const writeBlocked = computed(() => (props.loadError ?? '') !== '')
+
 // The owner role is user-only and needs its own key: an agent can never own, and a caller without
 // role.binding.owner cannot grant it (the API refuses either way).
 const offerable = computed(() => bindableRoles(props.roles, props.bindings, {
@@ -121,7 +134,7 @@ watch(() => [props.principal.type, props.principal.id], () => { selectedRoleKey.
 
 async function addBinding(): Promise<void> {
   const roleKey = selectedRoleKey.value
-  if (!roleKey || adding.value) return
+  if (!roleKey || adding.value || writeBlocked.value) return
   adding.value = true
   try {
     await create({

@@ -2,18 +2,21 @@
  * Permissions P1 US-011 (AC-2, AC-3, AC-4, AC-11 list half, AC-12): the Admin -> Users page manages
  * global role bindings instead of a MEMBER/ADMIN enum.
  *
- * The page is mounted for real: the real `useAdminUsers`, `useRoles` and `useRoleBindings` run over a
- * fake `$api`, and the real `PrincipalRolesDialog` and `CreateUserDialog` are its children. So a spec
- * asserts the requests the API receives and the chips, errors and gates the admin sees.
+ * The page is mounted for real: the real `useGlobalPermissions`, `useAdminUsers`, `useRoles` and
+ * `useRoleBindings` run over a fake `$api`, and the real `PrincipalRolesDialog` and
+ * `CreateUserDialog` are its children. So a spec asserts the requests the API receives, the keys the
+ * mounted page actually resolved from `/me/permissions`, and the chips, errors and gates the admin
+ * sees.
  */
-import { describe, test, expect, beforeEach, jest } from '@jest/globals'
-import { computed, defineComponent, h, ref } from 'vue'
+import { afterEach, describe, test, expect, beforeEach, jest } from '@jest/globals'
+import { defineComponent, h, ref } from 'vue'
 import { useField } from 'vee-validate'
 import { mountSfc, webFile, loadSfc, type Mounted, type FakeNode } from '../helpers/mount-sfc'
 import { uiStubs, enI18n, enLocale } from '../helpers/fleet-harness'
 import { allById, byId, call, settle } from '../helpers/roles-dom'
-import { permissionSet } from '../../lib/permissions'
+import { fakeAsyncData } from '../helpers/permission-nav'
 import { ApiError, extractApiError } from '../../composables/useApi'
+import { useGlobalPermissions } from '../../composables/usePermissions'
 import { useAdminUsers } from '../../composables/useAdminUsers'
 import { useRoles } from '../../composables/useRoles'
 import { useRoleBindings } from '../../composables/useRoleBindings'
@@ -51,12 +54,21 @@ interface FakeApi {
   delete: jest.Mock
 }
 
+// A JSON response is a new object with a new array each time; a shared instance would make a ref see
+// an unchanged value and skip the re-render.
+const usersPage = (records: unknown[] = USERS) => ({
+  records: [...records], total: records.length, current: 1, size: 20, hasNext: false, hasPrev: false,
+})
+const bindingsPage = (records: RoleBinding[] = BINDINGS) => ({
+  records: [...records], total: records.length, current: 1, size: 200, hasNext: false, hasPrev: false,
+})
+
 function fakeApi(over: Partial<FakeApi> = {}): FakeApi {
   return {
     get: jest.fn(async (path: string) => {
-      if (path === '/admin/users') return { records: USERS, total: USERS.length, current: 1, size: 20, hasNext: false, hasPrev: false }
+      if (path === '/admin/users') return usersPage()
       if (path === '/roles') return ROLES
-      if (path === '/role-bindings') return { records: BINDINGS, total: BINDINGS.length, current: 1, size: 200, hasNext: false, hasPrev: false }
+      if (path === '/role-bindings') return bindingsPage()
       throw new Error(`unexpected GET ${path}`)
     }),
     post: jest.fn(async () => user('u9')),
@@ -101,18 +113,35 @@ interface MountOptions {
   keys?: string[]
   api?: Partial<FakeApi>
   meId?: string
+  /** What `GET /me/permissions` answers; a promise lets a spec hold the keys back (F1). */
+  permissionsGet?: () => Promise<unknown>
 }
 
 async function mountPage(options: MountOptions = {}): Promise<Mount> {
   const api = fakeApi(options.api)
   const toast = { success: jest.fn(), error: jest.fn() }
-  const held = permissionSet(options.keys ?? ['role.read', 'role.binding.global', 'user.read'])
-  ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
+  const keys = options.keys ?? ['role.read', 'role.binding.global', 'user.read']
+  const permissionsGet = options.permissionsGet ?? (async () => ({ scope: 'global', projectSlug: null, keys }))
+  const host = globalThis as Record<string, unknown>
+  // The real permission composable is what the page gates on, so it resolves its own keys from
+  // `/me/permissions` through the two Nuxt auto-imports a mounted SFC does not supply to it.
+  host.useAsyncData = fakeAsyncData
+  host.useApi = () => ({
+    $api: {
+      ...api,
+      // Only `/me/permissions` is answered here; every other path reaches the recording fake with the
+      // exact arguments the composable used.
+      get: jest.fn(async (path: string, query?: unknown) => {
+        if (path === '/me/permissions') return permissionsGet()
+        return query === undefined ? api.get(path) : api.get(path, query)
+      }),
+    },
+  })
   const globals: Record<string, unknown> = {
     useI18n: () => enI18n(),
     useAppToast: () => toast,
     useAuth: () => ({ user: ref({ id: options.meId ?? 'u1' }) }),
-    useGlobalPermissions: () => ({ permissions: computed(() => held) }),
+    useGlobalPermissions,
     useAdminUsers,
     useRoles,
     useRoleBindings,
@@ -148,7 +177,17 @@ function dialogOf(node: FakeNode): FakeNode {
   throw new Error('node is not inside a dialog')
 }
 
-beforeEach(() => { (globalThis as Record<string, unknown>).useApi = undefined })
+beforeEach(() => {
+  const host = globalThis as Record<string, unknown>
+  host.useApi = undefined
+  host.useAsyncData = undefined
+})
+
+afterEach(() => {
+  const host = globalThis as Record<string, unknown>
+  delete host.useApi
+  delete host.useAsyncData
+})
 
 describe('AC-2: the role column shows one chip per global binding', () => {
   test("each chip carries the role's name and a PROJECT-scope role reads \"(all projects)\"", async () => {
@@ -279,5 +318,141 @@ describe('AC-11: a refused user creation', () => {
     expect(dialogOf(form).props.open).toBe(true)
     expect(m.api.get.mock.calls.filter(([path]) => path === '/admin/users')).toHaveLength(1)
     expect(allById(m.app, 'user-row')).toHaveLength(2)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fix round 1
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('F1: the role data loads when the permission keys arrive late', () => {
+  test('a delayed /me/permissions still ends in chips, Edit roles and the two role requests', async () => {
+    let release!: (value: unknown) => void
+    // One shared promise: the page and the (always mounted) dialog each read /me/permissions.
+    const gated = new Promise((resolve) => { release = resolve })
+    const m = await mountPage({ permissionsGet: jest.fn(() => gated) })
+
+    // The users list is loaded; the keys are not, so every gate is still closed.
+    expect(allById(m.app, 'user-row')).toHaveLength(2)
+    expect(allById(m.app, 'user-edit-roles')).toHaveLength(0)
+    expect(allById(m.app, 'user-roles-cell')).toHaveLength(0)
+    expect(m.api.get.mock.calls.filter(([path]) => path === '/roles' || path === '/role-bindings')).toHaveLength(0)
+
+    release({ scope: 'global', projectSlug: null, keys: ['role.read', 'role.binding.global', 'user.read'] })
+    await settle()
+
+    expect(m.api.get).toHaveBeenCalledWith('/roles')
+    expect(m.api.get).toHaveBeenCalledWith('/role-bindings', {
+      query: { principalType: 'USER', scope: 'global', size: '200', current: '1' },
+    })
+    expect(allById(m.app, 'user-edit-roles')).toHaveLength(1)
+    expect(allById(m.app, 'user-role-chip', rowFor(m.app, 'u2'))).toHaveLength(2)
+  })
+})
+
+describe('F4: the gates read the real /me/permissions answer', () => {
+  test('a failed /me/permissions closes both gates and asks for no role listing', async () => {
+    const m = await mountPage({ permissionsGet: async () => { throw new Error('permissions down') } })
+
+    expect(allById(m.app, 'user-row')).toHaveLength(2)
+    expect(allById(m.app, 'user-edit-roles')).toHaveLength(0)
+    expect(allById(m.app, 'user-roles-cell')).toHaveLength(0)
+    expect(m.api.get.mock.calls.filter(([path]) => path === '/roles' || path === '/role-bindings')).toHaveLength(0)
+  })
+})
+
+describe('F2: a created user shows the baseline binding the API granted', () => {
+  test('creating a user reloads the bindings, so the new row carries Member and the dialog does not re-offer it', async () => {
+    const users = [...USERS]
+    const bindings = [...BINDINGS]
+    const m = await mountPage({
+      api: {
+        get: jest.fn(async (path: string) => {
+          if (path === '/admin/users') return usersPage(users)
+          if (path === '/roles') return ROLES
+          if (path === '/role-bindings') return bindingsPage(bindings)
+          throw new Error(`unexpected GET ${path}`)
+        }),
+        post: jest.fn(async () => {
+          const created = user('u9', { email: 'new@koda.test', name: 'New User' })
+          users.push(created)
+          // The API grants the baseline member binding as part of creating the account.
+          bindings.push(binding('b9', { principalId: 'u9' }))
+          return created
+        }),
+      },
+    })
+
+    call(byId(m.app, 'user-create'), 'onClick')
+    await settle()
+    const form = byId(m.app, 'create-user-form')
+    const inputs = m.app.find('input', form)
+    call(inputs[0], 'onInput', { target: { value: 'new@koda.test' } })
+    call(inputs[1], 'onInput', { target: { value: 'New User' } })
+    call(inputs[2], 'onInput', { target: { value: 'StrongPass1!' } })
+    await settle()
+    await (form.props.onSubmit as (event: Event) => Promise<void>)({ preventDefault: () => undefined } as unknown as Event)
+    await settle()
+
+    const row = rowFor(m.app, 'u9')
+    expect(row).toBeDefined()
+    const chips = allById(m.app, 'user-role-chip', row)
+    expect(chips).toHaveLength(1)
+    expect(m.app.textOf(chips[0])).toBe('Member')
+    expect(m.api.get.mock.calls.filter(([path]) => path === '/role-bindings')).toHaveLength(2)
+
+    // The dialog for the new user does not offer the role it already holds.
+    call(allById(m.app, 'user-edit-roles', row)[0], 'onClick')
+    await settle()
+    expect(m.app.find('option').map((option) => option.props.value)).not.toContain('member')
+  })
+})
+
+describe('F5: a load error keeps the shared dialog honest', () => {
+  test('with GET /roles rejecting, Edit roles shows the load error instead of raw-key chips', async () => {
+    const err = new ApiError(50000, 'roles are down')
+    const m = await mountPage({
+      api: {
+        get: jest.fn(async (path: string) => {
+          if (path === '/admin/users') return usersPage()
+          if (path === '/role-bindings') return bindingsPage()
+          throw err
+        }),
+      },
+    })
+
+    call(allById(m.app, 'user-edit-roles', rowFor(m.app, 'u2'))[0], 'onClick')
+    await settle()
+
+    expect(allById(m.app, 'binding-chip')).toHaveLength(0)
+    expect(m.app.textOf(byId(m.app, 'principal-roles-error'))).toBe(extractApiError(err))
+  })
+
+  test('a failed bindings refresh after a removal leaves no stale chip in the dialog', async () => {
+    const err = new ApiError(50000, 'bindings are down')
+    let failBindings = false
+    const del = jest.fn(async () => { failBindings = true })
+    const m = await mountPage({
+      api: {
+        delete: del,
+        get: jest.fn(async (path: string) => {
+          if (path === '/admin/users') return usersPage()
+          if (path === '/roles') return ROLES
+          if (failBindings) throw err
+          return bindingsPage()
+        }),
+      },
+    })
+
+    call(allById(m.app, 'user-edit-roles', rowFor(m.app, 'u2'))[0], 'onClick')
+    await settle()
+    expect(allById(m.app, 'binding-chip')).toHaveLength(2)
+
+    call(byId(m.app, 'binding-remove'), 'onClick')
+    await settle()
+
+    expect(del).toHaveBeenCalledWith('/role-bindings/b1')
+    expect(allById(m.app, 'binding-chip')).toHaveLength(0)
+    expect(m.app.textOf(byId(m.app, 'principal-roles-error'))).toBe(extractApiError(err))
   })
 })

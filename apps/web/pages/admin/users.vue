@@ -89,10 +89,10 @@ async function reload(targetPage = 1): Promise<void> {
 /**
  * The roles and the bindings the column joins. Both are read together and each failure is kept
  * separately: an unjoined chip would show a key where a name belongs, so a failure renders the load
- * error instead of chips.
+ * error instead of chips — and the dialog, which shows the same rows, is told about it too.
  */
 async function reloadRoleData(): Promise<void> {
-  if (!canManageRoles.value) return
+  if (!canManageRoles.value || adminOnly.value) return
   rolesError.value = ''
   bindingsError.value = ''
   await Promise.all([
@@ -107,9 +107,28 @@ async function reloadRoleData(): Promise<void> {
   ])
 }
 
+/**
+ * The permission keys are their own request, so they can land after the users list. The watch — not
+ * the mount — is what loads the role data, so the column and "Edit roles" fill in whenever the two
+ * keys become available (and a refresh that loses them closes the column again).
+ */
+watch(canManageRoles, (allowed) => {
+  if (allowed) {
+    void reloadRoleData()
+    return
+  }
+  rolesError.value = ''
+  bindingsError.value = ''
+}, { immediate: true })
+
 function openRoles(user: AdminUser): void {
   editing.value = user
   rolesDialogOpen.value = true
+}
+
+/** A created account gets a baseline binding from the API, so the chips need a fresh read too. */
+async function onUserCreated(): Promise<void> {
+  await Promise.all([reload(page.value), reloadRoleData()])
 }
 
 async function toggleDisabled(user: AdminUser): Promise<void> {
@@ -121,10 +140,7 @@ async function toggleDisabled(user: AdminUser): Promise<void> {
   }
 }
 
-onMounted(async () => {
-  await reload()
-  if (!adminOnly.value) await reloadRoleData()
-})
+onMounted(() => { void reload() })
 </script>
 
 <template>
@@ -211,8 +227,9 @@ onMounted(async () => {
       :principal="editingPrincipal"
       :bindings="editingBindings"
       :roles="roles"
+      :load-error="roleColumnError"
       @changed="reloadRoleData"
     />
-    <CreateUserDialog v-model:open="createOpen" @created="reload(page)" />
+    <CreateUserDialog v-model:open="createOpen" @created="onUserCreated" />
   </div>
 </template>

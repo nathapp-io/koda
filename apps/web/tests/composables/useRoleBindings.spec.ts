@@ -89,6 +89,42 @@ describe('AC-1: listGlobal pages GET /role-bindings until hasNext is false', () 
 
     expect(bindings.bindings.value.map((row: Binding) => row.id)).toEqual(['b1'])
   })
+
+  // Fix round 1 / F3: a page cap silently published an incomplete listing.
+  test('F3: pages to the end well past 50 pages instead of truncating the listing', async () => {
+    const TOTAL_PAGES = 60
+    const get = jest.fn(async (_path: string, options: QueryOptions) => {
+      const current = Number(options.query.current)
+      return {
+        records: [binding(`b${current}`)],
+        total: TOTAL_PAGES,
+        current,
+        size: 200,
+        hasNext: current < TOTAL_PAGES,
+        hasPrev: current > 1,
+      }
+    })
+    withApi({ get })
+    const { useRoleBindings } = await import(composablePath)
+
+    const records = await useRoleBindings().listGlobal('USER')
+
+    expect(get).toHaveBeenCalledTimes(TOTAL_PAGES)
+    expect(records).toHaveLength(TOTAL_PAGES)
+    expect(records[TOTAL_PAGES - 1].id).toBe(`b${TOTAL_PAGES}`)
+  })
+
+  // Fix round 1 / F3: paging to completion still needs a guard against a server that never advances.
+  test('F3: a page that claims another page but returns no records rejects instead of spinning', async () => {
+    const get = jest.fn(async () => ({ records: [], hasNext: true }))
+    withApi({ get })
+    const { useRoleBindings } = await import(composablePath)
+    const bindings = useRoleBindings()
+
+    await expect(bindings.listGlobal('USER')).rejects.toThrow(/no records/i)
+
+    expect(bindings.bindings.value).toEqual([])
+  })
 })
 
 describe('useRoleBindings writes', () => {

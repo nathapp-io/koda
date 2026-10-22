@@ -1,18 +1,18 @@
 /**
  * Permissions P1 US-011 (AC-5, AC-6, AC-7, AC-8, AC-10): the reusable principal-roles dialog.
  *
- * The dialog is mounted for real over a fake `$api` with the real `useRoleBindings`, so a spec
- * asserts the HTTP calls the API receives and the `changed` event the owning page reacts to. Roles
- * and bindings arrive as props (the page reads them from `GET /roles` and `GET /role-bindings`); the
- * caller's keys arrive through the real `useGlobalPermissions` contract.
+ * The dialog is mounted for real over a fake `$api` with the real `useRoleBindings` and the real
+ * `useGlobalPermissions`, so a spec asserts the HTTP calls the API receives, the keys the dialog
+ * actually resolved from `/me/permissions`, and the `changed` event the owning page reacts to. Roles
+ * and bindings arrive as props (the page reads them from `GET /roles` and `GET /role-bindings`).
  */
-import { describe, test, expect, beforeEach, jest } from '@jest/globals'
-import { computed } from 'vue'
+import { afterEach, describe, test, expect, beforeEach, jest } from '@jest/globals'
 import { mountSfc, webFile, type Mounted } from '../helpers/mount-sfc'
 import { uiStubs, enI18n, enLocale } from '../helpers/fleet-harness'
 import { allById, byId, call, settle } from '../helpers/roles-dom'
-import { permissionSet } from '../../lib/permissions'
+import { fakeAsyncData } from '../helpers/permission-nav'
 import { ApiError, extractApiError } from '../../composables/useApi'
+import { useGlobalPermissions } from '../../composables/usePermissions'
 import { useRoleBindings } from '../../composables/useRoleBindings'
 import type { RoleBinding } from '../../composables/useRoleBindings'
 import type { Role } from '../../composables/useRoles'
@@ -54,6 +54,9 @@ interface MountOptions {
   bindings?: RoleBinding[]
   roles?: Role[]
   api?: Partial<FakeApi>
+  loadError?: string
+  /** Overrides what `GET /me/permissions` answers (a rejection covers the failed case). */
+  permissionsGet?: () => Promise<unknown>
 }
 
 interface Mount {
@@ -65,20 +68,32 @@ interface Mount {
 async function mountDialog(options: MountOptions = {}): Promise<Mount> {
   const api = fakeApi(options.api)
   const toast = { success: jest.fn(), error: jest.fn() }
-  const held = permissionSet(options.keys ?? ['role.read', 'role.binding.global'])
-  ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
+  const keys = options.keys ?? ['role.read', 'role.binding.global']
+  const permissionsGet = options.permissionsGet ?? (async () => ({ scope: 'global', projectSlug: null, keys }))
+  const host = globalThis as Record<string, unknown>
+  host.useAsyncData = fakeAsyncData
+  host.useApi = () => ({
+    $api: {
+      ...api,
+      get: jest.fn(async (path: string, query?: unknown) => {
+        if (path === '/me/permissions') return permissionsGet()
+        return query === undefined ? api.get(path) : api.get(path, query)
+      }),
+    },
+  })
   const app = mountSfc(dialogPath, {
     props: {
       open: true,
       principal: options.principal ?? { type: 'USER', id: 'u2', label: 'Bob' },
       bindings: options.bindings ?? [binding('b1')],
       roles: options.roles ?? ALL_ROLES,
+      loadError: options.loadError ?? '',
     },
     components: uiStubs,
     globals: {
       useI18n: () => enI18n(),
       useAppToast: () => toast,
-      useGlobalPermissions: () => ({ permissions: computed(() => held) }),
+      useGlobalPermissions,
       useRoleBindings,
     },
   })
@@ -94,7 +109,17 @@ const allProjectsCopy = (name: string): string => {
 
 const offeredKeys = (app: Mounted): string[] => app.find('option').map((option) => String(option.props.value))
 
-beforeEach(() => { (globalThis as Record<string, unknown>).useApi = undefined })
+beforeEach(() => {
+  const host = globalThis as Record<string, unknown>
+  host.useApi = undefined
+  host.useAsyncData = undefined
+})
+
+afterEach(() => {
+  const host = globalThis as Record<string, unknown>
+  delete host.useApi
+  delete host.useAsyncData
+})
 
 describe('AC-5: the dialog offers the unbound roles and grants one', () => {
   test('member is already bound, owner is withheld without role.binding.owner, developer is offered', async () => {
@@ -196,5 +221,42 @@ describe('AC-10: a refused removal', () => {
     expect(m.app.emitted('changed')).toHaveLength(0)
     expect(allById(m.app, 'binding-chip')).toHaveLength(1)
     expect(allById(m.app, 'principal-roles-body')).toHaveLength(1)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fix round 1
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('AC-7: a failed /me/permissions never offers the owner role', () => {
+  test('the keys come from /me/permissions, so a rejection closes the owner offer', async () => {
+    const m = await mountDialog({
+      bindings: [],
+      permissionsGet: async () => { throw new Error('permissions down') },
+    })
+
+    expect(offeredKeys(m.app)).not.toContain('owner')
+    expect(offeredKeys(m.app)).toEqual(['', 'member', 'developer'])
+  })
+})
+
+describe('F5: a page load error suppresses the chips and the writes', () => {
+  test('with loadError set the dialog shows the error, no chips and no way to add or remove', async () => {
+    const m = await mountDialog({ loadError: 'roles are down' })
+
+    expect(allById(m.app, 'binding-chip')).toHaveLength(0)
+    expect(allById(m.app, 'binding-remove')).toHaveLength(0)
+    expect(m.app.textOf(byId(m.app, 'principal-roles-error'))).toBe('roles are down')
+    expect(byId(m.app, 'binding-add').props.disabled).toBe(true)
+    expect(byId(m.app, 'binding-role-select').props.disabled).toBe(true)
+
+    // A click on the (disabled) add control still sends nothing.
+    call(byId(m.app, 'binding-role-select'), 'onChange', { target: { value: 'developer' } })
+    await settle()
+    call(byId(m.app, 'binding-add'), 'onClick')
+    await settle()
+
+    expect(m.api.post).not.toHaveBeenCalled()
+    expect(m.app.emitted('changed')).toHaveLength(0)
   })
 })

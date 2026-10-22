@@ -48,29 +48,35 @@ export interface NewRoleBinding {
 /** The list route's largest page; one page covers most installations, more pages are followed. */
 export const BINDING_PAGE_SIZE = 200
 
-/**
- * A backstop for the paging loop: a server that keeps answering `hasNext: true` must not spin here
- * forever. 50 pages is 10 000 bindings for one principal type, far past any real installation.
- */
-const MAX_PAGES = 50
-
 export function useRoleBindings() {
   const { $api } = useApi()
   const bindings = ref<RoleBinding[]>([])
   const pending = ref(false)
 
-  /** The bindings that apply everywhere for one principal type, every page of them. */
+  /**
+   * The bindings that apply everywhere for one principal type, every page of them.
+   *
+   * Paging follows `hasNext` to the end: a cap would publish a truncated listing and hide bindings
+   * that still exist. What stops a misbehaving server from spinning here is the progress check — a
+   * page that claims another page but carries no records cannot advance the listing, so it rejects.
+   */
   async function listGlobal(principalType: PrincipalType): Promise<RoleBinding[]> {
     pending.value = true
     try {
       const collected: RoleBinding[] = []
-      for (let current = 1; current <= MAX_PAGES; current += 1) {
+      for (let current = 1; ; current += 1) {
         const res = await $api.get<RoleBindingPage>('/role-bindings', {
           query: { principalType, scope: 'global', size: String(BINDING_PAGE_SIZE), current: String(current) },
         })
         const records = Array.isArray(res?.records) ? res.records : []
+        if (res?.hasNext !== true) {
+          collected.push(...records)
+          break
+        }
+        if (records.length === 0) {
+          throw new Error(`GET /role-bindings reported another page at current=${current} but returned no records`)
+        }
         collected.push(...records)
-        if (res?.hasNext !== true) break
       }
       // Assigned once, after the last page: a failed page throws and leaves the old list whole.
       bindings.value = collected
