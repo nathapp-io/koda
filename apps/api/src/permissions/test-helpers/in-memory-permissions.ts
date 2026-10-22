@@ -131,6 +131,13 @@ export class InMemoryPermissionStore {
     const isAdminBinding = (row: BindingWithRole) =>
       row.binding.projectId === null && (row.roleKey === 'owner' || row.roleKey === 'admin');
     return {
+      findCandidatePrincipalIds: async (type: PrincipalRef['type'], projectId: string, globalRoleIds: string[]) =>
+        [...new Set(this.bindings.filter((binding) => {
+          if (binding.principalType !== type) return false;
+          const role = this.roles.find((candidate) => candidate.id === binding.roleId);
+          return (role?.scope === 'PROJECT' && (binding.projectId === projectId || binding.projectId === null)) ||
+            (binding.projectId === null && globalRoleIds.includes(binding.roleId));
+        }).map((binding) => binding.principalId))].sort(),
       findEffectiveBindings: async (principal: PrincipalRef, projectId: string | null) =>
         this.bindings
           .filter((b) => same(b, principal) && (b.projectId === null || b.projectId === projectId))

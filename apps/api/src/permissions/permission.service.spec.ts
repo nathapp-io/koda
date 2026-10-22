@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { PermissionCache } from './permission-cache';
 import { PermissionService } from './permission.service';
@@ -206,6 +207,66 @@ describe('PermissionService', () => {
       });
       store.bind({ type: 'USER', id: 'u1' }, 'narrow', 'p1');
       expect((await service.can(user('u1'), 'approval.decide', { projectId: 'p1' })).allowed).toBe(true);
+    });
+  });
+
+  describe('principalIdsWithKey', () => {
+    const setup = () => {
+      const roles = { findRolesByScope: vi.fn().mockResolvedValue([
+        { id: 'admin', key: 'admin', permissions: [] },
+        { id: 'owner', key: 'owner', permissions: [] },
+        { id: 'read', key: 'read', permissions: ['project.read'] },
+        { id: 'bad', key: 'bad', permissions: ['not.a.key'] },
+        { id: 'other', key: 'other', permissions: ['agent.read'] },
+      ]) };
+      const bindings = { findCandidatePrincipalIds: vi.fn().mockResolvedValue(['u1', 'u2']) };
+      const subject = new PermissionService(roles as never, bindings as never, permissionCache);
+      return { subject, roles, bindings };
+    };
+    it('enumerates real keys using the shared repository doubles', async () => {
+      store.bind({ type: 'USER', id: 'u1' }, 'developer', 'p1');
+      store.bind({ type: 'USER', id: 'u1' }, 'viewer');
+      store.addUser('u2');
+      store.bind({ type: 'USER', id: 'u2' }, 'admin');
+      store.addUser('u3');
+      store.bind({ type: 'USER', id: 'u3' }, 'developer', 'p2');
+      store.bind({ type: 'AGENT', id: 'a1' }, 'viewer', 'p1');
+      expect(await service.principalIdsWithKey('USER', 'p1', 'project.read')).toEqual(['u1', 'u2']);
+      expect(await service.principalIdsWithKey('AGENT', 'p1', 'project.read')).toEqual(['a1']);
+    });
+    it('expands global roles, excludes invalid entries, and filters every candidate by effectiveKeys', async () => {
+      const { subject, roles, bindings } = setup();
+      const effective = vi.spyOn(subject, 'effectiveKeys').mockImplementation(async (ref) => new Set(ref.id === 'u2' ? ['project.read'] : []));
+      expect(await subject.principalIdsWithKey('USER', 'p1', 'project.read')).toEqual(['u2']);
+      expect(roles.findRolesByScope).toHaveBeenCalledExactlyOnceWith('GLOBAL');
+      expect(bindings.findCandidatePrincipalIds).toHaveBeenCalledExactlyOnceWith('USER', 'p1', ['admin', 'owner', 'read']);
+      expect(effective.mock.calls).toEqual([
+        [{ type: 'USER', id: 'u1' }, { projectId: 'p1' }],
+        [{ type: 'USER', id: 'u2' }, { projectId: 'p1' }],
+      ]);
+    });
+    it('AC-10: propagates the original candidate effectiveKeys error without a partial answer', async () => {
+      const { subject } = setup();
+      const error = new Error('candidate read');
+      vi.spyOn(subject, 'effectiveKeys').mockResolvedValueOnce(new Set(['project.read'])).mockRejectedValueOnce(error);
+      await expect(subject.principalIdsWithKey('USER', 'p1', 'project.read')).rejects.toBe(error);
+    });
+    it.each(['roles', 'candidates'])('AC-16: propagates the original %s read error', async (source) => {
+      const { subject, roles, bindings } = setup();
+      const error = new Error(source);
+      (source === 'roles' ? roles.findRolesByScope : bindings.findCandidatePrincipalIds).mockRejectedValueOnce(error);
+      await expect(subject.principalIdsWithKey('USER', 'p1', 'project.read')).rejects.toBe(error);
+    });
+    it('AC-17: effectiveKeys keeps the invalid GLOBAL entry warning and grants nothing', async () => {
+      const bindings = { findEffectiveBindings: vi.fn().mockResolvedValue([
+        { binding: { projectId: null }, roleKey: 'bad', roleScope: 'GLOBAL', rolePermissions: ['not.a.key'] },
+      ]) };
+      const subject = new PermissionService({} as never, bindings as never, permissionCache);
+      const warn = vi.spyOn(Logger.prototype, 'warn');
+      warn.mockClear();
+      expect(await subject.effectiveKeys({ type: 'USER', id: 'u1' }, { projectId: 'p1' })).toEqual(new Set());
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('role bad has an invalid permission entry'));
     });
   });
 

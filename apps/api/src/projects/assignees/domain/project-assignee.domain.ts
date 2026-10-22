@@ -33,10 +33,10 @@ export interface ProjectMembershipDomain {
 
 export interface IProjectAssigneesRepository extends IRepository<ProjectMembershipDomain, string> {
   /**
-   * The combined assignee list: non-disabled project members first, then the
-   * project's ACTIVE/PAUSED rostered agents, each group ordered by name.
+   * The combined assignee list: non-disabled users first, then ACTIVE/PAUSED agents
+   * from the supplied project.read holders, each group ordered by name.
    * `q` is a trimmed, case-insensitive substring of a name, email or slug;
    * `limit` caps the combined list.
    */
-  search(projectId: string, q: string, limit: number): Promise<AssigneeDomain[]>;
+  search(projectId: string, q: string, limit: number, ids: { userIds: string[]; agentIds: string[] }): Promise<AssigneeDomain[]>;
 }

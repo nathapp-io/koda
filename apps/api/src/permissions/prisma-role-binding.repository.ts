@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   AbstractPrismaRepository,
   PrismaClientLike,
@@ -10,7 +10,7 @@ import { Paginate } from '@nathapp/nestjs-prisma';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient, Role as RoleModel, RoleBinding as RoleBindingModel } from '../generated/prisma/client';
-import { accessibleProjectIds } from './membership.queries';
+import { accessibleProjectIds, MEMBERSHIP_READ_CAP } from './membership.queries';
 import type {
   BindingFilter,
   BindingWithRole,
@@ -150,6 +150,30 @@ export class PrismaRoleBindingRepository
    */
   async findAccessibleProjectIds(principal: PrincipalRef): Promise<string[]> {
     return accessibleProjectIds(this.db, principal);
+  }
+
+  /** Applicable binding holders, distinct and ascending, bounded like membership listings. */
+  async findCandidatePrincipalIds(type: PrincipalType, projectId: string, globalRoleIds: string[]): Promise<string[]> {
+    const rows = await this.db.roleBinding.findMany({
+      where: {
+        principalType: type,
+        OR: [
+          { projectId, role: { scope: 'PROJECT' } },
+          { projectId: null, role: { scope: 'PROJECT' } },
+          { projectId: null, roleId: { in: globalRoleIds } },
+        ],
+      },
+      select: { principalId: true },
+      distinct: ['principalId'],
+      orderBy: { principalId: 'asc' },
+      take: MEMBERSHIP_READ_CAP,
+    });
+    if (rows.length >= MEMBERSHIP_READ_CAP) {
+      new Logger(PrismaRoleBindingRepository.name).warn(
+        `findCandidatePrincipalIds read its ${MEMBERSHIP_READ_CAP}-row cap for ${type} in project ${projectId} and answered the first page`,
+      );
+    }
+    return rows.map(({ principalId }) => principalId);
   }
 
   async findExisting(

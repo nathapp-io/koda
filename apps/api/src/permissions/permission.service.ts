@@ -8,6 +8,7 @@ import type {
   BindingWithRole,
   PermissionDecision,
   PrincipalRef,
+  PrincipalType,
   RoleDomain,
 } from './permissions.types';
 import type { PrismaRoleBindingRepository } from './prisma-role-binding.repository';
@@ -100,6 +101,29 @@ export class PermissionService {
       candidates.map(async (projectId) => ((await this.effectiveKeys(ref, { projectId })).has(key) ? projectId : null)),
     );
     return { all: false, projectIds: held.filter((projectId): projectId is string => projectId !== null) };
+  }
+
+  /**
+   * Ascending, distinct ids of principals holding `key` in the project. Candidates have an
+   * applicable PROJECT binding or a null-project GLOBAL binding that can grant the key.
+   * Every candidate is checked through effectiveKeys; read failures propagate without a partial list.
+   */
+  async principalIdsWithKey(type: PrincipalType, projectId: string, key: string): Promise<string[]> {
+    const roles = await this.roles.findRolesByScope('GLOBAL');
+    const globalRoleIds = roles.filter((role) => {
+      if (GLOBAL_ADMIN_ROLE_KEYS.includes(role.key)) return true;
+      try {
+        return expandEntries(role.permissions, 'GLOBAL').has(key);
+      } catch {
+        // A hand-edited invalid role grants nothing; computeKeys owns its warning on evaluation.
+        return false;
+      }
+    }).map((role) => role.id);
+    const candidates = await this.bindings.findCandidatePrincipalIds(type, projectId, globalRoleIds);
+    const held = await Promise.all(candidates.map(async (id) =>
+      (await this.effectiveKeys({ type, id }, { projectId })).has(key) ? id : null,
+    ));
+    return held.filter((id): id is string => id !== null);
   }
 
   private async computeKeys(principal: PrincipalRef, projectId: string | null): Promise<Set<string>> {
