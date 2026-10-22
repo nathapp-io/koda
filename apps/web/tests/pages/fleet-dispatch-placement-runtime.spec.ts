@@ -3,6 +3,7 @@ import * as Vue from 'vue'
 import { useField } from 'vee-validate'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, toastRecorder } from '../helpers/fleet-harness'
+import { projectPermissionsStub } from '../helpers/permission-nav'
 
 const dispatchPage = webFile('pages', '[project]', 'fleet', 'dispatch.vue')
 
@@ -67,9 +68,9 @@ describe('fleet dispatch placement form runtime', () => {
           profileOptions: Vue.ref([]), labelOptions: Vue.ref([]), runnerName: () => '',
           load: async () => undefined,
         }),
-        useProjectViewerRole: () => ({ data: Vue.ref({ canManage: false, viewerRole: 'DEVELOPER' }) }),
+        // Permissions P1 US-008: the form is open to whoever holds the dispatch key.
+        useProjectPermissions: () => projectPermissionsStub(['fleet.job.dispatch']),
         useFleetJobs: () => ({ dispatch: api.dispatch, findActiveJob: async () => null }),
-        canWorkOnFleet: () => true,
       },
     })
 

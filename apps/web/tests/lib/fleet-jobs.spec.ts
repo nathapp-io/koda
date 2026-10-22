@@ -50,23 +50,32 @@ describe('permissions', () => {
     expect(canWorkOnFleet({ canManage: false, viewerRole: null })).toBe(false)
   })
 
-  const dev = { userId: 'u2', canWork: true }
-  const viewer = { userId: 'u3', canWork: false }
-  const requester = { userId: 'u1', canWork: false }
+  // Permissions P1 US-008: one flag per key the job routes require.
+  const dev = { userId: 'u2', canCancel: true, canRequeue: true, canDispatch: true }
+  const viewer = { userId: 'u3', canCancel: false, canRequeue: false, canDispatch: false }
+  const requester = { userId: 'u1', canCancel: false, canRequeue: false, canDispatch: false }
 
-  test('cancel: workers and the requester, only while unfinished', () => {
+  test('cancel: fleet.job.cancel and the requester, only while unfinished', () => {
     expect(canCancelJob(job({ state: 'RUNNING' }), dev)).toBe(true)
     expect(canCancelJob(job({ state: 'RUNNING' }), requester)).toBe(true)
     expect(canCancelJob(job({ state: 'RUNNING' }), viewer)).toBe(false)
     expect(canCancelJob(job({ state: 'COMPLETED' }), dev)).toBe(false)
-    expect(canCancelJob(job({ state: 'RUNNING' }), { userId: null, canWork: false })).toBe(false)
+    expect(canCancelJob(job({ state: 'RUNNING' }), { userId: null, canCancel: false, canRequeue: false, canDispatch: false })).toBe(false)
   })
 
-  test('requeue: workers only, from CRASHED, FAILED or CANCELLED', () => {
+  test('cancel follows fleet.job.cancel alone: fleet.job.requeue does not open it', () => {
+    expect(canCancelJob(job({ state: 'RUNNING' }), { userId: 'u2', canCancel: false, canRequeue: true, canDispatch: true })).toBe(false)
+  })
+
+  test('requeue: fleet.job.requeue only, from CRASHED, FAILED or CANCELLED', () => {
     expect(['CRASHED', 'FAILED', 'CANCELLED'].map(state => canRequeueJob(job({ state: state as FleetJobDto['state'] }), dev))).toEqual([true, true, true])
     expect(canRequeueJob(job({ state: 'ESCALATED' }), dev)).toBe(false)
     expect(canRequeueJob(job({ state: 'COMPLETED' }), dev)).toBe(false)
     expect(canRequeueJob(job({ state: 'FAILED' }), requester)).toBe(false)
+  })
+
+  test('requeue follows fleet.job.requeue alone: canCancel and canDispatch do not open it', () => {
+    expect(canRequeueJob(job({ state: 'FAILED' }), { userId: 'u2', canCancel: true, canRequeue: false, canDispatch: true })).toBe(false)
   })
 
   describe('requeue of config edits (US-004 R1)', () => {
@@ -103,7 +112,7 @@ describe('permissions', () => {
       expect(canRequeueJob(job({ state: 'FAILED', configEdit: null }), dev)).toBe(true)
     })
 
-    test('the config restriction does not widen the permission rule: a non-worker still cannot requeue', () => {
+    test('the config restriction does not widen the permission rule: an unkeyed caller still cannot requeue', () => {
       expect(canRequeueJob(job({ state: 'FAILED', configEdit: configEdit('edit', 'push_failed') }), requester)).toBe(false)
     })
   })

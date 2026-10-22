@@ -34,10 +34,11 @@ describe('fleet jobs list', () => {
     expect(list).toMatch(/onBeforeUnmount\(\(\) => liveReload\.cancel\(\)\)/)
   })
 
-  test('the dispatch button stays visible but disabled without DEVELOPER+, with a tooltip (#205)', () => {
-    expect(list).toContain('const canWork = computed(() => canWorkOnFleet(viewer.value))')
-    expect(list).toMatch(/<Button :disabled="!canWork"[^>]*data-testid="fleet-dispatch-button"/)
+  test('the dispatch button stays visible but disabled without fleet.job.dispatch, with a tooltip (#205, US-008)', () => {
+    expect(list).toContain("const canDispatch = computed(() => permissions.value.has('fleet.job.dispatch'))")
+    expect(list).toMatch(/<Button :disabled="!canDispatch"[^>]*data-testid="fleet-dispatch-button"/)
     expect(list).toContain("t('fleet.jobs.dispatchNoPermission')")
+    expect(list).not.toContain('canWorkOnFleet')
   })
 
   test('the table scrolls sideways on narrow screens and names a requester who left', () => {

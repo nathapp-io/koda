@@ -57,17 +57,15 @@
             </div>
           </TableCell>
           <TableCell class="space-x-1 whitespace-nowrap text-right">
-            <template v-if="editable">
-              <Button v-if="policy.paused" size="sm" data-testid="fleet-budget-resume" @click="emit('resume', policy)">
-                {{ t('fleet.budgets.actions.resume') }}
-              </Button>
-              <Button size="sm" variant="outline" data-testid="fleet-budget-edit" @click="emit('edit', policy)">
-                {{ t('fleet.budgets.actions.edit') }}
-              </Button>
-              <Button size="sm" variant="destructive" data-testid="fleet-budget-delete" @click="emit('remove', policy)">
-                {{ t('fleet.budgets.actions.delete') }}
-              </Button>
-            </template>
+            <Button v-if="canResume && policy.paused" size="sm" data-testid="fleet-budget-resume" @click="emit('resume', policy)">
+              {{ t('fleet.budgets.actions.resume') }}
+            </Button>
+            <Button v-if="canEdit" size="sm" variant="outline" data-testid="fleet-budget-edit" @click="emit('edit', policy)">
+              {{ t('fleet.budgets.actions.edit') }}
+            </Button>
+            <Button v-if="canDelete" size="sm" variant="destructive" data-testid="fleet-budget-delete" @click="emit('remove', policy)">
+              {{ t('fleet.budgets.actions.delete') }}
+            </Button>
           </TableCell>
         </TableRow>
       </TableBody>
@@ -83,8 +81,12 @@ import type { BudgetPolicyDto } from '~/lib/fleet-types'
 
 defineProps<{
   policies: BudgetPolicyDto[]
-  /** Shows Resume, Edit and Delete; a read-only table (members, fleet-wide policies on a project page) has no buttons. */
-  editable: boolean
+  /** Permissions P1 US-008: Resuming needs fleet.budget.resume, and only a paused policy can be resumed. */
+  canResume: boolean
+  /** fleet.budget.update. */
+  canEdit: boolean
+  /** fleet.budget.delete. */
+  canDelete: boolean
   scopeName: (policy: BudgetPolicyDto) => string | null
   testid?: string
 }>()

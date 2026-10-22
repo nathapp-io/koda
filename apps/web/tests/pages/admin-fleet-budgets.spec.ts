@@ -6,6 +6,8 @@ import { uiStubs, enI18n, toastRecorder } from '../helpers/fleet-harness'
 import * as apiModule from '../../composables/useApi'
 import { ApiError } from '../../composables/useApi'
 import { useFleetRunners } from '../../composables/useFleetRunners'
+import { useGlobalPermissions } from '../../composables/usePermissions'
+import { fakeAsyncData } from '../helpers/permission-nav'
 import type { BudgetPolicyDto } from '../../lib/fleet-types'
 
 const page = webFile('pages', 'admin', 'fleet', 'budgets.vue')
@@ -33,14 +35,26 @@ function makeApi(rows: BudgetPolicyDto[], over: Partial<Api> = {}): Api {
   }
 }
 
-/** Mounts the page with a fake `$api`; `useVisiblePolling` is stubbed so the test drives refreshes. */
+/** Permissions P1 US-008: every global budget key, so the table's own controls are always rendered. */
+const GLOBAL_KEYS = ['fleet.budget.resume', 'fleet.budget.update', 'fleet.budget.delete'] as const
+
+/**
+ * Mounts the page with a fake `$api`; `useVisiblePolling` is stubbed so the test drives refreshes.
+ * The permissions read is answered by the same double, so the real composable runs.
+ */
 function mountBudgets(api: Api, confirmResult = true) {
+  const pageGet = api.get
+  api.get = jest.fn(async (requestPath: string, options?: { query?: Record<string, string> }) =>
+    requestPath === '/me/permissions'
+      ? { scope: 'global', projectSlug: null, keys: [...GLOBAL_KEYS] }
+      : pageGet(requestPath, options))
   const toasts = toastRecorder()
   const stop = jest.fn()
   let task: () => Promise<void> = async () => undefined
   const polling = { start: jest.fn(), stop, runNow: async (): Promise<void> => { await task() }, isActive: () => true }
   globalThis.window = { confirm: () => confirmResult } as never
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
+  ;(globalThis as Record<string, unknown>).useAsyncData = fakeAsyncData
 
   const app = mountSfc(page, {
     components: uiStubs,
@@ -53,6 +67,8 @@ function mountBudgets(api: Api, confirmResult = true) {
       useI18n: () => enI18n(),
       useAppToast: () => toasts,
       useApi: () => ({ $api: api }),
+      useAsyncData: fakeAsyncData,
+      useGlobalPermissions,
       useVisiblePolling: (pageTask: () => Promise<void>) => {
         task = pageTask
         return polling
@@ -84,6 +100,7 @@ function mountBudgets(api: Api, confirmResult = true) {
 afterEach(() => {
   delete (globalThis as Record<string, unknown>).window
   delete (globalThis as Record<string, unknown>).useApi
+  delete (globalThis as Record<string, unknown>).useAsyncData
 })
 
 describe('Fleet admin Budgets page', () => {

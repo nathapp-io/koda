@@ -6,7 +6,6 @@ import { ApiError, extractApiError } from '~/composables/useApi'
 import { buildDispatchSchema, DISPATCH_DEFAULTS, dispatchPrefillFromQuery, prefillNotice, toDispatchBody } from '~/lib/fleet-dispatch'
 import type { DispatchFormValues } from '~/lib/fleet-dispatch'
 import { BASH_MODES } from '~/lib/fleet-bash-mode'
-import { canWorkOnFleet } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetJobDto, FleetRunnerSummary } from '~/lib/fleet-types'
 import FleetPlacementResult from '~/components/fleet/FleetPlacementResult.vue'
 import FleetTokenListInput from '~/components/fleet/FleetTokenListInput.vue'
@@ -20,8 +19,9 @@ const { t } = useI18n()
 const toast = useAppToast()
 const jobsApi = useFleetJobs(slug)
 const options = useFleetDispatchOptions(slug)
-const { data: viewer } = useProjectViewerRole(slug)
-const canWork = computed(() => canWorkOnFleet(viewer.value))
+// Permissions P1 US-008: the form follows the key the dispatch route requires.
+const { permissions } = useProjectPermissions(slug)
+const canDispatch = computed(() => permissions.value.has('fleet.job.dispatch'))
 
 const loadFailed = ref(false)
 /** P7: which prefill notice to show, if any. */
@@ -129,7 +129,7 @@ async function confirmPrConflict(): Promise<void> {
 
     <FleetBudgetBanner :slug="slug" :repo-name="options.repoName" />
 
-    <p v-if="!canWork" class="text-sm text-muted-foreground" data-testid="dispatch-no-permission">{{ t('fleet.dispatch.noPermission') }}</p>
+    <p v-if="!canDispatch" class="text-sm text-muted-foreground" data-testid="dispatch-no-permission">{{ t('fleet.dispatch.noPermission') }}</p>
     <ErrorState v-else-if="loadFailed" @retry="retry()" />
     <p v-else-if="options.repos.value.length === 0" class="text-sm text-muted-foreground" data-testid="dispatch-no-repos">{{ t('fleet.dispatch.noRepos') }}</p>
 

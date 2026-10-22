@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
 import { codeLabel } from '~/lib/fleet-i18n'
-import { canWorkOnFleet, formatUsd, isConfigJob } from '~/lib/fleet-jobs'
+import { formatUsd, isConfigJob } from '~/lib/fleet-jobs'
 import { FLEET_JOB_STATES } from '~/lib/project-event-stream'
 import { runningFirstJobs } from '~/lib/fleet-jobs'
 import FleetJobStateBadge from '~/components/fleet/FleetJobStateBadge.vue'
@@ -18,8 +18,9 @@ const toast = useAppToast()
 const jobsApi = useFleetJobs(slug)
 const options = useFleetDispatchOptions(slug)
 const people = useProjectMemberNames(slug)
-const { data: viewer } = useProjectViewerRole(slug)
-const canWork = computed(() => canWorkOnFleet(viewer.value))
+// Permissions P1 US-008: the dispatch button follows the key the dispatch route requires.
+const { permissions } = useProjectPermissions(slug)
+const canDispatch = computed(() => permissions.value.has('fleet.job.dispatch'))
 
 /** Radix Select items cannot have an empty value, so "no filter" is a sentinel. */
 const ALL = '__all__'
@@ -103,7 +104,7 @@ const sortedJobs = computed(() => runningFirstJobs(jobsApi.jobs.value))
         <Button variant="outline" data-testid="fleet-budgets-link" @click="navigateTo(`/${slug}/fleet/budgets`)">
           {{ t('fleet.jobs.budgets') }}
         </Button>
-        <Button :disabled="!canWork" :title="canWork ? undefined : t('fleet.jobs.dispatchNoPermission')" data-testid="fleet-dispatch-button" @click="navigateTo(`/${slug}/fleet/dispatch`)">
+        <Button :disabled="!canDispatch" :title="canDispatch ? undefined : t('fleet.jobs.dispatchNoPermission')" data-testid="fleet-dispatch-button" @click="navigateTo(`/${slug}/fleet/dispatch`)">
           {{ t('fleet.jobs.dispatch') }}
         </Button>
       </template>

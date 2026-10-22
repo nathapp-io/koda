@@ -3,6 +3,7 @@ import * as Vue from 'vue'
 import { computed, h, nextTick, reactive, ref, watch } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, toastRecorder, uiStubs } from '../helpers/fleet-harness'
+import { projectPermissionsStub } from '../helpers/permission-nav'
 import * as apiModule from '../../composables/useApi'
 import type { FleetJobDto } from '../../lib/fleet-types'
 
@@ -138,9 +139,8 @@ function mountPage(job: FleetJobDto) {
       useFleetRepoConfig: () => ({
         submitRegenerate: jest.fn(),
       }),
-      useProjectViewerRole: () => ({
-        data: ref({ canManage: false, viewerRole: 'VIEWER' }),
-      }),
+      // Permissions P1 US-008: the job page reads its gates from the project key set.
+      useProjectPermissions: () => projectPermissionsStub([]),
       useFleetJobLogs: () => ({
         list: jest.fn(async () => ({ attempts: [] })),
       }),

@@ -37,8 +37,10 @@ describe('dispatch page', () => {
     expect(dispatch).not.toMatch(/<select[^>]*v-bind="componentField"/)
   })
 
-  test('only project ADMIN and DEVELOPER get the form, through the shared rule', () => {
-    expect(dispatch).toContain('const canWork = computed(() => canWorkOnFleet(viewer.value))')
+  test('the form needs fleet.job.dispatch; other fleet job keys do not open it (Permissions P1 US-008)', () => {
+    expect(dispatch).toContain("const canDispatch = computed(() => permissions.value.has('fleet.job.dispatch'))")
+    expect(dispatch).toContain('<p v-if="!canDispatch"')
+    expect(dispatch).not.toContain('canWorkOnFleet')
   })
 
   test('prefills command/repo/feature/ref from the query for PLAN -> RUN and Admin links (#205)', () => {

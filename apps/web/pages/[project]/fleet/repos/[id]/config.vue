@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ApiError, extractApiError } from '~/composables/useApi'
-import { canWorkOnFleet } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetJobDto } from '~/lib/fleet-types'
 import {
   createFile, deleteFile, discardAll, discardFile, draftEdits, draftProblems, editFile, emptyDraft, groupFiles,
@@ -24,8 +23,10 @@ const { t } = useI18n()
 const toast = useAppToast()
 const configApi = useFleetRepoConfig(slug)
 const options = useFleetDispatchOptions(slug)
-const { data: viewerRole } = useProjectViewerRole(slug)
-const canWork = computed(() => canWorkOnFleet(viewerRole.value))
+// Permissions P1 US-008: editing follows fleet.job.config.edit, the drift check fleet.repo.drift.check.
+const { permissions } = useProjectPermissions(slug)
+const canEdit = computed(() => permissions.value.has('fleet.job.config.edit'))
+const canCheckDrift = computed(() => permissions.value.has('fleet.repo.drift.check'))
 
 const list = ref<NaxFileList | null>(null)
 const loaded = ref<Record<string, NaxFileContent>>({})
@@ -46,7 +47,7 @@ const existingPaths = computed(() => [...new Set([...(list.value?.files.map((f) 
 const targets = computed(() => (list.value ? newFileTargets(list.value.files) : []).filter((p) => !existingPaths.value.includes(p)))
 const edits = computed(() => draftEdits(draft.value))
 const problems = computed(() => draftProblems(draft.value))
-const canSave = computed(() => canWork.value && edits.value.length > 0 && problems.value.length === 0 && !busy.value)
+const canSave = computed(() => canEdit.value && edits.value.length > 0 && problems.value.length === 0 && !busy.value)
 const selectedDraft = computed(() => (selected.value ? draft.value.files[selected.value] : undefined))
 const selectedTooLarge = computed(() => selected.value !== null && tooLarge.value.includes(selected.value))
 const selectedContent = computed((): string | null => {
@@ -117,7 +118,7 @@ async function select(path: string): Promise<void> {
 
 function onEdit(content: string): void {
   const path = selected.value
-  if (!path || !canWork.value) return
+  if (!path || !canEdit.value) return
   const base = loaded.value[path]
   draft.value = base ? editFile(draft.value, base, content) : createFile(draft.value, path, content)
 }
@@ -177,16 +178,16 @@ const problemText = (p: { path: string | null; code: string }): string =>
       :subtitle="list ? t('fleet.config.page.subtitle', { repo: options.repoName(repoId), branch: list.defaultBranch, sha: list.baseSha.slice(0, 12) }) : options.repoName(repoId)"
     >
       <template #actions>
-        <Button v-if="canWork && list" variant="outline" :disabled="busy" data-testid="config-drift" @click="checkDrift()">
+        <Button v-if="canCheckDrift && list" variant="outline" :disabled="busy" data-testid="config-drift" @click="checkDrift()">
           {{ t('fleet.config.page.checkDrift') }}
         </Button>
-        <Button v-if="canWork && list" :disabled="!canSave" data-testid="config-save" @click="prDialog = true">
+        <Button v-if="canEdit && list" :disabled="!canSave" data-testid="config-save" @click="prDialog = true">
           {{ t('fleet.config.page.save', { count: edits.length }) }}
         </Button>
       </template>
     </PageHeader>
 
-    <p v-if="!canWork" class="rounded-md border border-border p-3 text-sm text-muted-foreground" data-testid="config-readonly-notice">
+    <p v-if="!canEdit" class="rounded-md border border-border p-3 text-sm text-muted-foreground" data-testid="config-readonly-notice">
       {{ t('fleet.config.page.readOnly') }}
     </p>
 
@@ -209,7 +210,7 @@ const problemText = (p: { path: string | null; code: string }): string =>
 
       <div class="grid grid-cols-1 gap-6 md:grid-cols-[18rem_1fr]">
         <aside class="space-y-3">
-          <Button v-if="canWork" variant="outline" size="sm" class="w-full" data-testid="config-new-file" @click="newFileDialog = true">
+          <Button v-if="canEdit" variant="outline" size="sm" class="w-full" data-testid="config-new-file" @click="newFileDialog = true">
             {{ t('fleet.config.page.newFile') }}
           </Button>
           <EmptyState v-if="groups.length === 0" :message="t('fleet.config.page.noFiles')" />
@@ -222,7 +223,7 @@ const problemText = (p: { path: string | null; code: string }): string =>
             <div class="flex items-center gap-2">
               <span class="truncate font-mono text-sm">{{ selected }}</span>
               <Button
-                v-if="canWork && selectedContent !== null"
+                v-if="canEdit && selectedContent !== null"
                 variant="ghost"
                 size="sm"
                 class="ml-auto"
@@ -237,7 +238,7 @@ const problemText = (p: { path: string | null; code: string }): string =>
               v-else-if="selectedContent !== null || selectedTooLarge"
               :path="selected"
               :model-value="selectedContent ?? ''"
-              :readonly="!canWork"
+              :readonly="!canEdit"
               :too-large="selectedTooLarge"
               @update:model-value="onEdit($event)"
             />
@@ -249,7 +250,7 @@ const problemText = (p: { path: string | null; code: string }): string =>
       <NaxChangesPanel
         v-if="Object.keys(draft.files).length > 0"
         :draft="draft"
-        :readonly="!canWork"
+        :readonly="!canEdit"
         @discard="draft = discardFile(draft, $event)"
         @discard-all="draft = discardAll(draft)"
         @resolve="draft = resolveConflict(draft, $event)"

@@ -13,10 +13,26 @@ const policy = (id: string, over: Partial<BudgetPolicyDto> = {}): BudgetPolicyDt
   createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', ...over,
 })
 
-function mountTable(policies: BudgetPolicyDto[], editable: boolean, scopeName: (p: BudgetPolicyDto) => string | null = () => null) {
+/** Permissions P1 US-008: one cap per budget key; a test names only the ones it grants. */
+interface TableCaps {
+  resume?: boolean
+  edit?: boolean
+  remove?: boolean
+}
+
+const READ_ONLY: TableCaps = {}
+const FULL: TableCaps = { resume: true, edit: true, remove: true }
+
+function mountTable(policies: BudgetPolicyDto[], caps: TableCaps = READ_ONLY, scopeName: (p: BudgetPolicyDto) => string | null = () => null) {
   return mountSfc(table, {
     components: uiStubs,
-    props: { policies, editable, scopeName },
+    props: {
+      policies,
+      canResume: caps.resume === true,
+      canEdit: caps.edit === true,
+      canDelete: caps.remove === true,
+      scopeName,
+    },
     globals: { useI18n: () => enI18n() },
   })
 }
@@ -36,7 +52,7 @@ describe('FleetBudgetTable', () => {
         policy('g'),
         policy('r', { scopeType: 'repo', scopeId: 'r1', windowKind: 'lifetime', spentUsd: '2.5000' }),
       ],
-      false,
+      READ_ONLY,
       (p) => (p.scopeType === 'repo' ? 'acme/app' : null),
     )
     const repo = app.textOf(rowOf(app, 'r'))
@@ -53,7 +69,7 @@ describe('FleetBudgetTable', () => {
   })
 
   test('status follows the server flags and the row carries it', () => {
-    const app = mountTable([policy('ok'), policy('warn', { warnReached: true, scopeId: 'w' }), policy('stop', { paused: true, warnReached: true, scopeId: 'z' })], false)
+    const app = mountTable([policy('ok'), policy('warn', { warnReached: true, scopeId: 'w' }), policy('stop', { paused: true, warnReached: true, scopeId: 'z' })], READ_ONLY)
     expect(['ok', 'warn', 'stop'].map((id) => rowOf(app, id).props['data-status'])).toEqual(['ok', 'warning', 'paused'])
     expect(app.textOf(rowOf(app, 'ok'))).toContain('Within budget')
     expect(app.textOf(rowOf(app, 'warn'))).toContain('Warning')
@@ -62,7 +78,7 @@ describe('FleetBudgetTable', () => {
   })
 
   test('the percentage is floored: 4.99 of 5.00 shows 99%, never 100%', () => {
-    const app = mountTable([policy('a', { spentUsd: '4.9900' })], false)
+    const app = mountTable([policy('a', { spentUsd: '4.9900' })], READ_ONLY)
     expect(app.textOf(rowOf(app, 'a'))).toContain('99%')
     app.unmount()
   })
@@ -71,7 +87,7 @@ describe('FleetBudgetTable', () => {
     const app = mountTable([
       policy('a', { warnPercent: 90, runningJobs: 'cancel' }),
       policy('b', { warnPercent: null, hardStop: false, scopeId: 'b' }),
-    ], false)
+    ], READ_ONLY)
     const a = app.textOf(rowOf(app, 'a'))
     expect(a).toContain('Warns at 90%')
     expect(a).toContain('Pauses at the limit')
@@ -83,14 +99,14 @@ describe('FleetBudgetTable', () => {
     app.unmount()
   })
 
-  test('a read-only table has no buttons at all (Review Focus 3)', () => {
-    const app = mountTable([policy('a', { paused: true })], false)
+  test('a table with no cap has no buttons at all (Review Focus 3)', () => {
+    const app = mountTable([policy('a', { paused: true })], READ_ONLY)
     expect(buttonLabels(app, 'a')).toEqual([])
     app.unmount()
   })
 
-  test('an editable table offers Edit and Delete, and Resume only on a paused row', () => {
-    const app = mountTable([policy('ok'), policy('stop', { paused: true, scopeId: 's' })], true)
+  test('a table holding all three keys offers Edit and Delete, and Resume only on a paused row', () => {
+    const app = mountTable([policy('ok'), policy('stop', { paused: true, scopeId: 's' })], FULL)
     expect(buttonLabels(app, 'ok')).toEqual(['Edit', 'Delete'])
     expect(buttonLabels(app, 'stop')).toEqual(['Resume', 'Edit', 'Delete'])
     app.unmount()
@@ -98,7 +114,7 @@ describe('FleetBudgetTable', () => {
 
   test('the buttons emit the row policy', () => {
     const rows = [policy('stop', { paused: true })]
-    const app = mountTable(rows, true)
+    const app = mountTable(rows, FULL)
     const click = (label: string): void => {
       const button = app.find('[data-stub="button"]', rowOf(app, 'stop')).find((b) => app.textOf(b) === label)
       ;(button?.props.onClick as () => void)()
@@ -113,7 +129,7 @@ describe('FleetBudgetTable', () => {
   })
 
   test('a paused row shows when it was paused', () => {
-    const app = mountTable([policy('stop', { paused: true, pausedAt: '2026-10-02T03:04:05.000Z' })], false)
+    const app = mountTable([policy('stop', { paused: true, pausedAt: '2026-10-02T03:04:05.000Z' })], READ_ONLY)
     // The badge says Paused; the line under it says Paused <local date and time>.
     expect(app.textOf(rowOf(app, 'stop'))).toMatch(/Paused\s*Paused \S/)
     app.unmount()

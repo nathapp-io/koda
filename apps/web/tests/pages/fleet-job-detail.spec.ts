@@ -42,11 +42,14 @@ describe('job detail', () => {
     expect(detail).toMatch(/async function reloadSilently\(\)[\s\S]*?catch \{/)
   })
 
-  test('actions are gated by the pure permission helpers', () => {
-    expect(detail).toContain('canWork: canWorkOnFleet(viewerRole.value)')
+  test('actions are gated by the pure permission helpers, one flag per key (Permissions P1 US-008)', () => {
+    expect(detail).toContain("canCancel: permissions.value.has('fleet.job.cancel')")
+    expect(detail).toContain("canRequeue: permissions.value.has('fleet.job.requeue')")
+    expect(detail).toContain("canDispatch: permissions.value.has('fleet.job.dispatch')")
     expect(detail).toContain('canCancelJob(job.value, viewer.value)')
     expect(detail).toContain('canRequeueJob(job.value, viewer.value)')
     expect(detail).toContain('mayHaveBundle(job.value.state)')
+    expect(detail).not.toContain('canWorkOnFleet')
   })
 
   test('a live reload catches up a bounded number of event pages; a failed first load is reported', () => {
@@ -122,6 +125,7 @@ describe('job detail', () => {
 
   test('a COMPLETED PLAN offers Dispatch run pre-filled with repo, feature and resultBranch (#205)', () => {
     expect(detail).toContain('showDispatchRun')
+    expect(detail).toContain('viewer.value.canDispatch')
     expect(detail).toContain("job.value.command === 'PLAN' && job.value.state === 'COMPLETED'")
     expect(detail).toContain('job.value.resultBranch !== null')
     expect(detail).toContain('data-testid="fleet-job-dispatch-run"')
@@ -159,7 +163,7 @@ describe('config jobs (S3 §6)', () => {
   test('the page swaps nax-only sections for the config panel', () => {
     expect(detail).toContain("import ConfigJobPanel from '~/components/fleet/config/ConfigJobPanel.vue'")
     expect(detail).toContain('const configJob = computed(() => job.value !== null && isConfigJob(job.value))')
-    expect(detail).toContain('<ConfigJobPanel v-if="configJob" :job="job" :slug="slug" :can-work="viewer.canWork" @regenerate="regenOpen = true" />')
+    expect(detail).toContain('<ConfigJobPanel v-if="configJob" :job="job" :slug="slug" :can-work="canEditConfig" @regenerate="regenOpen = true" />')
     expect(detail).toContain('<FleetJobProgress v-if="!configJob" :job="job" />')
     expect(detail).toContain('<FleetJobPipeline v-if="!configJob" :job="job" />')
     expect(detail).toContain('<FleetJobAnalytics v-if="!configJob" :slug="slug" :job-id="jobId" :reload-key="analyticsReload" />')
