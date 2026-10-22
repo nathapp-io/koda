@@ -63,67 +63,66 @@ describe('budgetPayload', () => {
   })
 })
 
-describe('canDecide (D244, Review Focus 5)', () => {
-  // The existing budget/bash rules do not read the viewer's user id, so a signed-out struct is enough here.
-  const admin = { kind: 'admin', userId: null } as const
-  const manager = { kind: 'project', canManage: true, canWork: true, userId: null } as const
-  const member = { kind: 'project', canManage: false, canWork: false, userId: null } as const
-  const developer = { kind: 'project', canManage: false, canWork: true, userId: null } as const
-  test('a pending budget override: admin inbox or project ADMIN', () => {
+describe('canDecide (D244, Review Focus 5; Permissions P1 US-009)', () => {
+  // The budget/bash rules do not read the viewer's user id, so a signed-out struct is enough here.
+  const admin = { kind: 'admin', userId: null, canDecideBudget: true, canDecideBash: true } as const
+  const manager = { kind: 'project', canDecideBudget: true, canDecideBash: true, userId: null } as const
+  const member = { kind: 'project', canDecideBudget: false, canDecideBash: false, userId: null } as const
+  const developer = { kind: 'project', canDecideBudget: false, canDecideBash: true, userId: null } as const
+  test('a pending budget override follows the budget key', () => {
     expect(canDecide(approval('a'), admin)).toBe(true)
     expect(canDecide(approval('a'), manager)).toBe(true)
     expect(canDecide(approval('a'), member)).toBe(false)
+    expect(canDecide(approval('a'), developer)).toBe(false)
   })
-  test('never once decided; a pending bash ask is decided by DEVELOPER+ (D290)', () => {
+  test('never once decided; a pending bash ask follows the bash key', () => {
     expect(canDecide(approval('a', { status: 'approved' }), admin)).toBe(false)
-    // D290: bash asks are decided by DEVELOPER+, budget overrides still by ADMIN only.
     const bash = approval('a', { type: 'nax_bash_escalate', policyId: null })
     expect(canDecide(bash, admin)).toBe(true)
     expect(canDecide(bash, developer)).toBe(true)
     expect(canDecide(bash, member)).toBe(false)
-    expect(canDecide(approval('a'), developer)).toBe(false)
     expect(canDecide({ ...bash, status: 'expired' }, admin)).toBe(false)
   })
 })
 
 describe('canDecide for assistant_action (2aw-D6)', () => {
-  test('AC-1: the requester decides even as a project VIEWER who cannot work', () => {
-    expect(canDecide(actionRow(), { kind: 'project', canManage: false, canWork: false, userId: 'u1' })).toBe(true)
+  test('AC-1: the requester decides even holding no decision key', () => {
+    expect(canDecide(actionRow(), { kind: 'project', canDecideBudget: false, canDecideBash: false, userId: 'u1' })).toBe(true)
   })
-  test('AC-2: a project ADMIN who is not the requester cannot', () => {
-    expect(canDecide(actionRow(), { kind: 'project', canManage: true, canWork: true, userId: 'u2' })).toBe(false)
+  test('AC-2: a project viewer holding both keys who is not the requester cannot', () => {
+    expect(canDecide(actionRow(), { kind: 'project', canDecideBudget: true, canDecideBash: true, userId: 'u2' })).toBe(false)
   })
-  test('AC-3: a global ADMIN who is not the requester cannot', () => {
-    expect(canDecide(actionRow(), { kind: 'admin', userId: 'u2' })).toBe(false)
+  test('AC-3: a global admin viewer holding both keys who is not the requester cannot', () => {
+    expect(canDecide(actionRow(), { kind: 'admin', canDecideBudget: true, canDecideBash: true, userId: 'u2' })).toBe(false)
   })
-  test('AC-4: a global ADMIN who is the requester can', () => {
-    expect(canDecide(actionRow(), { kind: 'admin', userId: 'u1' })).toBe(true)
+  test('AC-4: an admin viewer who is the requester can', () => {
+    expect(canDecide(actionRow(), { kind: 'admin', canDecideBudget: false, canDecideBash: false, userId: 'u1' })).toBe(true)
   })
   test('AC-5: nobody signed in never decides, on either viewer kind', () => {
-    expect(canDecide(actionRow(), { kind: 'project', canManage: true, canWork: true, userId: null })).toBe(false)
-    expect(canDecide(actionRow(), { kind: 'admin', userId: null })).toBe(false)
+    expect(canDecide(actionRow(), { kind: 'project', canDecideBudget: true, canDecideBash: true, userId: null })).toBe(false)
+    expect(canDecide(actionRow(), { kind: 'admin', canDecideBudget: true, canDecideBash: true, userId: null })).toBe(false)
   })
   test('AC-6: an action that is no longer pending is not decided again, not even by its requester', () => {
-    expect(canDecide(actionRow({ status: 'approved' }), { kind: 'admin', userId: 'u1' })).toBe(false)
+    expect(canDecide(actionRow({ status: 'approved' }), { kind: 'admin', canDecideBudget: true, canDecideBash: true, userId: 'u1' })).toBe(false)
   })
   test('a payload that does not parse is decided by nobody', () => {
-    expect(canDecide(actionRow({}, { threadPath: 7 }), { kind: 'admin', userId: 'u1' })).toBe(false)
+    expect(canDecide(actionRow({}, { threadPath: 7 }), { kind: 'admin', canDecideBudget: true, canDecideBash: true, userId: 'u1' })).toBe(false)
   })
 })
 
-describe('canDecide keeps the existing rules for the older types (AC-16..AC-18)', () => {
-  test('AC-16: a pending budget override still follows viewer.canManage, whoever the viewer is', () => {
-    expect(canDecide(approval('a'), { kind: 'project', canManage: true, canWork: false, userId: 'u2' })).toBe(true)
-    expect(canDecide(approval('a'), { kind: 'project', canManage: false, canWork: true, userId: 'u1' })).toBe(false)
+describe('canDecide reads permission keys, not role names (US-009)', () => {
+  test('a pending budget override follows canDecideBudget, whoever the viewer is', () => {
+    expect(canDecide(approval('a'), { kind: 'project', canDecideBudget: true, canDecideBash: false, userId: 'u2' })).toBe(true)
+    expect(canDecide(approval('a'), { kind: 'project', canDecideBudget: false, canDecideBash: true, userId: 'u1' })).toBe(false)
   })
-  test('AC-17: a pending bash ask still follows viewer.canWork, whoever the viewer is', () => {
+  test('a pending bash ask follows canDecideBash, whoever the viewer is', () => {
     const bash = approval('a', { type: 'nax_bash_escalate', policyId: null })
-    expect(canDecide(bash, { kind: 'project', canManage: false, canWork: true, userId: 'u2' })).toBe(true)
-    expect(canDecide(bash, { kind: 'project', canManage: true, canWork: false, userId: 'u1' })).toBe(false)
+    expect(canDecide(bash, { kind: 'project', canDecideBudget: false, canDecideBash: true, userId: 'u2' })).toBe(true)
+    expect(canDecide(bash, { kind: 'project', canDecideBudget: true, canDecideBash: false, userId: 'u1' })).toBe(false)
   })
-  test('AC-18: an admin viewer needs no user id for those two types', () => {
-    expect(canDecide(approval('a'), { kind: 'admin', userId: null })).toBe(true)
-    expect(canDecide(approval('a', { type: 'nax_bash_escalate', policyId: null }), { kind: 'admin', userId: null })).toBe(true)
+  test('an admin-kind viewer decides nothing without the keys', () => {
+    expect(canDecide(approval('a'), { kind: 'admin', canDecideBudget: false, canDecideBash: false, userId: null })).toBe(false)
+    expect(canDecide(approval('a', { type: 'nax_bash_escalate', policyId: null }), { kind: 'admin', canDecideBudget: false, canDecideBash: false, userId: null })).toBe(false)
   })
 })
 
@@ -169,14 +168,14 @@ describe('threadApiPath (2aw-D10)', () => {
 
 describe('keyboardDecision for assistant_action (2aw-D6)', () => {
   test('AC-7: the requester only ever rejects from the keyboard', () => {
-    expect(keyboardDecision(actionRow(), { kind: 'project', canManage: false, canWork: false, userId: 'u1' }))
+    expect(keyboardDecision(actionRow(), { kind: 'project', canDecideBudget: false, canDecideBash: false, userId: 'u1' }))
       .toEqual({ approve: null, deny: { decision: 'reject' } })
     // The same for an admin requester: the A key must never approve an action.
-    expect(keyboardDecision(actionRow(), { kind: 'admin', userId: 'u1' }))
+    expect(keyboardDecision(actionRow(), { kind: 'admin', canDecideBudget: true, canDecideBash: true, userId: 'u1' }))
       .toEqual({ approve: null, deny: { decision: 'reject' } })
   })
   test('a viewer who cannot decide gets no keyboard decisions', () => {
-    expect(keyboardDecision(actionRow(), { kind: 'admin', userId: 'u2' })).toEqual({ approve: null, deny: null })
+    expect(keyboardDecision(actionRow(), { kind: 'admin', canDecideBudget: true, canDecideBash: true, userId: 'u2' })).toEqual({ approve: null, deny: null })
   })
 })
 
@@ -443,7 +442,7 @@ describe('firstPending (D297)', () => {
 })
 
 describe('keyboardDecision (slice 4: inbox A/D keys)', () => {
-  const worker = { kind: 'project' as const, canManage: false, canWork: true, userId: null }
+  const worker = { kind: 'project' as const, canDecideBudget: false, canDecideBash: true, userId: null }
   // A complete valid bash payload — keyboardDecision validates through bashPayload like the panel.
   const bashAsk = (options: string[], over: Record<string, unknown> = {}) => ({
     type: 'nax_bash_escalate', status: 'pending',
@@ -466,15 +465,15 @@ describe('keyboardDecision (slice 4: inbox A/D keys)', () => {
     expect(d.deny).toEqual({ decision: 'deny' })
   })
 
-  test('a budget ask denies to keep_paused for a manager; approve needs a typed amount so it is null', () => {
-    const manager = { kind: 'project' as const, canManage: true, canWork: true, userId: null }
+  test('a budget ask denies to keep_paused for a budget decider; approve needs a typed amount so it is null', () => {
+    const manager = { kind: 'project' as const, canDecideBudget: true, canDecideBash: true, userId: null }
     const d = keyboardDecision({ type: 'budget_override_required', status: 'pending', payload: {} } as never, manager)
     expect(d.approve).toBeNull()
     expect(d.deny).toEqual({ decision: 'keep_paused' })
   })
 
-  test('a viewer without rights gets no keyboard decisions at all (bash needs canWork, budget canManage)', () => {
-    const viewer = { kind: 'project' as const, canManage: false, canWork: false, userId: null }
+  test('a viewer without rights gets no keyboard decisions at all (bash needs its key, budget its own)', () => {
+    const viewer = { kind: 'project' as const, canDecideBudget: false, canDecideBash: false, userId: null }
     expect(keyboardDecision(bashAsk(['allow', 'deny']) as never, viewer)).toEqual({ approve: null, deny: null })
     expect(keyboardDecision({ type: 'budget_override_required', status: 'pending', payload: {} } as never, worker)).toEqual({ approve: null, deny: null })
   })

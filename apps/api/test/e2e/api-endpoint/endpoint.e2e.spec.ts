@@ -3066,6 +3066,61 @@ describeIntegration('API Integration Tests', () => {
     });
   });
 
+  describe('US-003 (permissions P1 web) project roles and the unified members list', () => {
+    /** A project `member@koda.test` is not a member of, created here so the 403 case owns its fixture. */
+    let outsiderProjectSlug: string;
+
+    const rolesOf = (token: string, slug = projectSlug) => request(httpServer)
+      .get(`/api/projects/${slug}/roles`)
+      .set('Authorization', `Bearer ${token}`);
+    const membersOf = (token: string, query = '', slug = projectSlug) => request(httpServer)
+      .get(`/api/projects/${slug}/members${query}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    beforeAll(async () => {
+      const created = await request(httpServer)
+        .post('/api/projects')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Roles Outsider Project', slug: 'roles-outsider-project', key: 'ROP' })
+        .expect(201);
+      outsiderProjectSlug = body<{ slug: string }>(created).slug;
+    });
+
+    it('GET /api/projects/:slug/roles answers the PROJECT roles, each with the five chip fields', async () => {
+      const res = await rolesOf(userAccessToken).expect(200);
+
+      const roles = body<Array<Record<string, unknown>>>(res);
+      expect(roles.map((role) => role.key)).toContain('developer');
+      // No GLOBAL role is assignable in a project.
+      expect(roles.map((role) => role.key)).not.toContain('owner');
+      for (const role of roles) {
+        expect(Object.keys(role).sort()).toEqual(['description', 'id', 'key', 'name', 'system']);
+      }
+    });
+
+    it('GET /api/projects/:slug/roles answers 403 for a caller with no access to the project', async () => {
+      await rolesOf(nonAdminUserAccessToken, outsiderProjectSlug).expect(403);
+    });
+
+    it('GET /api/projects/:slug/members answers user rows with principalType USER and their bindings', async () => {
+      const page = body<{ records: Array<{ principalType: string; principalId: string; userId: string | null; agentSlug: string | null; bindings: unknown[] }> }>(
+        await membersOf(userAccessToken).expect(200),
+      );
+
+      expect(page.records.length).toBeGreaterThan(0);
+      for (const record of page.records) {
+        expect(record.principalType).toBe('USER');
+        expect(record.principalId).toBe(record.userId);
+        expect(record.agentSlug).toBeNull();
+        expect(Array.isArray(record.bindings)).toBe(true);
+      }
+    });
+
+    it('GET /api/projects/:slug/members?principals=agents answers 400 validation', async () => {
+      await membersOf(userAccessToken, '?principals=agents').expect(400);
+    });
+  });
+
   describe('US-003 Disabled member guard', () => {
     const disabledMemberEmail = 'disabled-member@koda.test';
 
@@ -5071,6 +5126,99 @@ describeIntegration('API Integration Tests', () => {
       const res = await deleteBinding(userAccessToken, 'no-such-binding').expect(404);
 
       refusal(res, 'permissions.bindingNotFound.404');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // Permissions P1 US-001 — the caller's own effective keys
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Me permissions API (permissions P1 US-001)', () => {
+    const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+    const mePermissions = (token: string, query = '') =>
+      request(httpServer).get(`/api/me/permissions${query}`).set(auth(token));
+
+    it('GET /api/me/permissions — 200 answers the global scope of the caller', async () => {
+      const res = await mePermissions(nonAdminUserAccessToken).expect(200);
+
+      const payload = body<{ scope: string; projectSlug: string | null; keys: string[] }>(res);
+      expect(payload.scope).toBe('global');
+      expect(payload.projectSlug).toBeNull();
+      // The baseline `member` role grants agent.read; the list arrives ascending and carries no
+      // implicit key (`auth.me.read` is always allowed and never listed).
+      expect(payload.keys).toContain('agent.read');
+      expect(payload.keys).not.toContain('auth.me.read');
+      expect(payload.keys).toEqual([...payload.keys].sort());
+    });
+
+    it('GET /api/me/permissions — 200 answers the project scope of a project the caller can read', async () => {
+      const res = await mePermissions(userAccessToken, `?project=${projectSlug}`).expect(200);
+
+      const payload = body<{ scope: string; projectSlug: string | null; keys: string[] }>(res);
+      expect(payload.scope).toBe('project');
+      expect(payload.projectSlug).toBe(projectSlug);
+      // The installation owner holds every project key in every project.
+      expect(payload.keys).toContain('ticket.delete');
+    });
+
+    it('GET /api/me/permissions — 404 for an unknown project slug', async () => {
+      const res = await mePermissions(nonAdminUserAccessToken, '?project=no-such-project').expect(404);
+
+      refusal(res, 'projects.404');
+    });
+
+    it('GET /api/me/permissions — 400 for an empty project value', async () => {
+      const res = await mePermissions(nonAdminUserAccessToken, '?project=').expect(400);
+
+      expect(res.body.ret).toBe(-2);
+      expect(res.body).not.toHaveProperty('data');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // Permissions P1 US-002 — the permission catalog
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Permission catalog API (permissions P1 US-002)', () => {
+    let catalogOwnerToken: string;
+    let catalogMemberToken: string;
+    beforeAll(async () => {
+      // The surrounding lifecycle normally supplies these actors. A filtered run must create its
+      // own: the first registration bootstraps the Owner binding through the real API.
+      const register = async (email: string): Promise<string> => {
+        const res = await request(httpServer).post('/api/auth/register')
+          .send({ email, name: 'Catalog test user', password: 'Catalog1234!Aa' }).expect(201);
+        return body<{ accessToken: string }>(res).accessToken;
+      };
+      catalogOwnerToken = userAccessToken || await register('catalog-owner@koda.test');
+      catalogMemberToken = nonAdminUserAccessToken || await register('catalog-member@koda.test');
+    });
+    const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+    const catalog = (token: string) =>
+      request(httpServer).get('/api/permissions/catalog').set(auth(token));
+
+    it('GET /api/permissions/catalog — 200 lists the role keys sorted by key', async () => {
+      const res = await catalog(catalogOwnerToken).expect(200);
+      const entries = body<
+        Array<{ key: string; scope: string; risk: string; principals: string[]; ownable: boolean }>
+      >(res);
+
+      expect(entries.length).toBeGreaterThan(0);
+      expect(entries.map((entry) => entry.key)).toEqual([...entries.map((entry) => entry.key)].sort());
+      // Metadata the role editor needs, on a key whose values the catalog derivation fixes.
+      expect(entries.find((entry) => entry.key === 'ticket.delete')).toEqual({
+        key: 'ticket.delete',
+        scope: 'project',
+        risk: 'high',
+        principals: ['user', 'agent'],
+        ownable: false,
+      });
+    });
+
+    it('GET /api/permissions/catalog — 403 for a user whose only binding is member', async () => {
+      const res = await catalog(catalogMemberToken).expect(403);
+
+      refusal(res, 'permissions.403');
     });
   });
 

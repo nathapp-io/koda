@@ -187,6 +187,7 @@ export class PrismaRoleBindingRepository
   async findViewPage(filter: BindingFilter, page: IPageOption): Promise<IPageResult<BindingWithRole>> {
     const where: Prisma.RoleBindingWhereInput = {
       ...(filter.principal ? this.principalWhere(filter.principal) : {}),
+      ...(filter.principalType !== undefined ? { principalType: filter.principalType } : {}),
       ...(filter.projectId !== undefined ? { projectId: filter.projectId } : {}),
     };
     const result = await Paginate(this.db.roleBinding, page, {

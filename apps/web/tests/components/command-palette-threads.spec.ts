@@ -7,6 +7,7 @@ import { join } from 'path'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import type { FakeNode } from '../helpers/mount-sfc'
 import { uiStubs, enI18n } from '../helpers/fleet-harness'
+import { globalPermissionsStub } from '../helpers/permission-nav'
 import * as apiModule from '../../composables/useApi'
 
 const realPalette = webFile('components', 'CommandPalette.vue')
@@ -75,6 +76,8 @@ function mountPalette(projectSlug: string | undefined): Mounted {
       useColorMode: () => ({ value: 'light', preference: 'light' }),
       navigateTo: (to: string) => { navigated.push(to) },
       useAuth: () => ({ user: ref({ email: 'a@k.t', role: 'MEMBER' }) }),
+      // US-006: the palette's Skills entry reads the global permission set; this viewer holds none.
+      useGlobalPermissions: () => globalPermissionsStub(),
     },
   })
 

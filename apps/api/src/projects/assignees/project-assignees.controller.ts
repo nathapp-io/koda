@@ -1,5 +1,5 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { ProjectMembershipGuard } from '../project-membership.guard';
 import { RequiresGuard } from '../../permissions/requires.guard';
@@ -12,6 +12,9 @@ import { AssigneeQuery } from './dto/assignee.query';
 
 @ApiTags('projects')
 @ApiBearerAuth()
+// The path template's `slug` is resolved by the guard, not a `@Param`, so it is documented explicitly:
+// without it the exported operation carried no `slug` parameter and could not be called by a client.
+@ApiParam({ name: 'slug', required: true, schema: { type: 'string' }, description: 'Project slug' })
 @Controller('projects/:slug/assignees')
 export class ProjectAssigneesController {
   constructor(private readonly assignees: ProjectAssigneesService) {}

@@ -3,6 +3,7 @@ import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { AfterCommitService } from './after-commit.service';
 import { MembershipService } from './membership.service';
+import { PermissionCatalogController } from './permission-catalog.controller';
 import { PermissionCache } from './permission-cache';
 import { PermissionService } from './permission.service';
 import { PrismaRoleBindingRepository } from './prisma-role-binding.repository';
@@ -34,7 +35,7 @@ import { SystemRoleSeeder } from './system-role.seeder';
 @Global()
 @Module({
   imports: [PrismaModule],
-  controllers: [RolesController, RoleBindingsController],
+  controllers: [RolesController, RoleBindingsController, PermissionCatalogController],
   providers: [
     PrismaRoleRepository,
     { provide: ROLE_REPOSITORY, useExisting: PrismaRoleRepository },

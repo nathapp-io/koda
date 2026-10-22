@@ -129,6 +129,25 @@ describe('Phase 3 — Step 1: OpenAPI Spec Integrity', () => {
       expect(pathCount).toBeGreaterThanOrEqual(20);
     });
 
+    it('declares a required path parameter for every path template variable (B3)', () => {
+      // A `{var}` with no matching `in: path` parameter makes the exported contract invalid: a generated
+      // client cannot supply the segment, and Swagger cannot build the request.
+      const offenders: string[] = [];
+      for (const [path, methods] of Object.entries(spec.paths as Record<string, Record<string, any>>)) {
+        const variables = [...path.matchAll(/\{([^}]+)\}/g)].map((match) => match[1]);
+        if (variables.length === 0) continue;
+        for (const [method, op] of Object.entries(methods)) {
+          const parameters: Array<{ name: string; in: string; required?: boolean }> = op?.parameters ?? [];
+          for (const variable of variables) {
+            const declared = parameters.find((param) => param.name === variable && param.in === 'path');
+            if (declared?.required !== true) offenders.push(`${method.toUpperCase()} ${path} -> ${variable}`);
+          }
+        }
+      }
+
+      expect(offenders).toEqual([]);
+    });
+
     EXPECTED_ENDPOINTS.forEach(({ path: endpointPath, method }) => {
       it(`should have ${method.toUpperCase()} ${endpointPath}`, () => {
         const pathObj = spec.paths[endpointPath];

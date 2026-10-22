@@ -5,5 +5,9 @@
   "-2": "Validation error",
   "user": { "404": "No user with that email address" },
   "userDisabled": { "409": "This account is disabled and cannot be added to a project" },
+  "roleAndRoleKey": {
+    "-2": "Send either a role or a role key, not both",
+    "400": "Send either a role or a role key, not both"
+  },
   "lastAdmin": { "409": "A project must keep at least one admin" }
 }

@@ -50,12 +50,25 @@ export interface CreateBindingInput {
   projectId?: string | null;
 }
 
+/**
+ * What a grant route hands `assertMayGrant`: the role it wants to write, where, and for whom. Unlike
+ * `CreateBindingInput` the principal id may still be unknown (`null`) — an invite to an address with no
+ * account yet — so the self-binding rule only runs when there is an id to compare.
+ */
+export interface GrantTarget {
+  roleKey: string;
+  projectId: string | null;
+  principalType: PrincipalType;
+  principalId: string | null;
+}
+
 const OWN_SUFFIX = '.own';
 const APPROVAL_DECIDE = 'approval.decide';
 const APPROVAL_DECIDE_PREFIX = 'approval.decide@';
 const OWNER_ROLE_KEY = 'owner';
 const ADMIN_ROLE_KEY = 'admin';
 const OWNER_BINDING_KEY = 'role.binding.owner';
+const PROJECT_SCOPE: RoleScope = 'PROJECT';
 
 /**
  * Permissions P1a: role administration (`/roles` and `/role-bindings`).
@@ -96,6 +109,19 @@ export class RoleAdminService {
   async listRoles(principal: KodaPrincipal): Promise<RoleDomain[]> {
     await this.assertCan(principal, 'role.read');
     return this.roles.findRoles();
+  }
+
+  /**
+   * Every role a project can hand out — `scope = 'PROJECT'`, system roles first, then by key — read to
+   * exhaustion rather than filtered out of a capped list, so a project with more roles than one read answers
+   * still sees them all.
+   *
+   * No key is checked here: `GET /projects/:slug/roles` carries `member.read` behind the project gate,
+   * because `role.read` is global and a Project Admin does not hold it. A caller that may read the
+   * project's roles may list them.
+   */
+  async listProjectRoles(): Promise<RoleDomain[]> {
+    return this.roles.findRolesByScope(PROJECT_SCOPE);
   }
 
   async createRole(principal: KodaPrincipal, input: CreateRoleInput): Promise<RoleDomain> {
@@ -189,6 +215,36 @@ export class RoleAdminService {
   ): Promise<IPageResult<RoleBindingView>> {
     await this.assertCan(principal, 'role.read');
     return this.membership.listBindings(filter, page);
+  }
+
+  /**
+   * US-004: the grant rules a write route runs **before** it stores anything — the same rules
+   * `createBinding` applies up to (and excluding) the write, without a target row to look up.
+   *
+   * The order is the brief's and the first failure decides the answer: the role, then its scope, then
+   * the principal type, then self-binding, then escalation in the scope the binding lands in.
+   *
+   * It checks no `role.binding.manage` / `role.binding.global`: the calling route's own key
+   * (`member.add`, `invite.create`) is the gate. `createBinding` keeps its own checks unchanged.
+   */
+  async assertMayGrant(principal: KodaPrincipal, target: GrantTarget): Promise<RoleDomain> {
+    const role = await this.findByKey(target.roleKey);
+    if (role.scope === 'GLOBAL' && target.projectId !== null) {
+      // Same sentence as the binding route: a whole GLOBAL role is what cannot be handed out inside a
+      // project, so the role itself is the interpolated entry.
+      throw new ValidationAppException({ entry: role.key }, 'permissions.scopeMismatch');
+    }
+    const expanded = this.expandStored(role);
+    this.assertPrincipalType(expanded, target.principalType);
+    if (target.principalId !== null) {
+      this.assertNotSelf(principal, { type: target.principalType, id: target.principalId });
+    }
+    await this.assertNoEscalation(
+      principal,
+      this.confer(role, expanded, target.projectId === null),
+      scopeOf(target.projectId),
+    );
+    return role;
   }
 
   /**

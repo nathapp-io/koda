@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { uiStubs, enI18n, toastRecorder } from '../helpers/fleet-harness'
+import { projectPermissionsStub } from '../helpers/permission-nav'
 import * as apiModule from '../../composables/useApi'
 import { ApiError } from '../../composables/useApi'
 import type { ScheduleDto } from '../../lib/fleet-types'
@@ -21,12 +22,13 @@ const schedule = (id: string, over: Partial<ScheduleDto> = {}): ScheduleDto => (
 })
 
 const ROWS = [schedule('a'), schedule('b', { createdById: 'someone-else' })]
-type Role = { canManage: boolean; viewerRole: string | null }
-const DEVELOPER: Role = { canManage: false, viewerRole: 'DEVELOPER' }
-const VIEWER: Role = { canManage: false, viewerRole: 'VIEWER' }
-const ADMIN: Role = { canManage: true, viewerRole: 'ADMIN' }
+/** A project key set (Permissions P1 US-009): the page reads the keys, never a role name. */
+type Keys = readonly string[]
+const DEVELOPER: Keys = ['fleet.schedule.create', 'fleet.schedule.update.own']
+const VIEWER: Keys = []
+const ADMIN: Keys = ['fleet.schedule.update', 'fleet.schedule.delete']
 
-function mountList(rows: ScheduleDto[], role: Role, get?: jest.Mock) {
+function mountList(rows: ScheduleDto[], role: Keys, get?: jest.Mock) {
   const api = {
     get: get ?? jest.fn(async () => rows),
     post: jest.fn(async (p: string) => schedule('a', { enabled: !p.endsWith('/disable') })),
@@ -52,7 +54,7 @@ function mountList(rows: ScheduleDto[], role: Role, get?: jest.Mock) {
       useApi: () => ({ $api: api }),
       useRoute: () => ({ params: { project: 'koda' } }),
       useAuth: () => ({ user: ref({ id: 'owner' }) }),
-      useProjectViewerRole: () => ({ data: ref(role) }),
+      useProjectPermissions: () => projectPermissionsStub(role),
       useFleetDispatchOptions: () => ({
         repos: ref([{ id: 'r1', owner: 'acme', name: 'app' }]), runners: ref([]),
         repoName: (id: string) => (id === 'r1' ? 'acme/app' : id), runnerName: (id: string | null) => id,
@@ -87,11 +89,12 @@ afterEach(() => {
 })
 
 describe('Schedules list page (behaviour)', () => {
-  test('a developer creates, and changes only their own schedule (Review Focus 2)', async () => {
+  test('a developer creates, and changes only their own schedule (Review Focus 2, US-009)', async () => {
     const m = mountList(ROWS, DEVELOPER)
     await m.settle()
     expect(m.hasTestid('fleet-schedule-create')).toBe(true)
-    expect(m.rowButtons('a')).toEqual(['fleet-schedule-disable', 'fleet-schedule-edit', 'fleet-schedule-delete'])
+    // US-009: update.own buys edit/enable/disable; delete is its own key.
+    expect(m.rowButtons('a')).toEqual(['fleet-schedule-disable', 'fleet-schedule-edit'])
     expect(m.rowButtons('b')).toEqual([])
     expect(m.app.text()).not.toContain('Only the schedule owner or a project administrator can change a schedule.')
     m.app.unmount()
@@ -107,7 +110,7 @@ describe('Schedules list page (behaviour)', () => {
     m.app.unmount()
   })
 
-  test('a project admin changes every schedule and sees no read-only line', async () => {
+  test('the any-row keys change and delete every schedule and show no read-only line', async () => {
     const m = mountList(ROWS, ADMIN)
     await m.settle()
     expect(m.rowButtons('b')).toEqual(['fleet-schedule-disable', 'fleet-schedule-edit', 'fleet-schedule-delete'])
@@ -115,10 +118,12 @@ describe('Schedules list page (behaviour)', () => {
     m.app.unmount()
   })
 
-  test('a developer who owns no schedule sees the read-only line', async () => {
+  test('an update.own holder who owns no listed schedule gets no row control', async () => {
     const m = mountList([schedule('b', { createdById: 'someone-else' })], DEVELOPER)
     await m.settle()
-    expect(m.app.text()).toContain('Only the schedule owner or a project administrator can change a schedule.')
+    expect(m.rowButtons('b')).toEqual([])
+    // US-009: the notice speaks about the keys the caller holds, and this caller holds some.
+    expect(m.app.text()).not.toContain('Only the schedule owner or a project administrator can change a schedule.')
     m.app.unmount()
   })
 

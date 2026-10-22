@@ -2,9 +2,10 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { extractErrorStatus } from '~/composables/useApi'
 import { approvalRoot } from '~/composables/useFleetApprovals'
-import { apiPath } from '~/lib/api-path'
 import { bashPayload, canDecide, commandPreview, countdownText, inboxPath, secondsLeft } from '~/lib/fleet-approvals'
 import type { ApprovalBase, ApprovalViewer } from '~/lib/fleet-approvals'
+import { permissionSet } from '~/lib/permissions'
+import type { PermissionSet } from '~/lib/permissions'
 import type { ApprovalCountsDto, FleetApprovalDto, FleetPage } from '~/lib/fleet-types'
 
 /** Browser-only delivery; the API remains the authority on membership and decision rights. */
@@ -118,6 +119,51 @@ export function useApprovalNotifications(counts: Ref<ApprovalCountsDto | null>) 
     }
   }
 
+  /**
+   * A 401/403/404 on one scope means that inbox is no longer this caller's, so its alerts close. Anything else is
+   * transient and leaves them alone: a flaky poll must not empty the screen.
+   */
+  function dismissScopeOnRefusal(error: unknown, match: (base: ApprovalBase) => boolean): void {
+    const code = error && typeof error === 'object'
+      ? (error as { code?: number; statusCode?: number }).code ?? (error as { statusCode?: number }).statusCode
+      : undefined
+    const status = extractErrorStatus(error) ?? code
+    if (status !== 401 && status !== 403 && status !== 404) return
+    for (const [id, entry] of [...active]) {
+      if (match(entry.base)) dismiss(id)
+    }
+  }
+
+  /**
+   * Permissions P1 US-009: the caller's effective keys for one scope, read directly — `refresh()` runs outside setup,
+   * so it cannot use `useAsyncData`. `{ error }` means the read failed: the caller then scans nothing for that scope.
+   */
+  async function permissionKeys(project: string | null): Promise<{ keys: PermissionSet } | { error: unknown }> {
+    try {
+      const response = project === null
+        ? await $api.get<{ keys?: string[] }>('/me/permissions')
+        : await $api.get<{ keys?: string[] }>('/me/permissions', { query: { project } })
+      return { keys: permissionSet(Array.isArray(response?.keys) ? response.keys : []) }
+    } catch (error) {
+      return { error }
+    }
+  }
+
+  /** The decision rights one project's key set carries; each approval kind has its own decide route. */
+  const projectViewer = (keys: PermissionSet): ApprovalViewer => ({
+    kind: 'project',
+    userId: auth.user.value?.id ?? null,
+    canDecideBudget: keys.has('fleet.approval.decide.budget'),
+    canDecideBash: keys.has('fleet.approval.decide.bash'),
+  })
+
+  const adminViewer = (keys: PermissionSet): ApprovalViewer => ({
+    kind: 'admin',
+    userId: auth.user.value?.id ?? null,
+    canDecideBudget: keys.has('fleet.approval.decide.budget'),
+    canDecideBash: keys.has('fleet.approval.decide.bash'),
+  })
+
   async function refresh(): Promise<void> {
     const token = ++generation
     const userId = auth.user.value?.id
@@ -130,35 +176,54 @@ export function useApprovalNotifications(counts: Ref<ApprovalCountsDto | null>) 
     if (history) for (const [id, entry] of Object.entries(history)) {
       if (entry.at < Date.now() - 86400000 && !active.has(id)) delete history[id]
     }
-    if (auth.user.value?.role === 'ADMIN') {
-      await scan({ kind: 'admin' }, { kind: 'admin', userId: auth.user.value?.id ?? null }, current)
+    // The global keys decide which inbox this account may read at all. Nothing is scanned until they answer, and a
+    // failed read scans nothing: a guess here would deliver a notification for an approval this caller cannot decide.
+    const global = await permissionKeys(null)
+    if (!current() || 'error' in global) return
+    if (global.keys.has('fleet.approval.read')) {
+      const viewer = adminViewer(global.keys)
+      // A refreshed key set can withdraw the power to answer an ask already on screen (the read key alone is not a
+      // decision): close those first, exactly as the project branch does, so no alert sits there unanswerable.
+      for (const [id, entry] of [...active]) {
+        if (entry.base.kind === 'admin' && !canDecide(entry.row, viewer)) dismiss(id)
+      }
+      try {
+        await scan({ kind: 'admin' }, viewer, current)
+      } catch (error) {
+        if (!current()) return
+        // A refused admin inbox closes its alerts and ends this refresh; there is no other scope to continue with.
+        dismissScopeOnRefusal(error, (base) => base.kind === 'admin')
+      }
       return
+    }
+    // Without the global read key this refresh cannot re-verify the admin inbox's alerts, so they close: a notice
+    // the caller can no longer act on is worse than none. Project alerts are re-checked below, one project at a time.
+    for (const [id, entry] of [...active]) {
+      if (entry.base.kind === 'admin') dismiss(id)
     }
     for (const project of snapshot.projects) {
       if (!current()) return
       if (project.pending === 0) continue
-      // Unlike the global account role, this endpoint describes the caller's project membership.
+      // The project's own key set replaces the membership read: only a decide key makes its inbox readable.
+      const result = await permissionKeys(project.slug)
+      if (!current()) return
+      if ('error' in result) {
+        // A project may have disappeared since the count snapshot; continue with the others.
+        dismissScopeOnRefusal(result.error, (base) => base.kind === 'project' && base.slug === project.slug)
+        continue
+      }
+      const viewer = projectViewer(result.keys)
+      for (const [id, entry] of [...active]) {
+        if (entry.base.kind === 'project' && entry.base.slug === project.slug && !canDecide(entry.row, viewer)) dismiss(id)
+      }
+      if (!viewer.canDecideBudget && !viewer.canDecideBash) continue
       try {
-        const member = await $api.get<{ viewerRole?: string | null; canManage?: boolean }>(apiPath`/projects/${project.slug}/members`, { query: { size: '1' } })
-        if (!current()) return
-        const viewer: ApprovalViewer = {
-          kind: 'project', canManage: member.canManage === true,
-          canWork: ['ADMIN', 'DEVELOPER'].includes(member.viewerRole ?? ''), userId: auth.user.value?.id ?? null,
-        }
-        for (const [id, entry] of active) {
-          if (entry.base.kind === 'project' && entry.base.slug === project.slug && !canDecide(entry.row, viewer)) dismiss(id)
-        }
-        if (viewer.canManage || viewer.canWork) await scan({ kind: 'project', slug: project.slug }, viewer, current)
+        await scan({ kind: 'project', slug: project.slug }, viewer, current)
       } catch (error) {
         if (!current()) return
-        const code = error && typeof error === 'object' ? (error as { code?: number; statusCode?: number }).code ?? (error as { statusCode?: number }).statusCode : undefined
-        const status = extractErrorStatus(error) ?? code
-        if (status === 401 || status === 403 || status === 404) {
-          for (const [id, entry] of active) {
-            if (entry.base.kind === 'project' && entry.base.slug === project.slug) dismiss(id)
-          }
-        }
-        // A membership may have disappeared since the count snapshot; continue with other projects.
+        // One project's inbox can refuse this caller (a decide key without the read key) or be gone: the other
+        // projects must still be scanned, so this failure stays inside this project.
+        dismissScopeOnRefusal(error, (base) => base.kind === 'project' && base.slug === project.slug)
       }
     }
     if (!current()) return

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../generated/prisma/client';
+import { LegacyProjectRole, ROLE_KEY_FOR_LEGACY_ROLE } from '../../permissions/legacy-project-roles';
 import { ProjectMemberRole } from '../members/domain/project-member.domain';
 import { InviteStatus, ProjectInviteRecord } from './domain/project-invite.domain';
 
@@ -9,7 +10,8 @@ type InviteRow = {
   id: string;
   projectId: string;
   email: string;
-  role: string;
+  role: string | null;
+  roleId: string | null;
   tokenHash: string;
   status: string;
   invitedById: string | null;
@@ -19,6 +21,7 @@ type InviteRow = {
   expiresAt: Date;
   createdAt: Date;
   invitedBy: { name: string | null } | null;
+  assignedRole: { key: string; name: string } | null;
   project: { name: string };
 };
 
@@ -27,11 +30,13 @@ type InvitePreviewRow = InviteRow & { project: { name: string; slug: string } };
 
 const INCLUDE_CONTEXT = {
   invitedBy: { select: { name: true } },
+  assignedRole: { select: { key: true, name: true } },
   project: { select: { name: true } },
 } as const;
 
 const INCLUDE_PREVIEW = {
   invitedBy: { select: { name: true } },
+  assignedRole: { select: { key: true, name: true } },
   project: { select: { name: true, slug: true } },
 } as const;
 
@@ -55,7 +60,9 @@ export interface ProjectInvitePreview extends ProjectInviteWithContext {
 export interface CreateProjectInviteInput {
   projectId: string;
   email: string;
-  role: ProjectMemberRole;
+  /** The legacy enum the role key maps to; null for any other role. */
+  role: ProjectMemberRole | null;
+  roleId: string;
   tokenHash: string;
   /** The inviting user, or null when `invitedByAgentId` names an agent (Permissions P1 US-008). */
   invitedById: string | null;
@@ -90,6 +97,7 @@ export class PrismaProjectInvitesRepository {
         projectId: input.projectId,
         email: input.email,
         role: input.role,
+        roleId: input.roleId,
         tokenHash: input.tokenHash,
         invitedById: input.invitedById,
         invitedByAgentId: input.invitedByAgentId,
@@ -206,16 +214,38 @@ export class PrismaProjectInvitesRepository {
   }
 
   private async toContexts(rows: readonly InviteRow[]): Promise<ProjectInviteWithContext[]> {
-    const names = await this.inviterNames(rows);
+    const [names, legacyRoles] = await Promise.all([this.inviterNames(rows), this.legacyRoleNames(rows)]);
     return rows.map((row) => ({
-      ...this.toRecord(row, names.get(row.invitedByAgentId ?? '') ?? null),
+      ...this.toRecord(row, names.get(row.invitedByAgentId ?? '') ?? null, legacyRoles),
       projectName: row.project.name,
     }));
   }
 
   private async toRecords(rows: readonly InviteRow[]): Promise<ProjectInviteRecord[]> {
-    const names = await this.inviterNames(rows);
-    return rows.map((row) => this.toRecord(row, names.get(row.invitedByAgentId ?? '') ?? null));
+    const [names, legacyRoles] = await Promise.all([this.inviterNames(rows), this.legacyRoleNames(rows)]);
+    return rows.map((row) => this.toRecord(row, names.get(row.invitedByAgentId ?? '') ?? null, legacyRoles));
+  }
+
+  /**
+   * The names of the roles that rows without a `roleId` stand for through their legacy `role`, in one
+   * read for the whole page (at most the three legacy roles).
+   */
+  private async legacyRoleNames(rows: readonly InviteRow[]): Promise<Map<string, string>> {
+    const keys = [
+      ...new Set(
+        rows
+          .filter((row) => row.assignedRole === null && row.role !== null)
+          .map((row) => ROLE_KEY_FOR_LEGACY_ROLE[row.role as LegacyProjectRole])
+          .filter((key): key is string => key !== undefined),
+      ),
+    ];
+    if (keys.length === 0) return new Map();
+    const roles = await this.db.role.findMany({
+      where: { key: { in: keys } },
+      select: { key: true, name: true },
+      take: keys.length,
+    });
+    return new Map(roles.map((role) => [role.key, role.name]));
   }
 
   /**
@@ -234,12 +264,21 @@ export class PrismaProjectInvitesRepository {
     return new Map(agents.map((agent) => [agent.id, agent.name]));
   }
 
-  private toRecord(row: InviteRow, agentInviterName: string | null): ProjectInviteRecord {
+  private toRecord(
+    row: InviteRow,
+    agentInviterName: string | null,
+    legacyRoles: ReadonlyMap<string, string>,
+  ): ProjectInviteRecord {
+    // A row without a roleId reads its role through the legacy name; a row with neither names no role.
+    const legacyKey = row.role === null ? null : (ROLE_KEY_FOR_LEGACY_ROLE[row.role as LegacyProjectRole] ?? null);
     return {
       id: row.id,
       projectId: row.projectId,
       email: row.email,
-      role: row.role as ProjectMemberRole,
+      role: row.role as ProjectMemberRole | null,
+      roleId: row.roleId,
+      roleKey: row.assignedRole?.key ?? legacyKey,
+      roleName: row.assignedRole?.name ?? (legacyKey === null ? null : (legacyRoles.get(legacyKey) ?? null)),
       status: row.status as InviteStatus,
       invitedById: row.invitedById,
       inviterName: row.invitedBy?.name ?? agentInviterName,

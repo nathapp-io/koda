@@ -4,7 +4,8 @@ import { ApiError, extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
 import { budgetStopPolicyId } from '~/lib/fleet-budgets'
 import { loadFleetJobDetail } from '~/lib/fleet-job-detail'
-import { canCancelJob, canRequeueJob, canWorkOnFleet, isConfigJob, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl, wipPushStatus } from '~/lib/fleet-jobs'
+import { canCancelJob, canRequeueJob, isConfigJob, isTerminalJobState, mayHaveBundle, mergeEvents, safePrUrl, wipPushStatus } from '~/lib/fleet-jobs'
+import type { JobViewer } from '~/lib/fleet-jobs'
 import type { DispatchResultDto, FleetApprovalDto, FleetJobDto, FleetJobEventDto } from '~/lib/fleet-types'
 import FleetJobProgress from '~/components/fleet/FleetJobProgress.vue'
 import FleetJobPipeline from '~/components/fleet/story-graph/FleetJobPipeline.vue'
@@ -40,7 +41,7 @@ const people = useProjectMemberNames(slug)
 const configApi = useFleetRepoConfig(slug)
 /** S3 §6: the open state of the "Open regenerate PR" dialog. */
 const regenOpen = ref(false)
-const { data: viewerRole } = useProjectViewerRole(slug)
+const { permissions } = useProjectPermissions(slug)
 
 const logsApi = useFleetJobLogs(slug, jobId)
 /** S2a §4.2: the log list drives the timeline's "Full log" rows and the expired-bundle button. */
@@ -65,15 +66,20 @@ const eventPage = ref(0)
 const moreEvents = ref(false)
 const loadingEvents = ref(false)
 
-const viewer = computed(() => ({
+/** Permissions P1 US-008: one flag per key its route requires; no flag comes from a role name. */
+const viewer = computed<JobViewer>(() => ({
   userId: auth.user.value?.id ?? null,
-  canWork: canWorkOnFleet(viewerRole.value),
+  canCancel: permissions.value.has('fleet.job.cancel'),
+  canRequeue: permissions.value.has('fleet.job.requeue'),
+  canDispatch: permissions.value.has('fleet.job.dispatch'),
 }))
+/** S3 §6: the config panel edits through `fleet.job.config.edit`, which is not a job-route key. */
+const canEditConfig = computed(() => permissions.value.has('fleet.job.config.edit'))
 /** S3 §6: config jobs run no nax session; the page shows the config panel instead of progress, stories and cost. */
 const configJob = computed(() => job.value !== null && isConfigJob(job.value))
 const canCancel = computed(() => job.value !== null && canCancelJob(job.value, viewer.value))
 const canRequeue = computed(() => job.value !== null && canRequeueJob(job.value, viewer.value))
-const showDispatchRun = computed(() => job.value !== null && job.value.command === 'PLAN' && job.value.state === 'COMPLETED' && job.value.resultBranch !== null && viewer.value.canWork)
+const showDispatchRun = computed(() => job.value !== null && job.value.command === 'PLAN' && job.value.state === 'COMPLETED' && job.value.resultBranch !== null && viewer.value.canDispatch)
 const dispatchRunHref = computed(() => {
   const current = job.value
   if (!current || !current.resultBranch) return `/${slug}/fleet/dispatch`
@@ -290,7 +296,7 @@ const formatTime = (iso: string | null): string => (iso ? new Date(iso).toLocale
 
       <FleetJobWorkflow v-if="job.workflow" :workflow="job.workflow" />
 
-      <ConfigJobPanel v-if="configJob" :job="job" :slug="slug" :can-work="viewer.canWork" @regenerate="regenOpen = true" />
+      <ConfigJobPanel v-if="configJob" :job="job" :slug="slug" :can-work="canEditConfig" @regenerate="regenOpen = true" />
 
       <div v-if="job.pendingApprovals > 0" class="flex flex-wrap items-center gap-3 rounded-md border border-primary p-4 text-sm" data-testid="fleet-job-approval-callout">
         <span class="font-medium">{{ t('fleet.jobs.detail.waitingApproval', { count: job.pendingApprovals }) }}</span>

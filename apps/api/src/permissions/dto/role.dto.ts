@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsArray, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength, ValidateIf } from 'class-validator';
+import { expandEntries } from '../entry-matcher';
 import type { RoleDomain, RoleScope } from '../permissions.types';
 
 /** `key` is the role's stable identifier: kebab-case, two to forty-nine characters. */
@@ -9,6 +10,10 @@ export const ROLE_SCOPES: readonly RoleScope[] = ['GLOBAL', 'PROJECT'];
 /**
  * One role as the roles API returns it. `key` and `scope` are fixed for the life of a role, `system`
  * marks a seeded role and `locked` marks the owner role, which no write may change.
+ *
+ * `permissions` is the stored entry list (wildcards, exclusions and `X.own` forms included);
+ * `expandedKeys` is what those entries stand for, so a client can show the granted keys without
+ * re-implementing the entry grammar.
  */
 export class RoleDto {
   @ApiProperty() declare id: string;
@@ -20,6 +25,12 @@ export class RoleDto {
   @ApiProperty({ description: 'The owner role: no write may change or delete it' }) declare locked: boolean;
   @ApiProperty({ type: [String], description: 'Catalog entries, in the order they were stored' })
   declare permissions: string[];
+  @ApiProperty({
+    type: [String],
+    description:
+      'The keys the stored entries expand to, ascending; empty when the entries no longer expand',
+  })
+  declare expandedKeys: string[];
 
   static from(role: RoleDomain): RoleDto {
     return {
@@ -31,7 +42,21 @@ export class RoleDto {
       system: role.system,
       locked: role.locked,
       permissions: role.permissions,
+      expandedKeys: expandedKeysOf(role),
     };
+  }
+}
+
+/**
+ * `expandEntries` as a sorted array. A role whose stored entries no longer expand grants nothing
+ * (`PermissionService` logs and skips it), so it reports no expanded keys instead of failing the
+ * whole roles listing; `permissions` still carries the raw list the editor has to fix.
+ */
+function expandedKeysOf(role: RoleDomain): string[] {
+  try {
+    return [...expandEntries(role.permissions, role.scope)].sort();
+  } catch {
+    return [];
   }
 }
 

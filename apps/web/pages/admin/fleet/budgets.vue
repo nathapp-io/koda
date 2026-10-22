@@ -18,6 +18,12 @@ const {
   refresh, openCreate, openEdit, openResume, remove, onApplied,
 } = useFleetBudgetPage(base)
 
+// Permissions P1 US-008: the table's three actions follow the global budget keys.
+const { permissions } = useGlobalPermissions()
+const canResume = computed(() => permissions.value.has('fleet.budget.resume'))
+const canEdit = computed(() => permissions.value.has('fleet.budget.update'))
+const canDelete = computed(() => permissions.value.has('fleet.budget.delete'))
+
 // D174: this prefix only acts on global and runner policies, so only those are listed.
 const rows = computed(() => policies.value.filter((p) => isManagedOn('admin', p)))
 const runnerOptions = computed(() => runnersApi.runners.value.map((r) => ({ value: r.id, label: r.name })))
@@ -63,7 +69,9 @@ onBeforeUnmount(polling.stop)
         v-else
         testid="fleet-budgets-admin"
         :policies="rows"
-        :editable="true"
+        :can-resume="canResume"
+        :can-edit="canEdit"
+        :can-delete="canDelete"
         :scope-name="nameOf"
         @edit="openEdit"
         @resume="openResume"

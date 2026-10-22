@@ -122,7 +122,9 @@ const VUE_HELPERS = ['ref', 'computed', 'reactive', 'watch', 'onMounted', 'onBef
 const NUXT_AUTO_IMPORTS = [
   'useI18n', 'useAppToast', 'useState', 'useHead', 'navigateTo', 'useApi', 'useColorMode', 'useRuntimeConfig', 'definePageMeta',
   'useAsyncData', 'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute', 'useRouter',
-  'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole', 'useProjectMembers',
+  'useFleetDispatchOptions', 'useFleetJobs', 'useProjectMembers',
+  // The ticket page reads the live comment list through useNuxtData (US-007 mounts it for real).
+  'useNuxtData',
   'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames', 'useFleetJobLogs',
   'useFleetRepoConfig', 'useSkillCatalog', 'useProjectSkills', 'useThread', 'useThreads', 'useThreadHandoffJobs', 'onBeforeRouteLeave',
   // The inbox's assistant-action panel (US-004) reads its exact preview through this composable.
@@ -131,6 +133,17 @@ const NUXT_AUTO_IMPORTS = [
   'useWorkspaceThreads', 'useWorkspaceThread',
   // The workspace thread detail page (US-006) reads the home project's runner summaries through it.
   'useProjectRunnerSummaries',
+  // Permissions P1 US-006: every gated control reads its keys through one of these two, so any spec
+  // that mounts a component holding one must override it through `globals`.
+  'useGlobalPermissions', 'useProjectPermissions',
+  // Permissions P1 US-010: the Admin -> Roles page and its editor read the roles API through this.
+  'useRoles',
+  // Permissions P1 US-011: the principal-roles dialog and the Admin -> Users page read and write
+  // bindings through this, so any spec mounting them overrides it through `globals`.
+  'useRoleBindings',
+  // Permissions P1 US-013: the project members panel lists the project roles through this, so its
+  // spec injects the real composable the same way.
+  'useProjectRoles',
 ] as const
 
 /** Defaults for auto-imports a test did not supply; `definePageMeta` is a compile-time no-op macro. */

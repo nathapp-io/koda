@@ -16,13 +16,15 @@ export const MAX_COMMENT = 1000
 
 export type ApprovalBase = { kind: 'admin' } | { kind: 'project'; slug: string }
 /**
- * D290: `canManage` = project ADMIN (budget overrides), `canWork` = DEVELOPER+ (bash asks), both from the members
- * endpoint. S5b 2a-D6: `userId` is the signed-in user, and an `assistant_action` is decided by its requester alone
- * (2a-R2), whatever the role — so it is read on both viewer kinds.
+ * Permissions P1 US-009: what the signed-in caller may decide, read from permission keys rather than a role
+ * name. `fleet.approval.decide.budget` answers a budget override, `fleet.approval.decide.bash` a bash ask —
+ * the project's keys on a project page, the global keys on the admin page. S5b 2a-D6: `userId` is the signed-in
+ * user, and an `assistant_action` is decided by its requester alone (2a-R2), whatever the keys — so it is read
+ * on both viewer kinds.
  */
 export type ApprovalViewer =
-  | { kind: 'admin'; userId: string | null }
-  | { kind: 'project'; canManage: boolean; canWork: boolean; userId: string | null }
+  | { kind: 'admin'; userId: string | null; canDecideBudget: boolean; canDecideBash: boolean }
+  | { kind: 'project'; userId: string | null; canDecideBudget: boolean; canDecideBash: boolean }
 
 export const INBOX_TABS = ['pending', 'all'] as const
 export type InboxTab = (typeof INBOX_TABS)[number]
@@ -156,9 +158,9 @@ export function bashChoices(p: BashApprovalPayload | null): BashDecision[] {
 }
 
 /**
- * Spec §1.7 (D244, D290): budget overrides by project ADMIN, bash asks by DEVELOPER+, everything on the admin inbox.
- * S5b 2a-D6 / 2a-R2: an `assistant_action` is decided by its requester alone — no role, no project membership
- * shortcut, and a viewer who is not signed in decides nothing.
+ * Spec §1.7 (D244, 2a-R2, Permissions P1 US-009): a pending budget override follows `fleet.approval.decide.budget`
+ * and a bash ask `fleet.approval.decide.bash`, on either viewer kind. An `assistant_action` is decided by its
+ * requester alone — no key, no project membership shortcut, and a viewer who is not signed in decides nothing.
  */
 export function canDecide(a: Pick<FleetApprovalDto, 'type' | 'status' | 'payload'>, viewer: ApprovalViewer): boolean {
   if (a.status !== 'pending') return false
@@ -166,8 +168,7 @@ export function canDecide(a: Pick<FleetApprovalDto, 'type' | 'status' | 'payload
     const action = assistantPayload(a)
     return viewer.userId !== null && action !== null && action.requestedById === viewer.userId
   }
-  if (viewer.kind === 'admin') return true
-  return a.type === 'budget_override_required' ? viewer.canManage : viewer.canWork
+  return a.type === 'budget_override_required' ? viewer.canDecideBudget : viewer.canDecideBash
 }
 
 export type RaiseError = 'amountInvalid' | 'notAbove' | null

@@ -60,6 +60,7 @@ import { ref, watch } from 'vue'
 import { LucideX } from 'lucide-vue-next'
 import { normalizeCapabilities } from '~/lib/utils'
 import { apiPath } from '~/lib/api-path'
+import { extractApiError } from '~/composables/useApi'
 
 const props = defineProps<{
   open: boolean
@@ -116,8 +117,9 @@ const onSubmit = handleSubmit(async () => {
     toast.success(t('agents.toast.capabilitiesUpdated'))
     emit('updated')
     emit('update:open', false)
-  } catch {
-    toast.error(t('agents.toast.updateCapabilitiesFailed'))
+  } catch (err: unknown) {
+    // The API owns the rules (who may update an agent, which capabilities exist); show what it said.
+    toast.error(extractApiError(err))
   }
 })
 </script>

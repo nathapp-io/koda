@@ -22,4 +22,22 @@ describe('member DTOs', () => {
     expect(await errorsOf(UpdateMemberRoleDto, { role: 'MEMBER' })).toContain('role');
     expect(await errorsOf(UpdateMemberRoleDto, {})).toContain('role');
   });
+
+  /**
+   * US-004: `roleKey` is the new way to name the granted role and the legacy `role` stays for the CLI.
+   * Both are optional, so at most one may be sent — that is the service's `members.roleAndRoleKey` 400,
+   * not a DTO shape error, because the DTO cannot express "at most one of two".
+   */
+  it('AddMemberDto accepts a role key, a legacy role, both, or neither', async () => {
+    expect(await errorsOf(AddMemberDto, { email: 'a@koda.test', roleKey: 'triager' })).toEqual([]);
+    expect(await errorsOf(AddMemberDto, { email: 'a@koda.test' })).toEqual([]);
+    expect(await errorsOf(AddMemberDto, { email: 'a@koda.test', role: 'DEVELOPER', roleKey: 'developer' })).toEqual([]);
+  });
+
+  it('AddMemberDto refuses a role key outside the key grammar', async () => {
+    // A key must be kebab-case; the property name is what fails, so the field is really validated.
+    expect(await errorsOf(AddMemberDto, { email: 'a@koda.test', roleKey: 'Not A Key' })).toContain('roleKey');
+    expect(await errorsOf(AddMemberDto, { email: 'a@koda.test', roleKey: 'A' })).toContain('roleKey');
+    expect(await errorsOf(AddMemberDto, { email: 'a@koda.test', roleKey: 'custom_role' })).toContain('roleKey');
+  });
 });

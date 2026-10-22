@@ -178,10 +178,10 @@ describe('US-004-3: Dialog wiring in pages/agents.vue', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('US-004-3: Full agents page integration for RotateKeyDialog and DeleteAgentDialog', () => {
-  test('page has all four dialog imports (CreateAgentDialog, EditAgentRolesDialog, EditAgentCapabilitiesDialog, RotateKeyDialog, DeleteAgentDialog)', () => {
+  test('page has all four dialog imports (CreateAgentDialog, PrincipalRolesDialog, EditAgentCapabilitiesDialog, RotateKeyDialog, DeleteAgentDialog)', () => {
     const source = readFileSync(pagePath, 'utf-8')
     expect(source).toContain('CreateAgentDialog')
-    expect(source).toContain('EditAgentRolesDialog')
+    expect(source).toContain('PrincipalRolesDialog')
     expect(source).toContain('EditAgentCapabilitiesDialog')
     expect(source).toContain('RotateKeyDialog')
     expect(source).toContain('DeleteAgentDialog')

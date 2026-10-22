@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket, Wallet, Inbox, BarChart3, Gauge, Settings, Search, Menu, Sparkles, MessagesSquare } from 'lucide-vue-next'
+import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity, Users, Server, FolderGit2, Rocket, Wallet, Inbox, BarChart3, Gauge, Settings, Search, Menu, Sparkles, MessagesSquare, ShieldCheck } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -48,7 +48,30 @@ watch(sidebarOpen, (open) => {
   }
 }, { flush: 'sync' })
 
-const isGlobalAdmin = computed(() => auth.user.value?.role === 'ADMIN')
+// Permissions P1 US-006: the admin navigation is gated on the caller's global permission keys, not
+// on a role name — roles are data, and a custom role has to work. One plain boolean per link, so a
+// test context without the binding renders that link hidden; the section label follows the links.
+const { permissions: globalPermissions } = useGlobalPermissions()
+const canReadUsers = computed(() => globalPermissions.value.has('user.read'))
+const canReadRoles = computed(() => globalPermissions.value.has('role.read'))
+const canReadFleetDashboard = computed(() => globalPermissions.value.has('fleet.dashboard.read'))
+const canReadFleetRunners = computed(() => globalPermissions.value.has('fleet.runner.read'))
+const canReadFleetRepos = computed(() => globalPermissions.value.has('fleet.repo.read'))
+const canReadFleetBudgets = computed(() => globalPermissions.value.has('fleet.budget.read'))
+const canReadFleetApprovals = computed(() => globalPermissions.value.has('fleet.approval.read'))
+const canReadFleetAnalytics = computed(() => globalPermissions.value.has('fleet.analytics.read'))
+const canReadSkills = computed(() => globalPermissions.value.has('skill.source.read'))
+const showAdminNav = computed(() =>
+  canReadUsers.value
+  || canReadRoles.value
+  || canReadFleetDashboard.value
+  || canReadFleetRunners.value
+  || canReadFleetRepos.value
+  || canReadFleetBudgets.value
+  || canReadFleetApprovals.value
+  || canReadFleetAnalytics.value
+  || canReadSkills.value,
+)
 
 const projectSlug = computed(() => route.params.project as string | undefined)
 
@@ -197,22 +220,24 @@ const backTo = computed(() => {
 
         <NuxtLink to="/admin/slos" :class="navLinkClass" :active-class="activeClass"><Activity class="h-4 w-4 shrink-0" />{{ t('nav.slos') }}</NuxtLink>
 
-        <p v-if="isGlobalAdmin" :class="sectionLabelClass">{{ t('nav.sectionAdmin') }}</p>
-        <NuxtLink v-if="isGlobalAdmin" to="/admin/users" :class="navLinkClass" :active-class="activeClass"><Users class="h-4 w-4 shrink-0" />{{ t('nav.users') }}</NuxtLink>
+        <p v-if="showAdminNav" :class="sectionLabelClass">{{ t('nav.sectionAdmin') }}</p>
+        <NuxtLink v-if="canReadUsers" to="/admin/users" :class="navLinkClass" :active-class="activeClass"><Users class="h-4 w-4 shrink-0" />{{ t('nav.users') }}</NuxtLink>
 
-        <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet" :class="navLinkClass" :active-class="activeClass"><Gauge class="h-4 w-4 shrink-0" />{{ t('nav.fleetOverview') }}</NuxtLink>
+        <NuxtLink v-if="canReadRoles" to="/admin/roles" :class="navLinkClass" :active-class="activeClass"><ShieldCheck class="h-4 w-4 shrink-0" />{{ t('nav.roles') }}</NuxtLink>
 
-        <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/runners" :class="navLinkClass" :active-class="activeClass"><Server class="h-4 w-4 shrink-0" />{{ t('nav.fleetRunners') }}</NuxtLink>
+        <NuxtLink v-if="canReadFleetDashboard" to="/admin/fleet" :class="navLinkClass" :active-class="activeClass"><Gauge class="h-4 w-4 shrink-0" />{{ t('nav.fleetOverview') }}</NuxtLink>
 
-        <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/repos" :class="navLinkClass" :active-class="activeClass"><FolderGit2 class="h-4 w-4 shrink-0" />{{ t('nav.fleetRepos') }}</NuxtLink>
+        <NuxtLink v-if="canReadFleetRunners" to="/admin/fleet/runners" :class="navLinkClass" :active-class="activeClass"><Server class="h-4 w-4 shrink-0" />{{ t('nav.fleetRunners') }}</NuxtLink>
 
-        <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/budgets" :class="navLinkClass" :active-class="activeClass"><Wallet class="h-4 w-4 shrink-0" />{{ t('nav.fleetBudgets') }}</NuxtLink>
+        <NuxtLink v-if="canReadFleetRepos" to="/admin/fleet/repos" :class="navLinkClass" :active-class="activeClass"><FolderGit2 class="h-4 w-4 shrink-0" />{{ t('nav.fleetRepos') }}</NuxtLink>
 
-        <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/approvals" :class="navLinkClass" :active-class="activeClass"><Inbox class="h-4 w-4 shrink-0" />{{ t('nav.fleetApprovals') }}</NuxtLink>
+        <NuxtLink v-if="canReadFleetBudgets" to="/admin/fleet/budgets" :class="navLinkClass" :active-class="activeClass"><Wallet class="h-4 w-4 shrink-0" />{{ t('nav.fleetBudgets') }}</NuxtLink>
 
-        <NuxtLink v-if="isGlobalAdmin" to="/admin/fleet/analytics" :class="navLinkClass" :active-class="activeClass"><BarChart3 class="h-4 w-4 shrink-0" />{{ t('nav.fleetAnalytics') }}</NuxtLink>
+        <NuxtLink v-if="canReadFleetApprovals" to="/admin/fleet/approvals" :class="navLinkClass" :active-class="activeClass"><Inbox class="h-4 w-4 shrink-0" />{{ t('nav.fleetApprovals') }}</NuxtLink>
 
-        <NuxtLink v-if="isGlobalAdmin" to="/admin/skills" :class="navLinkClass" :active-class="activeClass"><Sparkles class="h-4 w-4 shrink-0" />{{ t('nav.skills') }}</NuxtLink>
+        <NuxtLink v-if="canReadFleetAnalytics" to="/admin/fleet/analytics" :class="navLinkClass" :active-class="activeClass"><BarChart3 class="h-4 w-4 shrink-0" />{{ t('nav.fleetAnalytics') }}</NuxtLink>
+
+        <NuxtLink v-if="canReadSkills" to="/admin/skills" :class="navLinkClass" :active-class="activeClass"><Sparkles class="h-4 w-4 shrink-0" />{{ t('nav.skills') }}</NuxtLink>
 
         <!-- Project-scoped links: rendered after the global block in source, shown first via flex order -->
         <template v-if="projectSlug">

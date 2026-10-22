@@ -18,15 +18,20 @@ const route = useRoute()
 const slug = route.params.project as string
 const base: BudgetBase = { kind: 'project', slug }
 const { t } = useI18n()
-const { data: viewer } = useProjectViewerRole(slug)
 const options = useFleetDispatchOptions(slug)
 const {
   policies, pending, loadFailed, stale, forbidden, editOpen, editing, resumeOpen, resuming,
   refresh, openCreate, openEdit, openResume, remove, onApplied,
 } = useFleetBudgetPage(base)
 
-// D176: the server is the gate; this only decides which controls to draw.
-const canManage = computed(() => viewer.value.canManage)
+// Permissions P1 US-008: one flag per budget key; the server stays the gate, this only draws the controls.
+const { permissions } = useProjectPermissions(slug)
+const canCreate = computed(() => permissions.value.has('fleet.budget.create'))
+const canResume = computed(() => permissions.value.has('fleet.budget.resume'))
+const canEdit = computed(() => permissions.value.has('fleet.budget.update'))
+const canDelete = computed(() => permissions.value.has('fleet.budget.delete'))
+/** The notice is about the whole set: holding any one key means this page is not read-only. */
+const canChangePolicy = computed(() => canCreate.value || canResume.value || canEdit.value || canDelete.value)
 // D175: the project's own policies (editable) and the fleet-wide ones (read-only).
 const own = computed(() => policies.value.filter((p) => isManagedOn('project', p)))
 const fleetWide = computed(() => policies.value.filter((p) => p.scopeType === 'global'))
@@ -64,13 +69,13 @@ useProjectEvents(slug, {
   <div class="space-y-6">
     <PageHeader :title="t('fleet.budgets.title')" :subtitle="t('fleet.budgets.subtitleProject')">
       <template #actions>
-        <Button v-if="canManage" data-testid="fleet-budget-create" @click="openCreate()">
+        <Button v-if="canCreate" data-testid="fleet-budget-create" @click="openCreate()">
           {{ t('fleet.budgets.actions.create') }}
         </Button>
       </template>
     </PageHeader>
 
-    <p v-if="!canManage && !forbidden" class="text-sm text-muted-foreground" data-testid="fleet-budget-readonly">{{ t('fleet.budgets.readOnly') }}</p>
+    <p v-if="!canChangePolicy && !forbidden" class="text-sm text-muted-foreground" data-testid="fleet-budget-readonly">{{ t('fleet.budgets.readOnly') }}</p>
     <p v-if="forbidden" class="text-sm text-muted-foreground" data-testid="fleet-budget-forbidden">{{ t('fleet.budgets.forbidden') }}</p>
     <p v-if="stale" class="text-sm text-muted-foreground">{{ t('fleet.common.stale') }}</p>
 
@@ -84,7 +89,9 @@ useProjectEvents(slug, {
           v-else
           testid="fleet-budgets-own"
           :policies="own"
-          :editable="canManage"
+          :can-resume="canResume"
+          :can-edit="canEdit"
+          :can-delete="canDelete"
           :scope-name="nameOf"
           @edit="openEdit"
           @resume="openResume"
@@ -95,12 +102,12 @@ useProjectEvents(slug, {
       <section v-if="fleetWide.length > 0" class="space-y-2" data-testid="fleet-budgets-global-section">
         <h2 class="text-sm font-medium">{{ t('fleet.budgets.sections.global') }}</h2>
         <p class="text-xs text-muted-foreground">{{ t('fleet.budgets.sections.globalHint') }}</p>
-        <FleetBudgetTable testid="fleet-budgets-global" :policies="fleetWide" :editable="false" :scope-name="nameOf" />
+        <FleetBudgetTable testid="fleet-budgets-global" :policies="fleetWide" :can-resume="false" :can-edit="false" :can-delete="false" :scope-name="nameOf" />
       </section>
     </template>
 
     <FleetBudgetEditDialog
-      v-if="canManage"
+      v-if="canCreate || canEdit"
       v-model:open="editOpen"
       :base="base"
       :policy="editing"
@@ -109,7 +116,7 @@ useProjectEvents(slug, {
       @failed="refresh()"
     />
     <FleetBudgetResumeDialog
-      v-if="canManage && resuming"
+      v-if="canResume && resuming"
       :key="resuming.id"
       v-model:open="resumeOpen"
       :base="base"

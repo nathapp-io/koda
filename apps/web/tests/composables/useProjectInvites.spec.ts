@@ -24,16 +24,16 @@ describe('useProjectInvites (US-007)', () => {
     ;(globalThis as Record<string, unknown>).window = { location: { origin: ORIGIN } }
   })
 
-  test('AC7: create posts exactly { email, role } to /projects/<slug>/invites', async () => {
+  test('AC7: create posts exactly { email, roleKey } to /projects/<slug>/invites', async () => {
     expect(existsSync(composablePath)).toBe(true)
     const post = jest.fn(async () => ({ outcome: 'ADDED' }))
     withApi({ post })
     const { useProjectInvites } = await import(composablePath)
 
-    await useProjectInvites('my-project').create('a@b.io', 'ADMIN')
+    await useProjectInvites('my-project').create('a@b.io', 'triager')
 
     expect(post).toHaveBeenCalledTimes(1)
-    expect(post.mock.calls[0]).toEqual(['/projects/my-project/invites', { email: 'a@b.io', role: 'ADMIN' }])
+    expect(post.mock.calls[0]).toEqual(['/projects/my-project/invites', { email: 'a@b.io', roleKey: 'triager' }])
   })
 
   test('AC7 boundary: a rejected post rejects create instead of swallowing the error', async () => {
@@ -41,11 +41,21 @@ describe('useProjectInvites (US-007)', () => {
     withApi({ post })
     const { useProjectInvites } = await import(composablePath)
 
-    await expect(useProjectInvites('my-project').create('a@b.io', 'VIEWER')).rejects.toThrow('forbidden')
+    await expect(useProjectInvites('my-project').create('a@b.io', 'reviewer')).rejects.toThrow('forbidden')
   })
 
   test('load GETs the pending invites for the project and stores them', async () => {
-    const invites = [{ id: 'i1', email: 'pending@x.io', role: 'DEVELOPER', status: 'PENDING' }]
+    const invites = [{
+      id: 'i1',
+      email: 'pending@x.io',
+      role: null,
+      roleKey: 'developer',
+      roleName: 'Developer',
+      status: 'PENDING',
+      inviterName: null,
+      expiresAt: '2026-12-01T00:00:00Z',
+      createdAt: '2026-11-01T00:00:00Z',
+    }]
     const get = jest.fn(async () => invites)
     withApi({ get })
     const { useProjectInvites } = await import(composablePath)
@@ -55,6 +65,8 @@ describe('useProjectInvites (US-007)', () => {
 
     expect(get.mock.calls[0]?.[0]).toBe('/projects/my-project/invites')
     expect(store.invites.value).toEqual(invites)
+    // The role fields are part of the contract, and `roleName` is what the panel renders.
+    expect(store.invites.value[0]?.roleName).toBe('Developer')
   })
 
   test('inviteLink joins window.location.origin with the invite path', async () => {

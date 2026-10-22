@@ -72,6 +72,7 @@
     "settings": "设置",
     "slos": "SLO 指标",
     "users": "用户",
+    "roles": "角色",
     "fleetRunners": "执行机",
     "fleetRepos": "仓库",
     "fleetJobs": "Fleet 任务",
@@ -100,6 +101,59 @@
     "toggleTheme": "切换浅色/深色主题"
   },
   "admin": {
+    "roles": {
+      "title": "角色",
+      "subtitle": "创建角色并选择每个角色授予的权限。",
+      "create": "新建角色",
+      "edit": "编辑",
+      "view": "查看",
+      "delete": "删除",
+      "adminOnly": "你没有查看角色的权限。",
+      "deleteConfirm": "确定删除角色“{name}”？",
+      "table": { "name": "名称", "key": "标识", "scope": "范围" },
+      "scope": { "GLOBAL": "全局", "PROJECT": "项目" },
+      "badge": { "system": "系统", "locked": "已锁定" },
+      "risk": { "low": "低", "medium": "中", "high": "高", "critical": "严重" },
+      "matrix": { "none": "无", "own": "仅自己的", "any": "全部", "covered": "已覆盖" },
+      "entries": {
+        "title": "通配符与排除项",
+        "hint": "*.read、prefix.* 或 !ticket.delete 这类条目会按原样、按此顺序保存。",
+        "placeholder": "例如 ticket.transition.*",
+        "add": "添加",
+        "remove": "移除 {entry}"
+      },
+      "form": {
+        "createTitle": "新建角色",
+        "editTitle": "编辑角色 {name}",
+        "viewTitle": "角色 {name}",
+        "lockedHint": "此角色已锁定，无法修改。",
+        "key": "标识",
+        "keyHint": "小写字母、数字和连字符，2 至 49 个字符，创建后不可更改。",
+        "keyFormat": "请使用小写字母、数字和连字符，并以字母开头（2 至 49 个字符）",
+        "name": "名称",
+        "nameRequired": "名称为必填项",
+        "nameTooLong": "名称最多 100 个字符",
+        "description": "描述",
+        "descriptionTooLong": "描述最多 500 个字符",
+        "scope": "范围",
+        "permissions": "权限",
+        "save": "保存角色",
+        "saving": "保存中…"
+      },
+      "toast": { "saved": "角色已保存", "deleted": "角色已删除" }
+    },
+    "bindings": {
+      "title": "{name} 的角色",
+      "addRole": "添加角色",
+      "selectRole": "选择角色",
+      "add": "添加",
+      "empty": "尚未绑定任何角色",
+      "noRoles": "所有角色都已绑定",
+      "permissionsUnavailable": "正在获取你的权限…",
+      "remove": "移除 {name}",
+      "chip": { "allProjects": "{name}（全部项目）" },
+      "toast": { "added": "角色已添加", "removed": "角色已移除" }
+    },
     "users": {
       "title": "用户",
       "subtitle": "创建账号、调整全局角色、停用访问。",
@@ -110,6 +164,8 @@
       "you": "你",
       "enable": "启用",
       "disable": "停用",
+      "editRoles": "编辑角色",
+      "noRoles": "无角色",
       "prev": "上一页",
       "next": "下一页",
       "table": { "email": "邮箱", "name": "姓名", "role": "角色", "status": "状态" },
@@ -179,11 +235,19 @@
       "addEmail": "已有用户的邮箱",
       "add": "添加成员",
       "remove": "移除",
-      "removeConfirm": "确定将 {email} 移出此项目？",
+      "removeConfirm": "确定将 {name} 移出此项目？",
       "empty": "暂无成员。",
       "disabledBadge": "已停用",
       "roleLabel": "角色",
       "loadMore": "加载更多",
+      "agentBadge": "代理",
+      "agentLabel": "代理",
+      "agentPlaceholder": "选择代理",
+      "addAgent": "添加代理",
+      "noAgents": "所有代理都已是此项目的成员。",
+      "addRole": "添加角色",
+      "selectRole": "选择角色",
+      "removeRole": "移除 {name}",
       "roles": {
         "ADMIN": "管理员",
         "DEVELOPER": "开发者",
@@ -193,13 +257,17 @@
       "toast": {
         "added": "已添加成员",
         "removed": "已移除成员",
-        "roleChanged": "角色已更新"
+        "agentAdded": "已添加代理",
+        "roleAdded": "已添加角色",
+        "roleRemoved": "已移除角色"
       }
     },
     "invites": {
       "title": "邀请",
       "subtitle": "通过邮箱邀请他人；邮件不可用时也可分享一次性链接。",
       "emailPlaceholder": "new{'@'}example.com",
+      "roleLabel": "角色",
+      "selectRole": "选择角色",
       "send": "发送邀请",
       "shareTitle": "分享此一次性邀请链接",
       "notEmailed": "邀请邮件未能发送。请分享下方链接。",
@@ -423,6 +491,7 @@
     "title": "代理",
     "createAgent": "创建代理",
     "empty": "暂无代理。",
+    "noRoles": "无角色",
     "project": {
       "empty": "该项目暂无代理。",
       "scopingOff": "本实例已禁用项目代理范围。名单更改可能不会生效。",
@@ -502,6 +571,7 @@
       }
     },
     "actions": {
+      "menu": "操作",
       "editRoles": "编辑角色",
       "editCapabilities": "编辑能力",
       "rotateKey": "轮换密钥",
@@ -798,7 +868,7 @@
         "effortDefault": "默认",
         "effort": { "low": "低", "medium": "中", "high": "高", "xhigh": "极高" },
         "noBackend": "没有在线且启用的执行机提供原生线程模型。",
-        "noPermission": "只有项目管理员和开发者可以创建线程。",
+        "noPermission": "你没有在此项目中创建线程的权限。",
         "skills": "已启用的项目技能",
         "create": "创建线程",
         "validation": {
@@ -1079,7 +1149,7 @@
       "subtitleAdmin": "整个 Fleet 以及单台执行机的支出上限。",
       "subtitleProject": "此项目及其仓库的支出上限。Fleet 全局上限仅供查看。",
       "empty": "暂无预算策略。",
-      "readOnly": "只有项目管理员可以修改预算策略。",
+      "readOnly": "你没有修改预算策略的权限。",
       "forbidden": "您没有访问该项目的权限。",
       "sections": {
         "own": "项目与仓库策略",
@@ -1512,7 +1582,7 @@
       "title": "Fleet 任务",
       "subtitle": "派发到 fleet 执行机的 nax run 与 nax plan",
       "dispatch": "派发",
-      "dispatchNoPermission": "只有项目开发者和管理员可以派发任务。",
+      "dispatchNoPermission": "你没有在此项目中派发任务的权限。",
       "budgets": "预算",
       "schedules": "定时计划",
       "approvals": "审批",
@@ -1718,7 +1788,7 @@
     "dispatch": {
       "title": "派发任务",
       "subtitle": "在一台 fleet 执行机上运行 nax",
-      "noPermission": "只有项目开发者和管理员可以派发任务。",
+      "noPermission": "你没有在此项目中派发任务的权限。",
       "noRepos": "这个项目还没有登记仓库。全局管理员在 Fleet 仓库页面登记。",
       "repo": "仓库",
       "repoPlaceholder": "选择仓库",
@@ -2076,7 +2146,7 @@
         "subtitle": "{repo} · {branch}（{sha}）",
         "checkDrift": "检查漂移",
         "save": "创建 PR（{count}）",
-        "readOnly": "你可以查看此仓库的 nax 文件。编辑需要此项目的开发者或管理员角色。",
+        "readOnly": "你可以查看此仓库的 nax 文件，但不能修改。",
         "activeJob": "此仓库已有一个配置任务在排队或运行。",
         "openActiveJob": "打开",
         "unreachable": "koda 目前无法读取此仓库：{message}",
@@ -2222,6 +2292,7 @@
   "invite": {
     "title": "你被邀请了",
     "subtitle": "加入 {projectName}",
+    "role": "角色：{roleName}",
     "loading": "正在加载邀请…",
     "invalid": "此邀请链接无效或已过期。",
     "accountExists": "该邮箱已存在账户。请直接登录。",

@@ -4,6 +4,7 @@ import * as protocol from '@nathapp/fleet-protocol'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import type { FakeNode } from '../helpers/mount-sfc'
 import { enI18n, toastRecorder, uiStubs } from '../helpers/fleet-harness'
+import { projectPermissionsStub } from '../helpers/permission-nav'
 import * as apiModule from '../../composables/useApi'
 import { ApiError } from '../../composables/useApi'
 
@@ -30,7 +31,10 @@ const flush = async (): Promise<void> => {
 }
 const click = (n: FakeNode | undefined): unknown => (n?.props.onClick as () => unknown)()
 
-function harness(opts: { role?: { canManage: boolean; viewerRole: string | null }; query?: Record<string, string>; api?: Record<string, jest.Mock> } = {}) {
+/** Permissions P1 US-008: editing is fleet.job.config.edit, the drift check fleet.repo.drift.check. */
+const EDITOR = ['fleet.job.config.edit', 'fleet.repo.drift.check']
+
+function harness(opts: { project?: readonly string[]; query?: Record<string, string>; api?: Record<string, jest.Mock> } = {}) {
   const api = {
     list: jest.fn(async () => LIST),
     read: jest.fn(async (_repo: string, path: string) => ({ path, blobSha: path === '.nax/context.md' ? 'ctx1' : 'cfg1', content: path.endsWith('.json') ? '{}' : 'hello' })),
@@ -53,7 +57,7 @@ function harness(opts: { role?: { canManage: boolean; viewerRole: string | null 
       useAppToast: () => toasts,
       useFleetRepoConfig: () => api,
       useFleetDispatchOptions: () => ({ load: async () => undefined, repoName: () => 'acme/app' }),
-      useProjectViewerRole: () => ({ data: Vue.ref(opts.role ?? { canManage: false, viewerRole: 'DEVELOPER' }) }),
+      useProjectPermissions: () => projectPermissionsStub(opts.project ?? EDITOR),
       navigateTo,
       onBeforeRouteLeave: () => undefined,
     },
@@ -97,8 +101,8 @@ describe('config page (S3 §6)', () => {
     expect(app.find('[data-testid="config-problem"]')).toHaveLength(1)
   })
 
-  test('a VIEWER gets a read-only page: notice, no save/new/delete/drift, read-only editor', async () => {
-    const { app } = harness({ role: { canManage: false, viewerRole: 'VIEWER' } })
+  test('a caller with no config key gets a read-only page: notice, no save/new/delete/drift, read-only editor', async () => {
+    const { app } = harness({ project: [] })
     await flush()
     click(app.find('[data-testid="nax-file"]')[0])
     await flush()

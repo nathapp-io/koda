@@ -72,6 +72,7 @@
     "settings": "Settings",
     "slos": "SLOs",
     "users": "Users",
+    "roles": "Roles",
     "fleetRunners": "Runners",
     "fleetRepos": "Repos",
     "fleetJobs": "Fleet jobs",
@@ -100,6 +101,59 @@
     "toggleTheme": "Toggle light/dark theme"
   },
   "admin": {
+    "roles": {
+      "title": "Roles",
+      "subtitle": "Create roles and choose which permissions each one grants.",
+      "create": "New role",
+      "edit": "Edit",
+      "view": "View",
+      "delete": "Delete",
+      "adminOnly": "You do not have permission to view roles.",
+      "deleteConfirm": "Delete the role \"{name}\"?",
+      "table": { "name": "Name", "key": "Key", "scope": "Scope" },
+      "scope": { "GLOBAL": "Global", "PROJECT": "Project" },
+      "badge": { "system": "System", "locked": "Locked" },
+      "risk": { "low": "Low", "medium": "Medium", "high": "High", "critical": "Critical" },
+      "matrix": { "none": "None", "own": "Own", "any": "Any", "covered": "covered" },
+      "entries": {
+        "title": "Wildcards and exclusions",
+        "hint": "Entries such as *.read, prefix.* or !ticket.delete are kept as written, in this order.",
+        "placeholder": "e.g. ticket.transition.*",
+        "add": "Add",
+        "remove": "Remove {entry}"
+      },
+      "form": {
+        "createTitle": "New role",
+        "editTitle": "Edit role {name}",
+        "viewTitle": "Role {name}",
+        "lockedHint": "This role is locked and cannot be changed.",
+        "key": "Key",
+        "keyHint": "Lowercase letters, digits and hyphens, 2 to 49 characters. Cannot change later.",
+        "keyFormat": "Use lowercase letters, digits and hyphens, starting with a letter (2 to 49 characters)",
+        "name": "Name",
+        "nameRequired": "Name is required",
+        "nameTooLong": "Name must be at most 100 characters",
+        "description": "Description",
+        "descriptionTooLong": "Description must be at most 500 characters",
+        "scope": "Scope",
+        "permissions": "Permissions",
+        "save": "Save role",
+        "saving": "Saving…"
+      },
+      "toast": { "saved": "Role saved", "deleted": "Role deleted" }
+    },
+    "bindings": {
+      "title": "Roles for {name}",
+      "addRole": "Add a role",
+      "selectRole": "Select a role",
+      "add": "Add",
+      "empty": "No roles bound yet",
+      "noRoles": "Every role is already bound",
+      "permissionsUnavailable": "Waiting for your permissions…",
+      "remove": "Remove {name}",
+      "chip": { "allProjects": "{name} (all projects)" },
+      "toast": { "added": "Role added", "removed": "Role removed" }
+    },
     "users": {
       "title": "Users",
       "subtitle": "Create accounts, change global roles and disable access.",
@@ -110,6 +164,8 @@
       "you": "you",
       "enable": "Enable",
       "disable": "Disable",
+      "editRoles": "Edit roles",
+      "noRoles": "No roles",
       "prev": "Previous",
       "next": "Next",
       "table": { "email": "Email", "name": "Name", "role": "Role", "status": "Status" },
@@ -179,11 +235,19 @@
       "addEmail": "Email of an existing user",
       "add": "Add member",
       "remove": "Remove",
-      "removeConfirm": "Remove {email} from this project?",
+      "removeConfirm": "Remove {name} from this project?",
       "empty": "No members yet.",
       "disabledBadge": "Disabled",
       "roleLabel": "Role",
       "loadMore": "Load more",
+      "agentBadge": "Agent",
+      "agentLabel": "Agent",
+      "agentPlaceholder": "Choose an agent",
+      "addAgent": "Add agent",
+      "noAgents": "Every agent is already a member of this project.",
+      "addRole": "Add role",
+      "selectRole": "Choose a role",
+      "removeRole": "Remove {name}",
       "roles": {
         "ADMIN": "Admin",
         "DEVELOPER": "Developer",
@@ -193,13 +257,17 @@
       "toast": {
         "added": "Member added",
         "removed": "Member removed",
-        "roleChanged": "Role updated"
+        "agentAdded": "Agent added",
+        "roleAdded": "Role added",
+        "roleRemoved": "Role removed"
       }
     },
     "invites": {
       "title": "Invites",
       "subtitle": "Invite someone by email, or share a one-time link when email is unavailable.",
       "emailPlaceholder": "new{'@'}example.com",
+      "roleLabel": "Role",
+      "selectRole": "Choose a role",
       "send": "Send invite",
       "shareTitle": "Share this one-time invite link",
       "notEmailed": "The invite email could not be sent. Share the link below.",
@@ -423,6 +491,7 @@
     "title": "Agents",
     "createAgent": "Create Agent",
     "empty": "No agents yet.",
+    "noRoles": "No roles",
     "project": {
       "empty": "No agents on this project yet.",
       "scopingOff": "Project agent scoping is disabled on this instance. Roster changes may be ignored.",
@@ -517,6 +586,7 @@
       }
     },
     "actions": {
+      "menu": "Actions",
       "editRoles": "Edit Roles",
       "editCapabilities": "Edit Capabilities",
       "rotateKey": "Rotate Key",
@@ -798,7 +868,7 @@
         "effortDefault": "Default",
         "effort": { "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high" },
         "noBackend": "No online enabled runner offers a native thread model.",
-        "noPermission": "Only project administrators and developers can create threads.",
+        "noPermission": "You do not have permission to create threads in this project.",
         "skills": "Enabled project skills",
         "create": "Create thread",
         "validation": {
@@ -1079,7 +1149,7 @@
       "subtitleAdmin": "Spending caps for the whole fleet and for single runners.",
       "subtitleProject": "Spending caps for this project and its repos. Fleet-wide caps are shown read-only.",
       "empty": "No budget policies yet.",
-      "readOnly": "Only project administrators can change budget policies.",
+      "readOnly": "You do not have permission to change budget policies.",
       "forbidden": "You do not have access to this project.",
       "sections": {
         "own": "Project and repo policies",
@@ -1512,7 +1582,7 @@
       "title": "Fleet jobs",
       "subtitle": "nax runs and plans dispatched to fleet runners",
       "dispatch": "Dispatch",
-      "dispatchNoPermission": "Only project developers and admins can dispatch jobs.",
+      "dispatchNoPermission": "You do not have permission to dispatch jobs in this project.",
       "budgets": "Budgets",
       "schedules": "Schedules",
       "approvals": "Approvals",
@@ -1718,7 +1788,7 @@
     "dispatch": {
       "title": "Dispatch a job",
       "subtitle": "Run nax on one of the fleet runners",
-      "noPermission": "Only project developers and admins can dispatch jobs.",
+      "noPermission": "You do not have permission to dispatch jobs in this project.",
       "noRepos": "No repos are registered for this project yet. A global admin registers them on the Fleet repos page.",
       "repo": "Repo",
       "repoPlaceholder": "Select a repo",
@@ -2076,7 +2146,7 @@
         "subtitle": "{repo} · {branch} ({sha})",
         "checkDrift": "Check drift",
         "save": "Open PR ({count})",
-        "readOnly": "You can read this repo's nax files. Editing needs the Developer or Admin role in this project.",
+        "readOnly": "You can read this repo's nax files, but not change them.",
         "activeJob": "A config job for this repo is already queued or running.",
         "openActiveJob": "Open it",
         "unreachable": "koda cannot read this repo right now: {message}",
@@ -2222,6 +2292,7 @@
   "invite": {
     "title": "You're invited",
     "subtitle": "Join {projectName}",
+    "role": "Role: {roleName}",
     "loading": "Loading invite…",
     "invalid": "This invite link is invalid or has expired.",
     "accountExists": "An account already exists for this email. Sign in instead.",

@@ -1,0 +1,1592 @@
+{
+  "project": "koda",
+  "feature": "permissions-p1-web",
+  "branchName": "feat/permissions-p1-web",
+  "createdAt": "2026-07-14T00:00:00.000Z",
+  "updatedAt": "2026-10-22T12:12:36.922Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Return the caller's effective keys from GET /me/permissions",
+      "description": "**Goal** — Expose the authenticated user's or agent's effective global or project keys for fail-closed web gating.\n\n**Motivation** — The API decides every request on permission keys since enforce-core, and roles are data: a Triager, an Approver or any custom role is a first-class binding.\n\n**Approach** — New controller `MePermissionsController` in `apps/api/src/projects/me-permissions.controller.ts`, registered in `ProjectsModule` (it needs `ProjectAccessService`; `PermissionsModule` is global, so the controller cannot live there without importing `ProjectsModule`).\n\n```ts\n@ApiTags('permissions')\n@ApiBearerAuth()\n@Controller('me/permissions')\nexport class MePermissionsController {\n  constructor(private readonly access: ProjectAccessService, private readonly permissions: PermissionService) {}\n\n  @Get()\n  @UseGuards(RequiresGuard)\n  @Requires('auth.me.read')            // implicit: every authenticated principal holds it\n  async read(@Query() query: MePermissionsQuery, @Principal() principal: KodaPrincipal) { ... }\n}\n```\n\n- `MePermissionsQuery { project?: string }` (a project slug, `IsString` and `IsNotEmpty` when present: `?project=` with an empty value is a 400 validation error). A runner never reaches this route: `CombinedAuthGuard` keeps runner keys on `@RunnerRoute()` routes.\n- Without `project`: `PermissionService.effectiveKeys(ref, 'global')`.\n- With `project`: `ProjectAccessService.findProjectIdBySlug(slug)` (404 `projects`), then `ProjectAccessService.resolveMembership(projectId, principal)` (403 `projects` when the caller lacks `project.read` there), then `PermissionService.effectiveKeys(ref, { projectId })`.\n- Response `MePermissionsDto { scope: 'global' | 'project'; projectSlug: string | null; keys: string[] }`, `keys` sorted ascending. The set is exactly what `effectiveKeys` returns: role-derived keys and `X.own` entries, never implicit or public keys.\n- `ref` is `{ type: 'USER' | 'AGENT', id }` from the principal, as `PermissionService.can` builds it.\n\n**Scope** — In: controller, DTOs, ProjectsModule registration, integration behavior and endpoint e2e inventory case, preserving existing controllers and cases. Out: catalog/filter changes (US-002), browser composables (US-006), spec export (US-005). `/me/permissions` lists role-derived keys only; implicit and public keys are always allowed by the API and are not listed.\n\n**Interface** — `PermissionService.effectiveKeys(principal: PrincipalRef, scope: PermissionScope): Promise<ReadonlySet<string>>`; `MePermissionsQuery { project?: string }`; `MePermissionsDto { scope: 'global' | 'project'; projectSlug: string | null; keys: string[] }`.",
+      "acceptanceCriteria": [
+        "[integration] As a user holding only the baseline member binding, GET /api/me/permissions returns 200 with scope: 'global', projectSlug: null, and keys equal to the ascending-sorted expandEntries of the member role's entries.",
+        "[integration] As a developer of p, GET /api/me/permissions?project=<p.slug> returns scope: 'project', projectSlug: p.slug, and keys including ticket.create and comment.update.own and excluding ticket.delete.",
+        "[integration] As a user with a global admin binding and no binding in p, GET /api/me/permissions?project=<p.slug> returns keys including ticket.delete and role.binding.manage.",
+        "[integration] As an agent holding a developer binding in p, GET /api/me/permissions?project=<p.slug> returns keys including ticket.create.",
+        "[integration] As a user with a global owner binding, GET /api/me/permissions returns keys excluding the implicit key auth.me.read and public key session.login.",
+        "[integration] GET /api/me/permissions?project=no-such-project returns 404 with error key projects.",
+        "[integration] As a user with no binding in p and no global admin binding, GET /api/me/permissions?project=<p.slug> returns 403 with error key projects.",
+        "[integration] GET /api/me/permissions?project= with an empty value returns 400 validation."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard controller/DTO/DI integration over existing services; access-control disclosure requires strict isolated TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.4800000000000004,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T04:25:36.985Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/permission.service.ts",
+        "apps/api/src/projects/project-access.service.ts",
+        "apps/api/src/projects/projects.module.ts",
+        "apps/api/src/permissions/roles.controller.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/projects/me-permissions.controller.ts",
+        "apps/api/src/projects/dto/me-permissions.dto.ts",
+        "apps/api/test/integration/permissions/me-permissions.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/projects.module.ts",
+          "reason": "registers `MePermissionsController`; no test pins the controller list. The replacing invariant: every existing controller stays registered."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the api-testing rule requires every API endpoint change to be reflected here. The replacing invariant: it gains a case for the GET me permissions route; existing cases unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b7238ecbe6d9fd6ee86cb114f1556b6671c4944d"
+    },
+    {
+      "id": "US-002",
+      "title": "Expose the catalog, expanded role keys and binding filters",
+      "description": "**Goal** — Supply catalog metadata, safe expanded role keys and principal-type/global binding reads.\n\n**Motivation** — The catalog (risk, scope, ownability) is code-only; and `GET /role-bindings` cannot list \"every agent's global bindings\" in one filter.\n\n**Approach** — - New controller `PermissionCatalogController` in `apps/api/src/permissions/permission-catalog.controller.ts`, registered in `PermissionsModule.controllers`: `GET /permissions/catalog`, `@UseGuards(RequiresGuard)`, `@Requires('role.read')`. It returns `PermissionCatalogEntryDto[]` for every `PERMISSION_CATALOG` entry whose `access` is `'role'`, sorted by `key`:\n\n```ts\nclass PermissionCatalogEntryDto { key: string; scope: 'global' | 'project' | 'any'; risk: 'low' | 'medium' | 'high' | 'critical'; principals: ('user' | 'agent')[]; ownable: boolean }\n```\n\n- `RoleDto` gains `expandedKeys: string[]`: `expandEntries(role.permissions, role.scope)` as a sorted array, or `[]` when the stored entries no longer expand (`expandEntries` throws). Every route that returns a `RoleDto` carries it.\n- `ListRoleBindingsQuery` changes:\n  - `principalType` alone is now accepted and filters by type; `principalId` alone is still refused (400 validation).\n  - New `scope?: 'global'`: only `projectId`-null bindings. Any other value is a 400 validation error, and `scope=global` together with a non-empty `projectId` is a 400 validation error with key `permissions.scopeAndProject`.\n  - `BindingFilter` gains `principalType?: PrincipalType`; `MembershipService.listBindings`, `PrismaRoleBindingRepository` and the test double `InMemoryPermissionStore` (`apps/api/src/permissions/test-helpers/in-memory-permissions.ts`) honour it. `projectId: null` in the filter already means \"global bindings only\".\n\nNew API error keys get messages in both `en` and `zh`, under both the `-2` and `400` status keys as `permissions.scopeMismatch` has them: `permissions.scopeAndProject` (`permissions.json`). Exceptions are `new XAppException({}, '<namespace>.<code>')`, with messages at `<namespace>.<code>.<status>`.\n\n**Scope** — In: catalog DTO/controller/module, common RoleDto serialization, query/controller/filter/repository/test-double propagation, localized scope conflict, endpoint inventory and existing binding/unit regressions. Out: project role listing and members (US-003), browser editor (US-010), binding browser (US-011), OpenAPI export (US-005).\n\n**Interface** — `RoleDto` target `{ id, key, name, description, scope, system, locked, permissions, expandedKeys: string[] }`; `ListRoleBindingsQuery` target accepts `principalType` alone and `scope?: 'global'`; `BindingFilter` gains `principalType?: PrincipalType`.",
+      "acceptanceCriteria": [
+        "[integration] As a global admin, GET /api/permissions/catalog returns 200 with one entry per PERMISSION_CATALOG entry whose access is 'role', sorted by key.",
+        "[integration] The catalog's ticket.delete entry equals { key: 'ticket.delete', scope: 'project', risk: 'high', principals: ['user', 'agent'], ownable: false }, and its comment.update entry has ownable: true.",
+        "[integration] As a user holding only the baseline member binding, GET /api/permissions/catalog returns 403 with error key permissions.",
+        "[integration] As a global admin, GET /api/roles returns developer.expandedKeys sorted ascending, including ticket.create and comment.update.own and excluding ticket.delete.",
+        "[unit] RoleDto.from for a role whose permissions is ['no.such.key'] returns expandedKeys: [] and the stored permissions unchanged.",
+        "[integration] As a global admin, with two agents and one user each holding a global binding, GET /api/role-bindings?principalType=AGENT returns only the two agents' bindings.",
+        "[integration] As a global admin, with one user holding a global admin binding and a developer binding in p, GET /api/role-bindings?principalType=USER&principalId=<id>&scope=global returns only the global binding.",
+        "[integration] GET /api/role-bindings?principalId=<id> without principalType returns 400 validation.",
+        "[integration] GET /api/role-bindings?scope=project returns 400 validation.",
+        "[integration] GET /api/role-bindings?scope=global&projectId=<p.id> returns 400 with error key permissions.scopeAndProject."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "security",
+        "data"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Multi-layer permission metadata and query/filter propagation with authorization-sensitive scope narrowing.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.08000000000000007,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T04:42:05.508Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/permissions/entry-matcher.ts",
+        "apps/api/src/permissions/dto/role.dto.ts",
+        "apps/api/src/permissions/dto/role-binding.dto.ts",
+        "apps/api/src/permissions/role-bindings.controller.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/permissions/permission-catalog.controller.ts",
+        "apps/api/src/permissions/dto/permission-catalog-entry.dto.ts",
+        "apps/api/src/permissions/dto/role.dto.spec.ts",
+        "apps/api/test/integration/permissions/permission-catalog.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/permissions.module.ts",
+          "reason": "registers `PermissionCatalogController` beside `RolesController` and `RoleBindingsController`. The replacing invariant: the existing providers and exports are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/role-bindings-api.integration.spec.ts",
+          "reason": "any case asserting that `principalType` without `principalId` is a 400 now sees 200 filtered by type. The replacing invariant: `principalId` without `principalType` is still a 400; `principalType` alone lists only that type."
+        },
+        {
+          "path": "apps/api/src/permissions/membership.service.spec.ts",
+          "reason": "`listBindings` cases pin the filter object passed to the repository. The replacing invariant: a filter with `principalType` reaches the repository unchanged; existing filters behave as before."
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/in-memory-permissions.ts",
+          "reason": "the in-memory binding list filters only by `principal` and `projectId` (line ~147). The replacing invariant: it also filters by `principalType`."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the api-testing rule requires every API endpoint change to be reflected here. The replacing invariant: it gains a case for the GET permissions catalog route; existing cases unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e5240dc0a1e44bd0d37bdad0cf8dea582e9e1bdc"
+    },
+    {
+      "id": "US-003",
+      "title": "List assignable project roles and unified user/agent members",
+      "description": "**Goal** — Let member.read holders load project roles and paginated users/agents with local binding chips.\n\n**Motivation** — `role.read` is a global key, so a Project Admin cannot list roles or bindings.\n\n**Approach** — - `RoleAdminService.listProjectRoles(): Promise<RoleDomain[]>` (new, public): every role with `scope = 'PROJECT'`, system roles first, then by `key`. It checks no key: its route's guard does.\n- New controller `ProjectRolesController` in `apps/api/src/projects/members/project-roles.controller.ts`, registered in `ProjectMembersModule`: `GET /projects/:slug/roles`, `@UseGuards(ProjectMembershipGuard, RequiresGuard)`, `@Requires('member.read')`. It returns `ProjectRoleDto { id, key, name, description, system }[]` from `listProjectRoles()`.\n- `GET /projects/:slug/members` takes `principals?: 'users' | 'all'` (default `users`; any other value is 400 validation).\n  - `ProjectMemberDto` changes: `userId: string | null` (null for agents), `email: string | null` (null for agents), plus `principalType: 'USER' | 'AGENT'`, `principalId: string`, `agentSlug: string | null` (null for users), `bindings: MemberBindingDto[]`. `name`, `role`, `disabled` and `joinedAt` keep their meaning; for an agent `name` is `Agent.name`, `disabled` is `false`, and `role` is the strongest legacy role of its sources as `listProjectMemberships` reports it.\n  - `MemberBindingDto { id: string | null; roleKey: string; roleName: string }`: one entry per `RoleBinding` of that principal **in this project** (`projectId` equal), ordered by `createdAt`. Then the legacy rows, read directly for the page's principals: a `ProjectMember` row (`projectMember.findMany` by `projectId` and the page's user ids) maps its `role` through `ROLE_KEY_FOR_LEGACY_ROLE` (`ADMIN` → `project-admin`, `DEVELOPER` → `developer`, `VIEWER` → `viewer`; any other value → `viewer`), and an `AgentProject` row (`agentProject.findMany`, which has no role column) maps to `viewer`. A legacy row adds one entry with `id: null` only when the principal has no binding of that key in the project. All-projects bindings are not listed here.\n  - The single-record responses carry the same shape with `bindings` populated: `POST /projects/:slug/members`, the legacy `PATCH /projects/:slug/members/:userId`, and the `member` of an invite's `ADDED` outcome. `ProjectMemberRecord` (the shared domain type in `domain/project-member.domain.ts`) gains `principalType`, `principalId`, `agentSlug` and `bindings`, and `userId` / `email` become `string | null`; `ProjectMemberDto.from(record)` copies them.\n  - With `principals=all`, the page is the user rows (in today's order) followed by the agent rows (`listProjectMemberships(db, projectId, 'AGENT')`, same order rule); `total` counts both.\n  - `canManage` and `viewerRole` stay in the response unchanged (drop-legacy removes them).\n\n**Scope** — In: service/controller/module/repository/domain/DTO enrichment, combined pagination before slicing, all single-record producers, member service/controller/DI unit fixtures and route inventory case. Out: grant helper/roleKey member writes (US-004), invite role migration (US-005), browser management panel (US-013). All-projects bindings are not shown or edited in a project's member list; they are managed on Admin → Users and Admin → Agents.\n\n**Interface** — `RoleAdminService.listProjectRoles(): Promise<RoleDomain[]>`; `ProjectMembersService.list(slug, principal, page, principals: 'users' | 'all')` with omitted principals defaulting to 'users'; `MemberBindingDto { id: string | null; roleKey: string; roleName: string }`; `ProjectRoleDto { id, key, name, description, system }`.",
+      "acceptanceCriteria": [
+        "[integration] As a viewer of p, GET /api/projects/<p.slug>/roles returns 200 with every PROJECT-scope role, system roles first then by key, each with exactly id, key, name, description and system, and no GLOBAL role.",
+        "[integration] With RoleAdminService.listProjectRoles spied to resolve one role, GET /api/projects/<p.slug>/roles as a viewer of p calls the spy once and returns that one role.",
+        "[integration] As a user with no access to p, GET /api/projects/<p.slug>/roles returns 403.",
+        "[integration] As a viewer of p, GET /api/projects/<p.slug>/members without principals returns only user rows, each with principalType: 'USER', principalId equal to userId, and agentSlug: null.",
+        "[integration] Given a user holding developer and triager bindings in p, GET /api/projects/<p.slug>/members returns that user's row with two bindings entries ordered by binding createdAt, carrying the bindings' ids, roleKeys developer and triager and each role's name as roleName.",
+        "[integration] With an agent holding a reviewer binding in p, GET /api/projects/<p.slug>/members?principals=all returns user rows followed by one agent row with principalType: 'AGENT', userId: null, email: null, the agent's slug as agentSlug, its name, disabled: false and one reviewer binding; total counts the users and the agent.",
+        "[integration] With an agent holding a reviewer binding in every project (projectId null) and none in p, GET /api/projects/<p.slug>/members?principals=all returns no row for that agent.",
+        "[integration] Given a user whose only source in p is a legacy ProjectMember row of role DEVELOPER, GET /api/projects/<p.slug>/members returns that user's row with exactly one binding entry { id: null, roleKey: 'developer', roleName: <developer role name> }.",
+        "[integration] GET /api/projects/<p.slug>/members?principals=agents returns 400 validation.",
+        "[integration] With principals=all, size=1 and two users plus one agent in p, current=3 returns the agent row and hasNext: false.",
+        "[integration] A caller with project access but without member.read receives 403 from GET /api/projects/<p.slug>/roles."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "membership",
+        "security"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module domain shape changes and compatibility-aware combined pagination; permission-scoped member disclosure requires security TDD.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.13999999999999968,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T04:56:17.925Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/projects/members/project-members.service.ts",
+        "apps/api/src/projects/members/prisma-project-members.repository.ts",
+        "apps/api/src/permissions/legacy-membership.queries.ts",
+        "apps/api/src/permissions/role-admin.service.ts",
+        "apps/api/src/projects/members/dto/project-member.dto.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/projects/members/project-roles.controller.ts",
+        "apps/api/src/projects/members/dto/project-role.dto.ts",
+        "apps/api/src/projects/members/dto/member-binding.dto.ts",
+        "apps/api/test/integration/projects/project-members-principals.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/members/project-members.service.spec.ts",
+          "reason": "`new ProjectMembersService(...)` and `list` cases pin today's record shape and three-argument `list`. The replacing invariant: records carry `principalType: 'USER'`, `principalId`, `agentSlug: null` and `bindings`; `list` takes `principals` (default `'users'`)."
+        },
+        {
+          "path": "apps/api/src/projects/members/project-members.controller.spec.ts",
+          "reason": "lines ~40 and ~50 assert `service.list` was called with exactly three arguments. The replacing invariant: the controller parses `principals` and passes it as the fourth argument, `'users'` when absent."
+        },
+        {
+          "path": "apps/api/src/projects/members/project-members.module.spec.ts",
+          "reason": "compiles `ProjectMembersModule` with doubles for `MembershipService` and `PermissionService`; `ProjectRolesController` needs `RoleAdminService`. The replacing invariant: a `RoleAdminService` `useValue` double is provided and exported beside them."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the api-testing rule requires every API endpoint change to be reflected here. The replacing invariant: it gains a case for the project roles route (GET on a project slug's roles); existing cases unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-members.integration.spec.ts",
+          "reason": "asserts members with `toEqual(expect.objectContaining({ userId, role }))`. The replacing invariant: unchanged assertions still pass; no case asserts the absence of the new fields."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "85975b7f653dd6ba51cd35338c4169385ef1bafa"
+    },
+    {
+      "id": "US-004",
+      "title": "Grant member role keys through shared escalation rules",
+      "description": "**Goal** — Secure custom-role and legacy member grants and support role-less admin user creation.\n\n**Motivation** — A Triager, an Approver or any custom role is a first-class binding.\n\n**Approach** — US-004 owns `assertMayGrant`, the member add and `CreateUserDto`; US-005 owns everything about invites and the `openapi.json` regeneration.\n\n- `RoleAdminService.assertMayGrant(principal, target: { roleKey: string; projectId: string | null; principalType: PrincipalType; principalId: string | null }): Promise<RoleDomain>` (new, public). It runs the binding rules that do not need an existing target row, in this order, and returns the role:\n  1. role lookup by key: 404 `permissions.roleNotFound`;\n  2. a GLOBAL role with a project id: 400 `permissions.scopeMismatch`;\n  3. principal type: 400 `permissions.principalType` (as `assertPrincipalType`);\n  4. self: when `principalId` equals the caller's id and type, 403 `permissions.selfBinding`;\n  5. escalation: 403 `permissions.escalation` (as `createBinding`'s `assertNoEscalation`, scope from `projectId`).\n\n  It does not check `role.binding.manage` / `role.binding.global`: the calling route's own key (`member.add`, `invite.create`) is the gate. `createBinding` keeps its own checks unchanged.\n- `POST /projects/:slug/members`: `AddMemberDto` gains `roleKey?: string` (`ROLE_KEY_PATTERN`); both fields are optional in the DTO. The service throws `ValidationAppException({}, 'members.roleAndRoleKey')` when both are sent; neither means `viewer`, as today. The effective key is `roleKey`, else `ROLE_KEY_FOR_LEGACY_ROLE[role]`, else `viewer`. After the user lookup (404 `members.user`, 409 `members.userDisabled`), `ProjectMembersService.add` calls `assertMayGrant(principal, { roleKey: <effective key>, projectId, principalType: 'USER', principalId: user.id })` on every path, then writes the binding with that key inside the existing transaction (409 `members` when already a member).\n- `CreateUserDto.role` becomes optional (default `'MEMBER'`), so the web creates a user and then binds roles. `UsersAdminService.create` and its input type treat an absent `role` as `'MEMBER'`.\n- New API error keys get messages in both `en` and `zh`, under both the `-2` and `400` status keys as `permissions.scopeMismatch` has them: `members.roleAndRoleKey` (`members.json`).\n\nBoth write routes use one order: user lookup, then 409 for a disabled existing account (`invites.userDisabled` / `members.userDisabled`), then `assertMayGrant`, then 409 for an existing member (`invites.memberExists` / `members`). Order of checks on every write route: (1) the permission key, (2) input validation and lookups, (3) self-binding, (4) escalation, (5) Owner lock. `ProjectMembersService` constructor adds `RoleAdminService` as the last parameter; update service and DI doubles and optional-role DTO tests.\n\n**Scope** — In: shared helper and unchanged createBinding checks, member custom/legacy/default role grant, optional CreateUserDto/service/input role default, messages and unit/integration changes. Out: applying the helper to invites and schema migration (US-005), browser forms (US-011/013). Legacy role fields/routes remain for the CLI.\n\n**Interface** — `RoleAdminService.assertMayGrant(principal, target: { roleKey: string; projectId: string | null; principalType: PrincipalType; principalId: string | null }): Promise<RoleDomain>`; `AddMemberDto.roleKey?: string`; `CreateUserDto.role` optional, default `'MEMBER'`.",
+      "acceptanceCriteria": [
+        "[integration] As a Project Admin of p, POST /api/projects/<p.slug>/members { email, roleKey: 'triager' } returns 201 and grants the user only a triager binding in p.",
+        "[integration] As a user holding a custom PROJECT role in p with entries ['member.add', 'member.read', 'project.read'], POST /api/projects/<p.slug>/members { email, roleKey: 'developer' } returns 403 permissions.escalation and leaves the target with no binding in p.",
+        "[unit] ProjectMembersService.add with { email, roleKey: 'triager' } calls RoleAdminService.assertMayGrant once with { roleKey: 'triager', projectId, principalType: 'USER', principalId: <user id> } before MembershipService.createBinding, and an assertMayGrant rejection prevents createBinding.",
+        "[integration] POST /api/projects/<p.slug>/members { email, role: 'DEVELOPER', roleKey: 'developer' } returns 400 members.roleAndRoleKey.",
+        "[integration] As a Project Admin, POST /api/projects/<p.slug>/members { email, roleKey: 'no-such-role' } returns 404 permissions.roleNotFound.",
+        "[integration] As a user holding a custom PROJECT role in p with entries ['member.add', 'member.read', 'project.read'], POST /api/projects/<p.slug>/members { email, role: 'DEVELOPER' } using the legacy field only returns 403 permissions.escalation and leaves the target with no binding in p.",
+        "[integration] As a Project Admin of p, POST /api/projects/<p.slug>/members { email, roleKey: 'admin' } for a GLOBAL role returns 400 permissions.scopeMismatch.",
+        "[integration] As a Project Admin of p, POST /api/projects/<p.slug>/members { email: <the caller's own email>, roleKey: 'viewer' } returns 403 permissions.selfBinding.",
+        "[integration] The 201 response for adding triager carries principalType: 'USER', principalId equal to userId and bindings exactly [{ id: <the new binding's id>, roleKey: 'triager', roleName: <triager role name> }].",
+        "[integration] As a global admin, POST /api/admin/users { email, name, password } without role returns 201 and persists the user's User.role as 'MEMBER'."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "security",
+        "membership"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Shared security-sensitive grant preflight must preserve check order, legacy compatibility and separate binding-route authorization.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.05999999999999961,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T05:51:07.339Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/role-admin.service.ts",
+        "apps/api/src/projects/members/project-members.service.ts",
+        "apps/api/src/projects/members/dto/add-member.dto.ts",
+        "apps/api/src/users/dto/create-user.dto.ts",
+        "apps/api/src/users/users-admin.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/projects/member-role-keys.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/members/project-members.service.spec.ts",
+          "reason": "`new ProjectMembersService(...)` (line ~44) has no `RoleAdminService`, and `add` cases expect the binding to be written with no `assertMayGrant` call. A `RoleAdminService` double is passed as the last constructor argument. The replacing invariant: `assertMayGrant` is called with `{ roleKey, projectId, principalType: 'USER', principalId }` before the write, and a rejection writes nothing."
+        },
+        {
+          "path": "apps/api/src/users/dto/user-dto.spec.ts",
+          "reason": "`CreateUserDto` cases pass `role: 'MEMBER'` as required. The replacing invariant: an omitted `role` validates; `role: 'OWNER'` is still refused."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "785987550a8fafc96e8753867bbb216a9d24e183"
+    },
+    {
+      "id": "US-005",
+      "title": "Persist and accept invite role keys and export the API contract",
+      "description": "**Goal** — Carry project role identities through invite creation, preview, mail and acceptance without breaking legacy invites.\n\n**Motivation** — The members panel and the invites panel offer only ADMIN/DEVELOPER/VIEWER.\n\n**Approach** — US-004 owns `assertMayGrant`, the member add and `CreateUserDto`; US-005 owns everything about invites and the `openapi.json` regeneration.\n\n- `POST /projects/:slug/invites`: `CreateInviteDto.role` becomes optional and gains `roleKey?: string`; both are optional in the DTO, and the service requires exactly one (both: `ValidationAppException({}, 'invites.roleAndRoleKey')`; neither: `ValidationAppException({}, 'invites.roleRequired')`). The effective key is `roleKey`, else `ROLE_KEY_FOR_LEGACY_ROLE[role]`. Both write routes use one order: user lookup, then 409 for a disabled existing account (`invites.userDisabled` / `members.userDisabled`), then `assertMayGrant`, then 409 for an existing member (`invites.memberExists` / `members`). `ProjectInvitesService.create` calls `assertMayGrant(principal, { roleKey: <effective key>, projectId, principalType: 'USER', principalId: existingUserId ?? null })` at that point on both paths; `addExistingUser` binds that role key and `inviteNewAddress` stores the invite with `roleId`.\n- Schema: `ProjectInvite.roleId String?` with `assignedRole Role? @relation(fields: [roleId], references: [id], onDelete: SetNull)` (and `invites ProjectInvite[]` on `Role`); `ProjectInvite.role String?` (nullable). Migration `apps/api/prisma/migrations/20261101090000_invite_role_id/migration.sql`. A new invite stores `roleId` and stores `role` only when its key is `project-admin`, `developer` or `viewer` (the legacy enum the key maps to), else null. The spec's illustrative relation was also named `role`; that cannot coexist with the retained `role` scalar in Prisma. Use the internal relation name `assignedRole` and update repository includes/mapping accordingly, keeping the scalar, FK semantics and HTTP fields unchanged.\n- Invite acceptance (`InviteAcceptanceService`) binds the role named by `roleId`; a row with `roleId` null binds `ROLE_KEY_FOR_LEGACY_ROLE[role]`; a row with both null answers 409 `invites.roleGone`.\n- `InviteDto` and `InvitePreviewDto` gain `roleKey: string | null` and `roleName: string | null` (from `roleId`'s role, else from the legacy `role` mapping, else null); `role` becomes `string | null`. The invite email passes `roleName` as the existing `{{role}}` placeholder value; the templates are unchanged.\n- New API error keys get messages in both `en` and `zh`, under both the `-2` and `400` status keys as `permissions.scopeMismatch` has them: `invites.roleAndRoleKey`, `invites.roleRequired`, `invites.roleGone` (`invites.json`).\n- `openapi.json` is regenerated with `bun run api:export-spec` in US-005, after the last API contract change.\n\n`assertMayGrant` also runs when a caller sends only the legacy `role` (mapped to its key through `ROLE_KEY_FOR_LEGACY_ROLE`), so the CLI path gets the same escalation and self-binding rules as `roleKey`. `ProjectInvitesService` constructor adds `RoleAdminService` as the last parameter. Update GlobalStubsModule, repository/domain/create inputs, DTOs, acceptance/member result fixtures and invite mailer inputs; preserve transaction/claim/cache/session and token-secrecy behavior. The invite list gains roleKey/roleName (nine keys), preview gains them (eight keys), with no token/tokenHash leakage. Exceptions are `new XAppException({}, '<namespace>.<code>')` with localized status messages.\n\n**Scope** — In: invites' helper use, migration, nullable role fields, legacy fallback, roleName mail value and OpenAPI export after all API changes. Out: helper definition and member writes (US-004), web invite panels (US-014). The MEMBER_ADDED email (`email-content.builder.ts`) still shows the legacy role string; giving it the role name is out of scope. The CLI (`apps/cli`) and its generated client are not changed; the CLI keeps the legacy `role` flags until a CLI follow-up. `apps/cli/src/generated/` is not regenerated. US-005 only: an existing pending invite created before the migration keeps `roleId` null and is accepted through its legacy `role`; no backfill.\n\n**Interface** — `CreateInviteDto { role?: ProjectMemberRole; roleKey?: string }`; `InviteDto` / `InvitePreviewDto` target `role: string | null; roleKey: string | null; roleName: string | null`; `ProjectInvite.roleId String?`; `assignedRole Role? @relation(fields: [roleId], references: [id], onDelete: SetNull)`; the legacy scalar remains `role String?`.",
+      "acceptanceCriteria": [
+        "[integration] As a Project Admin of p, POST /api/projects/<p.slug>/invites { email: <new address>, roleKey: 'triager' } returns outcome: 'INVITED', stores triager's id as roleId and null as role, and returns invite.roleKey: 'triager' and roleName equal to that role's name.",
+        "[integration] As a user holding a custom PROJECT role in p with entries ['invite.create', 'invite.read', 'project.read'], POST /api/projects/<p.slug>/invites { email: <new address>, roleKey: 'developer' } returns 403 permissions.escalation and creates no ProjectInvite for that address.",
+        "[integration] POST /api/projects/<p.slug>/invites { email } with neither role nor roleKey returns 400 invites.roleRequired, and with both returns 400 invites.roleAndRoleKey.",
+        "[integration] As a Project Admin, POST /api/projects/<p.slug>/invites { email: <existing user's email>, roleKey: 'verifier' } returns outcome: 'ADDED' and grants the user a verifier binding in p.",
+        "[integration] POST /api/invites/<token>/accept for an invite created with roleKey: 'triager' creates the user with a triager binding in p.",
+        "[integration] Accepting an invite with roleId null and role 'VIEWER' creates the user with a viewer binding in p.",
+        "[integration] Accepting an invite whose roleId and role are both null returns 409 invites.roleGone and leaves no user for its email and no new binding.",
+        "[integration] DELETE /api/roles/<id> for the custom role named by an unaccepted invite returns 204 and sets the invite's roleId to null.",
+        "[integration] GET /api/invites/<token> returns exactly projectName, projectSlug, email, role, roleKey, roleName, inviterName and expiresAt, with roleKey: 'triager' for an invite created with that key.",
+        "[integration] The ADDED response for adding verifier carries a member whose bindings contain exactly one entry with roleKey: 'verifier' and the new binding's id.",
+        "[integration] As a Project Admin of p, POST /api/projects/<p.slug>/invites { email: <the caller's own email>, roleKey: 'viewer' } returns 403 permissions.selfBinding and leaves the caller's bindings unchanged.",
+        "[integration] As a Project Admin, POST /api/projects/<p.slug>/invites { email: <new address>, roleKey: 'no-such-role' } returns 404 permissions.roleNotFound and creates no ProjectInvite for that address."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "invites",
+        "prisma",
+        "contract"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002",
+        "US-003",
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Nullable-FK migration crosses role grants, anonymous account/session creation, transaction safety, mail and legacy compatibility; multi-constraint bespoke convention fidelity is critical.",
+        "agentProfileId": "claude-sonnet",
+        "agent": "claude",
+        "profileModelTier": "balanced",
+        "initialAgent": "claude",
+        "initialProfileId": "claude-sonnet",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "claude-sonnet",
+          "confidence": 0.6600000000000001,
+          "plannedProfileId": "claude-sonnet",
+          "applied": false,
+          "decidedAt": "2026-10-22T06:07:25.076Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/projects/invites/project-invites.service.ts",
+        "apps/api/src/projects/invites/invite-acceptance.service.ts",
+        "apps/api/src/projects/invites/prisma-project-invites.repository.ts",
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/permissions/role-admin.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261101090000_invite_role_id/migration.sql",
+        "apps/api/test/integration/projects/invite-role-keys.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/invites/project-invites.service.spec.ts",
+          "reason": "`new ProjectInvitesService(...)` at line ~92 has no `RoleAdminService`, and invite DTO expectations pin `role` only. The replacing invariant: a `RoleAdminService` double whose `assertMayGrant` resolves is passed last; DTOs carry `roleKey` and `roleName`."
+        },
+        {
+          "path": "apps/api/src/common/test-helpers/global-stubs.module.ts",
+          "reason": "`GlobalStubsModule` (used by the invites module spec) exports no `RoleAdminService`, which `ProjectInvitesService` now injects. The replacing invariant: it provides and exports a `RoleAdminService` `useValue` double; every existing stub is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-invites-admin.integration.spec.ts",
+          "reason": "line ~196 pins an invite row's keys to exactly seven. The replacing invariant: exactly nine keys, adding `roleKey` and `roleName`, still with no `token` or `tokenHash`."
+        },
+        {
+          "path": "apps/api/src/projects/invites/dto/create-invite.dto.spec.ts",
+          "reason": "`check(email, role = 'DEVELOPER')` and the case requiring `role`. The replacing invariant: both `role` and `roleKey` are optional in the DTO (the exactly-one rule is the service's); an unknown `role` is still `isIn` and a malformed `roleKey` fails `ROLE_KEY_PATTERN`."
+        },
+        {
+          "path": "apps/api/src/projects/invites/invite-acceptance.service.spec.ts",
+          "reason": "acceptance binds `ROLE_KEY_FOR_LEGACY_ROLE[invite.role]`. The replacing invariant: a row with `roleId` binds that role's key; a row without `roleId` binds the legacy mapping."
+        },
+        {
+          "path": "apps/api/src/projects/invites/prisma-project-invites.repository.spec.ts",
+          "reason": "the create input and record shape lack `roleId`. The replacing invariant: `create` takes `roleId` and `role: string | null`; records carry `roleId`, `roleKey` and `roleName`."
+        },
+        {
+          "path": "apps/api/src/projects/invites/invite-mailer.spec.ts",
+          "reason": "the template input carries `role`. The replacing invariant: it carries `roleName`, which the email body shows."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-invites-public.integration.spec.ts",
+          "reason": "line ~155 pins the preview keys to exactly six. The replacing invariant: exactly eight keys, adding `roleKey` and `roleName`."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "records the routes and DTOs this feature changes. The replacing invariant: regenerated with `bun run api:export-spec` after the last API change; every other path and schema unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "dcf12aa91b936b83e535dec74b65b2a43d1681a1"
+    },
+    {
+      "id": "US-006",
+      "title": "Add SSR permission sets and key-based global navigation gates",
+      "description": "**Goal** — Add fail-closed SSR permission composables and replace the global role-name navigation gates.\n\n**Motivation** — The admin navigation, the command palette and the knowledge card check `auth.user.role === 'ADMIN'`.\n\n**Approach** — `apps/web/lib/permissions.ts` (new):\n\n```ts\nexport interface PermissionSet {\n  /** Holds the key for every row. */\n  has(key: string): boolean\n  /** Holds the key for every row, or only for rows the caller created (`key.own`). */\n  hasOwn(key: string): boolean\n}\nexport function permissionSet(keys: readonly string[]): PermissionSet\nexport const EMPTY_PERMISSIONS: PermissionSet   // has/hasOwn always false\n```\n\n`apps/web/composables/usePermissions.ts` (new; auto-imported, added to the `tests/helpers/mount-sfc.ts` override list):\n\n```ts\nexport function useGlobalPermissions(): { permissions: ComputedRef<PermissionSet>; pending: Ref<boolean>; error: Ref<unknown>; refresh: () => Promise<void> }\nexport function useProjectPermissions(slug: string): /* same shape */\n```\n\n- Both use `useAsyncData` (SSR-friendly, so gates are set before hydration, like `useProjectViewerRole` today), keys `permissions-global` and `permissions-project-<slug>`, calling `$api.get('/me/permissions')` and `$api.get('/me/permissions', { query: { project: slug } })`.\n- On a failed or pending fetch, `permissions` is `EMPTY_PERMISSIONS`: every gated control is hidden, as today's `{ canManage: false, viewerRole: null }` default does.\n- Every new composable (`useGlobalPermissions`, `useProjectPermissions`, `useRoles`, `useRoleBindings`, `useProjectRoles`) is added to the `NUXT_AUTO_IMPORTS` override list in `tests/helpers/mount-sfc.ts` by the story that creates it. New components (`RoleEditorDialog`, `PermissionMatrix`, `PrincipalRolesDialog`) are imported explicitly in the SFCs that use them, as `pages/agents.vue` imports its dialogs.\n- `layouts/default.vue` reads the global set once in setup and exposes one plain computed boolean per admin link (and one for the section label), so a test context without the binding renders the links hidden.\n- Every web story that renders a new string adds its key to both `i18n/locales/en.json` and `zh.json` (`tests/i18n/used-keys-exist.spec.ts` and the locale-parity specs check both).\n\nEach control below gates on the key its API route requires. \"global\" reads `useGlobalPermissions()`, \"project\" reads `useProjectPermissions(slug)`. Component props keep their names where a component has one gated control; the page binds the prop to the key.\n\n| Site | Control | Key (set) |\n| `layouts/default.vue` | the \"Admin\" section label | shown when at least one admin link is shown |\n| `layouts/default.vue` | admin links `/admin/users`, `/admin/fleet`, `/admin/fleet/runners`, `/admin/fleet/repos`, `/admin/fleet/budgets`, `/admin/fleet/approvals`, `/admin/fleet/analytics`, `/admin/skills` | `user.read`, `fleet.dashboard.read`, `fleet.runner.read`, `fleet.repo.read`, `fleet.budget.read`, `fleet.approval.read`, `fleet.analytics.read`, `skill.source.read` (global) |\n| `components/CommandPalette.vue` | the `skills` command | `skill.source.read` (global) |\n| `pages/[project]/fleet/analytics.vue` | `FleetAnalyticsIngestNotice` `admin` prop | `fleet.ingest.read` (global) |\n\nThe API stays the authority. A web gate only hides or disables a control; every refusal from the API is still shown with `toast.error(extractApiError(err))`. Web convention: gate UI controls on keys from `useProjectPermissions(slug)` / `useGlobalPermissions()`, never on role names, `user.role` or `viewerRole`. Test the actual composables through /me/permissions responses; update all layout fixed setup bindings, closed __auto bags, command palette contexts and analytics tests. Preserve inline navigation source order and token styling from the redesign master plan.\n\n**Scope** — In: PermissionSet/composables, global links/section, palette skills, analytics ingest prop, both composable overrides and affected regressions/locales. Out: project controls (US-007), fleet controls (US-008/009), new roles nav link (US-010), deleting the old composable (US-015).\n\n**Interface** — The TypeScript declarations above are the public API consumed by US-007 through US-014; `hasOwn(key)` is true for an exact key or its `.own` key, while `has(key)` never promotes `.own`.",
+      "acceptanceCriteria": [
+        "[unit] permissionSet(['ticket.create']).has('ticket.create') returns true and .has('ticket.delete') returns false.",
+        "[unit] permissionSet(['comment.update.own']) returns hasOwn('comment.update'): true and has('comment.update'): false, while permissionSet(['comment.update']).hasOwn('comment.update') returns true.",
+        "[unit] EMPTY_PERMISSIONS.has('ticket.read') and EMPTY_PERMISSIONS.hasOwn('ticket.read') both return false.",
+        "[unit] useProjectPermissions('web') calls $api.get('/me/permissions', { query: { project: 'web' } }) and exposes permissions.value.has(k): true for a key k listed in the response.",
+        "[unit] When $api.get('/me/permissions', …) rejects, useProjectPermissions('web').permissions.value is EMPTY_PERMISSIONS and error.value is the rejection.",
+        "[unit] useGlobalPermissions() calls $api.get('/me/permissions') with no query under useAsyncData key permissions-global, while useProjectPermissions('web') uses permissions-project-web.",
+        "[unit] layouts/default.vue mounted with only user.read in the global set renders /admin/users and none of the /admin/fleet* or /admin/skills links.",
+        "[unit] layouts/default.vue mounted with auth.user.role 'ADMIN' and an empty global set renders none of the gate table's admin links and no Admin section label.",
+        "[unit] layouts/default.vue mounted with fleet.dashboard.read, fleet.runner.read, fleet.repo.read, fleet.budget.read, fleet.approval.read, fleet.analytics.read and skill.source.read but not user.read renders /admin/fleet, /admin/fleet/runners, /admin/fleet/repos, /admin/fleet/budgets, /admin/fleet/approvals, /admin/fleet/analytics and /admin/skills, and no /admin/users link.",
+        "[unit] CommandPalette mounted with skill.source.read in the global set lists the skills command, and with an empty set does not.",
+        "[unit] pages/[project]/fleet/analytics.vue passes admin: true to FleetAnalyticsIngestNotice when the global set holds fleet.ingest.read and admin: false otherwise.",
+        "[unit] While a /me/permissions fetch is pending, useGlobalPermissions and useProjectPermissions expose EMPTY_PERMISSIONS and mounted gated controls remain hidden."
+      ],
+      "tags": [
+        "web",
+        "security",
+        "permissions",
+        "ssr",
+        "navigation"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New SSR permission abstraction and numerous navigation harness consumers require fail-closed access-control integration.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "claude-sonnet",
+          "confidence": 1,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T06:31:38.770Z"
+        }
+      },
+      "contextFiles": [
+        "apps/web/composables/useProjectViewerRole.ts",
+        "apps/web/layouts/default.vue",
+        "apps/web/components/CommandPalette.vue",
+        "apps/web/tests/helpers/mount-sfc.ts",
+        "apps/web/composables/useApi.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/lib/permissions.ts",
+        "apps/web/composables/usePermissions.ts",
+        "apps/web/tests/lib/permissions.spec.ts",
+        "apps/web/tests/composables/usePermissions.spec.ts",
+        "apps/web/tests/layouts/default-permission-nav.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/helpers/mount-sfc.ts",
+          "reason": "the auto-import override list (line ~125) lacks `useGlobalPermissions` and `useProjectPermissions`. The replacing invariant: both are overridable like the existing composables."
+        },
+        {
+          "path": "apps/web/tests/layouts/default-fleet-nav.spec.ts",
+          "reason": "renders the admin fleet links for `user.role === 'ADMIN'`. The replacing invariant: each link renders when the global set holds its key, whatever `user.role` says."
+        },
+        {
+          "path": "apps/web/tests/layouts/default-skills-nav.spec.ts",
+          "reason": "renders the skills link for a global ADMIN. The replacing invariant: it renders with `skill.source.read` in the global set."
+        },
+        {
+          "path": "apps/web/tests/layouts/default.spec.ts",
+          "reason": "admin-link cases keyed on `role`. The replacing invariant: they are keyed on the global set."
+        },
+        {
+          "path": "apps/web/tests/layouts/threads-nav.spec.ts",
+          "reason": "runs the layout script with a closed `__auto` bag (line ~48) that has no `useGlobalPermissions`. The replacing invariant: it supplies `useGlobalPermissions` (an empty set unless the case needs a key); its assertions are unchanged."
+        },
+        {
+          "path": "apps/web/tests/layouts/my-threads-nav.spec.ts",
+          "reason": "runs the layout script with a closed `__auto` bag (line ~42) that has no `useGlobalPermissions`. The replacing invariant: it supplies `useGlobalPermissions` (an empty set unless the case needs a key); its assertions are unchanged."
+        },
+        {
+          "path": "apps/web/tests/layouts/default-slos-nav.spec.ts",
+          "reason": "renders the layout with a fixed setup context. The replacing invariant: it supplies `useGlobalPermissions` (an empty set unless the case needs a key); its assertions are unchanged."
+        },
+        {
+          "path": "apps/web/tests/layouts/code-intel-nav.spec.ts",
+          "reason": "renders the layout with a fixed setup context. The replacing invariant: it supplies `useGlobalPermissions` (an empty set unless the case needs a key); its assertions are unchanged."
+        },
+        {
+          "path": "apps/web/tests/layouts/memory-nav.spec.ts",
+          "reason": "renders the layout with a fixed setup context. The replacing invariant: it supplies `useGlobalPermissions` (an empty set unless the case needs a key); its assertions are unchanged."
+        },
+        {
+          "path": "apps/web/tests/layouts/timeline-nav.spec.ts",
+          "reason": "renders the layout with a fixed setup context. The replacing invariant: it supplies `useGlobalPermissions` (an empty set unless the case needs a key); its assertions are unchanged."
+        },
+        {
+          "path": "apps/web/tests/layouts/fleet-jobs-nav.spec.ts",
+          "reason": "renders the layout with a fixed setup context. The replacing invariant: it supplies `useGlobalPermissions` (an empty set unless the case needs a key); its assertions are unchanged."
+        },
+        {
+          "path": "apps/web/tests/layouts/project-agents-nav.spec.ts",
+          "reason": "renders the layout with a fixed setup context. The replacing invariant: it supplies `useGlobalPermissions` (an empty set unless the case needs a key); its assertions are unchanged."
+        },
+        {
+          "path": "apps/web/tests/components/command-palette-threads.spec.ts",
+          "reason": "mounts `CommandPalette` (line ~77) with no `useGlobalPermissions` override. The replacing invariant: it supplies `useGlobalPermissions` (an empty set unless the case needs a key); its assertions are unchanged."
+        },
+        {
+          "path": "apps/web/tests/components/command-palette-my-threads.spec.ts",
+          "reason": "mounts `CommandPalette` (line ~77) with no `useGlobalPermissions` override. The replacing invariant: it supplies `useGlobalPermissions` (an empty set unless the case needs a key); its assertions are unchanged."
+        },
+        {
+          "path": "apps/web/tests/components/command-palette-skills.spec.ts",
+          "reason": "offers `skills` for `role: 'ADMIN'`. The replacing invariant: offered with `skill.source.read`."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "US-006 adds its new UI strings. The replacing invariant: existing keys unchanged; the used-keys-exist spec finds every new key."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "US-006 adds its new UI strings. The replacing invariant: existing keys unchanged; the locale-parity specs pass."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-analytics-page.spec.ts",
+          "reason": "the ingest link follows `role === 'ADMIN'`. The replacing invariant: it follows `fleet.ingest.read` in the global set."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "22cbd59a7f5f4e0f5155c8bc80c9ae437fc9d58d"
+    },
+    {
+      "id": "US-007",
+      "title": "Gate project ticket, label, thread, skills and knowledge controls by key",
+      "description": "**Goal** — Replace broad project-role booleans with independent route-aligned keys across project controls.\n\n**Motivation** — A Triager (who holds `ticket.assign` and `ticket.label.*`) sees no assign or label control; a Developer who holds `fleet.knowledge.repo.reindex` cannot reindex.\n\n**Approach** — Each control below gates on the key its API route requires. \"global\" reads `useGlobalPermissions()`, \"project\" reads `useProjectPermissions(slug)`. Component props keep their names where a component has one gated control; the page binds the prop to the key.\n\n| Site | Control | Key (set) |\n| `pages/[project]/tickets/[ref].vue` → `TicketProperties` | assignee picker and unassign; label select; label chip removal; link form; delete | `canAssign` = `ticket.assign`; `canLabel` = `ticket.label.assign`; `canUnlabel` = `ticket.label.remove`; `canLink` = `ticket.link.add`; `canDelete` = `ticket.delete` (project). These five props replace `canWork` and `canManage`. |\n| `pages/[project]/tickets/[ref].vue` | `TicketFleetRuns` `canWork` (unlink); the fleet dispatch suggestion | `fleet.ticket-job.unlink`; `fleet.job.dispatch` (project) |\n| `pages/[project]/labels.vue` | create form; edit; delete | `label.create`; `label.update`; `label.delete` (project) |\n| `pages/[project]/threads/index.vue` | new-thread link (still also needs `threadsEnabled`) | `thread.create` (project) |\n| `pages/[project]/threads/new.vue` | the create form (today `canWork`) | `thread.create` (project) |\n| `pages/[project]/threads/[id].vue` | `ThreadControls` `canManage` (archive any thread) | `thread.archive` via `has` (project) |\n| `components/ProjectSkillsPanel.vue` | enable toggle; disable toggle | `skill.project.enable`; `skill.project.disable` (project) |\n| `components/SettingsKnowledgeCard.vue` | pattern editing and save; reindex button | `fleet.knowledge.patterns.update`; `fleet.knowledge.repo.reindex` (project) |\n| `pages/[project]/agents.vue` | the status menu | `agent.update` (global) |\n\nThe API stays the authority. A web gate only hides or disables a control; every refusal from the API is still shown with `toast.error(extractApiError(err))`. On a failed or pending fetch, `permissions` is `EMPTY_PERMISSIONS`: every gated control is hidden. Each consuming story's gate ACs mount the real page with `$api.get('/me/permissions', …)` answering the keys, not a stubbed `PermissionSet`. Every web story that renders a new string adds its key to both `i18n/locales/en.json` and `zh.json`. Update existing TicketProperties/assignee/ticket-fleet, labels, thread, skills, settings-knowledge and project agents fixtures to the new contracts, preserving all other behavior.\n\n**Scope** — In: all project controls in this table, TicketProperties prop migration and consumers. Out: fleet job/config/budget controls (US-008), schedules/approvals (US-009), member/invite management (US-013/014), deleting the roster add/remove UI and old helper (US-015). Ticket transition buttons, comment edit/delete and the KB dialog are not gated in the web by this feature; the API still refuses what a principal may not do.\n\n**Interface** — `TicketProperties` props target `canAssign`, `canLabel`, `canUnlabel`, `canLink`, `canDelete` instead of `canWork`/`canManage`; `TicketFleetRuns.canWork` and `ThreadControls.canManage` keep their names with the key values above.",
+      "acceptanceCriteria": [
+        "[unit] The mounted ticket page with only ticket.assign in the project set renders the assignee picker and no label select, link form or delete button.",
+        "[unit] The ticket page with ticket.label.assign and not ticket.label.remove renders the label select and non-removable label chips.",
+        "[unit] The ticket page with ticket.link.add renders the link form, and with ticket.delete renders the delete button.",
+        "[unit] The ticket page passes canWork: true to TicketFleetRuns with fleet.ticket-job.unlink in the project set and false without it.",
+        "[unit] The ticket page offers the fleet dispatch suggestion only when the project set holds fleet.job.dispatch and the project has a fleet repo and the ticket is linkable, as today.",
+        "[unit] The mounted labels page with only label.create in the project set renders the create form and no edit or delete button.",
+        "[unit] The labels page with label.update renders each label's edit button, and with label.delete its delete button.",
+        "[unit] The threads index renders the new-thread link with thread.create and threadsEnabled and hides it without thread.create; the new-thread page enables its create form only with thread.create.",
+        "[unit] The thread detail page passes canManage: true to ThreadControls with thread.archive in the project set and false when it holds only thread.archive.own.",
+        "[unit] ProjectSkillsPanel with skill.project.enable and not skill.project.disable enables a disabled skill's toggle and disables an enabled skill's toggle.",
+        "[unit] SettingsKnowledgeCard with fleet.knowledge.repo.reindex and not fleet.knowledge.patterns.update renders the reindex button and a read-only patterns field with no save button.",
+        "[unit] The project agents page renders its status menu with agent.update in the global set and hides it without that key."
+      ],
+      "tags": [
+        "web",
+        "permissions",
+        "security",
+        "project",
+        "ui"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Explicit but broad multi-page permission sweep with split component props and custom-role negative cases.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "claude-sonnet",
+          "confidence": 0.2599999999999998,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T06:58:00.855Z"
+        }
+      },
+      "contextFiles": [
+        "apps/web/lib/permissions.ts",
+        "apps/web/pages/[project]/tickets/[ref].vue",
+        "apps/web/components/TicketProperties.vue",
+        "apps/web/pages/[project]/labels.vue",
+        "apps/web/components/SettingsKnowledgeCard.vue"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/project-permission-gates.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/ticket-role-visibility.spec.ts",
+          "reason": "drives `canWork` / `canManage` through `useProjectViewerRole`. The replacing invariant: each control follows its key from `useProjectPermissions`."
+        },
+        {
+          "path": "apps/web/tests/pages/ticket-detail.spec.ts",
+          "reason": "mounts `TicketProperties` with `canWork`/`canManage`. The replacing invariant: it passes the five key props."
+        },
+        {
+          "path": "apps/web/tests/pages/ticket-fleet-wiring.spec.ts",
+          "reason": "the dispatch suggestion and `TicketFleetRuns.canWork` follow DEVELOPER. The replacing invariant: they follow `fleet.job.dispatch` and `fleet.ticket-job.unlink`."
+        },
+        {
+          "path": "apps/web/tests/components/ticket-detail-redesign.spec.ts",
+          "reason": "mounts `TicketProperties` with `canWork`/`canManage`. The replacing invariant: the five key props."
+        },
+        {
+          "path": "apps/web/tests/components/assignee-picker.spec.ts",
+          "reason": "reaches the picker through `canWork`. The replacing invariant: through `canAssign`."
+        },
+        {
+          "path": "apps/web/tests/pages/labels.spec.ts",
+          "reason": "create/edit/delete follow `canManage`/DEVELOPER. The replacing invariant: they follow `label.create`, `label.update`, `label.delete`."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-page.spec.ts",
+          "reason": "the new-thread link follows `canWorkOnFleet`. The replacing invariant: it follows `thread.create`."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-detail-page.spec.ts",
+          "reason": "`canManage` from `useProjectViewerRole`. The replacing invariant: from `thread.archive`."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-detail-actions-page.spec.ts",
+          "reason": "`canManage` from `useProjectViewerRole`. The replacing invariant: from `thread.archive`."
+        },
+        {
+          "path": "apps/web/tests/pages/threads-new-page.spec.ts",
+          "reason": "mocks `useProjectViewerRole`. The replacing invariant: mocks `useProjectPermissions`."
+        },
+        {
+          "path": "apps/web/tests/components/ProjectSkillsPanel.spec.ts",
+          "reason": "toggles follow `canManage`. The replacing invariant: they follow `skill.project.enable` / `skill.project.disable`."
+        },
+        {
+          "path": "apps/web/tests/components/settings-knowledge-card.spec.ts",
+          "reason": "admin controls follow `role === 'ADMIN'`. The replacing invariant: they follow `fleet.knowledge.patterns.update` and `fleet.knowledge.repo.reindex` in the project set."
+        },
+        {
+          "path": "apps/web/tests/pages/settings-skills-tab.spec.ts",
+          "reason": "mocks `useProjectViewerRole`. The replacing invariant: mocks `useProjectPermissions`."
+        },
+        {
+          "path": "apps/web/tests/pages/agents.spec.ts",
+          "reason": "the project agents page's status menu follows `canManage`. The replacing invariant: it follows `agent.update` in the global set."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b679949befe1bf8501ff59957992c96393ece558"
+    },
+    {
+      "id": "US-008",
+      "title": "Gate fleet job, repository config and budget actions independently",
+      "description": "**Goal** — Replace fleet work/manage booleans with separate cancel, requeue, dispatch, config and budget permissions.\n\n**Motivation** — A custom role holding `fleet.job.*` cannot dispatch from the UI.\n\n**Approach** — Each control below gates on the key its API route requires. \"global\" reads `useGlobalPermissions()`, \"project\" reads `useProjectPermissions(slug)`. Component props keep their names where a component has one gated control; the page binds the prop to the key.\n\n| Site | Control | Key (set) |\n| `lib/fleet-jobs.ts` `JobViewer` | cancel; requeue; dispatch-run | `{ userId, canCancel, canRequeue, canDispatch }` = `fleet.job.cancel`, `fleet.job.requeue`, `fleet.job.dispatch` (project). `canCancelJob` = unfinished and (`canCancel` or requester); `canRequeueJob` uses `canRequeue`. |\n| `pages/[project]/fleet/index.vue`, `dispatch.vue` | dispatch button / form | `fleet.job.dispatch` (project) |\n| `pages/[project]/fleet/jobs/[id]/index.vue` | viewer above; `ConfigJobPanel` `canWork` | `JobViewer` from keys; `fleet.job.config.edit` (project) |\n| `pages/[project]/fleet/repos/[id]/config.vue` | save, new file, editor; drift check | `fleet.job.config.edit`; `fleet.repo.drift.check` (project) |\n| `components/fleet/BudgetTable.vue` | resume; edit; delete | props `canResume`, `canEdit`, `canDelete` replace `editable` |\n| `pages/[project]/fleet/budgets.vue` | create; the table's resume, edit, delete (the create/edit and resume dialogs follow the same keys; the read-only notice shows when the set holds none of the four; the fleet-wide table gets all three props `false`) | `fleet.budget.create`; `fleet.budget.resume`, `fleet.budget.update`, `fleet.budget.delete` (project) |\n| `pages/admin/fleet/budgets.vue` | the table's resume, edit, delete (today `editable: true`) | `fleet.budget.resume`, `fleet.budget.update`, `fleet.budget.delete` (global) |\n\nKeep existing terminal-state, requeueable-state and unrecoverable config-edit restrictions; changing the permission signal is not a workflow rewrite. Leave canWorkOnFleet exported until US-015 deletes it after other consumers migrate. The API stays the authority. A web gate only hides or disables a control; every refusal from the API is still shown with `toast.error(extractApiError(err))`. On a failed or pending fetch, `permissions` is `EMPTY_PERMISSIONS`: every gated control is hidden. Each consuming story's gate ACs mount the real page with `$api.get('/me/permissions', …)` answering the keys, not a stubbed `PermissionSet`. Every web story that renders a new string adds its key to both `i18n/locales/en.json` and `zh.json`. Update all fleet job/dispatch/config/budget consumers and fixtures, including read-only fleet-wide policies.\n\n**Scope** — In: JobViewer/helper consumers, dispatch UI, ConfigJobPanel binding, repo config editing/drift split, BudgetTable props and project/admin budget dialogs. Out: schedule/approval viewer changes (US-009), deletion of canWorkOnFleet and its tests (US-015).\n\n**Interface** — `JobViewer` target `{ userId, canCancel, canRequeue, canDispatch }`; `BudgetTable` target props `canResume`, `canEdit`, `canDelete`, replacing `editable`; `ConfigJobPanel.canWork` retains its name and receives `fleet.job.config.edit`.",
+      "acceptanceCriteria": [
+        "[unit] canCancelJob on an unfinished job requested by u1 returns true for { userId: 'u2', canCancel: true }, true for { userId: 'u1', canCancel: false } and false for { userId: 'u2', canCancel: false }.",
+        "[unit] canRequeueJob on a requeueable job with state 'FAILED' and configEdit: null returns true with canRequeue: true and false with canRequeue: false.",
+        "[unit] The fleet index enables dispatch with fleet.job.dispatch in the project set, and the dispatch page shows its no-permission notice without that key.",
+        "[unit] The job detail page with fleet.job.requeue and not fleet.job.cancel shows requeue for a requeueable job; on an unfinished job fixture it shows cancel only when the signed-in user is the requester.",
+        "[unit] The job detail page passes canWork: true to ConfigJobPanel with fleet.job.config.edit in the project set and false without it.",
+        "[unit] The repo config page with fleet.repo.drift.check and not fleet.job.config.edit renders the drift button, no save or new-file button, and a read-only editor.",
+        "[unit] BudgetTable renders a paused policy's resume button only with canResume, its edit button only with canEdit, and its delete button only with canDelete.",
+        "[unit] The project budgets page with only fleet.budget.create and fleet.budget.resume renders create and passes canResume: true, canEdit: false and canDelete: false to the project budget table; the admin budgets page derives those same three props from the global set.",
+        "[unit] The project budgets page with an empty project set renders its read-only notice and passes canResume, canEdit and canDelete all false to both its project and fleet-wide tables.",
+        "[unit] canCancelJob returns false for a terminal job even when canCancel is true and userId matches requestedById, preserving the existing unfinished-job restriction.",
+        "[unit] canRequeueJob returns false for a FAILED job whose configEdit.mode is 'edit' and result.outcome is 'conflict' or 'invalid', even with canRequeue: true, preserving the existing unrecoverable-edit restriction."
+      ],
+      "tags": [
+        "web",
+        "fleet",
+        "permissions",
+        "security",
+        "ui"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Multiple helper/prop contracts and action-specific keys must preserve workflow and requester exceptions across fleet pages.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "claude-sonnet",
+          "confidence": 0.2999999999999998,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T08:10:45.129Z"
+        }
+      },
+      "contextFiles": [
+        "apps/web/lib/permissions.ts",
+        "apps/web/lib/fleet-jobs.ts",
+        "apps/web/components/fleet/BudgetTable.vue",
+        "apps/web/pages/[project]/fleet/budgets.vue",
+        "apps/web/pages/[project]/fleet/repos/[id]/config.vue"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/fleet-job-budget-gates.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/lib/fleet-jobs.spec.ts",
+          "reason": "`canWorkOnFleet`, `canCancelJob`, `canRequeueJob` over `{ userId, canWork }`. The replacing invariant: over `{ userId, canCancel, canRequeue, canDispatch }`; `canWorkOnFleet` cases stay until US-015 deletes it."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-job-detail.spec.ts",
+          "reason": "`JobViewer.canWork` and `ConfigJobPanel` `canWork`. The replacing invariant: key-derived viewer; `ConfigJobPanel` `canWork` = `fleet.job.config.edit`."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-job-detail-workflow.spec.ts",
+          "reason": "mocks `useProjectViewerRole`. The replacing invariant: mocks `useProjectPermissions`."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-jobs-list.spec.ts",
+          "reason": "the dispatch button follows `canWorkOnFleet`. The replacing invariant: it follows `fleet.job.dispatch`."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-dispatch-page.spec.ts",
+          "reason": "the no-permission notice follows `canWorkOnFleet`. The replacing invariant: it follows `fleet.job.dispatch`."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-dispatch-placement-runtime.spec.ts",
+          "reason": "mocks `useProjectViewerRole`. The replacing invariant: mocks `useProjectPermissions`."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-repo-config-page.spec.ts",
+          "reason": "`canWork` from `useProjectViewerRole`. The replacing invariant: save/new-file/editor follow `fleet.job.config.edit`, drift follows `fleet.repo.drift.check`."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-budgets-project-page.spec.ts",
+          "reason": "`canManage` from `useProjectViewerRole`. The replacing invariant: create/edit/resume follow `fleet.budget.create`/`update`/`resume`."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-budget-table.spec.ts",
+          "reason": "drives resume, edit and delete through `editable`. The replacing invariant: each action follows its own prop (`canResume`, `canEdit`, `canDelete`)."
+        },
+        {
+          "path": "apps/web/tests/pages/admin-fleet-budgets.spec.ts",
+          "reason": "the admin table is always editable. The replacing invariant: its actions follow `fleet.budget.resume`/`update`/`delete` in the global set."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b99ef86d314c167e8002c719d70aa67c713052c9"
+    },
+    {
+      "id": "US-009",
+      "title": "Gate fleet schedules and approvals by keys and ownership",
+      "description": "**Goal** — Distinguish schedule ownership rights and approval decision rights, including notification discovery.\n\n**Motivation** — Controls are gated on role names.\n\n**Approach** — Each control below gates on the key its API route requires. \"global\" reads `useGlobalPermissions()`, \"project\" reads `useProjectPermissions(slug)`. Component props keep their names where a component has one gated control; the page binds the prop to the key.\n\n| Site | Control | Key (set) |\n| `lib/fleet-schedules.ts` `ScheduleViewer` + `ScheduleTable` + both schedule pages | create; change (edit, enable, disable); delete | `{ userId, canCreate, canUpdateAny, canUpdateOwn, canDeleteAny, canDeleteOwn }` = `fleet.schedule.create`, `has('fleet.schedule.update')`, `hasOwn('fleet.schedule.update')`, `has('fleet.schedule.delete')`, `hasOwn('fleet.schedule.delete')` (project). `canChangeSchedule` = `canUpdateAny` or (`canUpdateOwn` and `userId === createdById`); new `canDeleteSchedule` = `canDeleteAny` or (`canDeleteOwn` and `userId === createdById`). |\n| `lib/fleet-approvals.ts` `ApprovalViewer` (both kinds) + `pages/[project]/fleet/approvals.vue` + `pages/admin/fleet/approvals.vue` | decide | `{ kind, userId, canDecideBudget, canDecideBash }` = `fleet.approval.decide.budget`, `fleet.approval.decide.bash`, from the project set on a project page and from the global set on the admin page. `canDecide` no longer returns true for every admin-kind viewer. `assistant_action` stays requester-only. |\n| `composables/useApprovalNotifications.ts` | admin scan; per-project scan | inside `refresh()` (which runs outside setup, so no `useAsyncData`), a direct `$api.get('/me/permissions')` comes first: with `fleet.approval.read` it scans the admin inbox; otherwise, per project, `$api.get('/me/permissions', { query: { project: slug } })` decides the viewer (replaces the `members?size=1` read). No scan starts before the global read resolves; a failed global read scans nothing. |\n| `components/fleet/ApprovalBadge.vue` | `globalAdmin` link target | `fleet.approval.read` (global) |\n\nPer-project notification scans require fleet.approval.decide.budget or fleet.approval.decide.bash. Preserve pending-state checks, requester-only assistant_action behavior for both viewer kinds, generation/account/mount cancellation, dedupe and independent project failure handling. Schedule delete is no longer implied by update; no-own keys must not become any-row grants. The API stays the authority. A web gate only hides or disables a control; every refusal from the API is still shown with `toast.error(extractApiError(err))`. On a failed or pending fetch, `permissions` is `EMPTY_PERMISSIONS`: every gated control is hidden. Each consuming story's gate ACs mount the real page with `$api.get('/me/permissions', …)` answering the keys, not a stubbed `PermissionSet`. Every web story that renders a new string adds its key to both `i18n/locales/en.json` and `zh.json`. Update ScheduleTable, ApprovalInbox and all approval action/bash/budget/thread card fixtures along with both admin/project pages and badges.\n\n**Scope** — In: schedule create/update/delete viewers/helpers/controls, approval viewers/decisions, notification scans and badge routing. Out: job/config/budget gates (US-008), helper deletion (US-015), P3 approval policy pages and unified inbox.\n\n**Interface** — `ScheduleViewer` target `{ userId, canCreate, canUpdateAny, canUpdateOwn, canDeleteAny, canDeleteOwn }`; `canChangeSchedule` = `canUpdateAny` or (`canUpdateOwn` and `userId === createdById`); `canDeleteSchedule` = `canDeleteAny` or (`canDeleteOwn` and `userId === createdById`); `ApprovalViewer` both kinds target `{ kind, userId, canDecideBudget, canDecideBash }`.",
+      "acceptanceCriteria": [
+        "[unit] canChangeSchedule returns true for { canUpdateAny: true, canUpdateOwn: false } on another user's schedule, true for { canUpdateAny: false, canUpdateOwn: true, userId: 'u1' } on a schedule created by u1, and false for that same viewer on a schedule created by u2; canDeleteSchedule follows canDeleteAny/canDeleteOwn by the same rule.",
+        "[unit] canDecide on a pending budget_override_required approval follows canDecideBudget, on a pending bash approval follows canDecideBash, and on assistant_action remains true only for its requester.",
+        "[unit] The schedules index renders create with fleet.schedule.create, a row's edit control with fleet.schedule.update.own when the signed-in user created it, and its delete button only with fleet.schedule.delete or fleet.schedule.delete.own as well.",
+        "[unit] The schedule detail page with fleet.schedule.update.own but neither fleet.schedule.delete nor fleet.schedule.delete.own renders edit, enable and disable for the signed-in user's schedule and no delete button.",
+        "[unit] The schedules index with an empty project set renders its read-only notice and no create button.",
+        "[unit] The project approvals page builds a project ApprovalViewer whose canDecideBudget/canDecideBash follow fleet.approval.decide.budget/fleet.approval.decide.bash in the project set, while the admin approvals page builds an admin viewer from those keys in the global set.",
+        "[unit] canDecide returns false on a pending budget_override_required approval for an admin-kind viewer with canDecideBudget: false.",
+        "[unit] useApprovalNotifications.refresh() calls $api.get('/me/permissions') first and scans the admin inbox when its keys include fleet.approval.read; otherwise it reads /me/permissions with query.project for each project and scans only projects with fleet.approval.decide.budget or fleet.approval.decide.bash.",
+        "[unit] ApprovalBadge targets the admin approvals page with fleet.approval.read in the global set and the project approvals page without it.",
+        "[unit] When useApprovalNotifications.refresh() is waiting for its global /me/permissions response, no admin or project approval scan starts.",
+        "[unit] When the global /me/permissions read rejects during useApprovalNotifications.refresh(), no admin or project approval inbox is scanned."
+      ],
+      "tags": [
+        "web",
+        "fleet",
+        "permissions",
+        "security",
+        "notifications"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Ownership-sensitive action checks span helper unions, multiple UI consumers and asynchronous notification discovery.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.7999999999999998,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T08:35:24.502Z"
+        }
+      },
+      "contextFiles": [
+        "apps/web/lib/permissions.ts",
+        "apps/web/lib/fleet-schedules.ts",
+        "apps/web/lib/fleet-approvals.ts",
+        "apps/web/composables/useApprovalNotifications.ts",
+        "apps/web/pages/admin/fleet/approvals.vue"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/fleet-schedule-approval-gates.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/lib/fleet-schedules.spec.ts",
+          "reason": "`canChangeSchedule` over `{ canWork, canManage }`. The replacing invariant: over `{ canCreate, canUpdateAny, canUpdateOwn }`."
+        },
+        {
+          "path": "apps/web/tests/lib/fleet-approvals.spec.ts",
+          "reason": "`canDecide` over `{ canManage, canWork }`, and admin viewers always decide (lines ~125-126). The replacing invariant: both kinds decide by `{ canDecideBudget, canDecideBash }`."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-approval-inbox.spec.ts",
+          "reason": "project viewers `{ canManage, canWork }` and admin fixtures `{ kind: 'admin', userId: null }` (lines ~505-540). The replacing invariant: both kinds carry `{ canDecideBudget, canDecideBash }`."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-approval-action-panel.spec.ts",
+          "reason": "builds an `ApprovalViewer`. The replacing invariant: the new project-kind shape."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-approval-bash-panel.spec.ts",
+          "reason": "builds an `ApprovalViewer`. The replacing invariant: the new project-kind shape."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-approval-budget-panel.spec.ts",
+          "reason": "builds an `ApprovalViewer`. The replacing invariant: the new project-kind shape."
+        },
+        {
+          "path": "apps/web/tests/components/thread-action-card.spec.ts",
+          "reason": "builds an `ApprovalViewer`. The replacing invariant: the new project-kind shape."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-approval-badge.spec.ts",
+          "reason": "`globalAdmin` from `role === 'ADMIN'` and project viewers from the members read. The replacing invariant: `fleet.approval.read` in the global set; project viewers from the project-scoped me/permissions read."
+        },
+        {
+          "path": "apps/web/tests/components/fleet-schedule-table.spec.ts",
+          "reason": "`ScheduleViewer` `{ canWork, canManage }`. The replacing invariant: the new shape."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-schedules-list-page.spec.ts",
+          "reason": "viewer from `useProjectViewerRole`. The replacing invariant: from `useProjectPermissions`."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-schedule-detail.spec.ts",
+          "reason": "viewer from `canWorkOnFleet`. The replacing invariant: from keys."
+        },
+        {
+          "path": "apps/web/tests/pages/fleet-approvals-pages.spec.ts",
+          "reason": "project viewer from `useProjectViewerRole`. The replacing invariant: the project page builds its viewer from `useProjectPermissions`, and the admin page passes `{ kind: 'admin', userId, canDecideBudget, canDecideBash }` from the global set (lines ~131 and ~150)."
+        },
+        {
+          "path": "apps/web/components/fleet/ScheduleTable.vue",
+          "reason": "takes `ScheduleViewer`. The replacing invariant: the new shape, same rendering rules."
+        },
+        {
+          "path": "apps/web/components/fleet/ApprovalInbox.vue",
+          "reason": "takes `ApprovalViewer`. The replacing invariant: the new viewer shape."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "dc061b058552db971ccecce97ccc298a8aa464da"
+    },
+    {
+      "id": "US-010",
+      "title": "Build Admin Roles CRUD with the permission matrix editor",
+      "description": "**Goal** — Let authorized humans browse and manage data-driven roles through a catalog-backed editor.\n\n**Motivation** — There is no page for roles at all, so custom roles exist only through the REST API.\n\n**Approach** — - `pages/admin/roles.vue` (new), `composables/useRoles.ts` (new: `load()`, `create(input)`, `update(id, patch)`, `remove(id)`, `loadCatalog()` over `/roles` and `/permissions/catalog`), `components/RoleEditorDialog.vue` (new), `components/PermissionMatrix.vue` (new).\n- The list shows name, key, scope, a `system` badge and a `locked` badge. A 403 on `GET /roles` shows the page's admin-only message, like `pages/admin/users.vue`.\n- The editor: key (create only, `ROLE_KEY_PATTERN`), name, description, scope (create only) and permissions.\n  - Matrix rows: catalog entries whose `scope` fits the role (`GLOBAL` → `global` or `any`; `PROJECT` → `project` or `any`), grouped by the key's first segment, each with its `risk` as a badge.\n  - A non-ownable row is a checkbox; an ownable row is a three-way choice none / own / any, writing `X.own` or `X`.\n  - Entries that are not a plain key of a matrix row (wildcards like `*.read`, `prefix.*`, exclusions `!x`) are kept verbatim as removable chips, and a text input adds one.\n  - For a saved role, a row whose key is in `expandedKeys` but not an explicit entry shows checked and disabled (\"covered\").\n  - Save sends `permissions` as the chip entries in their stored order, then the checked keys sorted.\n- A `locked` role opens read-only (no save, no delete). A `system` role's name is read-only and it has no delete; a save omits `name`.\n- Create, edit and delete controls show only with `role.manage` (global); the nav link `/admin/roles` shows with `role.read` (global).\n\nEvery new composable (`useGlobalPermissions`, `useProjectPermissions`, `useRoles`, `useRoleBindings`, `useProjectRoles`) is added to the `NUXT_AUTO_IMPORTS` override list in `tests/helpers/mount-sfc.ts` by the story that creates it. New components (`RoleEditorDialog`, `PermissionMatrix`, `PrincipalRolesDialog`) are imported explicitly in the SFCs that use them, as `pages/agents.vue` imports its dialogs. Every web story that renders a new string adds its key to both `i18n/locales/en.json` and `zh.json`. A web gate only hides or disables a control; every refusal from the API is still shown with `toast.error(extractApiError(err))`. When a role write fails, the list keeps its last loaded state and the dialog stays open. Reuse ApiError ret 40003 detection, useApi/apiPath, vee-validate/zod and existing dialog patterns; preserve inline nav/source order, plain per-link booleans and fail-closed section label. Keep .own choices explicitly editable while treating wildcard/exclusion entries as ordered chips.\n\n**Scope** — In: roles page/composable/editor/matrix, role-read nav, system/locked safeguards, catalog reads, sorted explicit-key writes, locales and helper override. Out: role bindings dialogs/principal pages (US-011/012). A preview of an unsaved wildcard's effect in the role editor is out of scope; covered rows reflect the saved role's `expandedKeys`. P2 audit and P3 policy pages remain deferred.\n\n**Interface** — `useRoles`: `load()`, `create(input)`, `update(id, patch)`, `remove(id)`, `loadCatalog()` over `/roles` and `/permissions/catalog`; role records carry `{ id, key, name, description, scope, system, locked, permissions, expandedKeys: string[] }`; catalog records carry `{ key, scope, risk, principals, ownable }`.",
+      "acceptanceCriteria": [
+        "[unit] The mounted admin roles page with GET /roles returning two roles lists each role's name, key and scope, with a system badge on the system role and a locked badge on the locked role.",
+        "[unit] When GET /roles rejects with error code 40003, the page renders its admin-only message and no role list.",
+        "[unit] RoleEditorDialog for a new PROJECT role uses the catalog from GET /permissions/catalog to render only project/any entries, grouped by the key's first segment, with each row's risk as a badge.",
+        "[unit] Checking ticket.create and choosing own for comment.update, then saving a new role, posts POST /roles with permissions: ['comment.update.own', 'ticket.create'].",
+        "[unit] Editing a saved role with permissions: ['*.read', 'ticket.create'] and expandedKeys including ticket.read shows *.read as an entry chip, ticket.read checked and disabled, and ticket.create checked and enabled.",
+        "[unit] Removing the *.read chip and adding ticket.transition.* through the text input, then saving, sends PATCH /roles/<id> with permissions: ['ticket.transition.*', 'ticket.create'].",
+        "[unit] A locked role opens with every editor field disabled and no save or delete button.",
+        "[unit] Saving a system role keeps its name read-only and sends a PATCH body without name, while the list renders no delete button for it.",
+        "[unit] Confirming deletion of a custom role sends DELETE /roles/<id> and reloads the list; a 409 rejection shows toast.error(extractApiError(err)) and leaves the role listed.",
+        "[unit] A rejected save with 403 permissions.escalation shows toast.error(extractApiError(err)) and leaves the dialog open with the entered values.",
+        "[unit] With role.read but not role.manage in the global set, the roles page renders no create, edit or delete control.",
+        "[unit] layouts/default.vue renders /admin/roles and the Admin section label when the global set holds only role.read, and no /admin/roles link without it."
+      ],
+      "tags": [
+        "web",
+        "roles",
+        "permissions",
+        "security",
+        "ui"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New catalog-backed editor abstraction must preserve wildcard/exclusion semantics and system/locked role safety across convention-sensitive UI contracts.",
+        "agentProfileId": "claude-sonnet",
+        "agent": "claude",
+        "profileModelTier": "balanced",
+        "initialAgent": "claude",
+        "initialProfileId": "claude-sonnet",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "claude-sonnet",
+          "confidence": 0.7000000000000002,
+          "plannedProfileId": "claude-sonnet",
+          "applied": false,
+          "decidedAt": "2026-10-22T09:23:37.634Z"
+        }
+      },
+      "contextFiles": [
+        "apps/web/pages/admin/users.vue",
+        "apps/web/components/CreateUserDialog.vue",
+        "apps/web/composables/usePermissions.ts",
+        "apps/web/layouts/default.vue",
+        "apps/web/tests/helpers/mount-sfc.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/pages/admin/roles.vue",
+        "apps/web/composables/useRoles.ts",
+        "apps/web/components/RoleEditorDialog.vue",
+        "apps/web/components/PermissionMatrix.vue",
+        "apps/web/tests/pages/admin-roles.spec.ts",
+        "apps/web/tests/components/role-editor-dialog.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/layouts/default.spec.ts",
+          "reason": "the admin link list. The replacing invariant: it also renders the admin roles link with `role.read` in the global set."
+        },
+        {
+          "path": "apps/web/tests/helpers/mount-sfc.ts",
+          "reason": "the `NUXT_AUTO_IMPORTS` override list lacks `useRoles`. The replacing invariant: it is overridable like the existing composables."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "US-010 adds its new UI strings. The replacing invariant: existing keys unchanged; the used-keys-exist spec finds every new key."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "US-010 adds its new UI strings. The replacing invariant: existing keys unchanged; the locale-parity specs pass."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "3c8b098df6080ff0809f9fdf3c927be4f0d08494"
+    },
+    {
+      "id": "US-011",
+      "title": "Manage user global and all-projects bindings with PrincipalRolesDialog",
+      "description": "**Goal** — Replace the admin users role enum selector with global binding chips and a reusable principal dialog.\n\n**Motivation** — The users page PATCHes `role: 'MEMBER' | 'ADMIN'`.\n\n**Approach** — - `composables/useRoleBindings.ts` (new): `listGlobal(principalType)` pages `GET /role-bindings?principalType=<t>&scope=global&size=200` until `hasNext` is false; `create({ principalType, principalId, roleKey, projectId })` → `POST /role-bindings`; `remove(id)` → `DELETE /role-bindings/:id`.\n- Binding chips get their role name and scope by joining `roleKey` against the roles from `GET /roles` (`useRoles`); `RoleBindingDto` is unchanged. The roles column and \"Edit roles\" need both `role.read` and `role.binding.global` (global); when `GET /roles` or `GET /role-bindings` fails, the column shows the load error through `extractApiError` and no chips.\n- `components/PrincipalRolesDialog.vue` (new): props `principal: { type: 'USER' | 'AGENT'; id: string; label: string }`, `bindings` (its `projectId`-null bindings) and `roles` (from `GET /roles`). It lists one chip per binding (a PROJECT-scope role's chip reads \"<name> (all projects)\"), offers the roles not already bound in a select, posts with `projectId: null`, and removes chips. It hides the `owner` role unless the caller holds `role.binding.owner` and the principal is a user. It emits `changed`.\n- `pages/admin/users.vue`: the role column shows the user's global binding chips; an \"Edit roles\" button opens the dialog, hidden for the signed-in user and without `role.binding.global`. `CreateUserDialog` no longer has a role field and posts without `role`.\n\nEvery new composable (`useGlobalPermissions`, `useProjectPermissions`, `useRoles`, `useRoleBindings`, `useProjectRoles`) is added to the `NUXT_AUTO_IMPORTS` override list in `tests/helpers/mount-sfc.ts` by the story that creates it. New components (`RoleEditorDialog`, `PermissionMatrix`, `PrincipalRolesDialog`) are imported explicitly in the SFCs that use them, as `pages/agents.vue` imports its dialogs. Every web story that renders a new string adds its key to both `i18n/locales/en.json` and `zh.json`. The API stays the authority. A web gate only hides or disables a control; every refusal from the API is still shown with `toast.error(extractApiError(err))`. Web: any role, binding, member or invite write fails: `toast.error(extractApiError(err))`; the list keeps its last loaded state, the dialog stays open.\n\nUpdate useAdminUsers.NewUser's input to permit role-less creation and CreateUserDialog's vee-validate schema/defaults/body; do not delete the legacy setRole/GlobalRole exports until US-015. listGlobal sends size/current as strings ('200', '1', '2', …). GET /roles and /role-bindings failures must not leave partially joined or stale role chips. US-010 owns useRoles; coordinate its availability before consuming it without changing the fixed dependency array or duplicating that composable. Existing admin-users 403 behavior, load/filter/pagination and setDisabled behavior remain. Gate tests use the real permission composable with /me/permissions responses.\n\n**Scope** — In: useRoleBindings and override, shared PrincipalRolesDialog, user chips/edit control, role-less user form/input, localized all-projects suffix/errors and tests. Out: useRoles/editor/page ownership (US-010), agents page wiring (US-012), project-bound management (US-013), deleting useAdminUsers.setRole/GlobalRole (US-015). All-projects bindings are not shown or edited in a project's member list; they are managed on Admin → Users and Admin → Agents.\n\n**Interface** — `listGlobal(principalType)`; `create({ principalType, principalId, roleKey, projectId })`; `remove(id)`; `PrincipalRolesDialog` props `principal: { type: 'USER' | 'AGENT'; id: string; label: string }`, `bindings`, `roles`, emitting `changed`; create user posts `{ email, name, password }`.",
+      "acceptanceCriteria": [
+        "[unit] useRoleBindings().listGlobal('USER') calls $api.get('/role-bindings', { query: { principalType: 'USER', scope: 'global', size: '200', current: '1' } }), requests current: '2' while hasNext is true, and returns both pages' records.",
+        "[unit] The admin users page renders one chip per global binding with the role's name, and a PROJECT-scope role's chip reads '<name> (all projects)' through its i18n key.",
+        "[unit] The users page renders Edit roles only for other users and renders none when the global set lacks role.binding.global or role.read.",
+        "[unit] When GET /role-bindings rejects, the users page shows toast.error(extractApiError(err)), the roles column displays the extracted load error, and no role chips render.",
+        "[unit] PrincipalRolesDialog for a user offers every role from GET /roles not already bound (the owner role only when the caller holds role.binding.owner); adding developer posts POST /role-bindings { principalType: 'USER', principalId, roleKey: 'developer', projectId: null } and emits changed.",
+        "[unit] Removing a PrincipalRolesDialog chip sends DELETE /role-bindings/<binding id> and emits changed.",
+        "[unit] PrincipalRolesDialog offers owner only when the global set holds role.binding.owner and the principal is a user.",
+        "[unit] A rejected POST /role-bindings shows toast.error(extractApiError(err)), emits no changed, and keeps the chips as they were with the dialog open.",
+        "[unit] CreateUserDialog renders no role field and submitting valid input posts POST /admin/users { email, name, password }.",
+        "[unit] A rejected DELETE /role-bindings/<id> shows toast.error(extractApiError(err)), retains the last loaded chips and leaves PrincipalRolesDialog open.",
+        "[unit] A rejected POST /admin/users shows toast.error(extractApiError(err)) and leaves CreateUserDialog open without changing the loaded user list.",
+        "[unit] When GET /roles rejects on the users page, the roles column displays the extracted load error and no binding chips."
+      ],
+      "tags": [
+        "web",
+        "permissions",
+        "roles",
+        "security",
+        "users"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-004",
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Reusable principal binding management joins paginated data and applies self/owner/global-key gates across dialogs and admin users.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "claude-sonnet",
+          "confidence": 0.3799999999999999,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T09:47:59.228Z"
+        }
+      },
+      "contextFiles": [
+        "apps/web/pages/admin/users.vue",
+        "apps/web/composables/useAdminUsers.ts",
+        "apps/web/components/CreateUserDialog.vue",
+        "apps/web/composables/usePermissions.ts",
+        "apps/web/tests/helpers/mount-sfc.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/composables/useRoleBindings.ts",
+        "apps/web/components/PrincipalRolesDialog.vue",
+        "apps/web/tests/composables/useRoleBindings.spec.ts",
+        "apps/web/tests/components/principal-roles-dialog.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/admin-users.spec.ts",
+          "reason": "the MEMBER/ADMIN select calls `setRole`. The replacing invariant: the role column renders binding chips and \"Edit roles\" opens `PrincipalRolesDialog`; no case expects a `role` PATCH."
+        },
+        {
+          "path": "apps/web/tests/helpers/mount-sfc.ts",
+          "reason": "the `NUXT_AUTO_IMPORTS` override list lacks `useRoleBindings`. The replacing invariant: it is overridable like the existing composables."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "US-011 adds its new UI strings. The replacing invariant: existing keys unchanged; the used-keys-exist spec finds every new key."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "US-011 adds its new UI strings. The replacing invariant: existing keys unchanged; the locale-parity specs pass."
+        },
+        {
+          "path": "apps/web/tests/components/create-user-dialog.spec.ts",
+          "reason": "submits `role: 'ADMIN'` / `'MEMBER'`. The replacing invariant: the dialog has no role field and posts `{ email, name, password }`."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b0e558745f2991fa7b64cf65a188a707944cb1f0"
+    },
+    {
+      "id": "US-012",
+      "title": "Move the standalone agents page to role bindings and action keys",
+      "description": "**Goal** — Use the shared principal roles dialog for agents and gate each agent action on its global key.\n\n**Motivation** — `EditAgentRolesDialog` PATCHes `/agents/:slug/update-roles` with `AGENT_ROLES`.\n\n**Approach** — - Binding chips get their role name and scope by joining `roleKey` against the roles from `GET /roles` (`useRoles`); `RoleBindingDto` is unchanged. The roles column and \"Edit roles\" need both `role.read` and `role.binding.global` (global); when `GET /roles` or `GET /role-bindings` fails, the column shows the load error through `extractApiError` and no chips.\n- `components/PrincipalRolesDialog.vue`: props `principal: { type: 'USER' | 'AGENT'; id: string; label: string }`, `bindings` (its `projectId`-null bindings) and `roles` (from `GET /roles`). It lists one chip per binding (a PROJECT-scope role's chip reads \"<name> (all projects)\"), offers the roles not already bound in a select, posts with `projectId: null`, and removes chips. It hides the `owner` role unless the caller holds `role.binding.owner` and the principal is a user. It emits `changed`.\n- `pages/agents.vue`: the roles column shows the agent's global binding chips (no longer `agent.roles`); \"Edit roles\" opens the same dialog. Actions gate on `agent.create` (create), `role.binding.global` (edit roles), `agent.capabilities.update`, `agent.key.rotate`, `agent.delete`, `agent.update` (status), all global. `CreateAgentDialog` no longer has a roles field and posts without `roles`.\n\nUse `useRoleBindings().listGlobal('AGENT')` (GET /role-bindings with principalType AGENT, scope global, size 200 and all pages) and useRoles, not normalization of agent.roles as the column source. Keep capability normalization and non-role agent details. Explicitly import PrincipalRolesDialog like the existing page's other dialogs, and reload binding state on changed. The edit roles action needs role.read as well as role.binding.global; the gate table does not override the shared column rule. A web gate only hides or disables a control; every refusal from the API is still shown with `toast.error(extractApiError(err))`. Web: any role, binding, member or invite write fails: `toast.error(extractApiError(err))`; the list keeps its last loaded state, the dialog stays open. Every web story that renders a new string adds its key to both `i18n/locales/en.json` and `zh.json`. Gate tests mount real SFCs with /me/permissions responses and exercise opening PrincipalRolesDialog from the real page. Remove roles from CreateAgentDialog schema/defaults/body and update validation/submission/wiring fixtures, preserving its other validations.\n\n**Scope** — In: standalone agents binding column/dialog/action gates and role-less create form, errors/locales/tests. Out: shared dialog/composable creation (US-011), project membership panel (US-013), deletion of EditAgentRolesDialog and agent-roles.ts (US-015). Do not remove the legacy API update-roles route or agent role tables.\n\n**Interface** — `PrincipalRolesDialog` receives `principal.type: 'AGENT'`, the agent id and global bindings; adding reviewer posts `{ principalType: 'AGENT', principalId: <agent id>, roleKey: 'reviewer', projectId: null }`; `POST /agents` create body has no `roles` property.",
+      "acceptanceCriteria": [
+        "[unit] The standalone agents page renders each agent's roles column from GET /role-bindings?principalType=AGENT&scope=global, one role-name chip per binding, not from agent.roles.",
+        "[unit] Choosing Edit roles opens PrincipalRolesDialog with principal.type 'AGENT' and the agent's id; adding reviewer posts POST /role-bindings { principalType: 'AGENT', principalId: <agent id>, roleKey: 'reviewer', projectId: null }.",
+        "[unit] PrincipalRolesDialog for an agent never offers owner even when the global set holds role.binding.owner.",
+        "[unit] The standalone agents page renders create only with agent.create; each row's Edit roles, Edit capabilities, Rotate key, Delete and status actions require role.binding.global, agent.capabilities.update, agent.key.rotate, agent.delete and agent.update respectively in the global set, with role.read also required for Edit roles.",
+        "[unit] CreateAgentDialog renders no roles field, and submitting a name and slug posts POST /agents with no roles property in its body.",
+        "[unit] When an agent-page role-binding write rejects, toast.error(extractApiError(err)) is shown, the last loaded role chips are retained and the dialog stays open."
+      ],
+      "tags": [
+        "web",
+        "agents",
+        "permissions",
+        "security",
+        "ui"
+      ],
+      "dependencies": [
+        "US-011"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two existing runtime UI files reuse the upstream binding composable and principal dialog; independent agent action gates still trigger the mandatory security TDD override.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.33999999999999986,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T10:42:51.392Z"
+        }
+      },
+      "contextFiles": [
+        "apps/web/pages/agents.vue",
+        "apps/web/components/CreateAgentDialog.vue",
+        "apps/web/components/PrincipalRolesDialog.vue",
+        "apps/web/composables/useRoleBindings.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/pages/agents-role-bindings.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/pages/agents.actions.spec.ts",
+          "reason": "the \"Edit roles\" action opens `EditAgentRolesDialog`. The replacing invariant: it opens `PrincipalRolesDialog` for the agent."
+        },
+        {
+          "path": "apps/web/tests/pages/agents-standalone.spec.ts",
+          "reason": "the roles column renders `agent.roles`. The replacing invariant: it renders the agent's global binding chips."
+        },
+        {
+          "path": "apps/web/tests/components/agents-page-wiring.spec.ts",
+          "reason": "wires `EditAgentRolesDialog`. The replacing invariant: wires `PrincipalRolesDialog`."
+        },
+        {
+          "path": "apps/web/tests/components/CreateAgentDialog.spec.ts",
+          "reason": "selects roles before submit. The replacing invariant: the dialog has no roles field and posts without `roles`."
+        },
+        {
+          "path": "apps/web/tests/components/create-agent-dialog-validation.spec.ts",
+          "reason": "\"roles required\" validation. The replacing invariant: no roles validation; other validations unchanged."
+        },
+        {
+          "path": "apps/web/tests/components/api-submission.spec.ts",
+          "reason": "the create body includes `roles`. The replacing invariant: it omits `roles`."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "US-012 adds its new UI strings. The replacing invariant: existing keys unchanged; the used-keys-exist spec finds every new key."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "US-012 adds its new UI strings. The replacing invariant: existing keys unchanged; the locale-parity specs pass."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2e383f4edb5e9e89812e9e470dfe8c1736301c68"
+    },
+    {
+      "id": "US-013",
+      "title": "Manage project users and agents through local binding chips",
+      "description": "**Goal** — Rewrite Project Members as a unified principal list with project-role selection and binding actions.\n\n**Motivation** — Project agents are added through a separate roster dialog that grants no role.\n\n**Approach** — - `ProjectMembersPanel` takes `slug` and `projectId`; the settings page renders it only once the project has loaded and passes its id. It loads `GET /projects/:slug/members?principals=all` and `GET /projects/:slug/roles`.\n  - Each row shows the name (users: name else email; agents: name with an agent badge and the slug) and one chip per binding (`roleName`). A chip with `id: null` (legacy) has no remove button.\n  - Add a user: email + role select → `POST /projects/:slug/members { email, roleKey }`.\n  - Add an agent: select from `GET /agents` minus agents already listed, plus a role → `POST /role-bindings { principalType: 'AGENT', principalId, roleKey, projectId }`.\n  - Add a role to a row: `POST /role-bindings` for that principal; remove a chip: `DELETE /role-bindings/:id`; remove a row: `DELETE` each non-null binding id, then reload.\n  - Gates (project set): the add-user form needs `member.add`; adding an agent, adding or removing a chip and removing a row need `role.binding.manage`. The signed-in user's own row shows no edit controls.\n- `useProjectMembers` loads the unified list as a new type `ProjectPrincipalRow { principalType; principalId; userId: string | null; email: string | null; agentSlug: string | null; name; disabled; joinedAt; bindings }`, and `add(email, roleKey)` posts `{ email, roleKey }`; its `changeRole` and `remove` and `ASSIGNABLE_MEMBER_ROLES` go away with the old panel (the panel writes through `useRoleBindings`). The existing `ProjectMember` type keeps `userId: string` and `email: string` for `useProjectMemberNames`, `lib/mentions.ts` and `MarkdownEditor`, which keep reading the default `principals=users` page.\n- `composables/useProjectRoles.ts` (new, US-013): `useProjectRoles(slug)` loads `GET /projects/:slug/roles` once; both panels use it.\n- A row whose bindings are all legacy (`id: null`) shows no remove-row button.\n\nWeb: removing a member row where one binding delete fails: toast, then reload the members list. Web: any role, binding, member or invite write fails: `toast.error(extractApiError(err))`; the list keeps its last loaded state, the dialog stays open. Disabled users show no chip edit controls, preserving the existing disabled-user regression anchor. Add useProjectRoles to the NUXT_AUTO_IMPORTS override list in tests/helpers/mount-sfc.ts. Every web story that renders a new string adds its key to both i18n/locales/en.json and zh.json. The API stays the authority; gate tests mount real SFCs using the real permission composables with /me/permissions responses. Keep pagination/loadMore/name lookup working, show only local bindings, skip null ids on deletes and reload after partial removal; do not substitute legacy member DELETE for binding deletes.\n\n**Scope** — In: ProjectPrincipalRow and roleKey add, new useProjectRoles, rewritten panel, settings projectId timing, user/agent add and chip/row binding mutations, disabled/self guards and regression tests. Out: global/all-projects binding management (US-011/012), invites panel (US-014), deleting the old project agent roster controls (US-015). All-projects bindings are not shown or edited in a project's member list; they are managed on Admin → Users and Admin → Agents. The last-project-admin rule of the legacy member routes is not applied to `/role-bindings` deletes; a project without a Project Admin stays reachable by global Owner and Admin.\n\n**Interface** — `ProjectMembersPanel` props `{ slug, projectId }`; `ProjectPrincipalRow { principalType; principalId; userId: string | null; email: string | null; agentSlug: string | null; name; disabled; joinedAt; bindings }`; `useProjectMembers(slug)` target rows ProjectPrincipalRow and `add(email: string, roleKey: string)`; `ProjectMember` remains user-only with string userId/email; `useProjectRoles(slug)` loads `GET /projects/:slug/roles` once.",
+      "acceptanceCriteria": [
+        "[unit] ProjectMembersPanel mounted with slug and projectId calls $api.get('/projects/<slug>/members', { query: { principals: 'all' } }) and $api.get('/projects/<slug>/roles'), and renders one row per record: users with name else email, agents with name, an agent badge and agentSlug.",
+        "[unit] Each row renders one roleName chip per bindings entry, and a chip with id null renders no remove button.",
+        "[unit] Submitting the add-user form with an email and triager posts POST /projects/<slug>/members { email, roleKey: 'triager' } and appends the returned member.",
+        "[unit] Adding an agent selected from GET /agents, excluding agents already listed, with reviewer posts POST /role-bindings { principalType: 'AGENT', principalId: <agent id>, roleKey: 'reviewer', projectId } and reloads the members list.",
+        "[unit] Adding verifier to an existing user row posts POST /role-bindings { principalType: 'USER', principalId: <user id>, roleKey: 'verifier', projectId }, and removing a chip sends DELETE /role-bindings/<binding id> and removes that chip.",
+        "[unit] Removing a row with binding ids b1, b2 and legacy null sends DELETE /role-bindings/b1 and DELETE /role-bindings/b2 and no other delete, then reloads the list.",
+        "[unit] When the second binding delete rejects during row removal, the panel shows toast.error(extractApiError(err)) and reloads the list.",
+        "[unit] With member.add but not role.binding.manage in the project set, the panel renders the add-user form and no add-agent, chip add/remove or row remove controls.",
+        "[unit] The signed-in user's own row renders no chip add, chip remove or row remove control even with role.binding.manage.",
+        "[unit] useProjectMembers('web').add('a@b.io', 'triager') posts { email: 'a@b.io', roleKey: 'triager' }, and useProjectMemberNames('web').load() still calls the members route with only { size: '100' }.",
+        "[unit] A row whose every binding has id null renders no remove-row button even with role.binding.manage.",
+        "[unit] A rejected POST /projects/<slug>/members shows toast.error(extractApiError(err)) and appends no row.",
+        "[unit] When adding an agent or adding/removing a chip fails, the panel shows toast.error(extractApiError(err)) and retains its last loaded rows and bindings."
+      ],
+      "tags": [
+        "web",
+        "membership",
+        "agents",
+        "permissions",
+        "security"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-004",
+        "US-006",
+        "US-011"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Unified principal UI crosses nullable types, compatibility chips, paging, partial destructive writes and separate grant permissions.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "claude-sonnet",
+          "confidence": 0.5,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T11:22:44.456Z"
+        }
+      },
+      "contextFiles": [
+        "apps/web/components/ProjectMembersPanel.vue",
+        "apps/web/composables/useProjectMembers.ts",
+        "apps/web/pages/[project]/settings.vue",
+        "apps/web/composables/useRoleBindings.ts",
+        "apps/web/composables/useProjectMemberNames.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/composables/useProjectRoles.ts",
+        "apps/web/tests/components/project-members-principals.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/components/ProjectMembersPanel.spec.ts",
+          "reason": "role buttons ADMIN/DEVELOPER/VIEWER and `changeRole`. The replacing invariant: binding chips, the role select from project roles, and role-binding writes."
+        },
+        {
+          "path": "apps/web/tests/components/project-members-disabled.spec.ts",
+          "reason": "disabled users show no role switch. The replacing invariant: disabled users show no chip edit controls."
+        },
+        {
+          "path": "apps/web/tests/composables/useProjectMembers.spec.ts",
+          "reason": "`add(email, role)` posts `{ email, role }` and records are `ProjectMember`. The replacing invariant: `add(email, roleKey)` posts `{ email, roleKey }`; rows are `ProjectPrincipalRow`; the `changeRole` and `remove` cases are deleted with those methods."
+        },
+        {
+          "path": "apps/web/tests/composables/useProjectMemberNames.spec.ts",
+          "reason": "record fixtures. The replacing invariant: fixtures may carry the new fields; `nameOf` is unchanged."
+        },
+        {
+          "path": "apps/web/tests/helpers/mount-sfc.ts",
+          "reason": "the `NUXT_AUTO_IMPORTS` override list lacks `useProjectRoles`. The replacing invariant: it is overridable like the existing composables."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "US-013 adds its new UI strings. The replacing invariant: existing keys unchanged; the used-keys-exist spec finds every new key."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "US-013 adds its new UI strings. The replacing invariant: existing keys unchanged; the locale-parity specs pass."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "52a420029e9500a841d8d845adc72356e12b1a86"
+    },
+    {
+      "id": "US-014",
+      "title": "Use project role keys and independent invite action gates in the web",
+      "description": "**Goal** — Replace invite role enums with project role keys and role names throughout the invite UI.\n\n**Motivation** — The members panel and the invites panel offer only ADMIN/DEVELOPER/VIEWER.\n\n**Approach** — - `ProjectInvitesPanel` shows only with `invite.read`; its form only with `invite.create`, resend with `invite.resend`, cancel with `invite.cancel`. The role select lists the project roles and posts `{ email, roleKey }`; each invite shows `roleName`. `pages/invite/[token].vue` shows the preview's `roleName`.\n- `composables/useProjectRoles.ts` (new, US-013): `useProjectRoles(slug)` loads `GET /projects/:slug/roles` once; both panels use it.\n- `useProjectInvites` carries `InviteDto.roleKey`, `roleName`, and `create(email, roleKey)`.\n\nThe API invite DTO contract is `role: string | null; roleKey: string | null; roleName: string | null`; update the web list and public preview types accordingly. Use project roles, not INVITE_ROLES or hardcoded ADMIN/DEVELOPER/VIEWER choices. Preserve INVITED/ADDED behavior, invitePath/share-link/emailed handling, member-added emission and existing refresh behavior. Stop rendering the panel without invite.read; independently gate form/resend/cancel. The API stays the authority. A web gate only hides or disables a control; every refusal from the API is still shown with `toast.error(extractApiError(err))`. Web: any role, binding, member or invite write fails: `toast.error(extractApiError(err))`; the list keeps its last loaded state, the dialog stays open. Every web story that renders a new string adds its key to both i18n/locales/en.json and zh.json. Gate tests mount the real SFC with /me/permissions answering the keys. Update ProjectInvitesPanel/useProjectInvites/invite-accept fixtures.\n\n**Scope** — In: invite panel permissions, role selection from useProjectRoles, roleKey create payload and nullable DTO fields, public preview roleName and locales/tests. Out: useProjectRoles creation and members panel (US-013), API migration and acceptance (US-005), deleting INVITE_ROLES (US-015). The legacy role API fields and ProjectInvite.role column remain; existing pending invites have no backfill.\n\n**Interface** — `useProjectInvites(slug)` target `create(email: string, roleKey: string)` posting `{ email, roleKey }`; `InviteDto` carries `role: string | null; roleKey: string | null; roleName: string | null`; public preview displays `roleName`.",
+      "acceptanceCriteria": [
+        "[unit] ProjectInvitesPanel offers project roles from GET /projects/<slug>/roles, and submitting an email with developer posts POST /projects/<slug>/invites { email, roleKey: 'developer' }.",
+        "[unit] ProjectInvitesPanel renders each listed invite's roleName.",
+        "[unit] ProjectInvitesPanel renders nothing without invite.read; with invite.read but not invite.create it renders the list and no form, and resend/cancel buttons follow invite.resend/invite.cancel.",
+        "[unit] pages/invite/[token].vue renders the preview's roleName.",
+        "[unit] A rejected POST /projects/<slug>/invites shows toast.error(extractApiError(err)) and leaves the invite list unchanged.",
+        "[unit] When an invite resend or cancel write rejects, toast.error(extractApiError(err)) is shown and the last loaded invite list is unchanged.",
+        "[unit] When roleKey invite creation returns outcome 'INVITED', ProjectInvitesPanel displays the returned invitePath with the current origin and preserves the emailed result while reloading invites, as before.",
+        "[unit] When roleKey invite creation returns outcome 'ADDED', ProjectInvitesPanel emits member-added and reloads invites, preserving the existing member-added event consumed by settings.vue's refreshProject listener."
+      ],
+      "tags": [
+        "web",
+        "invites",
+        "permissions",
+        "security",
+        "ui"
+      ],
+      "dependencies": [
+        "US-005",
+        "US-006",
+        "US-013"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard existing panel/composable/preview migration with independently gated invite access and writes.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.4400000000000004,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T11:44:32.671Z"
+        }
+      },
+      "contextFiles": [
+        "apps/web/components/ProjectInvitesPanel.vue",
+        "apps/web/composables/useProjectInvites.ts",
+        "apps/web/pages/invite/[token].vue",
+        "apps/web/composables/useProjectRoles.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/tests/components/project-invites-role-keys.spec.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/components/ProjectInvitesPanel.spec.ts",
+          "reason": "the role select offers `INVITE_ROLES` and posts `{ email, role }`. The replacing invariant: it offers project roles and posts `{ email, roleKey }`; invites show `roleName`."
+        },
+        {
+          "path": "apps/web/tests/composables/useProjectInvites.spec.ts",
+          "reason": "`create(email, role)`. The replacing invariant: `create(email, roleKey)` posts `{ email, roleKey }`."
+        },
+        {
+          "path": "apps/web/tests/pages/invite-accept.spec.ts",
+          "reason": "the preview shows `role`. The replacing invariant: it shows `roleName`."
+        },
+        {
+          "path": "apps/web/i18n/locales/en.json",
+          "reason": "US-014 adds its new UI strings. The replacing invariant: existing keys unchanged; the used-keys-exist spec finds every new key."
+        },
+        {
+          "path": "apps/web/i18n/locales/zh.json",
+          "reason": "US-014 adds its new UI strings. The replacing invariant: existing keys unchanged; the locale-parity specs pass."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "90b0338b29117a89b2b8445f832b7db609516e18"
+    },
+    {
+      "id": "US-015",
+      "title": "Delete obsolete web role UI, helpers and roster membership actions",
+      "description": "**Goal** — Remove legacy web role-management code after every replacement consumer has migrated.\n\n**Motivation** — Until the web stops depending on them, drop-legacy cannot land.\n\n**Approach** — Deletion only: `EditAgentRolesDialog.vue`, `lib/agent-roles.ts`, `AddProjectAgentDialog.vue`, `useProjectViewerRole.ts`, `canWorkOnFleet`, `useAdminUsers.setRole` and `GlobalRole`, `INVITE_ROLES`, `useProjectAgents.add`/`remove`, and the roster add/remove UI and its \"added by\"/\"added at\" columns in `pages/[project]/agents.vue`. Verified by `bun run type-check` and `bun run lint` in `apps/web`.\n\nThe deletions are otherwise verified by the build/static gate: `bun run type-check` and `bun run lint` in `apps/web` pass with `components/EditAgentRolesDialog.vue`, `lib/agent-roles.ts`, `components/AddProjectAgentDialog.vue` and `composables/useProjectViewerRole.ts` deleted; with `canWorkOnFleet`, `useAdminUsers.setRole`, `GlobalRole`, `INVITE_ROLES` and `useProjectAgents.add`/`remove` removed; and with the roster add/remove controls and the \"added by\"/\"added at\" columns removed from `pages/[project]/agents.vue`. `bun run test` in `apps/web` passes with the test edits listed under US-015 in Modifies.\n\nDelete tests/components/edit-agent-roles-dialog.spec.ts and AddProjectAgentDialog.spec.ts with their deleted dialogs. Remove only add/remove cases from tests/composables/useProjectAgents.spec.ts, keeping load/refresh/changeStatus; remove setRole cases from useAdminUsers.spec.ts, keeping load/createUser/setDisabled; remove canWorkOnFleet cases from tests/lib/fleet-jobs.spec.ts, keeping the rest. Remove useProjectViewerRole from the tests/helpers/mount-sfc.ts override list. Keep tests/pages/loading-states.spec.ts assertions for the remaining project agents page behavior. Do not delete new key gates, binding management or roster read/status/loading behavior. Keep any still-needed response fields typed without the deleted GlobalRole alias; do not reintroduce role-name gating.\n\n**Scope** — In: only the listed legacy UI/helper/export/action/test deletions and compilation-compatible removal of obsolete references. Out: adding new permission capabilities or pages (US-006 through US-014). Removing `canManage` and `viewerRole` from `GET /projects/:slug/members`, the legacy routes `PATCH /agents/:slug/update-roles`, `PATCH`/`DELETE /projects/:slug/members/:userId`, `POST`/`DELETE /projects/:slug/agents`, the `role` fields of `AddMemberDto` / `CreateInviteDto` / `CreateUserDto` / `UpdateUserDto`, the `ProjectInvite.role` column and the legacy tables is out of scope (`permissions-p1-drop-legacy`). The CLI (`apps/cli`) and its generated client are not changed; the CLI keeps the legacy `role` flags until a CLI follow-up. `apps/cli/src/generated/` is not regenerated. Playwright e2e specs under `apps/web/tests/e2e/` are not changed: they drive the legacy API routes, which stay.\n\n**Interface** — Importing `~/lib/fleet-jobs` yields no `canWorkOnFleet` export; `~/lib/agent-roles` no longer resolves; `useAdminUsers()` returns no `setRole`; `useProjectAgents('web')` returns no `add` or `remove`, retaining `load`, `refresh`, `changeStatus` and roster state.",
+      "acceptanceCriteria": [
+        "[unit] Importing ~/lib/fleet-jobs at runtime yields no canWorkOnFleet export, and importing ~/lib/agent-roles fails because the module no longer exists.",
+        "[unit] useAdminUsers() returns no setRole member, and useProjectAgents('web') returns no add or remove member.",
+        "[unit] The project agents page mounted with a roster renders no add-agent button, no remove control and no added by or added at column.",
+        "[unit] When a roster refresh rejects after an earlier successful load, useProjectAgents('web') records the rejection in error.value and retains the earlier items.value, preserving the existing read/refresh failure behavior.",
+        "[unit] useProjectAgents('web').changeStatus('agent-a', 'PAUSED') still calls $api.patch('/projects/web/agents/agent-a', { status: 'PAUSED' }) after add/remove are deleted."
+      ],
+      "tags": [
+        "web",
+        "permissions",
+        "security",
+        "delete",
+        "refactor"
+      ],
+      "dependencies": [
+        "US-007",
+        "US-008",
+        "US-009",
+        "US-011",
+        "US-012",
+        "US-013",
+        "US-014"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Well-specified mechanical deletion across known migrated consumers; role/access-control removal still requires the security test-strategy override.",
+        "agentProfileId": "native-luna",
+        "agent": "native",
+        "profileModelTier": "fast",
+        "initialAgent": "native",
+        "initialProfileId": "native-luna",
+        "initialModelTier": "fast",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.4800000000000004,
+          "plannedProfileId": "native-luna",
+          "applied": false,
+          "decidedAt": "2026-10-22T11:57:06.947Z"
+        }
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/agents.vue",
+        "apps/web/composables/useProjectAgents.ts",
+        "apps/web/lib/fleet-jobs.ts",
+        "apps/web/composables/useAdminUsers.ts",
+        "apps/web/tests/helpers/mount-sfc.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/components/edit-agent-roles-dialog.spec.ts",
+          "reason": "tests the deleted dialog. Deleted with it."
+        },
+        {
+          "path": "apps/web/tests/components/AddProjectAgentDialog.spec.ts",
+          "reason": "tests the deleted dialog. Deleted with it."
+        },
+        {
+          "path": "apps/web/tests/composables/useProjectAgents.spec.ts",
+          "reason": "`add`/`remove` cases. The replacing invariant: the `load`, `refresh` and `changeStatus` cases stay; `add`/`remove` cases are deleted."
+        },
+        {
+          "path": "apps/web/tests/composables/useAdminUsers.spec.ts",
+          "reason": "`setRole` cases. The replacing invariant: deleted; `load`, `createUser`, `setDisabled` cases stay."
+        },
+        {
+          "path": "apps/web/tests/lib/fleet-jobs.spec.ts",
+          "reason": "`canWorkOnFleet` cases. The replacing invariant: deleted; the rest stay."
+        },
+        {
+          "path": "apps/web/tests/helpers/mount-sfc.ts",
+          "reason": "lists `useProjectViewerRole`. The replacing invariant: the name is removed from the override list."
+        },
+        {
+          "path": "apps/web/tests/pages/loading-states.spec.ts",
+          "reason": "reads the project agents page, whose roster add/remove UI is removed. The replacing invariant: its loading-state assertions still hold for the page."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "637da8b965829db4a04fb6f785aed1d273630560"
+    }
+  ],
+  "analysis": "Refinement audit (second pass): compared all 137 numbered source acceptance criteria against the same-story acceptanceCriteria arrays. The original criteria occupy each story's first N slots, with N = US-001:8, US-002:10, US-003:10, US-004:10, US-005:12, US-006:11, US-007:12, US-008:9, US-009:9, US-010:12, US-011:9, US-012:5, US-013:12, US-014:5, US-015:3. Additional requirements follow those slots; no original criterion is deleted, reassigned or replaced by suggestedCriteria. Enumeration of the source-to-draft mapping, by original local AC number: US-001 [1 baseline sorted global keys; 2 developer project keys including comment.update.own; 3 global admin project keys without local binding; 4 agent keys; 5 no implicit/public keys; 6 missing slug 404; 7 inaccessible project 403; 8 empty project 400]. US-002 [1 catalog role entries/sort; 2 exact ticket.delete metadata/comment ownability; 3 catalog denied without role.read; 4 developer expandedKeys; 5 invalid stored entries preserve permissions; 6 principalType-only agent filtering; 7 global-scope filtering; 8 principalId alone rejected; 9 invalid scope rejected; 10 global/project conflict]. US-003 [1 exact project role fields/order; 2 listProjectRoles route delegation; 3 inaccessible roles denied; 4 default user-only identities; 5 ordered developer/triager binding chips; 6 agents follow users with nullable fields/combined total; 7 no all-projects-only agent row; 8 legacy developer null-id chip; 9 invalid principals query; 10 combined pagination]. US-004 [1 triager add; 2 escalation writes nothing; 3 grant-helper arguments/order/rejection; 4 both fields rejected; 5 missing role; 6 legacy-field escalation writes nothing; 7 GLOBAL scope mismatch; 8 self-binding; 9 enriched member result; 10 optional user role defaults MEMBER]. US-005 [1 stored custom roleId/null role and names; 2 escalation creates no invite; 3 exactly-one role fields; 4 existing-user verifier grant; 5 roleId acceptance; 6 legacy VIEWER acceptance; 7 roleGone no user/binding; 8 deleted role sets FK null; 9 exact eight preview fields; 10 enriched ADDED result; 11 self-invite leaves bindings unchanged; 12 missing role creates no invite]. US-006 [1 exact has; 2 own versus any; 3 empty permissions; 4 exact project request and returned keys; 5 fetch error fail-closed; 6 global request/cache keys; 7 user.read-only navigation; 8 ADMIN claim with empty set hides links/label; 9 independent fleet/skills links; 10 skills command gate; 11 ingest prop gate]. US-007 [1 assignee-only gate; 2 independent label assign/remove; 3 link/delete gates; 4 unlink prop; 5 dispatch key plus existing fleet repo/linkability conditions as today; 6 create-only label UI; 7 independent label update/delete; 8 thread creation plus threadsEnabled; 9 any archive not own archive; 10 independent skill enable/disable; 11 independent reindex/pattern editing; 12 global agent status gate]. US-008 [1 requester cancellation retained; 2 requeue gate; 3 list/dispatch gate; 4 independent requeue/cancel viewer; 5 config edit prop; 6 drift versus readonly config; 7 independent budget table props; 8 project/admin budget scope; 9 empty-set readonly project/fleet tables]. US-009 [1 update/delete any/own ownership; 2 budget/bash keys and requester-only assistant action retained; 3 schedule creation/edit/delete split; 4 own update without delete; 5 readonly schedule notice; 6 admin/project decision viewer wiring; 7 no admin decision bypass; 8 global-first and scoped notification discovery; 9 badge routing]. US-010 [1 role columns/badges; 2 forbidden notice; 3 scoped/grouped/risk matrix; 4 sorted explicit and own write; 5 saved wildcard coverage; 6 advanced-chip replacement/order; 7 locked readonly; 8 system name omitted/no delete; 9 delete reload/conflict retention; 10 failed save retains values; 11 role.read-only controls; 12 role nav and section label]. US-011 [1 all global binding pages/exact query; 2 named/all-projects chips; 3 no self or unauthorized edit; 4 binding-load failure/no chips; 5 selectable unbound roles/add payload/changed; 6 remove payload/changed; 7 owner eligibility; 8 failed add unchanged chips/no changed; 9 role-less user creation]. US-012 [1 bindings not agent.roles; 2 agent dialog/payload; 3 agents never offered owner; 4 independent action keys; 5 role-less agent creation]. US-013 [1 exact unified list/roles requests and identities; 2 legacy/nonlegacy chips; 3 roleKey user add/append; 4 agent exclusion/add/reload; 5 row role add/chip removal; 6 only non-null ids deleted/reload; 7 partial-delete failure/reload; 8 member.add versus binding.manage; 9 no self edits; 10 roleKey request with unchanged default user name query; 11 no legacy-only row removal; 12 failed add appends nothing]. US-014 [1 project roles/roleKey invite body; 2 roleName rows; 3 independent read/create/resend/cancel; 4 roleName preview; 5 failed create retains list]. US-015 [1 removed exports/module; 2 removed methods; 3 no roster membership controls/added metadata]. Regression qualifiers retained include US-002.5 stored permissions unchanged, US-005.11 bindings unchanged, US-007.5 fleet-repo/linkability as today, US-009.2 requester-only assistant decisions, US-011.5 roles not already bound, US-011.8 chips as they were, US-013.4 agents already listed excluded, and US-013.10 name lookup still using only size 100.\n\nAudit findings and corrections: the source schema illustration names both the retained string column and the new Prisma relation role. apps/api/prisma/schema.prisma:218 proves the scalar already exists; Prisma cannot declare two fields with that name. US-005 must retain nullable scalar role and use assignedRole for the new relation, preserving roleId, ON DELETE SET NULL, migration name, DTOs and every acceptance assertion. The relation identifier is internal and does not change the HTTP contract. The US-011.5 unbound-role selection fixture must authorize owner (or exclude owner from its input list) so its universal selection assertion does not contradict US-011.7's owner exclusion; clarified its precondition rather than weakening either assertion. US-008.2 uses a concrete FAILED/configEdit-null fixture and US-008.4 uses separate terminal/requeueable and unfinished/cancel fixtures, avoiding an impossible interpretation that a terminal requeueable job could show cancel. Explicit terminal/unrecoverable-config regression checks are added to US-008. US-009's documented global-read pending/failure scan refusals are promoted from suggestions into acceptanceCriteria. US-011's documented GET /roles failure/no-chips case is likewise promoted. US-014 gains regression assertions for existing INVITED share-link and ADDED member-added refresh paths (apps/web/components/ProjectInvitesPanel.vue:29-43). US-015 gains an explicit failed roster-refresh regression case and retained status-write behavior (apps/web/composables/useProjectAgents.ts:41-52,68-70), not merely negative export assertions. US-012 reuses the new dialog and binding composable and touches two main runtime files; reduced complexity to medium. Security strategy remains three-session-tdd for every story as explicitly required, rather than treating that mandated override as optional overhead.\n\nContext/dependency/scope audit: every spec Context Files entry is present in its story, none of a story's own outputs appears in contextFiles, and no story exceeds five context files. New contextual paths in US-007/008/009/010/011/012/013/014 come only from declared upstream outputs; useRoles is deliberately not listed for US-011 because the fixed graph does not guarantee it. The previously recorded US-010/useRoles scheduling gap remains an execution coordination constraint, not permission to alter the binding dependency graph or duplicate the helper. All fifteen ids, exact workdirs and exact dependency arrays are retained and reference existing stories. All twelve top-level Out of Scope bullets are retained verbatim, including the two explicitly story-qualified bullets, with nearby cleanup/API/UI boundaries echoed in descriptions. No local deferral has been hoisted. All AC outputs are observable HTTP bodies/statuses, return values, exceptions, calls, rendered props/text, or state transitions. Every story has a refusal/absence/failure case; no build/lint/typecheck condition is an AC. The 20 Failure Handling rows map respectively to US-001.6/.7, US-002.3/.8/.9/.10, US-003.11/.9, US-002.5, US-004.5/.7/.2/.4/.8 plus US-005.11, US-001.8, US-005.3/.7, US-006.5/.12, the existing failed-write criteria in US-010 through US-014, and US-013.7. This row map groups the table's repeated unknown-role/escalation/self scenarios with their explicit route criteria; no failure row is deferred only to prose.\n\nRepository verification: codebase-memory MCP is not exposed in this session; a capability request recorded that limitation, so discovery used direct Read/Glob/Grep. The supplied automated Express/Next.js labels are incorrect: the repository is NestJS + Fastify (API app context .nax/mono/apps/api/context.md:21) and Nuxt 3 + Vue (apps/web/package.json:6,35,39). This is an enhancement of the P1 permission architecture, not a new authorization engine. Follow .nax/mono/apps/{api,web}/context.md, Nathapp NestJS patterns before API implementation, and the existing JsonResponse envelopes, generated Prisma imports, project guards, DTO validation, and separate English/Chinese translations. No implementation or test execution was performed while drafting this PRD.\n\nGoal and completion: move the human web client to effective permission keys and data-driven roles, while adding the API surfaces it needs and preserving the CLI's legacy contract. Done means all fifteen stories' runtime criteria hold, the OpenAPI spec reflects all API changes, old web role-management and role-name gates are removed, and the unchanged legacy API routes still serve CLI/e2e callers. All stories concern access control and therefore require three-session-tdd, including UI-only gating and cleanup. Keep the fixed workdirs and dependency graph; API stories are numbered first, web stories second. US-005 is scoped to apps/api as explicitly ruled even though its export command also writes root openapi.json. Do not regenerate the CLI.\n\nExisting authorization core and API integration: apps/api/src/permissions/permission.service.ts:53-87 already implements can and effectiveKeys; can allows implicit/public catalog entries but effectiveKeys only expands roles. effectiveKeys caches principal-and-scope arrays and returns a set. computeKeys at :112-160 unions direct bindings, compatibility sources, baseline roles and the global Owner/Admin project wildcard. Reuse it exactly rather than reconstructing grants in controllers or browsers. Build USER/AGENT refs as can does at :64. ProjectAccessService.findProjectIdBySlug at apps/api/src/projects/project-access.service.ts:28 rejects missing/soft-deleted projects with projects; resolveMembership at :45 uses project.read and preserves the agent-scoping compatibility behavior. The new /me/permissions endpoint intentionally accepts both users and agents (unlike the usual users-only /me notification routes); CombinedAuthGuard still rejects runners. Keep MePermissionsController in ProjectsModule, not the global PermissionsModule, to avoid importing Projects into Permissions. apps/api/src/projects/projects.module.ts:17-23 documents the existing Memory -> Projects -> Agents -> Context cycle and its forwardRef; do not disturb it or drop ProjectsController at :25.\n\nRole administration already exists: apps/api/src/permissions/role-admin.service.ts:84-97 performs explicit key checks for role reads/writes; :196-234 createBinding enforces route keys, lookups, scope, principal suitability, self and escalation before MembershipService writes; :241-263 handles deletion from stored scope. assertMayGrant must reuse its role expansion/principal/escalation semantics but must NOT impose role.binding.manage/global on member.add or invite.create callers. Keep createBinding's independent authorization unchanged. Role writes invalidate caches; MembershipService.afterCommit at apps/api/src/permissions/membership.service.ts:67-77 specifically prevents stale recomputation during outer transactions. Preserve afterCommit wrapping, owner locks, legacy User.role mirroring, token revocation and after-commit invalidation. New reads use RequiresGuard; existing roles.controller.ts:24-69 and role-bindings.controller.ts:32-87 use service-enforced declarations and JsonResponse.Ok. Do not accidentally run duplicate or different authorization in the new grant helper.\n\nUS-002 propagation: RoleDto.from at apps/api/src/permissions/dto/role.dto.ts:24-35 is the common serialization seam for list/create/update, so expandedKeys belongs there and invalid stored entries must keep permissions untouched while returning []. ROLE_KEY_PATTERN at :6 is /^[a-z][a-z0-9-]{1,48}$/. ListRoleBindingsQuery at apps/api/src/permissions/dto/role-binding.dto.ts:71-119 currently validates principalType and principalId as a pair; relax only the type-alone case. role-bindings.controller.ts:40-51 currently maps only a complete principal and truthy projectId. Carry principalType through BindingFilter (apps/api/src/permissions/permissions.types.ts:132-135), MembershipService, PrismaRoleBindingRepository and InMemoryPermissionStore. Preserve undefined (any scope) versus null (only projectId-null) and reject scope=global with non-empty projectId before widening a filter. Register the catalog controller without changing existing providers/exports.\n\nUnified members and pagination: apps/api/src/projects/members/project-members.service.ts:41-55 returns page plus canManage/viewerRole; keep these compatibility fields but stop consuming them as web gates. PrismaProjectMembersRepository.findMemberPage at apps/api/src/projects/members/prisma-project-members.repository.ts:32-55 currently loads user memberships, slices, and then fetches user details. For principals=all concatenate the existing ordered user memberships and ordered agent memberships BEFORE pagination, calculate total/hasNext over the combined list, and enrich only page principals with local binding and legacy rows. Do not create agent rows from all-projects bindings. Actual local bindings precede missing legacy-key chips; legacy chips have null ids and never confer removable UI actions. findMember at :58-81 must be enriched too: POST members, legacy PATCH and invites' ADDED response must all return the same new fields. Shared ProjectMemberRecord nullable userId/email affects repository conversion, member service, invite addExistingUser and all typed fixtures. ProjectMembersModule at apps/api/src/projects/members/project-members.module.ts:8-12 needs the new controller and a RoleAdminService double in unit DI tests. listProjectRoles must bypass global role.read and rely on the route's ProjectMembershipGuard + member.read. The API's legacy enum write routes and last-admin rule remain unchanged.\n\nMember/invite migration and risks: ProjectMembersService.add at apps/api/src/projects/members/project-members.service.ts:58-75 currently maps legacy role straight to MembershipService inside a project lock; add roleKey conflict validation and assertMayGrant after user lookup/disabled checks but before duplicate membership checks and writes. Self-add must now return selfBinding rather than members conflict; legacy role-only paths receive the same escalation checks. CreateUserDto at apps/api/src/users/dto/create-user.dto.ts:24-27 requires role and UsersAdminService.create at apps/api/src/users/users-admin.service.ts:34-58 writes dto.role, so defaulting must reach both validation and persistence/input types.\n\nProjectInvitesService.create at apps/api/src/projects/invites/project-invites.service.ts:48-61 branches on account existence. addExistingUser at :117-153 currently checks disabled status, locks, writes a legacy-mapped binding and schedules MEMBER_ADDED atomically; retain that transaction/email behavior while passing the granted role and enriched member shape. inviteNewAddress at :156-183 cancels older pending invites and creates the replacement transactionally; no invalid grant may cancel or create a row. sendInvite at :193-211 currently passes role; change to roleName for the same template placeholder, not template content. InviteAcceptanceService at apps/api/src/projects/invites/invite-acceptance.service.ts:51-85 hashes outside the transaction, claims a token conditionally, creates an account, binds a project role and baseline, then issues a session after commit. Preserve token hashing/secrecy, claim race semantics, account-exists rollback and baseline binding; a missing invite role must create neither account nor binding. ProjectInvite.role is presently required at apps/api/prisma/schema.prisma:218, while Role is at :1571. US-005 adds the nullable roleId FK with ON DELETE SET NULL and makes role nullable via the exact named migration. Existing pending invites remain roleId-null with no backfill; acceptance falls back only as specified. A custom-role deletion leaves both fields null and must produce roleGone. Built-in keys retain legacy role values. DTO/repository/domain/mail helper types and fixtures all need the nullable fields; never expose token/hash in list or preview. Export openapi.json only after US-001 through US-004 have landed.\n\nWeb architecture: useProjectViewerRole at apps/web/composables/useProjectViewerRole.ts:19-35 is the SSR useAsyncData pattern to mirror, not a new source of authority. The new PermissionSet is exact-key membership plus a .own convenience, not a browser wildcard engine. Expose EMPTY_PERMISSIONS on pending/error even if Nuxt retains prior data; no role fallback. useAsyncData cache keys must isolate global/project scope. The existing useApi wrapper handles browser-relative proxy and SSR internal URLs; useApi and apiPath remain the integration seam. All page gate acceptance tests must mount real SFCs with the actual composables and mocked /me/permissions responses, not bypass the seam with a fake PermissionSet. Mount harness auto-imports at apps/web/tests/helpers/mount-sfc.ts:122-134 are destructured at :198-204 and missing entries become undefined. Add every new composable to its override list in its owning story and explicitly import the three new components in their consumers. Update closed __auto test bags and fixed layout setup contexts, not just mount-sfc overrides.\n\nGate impact/dependents: grep verified legacy gates at apps/web/layouts/default.vue:51, components/CommandPalette.vue:15, pages/[project]/fleet/analytics.vue:33, tickets/[ref].vue:197, labels.vue:32, threads/{index,new,[id]}.vue:10/20/34, components/ProjectSkillsPanel.vue:11, SettingsKnowledgeCard.vue:36, and pages/[project]/agents.vue:20. US-007 replaces TicketProperties' two broad booleans with five independent props and updates all its page/component/picker consumers. US-008 changes the JobViewer interface at apps/web/lib/fleet-jobs.ts:20-48 while preserving terminal/requeueability/config-edit restrictions and requester cancellation. Fleet index/dispatch/job detail/repo-config/budgets and BudgetTable all need corresponding bindings. US-009 changes ScheduleViewer at apps/web/lib/fleet-schedules.ts:223-234 and ApprovalViewer at apps/web/lib/fleet-approvals.ts:23-25, including ScheduleTable, ApprovalInbox, action panels, bash/budget panels and ThreadActionCard fixture builders. Do not grant update/delete-any from .own and do not retain the admin-kind approval bypass. useApprovalNotifications.refresh at apps/web/composables/useApprovalNotifications.ts:121-176 currently branches on User.role and fetches members?size=1 per project. Replace that with an awaited global permission read first, then scoped reads, preserving generation/mount/account cancellation, dedupe and per-project error isolation. Its refresh runs outside setup; use direct API calls, not useAsyncData. ApprovalBadge's target at apps/web/components/fleet/ApprovalBadge.vue:54 follows the global read key.\n\nRoles and principal UI: apps/web/pages/admin/users.vue:17-22 correctly recognizes ApiError envelope ret 40003 as forbidden; reuse that for the roles page, rather than assuming only HTTP 403. RoleEditorDialog mirrors CreateUserDialog's vee-validate/zod and error-preserving submit flow (apps/web/components/CreateUserDialog.vue:64-100). Preserve advanced stored entries and exclusion order; saved expandedKeys explain coverage, not a live wildcard preview. System/locked behavior must be enforced in UI payloads as well as visually. pages/agents.vue:2-6 imports its dialogs explicitly and :30-55 normalizes legacy agent.roles; its new column must join global binding roleKeys to /roles instead. PrincipalRolesDialog must filter owner for agents regardless of caller keys. A roles column needs BOTH role.read and role.binding.global; failed role/binding loads show an extracted error and no chips, never stale partial joins. Global project-role bindings need the localized all-projects suffix and remain exclusively on admin principal surfaces.\n\nDependency gap to coordinate without altering the binding structure: US-010 owns useRoles.ts, but US-011 consumes useRoles although US-010 is not in its declared dependencies. Schedule US-010 before US-011 when executing this PRD or explicitly coordinate that shared output; do not add a sixteenth story, change the declared dependency array, or have US-011 duplicate/re-author useRoles. contextFiles for US-011 deliberately contain only files available through its actual declared ancestors. Shared-file merge hotspots also include layout/default.vue, mount-sfc.ts, both locale JSONs, fleet-jobs.ts and API role-admin.service.ts; parallel implementation must preserve sibling edits.\n\nMembers/invites UI types: useProjectMembers currently declares the narrow user-only ProjectMember at apps/web/composables/useProjectMembers.ts:7-15 and mutation enum methods at :64-82. Add ProjectPrincipalRow for the unified panel while keeping ProjectMember string userId/email for mentions, MarkdownEditor and useProjectMemberNames. Always request principals=all for the management panel, never for name lookup. settings.vue:110-112 currently passes only slug; wait for loaded project and pass projectId, and avoid a parent canManage gate suppressing independently authorized panels. ProjectMembersPanel at apps/web/components/ProjectMembersPanel.vue:3-16 currently imports ASSIGNABLE_MEMBER_ROLES; replace the role radio UI, writes and state source, retain disabled-user no-edit behavior and hide self edits. Row removal is multiple individual binding deletes, not an atomic member removal: skip legacy null ids, reload after success or partial failure, and do not promise to remove a legacy-only membership. ProjectInvitesPanel at apps/web/components/ProjectInvitesPanel.vue:13-16 hardcodes invite enums and :66 eagerly loads; respect invite.read and independently gate all writes. useProjectInvites at apps/web/composables/useProjectInvites.ts:11-19,53-55 and the public invite preview type must carry nullable role, roleKey, roleName. Keep invite share-link, emailed and ADDED refresh behaviors.\n\nCleanup order: only US-015 deletes EditAgentRolesDialog, agent-roles.ts, AddProjectAgentDialog and useProjectViewerRole after their consumers move. useAdminUsers currently exports GlobalRole and setRole at apps/web/composables/useAdminUsers.ts:4,70-76; US-011 stops using them and US-015 deletes them. NewUser must already support role-less creation in US-011. useProjectAgents at apps/web/composables/useProjectAgents.ts:59-72 loses only add/remove; retain load/refresh/changeStatus. Retain roster read/status/loading UX while removing roster membership controls and added metadata columns. The endpoint and legacy fields remain API/CLI compatible until drop-legacy.\n\nTest implementation map: API unit tests remain src/**/*.spec.ts (vi, not jest); DB-backed tests belong test/integration/**/*.integration.spec.ts; route changes also update test/e2e/api-endpoint/endpoint.e2e.spec.ts in US-001/002/003. US-002 updates role-bindings-api.integration.spec.ts, membership.service.spec.ts and the in-memory store; US-003 updates member service/controller/module tests including the new fourth list argument and RoleAdminService DI double; US-004 updates member grant spies and users/dto/user-dto.spec.ts. US-005 updates project-invites.service.spec.ts, GlobalStubsModule, create-invite.dto.spec.ts, invite-acceptance.service.spec.ts, prisma-project-invites.repository.spec.ts and invite-mailer.spec.ts, plus exact-key assertions in project-invites-admin/public.integration.spec.ts (nine list keys and eight preview keys). Preserve existing controller/provider exports and route cases. Compose test Postgres on 5433 must be available before sandboxed API DB tests; run test:scoped against authored integration specs with KODA_DB_TESTS=1, not a skipped default run. Do not run concurrent resetting DB suites; use an isolated Testcontainers database for another checkout. Module registration/DI tests stay unit-only with external collaborators mocked.\n\nWeb regression map: US-006 updates all default/fleet/skills/threads/my-threads/SLOs/code-intel/memory/timeline/jobs/project-agents navigation contexts and command-palette tests, plus fleet-analytics-page. US-007 updates ticket-role-visibility, ticket-detail, ticket-fleet-wiring, ticket-detail-redesign, assignee-picker, labels, all thread pages, ProjectSkillsPanel, settings-skills-tab, settings-knowledge-card and project agents tests. US-008 updates fleet-jobs, job-detail/workflow, jobs-list, dispatch/placement-runtime, repo-config, project/admin budgets and budget-table tests. US-009 updates fleet-schedules/approvals, approval inbox/action/bash/budget/thread-card/badge, ScheduleTable and schedule/approval pages. US-010 adds page/editor/matrix behavior tests and roles navigation; US-011 replaces admin-users and create-user role-PATCH tests with bindings and role-less creation; US-012 updates agents actions/standalone/wiring, CreateAgentDialog validation and api-submission tests; US-013 updates ProjectMembersPanel/disabled, useProjectMembers and unchanged useProjectMemberNames behavior; US-014 updates ProjectInvitesPanel/useProjectInvites/invite-accept. US-015 deletes tests for deleted dialogs, removes only add/remove/setRole/canWorkOnFleet cases, and keeps loading-state and other composable behaviors. New test paths are listed per story. Do not edit generated acceptance material or Playwright e2e specs. Jest plus type-check/lint are validation stages, never behavioral ACs.\n\nNavigation/i18n/review constraints: docs/ux/redesign/MASTER-PLAN.md:35-42 pins inline links, source order, optional template bindings and tokens; read/update its Status/Decisions when changing nav/layout under the existing US-006/010 implementation, not as a new story. Use one global permission read and plain computed booleans per link plus the section label, so fixed test contexts fail closed. Keep existing SLO/project/KB/Timeline/Settings order. API errors use new XAppException({}, namespace.code) with translations under status keys in both locales; new validation keys require -2 and 400 as specified. Web strings always enter both en/zh JSONs and preserve existing keys. The API remains authoritative for every write: toast.error(extractApiError(err)) on refusals; do not close a failed dialog, optimistically corrupt a list, or hide an API error behind a role fallback. Feature-level exclusions below are binding; no legacy DB/table removal, CLI changes, P2/P3 pages or unrelated ticket/comment/KB gating belongs here.",
+  "outOfScope": [
+    "Removing `canManage` and `viewerRole` from `GET /projects/:slug/members`, the legacy routes `PATCH /agents/:slug/update-roles`, `PATCH`/`DELETE /projects/:slug/members/:userId`, `POST`/`DELETE /projects/:slug/agents`, the `role` fields of `AddMemberDto` / `CreateInviteDto` / `CreateUserDto` / `UpdateUserDto`, the `ProjectInvite.role` column and the legacy tables is out of scope (`permissions-p1-drop-legacy`).",
+    "The MEMBER_ADDED email (`email-content.builder.ts`) still shows the legacy role string; giving it the role name is out of scope.",
+    "The CLI (`apps/cli`) and its generated client are not changed; the CLI keeps the legacy `role` flags until a CLI follow-up. `apps/cli/src/generated/` is not regenerated.",
+    "All-projects bindings are not shown or edited in a project's member list; they are managed on Admin → Users and Admin → Agents.",
+    "The P2 audit log page and the P3 approval policy pages and unified inbox are out of scope.",
+    "Ticket transition buttons, comment edit/delete and the KB dialog are not gated in the web by this feature; the API still refuses what a principal may not do.",
+    "A preview of an unsaved wildcard's effect in the role editor is out of scope; covered rows reflect the saved role's `expandedKeys`.",
+    "Playwright e2e specs under `apps/web/tests/e2e/` are not changed: they drive the legacy API routes, which stay.",
+    "`.nax/rules/web.md` gains its gating line as a manual step with this spec, not as story work.",
+    "The last-project-admin rule of the legacy member routes is not applied to `/role-bindings` deletes; a project without a Project Admin stays reachable by global Owner and Admin.",
+    "US-001 only: `/me/permissions` lists role-derived keys only; implicit and public keys are always allowed by the API and are not listed.",
+    "US-005 only: an existing pending invite created before the migration keeps `roleId` null and is accepted through its legacy `role`; no backfill."
+  ],
+  "routingProfile": "cross-agent"
+}

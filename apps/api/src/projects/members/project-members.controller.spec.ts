@@ -37,7 +37,7 @@ describe('ProjectMembersController', () => {
     const page = { total: 0, current: 2, size: 5, hasNext: false, hasPrev: true, records: [] };
     service.list.mockResolvedValue({ page, canManage: true, viewerRole: 'ADMIN' });
     const res = await controller.list('proj', { current: '2', size: '5' } as never, principal);
-    expect(service.list).toHaveBeenCalledWith('proj', principal, { current: 2, size: 5 });
+    expect(service.list).toHaveBeenCalledWith('proj', principal, { current: 2, size: 5 }, undefined);
     expect(res).toEqual(expect.objectContaining({ ret: 0, data: { ...page, canManage: true, viewerRole: 'ADMIN' } }));
   });
 
@@ -47,7 +47,16 @@ describe('ProjectMembersController', () => {
       canManage: false,
     });
     await controller.list('proj', { projectId: 'other' } as never, principal);
-    expect(service.list).toHaveBeenCalledWith('proj', principal, { current: 1, size: 20 });
+    expect(service.list).toHaveBeenCalledWith('proj', principal, { current: 1, size: 20 }, undefined);
+  });
+
+  it('US-003: list forwards principals=all', async () => {
+    service.list.mockResolvedValue({
+      page: { total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] },
+      canManage: false,
+    });
+    await controller.list('proj', { principals: 'all' } as never, principal);
+    expect(service.list).toHaveBeenCalledWith('proj', principal, { current: 1, size: 20 }, 'all');
   });
 
   it('remove returns an empty Ok', async () => {

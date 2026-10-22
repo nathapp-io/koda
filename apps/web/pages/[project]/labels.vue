@@ -25,14 +25,13 @@ const { $api } = useApi()
 const { t } = useI18n()
 const toast = useAppToast()
 
-// #144: controls follow the caller's role in THIS project (the API decides;
-// this only avoids offering actions that would 403). useProjectViewerRole
-// is SSR-friendly so canManage/viewerRole are populated before hydration —
-// no flash of "no controls" → "controls appear" on first paint.
-const { data: viewerRoleData } = useProjectViewerRole(slug)
-const canManage = computed(() => viewerRoleData.value?.canManage === true)
-const viewerRole = computed(() => viewerRoleData.value?.viewerRole ?? null)
-const canCreate = computed(() => canManage.value || viewerRole.value === 'DEVELOPER')
+// #144 + Permissions P1 US-007: each control follows the key its API route requires, read from the
+// project scope. `useProjectPermissions` is SSR-friendly, so the gates are populated before
+// hydration, and a pending or failed fetch leaves every key absent — the control is hidden.
+const { permissions } = useProjectPermissions(slug)
+const canCreate = computed(() => permissions.value.has('label.create'))
+const canUpdate = computed(() => permissions.value.has('label.update'))
+const canDelete = computed(() => permissions.value.has('label.delete'))
 
 const { data: labelsData, pending, error, refresh } = useAsyncData(
   `labels-${slug}`,
@@ -187,14 +186,12 @@ async function saveEdit(label: Label) {
                 <Button size="sm" variant="outline" @click="cancelEdit">{{ t('common.cancel') }}</Button>
               </template>
               <template v-else>
-                <template v-if="canManage">
-                  <Button size="sm" variant="outline" @click="startEdit(label)">
-                    {{ t('common.edit') }}
-                  </Button>
-                  <Button variant="destructive" size="sm" @click="deleteLabel(label.id)">
-                    {{ t('labels.actions.delete') }}
-                  </Button>
-                </template>
+                <Button v-if="canUpdate" size="sm" variant="outline" @click="startEdit(label)">
+                  {{ t('common.edit') }}
+                </Button>
+                <Button v-if="canDelete" variant="destructive" size="sm" @click="deleteLabel(label.id)">
+                  {{ t('labels.actions.delete') }}
+                </Button>
               </template>
             </div>
           </TableCell>

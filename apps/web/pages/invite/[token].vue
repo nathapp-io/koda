@@ -10,7 +10,11 @@ interface InvitePreview {
   projectName: string
   projectSlug: string
   email: string
-  role?: string
+  /** Legacy enum, kept nullable in the contract: the UI shows `roleName` instead. */
+  role?: string | null
+  roleKey?: string | null
+  /** Permissions P1 US-014: the project role's label, as the API resolved it. */
+  roleName?: string | null
   inviterName?: string | null
   expiresAt?: string
 }
@@ -81,6 +85,10 @@ const onSubmit = handleSubmit(async (values) => {
         <h2 class="text-2xl font-bold tracking-tight">{{ t('invite.title') }}</h2>
         <p v-if="preview" class="mt-2 text-sm text-muted-foreground">
           {{ t('invite.subtitle', { projectName: preview.projectName }) }}
+        </p>
+        <!-- Permissions P1 US-014: the invite grants a project role, so the visitor sees which. -->
+        <p v-if="preview && preview.roleName" data-testid="invite-role-name" class="mt-1 text-sm text-muted-foreground">
+          {{ t('invite.role', { roleName: preview.roleName }) }}
         </p>
       </div>
 

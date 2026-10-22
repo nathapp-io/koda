@@ -82,6 +82,11 @@ export const uiStubs: Record<string, unknown> = Object.fromEntries(
   [
     ['Dialog', 'dialog'], ['DialogContent', 'dialog-content'], ['DialogHeader', 'dialog-header'],
     ['DialogTitle', 'dialog-title'], ['DialogFooter', 'dialog-footer'], ['DialogDescription', 'dialog-description'],
+    ['DialogTrigger', 'dialog-trigger'],
+    // The standalone agents page's row actions live in a dropdown (US-012 gates each item).
+    ['DropdownMenu', 'dropdown-menu'], ['DropdownMenuTrigger', 'dropdown-menu-trigger'],
+    ['DropdownMenuContent', 'dropdown-menu-content'], ['DropdownMenuItem', 'dropdown-menu-item'],
+    ['DropdownMenuLabel', 'dropdown-menu-label'], ['DropdownMenuSeparator', 'dropdown-menu-separator'],
     ['PageHeader', 'page-header'],
     ['NuxtLink', 'nuxt-link'],
     ['Table', 'table'], ['TableHeader', 'thead'], ['TableBody', 'tbody'],

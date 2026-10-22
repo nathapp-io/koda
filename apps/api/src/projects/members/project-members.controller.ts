@@ -38,8 +38,8 @@ export class ProjectMembersController {
   @ApiResponse({ status: 403, description: 'Not a project member, or member.read is missing' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   async list(@Param('slug') slug: string, @Query() rawQuery: ListMembersQuery, @Principal() principal: KodaPrincipal) {
-    const { current, size } = parseQuery(ListMembersQuery, rawQuery);
-    const { page, canManage, viewerRole } = await this.members.list(slug, principal, { current, size });
+    const { current, size, principals } = parseQuery(ListMembersQuery, rawQuery);
+    const { page, canManage, viewerRole } = await this.members.list(slug, principal, { current, size }, principals);
     return JsonResponse.Ok({ ...toPageResult(page), canManage, viewerRole });
   }
 

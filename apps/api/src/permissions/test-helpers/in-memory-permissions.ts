@@ -74,6 +74,17 @@ export class InMemoryPermissionStore {
         this.calls.push('find-roles');
         return [...this.roles];
       },
+      /**
+       * US-003: the PROJECT-scope listing read to exhaustion. The double has every row in memory, so it
+       * answers the same order the repository's keyset pages produce: system roles first, then by key.
+       */
+      findRolesByScope: async (scope: 'GLOBAL' | 'PROJECT') => {
+        this.calls.push(`find-roles-by-scope:${scope}`);
+        const byKey = (left: RoleDomain, right: RoleDomain) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0);
+        return this.roles
+          .filter((role) => role.scope === scope)
+          .sort((left, right) => Number(right.system) - Number(left.system) || byKey(left, right));
+      },
       createRole: async (input: Omit<RoleDomain, 'id'>) => {
         if (this.roles.some((role) => role.key === input.key)) {
           throw uniqueKeyViolation();
@@ -150,6 +161,7 @@ export class InMemoryPermissionStore {
         this.calls.push(`page:${page.current}:${page.size}`);
         const rows = this.bindings
           .filter((b) => (filter.principal ? same(b, filter.principal) : true))
+          .filter((b) => (filter.principalType === undefined ? true : b.principalType === filter.principalType))
           .filter((b) => (filter.projectId === undefined ? true : b.projectId === filter.projectId))
           .map(withRole);
         const start = (page.current - 1) * page.size;

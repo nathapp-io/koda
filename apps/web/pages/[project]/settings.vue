@@ -107,7 +107,9 @@ const { data: projectData, pending: loadingProject, error: projectError, refresh
           />
         </div>
 
-        <ProjectMembersPanel :slug="slug" />
+        <!-- Permissions P1 US-013: the panel binds project roles, so it needs the project's id.
+             Rendered only after the project loaded, so the id is never empty. -->
+        <ProjectMembersPanel v-if="projectData" :slug="slug" :project-id="projectData.id" />
 
         <ProjectInvitesPanel :slug="slug" @member-added="refreshProject()" />
       </TabsContent>

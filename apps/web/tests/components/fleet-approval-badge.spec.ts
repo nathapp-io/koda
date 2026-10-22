@@ -2,7 +2,10 @@ import { describe, test, expect, jest, afterEach } from '@jest/globals'
 import * as Vue from 'vue'
 import { ref, computed, watch } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
+import type { Mounted } from '../helpers/mount-sfc'
 import { uiStubs, enI18n } from '../helpers/fleet-harness'
+import { fakeAsyncData } from '../helpers/permission-nav'
+import { useGlobalPermissions } from '~/composables/usePermissions'
 import * as approvalsModule from '../../composables/useFleetApprovals'
 
 // mountSfc re-instantiates `~/…` imports; aliasing the module lets the test bump the badge's own approvalsVersion.
@@ -12,16 +15,56 @@ const badge = webFile('components', 'fleet', 'ApprovalBadge.vue')
 
 type Handlers = { onFleetApproval?: (event?: { approvalId: string; status: string }) => void; onResync: () => void }
 
+/** Every mounted badge: the notification composable starts a real 1 s ticker, so a failure must not leak one. */
+const mounted: Mounted[] = []
+
 afterEach(() => {
-  for (const key of ['useApi', 'Notification', 'document', 'window', 'localStorage']) delete (globalThis as Record<string, unknown>)[key]
+  for (const app of mounted.splice(0)) {
+    try { app.unmount() } catch { /* the test already unmounted it */ }
+  }
+  for (const key of ['useApi', 'useAsyncData', 'Notification', 'document', 'window', 'localStorage']) delete (globalThis as Record<string, unknown>)[key]
   jest.useRealTimers()
 })
 
-function mount(get: jest.Mock, opts: { slug?: string | null; role?: 'ADMIN' | 'MEMBER'; viewerRole?: string; state?: Map<string, Vue.Ref>; user?: Vue.Ref<{ id: string; role: string } | null> } = {}) {
-  const apiGet = (url: string, options?: unknown) => url === '/fleet/approval-counts' || get.getMockName() === 'notificationApi' ? (options === undefined ? get(url) : get(url, options)) : Promise.resolve(url.endsWith('/members') ? { viewerRole: 'DEVELOPER', canManage: false } : { records: [], hasNext: false })
+/** The keys a project answers unless a test says otherwise: that project can decide both ask kinds. */
+const DEFAULT_PROJECT_KEYS: readonly string[] = ['fleet.approval.decide.bash', 'fleet.approval.decide.budget']
+
+interface MountOpts {
+  slug?: string | null
+  /** The account's global key set, mutable so a test can take `fleet.approval.read` away. */
+  globalKeys?: Vue.Ref<readonly string[]>
+  /** Per-project key sets; a project not named answers `DEFAULT_PROJECT_KEYS`. */
+  projectKeys?: Record<string, readonly string[]>
+  /** Replaces the whole `/me/permissions` answer, for a failing or hanging read. */
+  permissionRead?: (slug: string | null) => unknown
+  state?: Map<string, Vue.Ref>
+  user?: Vue.Ref<{ id: string; role: string } | null>
+}
+
+/**
+ * Mounts the real badge. `get` answers the non-permission routes (`/fleet/approval-counts`, the inbox
+ * pages); `/me/permissions` is answered here from the key maps, exactly as the API answers it.
+ */
+function mount(get: jest.Mock, opts: MountOpts = {}) {
+  const globalKeys = opts.globalKeys ?? ref<readonly string[]>([])
+  const apiGet = (url: string, options?: { query?: Record<string, string> }) => {
+    if (url === '/me/permissions') {
+      const slug = options?.query?.project
+      if (opts.permissionRead) return opts.permissionRead(slug ?? null)
+      return {
+        scope: slug === undefined ? 'global' : 'project',
+        projectSlug: slug ?? null,
+        keys: [...(slug === undefined ? globalKeys.value : (opts.projectKeys?.[slug] ?? DEFAULT_PROJECT_KEYS))],
+      }
+    }
+    return options === undefined ? get(url) : get(url, options)
+  }
+  // The real permissions composable resolves its Nuxt auto-imports off the global scope, because the spec
+  // hands the badge that module itself (mount-sfc would otherwise re-instantiate it per mount).
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: { get: apiGet } })
+  ;(globalThis as Record<string, unknown>).useAsyncData = fakeAsyncData
   const state = opts.state ?? new Map<string, Vue.Ref>()
-  const user = opts.user ?? ref({ id: 'u1', role: opts.role ?? 'MEMBER' })
+  const user = opts.user ?? ref({ id: 'u1', role: 'MEMBER' })
   const toast = Object.assign(jest.fn((_title: string, _options: unknown) => 'toast'), { dismiss: jest.fn() })
   const navigate = jest.fn()
   let head: { titleTemplate?: (title?: string) => string } = {}
@@ -39,18 +82,21 @@ function mount(get: jest.Mock, opts: { slug?: string | null; role?: 'ADMIN' | 'M
       onBeforeUnmount: Vue.onBeforeUnmount,
       useI18n: () => enI18n(),
       useApi: () => ({ $api: { get: apiGet } }),
+      // US-009: the badge reads the global key set through the real composable.
+      useAsyncData: fakeAsyncData,
+      useGlobalPermissions,
       useState: (key: string, init: () => unknown) => { if (!state.has(key)) state.set(key, ref(init())); return state.get(key) },
       useHead: (value: typeof head | (() => typeof head)) => { Vue.watchEffect(() => { head = typeof value === 'function' ? value() : value }) },
       navigateTo: navigate,
       useAppToast: () => toast,
-      useProjectViewerRole: () => ({ data: ref({ canManage: opts.viewerRole === 'ADMIN', viewerRole: opts.viewerRole ?? 'DEVELOPER' }) }),
       useAuth: () => ({ user }),
       useVisiblePolling: (fn: () => Promise<void>, _ms: number, deps?: typeof pollDeps) => { task = fn; pollDeps = deps; return polling },
       useProjectEvents: (_s: string, h: Handlers) => { live = h },
     },
   })
+  mounted.push(app)
   const settle = async (): Promise<void> => {
-    for (let i = 0; i < 4; i += 1) {
+    for (let i = 0; i < 6; i += 1) {
       await new Promise((resolve) => { setImmediate(resolve) })
       await Vue.nextTick()
     }
@@ -80,15 +126,16 @@ describe('FleetApprovalBadge (D247)', () => {
     m.app.unmount()
   })
 
-  test('outside a project: the first project with pending for a member, the admin inbox for an admin', async () => {
+  test('outside a project: the first project with pending, the admin inbox for a holder of fleet.approval.read', async () => {
     const member = mount(jest.fn(async () => counts(2)), { slug: null })
     await member.settle()
     expect(member.el()[0].props.to).toBe('/beta/fleet/approvals')
     member.app.unmount()
-    const admin = mount(jest.fn(async () => counts(2)), { slug: null, role: 'ADMIN' })
-    await admin.settle()
-    expect(admin.el()[0].props.to).toBe('/admin/fleet/approvals')
-    admin.app.unmount()
+    // US-009: reading the admin inbox is a key, not the account's ADMIN role.
+    const reader = mount(jest.fn(async () => counts(2)), { slug: null, globalKeys: ref<readonly string[]>(['fleet.approval.read']), user: ref({ id: 'u1', role: 'MEMBER' }) })
+    await reader.settle()
+    expect(reader.el()[0].props.to).toBe('/admin/fleet/approvals')
+    reader.app.unmount()
   })
 
   test('over 99 shows 99+', async () => {
@@ -101,9 +148,9 @@ describe('FleetApprovalBadge (D247)', () => {
   test('announces the pending count and pulses while an ask waits (#208)', async () => {
     const m = mount(jest.fn(async () => counts(2)))
     await m.settle()
-    const badge = m.el()[0]
-    expect(badge.props['aria-live']).toBe('polite')
-    expect(String(badge.props.class)).toContain('animate-pulse')
+    const badgeEl = m.el()[0]
+    expect(badgeEl.props['aria-live']).toBe('polite')
+    expect(String(badgeEl.props.class)).toContain('animate-pulse')
     m.app.unmount()
   })
 
@@ -132,12 +179,12 @@ describe('FleetApprovalBadge (D247)', () => {
     const m = mount(get)
     await m.settle()
     jest.useFakeTimers()
-    const before = get.mock.calls.length
+    const before = countsCalls(get)
     m.live()?.onFleetApproval?.()
     jest.advanceTimersByTime(300)
     jest.useRealTimers()
     await m.settle()
-    expect(get.mock.calls.length).toBe(before + 1)
+    expect(countsCalls(get)).toBe(before + 1)
     m.app.unmount()
   })
 
@@ -158,19 +205,23 @@ describe('FleetApprovalBadge (D247)', () => {
 
   test('a decide anywhere in the tab refreshes after 300 ms (approvalsVersion)', async () => {
     const get = jest.fn(async () => counts(2))
-    const m = mount(get, { slug: null, role: 'ADMIN' })
+    const m = mount(get, { slug: null })
     await m.settle()
     jest.useFakeTimers()
-    const before = get.mock.calls.length
+    const before = countsCalls(get)
     approvalsVersion.value += 1
     await Vue.nextTick()
     jest.advanceTimersByTime(300)
     jest.useRealTimers()
     await m.settle()
-    expect(get.mock.calls.length).toBe(before + 1)
+    expect(countsCalls(get)).toBe(before + 1)
     m.app.unmount()
   })
 })
+
+/** How often the badge asked for the counts — one per refresh, whatever the scan also requested. */
+const countsCalls = (get: jest.Mock): number =>
+  (get.mock.calls as unknown as [string][]).filter(([url]) => url === '/fleet/approval-counts').length
 
 const approval = (id = 'a1', overrides: Record<string, unknown> = {}) => ({
   id, type: 'nax_bash_escalate', status: 'pending', projectId: 'p2', jobId: 'job-123', policyId: null,
@@ -179,9 +230,10 @@ const approval = (id = 'a1', overrides: Record<string, unknown> = {}) => ({
   requestedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 120000).toISOString(),
   outcome: null, decision: null, decidedById: null, decidedAt: null, resolvedBy: null, comment: null, ...overrides,
 })
-const notificationApi = (rows: ReturnType<typeof approval>[], viewerRole = 'DEVELOPER') => jest.fn(async (url: string) => {
+
+/** Answers the counts, one approval's detail and the inbox pages; `/me/permissions` is the harness's job. */
+const notificationApi = (rows: ReturnType<typeof approval>[]) => jest.fn(async (url: string) => {
   if (url === '/fleet/approval-counts') return counts(rows.length)
-  if (url.endsWith('/members')) return { canManage: viewerRole === 'ADMIN', viewerRole }
   if (url.endsWith('/a1')) return rows.find(row => row.id === 'a1')
   return { records: rows, total: rows.length, hasNext: false, current: 1, size: 100 }
 }).mockName('notificationApi')
@@ -207,26 +259,33 @@ describe('Approval attention notifications (#208)', () => {
     m.app.unmount()
   })
 
-  test.each(['VIEWER', 'REPORTER'])('does not notify %s project members', async (role) => {
-    const m = mount(notificationApi([approval()], role), { viewerRole: role })
+  test('does not notify a project whose key set holds no decide key', async () => {
+    // US-009: the project's keys, not a member role, decide whether its inbox is read at all.
+    const m = mount(notificationApi([approval()]), { projectKeys: { beta: ['fleet.job.dispatch', 'fleet.approval.read'] } })
     await m.settle()
     expect(m.toast).not.toHaveBeenCalled()
     m.app.unmount()
   })
 
-  test('budget notifications require project ADMIN while global ADMIN sees them without membership', async () => {
+  test('a budget ask needs the budget key; a holder of fleet.approval.read sees it from the admin inbox', async () => {
     const budget = approval('a1', { type: 'budget_override_required', expiresAt: null })
-    const developer = mount(notificationApi([budget]))
-    await developer.settle()
-    expect(developer.toast).not.toHaveBeenCalled()
-    developer.app.unmount()
-    const admin = mount(notificationApi([budget]), { role: 'ADMIN', slug: null })
-    await admin.settle()
-    expect(admin.toast).toHaveBeenCalledTimes(1)
-    const options = admin.toast.mock.calls[0][1] as unknown as { action: { onClick: () => void } }
+    // The project can decide bash asks, but not a budget override.
+    const bashOnly = mount(notificationApi([budget]), { projectKeys: { beta: ['fleet.approval.decide.bash'] } })
+    await bashOnly.settle()
+    expect(bashOnly.toast).not.toHaveBeenCalled()
+    bashOnly.app.unmount()
+
+    // The admin viewer's own decision rights come from the same global set: read plus the budget key.
+    const reader = mount(notificationApi([budget]), {
+      slug: null,
+      globalKeys: ref<readonly string[]>(['fleet.approval.read', 'fleet.approval.decide.budget']),
+    })
+    await reader.settle()
+    expect(reader.toast).toHaveBeenCalledTimes(1)
+    const options = reader.toast.mock.calls[0][1] as unknown as { action: { onClick: () => void } }
     options.action.onClick()
-    expect(admin.navigate).toHaveBeenCalledWith('/admin/fleet/approvals?id=a1')
-    admin.app.unmount()
+    expect(reader.navigate).toHaveBeenCalledWith('/admin/fleet/approvals?id=a1')
+    reader.app.unmount()
   })
 
   test('ignores expired and decided rows, dismisses an active toast on a decision event', async () => {
@@ -342,7 +401,10 @@ describe('Opt-in background browser approval notifications', () => {
     const browser = browserHarness()
     browser.storage.set('koda-approval-notifications-u1', 'true')
     const rows = [approval()]
-    const m = mount(notificationApi(rows), { role: 'ADMIN', slug: null })
+    const m = mount(notificationApi(rows), {
+      slug: null,
+      globalKeys: ref<readonly string[]>(['fleet.approval.read', 'fleet.approval.decide.bash']),
+    })
     await m.settle()
     expect(browser.instances).toHaveLength(1)
     expect(browser.requestPermission).not.toHaveBeenCalled()
@@ -385,22 +447,33 @@ describe('Notification authorization and asynchronous lifecycle', () => {
     m.app.unmount()
   })
 
-  test.each(['VIEWER', 'forbidden'])('closes alerts after project rights change to %s', async (role) => {
+  test('closes alerts when the project set loses its decide keys', async () => {
     const browser = browserHarness()
     browser.storage.set('koda-approval-notifications-u1', 'true')
-    let viewer = 'DEVELOPER'
-    const api = notificationApi([approval()])
-    const m = mount(jest.fn(async (url: string) => {
-      if (!url.endsWith('/members')) return api(url)
-      if (viewer === 'forbidden') throw { statusCode: 403 }
-      return { viewerRole: viewer, canManage: false }
-    }).mockName('notificationApi'))
+    const projectKeys: Record<string, readonly string[]> = { beta: ['fleet.approval.decide.bash'] }
+    const m = mount(notificationApi([approval()]), { projectKeys })
     await m.settle()
     expect(m.toast).toHaveBeenCalledTimes(1)
-    viewer = role
+    projectKeys.beta = []
     await m.poll()
     expect(m.toast.dismiss).toHaveBeenCalled()
     expect(browser.instances[0].close).toHaveBeenCalledTimes(1)
+    m.app.unmount()
+  })
+
+  test('closes alerts when the project permission read is refused', async () => {
+    let refuse = false
+    const m = mount(notificationApi([approval()]), {
+      permissionRead: (slug) => {
+        if (slug !== null && refuse) throw { statusCode: 403 }
+        return { scope: slug === null ? 'global' : 'project', projectSlug: slug, keys: [...DEFAULT_PROJECT_KEYS] }
+      },
+    })
+    await m.settle()
+    expect(m.toast).toHaveBeenCalledTimes(1)
+    refuse = true
+    await m.poll()
+    expect(m.toast.dismiss).toHaveBeenCalled()
     m.app.unmount()
   })
 
@@ -441,7 +514,6 @@ describe('Notification refresh generations', () => {
         loadNumber += 1
         return { total: 1, projects: [{ slug: loadNumber === 1 ? 'beta' : 'gamma', projectId: 'p2', pending: 1 }], unscoped: 0 }
       }
-      if (url.endsWith('/members')) return { viewerRole: 'DEVELOPER', canManage: false }
       if (url.includes('/beta/')) return new Promise(resolve => { finishOld = resolve })
       return { records: [approval('b1')], hasNext: false }
     }).mockName('notificationApi')
@@ -457,16 +529,20 @@ describe('Notification refresh generations', () => {
 })
 
 describe('Global notification decision rights', () => {
-  test('closes global ADMIN alerts when the same account loses its global role', async () => {
-    const user = ref<{ id: string; role: string } | null>({ id: 'u1', role: 'ADMIN' })
-    const m = mount(notificationApi([approval('a1', { type: 'budget_override_required', expiresAt: null })]), { user, slug: null })
+  test('closes the admin inbox alerts when the account loses fleet.approval.read', async () => {
+    const globalKeys = ref<readonly string[]>(['fleet.approval.read', 'fleet.approval.decide.budget'])
+    // The project scan cannot re-notify it, so the assertion is only about the admin alert closing.
+    const m = mount(notificationApi([approval('a1', { type: 'budget_override_required', expiresAt: null })]), {
+      globalKeys,
+      slug: null,
+      projectKeys: { beta: ['fleet.approval.decide.bash'] },
+    })
     await m.settle()
     expect(m.toast).toHaveBeenCalledTimes(1)
     const id = (m.toast.mock.calls[0][1] as { id: string }).id
-    user.value.role = 'MEMBER'
-    await Vue.nextTick()
-    expect(m.toast.dismiss).toHaveBeenCalledWith(id)
+    globalKeys.value = []
     await m.poll()
+    expect(m.toast.dismiss).toHaveBeenCalledWith(id)
     expect(m.toast).toHaveBeenCalledTimes(1)
     m.app.unmount()
   })

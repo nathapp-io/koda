@@ -1,6 +1,7 @@
 import { describe, expect, test } from '@jest/globals'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+import { adminNavFlags } from '../helpers/permission-nav'
 
 const layout = readFileSync(join(__dirname, '../..', 'layouts', 'default.vue'), 'utf-8')
 const template = layout.match(/<template>([\s\S]*)<\/template>/)?.[1] ?? ''
@@ -23,7 +24,7 @@ function iconStub(): VueFull.Component {
 
 function render(ctx: Record<string, unknown>) {
   // Bindings the template reads but the tests do not vary.
-  const bindings = { isGlobalAdmin: false, sectionLabelClass: 'section-label', paletteOpen: false, ...ctx }
+  const bindings = { ...adminNavFlags([]), sectionLabelClass: 'section-label', paletteOpen: false, ...ctx }
   return VueFull.createSSRApp({
     template,
     setup: () => bindings,

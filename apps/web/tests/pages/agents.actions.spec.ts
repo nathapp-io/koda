@@ -20,10 +20,10 @@ describe('US-003-3: pages/agents.vue exists', () => {
 //        it calls refresh()
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-003-3 AC1: refresh() is called on updated event from edit dialogs', () => {
-  test('source imports EditAgentRolesDialog component', () => {
+describe('US-012 AC1: refresh() and the binding reload follow the edit dialogs', () => {
+  test('source imports PrincipalRolesDialog component', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('EditAgentRolesDialog')
+    expect(source).toContain('PrincipalRolesDialog')
   })
 
   test('source imports EditAgentCapabilitiesDialog component', () => {
@@ -38,7 +38,7 @@ describe('US-003-3 AC1: refresh() is called on updated event from edit dialogs',
     expect(source).toMatch(/@updated="handle(Roles|Capabilities)Updated"/)
   })
 
-  test('source has EditAgentRolesDialog with @updated listener', () => {
+  test('source has EditAgentCapabilitiesDialog with @updated listener', () => {
     const source = readFileSync(pagePath, 'utf-8')
     expect(source).toContain('@updated')
   })
@@ -60,10 +60,11 @@ describe('US-003-3 AC2: dropdown contains Edit Roles and Edit Capabilities items
     expect(source).toContain('Edit Capabilities')
   })
 
-  test('source opens EditAgentRolesDialog via dropdown menu item', () => {
+  test('source opens PrincipalRolesDialog (or the capabilities dialog) via dropdown menu items', () => {
     const source = readFileSync(pagePath, 'utf-8')
     // Should have a ref for roles dialog and it should be opened
-    expect(source).toMatch(/EditAgentRolesDialog/)
+    expect(source).toMatch(/openRolesDialog/)
+    expect(source).toContain('PrincipalRolesDialog')
   })
 
   test('source opens EditAgentCapabilitiesDialog via dropdown menu item', () => {

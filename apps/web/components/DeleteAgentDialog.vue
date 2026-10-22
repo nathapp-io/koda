@@ -13,7 +13,7 @@
           <Button type="button" variant="outline" @click="$emit('update:open', false)">
             {{ t('common.cancel') }}
           </Button>
-          <Button variant="destructive" @click="handleDelete" :disabled="isSubmitting">
+          <Button variant="destructive" data-testid="agent-delete-confirm" @click="handleDelete" :disabled="isSubmitting">
             {{ isSubmitting ? t('agents.deleteAgent.deleting') : t('agents.actions.delete') }}
           </Button>
         </div>
@@ -25,6 +25,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
+import { extractApiError } from '~/composables/useApi'
 
 interface Agent {
   id: string
@@ -58,8 +59,9 @@ async function handleDelete() {
     toast.success(t('agents.toast.deleted'))
     emit('deleted')
     emit('update:open', false)
-  } catch {
-    toast.error(t('agents.toast.deleteFailed'))
+  } catch (err: unknown) {
+    // The API owns the rules (open tickets block a delete, who may delete an agent); show what it said.
+    toast.error(extractApiError(err))
   } finally {
     isSubmitting.value = false
   }

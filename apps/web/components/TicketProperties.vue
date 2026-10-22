@@ -66,8 +66,20 @@ const props = defineProps<{
   ticketRef: string
   ticketLinks: TicketLink[]
   allLabels: Label[]
-  canWork: boolean
-  canManage: boolean
+  /**
+   * One flag per gated control, each bound by the page to the key its API route requires
+   * (Permissions P1 US-007):
+   * - `canAssign` — `ticket.assign`: the assignee picker and the unassign button.
+   * - `canLabel` — `ticket.label.assign`: the label select and its Add button.
+   * - `canUnlabel` — `ticket.label.remove`: removing a label chip from the ticket.
+   * - `canLink` — `ticket.link.add`: the new-link form.
+   * - `canDelete` — `ticket.delete`: the delete-ticket button.
+   */
+  canAssign: boolean
+  canLabel: boolean
+  canUnlabel: boolean
+  canLink: boolean
+  canDelete: boolean
 }>()
 
 const emit = defineEmits<{
@@ -299,7 +311,7 @@ async function removeLink(linkId: string) {
           </div>
           <span v-else class="text-sm text-muted-foreground">{{ t('common.unassigned') }}</span>
         </div>
-        <div v-if="canWork" class="space-y-2 border-t pt-2.5">
+        <div v-if="canAssign" class="space-y-2 border-t pt-2.5">
           <AssigneePicker :project-slug="projectSlug" :disabled="assigning" @select="onAssigneeSelect" />
           <div class="flex items-center gap-2">
             <Button size="sm" variant="outline" :disabled="assigning" @click="unassignTicket">
@@ -355,16 +367,16 @@ async function removeLink(linkId: string) {
             :key="label.id"
             type="button"
             class="inline-flex h-[22px] items-center rounded-full border px-2.5 text-xs font-medium"
-            :class="canWork ? 'cursor-pointer' : 'cursor-default'"
+            :class="canUnlabel ? 'cursor-pointer' : 'cursor-default'"
             :style="{ borderColor: label.color, color: label.color }"
-            :disabled="!canWork"
-            @click="canWork && removeLabel(label.id)"
+            :disabled="!canUnlabel"
+            @click="canUnlabel && removeLabel(label.id)"
           >
             {{ label.name }}
           </button>
           <span v-if="!ticket.labels || ticket.labels.length === 0" class="text-xs text-muted-foreground">{{ t('labels.empty') }}</span>
         </div>
-        <div v-if="canWork" class="flex items-center gap-2 border-t pt-2.5">
+        <div v-if="canLabel" class="flex items-center gap-2 border-t pt-2.5">
           <Select v-model="selectedLabelId">
             <SelectTrigger class="w-[150px]" :aria-label="t('tickets.labels.select')">
               <SelectValue :placeholder="t('tickets.labels.select')" />
@@ -380,7 +392,7 @@ async function removeLink(linkId: string) {
       </div>
     </details>
 
-    <details v-if="hasLinkedSection" :class="panelClass" open>
+    <details v-if="hasLinkedSection || canLink" :class="panelClass" open>
       <summary :class="[panelHeadingClass, 'cursor-pointer list-none lg:pointer-events-none']">
         {{ t('tickets.detail.linked') }}
         <ChevronDown :class="summaryChevronClass" aria-hidden="true" />
@@ -450,7 +462,7 @@ async function removeLink(linkId: string) {
           </Button>
         </div>
 
-        <div v-if="canWork" class="flex items-center gap-2 border-t pt-2.5">
+        <div v-if="canLink" class="flex items-center gap-2 border-t pt-2.5">
           <Input v-model="newLinkUrl" :placeholder="t('tickets.links.placeholder')" />
           <Select v-model="newLinkType">
             <SelectTrigger class="w-[110px]" :aria-label="t('tickets.links.type')">
@@ -470,7 +482,7 @@ async function removeLink(linkId: string) {
       </div>
     </details>
 
-    <div v-if="canManage" :class="panelClass" class="p-3.5">
+    <div v-if="canDelete" :class="panelClass" class="p-3.5">
       <Button variant="destructive" class="w-full" :disabled="deletingTicket" @click="deleteTicket">
         {{ deletingTicket ? t('common.loading') : t('tickets.delete.button') }}
       </Button>

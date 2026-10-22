@@ -25,6 +25,11 @@ paths:
 - Web does not use generated OpenAPI client in current architecture
 - Keep API calls and envelope unwrapping inside composables/utilities, not scattered per page
 
+## Permission Gating
+- Gate a control on the permission key its API route requires, read from `useProjectPermissions(slug)` or `useGlobalPermissions()` (`has(key)`, `hasOwn(key)`)
+- Never gate on role names, `user.role`, `viewerRole` or `canManage`: roles are data and custom roles must work
+- A gate only hides or disables a control; still surface every API refusal with `extractApiError()`
+
 ## Styling
 - Use semantic Shadcn/Tailwind tokens (`text-muted-foreground`, `bg-background`, `border-border`)
 - Avoid hardcoded palette classes like `text-gray-500`

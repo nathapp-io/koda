@@ -127,7 +127,7 @@ describe('AssigneePicker and ticket assignment (US-007)', () => {
     const app = mountSfc(propertiesFile, {
       props: {
         ticket: { id: 't1', ref: 'WEB-1', title: 'Ticket', type: 'TASK', priority: 'LOW', status: 'CREATED', createdAt: '2026-01-01T00:00:00Z' },
-        projectSlug: 'web', ticketRef: 'WEB-1', ticketLinks: [], allLabels: [], canWork: true, canManage: false,
+        projectSlug: 'web', ticketRef: 'WEB-1', ticketLinks: [], allLabels: [], canAssign: true, canLabel: false, canUnlabel: false, canLink: false, canDelete: false,
       },
       components: propertyStubs,
       alias: { '~/components/TicketActionPanel.vue': { default: { render: () => null } } },
@@ -163,7 +163,7 @@ describe('AssigneePicker and ticket assignment (US-007)', () => {
     const app = mountSfc(propertiesFile, {
       props: {
         ticket: { id: 't1', ref: 'WEB-1', title: 'Ticket', type: 'TASK', priority: 'LOW', status: 'CREATED', createdAt: '2026-01-01T00:00:00Z' },
-        projectSlug: 'web', ticketRef: 'WEB-1', ticketLinks: [], allLabels: [], canWork: true, canManage: false,
+        projectSlug: 'web', ticketRef: 'WEB-1', ticketLinks: [], allLabels: [], canAssign: true, canLabel: false, canUnlabel: false, canLink: false, canDelete: false,
       },
       components: propertyStubs,
       alias: { '~/components/TicketActionPanel.vue': { default: { render: () => null } } },
@@ -192,7 +192,7 @@ describe('AssigneePicker and ticket assignment (US-007)', () => {
     const app = mountSfc(propertiesFile, {
       props: {
         ticket: { id: 't1', ref: 'WEB-1', title: 'Ticket', type: 'TASK', priority: 'LOW', status: 'CREATED', createdAt: '2026-01-01T00:00:00Z' },
-        projectSlug: 'web', ticketRef: 'WEB-1', ticketLinks: [], allLabels: [], canWork: true, canManage: false,
+        projectSlug: 'web', ticketRef: 'WEB-1', ticketLinks: [], allLabels: [], canAssign: true, canLabel: false, canUnlabel: false, canLink: false, canDelete: false,
       },
       components: propertyStubs,
       alias: { '~/components/TicketActionPanel.vue': { default: { render: () => null } } },

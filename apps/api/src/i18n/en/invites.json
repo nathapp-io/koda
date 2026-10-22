@@ -3,5 +3,14 @@
   "final": { "409": "This invite is already accepted or cancelled" },
   "accountExists": { "409": "An account already exists for this email address" },
   "memberExists": { "409": "User is already a member of this project" },
-  "userDisabled": { "409": "This account is disabled and cannot be added to a project" }
+  "userDisabled": { "409": "This account is disabled and cannot be added to a project" },
+  "roleAndRoleKey": {
+    "-2": "Send either a role or a role key, not both",
+    "400": "Send either a role or a role key, not both"
+  },
+  "roleRequired": {
+    "-2": "A role or a role key is required",
+    "400": "A role or a role key is required"
+  },
+  "roleGone": { "409": "The role of this invite no longer exists", "-2": "The role of this invite no longer exists", "400": "The role of this invite no longer exists" }
 }

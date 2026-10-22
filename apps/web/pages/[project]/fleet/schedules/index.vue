@@ -5,8 +5,6 @@ import { isForbidden } from '~/composables/useFleetBudgetPage'
 import { useFleetScheduleActions } from '~/composables/useFleetScheduleActions'
 import { useFleetSchedules } from '~/composables/useFleetSchedules'
 import { createDebouncer } from '~/lib/debounce'
-import { canWorkOnFleet } from '~/lib/fleet-jobs'
-import { canChangeSchedule } from '~/lib/fleet-schedules'
 import type { ScheduleViewer } from '~/lib/fleet-schedules'
 import type { ScheduleDto } from '~/lib/fleet-types'
 
@@ -20,7 +18,8 @@ const slug = route.params.project as string
 const { t } = useI18n()
 const toast = useAppToast()
 const auth = useAuth()
-const { data: viewerRole } = useProjectViewerRole(slug)
+// Permissions P1 US-009: the controls follow the keys their routes require, never a role name.
+const { permissions } = useProjectPermissions(slug)
 const options = useFleetDispatchOptions(slug)
 const people = useProjectMemberNames(slug)
 const api = useFleetSchedules(slug)
@@ -28,9 +27,24 @@ const api = useFleetSchedules(slug)
 // D217: the server is the gate; this only decides which controls to draw.
 const viewer = computed<ScheduleViewer>(() => ({
   userId: auth.user.value?.id ?? null,
-  canWork: canWorkOnFleet(viewerRole.value),
-  canManage: viewerRole.value.canManage,
+  canCreate: permissions.value.has('fleet.schedule.create'),
+  canUpdateAny: permissions.value.has('fleet.schedule.update'),
+  canUpdateOwn: permissions.value.hasOwn('fleet.schedule.update'),
+  canDeleteAny: permissions.value.has('fleet.schedule.delete'),
+  canDeleteOwn: permissions.value.hasOwn('fleet.schedule.delete'),
 }))
+
+/**
+ * The read-only notice says the caller holds no schedule right here at all (same rule the budgets page uses
+ * for its own notice); a caller who may create, change or delete something sees the controls instead.
+ */
+const readOnly = computed(() =>
+  !viewer.value.canCreate
+  && !viewer.value.canUpdateAny && !viewer.value.canUpdateOwn
+  && !viewer.value.canDeleteAny && !viewer.value.canDeleteOwn)
+
+/** The create/edit dialog exists only for a caller who could save something through it. */
+const canEdit = computed(() => viewer.value.canCreate || viewer.value.canUpdateAny || viewer.value.canUpdateOwn)
 
 const loaded = ref(false)
 const pending = ref(true)
@@ -106,13 +120,13 @@ const runnerOptions = computed(() => options.runners.value.map((r) => ({ value: 
   <div class="space-y-6">
     <PageHeader :title="t('fleet.schedules.title')" :subtitle="t('fleet.schedules.subtitle')">
       <template #actions>
-        <Button v-if="viewer.canWork && !forbidden" data-testid="fleet-schedule-create" @click="openCreate()">
+        <Button v-if="viewer.canCreate && !forbidden" data-testid="fleet-schedule-create" @click="openCreate()">
           {{ t('fleet.schedules.actions.create') }}
         </Button>
       </template>
     </PageHeader>
 
-    <p v-if="!viewer.canManage && !forbidden && !api.schedules.value.some((s) => canChangeSchedule(s, viewer))" class="text-sm text-muted-foreground" data-testid="fleet-schedule-readonly">{{ t('fleet.schedules.readOnly') }}</p>
+    <p v-if="readOnly && !forbidden" class="text-sm text-muted-foreground" data-testid="fleet-schedule-readonly">{{ t('fleet.schedules.readOnly') }}</p>
     <p v-if="forbidden" class="text-sm text-muted-foreground" data-testid="fleet-schedule-forbidden">{{ t('fleet.schedules.forbidden') }}</p>
     <p v-if="stale" class="text-sm text-muted-foreground">{{ t('fleet.common.stale') }}</p>
 
@@ -135,7 +149,7 @@ const runnerOptions = computed(() => options.runners.value.map((r) => ({ value: 
     </template>
 
     <FleetScheduleEditDialog
-      v-if="viewer.canWork"
+      v-if="canEdit"
       :key="editing?.id ?? 'new'"
       v-model:open="editOpen"
       :slug="slug"

@@ -10,7 +10,7 @@ import { isUniqueViolation } from '../common/utils/prisma-errors';
 import { userAuthStateCacheKey, userTokenVersionCacheTag } from '../auth/token-version.cache';
 import { MembershipService } from '../permissions/membership.service';
 import { PrismaUsersRepository } from './prisma-users.repository';
-import { UserListFilters } from './domain/user-admin.domain';
+import { GlobalRole, UserListFilters } from './domain/user-admin.domain';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserAdminDto } from './dto/user-admin.dto';
@@ -39,6 +39,9 @@ export class UsersAdminService {
       throw new ConflictAppException({}, 'users');
     }
 
+    // US-004: an absent role is the least-privileged global role, so the web can create an account and
+    // bind roles to it afterwards.
+    const role: GlobalRole = dto.role ?? 'MEMBER';
     const passwordHash = await bcrypt.hash(dto.password, 12);
     try {
       // The user row and its baseline binding are one unit (B4): a user whose binding write failed must
@@ -50,12 +53,12 @@ export class UsersAdminService {
             email,
             name: dto.name,
             passwordHash,
-            role: dto.role,
+            role,
           });
           // Permissions P1a (US-004): every user starts at the member baseline; an ADMIN also gets the
           // global admin binding.
           await this.membership.bindBaseline({ type: 'USER', id: created.id });
-          if (dto.role === 'ADMIN') {
+          if (role === 'ADMIN') {
             await this.membership.setGlobalAdmin(created.id, true, ADMIN_USERS_GRANTER);
           }
           return created;

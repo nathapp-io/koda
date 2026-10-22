@@ -116,10 +116,12 @@ describe('DeleteAgentDialog: success handling', () => {
 })
 
 describe('DeleteAgentDialog: error handling', () => {
-  test('source shows error toast on deletion failure', () => {
+  // US-012 (fix round 1, F2): the generic "Failed to delete agent" string was replaced by the API's
+  // own refusal, so a blocked delete tells the admin why (e.g. it still has open tickets).
+  test('source shows the extracted API error on deletion failure', () => {
     const source = getSource()
-    expect(source).toMatch(/toast\.error/)
-    expect(source).toContain('agents.toast.deleteFailed')
+    expect(source).toMatch(/toast\.error\(extractApiError\(err\)\)/)
+    expect(source).toContain("import { extractApiError } from '~/composables/useApi'")
   })
 })
 

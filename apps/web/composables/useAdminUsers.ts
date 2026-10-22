@@ -1,13 +1,11 @@
 import { ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
 
-export type GlobalRole = 'MEMBER' | 'ADMIN'
-
 export interface AdminUser {
   id: string
   email: string
   name: string | null
-  role: GlobalRole
+  role: string
   disabled: boolean
   createdAt: string
 }
@@ -25,7 +23,6 @@ export interface NewUser {
   email: string
   name: string
   password: string
-  role: GlobalRole
 }
 
 export function buildUserQuery(filters: { email?: string; page?: number }): Record<string, string> {
@@ -69,9 +66,5 @@ export function useAdminUsers() {
     replace(await $api.patch<AdminUser>(apiPath`/admin/users/${id}`, { disabled }))
   }
 
-  async function setRole(id: string, role: GlobalRole): Promise<void> {
-    replace(await $api.patch<AdminUser>(apiPath`/admin/users/${id}`, { role }))
-  }
-
-  return { users, total, page, hasNext, pending, load, createUser, setDisabled, setRole }
+  return { users, total, page, hasNext, pending, load, createUser, setDisabled }
 }

@@ -118,6 +118,21 @@ describe('UsersAdminService', () => {
 
       expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
     });
+
+    /**
+     * US-004: the web creates a user and then binds roles, so a create without a role must not be a
+     * validation error. An absent role is the least-privileged global role, `MEMBER`.
+     */
+    it('AC-10: an absent role writes MEMBER and grants no admin binding', async () => {
+      repo.createUser.mockResolvedValue(user({ id: 'new-member', role: 'MEMBER' }));
+
+      const created = await service.create({ email: 'm@k.t', name: 'M', password: 'Admin1234!Aa' });
+
+      expect(repo.createUser).toHaveBeenCalledWith(expect.objectContaining({ role: 'MEMBER' }));
+      expect(membership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'new-member' });
+      expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
+      expect(created.role).toBe('MEMBER');
+    });
   });
 
   describe('update', () => {

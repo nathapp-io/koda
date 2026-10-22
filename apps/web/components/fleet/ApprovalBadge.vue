@@ -44,14 +44,15 @@ const POLL_MS = 60_000
 const props = defineProps<{ slug: string | null }>()
 
 const { t } = useI18n()
-const auth = useAuth()
 const { counts, load } = useFleetApprovalCounts()
 const notifications = useApprovalNotifications(counts)
+// Permissions P1 US-009: the admin inbox is a destination for the caller who may read it, not for a role name.
+const { permissions: globalPermissions } = useGlobalPermissions()
 
 const count = computed(() => counts.value?.total ?? 0)
 const target = computed(() => {
   if (counts.value === null || count.value === 0) return null
-  return badgeTarget(counts.value, { slug: props.slug, globalAdmin: auth.user.value?.role === 'ADMIN' })
+  return badgeTarget(counts.value, { slug: props.slug, globalAdmin: globalPermissions.value.has('fleet.approval.read') })
 })
 
 useHead(() => {

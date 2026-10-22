@@ -139,6 +139,262 @@ describe('RoleAdminService', () => {
     });
   });
 
+  describe('listProjectRoles (US-003)', () => {
+    it('answers every PROJECT role and no GLOBAL one, in the repository order', async () => {
+      const roles = await service.listProjectRoles();
+
+      expect(roles.every((entry) => entry.scope === 'PROJECT')).toBe(true);
+      expect(roles.map((entry) => entry.key)).toContain('developer');
+      expect(roles.map((entry) => entry.key)).not.toContain('owner');
+      expect(roles.map((entry) => entry.key)).not.toContain('member');
+      // System roles first, then by key — the custom role the store holds sorts after the seeded seven.
+      const seeded = roles.filter((entry) => entry.system).map((entry) => entry.key);
+      expect(seeded).toEqual([...seeded].sort());
+      expect(roles.slice(0, seeded.length).every((entry) => entry.system)).toBe(true);
+      // The route's `member.read` guard is the gate: the service asks no key of any caller.
+      expect(cache.invalidations).toEqual([]);
+    });
+
+    it('reads through the scope-filtered, exhaustive repository reader — not a filtered capped list', async () => {
+      // A custom PROJECT role and a custom GLOBAL role: only the first is assignable in a project, and the
+      // reader is asked for the scope rather than for every role and filtered afterwards.
+      store.roles.push(
+        { id: 'role-qa', key: 'qa', name: 'QA', description: '', scope: 'PROJECT', system: false, locked: false, permissions: [] },
+        { id: 'role-auditor', key: 'auditor', name: 'Auditor', description: '', scope: 'GLOBAL', system: false, locked: false, permissions: [] },
+      );
+
+      const roles = await service.listProjectRoles();
+
+      expect(store.calls).toContain('find-roles-by-scope:PROJECT');
+      expect(store.calls).not.toContain('find-roles');
+      expect(roles.map((entry) => entry.key)).toContain('qa');
+      expect(roles.map((entry) => entry.key)).not.toContain('auditor');
+      expect(roles[roles.length - 1]?.key).toBe('qa');
+    });
+  });
+
+  /**
+   * US-004: the grant rules a write route runs **before** it stores a binding — role lookup, scope,
+   * principal type, self-binding, escalation — in that order, and nothing else. The calling route's own
+   * key (`member.add`, `invite.create`) is its gate, so no `role.binding.*` key is asked here.
+   */
+  describe('assertMayGrant (US-004)', () => {
+    const projectId = 'project-alpha';
+    let projectAdmin: KodaPrincipal;
+
+    /** A caller holding exactly the given entries in the project, and no global authority. */
+    const callerHolding = (id: string, entries: readonly string[]): KodaPrincipal => {
+      const roleKey = `grantor-${id}`;
+      store.roles.push({
+        id: `role-${roleKey}`,
+        key: roleKey,
+        name: `Grantor ${id}`,
+        description: '',
+        scope: 'PROJECT',
+        system: false,
+        locked: false,
+        permissions: [...entries],
+      });
+      store.addUser(id);
+      store.bind(USER(id), roleKey, projectId);
+      return principal(id);
+    };
+
+    beforeEach(() => {
+      store.projects.add(projectId);
+      store.agents.add('agent-1');
+      store.addUser('project-admin-1');
+      store.bind(USER('project-admin-1'), 'project-admin', projectId);
+      projectAdmin = principal('project-admin-1');
+      // A target role whose keys a narrow caller can hold: the escalation pass case.
+      store.roles.push({
+        id: 'role-reader',
+        key: 'reader',
+        name: 'Reader',
+        description: '',
+        scope: 'PROJECT',
+        system: false,
+        locked: false,
+        permissions: ['ticket.read'],
+      });
+    });
+
+    it('resolves the role for a caller that holds everything it confers, asking no route key', async () => {
+      const granted = await service.assertMayGrant(projectAdmin, {
+        roleKey: 'triager',
+        projectId,
+        principalType: 'USER',
+        principalId: 'target-1',
+      });
+
+      expect(granted.key).toBe('triager');
+      expect(granted.scope).toBe('PROJECT');
+      // The route's own key is the gate: no `role.binding.*` and no `can` call happens here.
+      expect(store.calls).not.toContain('lock-owner');
+      expect(cache.invalidations).toEqual([]);
+    });
+
+    it('a caller holding only the granted keys may grant them, without role.binding.manage', async () => {
+      const narrow = callerHolding('narrow-1', ['member.add', 'project.read', 'ticket.read']);
+
+      const granted = await service.assertMayGrant(narrow, {
+        roleKey: 'reader',
+        projectId,
+        principalType: 'USER',
+        principalId: 'target-1',
+      });
+
+      expect(granted.key).toBe('reader');
+    });
+
+    it('an unknown role key is 404 permissions.roleNotFound before anything else', async () => {
+      const error = await thrown(() =>
+        service.assertMayGrant(projectAdmin, {
+          roleKey: 'no-such-role',
+          projectId,
+          principalType: 'USER',
+          principalId: 'target-1',
+        }),
+      );
+
+      expect(error).toBeInstanceOf(NotFoundAppException);
+      expect(error.prefix).toBe('permissions.roleNotFound');
+      expect(error.httpStatus).toBe(404);
+    });
+
+    it('a GLOBAL role with a project id is 400 permissions.scopeMismatch, whatever the caller holds', async () => {
+      const error = await thrown(() =>
+        service.assertMayGrant(owner, {
+          roleKey: 'admin',
+          projectId,
+          principalType: 'USER',
+          principalId: 'target-1',
+        }),
+      );
+
+      expect(error).toBeInstanceOf(ValidationAppException);
+      expect(error.prefix).toBe('permissions.scopeMismatch');
+      expect(error.httpStatus).toBe(400);
+      // The sentence interpolates the role the caller tried to hand out in a project.
+      expect(error.args).toEqual({ entry: 'admin' });
+    });
+
+    it('a role an AGENT principal can never hold is 400 permissions.principalType', async () => {
+      const error = await thrown(() =>
+        service.assertMayGrant(owner, {
+          roleKey: 'owner',
+          projectId: null,
+          principalType: 'AGENT',
+          principalId: 'agent-1',
+        }),
+      );
+
+      expect(error).toBeInstanceOf(ValidationAppException);
+      expect(error.prefix).toBe('permissions.principalType');
+      expect(error.httpStatus).toBe(400);
+    });
+
+    it('binding a role to the caller itself is 403 permissions.selfBinding', async () => {
+      const error = await thrown(() =>
+        service.assertMayGrant(projectAdmin, {
+          roleKey: 'viewer',
+          projectId,
+          principalType: 'USER',
+          principalId: projectAdmin.id,
+        }),
+      );
+
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      expect(error.prefix).toBe('permissions.selfBinding');
+      expect(error.httpStatus).toBe(403);
+    });
+
+    it('the same id of the other principal type is not the caller', async () => {
+      // An agent and a user can share an id in principle: only a same-type match is a self-binding.
+      const granted = await service.assertMayGrant(projectAdmin, {
+        roleKey: 'reader',
+        projectId,
+        principalType: 'AGENT',
+        principalId: projectAdmin.id,
+      });
+
+      expect(granted.key).toBe('reader');
+    });
+
+    it('a role conferring a key the caller does not hold is 403 permissions.escalation', async () => {
+      const narrow = callerHolding('narrow-2', ['member.add', 'project.read', 'ticket.read']);
+
+      const error = await thrown(() =>
+        service.assertMayGrant(narrow, {
+          roleKey: 'developer',
+          projectId,
+          principalType: 'USER',
+          principalId: 'target-1',
+        }),
+      );
+
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      expect(error.prefix).toBe('permissions.escalation');
+      expect(error.httpStatus).toBe(403);
+    });
+
+    it("escalation is read in the target's scope: a key held in another project does not carry", async () => {
+      const otherProject = 'project-beta';
+      store.projects.add(otherProject);
+      store.addUser('elsewhere-admin');
+      store.bind(USER('elsewhere-admin'), 'project-admin', otherProject);
+
+      const error = await thrown(() =>
+        service.assertMayGrant(principal('elsewhere-admin'), {
+          roleKey: 'developer',
+          projectId,
+          principalType: 'USER',
+          principalId: 'target-1',
+        }),
+      );
+
+      expect(error).toBeInstanceOf(ForbiddenAppException);
+      expect(error.prefix).toBe('permissions.escalation');
+    });
+
+    it('a null principal id (an address with no account yet) skips the self rule', async () => {
+      const granted = await service.assertMayGrant(projectAdmin, {
+        roleKey: 'viewer',
+        projectId,
+        principalType: 'USER',
+        principalId: null,
+      });
+
+      expect(granted.key).toBe('viewer');
+    });
+
+    it('checks in the brief order: scope before self-binding, self-binding before escalation', async () => {
+      const narrow = callerHolding('narrow-3', ['member.add', 'project.read']);
+
+      // GLOBAL role, own id: the scope refusal comes first.
+      const scopeError = await thrown(() =>
+        service.assertMayGrant(narrow, {
+          roleKey: 'admin',
+          projectId,
+          principalType: 'USER',
+          principalId: narrow.id,
+        }),
+      );
+      expect(scopeError.prefix).toBe('permissions.scopeMismatch');
+
+      // An escalating role, own id: the self refusal comes first.
+      const selfError = await thrown(() =>
+        service.assertMayGrant(narrow, {
+          roleKey: 'developer',
+          projectId,
+          principalType: 'USER',
+          principalId: narrow.id,
+        }),
+      );
+      expect(selfError.prefix).toBe('permissions.selfBinding');
+    });
+  });
+
   describe('createRole', () => {
     const qa = {
       key: 'qa',

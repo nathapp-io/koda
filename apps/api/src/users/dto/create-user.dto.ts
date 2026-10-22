@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsIn, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { PASSWORD_COMPLEXITY } from '../../auth/dto/register.dto';
 import { GLOBAL_ROLES, GlobalRole } from '../domain/user-admin.domain';
 
@@ -21,7 +21,12 @@ export class CreateUserDto {
   @Matches(PASSWORD_COMPLEXITY, { message: '$t(common.validation.passwordComplexity)' })
   declare password: string;
 
-  @ApiProperty({ enum: GLOBAL_ROLES })
+  /**
+   * US-004: optional. An absent role is the least-privileged global role, `MEMBER`, so the web can
+   * create an account and then bind roles to it.
+   */
+  @ApiPropertyOptional({ enum: GLOBAL_ROLES, default: 'MEMBER' })
+  @IsOptional()
   @IsIn(GLOBAL_ROLES, { message: '$t(common.validation.isEnum)' })
-  declare role: GlobalRole;
+  declare role?: GlobalRole;
 }

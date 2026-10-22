@@ -4,6 +4,7 @@ import { computed, h, reactive, ref, watch } from 'vue'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import type { FleetComponentName } from '../helpers/mount-sfc'
 import { enI18n, uiStubs } from '../helpers/fleet-harness'
+import { permissionSet } from '~/lib/permissions'
 
 const page = webFile('pages', '[project]', 'fleet', 'analytics.vue')
 const DAY = 86_400_000
@@ -74,13 +75,45 @@ const REAL: FleetComponentName[] = [
 /** The real FleetNativeSelect is mounted (fleetComponents), so drop its stub. */
 const { FleetNativeSelect: _nativeSelectStub, ...stubs } = uiStubs
 
-function mountPage(get: Get, query: Record<string, unknown> = {}, role = 'MEMBER') {
+/** Records the `admin` prop the page hands the ingest notice (US-006 AC-11). */
+function ingestNoticeStub(seen: Array<Record<string, unknown>>) {
+  return {
+    name: 'StubFleetAnalyticsIngestNotice',
+    props: ['pending', 'failed', 'admin'],
+    setup(props: Record<string, unknown>) {
+      return () => {
+        seen.push({ admin: props.admin })
+        return h('x-stub-stub', { 'data-stub': 'ingest-notice', 'data-admin': String(props.admin) })
+      }
+    },
+  }
+}
+
+interface Viewer {
+  /** The keys of the caller's global permission set. */
+  keys?: readonly string[]
+  /** True while /me/permissions is still outstanding: the set is the empty one. */
+  pending?: boolean
+  /** Replace the real ingest notice with a stub that records its `admin` prop. */
+  captureIngest?: boolean
+  /** A role name, to prove the gate does not read it. */
+  role?: string
+}
+
+function mountPage(get: Get, query: Record<string, unknown> = {}, viewer: Viewer = {}) {
   const route = reactive({ params: { project: 'koda' }, query: { ...query } })
   const replace = jest.fn(async (to: { query: Query }) => { route.query = { ...to.query } })
   const hook: { visible?: () => void } = {}
+  const ingestProps: Array<Record<string, unknown>> = []
+  const held = permissionSet(viewer.keys ?? [])
   const app = mountSfc(page, {
-    components: { ...stubs, FleetAnalyticsSpendAreaChart: chartStub('spend-chart'), FleetAnalyticsRateLineChart: chartStub('rate-chart') },
-    fleetComponents: REAL,
+    components: {
+      ...stubs,
+      FleetAnalyticsSpendAreaChart: chartStub('spend-chart'),
+      FleetAnalyticsRateLineChart: chartStub('rate-chart'),
+      ...(viewer.captureIngest === true ? { FleetAnalyticsIngestNotice: ingestNoticeStub(ingestProps) } : {}),
+    },
+    fleetComponents: viewer.captureIngest === true ? REAL.filter((name) => name !== 'FleetAnalyticsIngestNotice') : REAL,
     alias: {
       '~/composables/useRefetchOnVisible': { useRefetchOnVisible: (fn: () => void) => { hook.visible = fn }, watchVisible: () => () => undefined },
     },
@@ -90,7 +123,13 @@ function mountPage(get: Get, query: Record<string, unknown> = {}, role = 'MEMBER
       useApi: () => ({ $api: { get } }),
       useRoute: () => route,
       useRouter: () => ({ replace }),
-      useAuth: () => ({ user: ref({ role }) }),
+      useAuth: () => ({ user: ref({ role: viewer.role ?? 'MEMBER' }) }),
+      useGlobalPermissions: () => ({
+        permissions: computed(() => (viewer.pending === true ? permissionSet([]) : held)),
+        pending: ref(viewer.pending === true),
+        error: ref(null),
+        refresh: async () => undefined,
+      }),
       definePageMeta: () => undefined,
     },
   })
@@ -104,7 +143,9 @@ function mountPage(get: Get, query: Record<string, unknown> = {}, role = 'MEMBER
   const text = (id: string): string => app.textOf(byId(id)[0])
   const status = (id: string): unknown => byId(id)[0]?.props['data-status']
   const calls = (suffix: string) => get.mock.calls.filter(([path]) => path.endsWith(suffix)).map(([, opts]) => opts?.query ?? {})
-  return { app, route, replace, settle, byId, text, status, calls, visible: () => hook.visible?.() }
+  /** The `admin` prop the ingest notice was last rendered with (undefined when it never rendered). */
+  const ingestAdmin = (): unknown => ingestProps[ingestProps.length - 1]?.admin
+  return { app, route, replace, settle, byId, text, status, calls, ingestAdmin, visible: () => hook.visible?.() }
 }
 
 describe('project Analytics page (spec §5.2)', () => {
@@ -246,10 +287,56 @@ describe('project Analytics page (spec §5.2)', () => {
     p.app.unmount()
   })
 
-  test('admins get a link from the ingest notice to ingest health (D401)', async () => {
-    const p = mountPage(makeGet(FULL), {}, 'ADMIN')
+  test('a reader of fleet ingest gets a link from the notice to ingest health (D401)', async () => {
+    const p = mountPage(makeGet(FULL), {}, { keys: ['fleet.ingest.read'] })
     await p.settle()
     expect(p.byId('fleet-analytics-ingest-link')[0].props.to).toBe('/admin/fleet/analytics')
+    p.app.unmount()
+  })
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // US-006 AC-11 — the notice's `admin` prop follows `fleet.ingest.read`
+  // ───────────────────────────────────────────────────────────────────────────
+
+  test('AC-11: admin is true when the global set holds fleet.ingest.read', async () => {
+    const p = mountPage(makeGet(FULL), {}, { keys: ['fleet.ingest.read'], captureIngest: true })
+    await p.settle()
+    expect(p.ingestAdmin()).toBe(true)
+    p.app.unmount()
+  })
+
+  test('AC-11: admin is false with an empty set, so no ingest link renders', async () => {
+    const p = mountPage(makeGet(FULL), {}, { keys: [], captureIngest: true })
+    await p.settle()
+    expect(p.ingestAdmin()).toBe(false)
+    p.app.unmount()
+  })
+
+  test('AC-11 (edge): an ADMIN role with no keys still gets admin false, and no link', async () => {
+    const p = mountPage(makeGet(FULL), {}, { keys: [], role: 'ADMIN', captureIngest: true })
+    await p.settle()
+    expect(p.ingestAdmin()).toBe(false)
+
+    const rendered = mountPage(makeGet(FULL), {}, { keys: [], role: 'ADMIN' })
+    await rendered.settle()
+    expect(rendered.byId('fleet-analytics-ingest-notice')).toHaveLength(1)
+    expect(rendered.byId('fleet-analytics-ingest-link')).toHaveLength(0)
+    rendered.app.unmount()
+    p.app.unmount()
+  })
+
+  test('AC-11 (edge): an unrelated key does not set admin', async () => {
+    const p = mountPage(makeGet(FULL), {}, { keys: ['fleet.analytics.read', 'user.read'], captureIngest: true })
+    await p.settle()
+    expect(p.ingestAdmin()).toBe(false)
+    p.app.unmount()
+  })
+
+  test('AC-12: while /me/permissions is pending the notice is rendered without the link', async () => {
+    const p = mountPage(makeGet(FULL), {}, { keys: ['fleet.ingest.read'], pending: true })
+    await p.settle()
+    expect(p.byId('fleet-analytics-ingest-notice')).toHaveLength(1)
+    expect(p.byId('fleet-analytics-ingest-link')).toHaveLength(0)
     p.app.unmount()
   })
 })

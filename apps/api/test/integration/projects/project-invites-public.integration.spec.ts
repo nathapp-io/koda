@@ -145,7 +145,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
   });
 
   // ── US-005 AC-1 ───────────────────────────────────────────────────────────
-  it('US-005 AC-1: previews a pending invite with exactly the six public fields', async () => {
+  it('US-005 AC-1: previews a pending invite with exactly the eight public fields', async () => {
     const { token, row } = await freshInvite();
 
     const res = await preview(token);
@@ -153,7 +153,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     const view = data<PreviewDto>(res);
 
     expect(Object.keys(view).sort()).toEqual(
-      ['projectName', 'projectSlug', 'email', 'role', 'inviterName', 'expiresAt'].sort(),
+      ['projectName', 'projectSlug', 'email', 'role', 'roleKey', 'roleName', 'inviterName', 'expiresAt'].sort(),
     );
     expect(view).toMatchObject({
       projectName: 'S5 Project',

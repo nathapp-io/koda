@@ -194,7 +194,7 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
       expect(invite).not.toHaveProperty('token');
       expect(invite).not.toHaveProperty('tokenHash');
       expect(Object.keys(invite).sort()).toEqual(
-        ['createdAt', 'email', 'expiresAt', 'id', 'inviterName', 'role', 'status'].sort(),
+        ['createdAt', 'email', 'expiresAt', 'id', 'inviterName', 'role', 'roleKey', 'roleName', 'status'].sort(),
       );
     }
   });

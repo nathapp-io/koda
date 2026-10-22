@@ -5,6 +5,16 @@ import type { FakeNode, Mounted } from '../helpers/mount-sfc'
 import { uiStubs, i18nStub, toastRecorder } from '../helpers/fleet-harness'
 import type { ToastRecorder } from '../helpers/fleet-harness'
 import * as apiModule from '../../composables/useApi'
+import { projectPermissionsStub } from '../helpers/permission-nav'
+
+/**
+ * Permissions P1 US-007: the re-index button follows `fleet.knowledge.repo.reindex` and the patterns
+ * editor follows `fleet.knowledge.patterns.update`, both read from the project scope.
+ */
+const PATTERNS_UPDATE = 'fleet.knowledge.patterns.update'
+const REINDEX = 'fleet.knowledge.repo.reindex'
+/** What a member who may do everything the card offers holds. */
+const CAN_EDIT: readonly string[] = [PATTERNS_UPDATE, REINDEX]
 
 /**
  * US-007 AC1-AC10: components/SettingsKnowledgeCard.vue, mounted for real (no DOM:
@@ -51,7 +61,7 @@ async function flush(): Promise<void> {
   await nextTick()
 }
 
-async function mountCard(role: string | undefined = 'ADMIN'): Promise<Mounted> {
+async function mountCard(project: readonly string[] = CAN_EDIT): Promise<Mounted> {
   toast = toastRecorder()
   const app = mountSfc(cardFile, {
     props: { slug: 'web' },
@@ -61,7 +71,7 @@ async function mountCard(role: string | undefined = 'ADMIN'): Promise<Mounted> {
       useApi: () => ({ $api: { get, post, put } }),
       useI18n: () => i18nStub(),
       useAppToast: () => toast,
-      useAuth: () => ({ user: { value: role === undefined ? null : { role } } }),
+      useProjectPermissions: () => projectPermissionsStub(project),
     },
   })
   await flush()
@@ -155,8 +165,8 @@ describe('US-007: the knowledge state', () => {
 })
 
 describe('US-007: re-index', () => {
-  test('AC3: an admin clicking re-index posts the repository reindex path, then reloads the state', async () => {
-    const app = await mountCard('ADMIN')
+  test('AC3: holding fleet.knowledge.repo.reindex, clicking re-index posts the repository reindex path, then reloads the state', async () => {
+    const app = await mountCard()
     expect(get).toHaveBeenCalledTimes(1)
 
     await click(byId(app, 'knowledge-reindex-r1'))
@@ -169,7 +179,7 @@ describe('US-007: re-index', () => {
 
   test('AC9: a failed re-index toasts the API error and does not reload the state', async () => {
     post.mockRejectedValueOnce(new apiModule.ApiError(403, 'Not allowed'))
-    const app = await mountCard('ADMIN')
+    const app = await mountCard()
 
     await click(byId(app, 'knowledge-reindex-r1'))
 
@@ -181,8 +191,8 @@ describe('US-007: re-index', () => {
 })
 
 describe('US-007: the patterns editor', () => {
-  test('AC4: a USER sees no re-index button and a read-only patterns textarea without save or reset', async () => {
-    const app = await mountCard('USER')
+  test('AC4: a member holding no knowledge key sees no re-index button and a read-only patterns textarea without save or reset', async () => {
+    const app = await mountCard([])
 
     expect(byId(app, 'knowledge-reindex-r1')).toBeUndefined()
     const textarea = byId(app, 'knowledge-patterns')
@@ -194,9 +204,9 @@ describe('US-007: the patterns editor', () => {
     app.unmount()
   })
 
-  test('an admin gets an editable textarea holding one pattern per line', async () => {
+  test('a member holding fleet.knowledge.patterns.update gets an editable textarea holding one pattern per line', async () => {
     get.mockImplementation(async () => answer({ patterns: ['a/*.md', 'b/**/*.md'] }))
-    const app = await mountCard('ADMIN')
+    const app = await mountCard()
 
     const textarea = byId(app, 'knowledge-patterns')
     expect(textarea?.props.readonly).toBe(false)
@@ -205,7 +215,7 @@ describe('US-007: the patterns editor', () => {
   })
 
   test('AC5: saving trimmed non-empty lines PUTs them as the patterns, then reloads', async () => {
-    const app = await mountCard('ADMIN')
+    const app = await mountCard()
 
     await type(app, 'handbook/*.md\n\n docs/*.md ')
     await save(app)
@@ -218,7 +228,7 @@ describe('US-007: the patterns editor', () => {
   })
 
   test('AC6: Reset to default PUTs null patterns, then reloads', async () => {
-    const app = await mountCard('ADMIN')
+    const app = await mountCard()
 
     await click(byId(app, 'knowledge-patterns-reset'))
 
@@ -229,7 +239,7 @@ describe('US-007: the patterns editor', () => {
   })
 
   test('AC7: a line that does not end in .md shows the validation message and sends nothing', async () => {
-    const app = await mountCard('ADMIN')
+    const app = await mountCard()
 
     await type(app, 'src/a.ts')
     await save(app)
@@ -240,7 +250,7 @@ describe('US-007: the patterns editor', () => {
   })
 
   test('an empty editor and more than 50 lines are rejected without a request', async () => {
-    const app = await mountCard('ADMIN')
+    const app = await mountCard()
 
     await type(app, '  \n ')
     await save(app)
@@ -254,7 +264,7 @@ describe('US-007: the patterns editor', () => {
   })
 
   test('a valid save clears an earlier validation message', async () => {
-    const app = await mountCard('ADMIN')
+    const app = await mountCard()
 
     await type(app, 'src/a.ts')
     await save(app)
@@ -268,7 +278,7 @@ describe('US-007: the patterns editor', () => {
 
   test('AC8: a rejected save toasts the API error and does not reload', async () => {
     put.mockRejectedValueOnce(new apiModule.ApiError(400, 'Invalid patterns'))
-    const app = await mountCard('ADMIN')
+    const app = await mountCard()
 
     await type(app, 'docs/*.md')
     await save(app)
@@ -282,7 +292,7 @@ describe('US-007: the patterns editor', () => {
 
   test('a rejected reset toasts the API error', async () => {
     put.mockRejectedValueOnce(new apiModule.ApiError(403, 'Nope'))
-    const app = await mountCard('ADMIN')
+    const app = await mountCard()
 
     await click(byId(app, 'knowledge-patterns-reset'))
 

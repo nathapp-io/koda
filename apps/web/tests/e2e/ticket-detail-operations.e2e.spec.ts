@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import {
   login,
   createProject,
+  createUser,
   addProjectMember,
   createTicket,
   deleteProject,
@@ -15,6 +16,11 @@ const CLOSE_REGEX = /^Close$|^关闭$/i;
 const DELETE_REGEX = /^Delete$|^删除$/i;
 const DELETE_TICKET_REGEX = /Delete Ticket|删除工单/i;
 const ADD_LINK_REGEX = /Add Link|添加链接/i;
+const ASSIGNEE = {
+  email: 'ticket-ops-assignee@koda-e2e.test',
+  name: 'Ticket Operations Assignee',
+  password: 'E2ePassword1!',
+};
 
 /**
  * Nuxt hydration resets the SSR DOM to v-model state when the client takes
@@ -69,17 +75,20 @@ async function createComment(token: string, projectSlug: string, ticketRef: stri
 
 test.describe('Ticket Detail Operations', () => {
   let token: string;
-  let userId: string;
+  let assigneeId: string;
   let projectSlug: string;
 
   test.beforeAll(async () => {
-    ({ token, userId } = await login(E2E_ADMIN.email, E2E_ADMIN.password));
+    ({ token } = await login(E2E_ADMIN.email, E2E_ADMIN.password));
     const proj = await createProject(token, {
       name: 'E2E Ticket Detail Operations',
       slug: `e2e-ticket-ops-${Date.now()}`,
       key: generateUniqueProjectKey('TD'),
     });
     projectSlug = proj.slug;
+    await createUser(token, ASSIGNEE);
+    await addProjectMember(token, projectSlug, ASSIGNEE.email, 'DEVELOPER');
+    ({ userId: assigneeId } = await login(ASSIGNEE.email, ASSIGNEE.password));
   });
 
   test.afterAll(async () => {
@@ -92,10 +101,8 @@ test.describe('Ticket Detail Operations', () => {
 
   test('sends assign, close, and delete ticket requests', async ({ page }) => {
     const title = `E2E Assign Close ${Date.now()}`;
-    // contract drift: the assignee picker (US-007) lists project members, so
-    // add the admin as a member first; the previous free-text user-id input
-    // accepted any userId.
-    await addProjectMember(token, projectSlug, E2E_ADMIN.email, 'DEVELOPER');
+    // The picker lists project members. Use a separate assignee because
+    // the admin cannot grant a project role to themselves.
     const ticket = await createTicket(token, projectSlug, { title, type: 'BUG' });
     await transitionTicket(token, projectSlug, ticket.ref, 'verify', { body: 'verify for close action visibility' });
 
@@ -104,15 +111,15 @@ test.describe('Ticket Detail Operations', () => {
     await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible({ timeout: 10000 });
     await waitForHydration(page);
     const pickerInput = page.locator('[data-testid="assignee-search"]').first();
-    await pickerInput.fill(E2E_ADMIN.email);
-    const adminOption = page.locator(`[data-testid="assignee-option-${userId}"]`).first();
-    await expect(adminOption).toBeVisible({ timeout: 10000 });
+    await pickerInput.fill(ASSIGNEE.email);
+    const assigneeOption = page.locator(`[data-testid="assignee-option-${assigneeId}"]`).first();
+    await expect(assigneeOption).toBeVisible({ timeout: 10000 });
 
     const assignRequest = page.waitForRequest(request =>
       request.method() === 'POST' &&
       request.url().includes(`/api/projects/${projectSlug}/tickets/${ticket.ref}/assign`)
     );
-    await adminOption.click();
+    await assigneeOption.click();
     await expect(assignRequest).resolves.toBeTruthy();
 
     const closeRequest = page.waitForRequest(request =>

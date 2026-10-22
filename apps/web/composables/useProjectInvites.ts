@@ -1,17 +1,22 @@
 import { ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
 
-/** Fleet S4b US-007: the only roles a project admin may invite (AGENT is not assignable). */
-export const INVITE_ROLES = ['ADMIN', 'DEVELOPER', 'VIEWER'] as const
-export type InviteRole = (typeof INVITE_ROLES)[number]
-
 export type InviteStatus = 'PENDING' | 'ACCEPTED' | 'EXPIRED' | 'CANCELLED'
 
-/** The public invite shape the API returns — never carries a raw token. */
+/**
+ * The public invite shape the API returns — never carries a raw token.
+ *
+ * Permissions P1 US-005 added the role-key fields: `role` is the legacy enum, `roleKey` the project
+ * role the invite grants and `roleName` its label. All three are nullable because an invite stored
+ * before the migration has no role row; an invite created since has all three unset or set together.
+ * The panel renders `roleName`, never the raw key.
+ */
 export interface InviteDto {
   id: string
   email: string
-  role: string
+  role: string | null
+  roleKey: string | null
+  roleName: string | null
   status: InviteStatus
   inviterName: string | null
   expiresAt: string
@@ -48,8 +53,9 @@ export function useProjectInvites(slug: string) {
     invites.value = await $api.get<InviteDto[]>(base)
   }
 
-  async function create(email: string, role: InviteRole): Promise<InviteCreateResultDto> {
-    return $api.post<InviteCreateResultDto>(base, { email, role })
+  /** Permissions P1 US-014: a project role key, not the legacy ADMIN/DEVELOPER/VIEWER enum. */
+  async function create(email: string, roleKey: string): Promise<InviteCreateResultDto> {
+    return $api.post<InviteCreateResultDto>(base, { email, roleKey })
   }
 
   async function resend(id: string): Promise<InviteResendResultDto> {

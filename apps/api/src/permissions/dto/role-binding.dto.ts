@@ -69,17 +69,31 @@ export class CreateRoleBindingDto {
   projectId?: string | null;
 }
 
-/** True when the request names a principal at all: `principalType` and `principalId` travel together. */
+/** True when the request names a principal at all: `principalType` may travel alone, `principalId` may not. */
 function namesPrincipal(dto: ListRoleBindingsQuery): boolean {
   return dto.principalType !== undefined || dto.principalId !== undefined;
 }
 
+/** The only scope value the list accepts: `global` means "the bindings that apply everywhere". */
+export const BINDING_SCOPES = ['global'] as const;
+export type BindingScope = (typeof BINDING_SCOPES)[number];
+
 /**
- * `GET /role-bindings` query: the filter (`principalType` + `principalId`, `projectId`) and the page.
+ * `GET /role-bindings` query: the filter (`principalType`, `principalType` + `principalId`,
+ * `projectId`, `scope`) and the page.
  *
  * The page defaults differ from `KodaPageQuery`: bindings are an administration listing, so it starts
- * at 50 and allows up to 200. A lone `principalType` or `principalId` is refused: a half-specified
- * principal would silently widen the filter to every principal.
+ * at 50 and allows up to 200.
+ *
+ * A lone `principalType` lists that type's bindings — the binding browser asks for "every agent's
+ * global bindings" in one request. A lone `principalId` is still refused: an id without a type names
+ * two possible principals, and guessing one would silently answer the wrong listing. `principalType`
+ * is what enforces that (its validators run whenever a principal is named at all, so a missing type
+ * fails there), which is why `principalId` itself is validated only when it is present.
+ *
+ * `scope=global` restricts the page to `projectId`-null bindings. It is not a synonym for "no project
+ * filter" (that is an omitted `projectId`), so combining it with a `projectId` is a refusal the
+ * controller answers with `permissions.scopeAndProject`.
  */
 export class ListRoleBindingsQuery extends PageOption {
   @ApiPropertyOptional({ description: 'Page number (1-based)', default: 1, minimum: 1 })
@@ -102,13 +116,13 @@ export class ListRoleBindingsQuery extends PageOption {
   @Max(MAX_BINDING_PAGE_SIZE)
   size: number = DEFAULT_BINDING_PAGE_SIZE;
 
-  @ApiPropertyOptional({ enum: PRINCIPAL_TYPES, description: 'Requires principalId' })
+  @ApiPropertyOptional({ enum: PRINCIPAL_TYPES, description: 'Filters by principal type; may be given alone' })
   @ValidateIf(namesPrincipal)
   @IsIn(PRINCIPAL_TYPES, { message: '$t(common.validation.isEnum)' })
   principalType?: PrincipalType;
 
-  @ApiPropertyOptional({ description: 'Requires principalType' })
-  @ValidateIf(namesPrincipal)
+  @ApiPropertyOptional({ description: 'Narrows the filter to one principal; requires principalType' })
+  @ValidateIf((dto: ListRoleBindingsQuery) => dto.principalId !== undefined)
   @IsString({ message: '$t(common.validation.isString)' })
   principalId?: string;
 
@@ -116,4 +130,12 @@ export class ListRoleBindingsQuery extends PageOption {
   @IsOptional()
   @IsString({ message: '$t(common.validation.isString)' })
   projectId?: string;
+
+  @ApiPropertyOptional({
+    enum: BINDING_SCOPES,
+    description: 'global: only bindings with no project. Cannot be combined with projectId',
+  })
+  @IsOptional()
+  @IsIn(BINDING_SCOPES, { message: '$t(common.validation.isEnum)' })
+  scope?: BindingScope;
 }

@@ -8,6 +8,8 @@ import { uiStubs, enI18n, toastRecorder } from '../helpers/fleet-harness'
 import * as apiModule from '../../composables/useApi'
 import { ApiError } from '../../composables/useApi'
 import type { BudgetPolicyDto } from '../../lib/fleet-types'
+import { useProjectPermissions } from '../../composables/usePermissions'
+import { fakeAsyncData } from '../helpers/permission-nav'
 
 const pageFile = webFile('pages', '[project]', 'fleet', 'budgets.vue')
 const source = readFileSync(path.join(__dirname, '../..', 'pages', '[project]', 'fleet', 'budgets.vue'), 'utf-8')
@@ -26,13 +28,26 @@ const ROWS = [
   policy('g', { scopeType: 'global', scopeId: null, projectId: null }),
 ]
 
-function mountProject(rows: BudgetPolicyDto[], canManage: boolean, get?: jest.Mock) {
-  const api = { get: get ?? jest.fn(async () => rows), delete: jest.fn(async () => undefined), post: jest.fn(), patch: jest.fn() }
+/** Permissions P1 US-008: the project budget keys a member holds; an empty set is the read-only page. */
+const MEMBER: readonly string[] = []
+const ADMIN_KEYS: readonly string[] = [
+  'fleet.budget.create', 'fleet.budget.resume', 'fleet.budget.update', 'fleet.budget.delete',
+]
+
+function mountProject(rows: BudgetPolicyDto[], project: readonly string[] = MEMBER, over: { get?: jest.Mock } = {}) {
+  // `/me/permissions` is the scope's key list; every other GET keeps the double the test supplied.
+  const listGet = over.get ?? jest.fn(async () => rows)
+  const get = jest.fn(async (requestPath: string, options?: { query?: Record<string, string> }) =>
+    requestPath === '/me/permissions'
+      ? { scope: 'project', projectSlug: options?.query?.project ?? null, keys: [...project] }
+      : listGet(requestPath, options))
+  const api = { get, delete: jest.fn(async () => undefined), post: jest.fn(), patch: jest.fn() }
   const toasts = toastRecorder()
   let task: () => Promise<void> = async () => undefined
   const polling = { start: jest.fn(), stop: jest.fn(), runNow: async (): Promise<void> => { await task() }, isActive: () => true }
   globalThis.window = { confirm: () => true } as never
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
+  ;(globalThis as Record<string, unknown>).useAsyncData = fakeAsyncData
 
   const app = mountSfc(pageFile, {
     components: uiStubs,
@@ -45,8 +60,9 @@ function mountProject(rows: BudgetPolicyDto[], canManage: boolean, get?: jest.Mo
       useI18n: () => enI18n(),
       useAppToast: () => toasts,
       useApi: () => ({ $api: api }),
+      useAsyncData: fakeAsyncData,
+      useProjectPermissions,
       useRoute: () => ({ params: { project: 'koda' } }),
-      useProjectViewerRole: () => ({ data: ref({ canManage, viewerRole: canManage ? 'ADMIN' : 'VIEWER' }) }),
       useFleetDispatchOptions: () => ({
         repos: ref([{ id: 'r1', owner: 'acme', name: 'app' }]),
         repoName: (id: string) => (id === 'r1' ? 'acme/app' : id),
@@ -77,11 +93,12 @@ function mountProject(rows: BudgetPolicyDto[], canManage: boolean, get?: jest.Mo
 afterEach(() => {
   delete (globalThis as Record<string, unknown>).window
   delete (globalThis as Record<string, unknown>).useApi
+  delete (globalThis as Record<string, unknown>).useAsyncData
 })
 
 describe('Project budgets page (behaviour)', () => {
   test('a member sees every policy but not one control (Review Focus 3)', async () => {
-    const m = mountProject(ROWS, false)
+    const m = mountProject(ROWS)
     await m.settle()
 
     // The project's own table first (project, then repo policies by scope id), then the fleet-wide table.
@@ -89,12 +106,12 @@ describe('Project budgets page (behaviour)', () => {
     expect(m.buttonLabels()).toEqual([])
     expect(m.app.find('[data-stub="fleet-budget-edit-dialog"]')).toHaveLength(0)
     expect(m.app.find('[data-stub="fleet-budget-resume-dialog"]')).toHaveLength(0)
-    expect(m.app.text()).toContain('Only project administrators can change budget policies.')
+    expect(m.app.text()).toContain('You do not have permission to change budget policies.')
     m.app.unmount()
   })
 
-  test('a project admin gets controls on the project and repo policies, none on the fleet-wide one', async () => {
-    const m = mountProject(ROWS, true)
+  test('a member holding the four budget keys gets controls on the project and repo policies, none on the fleet-wide one', async () => {
+    const m = mountProject(ROWS, ADMIN_KEYS)
     await m.settle()
 
     const own = m.app.find('[data-stub="tr"]').filter((r) => String(r.props['data-testid']).startsWith('fleet-budget-row-'))
@@ -105,12 +122,12 @@ describe('Project budgets page (behaviour)', () => {
     expect(labelsOf('pp')).toEqual(['Edit', 'Delete'])
     expect(labelsOf('rp')).toEqual(['Resume', 'Edit', 'Delete'])
     expect(labelsOf('g')).toEqual([])
-    expect(m.app.text()).not.toContain('Only project administrators can change budget policies.')
+    expect(m.app.text()).not.toContain('You do not have permission to change budget policies.')
     m.app.unmount()
   })
 
   test('repo policies show the repo name; a repo that no longer exists shows its raw id', async () => {
-    const m = mountProject(ROWS, false)
+    const m = mountProject(ROWS)
     await m.settle()
 
     const text = m.app.text()
@@ -120,19 +137,19 @@ describe('Project budgets page (behaviour)', () => {
   })
 
   test('the fleet-wide section carries the hint and disappears when there are no global policies', async () => {
-    const withGlobal = mountProject(ROWS, false)
+    const withGlobal = mountProject(ROWS)
     await withGlobal.settle()
     expect(withGlobal.app.text()).toContain('Set by a global administrator. They apply to every project.')
     withGlobal.app.unmount()
 
-    const without = mountProject(ROWS.filter((p) => p.scopeType !== 'global'), false)
+    const without = mountProject(ROWS.filter((p) => p.scopeType !== 'global'))
     await without.settle()
     expect(without.app.text()).not.toContain('Fleet-wide policies')
     without.app.unmount()
   })
 
   test('no own policies shows the empty state, not a table', async () => {
-    const m = mountProject([policy('g', { scopeType: 'global', scopeId: null })], true)
+    const m = mountProject([policy('g', { scopeType: 'global', scopeId: null })], ADMIN_KEYS)
     await m.settle()
     // The EmptyState stub keeps `message` as a prop, so the copy is asserted there (as on the admin page).
     expect(m.app.one('[data-stub="empty-state"]')?.props.message).toBe('No budget policies yet.')
@@ -142,11 +159,11 @@ describe('Project budgets page (behaviour)', () => {
 
   test('a 403 from the list shows the forbidden line, no rows or tables, and stops polling', async () => {
     const get = jest.fn(async () => { throw new ApiError(40003, 'forbidden') })
-    const m = mountProject(ROWS, false, get)
+    const m = mountProject(ROWS, MEMBER, { get })
     await m.settle()
 
     expect(m.app.text()).toContain('You do not have access to this project.')
-    expect(m.app.text()).not.toContain('Only project administrators can change budget policies.')
+    expect(m.app.text()).not.toContain('You do not have permission to change budget policies.')
     expect(m.rowIds()).toEqual([])
     expect(m.app.find('[data-stub="fleet-budgets-own"]')).toHaveLength(0)
     expect(m.polling.stop).toHaveBeenCalled()
@@ -157,7 +174,7 @@ describe('Project budgets page (behaviour)', () => {
     const get = jest.fn()
       .mockImplementationOnce(async () => { throw new Error('down') })
       .mockImplementationOnce(async () => ROWS)
-    const m = mountProject(ROWS, false, get)
+    const m = mountProject(ROWS, MEMBER, { get })
     await m.settle()
     const error = m.app.find('[data-stub="error-state"]')
     expect(error).toHaveLength(1)
@@ -176,15 +193,17 @@ describe('Project budgets page (wiring)', () => {
     expect(source).toContain('useFleetBudgetPage(base)')
   })
 
-  test('creating and the two dialogs exist only for a manager', () => {
-    expect(source).toMatch(/<Button v-if="canManage"[^>]*data-testid="fleet-budget-create"/)
-    expect(source).toContain('<FleetBudgetEditDialog\n      v-if="canManage"')
-    expect(source).toContain('v-if="canManage && resuming"')
+  test('creating and the two dialogs each follow their own key', () => {
+    expect(source).toMatch(/<Button v-if="canCreate"[^>]*data-testid="fleet-budget-create"/)
+    // One dialog serves both modes, so it is mounted for either key.
+    expect(source).toContain('<FleetBudgetEditDialog\n      v-if="canCreate || canEdit"')
+    expect(source).toContain('v-if="canResume && resuming"')
+    expect(source).toContain('v-if="!canChangePolicy && !forbidden"')
   })
 
-  test('own policies are editable by a manager; the fleet-wide table never is', () => {
-    expect(source).toContain(':editable="canManage"')
-    expect(source).toContain(':editable="false"')
+  test('the own table gets the three keys; the fleet-wide table gets all three false', () => {
+    expect(source).toMatch(/:can-resume="canResume"\s*:can-edit="canEdit"\s*:can-delete="canDelete"/)
+    expect(source).toContain(':can-resume="false" :can-edit="false" :can-delete="false"')
   })
 
   test('refreshes on fleet_job notices, debounced, plus a 30 s poll (D178)', () => {

@@ -9,6 +9,7 @@ import { CacheManager } from '@nathapp/nestjs-cache';
 import { INotifyService, NOTIFY_SERVICE, PREFERENCE_SERVICE } from '@nathapp/nestjs-notify';
 import { MembershipService } from '../../permissions/membership.service';
 import { PermissionService } from '../../permissions/permission.service';
+import { RoleAdminService } from '../../permissions/role-admin.service';
 import { AgentsService } from '../../agents/agents.service';
 import { EmailAvailability } from '../../email/email-availability';
 import { EmailScheduleService } from '../../email/schedule/email-schedule.service';
@@ -116,6 +117,12 @@ export const mockMembershipService = {
   afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
 } as unknown as MembershipService;
 
+/** Permissions P1 web US-005: RoleAdminService is exported by the global PermissionsModule; invites ask it for the grant rules. */
+export const mockRoleAdminService = {
+  assertMayGrant: vi.fn(async () => ({})),
+  listProjectRoles: vi.fn(async () => []),
+} as unknown as RoleAdminService;
+
 export const mockAuthConfig: IAuthConfig = {
   jwtSecret: 'test-secret',
   jwtExpiresIn: '15m',
@@ -185,6 +192,7 @@ export const mockFleetConfig: IFleetConfig = testFleetConfig();
     { provide: EmailScheduleService, useValue: mockEmailScheduleService },
     { provide: PermissionService, useValue: mockPermissionService },
     { provide: MembershipService, useValue: mockMembershipService },
+    { provide: RoleAdminService, useValue: mockRoleAdminService },
     { provide: AUTH_CFG, useValue: mockAuthConfig },
     { provide: RAG_CFG, useValue: mockRagConfig },
     { provide: VCS_CFG, useValue: mockVcsConfig },
@@ -192,6 +200,6 @@ export const mockFleetConfig: IFleetConfig = testFleetConfig();
     { provide: WEBHOOK_CFG, useValue: mockWebhookConfig },
     { provide: FLEET_CFG, useValue: mockFleetConfig },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, OutboxService, PREFERENCE_SERVICE, NOTIFY_SERVICE, EmailAvailability, EmailScheduleService, PermissionService, MembershipService, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG, FLEET_CFG],
+  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, OutboxService, PREFERENCE_SERVICE, NOTIFY_SERVICE, EmailAvailability, EmailScheduleService, PermissionService, MembershipService, RoleAdminService, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG, FLEET_CFG],
 })
 export class GlobalStubsModule {}

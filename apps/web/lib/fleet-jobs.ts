@@ -12,21 +12,24 @@ export const isTerminalJobState = (state: string): boolean => (TERMINAL_JOB_STAT
 /** A bundle can exist once the runner may upload (RUNNING partial on cancel, UPLOADING) or the job ended. */
 export const mayHaveBundle = (state: string): boolean => state === 'UPLOADING' || isTerminalJobState(state)
 
-/** Dispatch and requeue: project ADMIN (`canManage`) or DEVELOPER (S1 spec §2.2); one rule for every fleet page. */
-export function canWorkOnFleet(role: { canManage: boolean; viewerRole: string | null }): boolean {
-  return role.canManage || role.viewerRole === 'DEVELOPER'
-}
-
+/**
+ * The caller's fleet job rights, one flag per key the job routes require (Permissions P1 US-008).
+ * A role holding `fleet.job.*` alone now works; no flag is derived from a role name.
+ */
 export interface JobViewer {
   userId: string | null
-  /** Project ADMIN or DEVELOPER (S1 spec §2.2), from canWorkOnFleet. */
-  canWork: boolean
+  /** `fleet.job.cancel` — the key the cancel route enforces (the requester may also cancel theirs). */
+  canCancel: boolean
+  /** `fleet.job.requeue`. */
+  canRequeue: boolean
+  /** `fleet.job.dispatch` — the hand-off from a COMPLETED PLAN back to a RUN. */
+  canDispatch: boolean
 }
 
-/** Cancel: project DEVELOPER+ or the requester, and only while the job is unfinished. */
+/** Cancel: `fleet.job.cancel` or the requester, and only while the job is unfinished. */
 export function canCancelJob(job: Pick<FleetJobDto, 'state' | 'requestedById'>, viewer: JobViewer): boolean {
   if (isTerminalJobState(job.state)) return false
-  return viewer.canWork || (viewer.userId !== null && viewer.userId === job.requestedById)
+  return viewer.canCancel || (viewer.userId !== null && viewer.userId === job.requestedById)
 }
 
 /**
@@ -41,7 +44,7 @@ const isUnrecoverableConfigEdit = (configEdit: FleetJobDto['configEdit']): boole
 }
 
 export function canRequeueJob(job: Pick<FleetJobDto, 'state' | 'configEdit'>, viewer: JobViewer): boolean {
-  return viewer.canWork
+  return viewer.canRequeue
     && (REQUEUEABLE_JOB_STATES as readonly string[]).includes(job.state)
     && !isUnrecoverableConfigEdit(job.configEdit)
 }

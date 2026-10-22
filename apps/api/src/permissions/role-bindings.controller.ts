@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
-import { JsonResponse } from '@nathapp/nestjs-common';
+import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { parseQuery, toPageResult } from '../common/dto/koda-page.query';
 import {
@@ -31,23 +31,36 @@ export class RoleBindingsController {
 
   @Get()
   @Requires('role.read', { enforcedBy: 'service' })
-  @ApiOperation({ summary: 'List role bindings, optionally for one principal or one project (role.read)' })
+  @ApiOperation({
+    summary:
+      'List role bindings, optionally for one principal, one principal type, one project or the global scope (role.read)',
+  })
   @ApiResponse({
     status: 200,
     description: 'Page of bindings: { total, current, size, hasNext, hasPrev, records }',
   })
+  @ApiResponse({ status: 400, description: 'A lone principalId, an unknown scope, or scope=global with a projectId' })
   @ApiResponse({ status: 403, description: 'role.read permission required' })
   async list(@Query() rawQuery: ListRoleBindingsQuery, @Principal() principal: KodaPrincipal) {
-    const { current, size, principalType, principalId, projectId } = parseQuery(
+    const { current, size, principalType, principalId, projectId, scope } = parseQuery(
       ListRoleBindingsQuery,
       rawQuery,
     );
+    // `scope=global` and a project id name two different listings; answering either one silently
+    // would hide the caller's mistake. `permissions.scopeAndProject` is the key the client maps to
+    // its own sentence.
+    if (scope === 'global' && projectId) {
+      throw new ValidationAppException({}, 'permissions.scopeAndProject');
+    }
     const filter: BindingFilter = {
+      // A type alone lists that type's bindings; with an id it narrows to the one principal.
+      ...(principalType !== undefined ? { principalType } : {}),
       ...(principalType !== undefined && principalId !== undefined
         ? { principal: { type: principalType, id: principalId } }
         : {}),
-      // An empty `projectId` means "no project filter", not "the empty-string project".
-      ...(projectId ? { projectId } : {}),
+      // `scope=global` is "the bindings that apply everywhere" (no project); an empty `projectId`
+      // means "no project filter", not "the empty-string project".
+      ...(scope === 'global' ? { projectId: null } : projectId ? { projectId } : {}),
     };
     const page = await this.roles.listBindings(principal, filter, { current, size });
     return JsonResponse.Ok({

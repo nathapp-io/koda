@@ -525,12 +525,12 @@ describeIntegration('roles API (US-005)', () => {
       .build();
     const document = SwaggerModule.createDocument(nestApp, config);
 
-    const operation = (pathSuffix: string, method: string) => {
-      const match = Object.entries(document.paths).find(
-        ([path]) => path === pathSuffix || path.endsWith(pathSuffix),
-      );
-      expect(match, `no path ending in ${pathSuffix}`).toBeDefined();
-      const [path, item] = match as [string, Record<string, unknown>];
+    // Exact paths: `/api/projects/{slug}/roles` (US-003's project roles route) also ends in `/roles`,
+    // and a suffix match would compare it against the global role writes.
+    const operation = (path: string, method: string) => {
+      const match = Object.entries(document.paths).find(([candidate]) => candidate === path);
+      expect(match, `no path ${path}`).toBeDefined();
+      const [, item] = match as [string, Record<string, unknown>];
       const op = item[method] as { tags?: string[]; summary?: string; responses?: Record<string, unknown> } | undefined;
       expect(op, `no ${method.toUpperCase()} ${path}`).toBeDefined();
       const defined = op as NonNullable<typeof op>;
@@ -539,10 +539,10 @@ describeIntegration('roles API (US-005)', () => {
       expect(Object.keys(defined.responses ?? {}).length).toBeGreaterThan(0);
     };
 
-    operation('/roles', 'get');
-    operation('/roles', 'post');
-    operation('/roles/{id}', 'patch');
-    operation('/roles/{id}', 'delete');
+    operation('/api/roles', 'get');
+    operation('/api/roles', 'post');
+    operation('/api/roles/{id}', 'patch');
+    operation('/api/roles/{id}', 'delete');
   });
 
   it('AC-23: the first registration can read roles through its owner binding', async () => {
