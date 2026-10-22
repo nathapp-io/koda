@@ -1,6 +1,11 @@
 /**
  * US-007 — Project invites panel (create / resend / cancel).
  *
+ * Permissions P1 US-014 moved the panel onto project role keys and four independent gates; the
+ * gate matrix itself is pinned by `project-invites-role-keys.spec.ts` (which answers
+ * `/me/permissions`). This spec keeps the create/resend/cancel behaviour mounted with every gate
+ * open, so a regression in the writes is still caught here.
+ *
  * Behavioural mount tests: the real .vue file is compiled and rendered by the
  * mount-sfc harness, the Nuxt auto-import `useProjectInvites` is aliased to a
  * recording double, and every assertion reads the rendered tree or the emitted
@@ -11,10 +16,20 @@ import { existsSync } from 'fs'
 import { h, ref, nextTick } from 'vue'
 import { mountSfc, webFile, type Mounted, type FakeNode } from '../helpers/mount-sfc'
 import { uiStubs, enI18n, enLocale } from '../helpers/fleet-harness'
+import { projectPermissionsStub } from '../helpers/permission-nav'
 
 const ORIGIN = 'http://localhost:3101'
 const panelPath = webFile('components', 'ProjectInvitesPanel.vue')
 const settingsPath = webFile('pages', '[project]', 'settings.vue')
+
+/** Every gate US-014 introduced, open: this spec is about the writes. */
+const ALL_INVITE_KEYS = ['invite.read', 'invite.create', 'invite.resend', 'invite.cancel'] as const
+
+const PROJECT_ROLES = [
+  { id: 'r1', key: 'project-admin', name: 'Project Admin', description: '', system: true },
+  { id: 'r2', key: 'developer', name: 'Developer', description: '', system: true },
+  { id: 'r3', key: 'triager', name: 'Triager', description: '', system: false },
+]
 
 /** A window the compiled component can read for `window.location.origin` / `window.confirm`. */
 function setWindow(confirmFn: (message?: string) => boolean = () => true): void {
@@ -74,10 +89,19 @@ function linkText(app: Mounted): string {
 }
 
 function mountPanel(overrides: Record<string, unknown> = {}) {
-  const invites = ref([{ id: 'i1', email: 'pending@x.io', role: 'DEVELOPER', status: 'PENDING' }])
+  const invites = ref([{
+    id: 'i1',
+    email: 'pending@x.io',
+    role: null,
+    roleKey: 'developer',
+    roleName: 'Developer',
+    status: 'PENDING',
+    inviterName: null,
+    expiresAt: '2026-12-01T00:00:00Z',
+    createdAt: '2026-11-01T00:00:00Z',
+  }])
   const api = {
     invites,
-    canManage: ref(true),
     load: jest.fn(async () => undefined),
     create: jest.fn(async () => ({ outcome: 'INVITED', invitePath: '/invite/tok123', emailed: true })),
     resend: jest.fn(async () => ({ invitePath: '/invite/tok456', emailed: false })),
@@ -92,15 +116,22 @@ function mountPanel(overrides: Record<string, unknown> = {}) {
     globals: {
       useI18n: () => enI18n(),
       useAppToast: () => toast,
+      useProjectPermissions: () => projectPermissionsStub(ALL_INVITE_KEYS),
+      useProjectRoles: () => ({
+        roles: ref(PROJECT_ROLES),
+        pending: ref(false),
+        error: ref<unknown>(null),
+        load: jest.fn(async () => PROJECT_ROLES),
+      }),
     },
   })
   return { app, api, toast }
 }
 
-/** Submit the create form with the given email (role defaults to DEVELOPER). */
-async function submitCreate(p: ReturnType<typeof mountPanel>, email: string, role = 'DEVELOPER'): Promise<void> {
+/** Submit the create form with the given email and role key. */
+async function submitCreate(p: ReturnType<typeof mountPanel>, email: string, roleKey = 'developer'): Promise<void> {
   fill(field(p.app, 'email'), email)
-  fill(field(p.app, 'role'), role)
+  fill(field(p.app, 'role'), roleKey)
   await nextTick()
   fire(node(p.app, 'invite-create-form'), 'onSubmit')
   await settle()
@@ -113,15 +144,15 @@ describe('ProjectInvitesPanel (US-007)', () => {
     expect(existsSync(panelPath)).toBe(true)
   })
 
-  test('AC1: submitting email new@x.io and role DEVELOPER calls create("new@x.io", "DEVELOPER")', async () => {
+  test('AC1: submitting email new@x.io and the developer role calls create("new@x.io", "developer")', async () => {
     expect(existsSync(panelPath)).toBe(true)
     const p = mountPanel()
     await settle()
 
-    await submitCreate(p, 'new@x.io', 'DEVELOPER')
+    await submitCreate(p, 'new@x.io', 'developer')
 
     expect(p.api.create).toHaveBeenCalledTimes(1)
-    expect(p.api.create).toHaveBeenCalledWith('new@x.io', 'DEVELOPER')
+    expect(p.api.create).toHaveBeenCalledWith('new@x.io', 'developer')
     p.app.unmount()
   })
 

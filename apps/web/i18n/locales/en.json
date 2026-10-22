@@ -266,6 +266,8 @@
       "title": "Invites",
       "subtitle": "Invite someone by email, or share a one-time link when email is unavailable.",
       "emailPlaceholder": "new{'@'}example.com",
+      "roleLabel": "Role",
+      "selectRole": "Choose a role",
       "send": "Send invite",
       "shareTitle": "Share this one-time invite link",
       "notEmailed": "The invite email could not be sent. Share the link below.",
@@ -2290,6 +2292,7 @@
   "invite": {
     "title": "You're invited",
     "subtitle": "Join {projectName}",
+    "role": "Role: {roleName}",
     "loading": "Loading invite…",
     "invalid": "This invite link is invalid or has expired.",
     "accountExists": "An account already exists for this email. Sign in instead.",

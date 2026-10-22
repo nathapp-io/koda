@@ -1,20 +1,42 @@
 <script setup lang="ts">
+/**
+ * Permissions P1 US-014: project invites carry a project role key.
+ *
+ * The panel's four controls have four independent gates, all read from the project key set — never
+ * from a role name, because roles are data and a custom role has to work:
+ * - the panel itself (and so the invite list) only with `invite.read`;
+ * - the create form only with `invite.create`;
+ * - each row's resend only with `invite.resend`, cancel only with `invite.cancel`.
+ *
+ * The role select lists the project's roles (`GET /projects/:slug/roles`, one fetch shared with the
+ * members panel) and posts the chosen key as `{ email, roleKey }`; each row shows the invite's
+ * `roleName` as the API resolved it. Nothing is preselected: an invite must never grant a role the
+ * caller did not pick.
+ *
+ * A gate only hides or disables: every refusal still comes back from the API and is toasted with
+ * `extractApiError`, leaving the last loaded list on screen and the form's values in place.
+ */
 import { extractApiError } from '~/composables/useApi'
 import { useProjectInvites } from '~/composables/useProjectInvites'
-import type { InviteDto, InviteRole } from '~/composables/useProjectInvites'
+import type { InviteDto } from '~/composables/useProjectInvites'
+import type { Ref } from 'vue'
 
 const props = defineProps<{ slug: string }>()
 const emit = defineEmits<{ 'member-added': [] }>()
 
 const { t } = useI18n()
 const toast = useAppToast()
+const { permissions } = useProjectPermissions(props.slug)
 const { invites, load, create, resend, cancel } = useProjectInvites(props.slug)
+const { roles, load: loadRoles } = useProjectRoles(props.slug)
 
-/** AGENT is not an invitable role, so the select lists only these three. */
-const inviteRoles: InviteRole[] = ['ADMIN', 'DEVELOPER', 'VIEWER']
+const canRead = computed(() => permissions.value.has('invite.read'))
+const canCreate = computed(() => permissions.value.has('invite.create'))
+const canResend = computed(() => permissions.value.has('invite.resend'))
+const canCancel = computed(() => permissions.value.has('invite.cancel'))
 
 const email = ref('')
-const role = ref<InviteRole>('DEVELOPER')
+const roleKey = ref('')
 const submitting = ref(false)
 /** Set only on INVITED or a resend: the one-time raw-token link (D526). */
 const shareLink = ref<string | null>(null)
@@ -24,12 +46,44 @@ function withOrigin(path: string): string {
   return `${window.location.origin}${path}`
 }
 
+/** Run one API call, toasting its refusal with the API's own message. */
+async function run(action: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await action()
+    return true
+  }
+  catch (err: unknown) {
+    toast.error(extractApiError(err))
+    return false
+  }
+}
+
+/**
+ * The keys arrive asynchronously (`/me/permissions`), so the reads hang off the gates instead of
+ * mounting, and a gate that opens after mount (a client navigation resolves the key set late) reads
+ * too. Without `invite.read` the list would only earn a 403 toast, and the role select cannot open
+ * before `invite.create` renders the form.
+ *
+ * Both reads stay client-side on purpose: `useProjectInvites` holds the list in a plain ref, so a
+ * server-side read would render rows that hydration cannot reproduce (the payload carries the
+ * permission keys, not the invites) — an empty list on the client is the mismatch-free render.
+ */
+function readWhen(gate: Ref<boolean>, read: () => Promise<unknown>): void {
+  onMounted(() => { if (gate.value) void run(read) })
+  watch(gate, (allowed) => { if (allowed) void run(read) })
+}
+
+readWhen(canRead, load)
+readWhen(canCreate, loadRoles)
+
 async function onCreate(): Promise<void> {
   const address = email.value.trim()
-  if (!address) return
+  const key = roleKey.value
+  // No role chosen means no request: the API would refuse a role-less invite anyway.
+  if (!address || !key || submitting.value) return
   submitting.value = true
   try {
-    const result = await create(address, role.value)
+    const result = await create(address, key)
     if (result.outcome === 'ADDED') {
       emit('member-added')
       await load()
@@ -57,29 +111,24 @@ async function onResend(invite: InviteDto): Promise<void> {
 
 async function onCancel(invite: InviteDto): Promise<void> {
   if (!window.confirm(t('projects.invites.cancelConfirm', { email: invite.email }))) return
-  try {
-    await cancel(invite.id)
-    await load()
-  } catch (err: unknown) {
-    toast.error(extractApiError(err))
-  }
+  if (!(await run(() => cancel(invite.id)))) return
+  await run(load)
 }
-
-onMounted(load)
 </script>
 
 <template>
-  <div class="rounded-md border border-border p-6 space-y-4">
+  <div v-if="canRead" class="rounded-md border border-border p-6 space-y-4">
     <div>
       <h2 class="text-lg font-semibold">{{ t('projects.invites.title') }}</h2>
       <p class="text-sm text-muted-foreground">{{ t('projects.invites.subtitle') }}</p>
     </div>
 
-    <form data-testid="invite-create-form" class="flex flex-wrap gap-2" @submit.prevent="onCreate">
+    <form v-if="canCreate" data-testid="invite-create-form" class="flex flex-wrap gap-2" @submit.prevent="onCreate">
       <Input
         id="email"
         name="email"
         v-model="email"
+        data-testid="invite-email"
         type="email"
         class="max-w-xs"
         :placeholder="t('projects.invites.emailPlaceholder')"
@@ -90,16 +139,17 @@ onMounted(load)
       <select
         id="role"
         name="role"
-        :value="role"
+        data-testid="invite-role"
+        :aria-label="t('projects.invites.roleLabel')"
+        :value="roleKey"
         class="h-9 rounded-md border border-input bg-background px-2 text-sm"
-        @change="role = ($event.target as HTMLSelectElement).value as InviteRole"
-        @update:model-value="role = $event as InviteRole"
+        @change="roleKey = ($event.target as HTMLSelectElement).value"
+        @update:model-value="roleKey = $event as string"
       >
-        <option v-for="option in inviteRoles" :key="option" :value="option">
-          {{ t(`projects.invites.roles.${option}`) }}
-        </option>
+        <option value="">{{ t('projects.invites.selectRole') }}</option>
+        <option v-for="role in roles" :key="role.id" :value="role.key">{{ role.name }}</option>
       </select>
-      <Button type="submit" :disabled="submitting">
+      <Button type="submit" :disabled="submitting || !roleKey">
         {{ submitting ? t('common.loading') : t('projects.invites.send') }}
       </Button>
     </form>
@@ -112,13 +162,16 @@ onMounted(load)
 
     <p v-if="invites.length === 0" class="text-sm text-muted-foreground">{{ t('projects.invites.empty') }}</p>
     <ul v-else class="divide-y divide-border">
-      <li v-for="invite in invites" :key="invite.id" class="flex items-center justify-between gap-4 py-2">
+      <li v-for="invite in invites" :key="invite.id" data-testid="invite-row" class="flex items-center justify-between gap-4 py-2">
         <div>
           <div class="text-sm font-medium">{{ invite.email }}</div>
-          <div class="text-xs text-muted-foreground">{{ t(`projects.invites.roles.${invite.role}`) }}</div>
+          <div v-if="invite.roleName" data-testid="invite-row-role" class="text-xs text-muted-foreground">
+            {{ invite.roleName }}
+          </div>
         </div>
         <div class="flex items-center gap-2">
           <Button
+            v-if="canResend"
             size="sm"
             variant="outline"
             :data-testid="`invite-resend-${invite.id}`"
@@ -127,6 +180,7 @@ onMounted(load)
             {{ t('projects.invites.resend') }}
           </Button>
           <Button
+            v-if="canCancel"
             size="sm"
             variant="outline"
             :data-testid="`invite-cancel-${invite.id}`"

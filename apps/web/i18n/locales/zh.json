@@ -266,6 +266,8 @@
       "title": "邀请",
       "subtitle": "通过邮箱邀请他人；邮件不可用时也可分享一次性链接。",
       "emailPlaceholder": "new{'@'}example.com",
+      "roleLabel": "角色",
+      "selectRole": "选择角色",
       "send": "发送邀请",
       "shareTitle": "分享此一次性邀请链接",
       "notEmailed": "邀请邮件未能发送。请分享下方链接。",
@@ -2290,6 +2292,7 @@
   "invite": {
     "title": "你被邀请了",
     "subtitle": "加入 {projectName}",
+    "role": "角色：{roleName}",
     "loading": "正在加载邀请…",
     "invalid": "此邀请链接无效或已过期。",
     "accountExists": "该邮箱已存在账户。请直接登录。",

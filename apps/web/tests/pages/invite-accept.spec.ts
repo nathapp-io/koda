@@ -65,7 +65,14 @@ interface PageOverrides {
 }
 
 function mountPage(over: PageOverrides = {}) {
-  const get = over.get ?? jest.fn(async () => ({ projectName: 'Acme Project', projectSlug: 'my-project', email: 'a@x.io' }))
+  const get = over.get ?? jest.fn(async () => ({
+    projectName: 'Acme Project',
+    projectSlug: 'my-project',
+    email: 'a@x.io',
+    role: null,
+    roleKey: 'triager',
+    roleName: 'Triager',
+  }))
   const acceptInvite = over.acceptInvite ?? jest.fn(async () => ({ project: { slug: 'my-project' } }))
   const navigateTo = jest.fn(() => undefined)
   const auth = { isAuthenticated: ref(over.isAuthenticated ?? false), acceptInvite }
@@ -107,6 +114,31 @@ describe('/invite/[token] (US-007)', () => {
     await settle()
 
     expect(p.get.mock.calls[0]?.[0]).toBe('/invites/tokXYZ')
+    p.app.unmount()
+  })
+
+  test('Permissions P1 US-014: the preview roleName is shown, not the legacy role enum', async () => {
+    const p = mountPage()
+    await settle()
+
+    expect(node(p.app, 'invite-role-name')).toBeDefined()
+    expect(p.app.text()).toContain('Triager')
+    p.app.unmount()
+  })
+
+  test('Permissions P1 US-014 boundary: an invite with no role shows no role line', async () => {
+    const get = jest.fn(async () => ({
+      projectName: 'Acme Project',
+      projectSlug: 'my-project',
+      email: 'a@x.io',
+      role: null,
+      roleKey: null,
+      roleName: null,
+    }))
+    const p = mountPage({ get })
+    await settle()
+
+    expect(p.app.one('[data-testid="invite-role-name"]')).toBeUndefined()
     p.app.unmount()
   })
 
