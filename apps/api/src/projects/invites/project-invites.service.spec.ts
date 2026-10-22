@@ -7,7 +7,7 @@ import type { ProjectInviteRecord } from './domain/project-invite.domain';
 
 /**
  * S4b US-004: `ProjectInvitesService` is constructed with, in order —
- * `(invitesRepo, membersRepo, access, mailer, emailSchedule, emailAvailability, txManager, membership)`.
+ * `(invitesRepo, membersRepo, access, mailer, emailSchedule, emailAvailability, txManager, membership, roles)`.
  */
 
 const NOW = new Date('2026-10-10T10:00:00Z');
@@ -15,6 +15,14 @@ const plusDays = (base: Date, days: number) => new Date(base.getTime() + days * 
 const rawOf = (invitePath?: string): string => (invitePath ?? '').split('/').pop() ?? '';
 
 const admin = { actorType: 'user', id: 'admin', role: 'MEMBER', email: 'admin@k.t' } as KodaPrincipal;
+
+/** The `RoleAdminService.assertMayGrant` double answers a role whose id is `id-<key>`. */
+const ROLE_KEY_BY_ID: Record<string, string> = {
+  'id-project-admin': 'project-admin',
+  'id-developer': 'developer',
+  'id-viewer': 'viewer',
+  'id-triager': 'triager',
+};
 
 interface SetupOptions {
   existingUser?: { id: string; disabled: boolean } | null;
@@ -37,7 +45,7 @@ function setup(opts: SetupOptions = {}) {
       return count;
     }),
     create: vi.fn(async (input: {
-      projectId: string; email: string; role: 'ADMIN' | 'DEVELOPER' | 'VIEWER';
+      projectId: string; email: string; role: 'ADMIN' | 'DEVELOPER' | 'VIEWER' | null; roleId: string;
       tokenHash: string; invitedById: string | null; invitedByAgentId: string | null; expiresAt: Date;
     }): Promise<ProjectInviteRecord> => {
       const record: ProjectInviteRecord = {
@@ -45,6 +53,9 @@ function setup(opts: SetupOptions = {}) {
         projectId: input.projectId,
         email: input.email,
         role: input.role,
+        roleId: input.roleId,
+        roleKey: ROLE_KEY_BY_ID[input.roleId] ?? null,
+        roleName: ROLE_KEY_BY_ID[input.roleId] ? `Name of ${ROLE_KEY_BY_ID[input.roleId]}` : null,
         status: 'PENDING',
         invitedById: input.invitedById,
         inviterName: input.invitedByAgentId ? 'roster-agent' : 'Ada',
@@ -109,6 +120,13 @@ function setup(opts: SetupOptions = {}) {
     afterCommit: vi.fn(fn => fn()),
     createBinding: vi.fn(async () => ({ createdAt: NOW })),
   };
+  const roles = {
+    assertMayGrant: vi.fn(async (_principal: unknown, target: { roleKey: string }) => ({
+      id: `id-${target.roleKey}`,
+      key: target.roleKey,
+      name: `Name of ${target.roleKey}`,
+    })),
+  };
   const service = new ProjectInvitesService(
     invites as never,
     members as never,
@@ -118,6 +136,7 @@ function setup(opts: SetupOptions = {}) {
     email as never,
     txManager as never,
     membership as never,
+    roles as never,
   );
 
   const seed = (over: Partial<ProjectInviteRecord> = {}) => {
@@ -126,6 +145,9 @@ function setup(opts: SetupOptions = {}) {
       projectId: 'p1',
       email: 'new@x.io',
       role: 'DEVELOPER',
+      roleId: 'id-developer',
+      roleKey: 'developer',
+      roleName: 'Developer',
       status: 'PENDING',
       invitedById: 'admin',
       inviterName: 'Ada',
@@ -139,7 +161,7 @@ function setup(opts: SetupOptions = {}) {
     return record;
   };
 
-  return { service, invites, membership, members, access, mailer, schedule, email, store, seed };
+  return { service, invites, membership, members, access, roles, mailer, schedule, email, store, seed };
 }
 
 describe('ProjectInvitesService.create (S4b US-004)', () => {
@@ -293,7 +315,7 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
     expect(mailer.sendInvite).toHaveBeenCalledTimes(1);
     const call = mailer.sendInvite.mock.calls[0][0] as { rawToken: string; role: string; toEmail: string };
     expect(call.rawToken).toBe(rawOf(result.invitePath));
-    expect(call.role).toBe('DEVELOPER');
+    expect(call.role).toBe('Name of developer');
     expect(call.toEmail).toBe('new@x.io');
   });
 
@@ -326,6 +348,92 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
   });
 });
 
+describe('ProjectInvitesService.create role keys (permissions P1 web US-005)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('asks assertMayGrant for the roleKey with a null principal id for a new address, and stores roleId with a null legacy role', async () => {
+    const { service, invites, roles } = setup({ existingUser: null });
+
+    await service.create('p', { email: 'new@x.io', roleKey: 'triager' }, admin, 'en');
+
+    expect(roles.assertMayGrant).toHaveBeenCalledWith(admin, {
+      roleKey: 'triager',
+      projectId: 'p1',
+      principalType: 'USER',
+      principalId: null,
+    });
+    expect(invites.create).toHaveBeenCalledWith(expect.objectContaining({ role: null, roleId: 'id-triager' }));
+  });
+
+  it('maps the legacy role to its key for the grant rules and keeps the legacy enum beside roleId', async () => {
+    const { service, invites, roles } = setup({ existingUser: null });
+
+    await service.create('p', { email: 'new@x.io', role: 'ADMIN' }, admin, 'en');
+
+    expect(roles.assertMayGrant).toHaveBeenCalledWith(admin, expect.objectContaining({ roleKey: 'project-admin' }));
+    expect(invites.create).toHaveBeenCalledWith(expect.objectContaining({ role: 'ADMIN', roleId: 'id-project-admin' }));
+  });
+
+  it('stores the legacy enum for a roleKey that names a legacy role', async () => {
+    const { service, invites } = setup({ existingUser: null });
+
+    await service.create('p', { email: 'new@x.io', roleKey: 'viewer' }, admin, 'en');
+
+    expect(invites.create).toHaveBeenCalledWith(expect.objectContaining({ role: 'VIEWER', roleId: 'id-viewer' }));
+  });
+
+  it('asks assertMayGrant with the existing user id and binds the granted role key', async () => {
+    const { service, roles, membership } = setup({ existingUser: { id: 'u9', disabled: false } });
+
+    await service.create('p', { email: 'b@x.io', roleKey: 'verifier' }, admin, 'en');
+
+    expect(roles.assertMayGrant).toHaveBeenCalledWith(admin, expect.objectContaining({ principalId: 'u9' }));
+    expect(membership.createBinding).toHaveBeenCalledWith(
+      expect.objectContaining({ roleKey: 'verifier' }),
+      { type: 'USER', id: 'admin' },
+    );
+  });
+
+  it('refuses a request that sends both role and roleKey, and one that sends neither, before any lookup', async () => {
+    const { service, members, roles } = setup({ existingUser: null });
+
+    await expect(service.create('p', { email: 'a@x.io', role: 'VIEWER', roleKey: 'viewer' }, admin, 'en'))
+      .rejects.toMatchObject({ prefix: 'invites.roleAndRoleKey' });
+    await expect(service.create('p', { email: 'a@x.io' }, admin, 'en'))
+      .rejects.toMatchObject({ prefix: 'invites.roleRequired' });
+    expect(members.findUserIdByEmail).not.toHaveBeenCalled();
+    expect(roles.assertMayGrant).not.toHaveBeenCalled();
+  });
+
+  it('runs the disabled-account 409 before the grant rules, and the grant rules before the member 409', async () => {
+    const disabled = setup({ existingUser: { id: 'u9', disabled: true } });
+    await expect(disabled.service.create('p', { email: 'b@x.io', roleKey: 'viewer' }, admin, 'en'))
+      .rejects.toMatchObject({ prefix: 'invites.userDisabled' });
+    expect(disabled.roles.assertMayGrant).not.toHaveBeenCalled();
+
+    const member = setup({ existingUser: { id: 'u9', disabled: false }, memberExists: true });
+    member.roles.assertMayGrant.mockRejectedValueOnce(new Error('escalation'));
+    await expect(member.service.create('p', { email: 'b@x.io', roleKey: 'viewer' }, admin, 'en'))
+      .rejects.toThrow('escalation');
+    expect(member.members.findLocalRole).not.toHaveBeenCalled();
+  });
+
+  it('writes no invite when the grant rules refuse', async () => {
+    const { service, invites, roles } = setup({ existingUser: null });
+    roles.assertMayGrant.mockRejectedValueOnce(new Error('escalation'));
+
+    await expect(service.create('p', { email: 'new@x.io', roleKey: 'developer' }, admin, 'en')).rejects.toThrow('escalation');
+    expect(invites.cancelPending).not.toHaveBeenCalled();
+    expect(invites.create).not.toHaveBeenCalled();
+  });
+});
+
 describe('ProjectInvitesService.list (S4b US-004)', () => {
   // `list` reads the effective status against the current time; the seeded `expiresAt`/`createdAt`
   // are anchored to `NOW`, so the clock must match the same instant the `create` block pins.
@@ -344,7 +452,7 @@ describe('ProjectInvitesService.list (S4b US-004)', () => {
     const rows = await service.list('p', admin);
 
     expect(rows).toHaveLength(1);
-    expect(Object.keys(rows[0]).sort()).toEqual(['createdAt', 'email', 'expiresAt', 'id', 'inviterName', 'role', 'status']);
+    expect(Object.keys(rows[0]).sort()).toEqual(['createdAt', 'email', 'expiresAt', 'id', 'inviterName', 'role', 'roleKey', 'roleName', 'status']);
     expect(JSON.stringify(rows)).not.toMatch(/[a-f0-9]{64}/);
   });
 

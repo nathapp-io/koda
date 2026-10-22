@@ -8,7 +8,6 @@ import { UserDomain } from '../../auth/domain/auth.domain';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { MembershipService } from '../../permissions/membership.service';
-import { ROLE_KEY_FOR_LEGACY_ROLE } from '../../permissions/legacy-project-roles';
 import { hashInviteToken } from './invite-token';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { InvitePreviewDto } from './dto/invite-preview.dto';
@@ -44,6 +43,8 @@ export class InviteAcceptanceService {
       projectSlug: invite.projectSlug,
       email: invite.email,
       role: invite.role,
+      roleKey: invite.roleKey,
+      roleName: invite.roleName,
       inviterName: invite.inviterName,
       expiresAt: invite.expiresAt,
     };
@@ -59,6 +60,10 @@ export class InviteAcceptanceService {
       const invite = await this.invites.findByTokenHash(tokenHash);
       if (!this.usable(invite, now)) throw this.notFound();
 
+      // The role the invite names is gone (a custom role deleted before acceptance) and no legacy role
+      // stands in for it: nothing is granted, so nothing is claimed and no account is created.
+      if (invite.roleKey === null) throw new ConflictAppException({}, 'invites.roleGone');
+
       // The single-use gate (AC-7): exactly one concurrent accept sees count 1, the other rolls back.
       // The hash is re-checked inside the claim, so a resend that rotated it in between (AC-8) leaves
       // this superseded link unredeemable rather than accepting an invite the admin replaced.
@@ -73,7 +78,7 @@ export class InviteAcceptanceService {
       const created = await this.createUser(invite.email, dto.name, passwordHash);
       await this.invites.setAcceptedBy(invite.id, created.id, now);
       await this.membership.createBinding(
-        { principal: { type: 'USER', id: created.id }, projectId: invite.projectId, roleKey: ROLE_KEY_FOR_LEGACY_ROLE[invite.role] },
+        { principal: { type: 'USER', id: created.id }, projectId: invite.projectId, roleKey: invite.roleKey },
         { type: 'SYSTEM', id: 'invite' },
       );
       await this.membership.bindBaseline({ type: 'USER', id: created.id });

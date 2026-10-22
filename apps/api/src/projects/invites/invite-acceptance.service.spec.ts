@@ -21,6 +21,9 @@ const inviteRow = (over: Partial<ProjectInvitePreview> = {}): ProjectInvitePrevi
   projectId: 'p1',
   email: 'new@x.io',
   role: 'DEVELOPER',
+  roleId: 'id-developer',
+  roleKey: 'developer',
+  roleName: 'Developer',
   status: 'PENDING',
   invitedById: 'admin',
   inviterName: 'Ada',
@@ -128,22 +131,30 @@ describe('InviteAcceptanceService.preview (S4b US-005)', () => {
     vi.useRealTimers();
   });
 
-  it('AC-1: returns exactly the six public fields and hashes the token before lookup', async () => {
+  it('AC-1: returns exactly the eight public fields and hashes the token before lookup', async () => {
     const { service, invites } = setup();
 
     const view = await service.preview(RAW);
 
     expect(invites.findByTokenHash).toHaveBeenCalledWith(hashInviteToken(RAW));
     expect(Object.keys(view).sort()).toEqual(
-      ['projectName', 'projectSlug', 'email', 'role', 'inviterName', 'expiresAt'].sort(),
+      ['projectName', 'projectSlug', 'email', 'role', 'roleKey', 'roleName', 'inviterName', 'expiresAt'].sort(),
     );
     expect(view).toMatchObject({
       projectName: 'Koda',
       projectSlug: 'koda',
       email: 'new@x.io',
       role: 'DEVELOPER',
+      roleKey: 'developer',
+      roleName: 'Developer',
       inviterName: 'Ada',
     });
+  });
+
+  it('US-005: a custom role key shows with a null legacy role', async () => {
+    const { service } = setup({ row: inviteRow({ role: null, roleId: 'id-triager', roleKey: 'triager', roleName: 'Triager' }) });
+
+    await expect(service.preview(RAW)).resolves.toMatchObject({ role: null, roleKey: 'triager', roleName: 'Triager' });
   });
 
   it('AC-2: unknown, expired, cancelled and accepted tokens raise the same 404 shape', async () => {
@@ -185,6 +196,30 @@ describe('InviteAcceptanceService.accept (S4b US-005)', () => {
     expect(members.createMember).not.toHaveBeenCalled();
     expect(invites.setAcceptedBy).toHaveBeenCalledWith('i1', 'u1', NOW);
     expect(session.user).toMatchObject({ id: 'u1', email: 'new@x.io', role: 'MEMBER' });
+  });
+
+  it('US-005: binds the role key named by the invite, not the legacy role', async () => {
+    const { service, membership } = setup({
+      row: inviteRow({ role: null, roleId: 'id-triager', roleKey: 'triager', roleName: 'Triager' }),
+    });
+
+    await service.accept(RAW, validBody);
+
+    expect(membership.createBinding).toHaveBeenCalledWith(
+      expect.objectContaining({ roleKey: 'triager' }),
+      { type: 'SYSTEM', id: 'invite' },
+    );
+  });
+
+  it('US-005: an invite with no role at all is a 409 invites.roleGone before the claim, creating nothing', async () => {
+    const { service, invites, members, membership } = setup({
+      row: inviteRow({ role: null, roleId: null, roleKey: null, roleName: null }),
+    });
+
+    await expect(service.accept(RAW, validBody)).rejects.toMatchObject({ prefix: 'invites.roleGone', httpStatus: 409 });
+    expect(invites.claimPending).not.toHaveBeenCalled();
+    expect(members.createInvitedUser).not.toHaveBeenCalled();
+    expect(membership.createBinding).not.toHaveBeenCalled();
   });
 
   it('AC-3: hashes the password with bcrypt at register cost and stores it on the created user', async () => {

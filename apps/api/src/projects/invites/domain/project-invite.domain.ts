@@ -10,7 +10,13 @@ export interface ProjectInviteRecord {
   id: string;
   projectId: string;
   email: string;
-  role: ProjectMemberRole;
+  /** The legacy enum; null when the invite's role key has no legacy name (or the row predates neither). */
+  role: ProjectMemberRole | null;
+  /** The role the invite binds; null for a pre-migration invite or after its custom role was deleted. */
+  roleId: string | null;
+  /** Key and name of the role the invite grants: from `roleId`, else from the legacy `role`, else null. */
+  roleKey: string | null;
+  roleName: string | null;
   status: InviteStatus;
   /** The inviting user, or null when the inviter is an agent (Permissions P1 US-008). */
   invitedById: string | null;

@@ -1,12 +1,14 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { EmailAvailability } from '../../email/email-availability';
 import { EmailScheduleService } from '../../email/schedule/email-schedule.service';
 import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { MembershipService } from '../../permissions/membership.service';
-import { ROLE_KEY_FOR_LEGACY_ROLE } from '../../permissions/legacy-project-roles';
+import { LegacyProjectRole, legacyRoleForRoleKey, ROLE_KEY_FOR_LEGACY_ROLE } from '../../permissions/legacy-project-roles';
+import { RoleDomain } from '../../permissions/permissions.types';
+import { RoleAdminService } from '../../permissions/role-admin.service';
 import { ProjectAccessService } from '../project-access.service';
 import { ProjectMemberDto } from '../members/dto/project-member.dto';
 import { ProjectMemberRecord, ProjectMemberRole } from '../members/domain/project-member.domain';
@@ -45,6 +47,7 @@ export class ProjectInvitesService {
     private readonly email: EmailAvailability,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly membership: MembershipService,
+    private readonly roles: RoleAdminService,
   ) {}
 
   async create(
@@ -53,13 +56,31 @@ export class ProjectInvitesService {
     principal: KodaPrincipal,
     locale: string,
   ): Promise<InviteCreateResultDto> {
+    const roleKey = effectiveRoleKey(dto);
     const projectId = await this.access.findProjectIdBySlug(slug);
 
     const email = dto.email.trim().toLowerCase();
     const userId = await this.members.findUserIdByEmail(email);
-    if (userId) return this.addExistingUser(projectId, userId, dto.role, principal);
+    // Both paths use one order: user lookup, disabled account, grant rules, then the member check.
+    if (userId) {
+      const user = await this.members.findUserState(userId);
+      if (!user || user.disabled) throw new ConflictAppException({}, 'invites.userDisabled');
+      const role = await this.assertMayGrant(principal, roleKey, projectId, userId);
+      return this.addExistingUser(projectId, user, role, principal);
+    }
 
-    return this.inviteNewAddress(projectId, email, dto.role, principal, locale);
+    const role = await this.assertMayGrant(principal, roleKey, projectId, null);
+    return this.inviteNewAddress(projectId, email, role, principal, locale);
+  }
+
+  /** The same grant rules `POST /role-bindings` applies, run before anything is written. */
+  private assertMayGrant(
+    principal: KodaPrincipal,
+    roleKey: string,
+    projectId: string,
+    principalId: string | null,
+  ): Promise<RoleDomain> {
+    return this.roles.assertMayGrant(principal, { roleKey, projectId, principalType: 'USER', principalId });
   }
 
   async list(slug: string, principal: KodaPrincipal): Promise<InviteDto[]> {
@@ -111,12 +132,11 @@ export class ProjectInvitesService {
   /** An active account joins immediately; a disabled account (or an existing membership) is a 409. */
   private async addExistingUser(
     projectId: string,
-    userId: string,
-    role: ProjectMemberRole,
+    user: InviteUserState,
+    role: RoleDomain,
     principal: KodaPrincipal,
   ): Promise<InviteCreateResultDto> {
-    const user: InviteUserState | null = await this.members.findUserState(userId);
-    if (!user || user.disabled) throw new ConflictAppException({}, 'invites.userDisabled');
+    const userId = user.id;
 
     // Membership write and the MEMBER_ADDED schedule share one transaction: a scheduling
     // failure rolls the membership back so the admin's retry does not hit a 409 for a
@@ -127,7 +147,7 @@ export class ProjectInvitesService {
         throw new ConflictAppException({}, 'invites.memberExists');
       }
       await this.membership.createBinding(
-        { principal: { type: 'USER', id: userId }, projectId, roleKey: ROLE_KEY_FOR_LEGACY_ROLE[role] },
+        { principal: { type: 'USER', id: userId }, projectId, roleKey: role.key },
         granterOf(principal),
       );
       // Read the written membership back inside the same transaction, so the outcome carries the same
@@ -152,7 +172,7 @@ export class ProjectInvitesService {
   private async inviteNewAddress(
     projectId: string,
     email: string,
-    role: ProjectMemberRole,
+    role: RoleDomain,
     principal: KodaPrincipal,
     locale: string,
   ): Promise<InviteCreateResultDto> {
@@ -167,7 +187,8 @@ export class ProjectInvitesService {
       return this.invites.create({
         projectId,
         email,
-        role,
+        role: legacyNameOf(role.key),
+        roleId: role.id,
         tokenHash: hash,
         invitedById: inviter.invitedById,
         invitedByAgentId: inviter.invitedByAgentId,
@@ -197,7 +218,7 @@ export class ProjectInvitesService {
         rawToken,
         projectName: invite.projectName,
         inviterName: invite.inviterName ?? '',
-        role: invite.role,
+        role: invite.roleName ?? invite.role ?? '',
         expiresAt: invite.expiresAt,
       });
     } catch (error) {
@@ -211,12 +232,33 @@ export class ProjectInvitesService {
       id: record.id,
       email: record.email,
       role: record.role,
+      roleKey: record.roleKey,
+      roleName: record.roleName,
       status: effectiveStatus(record, now),
       inviterName: record.inviterName,
       expiresAt: record.expiresAt,
       createdAt: record.createdAt,
     };
   }
+}
+
+/**
+ * US-005: exactly one of `roleKey` and the legacy `role` names the role; the key wins its own field and a
+ * legacy role maps to its key. Sending both, or neither, is a client bug.
+ */
+function effectiveRoleKey(dto: CreateInviteDto): string {
+  if (dto.role !== undefined && dto.roleKey !== undefined) {
+    throw new ValidationAppException({}, 'invites.roleAndRoleKey');
+  }
+  if (dto.roleKey !== undefined) return dto.roleKey;
+  if (dto.role !== undefined) return ROLE_KEY_FOR_LEGACY_ROLE[dto.role];
+  throw new ValidationAppException({}, 'invites.roleRequired');
+}
+
+/** The legacy enum stored beside `roleId`: only the three keys that have a legacy name, null for any other. */
+function legacyNameOf(roleKey: string): LegacyProjectRole | null {
+  const legacy = legacyRoleForRoleKey(roleKey);
+  return ROLE_KEY_FOR_LEGACY_ROLE[legacy] === roleKey ? legacy : null;
 }
 
 /**

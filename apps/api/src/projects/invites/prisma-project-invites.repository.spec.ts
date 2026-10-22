@@ -18,6 +18,7 @@ const row = (over: Record<string, unknown> = {}) => ({
   projectId: 'p1',
   email: 'new@x.io',
   role: 'DEVELOPER',
+  roleId: null,
   tokenHash: TOKEN_HASH,
   status: 'PENDING',
   invitedById: 'admin',
@@ -27,6 +28,7 @@ const row = (over: Record<string, unknown> = {}) => ({
   expiresAt: EXPIRES_AT,
   createdAt: CREATED_AT,
   invitedBy: { name: 'Ada' },
+  assignedRole: null,
   project: { name: 'Koda' },
   ...over,
 });
@@ -42,6 +44,9 @@ const RECORD_KEYS = [
   'inviterName',
   'projectId',
   'role',
+  'roleId',
+  'roleKey',
+  'roleName',
   'status',
 ].sort();
 
@@ -50,10 +55,11 @@ function setup() {
   const create = vi.fn().mockResolvedValue(row());
   const updateMany = vi.fn().mockResolvedValue({ count: 0 });
   const findAgents = vi.fn().mockResolvedValue([]);
+  const findRoles = vi.fn().mockResolvedValue([{ key: 'developer', name: 'Developer' }]);
   const repo = new PrismaProjectInvitesRepository({
-    client: { projectInvite: { findMany, create, updateMany }, agent: { findMany: findAgents } },
+    client: { projectInvite: { findMany, create, updateMany }, agent: { findMany: findAgents }, role: { findMany: findRoles } },
   } as never);
-  return { repo, findMany, create, updateMany, findAgents };
+  return { repo, findMany, create, updateMany, findAgents, findRoles };
 }
 
 describe('PrismaProjectInvitesRepository.list (S4b US-004)', () => {
@@ -87,6 +93,10 @@ describe('PrismaProjectInvitesRepository.list (S4b US-004)', () => {
       projectId: 'p1',
       email: 'new@x.io',
       role: 'DEVELOPER',
+      roleId: null,
+      // No roleId: the legacy role names the role, and its name is read from the role table.
+      roleKey: 'developer',
+      roleName: 'Developer',
       status: 'PENDING',
       invitedById: 'admin',
       // The inviter may have been deleted since the invite was sent; the name is display-only.
@@ -98,6 +108,50 @@ describe('PrismaProjectInvitesRepository.list (S4b US-004)', () => {
     });
     expect(records[1]).toMatchObject({ id: 'i2', inviterName: 'Ada' });
     expect(JSON.stringify(records)).not.toContain(TOKEN_HASH);
+  });
+});
+
+describe('PrismaProjectInvitesRepository role fields (permissions P1 web US-005)', () => {
+  it('reads roleKey and roleName from the related role, and the legacy role stays null for a custom key', async () => {
+    const { repo, findMany, findRoles } = setup();
+    findMany.mockResolvedValueOnce([
+      row({ role: null, roleId: 'r1', assignedRole: { key: 'triager', name: 'Triager' } }),
+    ]);
+
+    const [record] = await repo.list('p1');
+
+    expect(record).toMatchObject({ role: null, roleId: 'r1', roleKey: 'triager', roleName: 'Triager' });
+    // Every row names its role through the relation: no legacy lookup is needed.
+    expect(findRoles).not.toHaveBeenCalled();
+  });
+
+  it('answers null roleKey and roleName for a row whose roleId and role are both null', async () => {
+    const { repo, findMany, findRoles } = setup();
+    findMany.mockResolvedValueOnce([row({ role: null, roleId: null })]);
+
+    const [record] = await repo.list('p1');
+
+    expect(record).toMatchObject({ role: null, roleId: null, roleKey: null, roleName: null });
+    expect(findRoles).not.toHaveBeenCalled();
+  });
+
+  it('reads the legacy role names of a page in one bounded query', async () => {
+    const { repo, findMany, findRoles } = setup();
+    findRoles.mockResolvedValueOnce([
+      { key: 'viewer', name: 'Viewer' },
+      { key: 'developer', name: 'Developer' },
+    ]);
+    findMany.mockResolvedValueOnce([row({ role: 'VIEWER' }), row({ id: 'i2', role: 'DEVELOPER' }), row({ id: 'i3', role: 'VIEWER' })]);
+
+    const records = await repo.list('p1');
+
+    expect(findRoles).toHaveBeenCalledTimes(1);
+    expect(findRoles).toHaveBeenCalledWith({
+      where: { key: { in: ['viewer', 'developer'] } },
+      select: { key: true, name: true },
+      take: 2,
+    });
+    expect(records.map((record) => record.roleName)).toEqual(['Viewer', 'Developer', 'Viewer']);
   });
 });
 
@@ -122,6 +176,7 @@ describe('PrismaProjectInvitesRepository writes (S4b US-004)', () => {
       projectId: 'p1',
       email: 'new@x.io',
       role: 'DEVELOPER',
+      roleId: 'id-developer',
       tokenHash: TOKEN_HASH,
       invitedById: 'admin',
       invitedByAgentId: null,
@@ -133,12 +188,17 @@ describe('PrismaProjectInvitesRepository writes (S4b US-004)', () => {
         projectId: 'p1',
         email: 'new@x.io',
         role: 'DEVELOPER',
+        roleId: 'id-developer',
         tokenHash: TOKEN_HASH,
         invitedById: 'admin',
         invitedByAgentId: null,
         expiresAt: EXPIRES_AT,
       },
-      include: { invitedBy: { select: { name: true } }, project: { select: { name: true } } },
+      include: {
+        invitedBy: { select: { name: true } },
+        assignedRole: { select: { key: true, name: true } },
+        project: { select: { name: true } },
+      },
     });
     expect(created).toMatchObject({ id: 'i9', projectName: 'Koda' });
     expect(Object.keys(created)).not.toContain('tokenHash');
@@ -155,6 +215,7 @@ describe('PrismaProjectInvitesRepository writes (S4b US-004)', () => {
       projectId: 'p1',
       email: 'new@x.io',
       role: 'VIEWER',
+      roleId: 'id-viewer',
       tokenHash: TOKEN_HASH,
       invitedById: null,
       invitedByAgentId: 'agent-1',

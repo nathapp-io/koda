@@ -1968,6 +1968,53 @@
         ]
       }
     },
+    "/api/me/permissions": {
+      "get": {
+        "operationId": "MePermissionsController_read",
+        "parameters": [
+          {
+            "name": "project",
+            "required": false,
+            "in": "query",
+            "description": "Project slug; omit for the global scope",
+            "schema": {
+              "example": "koda",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MePermissionsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An empty project slug"
+          },
+          "403": {
+            "description": "No project.read in the project"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The permission keys I hold, globally or in one project",
+        "tags": [
+          "permissions"
+        ]
+      }
+    },
     "/api/code-intel/index": {
       "post": {
         "operationId": "CodeIntelController_indexCommit",
@@ -2275,6 +2322,20 @@
               "default": 20,
               "type": "number"
             }
+          },
+          {
+            "name": "principals",
+            "required": false,
+            "in": "query",
+            "description": "users (default): user rows only. all: user rows, then agent rows",
+            "schema": {
+              "default": "users",
+              "type": "string",
+              "enum": [
+                "users",
+                "all"
+              ]
+            }
           }
         ],
         "responses": {
@@ -2454,6 +2515,42 @@
           }
         ],
         "summary": "Remove a member (member.remove)",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{slug}/roles": {
+      "get": {
+        "operationId": "ProjectRolesController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Every PROJECT-scope role, system roles first then by key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectRoleDto"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a project member, or member.read is missing"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the project roles a member can be given (member.read)",
         "tags": [
           "projects"
         ]
@@ -11559,7 +11656,7 @@
             "name": "principalType",
             "required": false,
             "in": "query",
-            "description": "Requires principalId",
+            "description": "Filters by principal type; may be given alone",
             "schema": {
               "type": "string",
               "enum": [
@@ -11572,7 +11669,7 @@
             "name": "principalId",
             "required": false,
             "in": "query",
-            "description": "Requires principalType",
+            "description": "Narrows the filter to one principal; requires principalType",
             "schema": {
               "type": "string"
             }
@@ -11585,11 +11682,26 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "scope",
+            "required": false,
+            "in": "query",
+            "description": "global: only bindings with no project. Cannot be combined with projectId",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "global"
+              ]
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "Page of bindings: { total, current, size, hasNext, hasPrev, records }"
+          },
+          "400": {
+            "description": "A lone principalId, an unknown scope, or scope=global with a projectId"
           },
           "403": {
             "description": "role.read permission required"
@@ -11600,7 +11712,7 @@
             "bearer": []
           }
         ],
-        "summary": "List role bindings, optionally for one principal or one project (role.read)",
+        "summary": "List role bindings, optionally for one principal, one principal type, one project or the global scope (role.read)",
         "tags": [
           "role-bindings"
         ]
@@ -11682,6 +11794,39 @@
         "summary": "Remove a binding, authorised from the stored row (role.binding.global or role.binding.manage, plus role.binding.owner for the owner role)",
         "tags": [
           "role-bindings"
+        ]
+      }
+    },
+    "/api/permissions/catalog": {
+      "get": {
+        "operationId": "PermissionCatalogController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Every role key, sorted by key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PermissionCatalogEntryDto"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "role.read permission required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The role-grantable permission keys with their scope, risk and ownability (role.read)",
+        "tags": [
+          "permissions"
         ]
       }
     }
@@ -11840,14 +11985,14 @@
               "MEMBER",
               "ADMIN"
             ],
-            "type": "string"
+            "type": "string",
+            "default": "MEMBER"
           }
         },
         "required": [
           "email",
           "name",
-          "password",
-          "role"
+          "password"
         ]
       },
       "UserAdminDto": {
@@ -12567,6 +12712,36 @@
           "agentSlug"
         ]
       },
+      "MePermissionsDto": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "enum": [
+              "global",
+              "project"
+            ],
+            "type": "string",
+            "description": "The scope the keys are answered for"
+          },
+          "projectSlug": {
+            "type": "string",
+            "nullable": true,
+            "description": "The project slug of a project scope; null for the global scope"
+          },
+          "keys": {
+            "description": "The effective permission keys, ascending",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "scope",
+          "projectSlug",
+          "keys"
+        ]
+      },
       "SourceFileDto": {
         "type": "object",
         "properties": {
@@ -12624,20 +12799,52 @@
               "VIEWER"
             ],
             "type": "string"
+          },
+          "roleKey": {
+            "type": "string",
+            "example": "triager",
+            "description": "kebab-case role key; mutually exclusive with role"
           }
         },
         "required": [
           "email"
         ]
       },
+      "MemberBindingDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "nullable": true,
+            "description": "The binding row; null for a legacy membership row"
+          },
+          "roleKey": {
+            "type": "string",
+            "example": "developer"
+          },
+          "roleName": {
+            "type": "string",
+            "example": "Developer"
+          }
+        },
+        "required": [
+          "id",
+          "roleKey",
+          "roleName"
+        ]
+      },
       "ProjectMemberDto": {
         "type": "object",
         "properties": {
           "userId": {
-            "type": "string"
+            "type": "string",
+            "nullable": true,
+            "description": "Null for an agent"
           },
           "email": {
-            "type": "string"
+            "type": "string",
+            "nullable": true,
+            "description": "Null for an agent"
           },
           "name": {
             "type": "string",
@@ -12658,14 +12865,38 @@
           "joinedAt": {
             "format": "date-time",
             "type": "string"
+          },
+          "principalType": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "principalId": {
+            "type": "string",
+            "description": "The User.id or Agent.id this row names"
+          },
+          "agentSlug": {
+            "type": "string",
+            "nullable": true,
+            "description": "Null for a user"
+          },
+          "bindings": {
+            "description": "The roles held in this project, oldest first",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemberBindingDto"
+            }
           }
         },
         "required": [
-          "userId",
-          "email",
           "role",
           "disabled",
-          "joinedAt"
+          "joinedAt",
+          "principalType",
+          "principalId",
+          "bindings"
         ]
       },
       "UpdateMemberRoleDto": {
@@ -12682,6 +12913,37 @@
         },
         "required": [
           "role"
+        ]
+      },
+      "ProjectRoleDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string",
+            "example": "developer"
+          },
+          "name": {
+            "type": "string",
+            "example": "Developer"
+          },
+          "description": {
+            "type": "string",
+            "description": "Empty string when the role has no description"
+          },
+          "system": {
+            "type": "boolean",
+            "description": "Seeded system role"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "name",
+          "description",
+          "system"
         ]
       },
       "AssigneeDto": {
@@ -19999,7 +20261,16 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
+          },
+          "roleKey": {
+            "type": "string",
+            "nullable": true
+          },
+          "roleName": {
+            "type": "string",
+            "nullable": true
           },
           "status": {
             "enum": [
@@ -20027,6 +20298,8 @@
           "id",
           "email",
           "role",
+          "roleKey",
+          "roleName",
           "status",
           "expiresAt",
           "createdAt"
@@ -20048,12 +20321,17 @@
               "DEVELOPER",
               "VIEWER"
             ],
-            "type": "string"
+            "type": "string",
+            "description": "Legacy role; mutually exclusive with roleKey"
+          },
+          "roleKey": {
+            "type": "string",
+            "example": "triager",
+            "description": "kebab-case role key; mutually exclusive with role"
           }
         },
         "required": [
-          "email",
-          "role"
+          "email"
         ]
       },
       "InviteCreateResultDto": {
@@ -20115,7 +20393,16 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "type": "string",
+            "nullable": true
+          },
+          "roleKey": {
+            "type": "string",
+            "nullable": true
+          },
+          "roleName": {
+            "type": "string",
+            "nullable": true
           },
           "inviterName": {
             "type": "string",
@@ -20131,6 +20418,8 @@
           "projectSlug",
           "email",
           "role",
+          "roleKey",
+          "roleName",
           "expiresAt"
         ]
       },
@@ -20191,6 +20480,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "expandedKeys": {
+            "description": "The keys the stored entries expand to, ascending; empty when the entries no longer expand",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -20201,7 +20497,8 @@
           "scope",
           "system",
           "locked",
-          "permissions"
+          "permissions",
+          "expandedKeys"
         ]
       },
       "CreateRoleDto": {
@@ -20353,6 +20650,54 @@
           "grantedByType",
           "grantedById",
           "createdAt"
+        ]
+      },
+      "PermissionCatalogEntryDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "`resource.verb[.qualifier]`",
+            "example": "ticket.delete"
+          },
+          "scope": {
+            "enum": [
+              "global",
+              "project",
+              "any"
+            ],
+            "type": "string"
+          },
+          "risk": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "type": "string"
+          },
+          "principals": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "user",
+                "agent"
+              ]
+            }
+          },
+          "ownable": {
+            "type": "boolean",
+            "description": "A role may grant this key in its `X.own` form"
+          }
+        },
+        "required": [
+          "key",
+          "scope",
+          "risk",
+          "principals",
+          "ownable"
         ]
       }
     }

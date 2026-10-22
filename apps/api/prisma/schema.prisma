@@ -215,7 +215,10 @@ model ProjectInvite {
   id               String    @id @default(cuid())
   projectId        String
   email            String // lowercased, trimmed
-  role             String // ADMIN | DEVELOPER | VIEWER
+  /// Legacy enum (ADMIN | DEVELOPER | VIEWER); null for an invite whose role key has no legacy name.
+  role             String?
+  /// The role the invite binds on acceptance; SetNull when a custom role is deleted before it is accepted.
+  roleId           String?
   tokenHash        String    @unique
   status           String    @default("PENDING") // PENDING | ACCEPTED | EXPIRED | CANCELLED
   /// The inviter: a user id, or null when an agent invited (see `invitedByAgentId`).
@@ -229,8 +232,9 @@ model ProjectInvite {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  invitedBy User?   @relation("ProjectInviteInvitedBy", fields: [invitedById], references: [id], onDelete: Cascade)
+  project       Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  invitedBy     User?   @relation("ProjectInviteInvitedBy", fields: [invitedById], references: [id], onDelete: Cascade)
+  assignedRole  Role?   @relation(fields: [roleId], references: [id], onDelete: SetNull)
 
   @@index([projectId, email, status])
 }
@@ -1581,6 +1585,7 @@ model Role {
   updatedAt   DateTime @updatedAt
 
   bindings RoleBinding[]
+  invites  ProjectInvite[]
 }
 
 /// Permissions P1a: a role given to a user or an agent, in one project or globally (projectId null).

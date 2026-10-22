@@ -6,7 +6,9 @@ import { InviteStatus } from '../domain/project-invite.domain';
 export class InviteDto {
   @ApiProperty() declare id: string;
   @ApiProperty() declare email: string;
-  @ApiProperty() declare role: string;
+  @ApiProperty({ nullable: true, type: String }) declare role: string | null;
+  @ApiProperty({ nullable: true, type: String }) declare roleKey: string | null;
+  @ApiProperty({ nullable: true, type: String }) declare roleName: string | null;
   @ApiProperty({ enum: ['PENDING', 'ACCEPTED', 'EXPIRED', 'CANCELLED'] }) declare status: InviteStatus;
   @ApiPropertyOptional({ nullable: true, type: String }) declare inviterName: string | null;
   @ApiProperty() declare expiresAt: Date;
