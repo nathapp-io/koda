@@ -3,7 +3,7 @@
   "feature": "permissions-p1-web",
   "branchName": "feat/permissions-p1-web",
   "createdAt": "2026-07-14T00:00:00.000Z",
-  "updatedAt": "2026-10-22T05:51:03.533Z",
+  "updatedAt": "2026-10-22T06:07:21.300Z",
   "userStories": [
     {
       "id": "US-001",
@@ -292,8 +292,8 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -305,7 +305,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.05999999999999961,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T05:51:07.339Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/permissions/role-admin.service.ts",
@@ -331,7 +343,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "785987550a8fafc96e8753867bbb216a9d24e183"
     },
     {
       "id": "US-005",
