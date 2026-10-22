@@ -120,6 +120,21 @@ export function useApprovalNotifications(counts: Ref<ApprovalCountsDto | null>) 
   }
 
   /**
+   * A 401/403/404 on one scope means that inbox is no longer this caller's, so its alerts close. Anything else is
+   * transient and leaves them alone: a flaky poll must not empty the screen.
+   */
+  function dismissScopeOnRefusal(error: unknown, match: (base: ApprovalBase) => boolean): void {
+    const code = error && typeof error === 'object'
+      ? (error as { code?: number; statusCode?: number }).code ?? (error as { statusCode?: number }).statusCode
+      : undefined
+    const status = extractErrorStatus(error) ?? code
+    if (status !== 401 && status !== 403 && status !== 404) return
+    for (const [id, entry] of [...active]) {
+      if (match(entry.base)) dismiss(id)
+    }
+  }
+
+  /**
    * Permissions P1 US-009: the caller's effective keys for one scope, read directly — `refresh()` runs outside setup,
    * so it cannot use `useAsyncData`. `{ error }` means the read failed: the caller then scans nothing for that scope.
    */
@@ -166,7 +181,19 @@ export function useApprovalNotifications(counts: Ref<ApprovalCountsDto | null>) 
     const global = await permissionKeys(null)
     if (!current() || 'error' in global) return
     if (global.keys.has('fleet.approval.read')) {
-      await scan({ kind: 'admin' }, adminViewer(global.keys), current)
+      const viewer = adminViewer(global.keys)
+      // A refreshed key set can withdraw the power to answer an ask already on screen (the read key alone is not a
+      // decision): close those first, exactly as the project branch does, so no alert sits there unanswerable.
+      for (const [id, entry] of [...active]) {
+        if (entry.base.kind === 'admin' && !canDecide(entry.row, viewer)) dismiss(id)
+      }
+      try {
+        await scan({ kind: 'admin' }, viewer, current)
+      } catch (error) {
+        if (!current()) return
+        // A refused admin inbox closes its alerts and ends this refresh; there is no other scope to continue with.
+        dismissScopeOnRefusal(error, (base) => base.kind === 'admin')
+      }
       return
     }
     // Without the global read key this refresh cannot re-verify the admin inbox's alerts, so they close: a notice
@@ -181,22 +208,23 @@ export function useApprovalNotifications(counts: Ref<ApprovalCountsDto | null>) 
       const result = await permissionKeys(project.slug)
       if (!current()) return
       if ('error' in result) {
-        const error = result.error
-        const code = error && typeof error === 'object' ? (error as { code?: number; statusCode?: number }).code ?? (error as { statusCode?: number }).statusCode : undefined
-        const status = extractErrorStatus(error) ?? code
-        if (status === 401 || status === 403 || status === 404) {
-          for (const [id, entry] of active) {
-            if (entry.base.kind === 'project' && entry.base.slug === project.slug) dismiss(id)
-          }
-        }
         // A project may have disappeared since the count snapshot; continue with the others.
+        dismissScopeOnRefusal(result.error, (base) => base.kind === 'project' && base.slug === project.slug)
         continue
       }
       const viewer = projectViewer(result.keys)
-      for (const [id, entry] of active) {
+      for (const [id, entry] of [...active]) {
         if (entry.base.kind === 'project' && entry.base.slug === project.slug && !canDecide(entry.row, viewer)) dismiss(id)
       }
-      if (viewer.canDecideBudget || viewer.canDecideBash) await scan({ kind: 'project', slug: project.slug }, viewer, current)
+      if (!viewer.canDecideBudget && !viewer.canDecideBash) continue
+      try {
+        await scan({ kind: 'project', slug: project.slug }, viewer, current)
+      } catch (error) {
+        if (!current()) return
+        // One project's inbox can refuse this caller (a decide key without the read key) or be gone: the other
+        // projects must still be scanned, so this failure stays inside this project.
+        dismissScopeOnRefusal(error, (base) => base.kind === 'project' && base.slug === project.slug)
+      }
     }
     if (!current()) return
     for (const [id, entry] of active) {

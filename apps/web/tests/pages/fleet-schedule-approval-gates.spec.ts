@@ -559,8 +559,8 @@ describe('US-009 AC-6: both approvals pages build their viewer from the decision
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface NotifyOver {
-  /** The global-scope keys `/me/permissions` answers. */
-  global: readonly string[]
+  /** The global-scope keys `/me/permissions` answers; a function lets a test change them between polls. */
+  global: readonly string[] | (() => readonly string[])
   /** Per-project keys, by slug. A project not listed answers no key at all. */
   projects?: Record<string, readonly string[]>
   counts?: ApprovalCountsDto
@@ -568,12 +568,38 @@ interface NotifyOver {
   hang?: readonly string[]
   /** A path whose GET rejects (the global read, for AC-11). */
   fail?: readonly string[]
+  /** A path whose GET rejects with a specific error, e.g. `{ statusCode: 403 }`. */
+  reject?: Record<string, unknown>
+  /** The pending page one inbox path answers (`approvalRoot`), empty when not named. */
+  rows?: Record<string, readonly unknown[]>
   /**
    * Answer the old membership route as a project ADMIN. Nothing reads it any more, but a harness that did
    * would scan on it — so AC-10/AC-11 cannot pass by a membership that simply never had the rights.
    */
   membersGrant?: boolean
 }
+
+/** A callable toast double that records what was shown and what was dismissed (`dismiss(toastId)`). */
+function notifyToasts(): {
+  toast: ((title: string, options?: { id?: string }) => string) & { dismiss: jest.Mock }
+  calls: Array<{ title: string; id: string | undefined }>
+  dismiss: jest.Mock
+} {
+  const calls: Array<{ title: string; id: string | undefined }> = []
+  const dismiss = jest.fn()
+  const toast = Object.assign(
+    (title: string, options?: { id?: string }): string => { calls.push({ title, id: options?.id }); return 'toast' },
+    { dismiss },
+  )
+  return { toast, calls, dismiss }
+}
+
+/** One pending approval the badge may notify about; `budget` decides which decide key it needs. */
+const notifyRow = (id: string, projectId = 'p1', over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  id, type: 'budget_override_required', status: 'pending', projectId, jobId: null, policyId: null,
+  payload: {}, requestedAt: '2026-10-01T00:00:00.000Z', expiresAt: null, outcome: null, decision: null,
+  decidedById: null, decidedAt: null, resolvedBy: null, comment: null, ...over,
+})
 
 const notifyCounts = (projects: string[]): ApprovalCountsDto => ({
   total: projects.length,
@@ -586,9 +612,17 @@ const notifyCounts = (projects: string[]): ApprovalCountsDto => ({
  * that answers `/me/permissions`, the approval counts and one pending page per inbox. Every call is
  * recorded in order, which is what the scan ACs assert on.
  */
-function mountNotifications(over: NotifyOver): { app: Mounted; get: jest.Mock; paths: () => string[] } {
+function mountNotifications(over: NotifyOver): {
+  app: Mounted
+  get: jest.Mock
+  paths: () => string[]
+  toasts: ReturnType<typeof notifyToasts>
+  poll: () => Promise<void>
+} {
   const counts = over.counts ?? notifyCounts([])
+  const globalKeys = (): readonly string[] => (typeof over.global === 'function' ? over.global() : over.global)
   const get = jest.fn(async (path: string, options?: { query?: Record<string, string> }) => {
+    if (over.reject && path in over.reject) throw over.reject[path]
     if (over.fail?.includes(path)) throw new Error(`failed ${path}`)
     if (over.hang?.includes(path)) return new Promise(() => undefined)
     if (path === '/fleet/approval-counts') return counts
@@ -596,13 +630,14 @@ function mountNotifications(over: NotifyOver): { app: Mounted; get: jest.Mock; p
     if (path === '/me/permissions') {
       const project = options?.query?.project
       return project === undefined
-        ? { scope: 'global', projectSlug: null, keys: [...over.global] }
+        ? { scope: 'global', projectSlug: null, keys: [...globalKeys()] }
         : { scope: 'project', projectSlug: project, keys: [...(over.projects?.[project] ?? [])] }
     }
-    return { records: [], total: 0, current: 1, size: 100, hasNext: false }
+    return { records: [...(over.rows?.[path] ?? [])], total: 0, current: 1, size: 100, hasNext: false }
   })
   installPermissionsRuntime(get)
   const polling = pollingDouble()
+  const toasts = notifyToasts()
   const state = new Map<string, unknown>()
   const app = track(mountSfc(webFile('components', 'fleet', 'ApprovalBadge.vue'), {
     components: uiStubs,
@@ -613,13 +648,13 @@ function mountNotifications(over: NotifyOver): { app: Mounted; get: jest.Mock; p
       useApi: () => ({ $api: { get } }),
       useAsyncData: fakeAsyncData,
       // The badge's own link target is AC-9's subject; these ACs are about the notification scans.
-      useGlobalPermissions: () => globalPermissionsStub(over.global),
+      useGlobalPermissions: () => globalPermissionsStub(globalKeys()),
       useState: (key: string, init: () => unknown) => {
         if (!state.has(key)) state.set(key, ref(init()))
         return state.get(key)
       },
       useAuth: () => ({ user: ref({ id: 'u1', role: 'MEMBER' }) }),
-      useAppToast: () => toastRecorder(),
+      useAppToast: () => toasts.toast,
       useHead: () => undefined,
       navigateTo: jest.fn(async () => undefined),
       useVisiblePolling: (pageTask: () => Promise<void>) => {
@@ -629,7 +664,7 @@ function mountNotifications(over: NotifyOver): { app: Mounted; get: jest.Mock; p
     },
   }))
   const paths = (): string[] => (get.mock.calls as unknown as [string][]).map(([path]) => path)
-  return { app, get, paths }
+  return { app, get, paths, toasts, poll: () => (polling.runNow as () => Promise<void>)() }
 }
 
 /** First index of `path` in the recorded call order, or -1. */
@@ -736,6 +771,7 @@ function mountBadge(global: readonly string[]): { app: Mounted; target: () => un
   const get = permissionsApi({ global, routes: { '/fleet/approval-counts': notifyCounts(['beta']) } })
   installPermissionsRuntime(get)
   const polling = pollingDouble()
+  const toasts = notifyToasts()
   const state = new Map<string, unknown>()
   const app = track(mountSfc(webFile('components', 'fleet', 'ApprovalBadge.vue'), {
     components: uiStubs,
@@ -751,7 +787,7 @@ function mountBadge(global: readonly string[]): { app: Mounted; target: () => un
         return state.get(key)
       },
       useAuth: () => ({ user: ref({ id: 'u1', role: 'MEMBER' }) }),
-      useAppToast: () => toastRecorder(),
+      useAppToast: () => toasts.toast,
       useHead: () => undefined,
       navigateTo: jest.fn(async () => undefined),
       useVisiblePolling: (pageTask: () => Promise<void>) => {
@@ -811,6 +847,88 @@ describe('US-009 AC-9: the badge links to the inbox the global read key opens', 
     await settle()
 
     expect(byTestId(app, 'fleet-approval-badge')?.props.to).toBe('/beta/fleet/approvals')
+    app.unmount()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fix round 1 — per-project failure isolation and admin revalidation
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('US-009 AC-8 (fix round 1): one refused inbox does not stop the other projects', () => {
+  test('AC-8: a project whose inbox rejects is skipped, and the next project still notifies', async () => {
+    const { app, paths, toasts } = mountNotifications({
+      global: [],
+      counts: notifyCounts(['beta', 'gamma']),
+      projects: { beta: ['fleet.approval.decide.budget'], gamma: ['fleet.approval.decide.budget'] },
+      // A decide key without fleet.approval.read: the list route refuses this caller.
+      reject: { '/projects/beta/fleet/approvals': { statusCode: 403 } },
+      rows: { '/projects/gamma/fleet/approvals': [notifyRow('g1')] },
+    })
+    await settle()
+
+    expect(paths()).toContain('/projects/gamma/fleet/approvals')
+    expect(toasts.calls).toHaveLength(1)
+    app.unmount()
+  })
+
+  test('AC-8: a 403 on a project\'s inbox closes that project\'s alerts, and leaves another project\'s alone', async () => {
+    const rows: Record<string, readonly unknown[]> = {
+      '/projects/beta/fleet/approvals': [notifyRow('b1')],
+      '/projects/gamma/fleet/approvals': [notifyRow('g1')],
+    }
+    const reject: Record<string, unknown> = {}
+    const { app, toasts, poll } = mountNotifications({
+      global: [],
+      counts: notifyCounts(['beta', 'gamma']),
+      projects: { beta: ['fleet.approval.decide.budget'], gamma: ['fleet.approval.decide.budget'] },
+      rows,
+      reject,
+    })
+    await settle()
+    expect(toasts.calls.map((call) => call.id)).toEqual(['fleet-approval-u1-b1', 'fleet-approval-u1-g1'])
+
+    // The next refresh is refused for beta only; gamma's ask is still pending and stays on screen.
+    reject['/projects/beta/fleet/approvals'] = { statusCode: 403 }
+    await poll()
+
+    expect(toasts.dismiss.mock.calls).toEqual([['fleet-approval-u1-b1']])
+    app.unmount()
+  })
+})
+
+describe('US-009 (fix round 1): the admin branch revalidates the alerts it already shows', () => {
+  test('AC-2/AC-8: losing fleet.approval.decide.budget closes an admin alert it can no longer answer', async () => {
+    let global: readonly string[] = ['fleet.approval.read', 'fleet.approval.decide.budget']
+    const { app, toasts, poll } = mountNotifications({
+      global: () => global,
+      counts: notifyCounts([]),
+      rows: { '/fleet/approvals': [notifyRow('a1')] },
+    })
+    await settle()
+    expect(toasts.calls.map((call) => call.id)).toEqual(['fleet-approval-u1-a1'])
+
+    // fleet.approval.read stays: the inbox is still read, but this viewer may no longer decide a budget ask.
+    global = ['fleet.approval.read']
+    await poll()
+
+    expect(toasts.dismiss.mock.calls).toEqual([['fleet-approval-u1-a1']])
+    app.unmount()
+  })
+
+  test('AC-2: keeping the budget key keeps the alert on screen', async () => {
+    let global: readonly string[] = ['fleet.approval.read', 'fleet.approval.decide.budget']
+    const { app, toasts, poll } = mountNotifications({
+      global: () => global,
+      counts: notifyCounts([]),
+      rows: { '/fleet/approvals': [notifyRow('a1')] },
+    })
+    await settle()
+    global = ['fleet.approval.read', 'fleet.approval.decide.budget']
+    await poll()
+
+    expect(toasts.dismiss).not.toHaveBeenCalled()
+    expect(toasts.calls).toHaveLength(1)
     app.unmount()
   })
 })
