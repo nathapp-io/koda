@@ -392,6 +392,11 @@ describe('AC-4: every action needs its own global key', () => {
     ]) {
       expect(allById(m.app, id).length).toBeGreaterThan(0)
     }
+
+    // The trigger names the menu, not one of its items: it holds edit/rotate/delete as well as the
+    // three statuses, and it is the only label a caller without agent.update would see.
+    const menuLabel = (enLocale.agents as Record<string, Record<string, string>>).actions.menu
+    expect(m.app.textOf(allById(m.app, 'agent-actions')[0])).toBe(menuLabel)
   })
 })
 

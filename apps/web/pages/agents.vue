@@ -313,7 +313,7 @@ function handleAgentCreated() {
           <TableCell>
             <DropdownMenu v-if="hasRowActions">
               <DropdownMenuTrigger as-child>
-                <Button variant="ghost" size="sm" data-testid="agent-actions">{{ t('common.changeStatus') }}</Button>
+                <Button variant="ghost" size="sm" data-testid="agent-actions">{{ t('agents.actions.menu') }}</Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem v-if="canRotateKey" data-testid="agent-rotate-key" @click="openRotateKeyDialog(agent)">

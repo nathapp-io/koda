@@ -559,6 +559,7 @@
       }
     },
     "actions": {
+      "menu": "操作",
       "editRoles": "编辑角色",
       "editCapabilities": "编辑能力",
       "rotateKey": "轮换密钥",
