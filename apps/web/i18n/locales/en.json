@@ -798,7 +798,7 @@
         "effortDefault": "Default",
         "effort": { "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high" },
         "noBackend": "No online enabled runner offers a native thread model.",
-        "noPermission": "Only project administrators and developers can create threads.",
+        "noPermission": "You do not have permission to create threads in this project.",
         "skills": "Enabled project skills",
         "create": "Create thread",
         "validation": {

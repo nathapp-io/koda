@@ -1,9 +1,11 @@
 /**
- * Shared doubles for the layouts/permission specs (Permissions P1 US-006).
+ * Shared doubles for the layouts/permission specs (Permissions P1 US-006 and US-007).
  *
- * Three shapes are needed:
+ * Four shapes are needed:
  * - `globalPermissionsStub`: a `useGlobalPermissions` double for harnesses that run the real layout
  *   `<script setup>` and only need a fixed global key set.
+ * - `projectPermissionsStub`: the same double for the project scope, for the specs (US-007) whose
+ *   gates read `useProjectPermissions`.
  * - `adminNavFlags`: the template bindings `layouts/default.vue` derives from that set, for the older
  *   harnesses that render the template with a hand-written setup instead of running the real one.
  * - `fakeAsyncData`: Nuxt's `useAsyncData` in miniature, for specs that run the real permissions
@@ -78,6 +80,25 @@ export function globalPermissionsStub(keys: readonly string[] = [], pending = fa
     permissions: computed(() => (pending ? permissionSet([]) : held)),
     pending: ref(pending),
     error: ref<unknown>(null),
+    refresh: async (): Promise<void> => undefined,
+  }
+}
+
+/**
+ * A `useProjectPermissions` double whose project set is fixed at mount — the same minimal shape
+ * `useGlobalPermissions` returns, for the specs (US-007) that mount a page whose gates read the
+ * project scope. `pending` and `error` keep every gate closed, exactly as the real composable does;
+ * the returned `error` ref stays writable, so a spec can hand a mounted component a failed fetch.
+ */
+export function projectPermissionsStub(keys: readonly string[] = [], options: { pending?: boolean; error?: unknown } = {}) {
+  const held = permissionSet(keys)
+  const pending = ref(options.pending === true)
+  const error = ref<unknown>(options.error ?? null)
+  return {
+    // Fail closed like the real composable: a pending or failed fetch exposes nothing.
+    permissions: computed(() => (pending.value || error.value ? permissionSet([]) : held)),
+    pending,
+    error,
     refresh: async (): Promise<void> => undefined,
   }
 }

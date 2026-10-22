@@ -6,7 +6,6 @@ import { extractApiError } from '~/composables/useApi'
 import type { ProjectSkillDto } from '~/composables/useProjectSkills'
 import { buildThreadCreateSchema, eligibleModels, toCreateThreadBody } from '~/lib/thread-create'
 import type { ThreadCreateFormValues } from '~/lib/thread-create'
-import { canWorkOnFleet } from '~/lib/fleet-jobs'
 import { apiPath } from '~/lib/api-path'
 
 definePageMeta({ layout: 'default' })
@@ -17,8 +16,10 @@ const { t } = useI18n()
 const { $api } = useApi()
 const options = useFleetDispatchOptions(slug)
 const skillsApi = useProjectSkills()
-const { data: viewer } = useProjectViewerRole(slug)
-const canWork = computed(() => canWorkOnFleet(viewer.value))
+// Permissions P1 US-007: the create form needs `thread.create` in this project. A pending or failed
+// permissions fetch leaves the key absent, so the form stays closed.
+const { permissions } = useProjectPermissions(slug)
+const canCreate = computed(() => permissions.value.has('thread.create'))
 const skills = ref<ProjectSkillDto[]>([])
 const loadFailed = ref(false)
 const submitError = ref('')
@@ -75,7 +76,7 @@ const submit = handleSubmit(async (formValues: ThreadCreateFormValues) => {
 <template>
   <div class="max-w-3xl space-y-6">
     <PageHeader :title="t('fleet.threads.new.title')" />
-    <p v-if="!canWork" class="text-sm text-muted-foreground">{{ t('fleet.threads.new.noPermission') }}</p>
+    <p v-if="!canCreate" class="text-sm text-muted-foreground">{{ t('fleet.threads.new.noPermission') }}</p>
     <div v-else-if="loadFailed" class="space-y-3">
       <ErrorState />
       <p v-if="submitError" class="text-sm" role="alert">{{ submitError }}</p>

@@ -123,6 +123,8 @@ const NUXT_AUTO_IMPORTS = [
   'useI18n', 'useAppToast', 'useState', 'useHead', 'navigateTo', 'useApi', 'useColorMode', 'useRuntimeConfig', 'definePageMeta',
   'useAsyncData', 'useVisiblePolling', 'useFleetRunners', 'useFleetRepos', 'useRoute', 'useRouter',
   'useFleetDispatchOptions', 'useFleetJobs', 'useProjectViewerRole', 'useProjectMembers',
+  // The ticket page reads the live comment list through useNuxtData (US-007 mounts it for real).
+  'useNuxtData',
   'useAdminUsers', 'useProjectEvents', 'useAuth', 'useProjectMemberNames', 'useFleetJobLogs',
   'useFleetRepoConfig', 'useSkillCatalog', 'useProjectSkills', 'useThread', 'useThreads', 'useThreadHandoffJobs', 'onBeforeRouteLeave',
   // The inbox's assistant-action panel (US-004) reads its exact preview through this composable.

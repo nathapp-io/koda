@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { MessagesSquare } from 'lucide-vue-next'
-import { canWorkOnFleet } from '~/lib/fleet-jobs'
 
 const route = useRoute()
 const router = typeof useRouter === 'function' ? useRouter() : null
 const slug = route.params.project as string
 const { t } = useI18n()
 const threadsList = useThreads(slug)
-const roleRequest = useProjectViewerRole(slug)
 const members = useProjectMemberNames(slug)
-const role = computed(() => roleRequest.data.value ?? { canManage: false, viewerRole: null })
-const canCreate = computed(() => canWorkOnFleet(role.value) && threadsList.threadsEnabled.value)
+// Permissions P1 US-007: creating a thread needs `thread.create` in this project (still plus the
+// project's threads feature flag). A pending or failed permissions fetch leaves the key absent.
+const { permissions } = useProjectPermissions(slug)
+const canCreate = computed(() => permissions.value.has('thread.create') && threadsList.threadsEnabled.value)
 const pending = ref(true)
 const loadFailed = ref(false)
 

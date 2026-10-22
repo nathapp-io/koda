@@ -7,6 +7,7 @@ import type { FakeNode } from '../helpers/mount-sfc'
 import { uiStubs, i18nStub, toastRecorder, enI18n } from '../helpers/fleet-harness'
 import type { ChatMessageDto, ThreadDetailDto } from '~/lib/thread-types'
 import type { FleetRunnerSummary } from '~/lib/fleet-types'
+import { projectPermissionsStub } from '../helpers/permission-nav'
 
 /**
  * US-006 AC14-AC15: pages/[project]/threads/[id].vue — the thread detail page.
@@ -163,7 +164,6 @@ function mountPage(over: {
   const messages = ref(over.messages ?? [])
   const runners = ref(over.runners ?? [])
   let head: CapturedHead = {}
-  const viewer = ref({ canManage: true, viewerRole: 'DEVELOPER' })
   const jobs = ref({ plan: null, run: over.job as never ?? null })
   const reloadThread = jest.fn(async () => undefined)
   const refreshJob = jest.fn(async () => undefined)
@@ -230,7 +230,8 @@ function mountPage(over: {
         repoName: (id: string) => id,
         runnerName: (id: string | null) => id,
       }),
-      useProjectViewerRole: () => ({ data: viewer }),
+      // Permissions P1 US-007: the page's archive-any control follows `thread.archive`.
+      useProjectPermissions: () => projectPermissionsStub(['thread.archive']),
     },
   })
   const settle = async (): Promise<void> => {

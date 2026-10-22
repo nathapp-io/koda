@@ -8,14 +8,24 @@ const props = defineProps<{ slug: string }>()
 const { t } = useI18n()
 const toast = useAppToast()
 const { list, enable, disable } = useProjectSkills()
-const { data: viewer, error: viewerError } = useProjectViewerRole(props.slug)
-const canManage = computed(() => viewer.value?.canManage === true)
+// Permissions P1 US-007: each direction of the toggle is its own key — switching a skill on needs
+// `skill.project.enable`, switching it off needs `skill.project.disable`. A pending or failed
+// permissions fetch leaves both absent, so every switch stays locked.
+const { permissions, error: permissionsError } = useProjectPermissions(props.slug)
+const canEnable = computed(() => permissions.value.has('skill.project.enable'))
+const canDisable = computed(() => permissions.value.has('skill.project.disable'))
 
-// A failed role fetch leaves canManage false, which looks the same as a non-admin viewer. Surface the
-// failure so the admin knows why every switch is locked. The switches stay disabled: the API decides.
-watch(viewerError, (err) => {
+// A failed permissions fetch leaves every key absent, which looks the same as a viewer who holds
+// none. Surface the failure so the admin knows why every switch is locked. The switches stay
+// disabled: the API decides.
+watch(permissionsError, (err) => {
   if (err) toast.error(extractApiError(err))
 }, { immediate: true })
+
+/** The key that governs flipping THIS row: enabling a disabled skill, or disabling an enabled one. */
+function canToggle(skill: ProjectSkillDto): boolean {
+  return skill.enabled ? canDisable.value : canEnable.value
+}
 
 const skills = ref<ProjectSkillDto[]>([])
 const loading = ref(true)
@@ -25,6 +35,9 @@ const pending = ref<Set<string>>(new Set())
 /** Flip one skill optimistically; put the switch back and toast the API message if the call fails. */
 async function onToggle(skill: ProjectSkillDto, next: boolean): Promise<void> {
   if (pending.value.has(skill.id)) return
+  // The switch is disabled without the key, but a programmatic emit must not slip past the gate:
+  // only the direction the caller holds is ever sent.
+  if (next ? !canEnable.value : !canDisable.value) return
   const previous = skill.enabled
   skill.enabled = next
   pending.value = new Set([...pending.value, skill.id])
@@ -87,7 +100,7 @@ onMounted(async () => {
           :data-testid="`skill-switch-${skill.id}`"
           :aria-label="skill.name"
           :checked="skill.enabled"
-          :disabled="!canManage || pending.has(skill.id)"
+          :disabled="!canToggle(skill) || pending.has(skill.id)"
           @update:checked="onToggle(skill, $event)"
         />
       </li>

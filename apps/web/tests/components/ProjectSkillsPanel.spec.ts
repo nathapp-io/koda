@@ -7,6 +7,12 @@ import type { FakeNode } from '../helpers/mount-sfc'
 import * as apiModule from '../../composables/useApi'
 import { ApiError } from '../../composables/useApi'
 import { useProjectSkills } from '../../composables/useProjectSkills'
+import { projectPermissionsStub } from '../helpers/permission-nav'
+
+/** Permissions P1 US-007: each switch direction follows its own project key. */
+const ENABLE = 'skill.project.enable'
+const DISABLE = 'skill.project.disable'
+const CAN_TOGGLE: readonly string[] = [ENABLE, DISABLE]
 
 const panelFile = webFile('components', 'ProjectSkillsPanel.vue')
 
@@ -41,9 +47,10 @@ const switchStub = {
 
 interface MountOver {
   items?: ProjectSkill[]
-  canManage?: boolean
-  /** When set, the viewer-role fetch fails with this error instead of resolving. */
-  viewerError?: unknown
+  /** The project keys the panel sees; the defaults hold both toggle directions. */
+  projectPermissions?: readonly string[]
+  /** When set, the permissions fetch fails with this error instead of resolving. */
+  permissionsError?: unknown
   list?: jest.Mock
   put?: jest.Mock
   del?: jest.Mock
@@ -56,7 +63,7 @@ function mountPanel(over: MountOver = {}) {
     delete: over.del ?? jest.fn(async () => ({})),
   }
   const toasts: ToastRecorder = toastRecorder()
-  const canManage = over.canManage ?? true
+  const projectPermissions = over.projectPermissions ?? CAN_TOGGLE
   // The real useProjectSkills reads useApi() as a Nuxt global; point it at the fake api for this mount.
   ;(globalThis as Record<string, unknown>).useApi = () => ({ $api: api })
 
@@ -71,10 +78,7 @@ function mountPanel(over: MountOver = {}) {
       useI18n: () => enI18n(),
       useAppToast: () => toasts,
       useProjectSkills,
-      useProjectViewerRole: () => ({
-        data: ref({ canManage, viewerRole: canManage ? 'ADMIN' : 'DEVELOPER' }),
-        error: ref(over.viewerError ?? null),
-      }),
+      useProjectPermissions: () => projectPermissionsStub(projectPermissions, { error: over.permissionsError }),
     },
   })
 
@@ -197,8 +201,8 @@ describe('ProjectSkillsPanel (US-007)', () => {
     unmount()
   })
 
-  test('US-007 AC7: when the viewer cannot manage, every switch is disabled', async () => {
-    const { switchIn, settle, unmount } = mountPanel({ canManage: false })
+  test('US-007 AC7: with neither toggle key every switch is disabled', async () => {
+    const { switchIn, settle, unmount } = mountPanel({ projectPermissions: [] })
     await settle()
 
     expect(switchIn('alpha').props.disabled).toBe(true)
@@ -206,8 +210,8 @@ describe('ProjectSkillsPanel (US-007)', () => {
     unmount()
   })
 
-  test('US-007 AC7 (control): when the viewer can manage, switches are enabled', async () => {
-    const { switchIn, settle, unmount } = mountPanel({ canManage: true })
+  test('US-007 AC7 (control): with both toggle keys, switches are enabled', async () => {
+    const { switchIn, settle, unmount } = mountPanel({ projectPermissions: CAN_TOGGLE })
     await settle()
 
     expect(switchIn('alpha').props.disabled).toBe(false)
@@ -232,9 +236,9 @@ describe('ProjectSkillsPanel (US-007)', () => {
     unmount()
   })
 
-  test('US-007 AC7 (error path): a failed viewer-role fetch toasts its message and keeps every switch disabled', async () => {
-    // On failure the composable's default is canManage false, so mount the failed state as it really is.
-    const { switchIn, toasts, settle, unmount } = mountPanel({ canManage: false, viewerError: new ApiError(500, 'Members unavailable') })
+  test('US-007 AC7 (error path): a failed permissions fetch toasts its message and keeps every switch disabled', async () => {
+    // On failure the keys are unknown, so every gate is closed — the panel surfaces why.
+    const { switchIn, toasts, settle, unmount } = mountPanel({ projectPermissions: CAN_TOGGLE, permissionsError: new ApiError(500, 'Members unavailable') })
     await settle()
 
     expect(toasts.errors).toEqual(['Members unavailable'])
@@ -242,8 +246,8 @@ describe('ProjectSkillsPanel (US-007)', () => {
     unmount()
   })
 
-  test('US-007 AC7 (control): a successful viewer-role fetch toasts nothing', async () => {
-    const { toasts, settle, unmount } = mountPanel({ canManage: true })
+  test('US-007 AC7 (control): a successful permissions fetch toasts nothing', async () => {
+    const { toasts, settle, unmount } = mountPanel({ projectPermissions: CAN_TOGGLE })
     await settle()
 
     expect(toasts.errors).toEqual([])

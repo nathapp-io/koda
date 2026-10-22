@@ -24,6 +24,12 @@ const refresh = agents.refresh
 const items = agents.items
 const scoping = agents.scoping
 
+// Permissions P1 US-007: the per-agent status menu is gated by the GLOBAL `agent.update` key (the
+// API route requires it, or the agent acting for itself). A pending or failed fetch leaves it
+// absent, so the menu is not rendered.
+const { permissions: globalPermissions } = useGlobalPermissions()
+const canUpdateAgentStatus = computed(() => globalPermissions.value.has('agent.update'))
+
 const addDialogOpen = ref(false)
 const addErrorMessage = ref<string | null>(null)
 // Guards the add POST: the dialog's Confirm can emit `added` twice before the
@@ -272,6 +278,7 @@ async function removeAgent(agent: ProjectAgent): Promise<void> {
           <TableCell v-if="canManageComputed">
             <div class="flex flex-col gap-1">
               <select
+                v-if="canUpdateAgentStatus"
                 :value="agent.status"
                 :aria-label="t('agents.columns.status')"
                 :disabled="busySlug === agent.slug"

@@ -31,11 +31,14 @@ useProjectEvents(slug, {
 })
 const options = useFleetDispatchOptions(slug)
 const auth = useAuth()
-const { data: viewer } = useProjectViewerRole(slug)
+// Permissions P1 US-007: archiving ANY thread needs `thread.archive` in this project. `has` is the
+// right question, never `hasOwn`: an `.own` binding only covers the caller's own threads, and the
+// creator control (`isCreator`) is what covers those.
+const { permissions } = useProjectPermissions(slug)
 const toast = useAppToast()
 
 const isCreator = computed(() => controller.thread.value !== null && controller.thread.value.createdById === auth.user.value?.id)
-const canManage = computed(() => viewer.value?.canManage === true)
+const canManage = computed(() => permissions.value.has('thread.archive'))
 
 useHead(() => ({
   title: isTurnRunning(controller.messages.value) ? `• ${controller.thread.value?.title ?? ''}` : controller.thread.value?.title ?? '',

@@ -5,6 +5,7 @@ import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, uiStubs } from '../helpers/fleet-harness'
 import { extractApiError } from '../../composables/useApi'
 import { useProjectAgents, type ProjectAgent } from '../../composables/useProjectAgents'
+import { globalPermissionsStub } from '../helpers/permission-nav'
 
 const page = webFile('pages', '[project]', 'agents.vue')
 
@@ -186,6 +187,8 @@ function mountPage(options: MountOptions = {}): PageHandle {
         error: ref(null),
         refresh: async () => undefined,
       }),
+      // Permissions P1 US-007: the per-agent status menu is gated by the GLOBAL `agent.update` key.
+      useGlobalPermissions: () => globalPermissionsStub(['agent.update']),
       useRoute: () => ({ params: { project: 'acme' }, path: '/acme/agents' }),
       definePageMeta: () => undefined,
     },

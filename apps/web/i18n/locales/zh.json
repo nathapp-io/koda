@@ -798,7 +798,7 @@
         "effortDefault": "默认",
         "effort": { "low": "低", "medium": "中", "high": "高", "xhigh": "极高" },
         "noBackend": "没有在线且启用的执行机提供原生线程模型。",
-        "noPermission": "只有项目管理员和开发者可以创建线程。",
+        "noPermission": "你没有在此项目中创建线程的权限。",
         "skills": "已启用的项目技能",
         "create": "创建线程",
         "validation": {

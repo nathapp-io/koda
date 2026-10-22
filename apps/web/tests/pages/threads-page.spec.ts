@@ -6,6 +6,7 @@ import type { FakeNode, Mounted } from '../helpers/mount-sfc'
 import { uiStubs, i18nStub, toastRecorder } from '../helpers/fleet-harness'
 import * as apiModule from '../../composables/useApi'
 import { useThreads } from '~/composables/useThreads'
+import { projectPermissionsStub } from '../helpers/permission-nav'
 import type { ThreadDto } from '~/lib/thread-types'
 
 const g = globalThis as Record<string, unknown>
@@ -36,20 +37,22 @@ const listItem = (overrides: Record<string, unknown> = {}): ThreadDto => ({
   ...overrides,
 })
 
-type Role = { canManage: boolean; viewerRole: string | null }
-const DEVELOPER: Role = { canManage: false, viewerRole: 'DEVELOPER' }
-const ADMIN: Role = { canManage: true, viewerRole: 'ADMIN' }
-const VIEWER: Role = { canManage: false, viewerRole: 'VIEWER' }
+/**
+ * Permissions P1 US-007: the New-thread link follows the project `thread.create` key (still plus the
+ * project's threads feature flag), so the mounts vary the key set instead of a role name.
+ */
+const CAN_CREATE: readonly string[] = ['thread.create']
+const NO_KEYS: readonly string[] = []
 
 /**
  * The page under test is `pages/[project]/threads/index.vue` (US-004). It auto-imports useThreads,
- * useProjectViewerRole and useProjectMemberNames; the test overrides those through mount-sfc
- * globals, exactly as mount-sfc's NUXT_AUTO_IMPORTS addition is meant to allow. The real
+ * useProjectPermissions (US-007) and useProjectMemberNames; the test overrides those through
+ * mount-sfc globals, exactly as mount-sfc's NUXT_AUTO_IMPORTS addition is meant to allow. The real
  * ThreadListTable is registered as a component so the row is produced by the component's own
  * template, not by a stub.
  */
 function mountPage(over: {
-  role?: Role
+  projectPermissions?: readonly string[]
   threadsEnabled?: boolean
   threads?: ThreadDto[]
   load?: jest.Mock
@@ -87,7 +90,7 @@ function mountPage(over: {
       useRoute: () => ({ params: { project: 'web' }, query: {} }),
       useRouter: () => ({ replace }),
       useAuth: () => ({ user: ref({ id: 'me', email: 'a@k.t', role: 'MEMBER' }) }),
-      useProjectViewerRole: () => ({ data: ref(over.role ?? VIEWER) }),
+      useProjectPermissions: () => projectPermissionsStub(over.projectPermissions ?? NO_KEYS),
       useProjectMemberNames: () => ({ load: over.membersLoad ?? jest.fn(async () => undefined), nameOf: () => 'Dana' }),
       useThreads: over.api ? useThreads : () => stubList,
     },
@@ -136,24 +139,24 @@ afterEach(() => {
 })
 
 describe('US-004 AC11-AC15: the project threads list page', () => {
-  test('AC11: a DEVELOPER with threadsEnabled true sees the New thread link to /web/threads/new', async () => {
-    const m = mountPage({ role: DEVELOPER, threadsEnabled: true })
+  test('AC11: thread.create with threadsEnabled true sees the New thread link to /web/threads/new', async () => {
+    const m = mountPage({ projectPermissions: CAN_CREATE, threadsEnabled: true })
     await m.settle()
 
     expect(linkTo(m.app, '/web/threads/new')).toBeDefined()
     m.app.unmount()
   })
 
-  test('AC12: threadsEnabled false hides the New thread link even for a project ADMIN', async () => {
-    const m = mountPage({ role: ADMIN, threadsEnabled: false })
+  test('AC12: threadsEnabled false hides the New thread link even with thread.create', async () => {
+    const m = mountPage({ projectPermissions: CAN_CREATE, threadsEnabled: false })
     await m.settle()
 
     expect(linkTo(m.app, '/web/threads/new')).toBeUndefined()
     m.app.unmount()
   })
 
-  test('AC13: threadsEnabled true does not show the New thread link for a VIEWER', async () => {
-    const m = mountPage({ role: VIEWER, threadsEnabled: true })
+  test('AC13: threadsEnabled true does not show the New thread link without thread.create', async () => {
+    const m = mountPage({ projectPermissions: NO_KEYS, threadsEnabled: true })
     await m.settle()
 
     expect(linkTo(m.app, '/web/threads/new')).toBeUndefined()
@@ -161,7 +164,7 @@ describe('US-004 AC11-AC15: the project threads list page', () => {
   })
 
   test('AC14: switching the page to Archived calls useThreads().load with the status ARCHIVED', async () => {
-    const m = mountPage({ role: DEVELOPER })
+    const m = mountPage({ projectPermissions: CAN_CREATE })
     await m.settle()
 
     clickByLabel(m.app, 'fleet.threads.list.archived')
@@ -172,7 +175,7 @@ describe('US-004 AC11-AC15: the project threads list page', () => {
   })
 
   test('AC15: a stubbed useThreads holding [t] renders a ThreadListTable row linking to /web/threads/th1', async () => {
-    const m = mountPage({ role: DEVELOPER, threads: [listItem()] })
+    const m = mountPage({ projectPermissions: CAN_CREATE, threads: [listItem()] })
     await m.settle()
 
     expect(linkTo(m.app, '/web/threads/th1')).toBeDefined()
@@ -220,7 +223,7 @@ describe('koda#294: out-of-order status reads on the project threads page', () =
   /** Mount, settle the initial ACTIVE read, then click Archived and Active without settling either. */
   async function startRace() {
     const api = queuedApi()
-    const m = mountPage({ role: DEVELOPER, api: { get: api.get } })
+    const m = mountPage({ projectPermissions: CAN_CREATE, api: { get: api.get } })
     await m.settle()
     // The page's own first read: ACTIVE, from the empty query.
     expect(api.reads.map(read => read.status)).toEqual(['ACTIVE'])
@@ -305,7 +308,7 @@ describe('koda#294: out-of-order status reads on the project threads page', () =
     const members: Array<{ resolve: () => void }> = []
     const membersLoad = jest.fn(() => new Promise<void>((resolve) => { members.push({ resolve }) }))
     const api = queuedApi()
-    const m = mountPage({ role: DEVELOPER, api: { get: api.get }, membersLoad })
+    const m = mountPage({ projectPermissions: CAN_CREATE, api: { get: api.get }, membersLoad })
     await m.settle()
 
     // The page's own first read, with its members read settled so the page is idle before the race.

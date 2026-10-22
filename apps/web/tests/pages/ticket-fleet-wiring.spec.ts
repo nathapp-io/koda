@@ -15,19 +15,19 @@ const liveHandlers = (source: string): string => {
 }
 
 describe('ticket page fleet wiring (C9 §4)', () => {
-  test('Dispatch shows for DEVELOPER+ on an open ticket of a project with a fleet repo (D461, P2)', () => {
+  test('Dispatch shows for fleet.job.dispatch on an open ticket of a project with a fleet repo (D461, P2)', () => {
     expect(page).toContain("import { isLinkableTicket, ticketDispatchQuery } from '~/lib/fleet-ticket-links'")
     expect(page).toContain('apiPath`/projects/${slug}/fleet/repos`')
     expect(page).toContain("{ query: { size: '1' } }")
-    expect(page).toMatch(/onMounted\(\(\) => \{\s*watch\(canWork, loadFleetRepoFlag, \{ immediate: true \}\)/)
-    expect(page).toContain('if (!current || !canWork.value || !hasFleetRepo.value || !isLinkableTicket(current.status)) return null')
+    expect(page).toMatch(/onMounted\(\(\) => \{\s*watch\(canDispatch, loadFleetRepoFlag, \{ immediate: true \}\)/)
+    expect(page).toContain('if (!current || !canDispatch.value || !hasFleetRepo.value || !isLinkableTicket(current.status)) return null')
     expect(page).toContain('return { path: `/${slug}/fleet/dispatch`, query: ticketDispatchQuery(current) }')
     expect(page).toContain(':dispatch-href="dispatchHref"')
   })
 
   test('the Fleet runs card sits under the header and refreshes links after an unlink', () => {
     expect(page).toContain("import TicketFleetRuns from '~/components/TicketFleetRuns.vue'")
-    expect(page).toMatch(/<TicketHeader[\s\S]*?\/>\s*<TicketFleetRuns[\s\S]*?:ticket-id="ticket\.id"[\s\S]*?:ticket-links="ticketLinks"[\s\S]*?:can-work="canWork"[\s\S]*?@changed="refetchAll\(\)"/)
+    expect(page).toMatch(/<TicketHeader[\s\S]*?\/>\s*<TicketFleetRuns[\s\S]*?:ticket-id="ticket\.id"[\s\S]*?:ticket-links="ticketLinks"[\s\S]*?:can-work="canUnlinkFleetRun"[\s\S]*?@changed="refetchAll\(\)"/)
   })
 
   test('live ticket events and resync also reload the links (P5: fleet PR links arrive as TICKET_UPDATED)', () => {

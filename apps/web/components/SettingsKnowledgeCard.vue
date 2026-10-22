@@ -30,10 +30,13 @@ const props = defineProps<{ slug: string }>()
 const { $api } = useApi()
 const { t } = useI18n()
 const toast = useAppToast()
-const auth = useAuth()
 
-/** The CommandPalette rule: the global ADMIN role. The API stays the authority on every action. */
-const isAdmin = computed(() => auth.user.value?.role === 'ADMIN')
+// Permissions P1 US-007: editing the document patterns needs `fleet.knowledge.patterns.update` and
+// re-indexing a repository needs `fleet.knowledge.repo.reindex`, both in this project. A pending or
+// failed fetch leaves the keys absent, so the editor is read-only and no button renders.
+const { permissions } = useProjectPermissions(props.slug)
+const canEditPatterns = computed(() => permissions.value.has('fleet.knowledge.patterns.update'))
+const canReindex = computed(() => permissions.value.has('fleet.knowledge.repo.reindex'))
 
 /** The API's pattern limits (US-002); the messages are i18n keys, resolved where they are shown. */
 const MAX_PATTERNS = 50
@@ -73,6 +76,8 @@ async function retry(): Promise<void> {
 onMounted(load)
 
 async function reindex(repoId: string): Promise<void> {
+  // The button only renders with the key; a stray call must not send a request the API will refuse.
+  if (!canReindex.value) return
   reindexing.value = repoId
   try {
     await $api.post(apiPath`/projects/${props.slug}/knowledge/repos/${repoId}/reindex`)
@@ -99,6 +104,8 @@ async function putPatterns(patterns: string[] | null, successKey: string): Promi
 }
 
 async function savePatterns(): Promise<void> {
+  // The save button only renders with the key; a stray form submit must not send the PUT.
+  if (!canEditPatterns.value) return
   const lines = patternsText.value.split('\n').map((line) => line.trim()).filter((line) => line !== '')
   const parsed = patternsSchema.safeParse({ patterns: lines })
   if (!parsed.success) {
@@ -110,6 +117,7 @@ async function savePatterns(): Promise<void> {
 }
 
 async function resetPatterns(): Promise<void> {
+  if (!canEditPatterns.value) return
   patternsError.value = null
   await putPatterns(null, 'knowledge.patterns.reset')
 }
@@ -147,7 +155,7 @@ const shortSha = (sha: string | null): string => (sha ? sha.slice(0, 7) : '')
               <code v-if="repo.indexedSha" class="text-xs text-muted-foreground">{{ shortSha(repo.indexedSha) }}</code>
             </div>
             <Button
-              v-if="isAdmin && state.enabled"
+              v-if="canReindex && state.enabled"
               type="button"
               variant="outline"
               size="sm"
@@ -182,13 +190,13 @@ const shortSha = (sha: string | null): string => (sha ? sha.slice(0, 7) : '')
         <Textarea
           v-model="patternsText"
           data-testid="knowledge-patterns"
-          :readonly="!isAdmin"
+          :readonly="!canEditPatterns"
           rows="6"
         />
         <p v-if="patternsError" data-testid="knowledge-patterns-error" class="text-xs text-status-rejected">
           {{ t(patternsError) }}
         </p>
-        <div v-if="isAdmin" class="flex flex-wrap gap-3">
+        <div v-if="canEditPatterns" class="flex flex-wrap gap-3">
           <Button type="submit" data-testid="knowledge-patterns-save" :disabled="saving">
             {{ saving ? t('common.loading') : t('knowledge.patterns.save') }}
           </Button>

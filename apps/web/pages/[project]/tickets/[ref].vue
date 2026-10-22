@@ -190,16 +190,22 @@ async function saveEdit() {
   }
 }
 
-// Controls follow the caller's role in THIS project (the API decides;
-// this only avoids offering actions that would 403). useProjectViewerRole
-// is SSR-friendly so canManage/viewerRole are populated before hydration —
-// no flash of "no controls" → "controls appear" on first paint.
-const { data: viewerRoleData } = useProjectViewerRole(slug)
-const canManage = computed(() => viewerRoleData.value?.canManage === true)
-const viewerRole = computed(() => viewerRoleData.value?.viewerRole ?? null)
-const canWork = computed(() => canManage.value || viewerRole.value === 'DEVELOPER')
+// Controls follow the caller's permission keys in THIS project (the API decides; this only avoids
+// offering actions that would 403). `useProjectPermissions` is SSR-friendly, so the gates are
+// populated before hydration — no flash of "no controls" → "controls appear" on first paint — and a
+// pending or failed fetch leaves every key absent, which hides the control (fail closed).
+const { permissions } = useProjectPermissions(slug)
+const canAssign = computed(() => permissions.value.has('ticket.assign'))
+const canLabel = computed(() => permissions.value.has('ticket.label.assign'))
+const canUnlabel = computed(() => permissions.value.has('ticket.label.remove'))
+const canLink = computed(() => permissions.value.has('ticket.link.add'))
+const canDelete = computed(() => permissions.value.has('ticket.delete'))
+// C9 §3: unlinking a fleet run and dispatching a job are two separate keys.
+const canUnlinkFleetRun = computed(() => permissions.value.has('fleet.ticket-job.unlink'))
+const canDispatch = computed(() => permissions.value.has('fleet.job.dispatch'))
 
-// C9 §4 (D461, P2): Dispatch needs DEVELOPER+, a fleet repo in the project, and an open ticket.
+// C9 §4 (D461, P2): Dispatch needs `fleet.job.dispatch`, a fleet repo in the project, and an open
+// ticket.
 const hasFleetRepo = vueRef(false)
 
 async function loadFleetRepoFlag(allowed: boolean): Promise<void> {
@@ -213,14 +219,14 @@ async function loadFleetRepoFlag(allowed: boolean): Promise<void> {
   }
 }
 
-// Client-only: the role may resolve after mount, and the button is not worth a server round trip.
+// Client-only: the keys may resolve after mount, and the button is not worth a server round trip.
 onMounted(() => {
-  watch(canWork, loadFleetRepoFlag, { immediate: true })
+  watch(canDispatch, loadFleetRepoFlag, { immediate: true })
 })
 
 const dispatchHref = computed(() => {
   const current = ticket.value
-  if (!current || !canWork.value || !hasFleetRepo.value || !isLinkableTicket(current.status)) return null
+  if (!current || !canDispatch.value || !hasFleetRepo.value || !isLinkableTicket(current.status)) return null
   return { path: `/${slug}/fleet/dispatch`, query: ticketDispatchQuery(current) }
 })
 
@@ -283,7 +289,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPageKeydown))
           :ticket-ref="ref"
           :ticket-id="ticket.id"
           :ticket-links="ticketLinks"
-          :can-work="canWork"
+          :can-work="canUnlinkFleetRun"
           @changed="refetchAll()"
         />
       </div>
@@ -296,8 +302,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPageKeydown))
           :ticket-ref="ref"
           :ticket-links="ticketLinks"
           :all-labels="allLabels"
-          :can-work="canWork"
-          :can-manage="canManage"
+          :can-assign="canAssign"
+          :can-label="canLabel"
+          :can-unlabel="canUnlabel"
+          :can-link="canLink"
+          :can-delete="canDelete"
           @transition="onTransition"
           @changed="refetchAll()"
         />

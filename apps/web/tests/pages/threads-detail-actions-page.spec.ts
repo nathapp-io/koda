@@ -6,6 +6,7 @@ import { mountSfc, webFile } from '../helpers/mount-sfc'
 import type { FakeNode } from '../helpers/mount-sfc'
 import { i18nStub, toastRecorder, uiStubs, type ToastRecorder } from '../helpers/fleet-harness'
 import { ApiError, extractApiError } from '../../composables/useApi'
+import { projectPermissionsStub } from '../helpers/permission-nav'
 import type { ChatMessageDto, ThreadDetailDto } from '~/lib/thread-types'
 
 /**
@@ -187,7 +188,8 @@ function mountPage(over: { send?: jest.Mock; plan?: jest.Mock; publish?: jest.Mo
         repoName: (id: string) => id,
         runnerName: (id: string | null) => id,
       }),
-      useProjectViewerRole: () => ({ data: ref({ canManage: true, viewerRole: 'DEVELOPER' }) }),
+      // Permissions P1 US-007: ThreadControls' canManage prop follows the project `thread.archive` key.
+      useProjectPermissions: () => projectPermissionsStub(['thread.archive']),
     },
   })
   const settle = async (): Promise<void> => {

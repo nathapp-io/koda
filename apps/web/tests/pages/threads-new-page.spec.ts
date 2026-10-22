@@ -6,6 +6,7 @@ import { mountSfc, webFile, loadSfc } from '../helpers/mount-sfc'
 import type { FakeNode, Mounted } from '../helpers/mount-sfc'
 import { i18nStub, toastRecorder, uiStubs } from '../helpers/fleet-harness'
 import * as apiModule from '../../composables/useApi'
+import { projectPermissionsStub } from '../helpers/permission-nav'
 import { ApiError } from '../../composables/useApi'
 
 /**
@@ -96,7 +97,8 @@ function mountPage(over: PageOver = {}) {
       useRoute: () => ({ params: { project: 'web' } }),
       useRouter: () => ({ push, replace: jest.fn(async () => undefined) }),
       navigateTo: nav,
-      useProjectViewerRole: () => ({ data: ref({ canManage: false, viewerRole: 'DEVELOPER' }) }),
+      // Permissions P1 US-007: the create form follows the project `thread.create` key.
+      useProjectPermissions: () => projectPermissionsStub(['thread.create']),
       useFleetDispatchOptions: () => ({
         repos: ref([repo()]),
         runners: ref(runners),
