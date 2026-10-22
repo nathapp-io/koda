@@ -15,6 +15,7 @@ import { ProjectMemberRecord, ProjectMemberRole } from './domain/project-member.
 import { AddMemberDto } from './dto/add-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { ProjectMemberDto } from './dto/project-member.dto';
+import { DEFAULT_MEMBER_PRINCIPAL_FILTER, MemberPrincipalFilter } from './dto/list-members.query';
 
 /**
  * Project membership management over the role bindings (Permissions P1a US-004).
@@ -37,18 +38,22 @@ export class ProjectMembersService {
   /**
    * `canManage` travels with the page so the UI does not have to guess from the
    * rows it happens to have loaded (a project ADMIN can be on a later page).
+   *
+   * US-003: `principals` decides whether the page also holds the project's agent principals —
+   * `'users'` (the default) is the user rows alone, `'all'` appends them.
    */
   async list(
     slug: string,
     principal: KodaPrincipal,
     page: IPageOption,
+    principals: MemberPrincipalFilter = DEFAULT_MEMBER_PRINCIPAL_FILTER,
   ): Promise<{ page: IPageResult<ProjectMemberDto>; canManage: boolean; viewerRole: string | null }> {
     const projectId = await this.access.findProjectIdBySlug(slug);
     // One membership read serves the gate and viewerRole; the key decides canManage, so a role
     // binding that grants `member.read` without `member.add` lists members without managing them.
     const viewerRole = await this.access.resolveMembership(projectId, principal);
     const [memberPage, decision] = await Promise.all([
-      this.membersRepo.findMemberPage(projectId, page),
+      this.membersRepo.findMemberPage(projectId, page, principals),
       this.permissions.can(principal, 'member.add', { projectId }),
     ]);
     return { page: remapPage(memberPage, ProjectMemberDto.from), canManage: decision.allowed, viewerRole };

@@ -1,5 +1,6 @@
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { legacyRoleForRoleKey } from '../../permissions/legacy-project-roles';
 import { hashInviteToken } from './invite-token';
 import { ProjectInvitesService } from './project-invites.service';
 import type { ProjectInviteRecord } from './domain/project-invite.domain';
@@ -69,7 +70,26 @@ function setup(opts: SetupOptions = {}) {
       opts.existingUser ? { id: opts.existingUser.id, email: 'b@x.io', name: 'New User', disabled: opts.existingUser.disabled } : null),
     lockMembers: vi.fn(),
     findLocalRole: vi.fn(async () => opts.memberExists ? 'VIEWER' : null),
-    createMember: vi.fn(),
+    /**
+     * US-003: an `ADDED` outcome reads the written membership back (the same `readMemberRecord` the
+     * members routes use), so this double answers the record the binding write produced.
+     */
+    findRequiredMember: vi.fn(async (_projectId: string, userId: string) => {
+      const writes = membership.createBinding.mock.calls as unknown as Array<[{ roleKey: string }]>;
+      const roleKey = writes[writes.length - 1]?.[0]?.roleKey ?? 'viewer';
+      return {
+        userId,
+        email: 'b@x.io',
+        name: 'New User',
+        role: legacyRoleForRoleKey(roleKey),
+        disabled: false,
+        joinedAt: NOW,
+        principalType: 'USER',
+        principalId: userId,
+        agentSlug: null,
+        bindings: [{ id: 'binding-1', roleKey, roleName: roleKey }],
+      };
+    }),
   };
 
   const access = {
@@ -153,6 +173,20 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
     expect(membership.createBinding).toHaveBeenCalledWith({ principal: { type: 'USER', id: 'u9' }, projectId: 'p1', roleKey: 'developer' }, { type: 'USER', id: 'admin' });
     expect(result.member).toMatchObject({ email: 'b@x.io', name: 'New User', joinedAt: NOW });
     expect(members.lockMembers.mock.invocationCallOrder[0]).toBeLessThan(members.findLocalRole.mock.invocationCallOrder[0]);
+  });
+
+  it('US-003: the ADDED outcome carries the written membership bindings, read back through the repository', async () => {
+    const { service, members } = setup({ existingUser: { id: 'u9', disabled: false } });
+
+    const result = await service.create('p', { email: 'b@x.io', role: 'DEVELOPER' }, admin, 'en');
+
+    expect(members.findRequiredMember).toHaveBeenCalledWith('p1', 'u9');
+    expect(result.member).toMatchObject({
+      principalType: 'USER',
+      principalId: 'u9',
+      agentSlug: null,
+      bindings: [{ id: 'binding-1', roleKey: 'developer', roleName: 'developer' }],
+    });
   });
 
   it('AC-13: adding an existing active user schedules exactly one MEMBER_ADDED and no INVITE', async () => {

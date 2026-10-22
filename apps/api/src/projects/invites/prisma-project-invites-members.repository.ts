@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient, ProjectMember, User } from '../../generated/prisma/client';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { PrismaClient } from '../../generated/prisma/client';
 import { lockProjectMembers } from '../../common/utils/advisory-lock';
 import { localProjectRole } from '../../permissions/legacy-membership.queries';
 import { UserDomain } from '../../auth/domain/auth.domain';
 import { ProjectMemberRecord, ProjectMemberRole } from '../members/domain/project-member.domain';
-
-type MemberRow = ProjectMember & { user: User };
+import { readMemberRecord } from '../members/project-member.queries';
 
 export interface InviteUserState {
   id: string;
@@ -25,6 +25,10 @@ export interface CreateInvitedUserInput {
 /**
  * Fleet S4b US-004: the invites module's own membership and user reads/writes. `ProjectMembersModule`'s
  * service is deliberately not imported — the invites feature only needs to add a member by user id.
+ *
+ * US-003: a member record read here goes through the same `readMemberRecord` the members module uses —
+ * the invites routes answer the member's `ProjectMemberDto`, chips included, so both paths must map a
+ * membership identically.
  */
 @Injectable()
 export class PrismaProjectInvitesMembersRepository {
@@ -32,17 +36,6 @@ export class PrismaProjectInvitesMembersRepository {
 
   private get db() {
     return this.prisma.client;
-  }
-
-  private toRecord(m: MemberRow): ProjectMemberRecord {
-    return {
-      userId: m.userId,
-      email: m.user.email,
-      name: m.user.name,
-      role: m.role,
-      disabled: m.user.disabled,
-      joinedAt: m.joinedAt,
-    };
   }
 
   /** Case-insensitive so an admin can re-type the address in any casing. */
@@ -69,9 +62,20 @@ export class PrismaProjectInvitesMembersRepository {
     return localProjectRole(this.db, { type: 'USER', id: userId }, projectId);
   }
 
+  /** The member record an invite's `ADDED` outcome answers: the same shape the members routes return. */
+  async findMember(projectId: string, userId: string): Promise<ProjectMemberRecord | null> {
+    return readMemberRecord(this.db, projectId, { type: 'USER', id: userId });
+  }
+
+  async findRequiredMember(projectId: string, userId: string): Promise<ProjectMemberRecord> {
+    const record = await this.findMember(projectId, userId);
+    if (!record) throw new NotFoundAppException({}, 'members');
+    return record;
+  }
+
   async createMember(projectId: string, userId: string, role: ProjectMemberRole): Promise<ProjectMemberRecord> {
-    const m = await this.db.projectMember.create({ data: { projectId, userId, role }, include: { user: true } });
-    return this.toRecord(m);
+    await this.db.projectMember.create({ data: { projectId, userId, role } });
+    return this.findRequiredMember(projectId, userId);
   }
 
   /**

@@ -56,6 +56,7 @@ const APPROVAL_DECIDE_PREFIX = 'approval.decide@';
 const OWNER_ROLE_KEY = 'owner';
 const ADMIN_ROLE_KEY = 'admin';
 const OWNER_BINDING_KEY = 'role.binding.owner';
+const PROJECT_SCOPE: RoleScope = 'PROJECT';
 
 /**
  * Permissions P1a: role administration (`/roles` and `/role-bindings`).
@@ -96,6 +97,19 @@ export class RoleAdminService {
   async listRoles(principal: KodaPrincipal): Promise<RoleDomain[]> {
     await this.assertCan(principal, 'role.read');
     return this.roles.findRoles();
+  }
+
+  /**
+   * Every role a project can hand out — `scope = 'PROJECT'`, system roles first, then by key — which is
+   * the order `findRoles` already answers in, filtered.
+   *
+   * No key is checked here: `GET /projects/:slug/roles` carries `member.read` behind the project gate,
+   * because `role.read` is global and a Project Admin does not hold it. A caller that may read the
+   * project's roles may list them.
+   */
+  async listProjectRoles(): Promise<RoleDomain[]> {
+    const roles = await this.roles.findRoles();
+    return roles.filter((role) => role.scope === PROJECT_SCOPE);
   }
 
   async createRole(principal: KodaPrincipal, input: CreateRoleInput): Promise<RoleDomain> {

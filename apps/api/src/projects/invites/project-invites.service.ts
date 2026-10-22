@@ -126,11 +126,13 @@ export class ProjectInvitesService {
       if ((await this.members.findLocalRole(projectId, userId)) !== null) {
         throw new ConflictAppException({}, 'invites.memberExists');
       }
-      const binding = await this.membership.createBinding(
+      await this.membership.createBinding(
         { principal: { type: 'USER', id: userId }, projectId, roleKey: ROLE_KEY_FOR_LEGACY_ROLE[role] },
         granterOf(principal),
       );
-      const created: ProjectMemberRecord = { userId, email: user.email, name: user.name, role, joinedAt: binding.createdAt, disabled: false };
+      // Read the written membership back inside the same transaction, so the outcome carries the same
+      // record (and the same role chips) the members routes answer with.
+      const created: ProjectMemberRecord = await this.members.findRequiredMember(projectId, userId);
 
       if (this.email.configured) {
         await this.schedule.scheduleMemberAdded({

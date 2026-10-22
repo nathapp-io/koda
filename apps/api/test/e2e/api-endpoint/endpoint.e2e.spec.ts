@@ -3066,6 +3066,61 @@ describeIntegration('API Integration Tests', () => {
     });
   });
 
+  describe('US-003 (permissions P1 web) project roles and the unified members list', () => {
+    /** A project `member@koda.test` is not a member of, created here so the 403 case owns its fixture. */
+    let outsiderProjectSlug: string;
+
+    const rolesOf = (token: string, slug = projectSlug) => request(httpServer)
+      .get(`/api/projects/${slug}/roles`)
+      .set('Authorization', `Bearer ${token}`);
+    const membersOf = (token: string, query = '', slug = projectSlug) => request(httpServer)
+      .get(`/api/projects/${slug}/members${query}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    beforeAll(async () => {
+      const created = await request(httpServer)
+        .post('/api/projects')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Roles Outsider Project', slug: 'roles-outsider-project', key: 'ROP' })
+        .expect(201);
+      outsiderProjectSlug = body<{ slug: string }>(created).slug;
+    });
+
+    it('GET /api/projects/:slug/roles answers the PROJECT roles, each with the five chip fields', async () => {
+      const res = await rolesOf(userAccessToken).expect(200);
+
+      const roles = body<Array<Record<string, unknown>>>(res);
+      expect(roles.map((role) => role.key)).toContain('developer');
+      // No GLOBAL role is assignable in a project.
+      expect(roles.map((role) => role.key)).not.toContain('owner');
+      for (const role of roles) {
+        expect(Object.keys(role).sort()).toEqual(['description', 'id', 'key', 'name', 'system']);
+      }
+    });
+
+    it('GET /api/projects/:slug/roles answers 403 for a caller with no access to the project', async () => {
+      await rolesOf(nonAdminUserAccessToken, outsiderProjectSlug).expect(403);
+    });
+
+    it('GET /api/projects/:slug/members answers user rows with principalType USER and their bindings', async () => {
+      const page = body<{ records: Array<{ principalType: string; principalId: string; userId: string | null; agentSlug: string | null; bindings: unknown[] }> }>(
+        await membersOf(userAccessToken).expect(200),
+      );
+
+      expect(page.records.length).toBeGreaterThan(0);
+      for (const record of page.records) {
+        expect(record.principalType).toBe('USER');
+        expect(record.principalId).toBe(record.userId);
+        expect(record.agentSlug).toBeNull();
+        expect(Array.isArray(record.bindings)).toBe(true);
+      }
+    });
+
+    it('GET /api/projects/:slug/members?principals=agents answers 400 validation', async () => {
+      await membersOf(userAccessToken, '?principals=agents').expect(400);
+    });
+  });
+
   describe('US-003 Disabled member guard', () => {
     const disabledMemberEmail = 'disabled-member@koda.test';
 

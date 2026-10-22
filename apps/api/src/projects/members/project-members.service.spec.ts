@@ -7,7 +7,18 @@ import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 const globalAdmin = { actorType: 'user', id: 'g1', role: 'ADMIN', email: 'g@k.t' } as KodaPrincipal;
 const projectAdmin = { actorType: 'user', id: 'pa', role: 'MEMBER', email: 'pa@k.t' } as KodaPrincipal;
 const member = (userId: string, role: string, disabled = false) =>
-  ({ userId, email: `${userId}@k.t`, name: userId, role, disabled, joinedAt: new Date(0) });
+  ({
+    userId,
+    email: `${userId}@k.t`,
+    name: userId,
+    role,
+    disabled,
+    joinedAt: new Date(0),
+    principalType: 'USER' as const,
+    principalId: userId,
+    agentSlug: null,
+    bindings: [{ id: `bind-${userId}`, roleKey: 'developer', roleName: 'Developer' }],
+  });
 
 describe('ProjectMembersService', () => {
   let repo: Record<string, Mock>;
@@ -94,6 +105,18 @@ describe('ProjectMembersService', () => {
     const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
 
     expect(result).toEqual(expect.objectContaining({ canManage: false, viewerRole: null }));
+  });
+
+  it('US-003: list passes the principals filter down, defaulting to users', async () => {
+    repo.findMemberPage.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
+    access.resolveMembership.mockResolvedValue('VIEWER');
+
+    await service.list('proj', projectAdmin, { current: 1, size: 20 });
+    // An omitted filter is the pre-US-003 listing: user rows only.
+    expect(repo.findMemberPage).toHaveBeenLastCalledWith('p1', { current: 1, size: 20 }, 'users');
+
+    await service.list('proj', projectAdmin, { current: 1, size: 20 }, 'all');
+    expect(repo.findMemberPage).toHaveBeenLastCalledWith('p1', { current: 1, size: 20 }, 'all');
   });
 
   it('writes never assert the caller\'s admin role — the route key is the gate', async () => {

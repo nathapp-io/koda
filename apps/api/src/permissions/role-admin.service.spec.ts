@@ -139,6 +139,19 @@ describe('RoleAdminService', () => {
     });
   });
 
+  describe('listProjectRoles (US-003)', () => {
+    it('answers every PROJECT role and no GLOBAL one, in the repository order', async () => {
+      const roles = await service.listProjectRoles();
+
+      expect(roles.every((entry) => entry.scope === 'PROJECT')).toBe(true);
+      expect(roles.map((entry) => entry.key)).toContain('developer');
+      expect(roles.map((entry) => entry.key)).not.toContain('owner');
+      expect(roles.map((entry) => entry.key)).not.toContain('member');
+      // The route's `member.read` guard is the gate: the service asks no key of any caller.
+      expect(cache.invalidations).toEqual([]);
+    });
+  });
+
   describe('createRole', () => {
     const qa = {
       key: 'qa',
