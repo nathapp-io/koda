@@ -149,6 +149,7 @@
       "add": "添加",
       "empty": "尚未绑定任何角色",
       "noRoles": "所有角色都已绑定",
+      "permissionsUnavailable": "正在获取你的权限…",
       "remove": "移除 {name}",
       "chip": { "allProjects": "{name}（全部项目）" },
       "toast": { "added": "角色已添加", "removed": "角色已移除" }

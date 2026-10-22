@@ -107,6 +107,14 @@ interface Mount {
   app: Mounted
   api: FakeApi
   toast: { success: jest.Mock; error: jest.Mock }
+  /** The `useAsyncData` handles the page and the dialog hold, so a spec can drive a permission refresh. */
+  permissionData: AsyncCallHandle[]
+}
+
+interface AsyncCallHandle {
+  data: { value: unknown }
+  pending: { value: boolean }
+  error: { value: unknown }
 }
 
 interface MountOptions {
@@ -123,9 +131,15 @@ async function mountPage(options: MountOptions = {}): Promise<Mount> {
   const keys = options.keys ?? ['role.read', 'role.binding.global', 'user.read']
   const permissionsGet = options.permissionsGet ?? (async () => ({ scope: 'global', projectSlug: null, keys }))
   const host = globalThis as Record<string, unknown>
+  const permissionData: AsyncCallHandle[] = []
   // The real permission composable is what the page gates on, so it resolves its own keys from
-  // `/me/permissions` through the two Nuxt auto-imports a mounted SFC does not supply to it.
-  host.useAsyncData = fakeAsyncData
+  // `/me/permissions` through the two Nuxt auto-imports a mounted SFC does not supply to it. Each
+  // handle is kept so a spec can put the composable back into its pending state (a refresh).
+  host.useAsyncData = <T,>(key: string, run: () => Promise<T>, opts?: { default?: () => T }) => {
+    const result = fakeAsyncData(key, run, opts)
+    permissionData.push(result as unknown as AsyncCallHandle)
+    return result
+  }
   host.useApi = () => ({
     $api: {
       ...api,
@@ -156,7 +170,7 @@ async function mountPage(options: MountOptions = {}): Promise<Mount> {
     globals,
   })
   await settle()
-  return { app, api, toast }
+  return { app, api, toast, permissionData }
 }
 
 const rowFor = (app: Mounted, id: string): FakeNode =>
@@ -454,5 +468,72 @@ describe('F5: a load error keeps the shared dialog honest', () => {
     expect(del).toHaveBeenCalledWith('/role-bindings/b1')
     expect(allById(m.app, 'binding-chip')).toHaveLength(0)
     expect(m.app.textOf(byId(m.app, 'principal-roles-error'))).toBe(extractApiError(err))
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fix round 2
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('F5 (round 2): a permission refresh does not reopen a failed snapshot', () => {
+  test('the dialog keeps the load error and no chips while permissions are pending and after they return', async () => {
+    const err = new ApiError(50000, 'roles are down')
+    const m = await mountPage({
+      api: {
+        get: jest.fn(async (path: string) => {
+          if (path === '/admin/users') return usersPage()
+          if (path === '/role-bindings') return bindingsPage()
+          throw err
+        }),
+      },
+    })
+
+    call(allById(m.app, 'user-edit-roles', rowFor(m.app, 'u2'))[0], 'onClick')
+    await settle()
+    expect(m.app.textOf(byId(m.app, 'principal-roles-error'))).toBe(extractApiError(err))
+    expect(allById(m.app, 'binding-chip')).toHaveLength(0)
+
+    // A permission refresh puts the keys back into the pending state: the failed snapshot must stay
+    // invalid rather than reopen with raw role keys and usable remove buttons.
+    for (const handle of m.permissionData) handle.pending.value = true
+    await settle()
+    expect(allById(m.app, 'binding-chip')).toHaveLength(0)
+    expect(allById(m.app, 'binding-remove')).toHaveLength(0)
+
+    // And when the keys come back, the error is still there until a reload actually succeeds.
+    for (const handle of m.permissionData) handle.pending.value = false
+    await settle()
+    expect(allById(m.app, 'binding-chip')).toHaveLength(0)
+    expect(m.app.textOf(byId(m.app, 'principal-roles-error'))).toBe(extractApiError(err))
+  })
+
+  test('a successful reload after the failure is what clears it', async () => {
+    const err = new ApiError(50000, 'roles are down')
+    let rolesFail = true
+    const m = await mountPage({
+      api: {
+        get: jest.fn(async (path: string) => {
+          if (path === '/admin/users') return usersPage()
+          if (path === '/role-bindings') return bindingsPage()
+          if (rolesFail) throw err
+          return ROLES
+        }),
+      },
+    })
+
+    call(allById(m.app, 'user-edit-roles', rowFor(m.app, 'u2'))[0], 'onClick')
+    await settle()
+    expect(allById(m.app, 'binding-chip')).toHaveLength(0)
+
+    rolesFail = false
+    for (const handle of m.permissionData) handle.pending.value = true
+    await settle()
+    for (const handle of m.permissionData) handle.pending.value = false
+    await settle()
+
+    expect(allById(m.app, 'principal-roles-error')).toHaveLength(0)
+    const chips = allById(m.app, 'binding-chip')
+    expect(chips).toHaveLength(2)
+    expect(m.app.textOf(chips[0])).toBe('Member')
   })
 })

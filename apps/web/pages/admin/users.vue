@@ -90,36 +90,49 @@ async function reload(targetPage = 1): Promise<void> {
  * The roles and the bindings the column joins. Both are read together and each failure is kept
  * separately: an unjoined chip would show a key where a name belongs, so a failure renders the load
  * error instead of chips — and the dialog, which shows the same rows, is told about it too.
+ *
+ * The error state is only decided by a completed attempt, and only a run in which both listings
+ * succeeded clears it. Clearing it when a request *starts* (or when the permission gate flickers)
+ * would re-publish the stale snapshot the failure was about.
  */
 async function reloadRoleData(): Promise<void> {
   if (!canManageRoles.value || adminOnly.value) return
-  rolesError.value = ''
-  bindingsError.value = ''
-  await Promise.all([
-    loadRoles().catch((err: unknown) => {
-      rolesError.value = extractApiError(err)
-      toast.error(extractApiError(err))
-    }),
-    listGlobal('USER').catch((err: unknown) => {
-      bindingsError.value = extractApiError(err)
-      toast.error(extractApiError(err))
-    }),
+  const [rolesFailure, bindingsFailure] = await Promise.all([
+    loadRoles().then(() => null, (err: unknown) => extractApiError(err)),
+    listGlobal('USER').then(() => null, (err: unknown) => extractApiError(err)),
   ])
+  if (rolesFailure !== null) {
+    rolesError.value = rolesFailure
+    toast.error(rolesFailure)
+  }
+  if (bindingsFailure !== null) {
+    bindingsError.value = bindingsFailure
+    toast.error(bindingsFailure)
+  }
+  if (rolesFailure === null && bindingsFailure === null) {
+    rolesError.value = ''
+    bindingsError.value = ''
+  }
 }
 
 /**
  * The permission keys are their own request, so they can land after the users list. The watch — not
  * the mount — is what loads the role data, so the column and "Edit roles" fill in whenever the two
- * keys become available (and a refresh that loses them closes the column again).
+ * keys become available.
+ *
+ * Losing the keys deliberately does *not* clear the load errors: they describe the snapshot, and a
+ * permission refresh is not a reload. The dialog reads the same state, so a failed snapshot stays
+ * closed instead of reopening with raw role keys while the keys are re-read.
  */
 watch(canManageRoles, (allowed) => {
-  if (allowed) {
-    void reloadRoleData()
-    return
-  }
-  rolesError.value = ''
-  bindingsError.value = ''
+  if (allowed) void reloadRoleData()
 }, { immediate: true })
+
+/**
+ * True while the page cannot vouch for the role snapshot: the keys are unknown (pending or failed) or
+ * the last listing attempt failed. The dialog hides its chips and offers no write in this state.
+ */
+const roleDataBlocked = computed(() => !canManageRoles.value || roleColumnError.value !== '')
 
 function openRoles(user: AdminUser): void {
   editing.value = user
@@ -228,6 +241,7 @@ onMounted(() => { void reload() })
       :bindings="editingBindings"
       :roles="roles"
       :load-error="roleColumnError"
+      :blocked="roleDataBlocked"
       @changed="reloadRoleData"
     />
     <CreateUserDialog v-model:open="createOpen" @created="onUserCreated" />

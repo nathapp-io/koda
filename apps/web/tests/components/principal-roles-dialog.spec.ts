@@ -55,6 +55,7 @@ interface MountOptions {
   roles?: Role[]
   api?: Partial<FakeApi>
   loadError?: string
+  blocked?: boolean
   /** Overrides what `GET /me/permissions` answers (a rejection covers the failed case). */
   permissionsGet?: () => Promise<unknown>
 }
@@ -88,6 +89,7 @@ async function mountDialog(options: MountOptions = {}): Promise<Mount> {
       bindings: options.bindings ?? [binding('b1')],
       roles: options.roles ?? ALL_ROLES,
       loadError: options.loadError ?? '',
+      blocked: options.blocked ?? false,
     },
     components: uiStubs,
     globals: {
@@ -251,6 +253,27 @@ describe('F5: a page load error suppresses the chips and the writes', () => {
     expect(byId(m.app, 'binding-role-select').props.disabled).toBe(true)
 
     // A click on the (disabled) add control still sends nothing.
+    call(byId(m.app, 'binding-role-select'), 'onChange', { target: { value: 'developer' } })
+    await settle()
+    call(byId(m.app, 'binding-add'), 'onClick')
+    await settle()
+
+    expect(m.api.post).not.toHaveBeenCalled()
+    expect(m.app.emitted('changed')).toHaveLength(0)
+  })
+})
+
+describe('F5 (round 2): an unavailable key set blocks the dialog', () => {
+  test('blocked with no load error shows the waiting copy, no chips and no writes', async () => {
+    const m = await mountDialog({ blocked: true })
+
+    expect(allById(m.app, 'binding-chip')).toHaveLength(0)
+    expect(allById(m.app, 'binding-remove')).toHaveLength(0)
+    // The waiting copy, not the owner page's error message.
+    const status = m.app.textOf(byId(m.app, 'principal-roles-error'))
+    expect(status).toBe(enI18n().t('admin.bindings.permissionsUnavailable'))
+    expect(byId(m.app, 'binding-add').props.disabled).toBe(true)
+
     call(byId(m.app, 'binding-role-select'), 'onChange', { target: { value: 'developer' } })
     await settle()
     call(byId(m.app, 'binding-add'), 'onClick')

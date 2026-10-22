@@ -6,7 +6,9 @@
       </DialogHeader>
 
       <div class="space-y-4" data-testid="principal-roles-body">
-        <p v-if="writeBlocked" class="text-sm text-status-rejected" data-testid="principal-roles-error">{{ loadError }}</p>
+        <p v-if="writeBlocked" class="text-sm" :class="hasError ? 'text-status-rejected' : 'text-muted-foreground'" data-testid="principal-roles-error">
+          {{ hasError ? loadError : t('admin.bindings.permissionsUnavailable') }}
+        </p>
         <template v-else>
           <div class="flex flex-wrap gap-2" data-testid="binding-chips">
             <Badge
@@ -102,6 +104,11 @@ const props = defineProps<{
    * instead of chips and offers no write.
    */
   loadError?: string
+  /**
+   * The owner page cannot vouch for the snapshot at all — the caller's keys are still being read, or
+   * the last read failed. Nothing is shown that could be acted on, whichever reason it is.
+   */
+  blocked?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -120,8 +127,9 @@ const removingId = ref<string | null>(null)
 
 const chips = computed(() => bindingChips(props.bindings, props.roles))
 
-/** A load error leaves nothing to act on: no chips to remove, no role to add. */
-const writeBlocked = computed(() => (props.loadError ?? '') !== '')
+/** A load error or an unavailable key set leaves nothing to act on: no chips to remove, no role to add. */
+const hasError = computed(() => (props.loadError ?? '') !== '')
+const writeBlocked = computed(() => hasError.value || props.blocked === true)
 
 // The owner role is user-only and needs its own key: an agent can never own, and a caller without
 // role.binding.owner cannot grant it (the API refuses either way).

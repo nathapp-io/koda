@@ -149,6 +149,7 @@
       "add": "Add",
       "empty": "No roles bound yet",
       "noRoles": "Every role is already bound",
+      "permissionsUnavailable": "Waiting for your permissions…",
       "remove": "Remove {name}",
       "chip": { "allProjects": "{name} (all projects)" },
       "toast": { "added": "Role added", "removed": "Role removed" }
