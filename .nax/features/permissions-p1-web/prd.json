@@ -3,7 +3,7 @@
   "feature": "permissions-p1-web",
   "branchName": "feat/permissions-p1-web",
   "createdAt": "2026-07-14T00:00:00.000Z",
-  "updatedAt": "2026-10-22T09:47:55.145Z",
+  "updatedAt": "2026-10-22T10:42:47.419Z",
   "userStories": [
     {
       "id": "US-001",
@@ -1108,8 +1108,8 @@
         "US-004",
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -1121,7 +1121,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "claude-sonnet",
+          "confidence": 0.3799999999999999,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T09:47:59.228Z"
+        }
       },
       "contextFiles": [
         "apps/web/pages/admin/users.vue",
@@ -1162,7 +1174,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "b0e558745f2991fa7b64cf65a188a707944cb1f0"
     },
     {
       "id": "US-012",
