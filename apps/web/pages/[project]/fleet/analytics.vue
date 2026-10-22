@@ -21,16 +21,18 @@ const DEFAULT_GROUP: ProjectGroupBy = 'model'
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
-const auth = useAuth()
 const slug = route.params.project as string
 const api = useFleetAnalytics(slug)
+// Permissions P1 US-006: the ingest-health link is gated on the key its admin route requires, not
+// on a role name.
+const { permissions: globalPermissions } = useGlobalPermissions()
+const canReadIngest = computed(() => globalPermissions.value.has('fleet.ingest.read'))
 
 const range = computed(() => parseRange(route.query))
 const group = computed(() => parseGroup(route.query.group, PROJECT_GROUPS, DEFAULT_GROUP))
 const groupOptions = computed(() => PROJECT_GROUPS.map((g) => ({ value: g, label: t(`fleet.analytics.groupBy.${g}`) })))
 const win = ref<WindowQuery | null>(null)
 const invalidRange = ref(false)
-const isAdmin = computed(() => auth.user.value?.role === 'ADMIN')
 
 /** Panels run only after refreshAll set a valid window. */
 function current(): WindowQuery {
@@ -141,7 +143,7 @@ const tiles = computed(() => {
     </div>
 
     <template v-if="!invalidRange">
-    <FleetAnalyticsIngestNotice v-if="ingest.data.value" :pending="ingest.data.value.pending" :failed="ingest.data.value.failed" :admin="isAdmin" />
+    <FleetAnalyticsIngestNotice v-if="ingest.data.value" :pending="ingest.data.value.pending" :failed="ingest.data.value.failed" :admin="canReadIngest" />
     <FleetAnalyticsSummaryTiles :tiles="tiles" />
 
     <FleetAnalyticsPanel :title="t('fleet.analytics.panels.spend')" :status="spend.status.value" :empty-text="t('fleet.analytics.empty')" testid="fleet-analytics-spend" @retry="spend.run()">

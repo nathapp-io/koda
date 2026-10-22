@@ -131,6 +131,9 @@ const NUXT_AUTO_IMPORTS = [
   'useWorkspaceThreads', 'useWorkspaceThread',
   // The workspace thread detail page (US-006) reads the home project's runner summaries through it.
   'useProjectRunnerSummaries',
+  // Permissions P1 US-006: every gated control reads its keys through one of these two, so any spec
+  // that mounts a component holding one must override it through `globals`.
+  'useGlobalPermissions', 'useProjectPermissions',
 ] as const
 
 /** Defaults for auto-imports a test did not supply; `definePageMeta` is a compile-time no-op macro. */

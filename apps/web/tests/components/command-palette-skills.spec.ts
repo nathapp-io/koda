@@ -1,12 +1,13 @@
 import { describe, test, expect, jest, afterAll } from '@jest/globals'
 import * as Vue from 'vue'
-import { ref, computed, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { mountSfc, webFile } from '../helpers/mount-sfc'
 import type { FakeNode } from '../helpers/mount-sfc'
 import { uiStubs, enI18n } from '../helpers/fleet-harness'
+import { permissionSet } from '~/lib/permissions'
 import * as apiModule from '../../composables/useApi'
 
 const realPalette = webFile('components', 'CommandPalette.vue')
@@ -15,8 +16,8 @@ const realPalette = webFile('components', 'CommandPalette.vue')
  * The palette's search box is a native `<input v-model>`. The fake renderer in mount-sfc cannot
  * host Vue's `vModelText` directive, which calls `addEventListener` on a real element. So this spec
  * mounts a copy of the real palette whose only change is `v-model="query"` becoming `:value="query"`.
- * The `<script setup>` (the command list and the admin gate) and the rest of the template are the
- * component's own code, untouched.
+ * The `<script setup>` (the command list and the permission gate) and the rest of the template are
+ * the component's own code, untouched.
  */
 const scratch = mkdtempSync(join(tmpdir(), 'palette-skills-'))
 const paletteCopy = join(scratch, 'CommandPalette.vue')
@@ -56,9 +57,19 @@ interface Mounted {
   unmount: () => void
 }
 
-/** Mounts the real palette, opened, for a viewer with the given global role. */
-function mountPalette(role: 'ADMIN' | 'MEMBER'): Mounted {
+interface Viewer {
+  /** The keys of the caller's global permission set. */
+  keys?: readonly string[]
+  /** True while /me/permissions is still outstanding: the set is the empty one. */
+  pending?: boolean
+  /** A role name, to prove the gate does not read it. */
+  role?: string
+}
+
+/** Mounts the real palette, opened, for a viewer with the given global permission set. */
+function mountPalette(viewer: Viewer = {}): Mounted {
   const navigated: string[] = []
+  const held = permissionSet(viewer.keys ?? [])
   const app = mountSfc(paletteCopy, {
     props: { open: true },
     components: {
@@ -75,7 +86,13 @@ function mountPalette(role: 'ADMIN' | 'MEMBER'): Mounted {
       useApi: () => ({ $api: { get: jest.fn(async () => []) } }),
       useColorMode: () => ({ value: 'light', preference: 'light' }),
       navigateTo: (to: string) => { navigated.push(to) },
-      useAuth: () => ({ user: ref({ email: 'a@k.t', role }) }),
+      useAuth: () => ({ user: ref({ email: 'a@k.t', role: viewer.role ?? 'MEMBER' }) }),
+      useGlobalPermissions: () => ({
+        permissions: computed(() => (viewer.pending === true ? permissionSet([]) : held)),
+        pending: ref(viewer.pending === true),
+        error: ref(null),
+        refresh: async () => undefined,
+      }),
     },
   })
 
@@ -89,16 +106,18 @@ function mountPalette(role: 'ADMIN' | 'MEMBER'): Mounted {
   return { optionIds, activate, navigated, unmount: () => app.unmount() }
 }
 
-describe('CommandPalette skills entry (US-007)', () => {
-  test('US-007 AC11: a global admin sees a palette entry with id skills', () => {
-    const { optionIds, unmount } = mountPalette('ADMIN')
+const SKILLS_KEYS = ['skill.source.read']
+
+describe('CommandPalette skills entry (US-006 AC-10)', () => {
+  test('AC-10: the skills command is listed when the global set holds skill.source.read', () => {
+    const { optionIds, unmount } = mountPalette({ keys: SKILLS_KEYS })
 
     expect(optionIds()).toContain('skills')
     unmount()
   })
 
-  test('US-007 AC11: activating the skills entry navigates to /admin/skills', () => {
-    const { activate, navigated, unmount } = mountPalette('ADMIN')
+  test('AC-10: it navigates to /admin/skills when activated', () => {
+    const { activate, navigated, unmount } = mountPalette({ keys: SKILLS_KEYS })
 
     activate('skills')
 
@@ -106,17 +125,38 @@ describe('CommandPalette skills entry (US-007)', () => {
     unmount()
   })
 
-  test('US-007 AC12: a user who is not a global admin sees no palette entry with id skills', () => {
-    const { optionIds, unmount } = mountPalette('MEMBER')
+  test('AC-10: an empty set lists no skills command', () => {
+    const { optionIds, unmount } = mountPalette({ keys: [] })
 
     expect(optionIds()).not.toContain('skills')
     unmount()
   })
 
-  test('US-007 AC12 (control): a non-admin still sees the dashboard entry, so the missing skills entry is not a broken palette', () => {
-    const { optionIds, unmount } = mountPalette('MEMBER')
+  test('AC-10 (edge): an ADMIN role with an empty set still gets no skills command', () => {
+    const { optionIds, unmount } = mountPalette({ role: 'ADMIN', keys: [] })
+
+    expect(optionIds()).not.toContain('skills')
+    unmount()
+  })
+
+  test('AC-10 (edge): an unrelated key does not unlock the command', () => {
+    const { optionIds, unmount } = mountPalette({ keys: ['user.read', 'fleet.dashboard.read'] })
+
+    expect(optionIds()).not.toContain('skills')
+    unmount()
+  })
+
+  test('AC-10 (control): an empty set still offers the dashboard entry', () => {
+    const { optionIds, unmount } = mountPalette({ keys: [] })
 
     expect(optionIds()).toContain('dashboard')
+    unmount()
+  })
+
+  test('AC-12: while /me/permissions is pending the skills command stays hidden', () => {
+    const { optionIds, unmount } = mountPalette({ keys: SKILLS_KEYS, pending: true })
+
+    expect(optionIds()).not.toContain('skills')
     unmount()
   })
 })

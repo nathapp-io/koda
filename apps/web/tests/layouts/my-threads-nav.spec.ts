@@ -5,6 +5,7 @@ import * as ts from 'typescript'
 import { compileScript, parse } from 'vue/compiler-sfc'
 import { webFile } from '../helpers/mount-sfc'
 import { i18nStub } from '../helpers/fleet-harness'
+import { globalPermissionsStub } from '../helpers/permission-nav'
 
 /**
  * US-005 AC-12/AC-13 (fleet S5b 1d): the `My threads` sidebar link.
@@ -37,9 +38,12 @@ function layoutBindings(path: string, params: Record<string, string>): Record<st
     useI18n: () => i18nStub(),
     useAuth: () => ({ user: { value: { email: 'a@k.t', role: 'MEMBER' } }, logout: () => undefined }),
     useRoute: () => ({ path, params }),
+    // US-006: the admin nav now reads the global permission set; this spec renders a caller who
+    // holds none of it, so every admin link stays hidden.
+    useGlobalPermissions: () => globalPermissionsStub(),
   }
   const mod: { exports: Record<string, unknown> } = { exports: {} }
-  new Function('require', 'module', 'exports', '__auto', 'const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, useI18n, useAuth, useRoute } = __auto;\n' + js)(
+  new Function('require', 'module', 'exports', '__auto', 'const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, useI18n, useAuth, useRoute, useGlobalPermissions } = __auto;\n' + js)(
     (id: string) => (id === 'lucide-vue-next' ? {} : require(id)),
     mod,
     mod.exports,

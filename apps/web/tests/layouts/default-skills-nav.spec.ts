@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll } from '@jest/globals'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+import { ADMIN_NAV_KEYS, adminNavFlags } from '../helpers/permission-nav'
 
 const layoutPath = join(__dirname, '../..', 'layouts', 'default.vue')
 
@@ -34,12 +35,13 @@ describe('US-007 admin Skills nav link', () => {
     layoutTemplate = extractTemplate(layoutSource)
   })
 
-  function render(isGlobalAdmin: boolean): Promise<string> {
+  /** US-006: the sidebar gates each admin link on its global key, so the flag is now "holds them all". */
+  function render(holdsAdminKeys: boolean): Promise<string> {
     const app = VueFull.createSSRApp({
       template: layoutTemplate,
       setup: () => ({
         t: (key: string) => key,
-        auth: { user: { value: { email: 'a@k.t', role: isGlobalAdmin ? 'ADMIN' : 'MEMBER' } }, logout: () => {}, token: { value: 't' } },
+        auth: { user: { value: { email: 'a@k.t', role: 'MEMBER' } }, logout: () => {}, token: { value: 't' } },
         route: { path: '/', params: {} },
         sidebarOpen: { value: true },
         projectSlug: undefined,
@@ -47,7 +49,7 @@ describe('US-007 admin Skills nav link', () => {
         backTo: '/',
         navLinkClass: 'nav-link',
         activeClass: 'active',
-        isGlobalAdmin,
+        ...adminNavFlags(holdsAdminKeys ? ADMIN_NAV_KEYS : []),
       }),
       components: {
         NuxtLink: {

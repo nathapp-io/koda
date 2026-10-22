@@ -10,9 +10,11 @@ const emit = defineEmits<{ (e: 'update:open', value: boolean): void }>()
 
 const { t } = useI18n()
 const { $api } = useApi()
-const auth = useAuth()
 const colorMode = useColorMode()
-const isGlobalAdmin = computed(() => auth.user.value?.role === 'ADMIN')
+// Permissions P1 US-006: the Skills destination is gated on the key `/admin/skills` needs, not on a
+// role name (roles are data; a custom role must work).
+const { permissions: globalPermissions } = useGlobalPermissions()
+const canReadSkills = computed(() => globalPermissions.value.has('skill.source.read'))
 
 const query = ref('')
 const active = ref(0)
@@ -30,7 +32,7 @@ const commands = computed<Command[]>(() => {
     { id: 'my-threads', label: t('nav.myThreads'), icon: MessagesSquare, run: go('/threads') },
     { id: 'slos', label: t('nav.slos'), icon: Activity, run: go('/admin/slos') },
   ]
-  if (isGlobalAdmin.value) {
+  if (canReadSkills.value) {
     list.push({ id: 'skills', label: t('nav.skills'), icon: Sparkles, run: go('/admin/skills') })
   }
   const slug = props.projectSlug

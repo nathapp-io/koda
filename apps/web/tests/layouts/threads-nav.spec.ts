@@ -5,6 +5,7 @@ import * as ts from 'typescript'
 import { compileScript, parse } from 'vue/compiler-sfc'
 import { webFile } from '../helpers/mount-sfc'
 import { i18nStub } from '../helpers/fleet-harness'
+import { adminNavFlags, globalPermissionsStub } from '../helpers/permission-nav'
 
 const layoutPath = webFile('layouts', 'default.vue')
 const layoutSource = readFileSync(layoutPath, 'utf-8')
@@ -43,9 +44,12 @@ function breadcrumbItemsFor(path: string, params: Record<string, string>): Crumb
     useI18n: () => i18nStub(),
     useAuth: () => ({ user: { value: { email: 'a@k.t', role: 'MEMBER' } }, logout: () => undefined }),
     useRoute: () => ({ path, params }),
+    // US-006: the admin nav now reads the global permission set; this spec renders a caller who
+    // holds none of it, so every admin link stays hidden.
+    useGlobalPermissions: () => globalPermissionsStub(),
   }
   const mod: { exports: Record<string, unknown> } = { exports: {} }
-  new Function('require', 'module', 'exports', '__auto', 'const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, useI18n, useAuth, useRoute } = __auto;\n' + js)(
+  new Function('require', 'module', 'exports', '__auto', 'const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, useI18n, useAuth, useRoute, useGlobalPermissions } = __auto;\n' + js)(
     (id: string) => (id === 'lucide-vue-next' ? {} : require(id)),
     mod,
     mod.exports,
@@ -121,7 +125,7 @@ function renderProjectLayout(projectSlug: string | undefined): Promise<string> {
       backTo: projectSlug ? `/${projectSlug}` : '/',
       navLinkClass: 'nav-link',
       activeClass: 'active',
-      isGlobalAdmin: false,
+      ...adminNavFlags([]),
     }),
     components: {
       NuxtLink: {
