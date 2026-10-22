@@ -7,7 +7,7 @@
  * (reached through `GET /fleet/activity` and `GET /fleet/approval-counts`) and
  * `PrismaScheduleRepository.findOwnerAccess` (reached through `POST /projects/:slug/fleet/schedules/:id/enable`
  * and `ScheduleTicker.tick`) on one side, and the compatibility queries in
- * `src/permissions/legacy-membership.queries.ts` on the other. Sources are real rows — bindings
+ * `src/permissions/membership.queries.ts` on the other. Sources are real rows — bindings
  * through `MembershipService.createBinding` (booting the app runs `SystemRoleSeeder`, so the seeded
  * role keys exist), no legacy `ProjectMember` row anywhere in this spec.
  *

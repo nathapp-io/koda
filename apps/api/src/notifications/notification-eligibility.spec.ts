@@ -10,13 +10,11 @@ const draft = (userId: string, over: Partial<NotificationDraft> = {}): Notificat
 const GLOBAL_BINDINGS = 'projectId-null';
 
 /**
- * The fake Prisma client the compatibility queries read:
- * `legacy` — the `ProjectMember` rows per project id;
+ * The fake Prisma client the binding-only queries read:
  * `bindings` — the PROJECT-scope bindings per project id, plus `GLOBAL_BINDINGS` for the ones with no
  * project, which apply in every project.
  */
 interface Sources {
-  legacy?: Readonly<Record<string, readonly string[]>>;
   bindings?: Readonly<Record<string, readonly string[]>>;
 }
 
@@ -32,22 +30,18 @@ function setup(sources: Sources = {}) {
       ].filter((u) => where.id?.in.includes(u.id));
     }),
   };
-  const projectMember = {
-    findMany: vi.fn(async ({ where }: { where: { projectId: string } }) =>
-      (sources.legacy?.[where.projectId] ?? []).map((userId) => ({ userId }))),
-  };
   const roleBinding = {
     findMany: vi.fn(async ({ where }: { where: { projectId: string | null } }) =>
       (sources.bindings?.[where.projectId ?? GLOBAL_BINDINGS] ?? []).map((principalId) => ({ principalId }))),
   };
   const project = { count: vi.fn(async () => 1) };
-  const eligibility = new NotificationEligibility({ client: { user, projectMember, roleBinding, project } } as never);
-  return { eligibility, user, projectMember, roleBinding, project };
+  const eligibility = new NotificationEligibility({ client: { user, roleBinding, project } } as never);
+  return { eligibility, user, roleBinding, project };
 }
 
 describe('NotificationEligibility (S4a §2.1 step 1)', () => {
   it('drops the actor, disabled or unknown users, and non-member non-admins of the project', async () => {
-    const { eligibility, user } = setup({ legacy: { p1: ['actor'] }, bindings: { p1: ['member'] } });
+    const { eligibility, user } = setup({ bindings: { p1: ['member'] } });
     const kept = await eligibility.filter([draft('member'), draft('admin'), draft('outsider'), draft('actor'), draft('disabled-or-gone')]);
     expect(kept.map((d) => d.userId)).toEqual(['member', 'admin']);
     expect(user.findMany).toHaveBeenCalledWith({
@@ -57,10 +51,8 @@ describe('NotificationEligibility (S4a §2.1 step 1)', () => {
   });
 
   it('keeps a user whose only source in the project is a project binding', async () => {
-    const { eligibility, projectMember, roleBinding } = setup({ bindings: { p1: ['member'] } });
+    const { eligibility, roleBinding } = setup({ bindings: { p1: ['member'] } });
     await expect(eligibility.filter([draft('member')])).resolves.toEqual([draft('member')]);
-    // The legacy row was read too: the binding is not a shortcut around the compatibility union.
-    expect(projectMember.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { projectId: 'p1' } }));
     expect(roleBinding.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { principalType: 'USER', projectId: 'p1', role: { scope: 'PROJECT' } },
     }));
@@ -76,20 +68,18 @@ describe('NotificationEligibility (S4a §2.1 step 1)', () => {
     expect(project.count).toHaveBeenCalledWith({ where: { id: 'p1', deletedAt: null } });
   });
 
-  it('reads the compatibility sources once per distinct draft project', async () => {
-    const { eligibility, projectMember, roleBinding } = setup({ legacy: { p1: ['member'], p2: ['member'] } });
+  it('reads the binding sources once per distinct draft project', async () => {
+    const { eligibility, roleBinding } = setup({ bindings: { p1: ['member'], p2: ['member'] } });
     const kept = await eligibility.filter([draft('member'), draft('member', { projectId: 'p2' })]);
     expect(kept.map((d) => d.userId)).toEqual(['member', 'member']);
-    expect(projectMember.findMany.mock.calls.map(([args]) => args.where.projectId)).toEqual(['p1', 'p2']);
     // Two queries per project: the local bindings and the projectId-null ones.
     expect(roleBinding.findMany.mock.calls.map(([args]) => args.where.projectId)).toEqual(['p1', null, 'p2', null]);
   });
 
   it('keeps global drafts (projectId null) for any active user without a membership query', async () => {
-    const { eligibility, projectMember, roleBinding } = setup();
+    const { eligibility, roleBinding } = setup();
     const kept = await eligibility.filter([draft('outsider', { projectId: null, actorId: null })]);
     expect(kept.map((d) => d.userId)).toEqual(['outsider']);
-    expect(projectMember.findMany).not.toHaveBeenCalled();
     expect(roleBinding.findMany).not.toHaveBeenCalled();
   });
 

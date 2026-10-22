@@ -155,10 +155,7 @@ describe('EmailContentBuilder MEMBER_ADDED content (S4b US-004)', () => {
     expect((result as { data: unknown }).data).toEqual({ projectName: 'Koda', role: 'DEVELOPER', url: `${WEB}/s4b` });
     expect(s.email.webUrl).toHaveBeenCalledWith('/s4b');
     // The role comes from the compatibility union: the user's legacy row and its own bindings.
-    expect(s.projectMember.findUnique).toHaveBeenCalledWith({
-      where: { projectId_userId: { projectId: 'p1', userId: 'u1' } },
-      select: { role: true },
-    });
+
     expect(s.roleBinding.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ principalType: 'USER', principalId: 'u1' }),
     }));
@@ -186,7 +183,7 @@ describe('EmailContentBuilder MEMBER_ADDED content (S4b US-004)', () => {
     expect((result as { data: unknown }).data).toEqual({ projectName: 'Koda', role: 'VIEWER', url: `${WEB}/s4b` });
   });
 
-  it('AC-14: a legacy ProjectMember row still answers its own role', async () => {
+  it('AC-14: a legacy-only member is a gone source', async () => {
     const s = setupMemberAdded();
     s.setUser({ id: 'u1', disabled: false });
     s.setProject({ id: 'p1', name: 'Koda', slug: 's4b', deletedAt: null });
@@ -194,7 +191,7 @@ describe('EmailContentBuilder MEMBER_ADDED content (S4b US-004)', () => {
 
     const result = await s.builder.build(memberRow());
 
-    expect((result as { data: unknown }).data).toEqual({ projectName: 'Koda', role: 'ADMIN', url: `${WEB}/s4b` });
+    expect(result).toEqual({ skip: 'SOURCE_GONE' });
   });
 
   it('AC-15: a soft-deleted project yields { skip: SOURCE_GONE }', async () => {

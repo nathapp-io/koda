@@ -75,7 +75,7 @@ export interface RoleBindingRepository extends IRepository<RoleBindingDomain> {
 export type PrincipalRef = { type: PrincipalType; id: string };
 
 /**
- * Permissions P1b: one row of a project's membership list, as the compatibility queries answer it.
+ * Permissions P1b: one row of a project's membership list, as the binding-only queries answer it.
  *
  * The principal's legacy role (`ADMIN` | `DEVELOPER` | `VIEWER`) over its LOCAL sources in the
  * project, when the earliest of those sources joined, and who added it.
@@ -84,9 +84,9 @@ export interface ProjectMembership {
   principalId: string;
   /** `strongestProjectRole` over the principal's LOCAL sources in the project. */
   role: string;
-  /** The earliest of: the legacy row's date (`ProjectMember.joinedAt`, `AgentProject.createdAt`) and the `createdAt` of each project binding. */
+  /** The earliest `createdAt` of the principal's project bindings. */
   since: Date;
-  /** From the earliest source: `AgentProject.addedById`; a binding's `grantedById` when its `grantedByType` is `'USER'`; otherwise `null`. */
+  /** The earliest binding's `grantedById` when `grantedByType` is `'USER'`; otherwise `null`. */
   addedByUserId: string | null;
 }
 

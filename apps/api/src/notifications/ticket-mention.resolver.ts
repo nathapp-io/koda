@@ -1,15 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaClient } from '../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { principalIdsWithAccess } from '../permissions/legacy-membership.queries';
+import { principalIdsWithAccess } from '../permissions/membership.queries';
 import { parseMentions } from './mentions';
 
 /**
  * Fleet S4a §2.3 (slice 3): who a text mentions. Only enabled project members and enabled global admins count;
  * a token for anyone else is ignored (D504). Order follows the text.
  *
- * Permissions P1b US-005: "a project member" is the compatibility union over the **access sources** —
- * the legacy `ProjectMember` row and the PROJECT-scope bindings of the user, in the project and
+ * Permissions P1b US-005: "a project member" has PROJECT-scope bindings, in the project and
  * `projectId`-null — while the global-admin branch stays on `User.role`. The project's member ids are
  * read once per call and intersected with the mentioned ones; nothing is cached.
  */

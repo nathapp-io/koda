@@ -31,10 +31,6 @@ interface Fixtures {
   users?: UserRow[];
   /** Every agent row. */
   agents?: AgentRow[];
-  /** `ProjectMember.userId` rows of the project. */
-  members?: string[];
-  /** `AgentProject.agentId` rows of the project. */
-  roster?: string[];
   /** PROJECT-scope bindings in the project, by principal type. */
   bindings?: { user?: string[]; agent?: string[] };
   /** `projectId`-null PROJECT-scope bindings, by principal type. */
@@ -54,16 +50,8 @@ interface FindManyArgs {
   select?: unknown;
 }
 
-/**
- * Permissions P1b US-003: `search` reads the compatibility queries, so the stubs below answer the
- * query file's reads — `projectMember.findMany` / `agentProject.findMany` (the legacy rows),
- * `roleBinding.findMany` (the project's bindings and the `projectId`-null ones) and `project.count`
- * (a global binding only reaches a live project) — and only then the `user.findMany` /
- * `agent.findMany` rows the assignees come from.
- */
+/** Binding reads determine candidate ids before the bounded account detail reads. */
 const repositoryWith = (fixtures: Fixtures) => {
-  const memberFindMany = vi.fn(async () => (fixtures.members ?? []).map((userId) => ({ userId })));
-  const rosterFindMany = vi.fn(async () => (fixtures.roster ?? []).map((agentId) => ({ agentId })));
   const bindingFindMany = vi.fn(async (args: FindManyArgs) => {
     const { principalType, projectId } = args.where;
     const table = projectId === null ? fixtures.globalBindings : fixtures.bindings;
@@ -84,8 +72,6 @@ const repositoryWith = (fixtures: Fixtures) => {
 
   const prisma = {
     client: {
-      projectMember: { findMany: memberFindMany },
-      agentProject: { findMany: rosterFindMany },
       roleBinding: { findMany: bindingFindMany },
       user: { findMany: userFindMany },
       agent: { findMany: agentFindMany },
@@ -98,8 +84,6 @@ const repositoryWith = (fixtures: Fixtures) => {
       transactionManager,
       prisma as unknown as PrismaService<PrismaClient>,
     ),
-    memberFindMany,
-    rosterFindMany,
     bindingFindMany,
     userFindMany,
     agentFindMany,
@@ -109,7 +93,7 @@ const repositoryWith = (fixtures: Fixtures) => {
 describe('PrismaProjectAssigneesRepository.search', () => {
   it('reads non-disabled users whose id has access to the project only', async () => {
     const { repository, userFindMany } = repositoryWith({
-      members: ['u1'],
+      bindings: { user: ['u1'] },
       users: [{ id: 'u1', name: 'Alice', email: 'alice@koda.test' }],
     });
 
@@ -122,7 +106,7 @@ describe('PrismaProjectAssigneesRepository.search', () => {
 
   it('falls back to the email when a user has no name', async () => {
     const { repository } = repositoryWith({
-      members: ['u1'],
+      bindings: { user: ['u1'] },
       users: [{ id: 'u1', name: null, email: 'alice@koda.test' }],
     });
 
@@ -220,8 +204,7 @@ describe('PrismaProjectAssigneesRepository.search', () => {
 
   it('puts every user before every agent and caps the combined list at limit', async () => {
     const { repository } = repositoryWith({
-      members: ['u1'],
-      roster: ['a1'],
+      bindings: { user: ['u1'], agent: ['a1'] },
       users: [{ id: 'u1', name: 'Alice', email: 'alice@koda.test' }],
       agents: [{ id: 'a1', name: 'a-bot', slug: 'a-bot', status: 'ACTIVE' }],
     });

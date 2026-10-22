@@ -11,6 +11,7 @@
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/agents/agent-roster-repository.integration.spec.ts
  */
+import { ensureSystemRoles, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { resetDb } from '../../helpers/reset-db';
@@ -31,6 +32,7 @@ describeIntegration('PrismaAgentRepository roster reads (PG)', () => {
 
   beforeAll(async () => {
     await resetDb();
+    await ensureSystemRoles(prisma);
 
     const agent = await prisma.agent.create({
       data: { name: 'Roster Bot', slug: 'roster-bot', apiKeyHash: 'roster-bot-api-key-hash' },
@@ -57,14 +59,9 @@ describeIntegration('PrismaAgentRepository roster reads (PG)', () => {
     deletedProjectId = mike.id;
     otherAgentProjectId = otherAgentsProject.id;
 
-    await prisma.agentProject.createMany({
-      data: [
-        { projectId: zulu.id, agentId },
-        { projectId: alpha.id, agentId },
-        { projectId: mike.id, agentId },
-        { projectId: otherAgentsProject.id, agentId: otherAgentId },
-      ],
-    });
+    for (const [projectId, principalId] of [[zulu.id, agentId], [alpha.id, agentId], [mike.id, agentId], [otherAgentsProject.id, otherAgentId]]) {
+      await grantRole(prisma, { type: 'AGENT', id: principalId }, 'viewer', projectId);
+    }
 
     // Soft-deleted AFTER the roster row exists, so the row is still there and
     // only the `deletedAt: null` filter can keep the project out of the list.
@@ -83,8 +80,8 @@ describeIntegration('PrismaAgentRepository roster reads (PG)', () => {
   });
 
   it('AC15 boundary: a soft-deleted project is dropped while its roster row survives', async () => {
-    const survivingRow = await prisma.agentProject.count({
-      where: { agentId, projectId: deletedProjectId },
+    const survivingRow = await prisma.roleBinding.count({
+      where: { principalType: 'AGENT', principalId: agentId, projectId: deletedProjectId },
     });
 
     expect(survivingRow).toBe(1);

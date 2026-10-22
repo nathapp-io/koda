@@ -1,6 +1,6 @@
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../generated/prisma/client';
-import { MEMBERSHIP_READ_CAP } from '../permissions/legacy-membership.queries';
+import { MEMBERSHIP_READ_CAP } from '../permissions/membership.queries';
 import { PrismaHomeRepository } from './prisma-home.repository';
 
 /**
@@ -55,7 +55,6 @@ interface StubArgs {
 
 function stubClient(
   bindings: BindingRow[],
-  members: Array<{ projectId: string; userId: string }> = [],
   projects: ProjectRow[] = PROJECTS,
 ) {
   const projectFindMany = vi.fn(async (args: StubArgs = {}) => {
@@ -86,14 +85,6 @@ function stubClient(
 
   return {
     project: { findMany: projectFindMany },
-    projectMember: {
-      findMany: vi.fn(async (args: { where?: { userId?: string } } = {}) => {
-        const userId = args.where?.userId;
-        return members
-          .filter((row) => userId === undefined || row.userId === userId)
-          .map((row) => ({ projectId: row.projectId }));
-      }),
-    },
     roleBinding: {
       findMany: vi.fn(async (args: { where?: Record<string, unknown> } = {}) => {
         const where = args.where ?? {};
@@ -118,10 +109,9 @@ function stubClient(
 
 function repositoryFor(
   bindings: BindingRow[],
-  members: Array<{ projectId: string; userId: string }> = [],
   projects: ProjectRow[] = PROJECTS,
 ): { repository: PrismaHomeRepository; client: ReturnType<typeof stubClient> } {
-  const client = stubClient(bindings, members, projects);
+  const client = stubClient(bindings, projects);
   const prisma = { client: client as unknown as PrismaClient };
   return { repository: new PrismaHomeRepository(prisma as unknown as PrismaService<PrismaClient>), client };
 }
@@ -146,15 +136,14 @@ describe('PrismaHomeRepository.findProjects — membership reads (US-002)', () =
     expect(client.roleBinding.findMany).toHaveBeenCalled();
   });
 
-  it('orders by name ascending and unions the legacy row with the bindings', async () => {
+  it('lists only binding projects in name order', async () => {
     const { repository } = repositoryFor(
       [bind('u1', 'viewer', 'p2')],
-      [{ projectId: 'p1', userId: 'u1' }],
     );
 
     const projects = await repository.findProjects({ id: 'u1', globalAdmin: false });
 
-    expect(projects.map((project) => project.slug)).toEqual(['p1', 'p2']);
+    expect(projects.map((project) => project.slug)).toEqual(['p2']);
   });
 
   it('lists every non-deleted project for a projectId-null project binding', async () => {
@@ -196,7 +185,7 @@ describe('PrismaHomeRepository.findProjects — membership reads (US-002)', () =
       description: null,
       deletedAt: null,
     }));
-    const { repository } = repositoryFor([bind('u1', 'developer', null)], [], bulk);
+    const { repository } = repositoryFor([bind('u1', 'developer', null)], bulk);
 
     const projects = await repository.findProjects({ id: 'u1', globalAdmin: false });
 

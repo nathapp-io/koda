@@ -4,7 +4,7 @@ import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient, User } from '../generated/prisma/client';
 import { GlobalLock, lockGlobal } from '../common/utils/advisory-lock';
-import { MEMBERSHIP_READ_CAP } from '../permissions/legacy-membership.queries';
+import { MEMBERSHIP_READ_CAP } from '../permissions/membership.queries';
 import { GlobalRole, UserAdminRecord, UserAdminWrite, UserListFilters } from './domain/user-admin.domain';
 
 @Injectable()

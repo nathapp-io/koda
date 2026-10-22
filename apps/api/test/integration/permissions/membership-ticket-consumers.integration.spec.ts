@@ -123,7 +123,7 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
    * only source: the PROJECT-scope bindings it holds, `projectId`-null ones included. A GLOBAL-scope
    * binding (`member`, `owner`, `admin`, `agent`) is never a source — the admin and agent create
    * routes write one as a baseline for every principal, and
-   * `src/permissions/legacy-membership.queries.spec.ts` pins that it is no source ("a GLOBAL-scope
+   * `src/permissions/membership.queries.spec.ts` pins that it is no source ("a GLOBAL-scope
    * binding is never a source").
    */
   const projectBindingsOf = async (type: 'USER' | 'AGENT', id: string) =>
@@ -264,13 +264,16 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
     expect(offered).not.toContain(`user:${ids.disabledDev}`);
   }, TEST_TIMEOUT_MS);
 
-  it('AC-7: a user whose only source is a legacy ProjectMember row is still offered', async () => {
+  it('AC-7: a user whose only source is a legacy ProjectMember row is not offered', async () => {
     expect(await projectBindingsOf('USER', ids.legacyMember)).toEqual([]);
     expect(await prisma.projectMember.count({ where: { projectId, userId: ids.legacyMember } })).toBe(1);
 
     const offered = await offeredKeys();
 
-    expect(offered).toContain(`user:${ids.legacyMember}`);
+    expect(offered).not.toContain(`user:${ids.legacyMember}`);
+    const ticket = await createTicket('Legacy-only assignee refused');
+    await assignTicket(ticket.ref, { userId: ids.legacyMember }).expect(403);
+    expect((await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } })).assignedToUserId).toBeNull();
   }, TEST_TIMEOUT_MS);
 
   it('AC-8: the writer records the event for a user whose only source is a developer binding', async () => {

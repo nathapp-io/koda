@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaClient } from '../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { principalIdsWithAccess } from '../permissions/legacy-membership.queries';
+import { principalIdsWithAccess } from '../permissions/membership.queries';
 import type { NotificationDraft } from './notification.types';
 
 const unique = (values: readonly string[]): string[] => [...new Set(values)];
@@ -11,8 +11,7 @@ const unique = (values: readonly string[]): string[] => [...new Set(values)];
  * (agents are not users, so agent ids fall out here too); for a project-scoped draft, only a project
  * member or a global ADMIN.
  *
- * Permissions P1b US-005: "a project member" is the compatibility union over the **access sources** —
- * the legacy `ProjectMember` row and the PROJECT-scope bindings of the user, in the project and
+ * Permissions P1b US-005: "a project member" has PROJECT-scope bindings, in the project and
  * `projectId`-null — read once per distinct draft project through `principalIdsWithAccess`. Nothing
  * is cached; a draft with no project consults none of them.
  */

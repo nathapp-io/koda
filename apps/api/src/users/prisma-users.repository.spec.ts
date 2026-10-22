@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { createMockPrismaService } from '@nathapp/nestjs-prisma';
-import { MEMBERSHIP_READ_CAP } from '../permissions/legacy-membership.queries';
+import { MEMBERSHIP_READ_CAP } from '../permissions/membership.queries';
 import { PrismaUsersRepository } from './prisma-users.repository';
 
 function mockPrisma() {
