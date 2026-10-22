@@ -1,6 +1,6 @@
 import * as bcrypt from 'bcrypt';
 import { seedAdminUser } from '../../../prisma/seed-admin-data';
-import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
+import { ensureSystemRoles, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 import { resetDb } from '../../helpers/reset-db';
 
@@ -35,6 +35,53 @@ dbDescribe('production admin seed bindings', () => {
     expect(result).toEqual({ created: true, userId: user.id, roleKey: 'admin' });
     expect(await bindings(user.id)).toEqual([{ key: 'admin', projectId: null }, { key: 'member', projectId: null }]);
     expect(user.role).toBe('ADMIN');
+  });
+
+  it('F1: concurrent new emails create exactly one owner and one admin', async () => {
+    await ensureSystemRoles(db);
+    const results = await Promise.all([
+      seedAdminUser(db, input),
+      seedAdminUser(db, { ...input, email: 'second@koda.test' }),
+    ]);
+    expect(results.every(result => result.created)).toBe(true);
+    expect(results.flatMap(result => result.created ? [result.roleKey] : []).sort()).toEqual(['admin', 'owner']);
+    for (const result of results) {
+      if (!result.created) throw new Error('expected new user');
+      expect(await bindings(result.userId)).toEqual(
+        [{ key: 'member', projectId: null }, { key: result.roleKey, projectId: null }]
+          .sort((a, b) => a.key.localeCompare(b.key)),
+      );
+    }
+  });
+
+  it('F1: concurrent identical emails yield one creation and one no-op', async () => {
+    await ensureSystemRoles(db);
+    const results = await Promise.all([seedAdminUser(db, input), seedAdminUser(db, input)]);
+    expect(results.filter(result => result.created)).toHaveLength(1);
+    expect(results).toContainEqual({ created: false });
+    expect(await db.user.count()).toBe(1);
+    expect(await db.roleBinding.count()).toBe(2);
+  });
+
+  it('F1: a failed owner grant rolls back the user, baseline and system-role seed', async () => {
+    await db.$executeRawUnsafe(`CREATE FUNCTION seed_admin_reject_owner() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM "Role" WHERE id = NEW."roleId" AND key = 'owner') THEN
+          RAISE EXCEPTION 'seed grant failure';
+        END IF;
+        RETURN NEW;
+      END $$`);
+    try {
+      await db.$executeRawUnsafe(`CREATE TRIGGER seed_admin_reject_owner BEFORE INSERT ON "RoleBinding"
+        FOR EACH ROW EXECUTE FUNCTION seed_admin_reject_owner()`);
+      await expect(seedAdminUser(db, input)).rejects.toThrow('seed grant failure');
+      expect(await db.user.count()).toBe(0);
+      expect(await db.roleBinding.count()).toBe(0);
+      expect(await db.role.count()).toBe(0);
+    } finally {
+      await db.$executeRawUnsafe('DROP TRIGGER IF EXISTS seed_admin_reject_owner ON "RoleBinding"');
+      await db.$executeRawUnsafe('DROP FUNCTION seed_admin_reject_owner()');
+    }
   });
 
   it('AC-14/15: existing email returns false and writes nothing, even with system roles absent', async () => {

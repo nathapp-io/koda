@@ -1,4 +1,4 @@
-import type { PrismaClient } from '../../generated/prisma/client';
+import type { Prisma, PrismaClient } from '../../generated/prisma/client';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { SystemRoleSeeder } from '../system-role.seeder';
 import { SYSTEM_ROLES } from '../system-roles';
@@ -6,6 +6,8 @@ import type { PrincipalRef, RoleDomain, RoleRepository, RoleScope } from '../per
 
 /** The client the helpers write through: a PrismaClient, or `PrismaService.client`. */
 export type FixtureDb = PrismaClient;
+/** Role grants can join a caller-owned transaction without opening a nested transaction. */
+type RoleGrantDb = FixtureDb | Prisma.TransactionClient;
 
 const roleDomain = (row: Awaited<ReturnType<FixtureDb['role']['findUniqueOrThrow']>>): RoleDomain => ({
   id: row.id,
@@ -19,7 +21,7 @@ const roleDomain = (row: Awaited<ReturnType<FixtureDb['role']['findUniqueOrThrow
 });
 
 /** Seeds the eleven system roles exactly as an API boot does (idempotent). */
-export async function ensureSystemRoles(db: FixtureDb): Promise<void> {
+export async function ensureSystemRoles(db: RoleGrantDb): Promise<void> {
   const roles = {
     findOne: async ({ key }: Partial<RoleDomain>) => {
       if (key === undefined) return null;
@@ -34,7 +36,7 @@ export async function ensureSystemRoles(db: FixtureDb): Promise<void> {
 
 /** Bind a principal to a seeded role, returning an existing identical binding when present. */
 export async function grantRole(
-  db: FixtureDb,
+  db: RoleGrantDb,
   principal: PrincipalRef,
   roleKey: string,
   projectId?: string | null,
@@ -50,7 +52,7 @@ export async function grantRole(
   const where = { principalType: principal.type, principalId: principal.id, roleId: role.id, projectId: scopeId };
   const mirrorsAdmin = principal.type === 'USER' && scopeId === null && (roleKey === 'owner' || roleKey === 'admin');
   try {
-    return await db.$transaction(async (tx) => {
+    const write = async (tx: Prisma.TransactionClient) => {
       const existing = await tx.roleBinding.findFirst({ where, select: { id: true } });
       if (existing) {
         if (mirrorsAdmin) await tx.user.update({ where: { id: principal.id }, data: { role: 'ADMIN' } });
@@ -67,9 +69,11 @@ export async function grantRole(
       });
       if (mirrorsAdmin) await tx.user.update({ where: { id: principal.id }, data: { role: 'ADMIN' } });
       return binding;
-    });
+    };
+    return '$transaction' in db ? await db.$transaction(write) : await write(db);
   } catch (error) {
-    if (!isUniqueViolation(error, 'principalId')) throw error;
+    // A caller-owned transaction must roll back on failure; it cannot re-read an aborted transaction.
+    if (!('$transaction' in db) || !isUniqueViolation(error, 'principalId')) throw error;
     // A concurrent transaction inserted the same binding after our lookup. Its transaction also
     // commits the admin mirror; re-read outside our failed transaction to return its binding.
     const existing = await db.roleBinding.findFirst({ where, select: { id: true } });
@@ -79,7 +83,7 @@ export async function grantRole(
 }
 
 /** Grants the baseline role production writes when creating a principal. */
-export async function grantBaseline(db: FixtureDb, principal: PrincipalRef): Promise<{ id: string }> {
+export async function grantBaseline(db: RoleGrantDb, principal: PrincipalRef): Promise<{ id: string }> {
   return grantRole(db, principal, principal.type === 'USER' ? 'member' : 'agent');
 }
 
