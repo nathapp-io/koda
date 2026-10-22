@@ -131,6 +131,8 @@ export interface BindingWithRole {
 /** Filter of a binding list. `projectId: null` means global bindings only; undefined means any. */
 export interface BindingFilter {
   principal?: PrincipalRef;
+  /** Only bindings of this principal type, whatever principal they name (US-002). */
+  principalType?: PrincipalType;
   projectId?: string | null;
 }
 

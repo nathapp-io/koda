@@ -16,6 +16,10 @@
     "-2": "Permission entry {entry} cannot be granted by a role of this scope",
     "400": "Permission entry {entry} cannot be granted by a role of this scope"
   },
+  "scopeAndProject": {
+    "-2": "A global scope cannot be combined with a project id",
+    "400": "A global scope cannot be combined with a project id"
+  },
   "principalType": {
     "-2": "This role holds a permission the principal type cannot have",
     "400": "This role holds a permission the principal type cannot have"

@@ -150,6 +150,7 @@ export class InMemoryPermissionStore {
         this.calls.push(`page:${page.current}:${page.size}`);
         const rows = this.bindings
           .filter((b) => (filter.principal ? same(b, filter.principal) : true))
+          .filter((b) => (filter.principalType === undefined ? true : b.principalType === filter.principalType))
           .filter((b) => (filter.projectId === undefined ? true : b.projectId === filter.projectId))
           .map(withRole);
         const start = (page.current - 1) * page.size;

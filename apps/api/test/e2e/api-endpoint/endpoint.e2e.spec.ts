@@ -5120,6 +5120,53 @@ describeIntegration('API Integration Tests', () => {
     });
   });
 
+  // ─────────────────────────────────────────────────────────────────
+  // Permissions P1 US-002 — the permission catalog
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Permission catalog API (permissions P1 US-002)', () => {
+    let catalogOwnerToken: string;
+    let catalogMemberToken: string;
+    beforeAll(async () => {
+      // The surrounding lifecycle normally supplies these actors. A filtered run must create its
+      // own: the first registration bootstraps the Owner binding through the real API.
+      const register = async (email: string): Promise<string> => {
+        const res = await request(httpServer).post('/api/auth/register')
+          .send({ email, name: 'Catalog test user', password: 'Catalog1234!Aa' }).expect(201);
+        return body<{ accessToken: string }>(res).accessToken;
+      };
+      catalogOwnerToken = userAccessToken || await register('catalog-owner@koda.test');
+      catalogMemberToken = nonAdminUserAccessToken || await register('catalog-member@koda.test');
+    });
+    const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+    const catalog = (token: string) =>
+      request(httpServer).get('/api/permissions/catalog').set(auth(token));
+
+    it('GET /api/permissions/catalog — 200 lists the role keys sorted by key', async () => {
+      const res = await catalog(catalogOwnerToken).expect(200);
+      const entries = body<
+        Array<{ key: string; scope: string; risk: string; principals: string[]; ownable: boolean }>
+      >(res);
+
+      expect(entries.length).toBeGreaterThan(0);
+      expect(entries.map((entry) => entry.key)).toEqual([...entries.map((entry) => entry.key)].sort());
+      // Metadata the role editor needs, on a key whose values the catalog derivation fixes.
+      expect(entries.find((entry) => entry.key === 'ticket.delete')).toEqual({
+        key: 'ticket.delete',
+        scope: 'project',
+        risk: 'high',
+        principals: ['user', 'agent'],
+        ownable: false,
+      });
+    });
+
+    it('GET /api/permissions/catalog — 403 for a user whose only binding is member', async () => {
+      const res = await catalog(catalogMemberToken).expect(403);
+
+      refusal(res, 'permissions.403');
+    });
+  });
+
   // The sentinel runs last: the principals of this file are created across its tests, and it lists the
   // ones that still exist here. `temp-agent` is left out — the file deletes it.
   it('fixtures grant through bindings only', async () => {
