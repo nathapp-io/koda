@@ -114,13 +114,8 @@ describe('US-012: the create form has no roles field', () => {
     expect(source).not.toContain('availableRoles')
   })
 
-  test('shared AGENT_ROLES still enumerates DEVELOPER, REVIEWER, VERIFIER, TRIAGER', () => {
-    const rolesPath = join(webDir, 'lib', 'agent-roles.ts')
-    const rolesSource = readFileSync(rolesPath, 'utf-8')
-    expect(rolesSource).toContain('DEVELOPER')
-    expect(rolesSource).toContain('REVIEWER')
-    expect(rolesSource).toContain('VERIFIER')
-    expect(rolesSource).toContain('TRIAGER')
+  test('legacy agent role helper has been removed', () => {
+    expect(existsSync(join(webDir, 'lib', 'agent-roles.ts'))).toBe(false)
   })
 })
 
