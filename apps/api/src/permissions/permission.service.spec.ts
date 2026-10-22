@@ -245,6 +245,38 @@ describe('PermissionService', () => {
         [{ type: 'USER', id: 'u2' }, { projectId: 'p1' }],
       ]);
     });
+    it('F1: bounds concurrent effectiveKeys reads across multiple chunks and preserves sorted holders', async () => {
+      const { subject, bindings } = setup();
+      const candidates = Array.from({ length: 37 }, (_, i) => `u${String(i).padStart(2, '0')}`);
+      bindings.findCandidatePrincipalIds.mockResolvedValue(candidates);
+      let active = 0;
+      let peak = 0;
+      const effective = vi.spyOn(subject, 'effectiveKeys').mockImplementation(async (ref) => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await Promise.resolve();
+        active -= 1;
+        return new Set(Number(ref.id.slice(1)) % 2 === 0 ? ['project.read'] : []);
+      });
+      expect(await subject.principalIdsWithKey('USER', 'p1', 'project.read')).toEqual(
+        candidates.filter((_, i) => i % 2 === 0),
+      );
+      expect(peak).toBeLessThanOrEqual(10);
+      expect(active).toBe(0);
+      expect(effective).toHaveBeenCalledTimes(candidates.length);
+    });
+    it('F1: a later chunk failure rejects unchanged without starting further chunks', async () => {
+      const { subject, bindings } = setup();
+      bindings.findCandidatePrincipalIds.mockResolvedValue(Array.from({ length: 37 }, (_, i) => `u${i}`));
+      const error = new Error('later candidate read');
+      const effective = vi.spyOn(subject, 'effectiveKeys').mockImplementation(async (ref) => {
+        if (ref.id === 'u11') throw error;
+        return new Set(['project.read']);
+      });
+      await expect(subject.principalIdsWithKey('USER', 'p1', 'project.read')).rejects.toBe(error);
+      expect(effective).toHaveBeenCalledTimes(20);
+      expect(effective).not.toHaveBeenCalledWith({ type: 'USER', id: 'u20' }, { projectId: 'p1' });
+    });
     it('AC-10: propagates the original candidate effectiveKeys error without a partial answer', async () => {
       const { subject } = setup();
       const error = new Error('candidate read');

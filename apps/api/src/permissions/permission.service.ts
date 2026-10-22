@@ -18,6 +18,8 @@ const OWN_SUFFIX = '.own';
 const APPROVAL_DECIDE = 'approval.decide';
 const APPROVAL_DECIDE_NARROWED_PREFIX = 'approval.decide@';
 const GLOBAL_ADMIN_ROLE_KEYS: readonly string[] = ['owner', 'admin'];
+/** Bound database pressure from cold-cache principal enumeration (two types per assignee search). */
+const PRINCIPAL_KEY_READ_CONCURRENCY = 10;
 export type PermissionScope = { projectId: string } | 'global';
 
 export interface PermissionContext {
@@ -120,10 +122,17 @@ export class PermissionService {
       }
     }).map((role) => role.id);
     const candidates = await this.bindings.findCandidatePrincipalIds(type, projectId, globalRoleIds);
-    const held = await Promise.all(candidates.map(async (id) =>
-      (await this.effectiveKeys({ type, id }, { projectId })).has(key) ? id : null,
-    ));
-    return held.filter((id): id is string => id !== null);
+    const held: string[] = [];
+    // Candidates are membership-capped. Finish each small chunk before starting another so a
+    // cold cache cannot fan thousands of concurrent reads out to the database. Keep candidate order.
+    for (let offset = 0; offset < candidates.length; offset += PRINCIPAL_KEY_READ_CONCURRENCY) {
+      const chunk = candidates.slice(offset, offset + PRINCIPAL_KEY_READ_CONCURRENCY);
+      const matches = await Promise.all(chunk.map(async (id) =>
+        (await this.effectiveKeys({ type, id }, { projectId })).has(key) ? id : null,
+      ));
+      held.push(...matches.filter((id): id is string => id !== null));
+    }
+    return held;
   }
 
   private async computeKeys(principal: PrincipalRef, projectId: string | null): Promise<Set<string>> {
