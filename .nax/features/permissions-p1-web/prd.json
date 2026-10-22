@@ -3,7 +3,7 @@
   "feature": "permissions-p1-web",
   "branchName": "feat/permissions-p1-web",
   "createdAt": "2026-07-14T00:00:00.000Z",
-  "updatedAt": "2026-10-22T11:44:28.458Z",
+  "updatedAt": "2026-10-22T11:57:02.931Z",
   "userStories": [
     {
       "id": "US-001",
@@ -1409,8 +1409,8 @@
         "US-006",
         "US-013"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -1422,7 +1422,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.4400000000000004,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-22T11:44:32.671Z"
+        }
       },
       "contextFiles": [
         "apps/web/components/ProjectInvitesPanel.vue",
@@ -1459,7 +1471,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "90b0338b29117a89b2b8445f832b7db609516e18"
     },
     {
       "id": "US-015",
