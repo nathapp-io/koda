@@ -9,6 +9,7 @@ import { VcsIssue } from './types';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
+import { runAsSystemWriter } from '../action-context/action-context';
 
 /**
  * GitHub webhook event payload (issues)
@@ -165,9 +166,20 @@ export class VcsWebhookService implements OnModuleDestroy {
   }
 
   /**
-   * Handle GitHub webhook event
+   * Handle GitHub webhook event.
+   *
+   * Permissions P2 US-005: the route is public, so the request enters as `SYSTEM/anonymous`; the intake is the
+   * system's own write, so it runs as `SYSTEM/vcs` and overrides that context.
    */
-  async handleWebhook(
+  handleWebhook(
+    connection: VcsConnectionWithProjectDomain,
+    event: string,
+    payload: GitHubWebhookPayload,
+  ): Promise<WebhookHandleResult> {
+    return runAsSystemWriter(this, () => this.routeWebhook(connection, event, payload));
+  }
+
+  private async routeWebhook(
     connection: VcsConnectionWithProjectDomain,
     event: string,
     payload: GitHubWebhookPayload,

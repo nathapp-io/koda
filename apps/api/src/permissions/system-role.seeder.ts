@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { runAsSystem } from '../action-context/action-context';
 import { expandEntries } from './entry-matcher';
 import type { RoleDomain, RoleRepository, RoleSeed } from './permissions.types';
 import { ROLE_REPOSITORY, SYSTEM_ROLES_SEED } from './permissions.tokens';
@@ -27,7 +28,12 @@ export class SystemRoleSeeder implements OnApplicationBootstrap {
     @Inject(ROLE_REPOSITORY) private readonly roles: RoleRepository,
   ) {}
 
+  /** Permissions P2 US-005: the boot hook is the background entry, so the seed writes as `seed`. */
   async onApplicationBootstrap(): Promise<void> {
+    await runAsSystem('seed', () => this.seedAll());
+  }
+
+  private async seedAll(): Promise<void> {
     for (const seed of this.seeds) this.validate(seed);
     for (const seed of this.seeds) await this.seedRole(seed);
   }

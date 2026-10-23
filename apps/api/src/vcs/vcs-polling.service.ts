@@ -8,6 +8,7 @@ import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
+import { runAsSystemWriter } from '../action-context/action-context';
 import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES } from './providers/pagination';
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : 'Unknown error');
@@ -108,8 +109,15 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
     this.schedulePolling(connection);
   }
 
-  /** One polling tick. Never rejects: an interval callback has no caller to catch it. */
-  private async tick(connectionId: string): Promise<void> {
+  /**
+   * One polling tick. Never rejects: an interval callback has no caller to catch it. Permissions P2 US-005:
+   * the interval callback is the background entry, so the tick runs as `vcs`.
+   */
+  private tick(connectionId: string): Promise<void> {
+    return runAsSystemWriter(this, () => this.pollConnection(connectionId));
+  }
+
+  private async pollConnection(connectionId: string): Promise<void> {
     try {
       const connection = await this.vcsRepo.findVcsConnectionById(connectionId);
       if (!connection || !connection.isActive || connection.syncMode !== 'polling') {

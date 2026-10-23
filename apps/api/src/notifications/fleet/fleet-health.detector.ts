@@ -5,6 +5,7 @@ import { OutboxService } from '@nathapp/nestjs-outbox';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { isRunnerOnline } from '../../fleet/common/runner-online';
 import { readCapabilities } from '../../fleet/dashboard/dashboard-view';
+import { runAsSystemWriter } from '../../action-context/action-context';
 import { FleetHealthAlertsRepository } from './fleet-health-alerts.repository';
 import { planHealthChanges } from './fleet-health-plan';
 import { FLEET_HEALTH_ALERT, FleetHealthAlertPayload } from './fleet-notification-events';
@@ -45,7 +46,12 @@ export class FleetHealthDetector implements OnModuleInit, OnModuleDestroy {
     this.timer = null;
   }
 
-  async detect(now = new Date()): Promise<{ opened: number; closed: number }> {
+  /** Permissions P2 US-005: the interval callback is the background entry; the detect runs as `health`. */
+  detect(now = new Date()): Promise<{ opened: number; closed: number }> {
+    return runAsSystemWriter(this, () => this.runDetect(now));
+  }
+
+  private async runDetect(now: Date): Promise<{ opened: number; closed: number }> {
     const [rows, openAlerts] = await Promise.all([this.repo.findRunners(), this.repo.findOpen()]);
     const plan = planHealthChanges({
       runners: rows.map((r) => ({

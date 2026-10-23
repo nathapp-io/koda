@@ -1,5 +1,6 @@
-import type { Mock } from 'vitest';
+import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
+import { currentContext, runWithActionContext, type ActionContext } from '../action-context/action-context';
 import { VcsWebhookService, GitHubWebhookPayload, WebhookHandleResult } from './vcs-webhook.service';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
@@ -19,7 +20,7 @@ interface SharedEnqueuedEvent {
   createdAt: number;
 }
 
-function createMockVcsRepository(sharedEnqueuedEvents?: SharedEnqueuedEvent[]): IVcsRepository {
+function createMockVcsRepository(sharedEnqueuedEvents?: SharedEnqueuedEvent[]): Mocked<IVcsRepository> {
   return {
     findProjectById: vi.fn().mockResolvedValue(null),
     findVcsConnectionByProjectId: vi.fn().mockResolvedValue(null),
@@ -146,11 +147,12 @@ function resolveOutboxEvent(overrides?: Partial<OutboxEventDomain>): OutboxEvent
 function buildTestingModule(
   recordMock: Mock,
   sharedEnqueuedEvents?: SharedEnqueuedEvent[],
+  repo: IVcsRepository = createMockVcsRepository(sharedEnqueuedEvents),
 ) {
   return Test.createTestingModule({
     providers: [
       VcsWebhookService,
-      { provide: VCS_REPOSITORY, useValue: createMockVcsRepository(sharedEnqueuedEvents) },
+      { provide: VCS_REPOSITORY, useValue: repo },
       { provide: VcsSyncService, useValue: createMockSyncService() },
       { provide: VcsPrSyncService, useValue: createMockPrSyncService() },
       { provide: NathappOutboxService, useValue: createMockOutboxService(recordMock) },
@@ -453,5 +455,63 @@ describe('VcsWebhookService — cross-instance deduplication', () => {
     expect(record2).toHaveBeenCalledTimes(1);
 
     nowSpy.mockRestore();
+  });
+});
+
+/**
+ * Permissions P2 US-005: the intake is a public request, so it enters as `SYSTEM/anonymous` (US-002). The
+ * intake is the system's own write, so `handleWebhook` overrides that with `SYSTEM/vcs`.
+ */
+describe('VcsWebhookService — the intake runs as SYSTEM/vcs (P2 US-005)', () => {
+  const anonymousIntake = <T>(fn: () => T): T =>
+    runWithActionContext({ actor: { type: 'SYSTEM', id: 'anonymous' }, origin: 'rest' }, fn);
+
+  function openedPayload(): GitHubWebhookPayload {
+    return {
+      action: 'opened',
+      pull_request: {
+        number: 7,
+        title: 'feat: a change',
+        body: null,
+        user: { login: 'dev' },
+        html_url: 'https://github.com/owner/repo/pull/7',
+        state: 'open',
+        draft: false,
+        merged: false,
+        merged_at: null,
+        merged_by: null,
+        base: { ref: 'main', repo: { full_name: 'owner/repo' } },
+        head: { ref: 'feat/a-change', repo: { full_name: 'owner/repo' } },
+      },
+    };
+  }
+
+  it('AC-4: a pull_request opened that matches a link writes the PR state as SYSTEM/vcs', async () => {
+    const repo = createMockVcsRepository();
+    repo.findTicketLinkForConnectionPr.mockResolvedValue({
+      id: 'link-1',
+      ticketId: 't-1',
+      prNumber: 7,
+      prState: 'open',
+      url: 'https://github.com/owner/repo/pull/7',
+      externalRef: null,
+    });
+    const seen: Array<ActionContext | undefined> = [];
+    repo.updateTicketLinkWithPrState.mockImplementation(async () => {
+      seen.push(currentContext());
+      return 'updated';
+    });
+    const record = vi.fn<(...args: [OutboxEventInput]) => Promise<OutboxEventDomain>>().mockResolvedValue(resolveOutboxEvent());
+    const module = await buildTestingModule(record, undefined, repo);
+    const service = module.get<VcsWebhookService>(VcsWebhookService);
+
+    try {
+      await anonymousIntake(() => service.handleWebhook(createMockConnection(), 'pull_request', openedPayload()));
+    } finally {
+      await module.close();
+    }
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'vcs' });
   });
 });

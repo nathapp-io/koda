@@ -7,6 +7,7 @@ import { EmailAvailability } from './email-availability';
 import { EmailContentBuilder } from './email-content.builder';
 import { KODA_TENANT_ID } from './koda-tenant';
 import { EmailScheduleService } from './schedule/email-schedule.service';
+import { runAsSystemWriter } from '../action-context/action-context';
 import { EmailScheduleRow } from './schedule/email-schedule.types';
 
 export type SendOutcome = 'SENT' | 'FAILED' | 'RETRY';
@@ -60,8 +61,15 @@ export class EmailDispatcher implements OnModuleInit, OnModuleDestroy {
   /**
    * The scheduled entry point: a tick that is still in flight suppresses the next interval, so two
    * scheduled ticks never overlap. A failure of the tick itself (claim/close) is logged, not thrown.
+   *
+   * Permissions P2 US-005: this is the background entry, so it runs as `email`; a direct `tick`/`sendOne`
+   * call keeps whatever context its caller had.
    */
   async runScheduledTick(now = new Date()): Promise<void> {
+    await runAsSystemWriter(this, () => this.tickGuarded(now));
+  }
+
+  private async tickGuarded(now: Date): Promise<void> {
     if (this.ticking) return;
     this.ticking = true;
     try {

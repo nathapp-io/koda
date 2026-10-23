@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { currentContext, type ActionContext } from '../../../action-context/action-context';
 import { ThreadIngestBootstrap } from './thread-ingest.bootstrap';
 import type { UnfoldedStream, UnfoldedStreamSource } from './domain/thread-ingest.domain';
 import type { ThreadIngestor } from './thread-ingestor';
@@ -56,5 +57,21 @@ describe('ThreadIngestBootstrap (US-007)', () => {
     const { bootstrap, ingestor } = build({ source: { findUnfolded: vi.fn(async () => []) } });
     await bootstrap.onApplicationBootstrap();
     expect(ingestor.catchUp).not.toHaveBeenCalled();
+  });
+
+  /** Permissions P2 US-005: the boot hook is the background entry; the catch-up folds as `thread`. */
+  it('AC-10: the boot catch-up folds each unfolded stream as SYSTEM/thread', async () => {
+    const seen: Array<ActionContext | undefined> = [];
+    const { bootstrap } = build({
+      catchUp: vi.fn(async () => {
+        seen.push(currentContext());
+      }) as unknown as ThreadIngestor['catchUp'],
+      source: { findUnfolded: vi.fn(async () => [{ jobId: 'J1', leaseEpoch: 1 }]) },
+    });
+
+    await bootstrap.onApplicationBootstrap();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'thread' });
   });
 });

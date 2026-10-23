@@ -2,6 +2,7 @@ import { SystemWriter } from '../permissions/system-writer.decorator';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
+import { runAsSystemWriter } from '../action-context/action-context';
 import { INotificationsConfig, NOTIFICATIONS_CFG } from '../config/notifications.config';
 import { NotificationsRepository } from './notifications.repository';
 import { FleetHealthAlertsRepository } from './fleet/fleet-health-alerts.repository';
@@ -26,9 +27,10 @@ export class NotificationRetentionProcessor {
     private readonly healthAlerts: FleetHealthAlertsRepository,
   ) {}
 
+  /** Permissions P2 US-005: the cron method is the background entry; the purge runs as `notification`. */
   @Cron('30 4 * * *')
   async scheduledPurge(): Promise<void> {
-    await this.purge(new Date());
+    await runAsSystemWriter(this, () => this.purge(new Date()));
   }
 
   /** Each purge step logs and swallows its own failure, so one failing step never skips the next (Part D adds one). */
