@@ -208,7 +208,6 @@ describeIntegration('notification, mention and email consumers read bindings (US
 
   it('AC-2: deliver inserts nothing for an enabled non-admin with no source, and one for an enabled global ADMIN', async () => {
     await expectNoSource(ids.outsider as string);
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: ids.admin } })).role).toBe('ADMIN');
     await expectNoSource(ids.admin as string);
 
     const inserted = await writer.deliver([draft(ids.outsider as string), draft(ids.admin as string)]);

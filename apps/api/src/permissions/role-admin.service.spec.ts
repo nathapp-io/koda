@@ -950,13 +950,13 @@ describe('RoleAdminService', () => {
 
     describe('removeBinding', () => {
       it('AC-13/AC-14 (unit): an owner removes another user\'s global admin binding', async () => {
-        store.addUser('target-1', 'ADMIN');
+        store.addUser('target-1');
         const binding = store.bind(USER('target-1'), 'admin', null);
 
         await service.removeBinding(owner, binding.id);
 
         expect(store.bindings.some((entry) => entry.id === binding.id)).toBe(false);
-        expect(store.users.get('target-1')?.role).toBe('MEMBER');
+        expect(store.users.get('target-1')?.tokenVersion).toBe(1);
       });
 
       it('AC-15 (unit): with a second owner binding an owner may remove it', async () => {

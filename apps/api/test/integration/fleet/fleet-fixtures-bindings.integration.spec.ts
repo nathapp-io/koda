@@ -78,7 +78,6 @@ describeIntegration('fleet fixtures grant through bindings (PG, US-002)', () => 
       where: { principalType: 'USER', principalId: base.adminId, projectId: null, role: { key: 'admin' } },
     });
     expect(admin).not.toBeNull();
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: base.adminId } })).role).toBe('ADMIN');
   });
 
   it('AC-4: a rostered fixture agent holds its project roles as bindings and nothing else', async () => {

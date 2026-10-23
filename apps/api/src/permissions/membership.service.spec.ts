@@ -8,7 +8,7 @@ import { FakeCacheManager, InMemoryPermissionStore } from './test-helpers/in-mem
 
 /**
  * US-003 — MembershipService rules without a database: idempotent create, owner lock and last-owner
- * protection, legacy User.role mirroring with token revocation, cache invalidation. The integration
+ * protection, binding-derived token revocation, cache invalidation. The integration
  * spec runs the concurrency criteria against Postgres.
  */
 
@@ -137,25 +137,26 @@ describe('MembershipService', () => {
       expect(store.calls).not.toContain('lock-owner');
     });
 
-    it('AC-18/19: a global admin binding sets User.role ADMIN and bumps the token version', async () => {
+    it('AC-18/19: a global admin binding promotes the derived role and bumps the token version', async () => {
       await service.createBinding({ principal: USER('u1'), roleKey: 'admin', projectId: null }, BY);
-      expect(store.users.get('u1')).toMatchObject({ role: 'ADMIN', tokenVersion: 1 });
+      expect(store.users.get('u1')).toMatchObject({ tokenVersion: 1 });
       expect(await service.isGlobalAdmin('u1')).toBe(true);
       expect(cache.invalidations).toEqual(
         expect.arrayContaining(['USER:u1#tag', 'user-auth-state|u1', 'permissions#tag']),
       );
     });
 
-    it('does not touch User.role for a project binding, an agent or another global role', async () => {
+    it('does not revoke tokens for a project binding, an agent or another global role', async () => {
       await service.createBinding({ principal: USER('u1'), roleKey: 'developer', projectId: 'p1' }, BY);
       await service.createBinding({ principal: USER('u1'), roleKey: 'member', projectId: null }, BY);
       await service.createBinding({ principal: { type: 'AGENT', id: 'a1' }, roleKey: 'agent', projectId: null }, BY);
-      expect(store.users.get('u1')).toMatchObject({ role: 'MEMBER', tokenVersion: 0 });
+      expect(store.users.get('u1')).toMatchObject({ tokenVersion: 0 });
     });
 
     it('does not bump the token version when the user is already ADMIN', async () => {
-      store.addUser('root', 'ADMIN');
-      store.addUser('root2', 'ADMIN');
+      store.addUser('root');
+      store.addUser('root2');
+      store.bind(USER('root'), 'admin');
       await service.createBinding({ principal: USER('root'), roleKey: 'owner', projectId: null }, BY);
       expect(store.users.get('root')?.tokenVersion).toBe(0);
       expect(cache.invalidations).not.toContain('USER:root#tag');
@@ -230,7 +231,7 @@ describe('MembershipService', () => {
         { principal: USER('u1'), roleKey: 'admin', projectId: null },
         BY,
       );
-      expect(store.users.get('u1')?.role).toBe('ADMIN');
+      expect(await service.isGlobalAdmin('u1')).toBe(true);
       cache.invalidations.length = 0;
 
       // The row was read, then a concurrent delete removed it before this transaction's statement:
@@ -251,13 +252,13 @@ describe('MembershipService', () => {
       expect(error).toBeInstanceOf(NotFoundAppException);
       expect(JSON.stringify(error)).toContain('permissions.bindingNotFound');
       // Losing the delete changes nothing: no demotion, no token revocation, no cache invalidation.
-      expect(store.users.get('u1')?.role).toBe('ADMIN');
+      expect(await service.isGlobalAdmin('u1')).toBe(true);
       expect(store.users.get('u1')?.tokenVersion).toBe(1);
       expect(cache.invalidations).toEqual([]);
     });
 
-    it('B2: locks the binding\'s user before deciding the legacy role', async () => {
-      store.addUser('admin-1', 'ADMIN');
+    it('B2: locks the binding\'s user before deciding token revocation', async () => {
+      store.addUser('admin-1');
       const binding = await service.createBinding(
         { principal: USER('admin-1'), roleKey: 'admin', projectId: null },
         BY,
@@ -291,7 +292,7 @@ describe('MembershipService', () => {
       const view = await service.createBinding({ principal: USER('u1'), roleKey: 'admin', projectId: null }, BY);
       cache.invalidations.length = 0;
       await service.removeBinding(view.id);
-      expect(store.users.get('u1')).toMatchObject({ role: 'MEMBER', tokenVersion: 2 });
+      expect(store.users.get('u1')).toMatchObject({ tokenVersion: 2 });
       expect(await service.isGlobalAdmin('u1')).toBe(false);
       expect(cache.invalidations).toEqual(expect.arrayContaining(['USER:u1#tag', 'user-auth-state|u1']));
     });
@@ -300,7 +301,7 @@ describe('MembershipService', () => {
       const admin = await service.createBinding({ principal: USER('u1'), roleKey: 'admin', projectId: null }, BY);
       await service.createBinding({ principal: USER('u1'), roleKey: 'owner', projectId: null }, BY);
       await service.removeBinding(admin.id);
-      expect(store.users.get('u1')?.role).toBe('ADMIN');
+      expect(await service.isGlobalAdmin('u1')).toBe(true);
     });
 
     it('AC-22/23: refuses to remove the last enabled owner binding with permissions.ownerLocked', async () => {
@@ -313,7 +314,7 @@ describe('MembershipService', () => {
     });
 
     it('counts only owners that are not disabled', async () => {
-      store.addUser('off', 'ADMIN', true);
+      store.addUser('off', true);
       const live = await service.createBinding({ principal: USER('u1'), roleKey: 'owner', projectId: null }, BY);
       await service.createBinding({ principal: USER('off'), roleKey: 'owner', projectId: null }, BY);
       await expect(service.removeBinding(live.id)).rejects.toBeInstanceOf(ForbiddenAppException);
@@ -383,7 +384,7 @@ describe('MembershipService', () => {
 
       expect(await service.removeProjectBindings(USER('u1'), 'p1')).toBe(1);
 
-      expect(store.users.get('u1')).toMatchObject({ role: 'ADMIN', tokenVersion: 1 });
+      expect(store.users.get('u1')).toMatchObject({ tokenVersion: 1 });
       expect(cache.invalidations).not.toContain('USER:u1#tag');
     });
 
@@ -446,7 +447,7 @@ describe('MembershipService', () => {
     it('true grants the admin role through createBinding with the supplied granter', async () => {
       await service.setGlobalAdmin('u1', true, { type: 'USER', id: 'boss' });
       expect(store.bindings[0]).toMatchObject({ grantedByType: 'USER', grantedById: 'boss' });
-      expect(store.users.get('u1')?.role).toBe('ADMIN');
+      expect(await service.isGlobalAdmin('u1')).toBe(true);
     });
 
     it('false removes only the admin binding and never an owner binding', async () => {
@@ -454,19 +455,19 @@ describe('MembershipService', () => {
       await service.createBinding({ principal: USER('u1'), roleKey: 'admin', projectId: null }, BY);
       await service.setGlobalAdmin('u1', false, BY);
       expect(store.bindings.map((b) => b.roleId)).toEqual([store.roleByKey('owner').id]);
-      expect(store.users.get('u1')?.role).toBe('ADMIN');
+      expect(await service.isGlobalAdmin('u1')).toBe(true);
     });
 
-    it('false demotes a legacy admin who held no binding at all, revoking tokens', async () => {
-      store.addUser('legacy', 'ADMIN');
+    it('false does not revoke a user who held no binding at all', async () => {
+      store.addUser('legacy');
       await service.setGlobalAdmin('legacy', false, BY);
-      expect(store.users.get('legacy')).toMatchObject({ role: 'MEMBER', tokenVersion: 1 });
-      expect(cache.invalidations).toEqual(expect.arrayContaining(['USER:legacy#tag', 'user-auth-state|legacy']));
+      expect(store.users.get('legacy')).toMatchObject({ tokenVersion: 0 });
+      expect(cache.invalidations).toEqual([]);
     });
 
     it('false for a member without a binding writes nothing', async () => {
       await service.setGlobalAdmin('u1', false, BY);
-      expect(store.users.get('u1')).toMatchObject({ role: 'MEMBER', tokenVersion: 0 });
+      expect(store.users.get('u1')).toMatchObject({ tokenVersion: 0 });
     });
 
     it('false for an unknown user is 404', async () => {
@@ -475,9 +476,9 @@ describe('MembershipService', () => {
   });
 
   describe('isGlobalAdmin', () => {
-    it('uses owner or admin bindings, not legacy User.role ADMIN', async () => {
+    it('uses owner or admin bindings, not account state', async () => {
       expect(await service.isGlobalAdmin('u1')).toBe(false);
-      store.addUser('legacy', 'ADMIN');
+      store.addUser('legacy');
       expect(await service.isGlobalAdmin('legacy')).toBe(false);
       store.bind(USER('u2'), 'owner', null);
       expect(await service.isGlobalAdmin('u2')).toBe(true);
@@ -567,7 +568,7 @@ describe('MembershipService', () => {
       await service.createBinding({ principal: USER('u1'), roleKey: 'developer', projectId: 'p1' }, BY);
       await service.removeAllBindings(USER('u1'));
       expect(store.bindings.filter((b) => b.principalId === 'u1')).toHaveLength(0);
-      expect(store.users.get('u1')?.role).toBe('MEMBER');
+      expect(await service.isGlobalAdmin('u1')).toBe(false);
     });
 
     it('refuses to remove the last enabled owner binding', async () => {
@@ -601,7 +602,7 @@ describe('MembershipService', () => {
       await service.bindBaseline(USER('u1'));
       const restore = grantBeforeTheFirstLock(() => {
         store.bind(USER('u1'), 'admin', null);
-        store.users.set('u1', { role: 'ADMIN', disabled: false, tokenVersion: 1 });
+        store.users.set('u1', { disabled: false, tokenVersion: 1 });
       });
 
       try {
@@ -611,10 +612,10 @@ describe('MembershipService', () => {
       }
 
       // The snapshot is read under the locks, so the committed admin binding is part of what is deleted
-      // and of the legacy-role mirror: no binding survives and no legacy ADMIN is left behind.
+      // and of the derived-role flip: no binding survives and no legacy ADMIN is left behind.
       expect(store.calls.indexOf('lock-user:u1')).toBeLessThan(store.calls.indexOf('read-bindings'));
       expect(store.bindings.filter((b) => b.principalId === 'u1')).toHaveLength(0);
-      expect(store.users.get('u1')).toMatchObject({ role: 'MEMBER', tokenVersion: 2 });
+      expect(store.users.get('u1')).toMatchObject({ tokenVersion: 2 });
       expect(cache.invalidations).toEqual(expect.arrayContaining(['USER:u1#tag', 'user-auth-state|u1']));
     });
 

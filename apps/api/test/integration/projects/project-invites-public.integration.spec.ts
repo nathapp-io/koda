@@ -216,7 +216,6 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
       where: { email: { equals: row.email, mode: 'insensitive' } },
     });
     expect(users).toHaveLength(1);
-    expect(users[0].role).toBe('MEMBER');
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     expect(await require('bcrypt').compare(TEST_PASSWORD, users[0].passwordHash)).toBe(true);
   });

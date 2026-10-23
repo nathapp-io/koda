@@ -128,7 +128,7 @@ describeIntegration('permission fixture bindings (PG)', () => {
     expect(results[0]?.id).toBe(results[1]?.id);
     expect(await db.roleBinding.count({ where: { principalId: u.id, projectId: p.id } })).toBe(1);
   });
-  it('F3: failed admin mirror rolls back a new binding and repairs the mirror for an existing one', async () => {
+  it('F3: failed admin grant rolls back a new binding; an existing grant stays idempotent', async () => {
     await expect(grantRole(db, ref('missing-user'), 'admin')).rejects.toThrow();
     expect(await db.roleBinding.count({ where: { principalId: 'missing-user' } })).toBe(0);
 
@@ -137,19 +137,19 @@ describeIntegration('permission fixture bindings (PG)', () => {
     await db.roleBinding.create({ data: { principalType: 'USER', principalId: u.id, roleId: adminRole.id, grantedByType: 'SYSTEM', grantedById: 'test' } });
     await db.user.update({ where: { id: u.id }, data: { role: 'MEMBER' } });
     await grantRole(db, ref(u.id), 'admin');
-    expect((await db.user.findUniqueOrThrow({ where: { id: u.id } })).role).toBe('ADMIN');
+    expect(await db.roleBinding.count({ where: { principalType: 'USER', principalId: u.id } })).toBe(1);
   });
   it('AC-6: unknown role rejects without creating a binding', async () => {
     const u = await user(); const p = await project();
     await expect(grantRole(db, ref(u.id), 'no-such-role', p.id)).rejects.toThrow('no role no-such-role');
     expect(await db.roleBinding.count({ where: { principalId: u.id } })).toBe(0);
   });
-  it('AC-7: mirrors only global admin-role grants to User.role', async () => {
+  it('AC-7: grants global admin and project developer bindings', async () => {
     const admin = await user(); const developer = await user(); const p = await project();
     await grantRole(db, ref(admin.id), 'admin');
     await grantRole(db, ref(developer.id), 'developer', p.id);
-    expect((await db.user.findUniqueOrThrow({ where: { id: admin.id } })).role).toBe('ADMIN');
-    expect((await db.user.findUniqueOrThrow({ where: { id: developer.id } })).role).toBe('MEMBER');
+    expect(await db.roleBinding.count({ where: { principalType: 'USER', principalId: admin.id, projectId: null, role: { key: 'admin' } } })).toBe(1);
+    expect(await db.roleBinding.count({ where: { principalType: 'USER', principalId: developer.id, projectId: p.id, role: { key: 'developer' } } })).toBe(1);
   });
   it('AC-8: grants user and agent baselines idempotently', async () => {
     const u = await user(); const a = await agent();

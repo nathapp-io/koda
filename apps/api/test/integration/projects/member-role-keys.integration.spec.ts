@@ -253,8 +253,6 @@ describeIntegration('member role keys (US-004)', () => {
       .send({ email: 'no-role@koda.test', name: 'No role', password: TEST_PASSWORD });
 
     expect(res.status).toBe(201);
-    const stored = await db.user.findFirstOrThrow({ where: { email: 'no-role@koda.test' }, select: { role: true } });
-    expect(stored.role).toBe('MEMBER');
     // No global admin binding was granted either.
     const globalAdmins = await db.roleBinding.count({
       where: {

@@ -47,7 +47,7 @@ describeIntegration('registration closed (default)', () => {
     expect(statuses).toEqual([201, 403, 403, 403, 403]);
     const users = await prisma.client.user.findMany();
     expect(users).toHaveLength(1);
-    expect(users[0].role).toBe('ADMIN');
+    expect(await prisma.client.roleBinding.count({ where: { principalType: 'USER', principalId: users[0].id, projectId: null, role: { key: 'owner' } } })).toBe(1);
   });
 
   it('reports closed once a user exists', async () => {
@@ -75,6 +75,10 @@ describeIntegration('registration open (REGISTRATION_ENABLED=true)', () => {
 
     expect(results.map((r) => r.status)).toEqual([201, 201, 201, 201, 201]);
     expect(await prisma.client.user.count()).toBe(5);
-    expect(await prisma.client.user.count({ where: { role: 'ADMIN' } })).toBe(1);
+    const adminBindings = await prisma.client.roleBinding.findMany({
+      where: { principalType: 'USER', projectId: null, role: { key: { in: ['owner', 'admin'] } } },
+      select: { principalId: true },
+    });
+    expect(await prisma.client.user.count({ where: { disabled: false, id: { in: adminBindings.map(row => row.principalId) } } })).toBe(1);
   });
 });

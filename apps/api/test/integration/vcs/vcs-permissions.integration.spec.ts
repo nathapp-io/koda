@@ -51,7 +51,6 @@ describeIntegration('VCS permission keys over HTTP (binding-only principals)', (
         .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
       tokens[who] = await loginToken(server, `${who}@koda.test`);
       const user = await prisma.user.findUniqueOrThrow({ where: { email: `${who}@koda.test` } });
-      expect(user.role).toBe('MEMBER');
       // User creation also grants the global member role; remove it so this
       // fixture exercises only the explicit project binding (or no binding).
       await prisma.roleBinding.deleteMany({ where: { principalType: 'USER', principalId: user.id } });

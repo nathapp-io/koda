@@ -27,7 +27,7 @@ import type {
   RoleBindingDomain,
   RoleBindingRepository,
   RoleScope,
-  UserLegacyState,
+  UserAccountState,
 } from './permissions.types';
 
 type BindingWithRoleModel = RoleBindingModel & { role: RoleModel };
@@ -351,22 +351,19 @@ export class PrismaRoleBindingRepository
     });
   }
 
-  async findUserState(userId: string): Promise<UserLegacyState | null> {
+  async findUserState(userId: string): Promise<UserAccountState | null> {
     const user = await this.db.user.findUnique({
       where: { id: userId },
-      select: { role: true, disabled: true },
+      select: { disabled: true },
     });
-    return user ? { role: user.role as UserLegacyState['role'], disabled: user.disabled } : null;
+    return user ? { disabled: user.disabled } : null;
   }
 
-  /**
-   * Sets the legacy `User.role` and, in the same statement, bumps `tokenVersion` so the user's tokens
-   * stop working. Returns false (and writes nothing) when the role is already `role`.
-   */
-  async setUserRole(userId: string, role: UserLegacyState['role']): Promise<boolean> {
+  /** Revokes tokens in the binding transaction; false when the user no longer exists. */
+  async bumpTokenVersion(userId: string): Promise<boolean> {
     const result = await this.db.user.updateMany({
-      where: { id: userId, role: { not: role } },
-      data: { role, tokenVersion: { increment: 1 } },
+      where: { id: userId },
+      data: { tokenVersion: { increment: 1 } },
     });
     return result.count > 0;
   }

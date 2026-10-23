@@ -8,13 +8,13 @@ import type {
   PrincipalRef,
   RoleBindingDomain,
   RoleDomain,
-  UserLegacyState,
+  UserAccountState,
 } from '../permissions.types';
 import { SYSTEM_ROLES } from '../system-roles';
 
 /**
  * Unit-test double of the two permission repositories and the cache. It mimics the contracts the
- * services rely on (partial unique index, owner lock as a no-op, user legacy role persistence), so
+ * services rely on (partial unique index, owner lock as a no-op, token-version persistence), so
  * the service specs can assert behaviour without Postgres. The integration specs cover the real thing.
  */
 export class InMemoryPermissionStore {
@@ -29,7 +29,7 @@ export class InMemoryPermissionStore {
     permissions: [...seed.permissions],
   }));
   bindings: RoleBindingDomain[] = [];
-  users = new Map<string, UserLegacyState & { tokenVersion: number }>();
+  users = new Map<string, UserAccountState & { tokenVersion: number }>();
   agents = new Set<string>();
   projects = new Set<string>();
   calls: string[] = [];
@@ -49,10 +49,11 @@ export class InMemoryPermissionStore {
   openAgentTickets = new Map<string, { count: number; refs: string[] }>();
   /** The error the next `countOpenAgentTickets` throws instead of answering (US-002). */
   openAgentTicketsFailure: Error | null = null;
+  bumpTokenVersionFailure: Error | null = null;
   private counter = 0;
 
-  addUser(id: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER', disabled = false): void {
-    this.users.set(id, { role, disabled, tokenVersion: 0 });
+  addUser(id: string, disabled = false): void {
+    this.users.set(id, { disabled, tokenVersion: 0 });
   }
 
   roleByKey(key: string): RoleDomain {
@@ -296,15 +297,20 @@ export class InMemoryPermissionStore {
         if (this.openAgentTicketsFailure) throw this.openAgentTicketsFailure;
         return this.openAgentTickets.get(`${agentId}:${projectId}`) ?? { count: 0, refs: [] };
       },
-      findUserState: async (userId: string): Promise<UserLegacyState | null> => {
+      findUserState: async (userId: string): Promise<UserAccountState | null> => {
         const user = this.users.get(userId);
-        return user ? { role: user.role, disabled: user.disabled } : null;
+        return user ? { disabled: user.disabled } : null;
       },
-      setUserRole: async (userId: string, role: 'MEMBER' | 'ADMIN') => {
+      bumpTokenVersion: async (userId: string) => {
+        if (this.bumpTokenVersionFailure) {
+          const error = this.bumpTokenVersionFailure;
+          this.bumpTokenVersionFailure = null;
+          throw error;
+        }
         const user = this.users.get(userId);
-        if (!user || user.role === role) return false;
-        this.users.set(userId, { ...user, role, tokenVersion: user.tokenVersion + 1 });
-        this.calls.push(`role:${userId}:${role}`);
+        if (!user) return false;
+        this.users.set(userId, { ...user, tokenVersion: user.tokenVersion + 1 });
+        this.calls.push(`tokens:${userId}`);
         return true;
       },
       principalExists: async (principal: PrincipalRef) =>

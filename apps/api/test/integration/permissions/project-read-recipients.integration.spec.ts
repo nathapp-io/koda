@@ -86,7 +86,7 @@ describeIntegration('project.read notification recipients (PG)', () => {
     await grantRole(db, { type: 'USER', id: disabled.id }, 'admin');
     await grantRole(db, { type: 'USER', id: second.id }, 'admin');
     expect(await eligibility.findGlobalAdminIds()).toEqual([first.id, second.id]);
-    expect(roleAdminWithoutBinding.role).toBe('ADMIN');
+    expect(await eligibility.findGlobalAdminIds()).not.toContain(roleAdminWithoutBinding.id);
   });
   it('AC-7: a project binding in P2 does not grant eligibility in P', async () => {
     const user = await newUser();

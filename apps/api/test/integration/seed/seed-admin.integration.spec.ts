@@ -21,7 +21,6 @@ dbDescribe('production admin seed bindings', () => {
     const user = await db.user.findUniqueOrThrow({ where: { email: input.email } });
     expect(result).toEqual({ created: true, userId: user.id, roleKey: 'owner' });
     expect(await bindings(user.id)).toEqual([{ key: 'member', projectId: null }, { key: 'owner', projectId: null }]);
-    expect(user.role).toBe('ADMIN');
     expect(await bcrypt.compare(input.password, user.passwordHash)).toBe(true);
     expect(bcrypt.getRounds(user.passwordHash)).toBe(12);
   });
@@ -34,7 +33,6 @@ dbDescribe('production admin seed bindings', () => {
     const user = await db.user.findUniqueOrThrow({ where: { email: input.email } });
     expect(result).toEqual({ created: true, userId: user.id, roleKey: 'admin' });
     expect(await bindings(user.id)).toEqual([{ key: 'admin', projectId: null }, { key: 'member', projectId: null }]);
-    expect(user.role).toBe('ADMIN');
   });
 
   it('F1: concurrent new emails create exactly one owner and one admin', async () => {

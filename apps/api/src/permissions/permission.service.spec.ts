@@ -85,8 +85,8 @@ describe('PermissionService', () => {
     expect((await service.can(user('u1'), 'role.binding.owner')).allowed).toBe(false);
   });
 
-  it('AC-7: legacy User.role ADMIN with no bindings grants nothing', async () => {
-    store.addUser('legacy', 'ADMIN');
+  it('AC-7: a user with no bindings is granted nothing', async () => {
+    store.addUser('legacy');
     expect(await service.can(user('legacy'), 'user.create')).toEqual({ allowed: false, reason: 'not-granted' });
     expect(await service.effectiveKeys({ type: 'USER', id: 'legacy' }, 'global')).toEqual(new Set());
     expect((await service.effectiveKeys({ type: 'USER', id: 'legacy' }, { projectId: 'p1' })).has('ticket.delete')).toBe(false);

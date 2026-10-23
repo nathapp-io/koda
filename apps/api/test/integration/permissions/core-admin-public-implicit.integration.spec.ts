@@ -95,8 +95,8 @@ describeIntegration('admin, auth, home, notification and public invite route key
   const bindingsOf = (who: string) =>
     db.roleBinding.count({ where: { principalType: 'USER', principalId: userIds[who] } });
 
-  const roleOf = async (who: string): Promise<string> =>
-    (await db.user.findUniqueOrThrow({ where: { id: userIds[who] }, select: { role: true } })).role;
+  const roleOf = async (who: string): Promise<string[]> =>
+    (await db.roleBinding.findMany({ where: { principalType: 'USER', principalId: userIds[who], projectId: null }, include: { role: true } })).map(row => row.role.key).sort();
 
   beforeAll(async () => {
     await resetDb();
@@ -184,8 +184,8 @@ describeIntegration('admin, auth, home, notification and public invite route key
       .send({ role: 'ADMIN' });
 
     expectPermissionsRefusal(res);
-    await expect(roleOf('target')).resolves.toBe(before);
-    expect(before).toBe('MEMBER');
+    await expect(roleOf('target')).resolves.toEqual(before);
+    expect(before).toEqual(['member']);
   }, TIMEOUT);
 
   it('AC-4: a global admin gets 200 from GET /admin/users', async () => {
@@ -206,7 +206,7 @@ describeIntegration('admin, auth, home, notification and public invite route key
     expect(res.body.ret).toBe(40003);
     expect(res.body.message).toBe(USERS_SELF_REFUSED);
     // US-005: `disabled` is the only patchable field, so the self rule refuses a self-disable.
-    await expect(roleOf('gadmin')).resolves.toBe('ADMIN');
+    await expect(roleOf('gadmin')).resolves.toEqual(['admin', 'member']);
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------

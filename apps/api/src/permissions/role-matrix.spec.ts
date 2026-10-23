@@ -76,7 +76,7 @@ function buildRow(seed: RoleSeed): Row {
     store.agents.add(id);
     store.bind(ref, 'agent', null);
   } else {
-    store.addUser(id, 'MEMBER');
+    store.addUser(id);
     store.bind(ref, 'member', null);
     // The `member` row is the baseline binding itself.
     if (seed.key !== 'member') {
