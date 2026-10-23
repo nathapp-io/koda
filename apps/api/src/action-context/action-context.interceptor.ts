@@ -5,7 +5,7 @@ import {
   isRunnerPrincipal,
   type KodaPrincipal,
 } from '../auth/principal/koda-principal.types';
-import { runWithActor, type ActionActor } from './action-context';
+import { runWithActor, type ActorType } from './action-context';
 
 /**
  * Permissions P1d US-001: runs every request handler inside the action context of its principal.
@@ -23,7 +23,7 @@ export class ActionContextInterceptor implements NestInterceptor {
     const principal = ctx.switchToHttp().getRequest<{ user?: KodaPrincipal }>().user;
     if (!principal || isRunnerPrincipal(principal)) return next.handle();
 
-    const actor: ActionActor = { type: isAgentPrincipal(principal) ? 'AGENT' : 'USER', id: principal.id };
+    const actor: { type: ActorType; id: string } = { type: isAgentPrincipal(principal) ? 'AGENT' : 'USER', id: principal.id };
 
     // The handler body is the Observable's subscribe callback, so the context must wrap the
     // subscription — wrapping `next.handle()` alone would leave the handler outside it.
