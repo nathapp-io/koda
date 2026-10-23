@@ -69,7 +69,6 @@ function mountPage(over: PageOverrides = {}) {
     projectName: 'Acme Project',
     projectSlug: 'my-project',
     email: 'a@x.io',
-    role: null,
     roleKey: 'triager',
     roleName: 'Triager',
   }))
@@ -131,7 +130,6 @@ describe('/invite/[token] (US-007)', () => {
       projectName: 'Acme Project',
       projectSlug: 'my-project',
       email: 'a@x.io',
-      role: null,
       roleKey: null,
       roleName: null,
     }))
@@ -139,6 +137,23 @@ describe('/invite/[token] (US-007)', () => {
     await settle()
 
     expect(p.app.one('[data-testid="invite-role-name"]')).toBeUndefined()
+    p.app.unmount()
+  })
+
+  test('Permissions P1 US-011 AC-9: a preview with roleName and no role property renders the role name', async () => {
+    // The legacy `role` enum is gone from the preview; `roleName` is the only role copy the page has.
+    const get = jest.fn(async () => ({
+      projectName: 'Acme Project',
+      projectSlug: 'my-project',
+      email: 'a@x.io',
+      roleKey: 'developer',
+      roleName: 'Developer',
+    }))
+    const p = mountPage({ get })
+    await settle()
+
+    const roleLine = node(p.app, 'invite-role-name')
+    expect(p.app.textOf(roleLine)).toBe(copyOf('invite.role').replace('{roleName}', 'Developer'))
     p.app.unmount()
   })
 

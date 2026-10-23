@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals'
 import * as Vue from 'vue'
 import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { Ref } from 'vue'
 import { canChangeSchedule, canDeleteSchedule } from '~/lib/fleet-schedules'
 import type { ScheduleViewer } from '~/lib/fleet-schedules'
 import { canDecide } from '~/lib/fleet-approvals'
@@ -577,6 +578,17 @@ interface NotifyOver {
    * would scan on it — so AC-10/AC-11 cannot pass by a membership that simply never had the rights.
    */
   membersGrant?: boolean
+  /**
+   * The signed-in account the mounted badge reads through `useAuth().user`. Pass one so a spec can
+   * change the identity (id or role) while a refresh is in flight; US-011's identity ACs need that.
+   */
+  user?: Ref<NotifyUser>
+}
+
+/** The account fields `useApprovalNotifications` reads from `auth.user`. */
+interface NotifyUser {
+  id: string
+  role: string
 }
 
 /** A callable toast double that records what was shown and what was dismissed (`dismiss(toastId)`). */
@@ -618,10 +630,23 @@ function mountNotifications(over: NotifyOver): {
   paths: () => string[]
   toasts: ReturnType<typeof notifyToasts>
   poll: () => Promise<void>
+  /** The shared account ref the mounted badge reads; replacing it switches identity mid-refresh. */
+  user: Ref<NotifyUser>
+  /**
+   * Paths whose GET is held open: add one before `poll()` so a spec can change the identity while a
+   * refresh is really running, then resolve the recorded call on `pending`.
+   */
+  defer: Set<string>
+  /** The held-open GETs, in call order. */
+  pending: Array<{ path: string; resolve: (body: unknown) => void }>
 } {
   const counts = over.counts ?? notifyCounts([])
   const globalKeys = (): readonly string[] => (typeof over.global === 'function' ? over.global() : over.global)
+  const user: Ref<NotifyUser> = over.user ?? ref({ id: 'u1', role: 'MEMBER' })
+  const defer = new Set<string>()
+  const pending: Array<{ path: string; resolve: (body: unknown) => void }> = []
   const get = jest.fn(async (path: string, options?: { query?: Record<string, string> }) => {
+    if (defer.has(path)) return new Promise(resolve => { pending.push({ path, resolve }) })
     if (over.reject && path in over.reject) throw over.reject[path]
     if (over.fail?.includes(path)) throw new Error(`failed ${path}`)
     if (over.hang?.includes(path)) return new Promise(() => undefined)
@@ -653,7 +678,7 @@ function mountNotifications(over: NotifyOver): {
         if (!state.has(key)) state.set(key, ref(init()))
         return state.get(key)
       },
-      useAuth: () => ({ user: ref({ id: 'u1', role: 'MEMBER' }) }),
+      useAuth: () => ({ user }),
       useAppToast: () => toasts.toast,
       useHead: () => undefined,
       navigateTo: jest.fn(async () => undefined),
@@ -664,7 +689,7 @@ function mountNotifications(over: NotifyOver): {
     },
   }))
   const paths = (): string[] => (get.mock.calls as unknown as [string][]).map(([path]) => path)
-  return { app, get, paths, toasts, poll: () => (polling.runNow as () => Promise<void>)() }
+  return { app, get, paths, toasts, poll: () => (polling.runNow as () => Promise<void>)(), user, defer, pending }
 }
 
 /** First index of `path` in the recorded call order, or -1. */
@@ -930,5 +955,81 @@ describe('US-009 (fix round 1): the admin branch revalidates the alerts it alrea
     expect(toasts.dismiss).not.toHaveBeenCalled()
     expect(toasts.calls).toHaveLength(1)
     app.unmount()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Permissions P1 US-011 — the notification identity is the user id, not (id, role)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The identity a refresh is keyed on. A same-id role swap is not a different account, so it must not
+ * throw away a refresh that is already running; an id change is, so it must.
+ */
+describe('US-011: useApprovalNotifications keys a refresh on the user id alone', () => {
+  /** One pending budget ask, answered by the admin inbox; the badge holds the decision keys below. */
+  const KEYS = ['fleet.approval.read', 'fleet.approval.decide.budget']
+  const page = (id: string): Record<string, unknown> => ({
+    records: [notifyRow(id)], total: 1, current: 1, size: 100, hasNext: false,
+  })
+
+  test('AC-7: a role-only change during a running refresh keeps that refresh\'s result', async () => {
+    const m = mountNotifications({
+      global: KEYS,
+      counts: notifyCounts([]),
+      rows: { '/fleet/approvals': [notifyRow('a1')] },
+    })
+    await settle()
+    // The mount's own refresh delivered the first ask.
+    expect(m.toasts.calls.map((call) => call.id)).toEqual(['fleet-approval-u1-a1'])
+
+    // The next refresh reaches the inbox scan and is held there, so the identity change lands mid-flight.
+    m.defer.add('/fleet/approvals')
+    const running = m.poll()
+    await settle()
+    expect(m.pending.map((call) => call.path)).toEqual(['/fleet/approvals'])
+
+    // Same account, other legacy role value: the refresh still belongs to this user.
+    m.user.value = { id: 'u1', role: 'ADMIN' }
+    await settle()
+
+    // Both asks are pending, so a complete scan notifies the new one and dismisses nothing.
+    m.pending[0]?.resolve({
+      records: [notifyRow('a1'), notifyRow('a2')], total: 2, current: 1, size: 100, hasNext: false,
+    })
+    await running
+    await settle()
+
+    expect(m.toasts.calls.map((call) => call.id)).toContain('fleet-approval-u1-a2')
+    // ...and the running refresh was not torn down either: nothing of this identity's was dismissed.
+    expect(m.toasts.dismiss).not.toHaveBeenCalled()
+    m.app.unmount()
+  })
+
+  test('AC-8: an id change during a running refresh discards that refresh\'s result', async () => {
+    const m = mountNotifications({
+      global: KEYS,
+      counts: notifyCounts([]),
+      rows: { '/fleet/approvals': [notifyRow('a1')] },
+    })
+    await settle()
+    expect(m.toasts.calls.map((call) => call.id)).toEqual(['fleet-approval-u1-a1'])
+
+    m.defer.add('/fleet/approvals')
+    const running = m.poll()
+    await settle()
+    expect(m.pending.map((call) => call.path)).toEqual(['/fleet/approvals'])
+
+    // A different account: the answer the u1 refresh is waiting for is no longer this caller's.
+    m.user.value = { id: 'u2', role: 'MEMBER' }
+    await settle()
+
+    m.pending[0]?.resolve(page('a2'))
+    await running
+    await settle()
+
+    expect(m.toasts.calls.map((call) => call.id)).not.toContain('fleet-approval-u1-a2')
+    expect(m.toasts.calls.map((call) => call.id)).not.toContain('fleet-approval-u2-a2')
+    m.app.unmount()
   })
 })

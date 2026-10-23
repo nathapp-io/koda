@@ -10,8 +10,8 @@ import type { ProjectMember } from '~/composables/useProjectMembers'
 const editor = webFile('components', 'MarkdownEditor.vue')
 const ID = 'c000000000000000000000001'
 const MEMBERS: ProjectMember[] = [
-  { userId: ID, name: 'Ann Lee', email: 'ann@x.io', role: 'DEVELOPER', joinedAt: '' },
-  { userId: 'c000000000000000000000002', name: 'Bo', email: 'bo@x.io', role: 'VIEWER', joinedAt: '' },
+  { userId: ID, name: 'Ann Lee', email: 'ann@x.io', disabled: false, joinedAt: '' },
+  { userId: 'c000000000000000000000002', name: 'Bo', email: 'bo@x.io', disabled: false, joinedAt: '' },
 ]
 
 function mount(props: Record<string, unknown>) {

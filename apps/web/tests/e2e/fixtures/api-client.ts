@@ -128,13 +128,14 @@ export async function deleteProject(token: string, slug: string): Promise<void> 
 
 export async function createAgent(
   token: string,
-  data: { name: string; slug: string; roles?: string[] },
+  data: { name: string; slug: string },
 ): Promise<AgentResult> {
   const res = await fetch(`${API_URL}/api/agents`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    // The API requires a non-empty roles array (DEVELOPER/REVIEWER/VERIFIER/TRIAGER).
-    body: JSON.stringify({ roles: ['DEVELOPER'], ...data }),
+    // Permissions P1 US-011: `POST /agents` no longer takes a `roles` list — the API binds the
+    // agent's baseline role itself.
+    body: JSON.stringify(data),
   });
 
   if (!res.ok) {
@@ -188,21 +189,25 @@ export async function createUser(
   const res = await fetch(`${API_URL}/api/admin/users`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ ...data, role: 'MEMBER' }),
+    // Permissions P1 US-011: `POST /admin/users` no longer takes a `role`.
+    body: JSON.stringify(data),
   });
   if (!res.ok && res.status !== 409) throw new Error(`Create user failed: ${res.status} ${await res.text()}`);
 }
+
+/** The project role keys a member may be added with (Permissions P1 US-004/US-011). */
+export type ProjectRoleKey = 'project-admin' | 'developer' | 'viewer';
 
 export async function addProjectMember(
   token: string,
   projectSlug: string,
   email: string,
-  role: 'ADMIN' | 'DEVELOPER' | 'VIEWER',
+  roleKey: ProjectRoleKey,
 ): Promise<void> {
   const res = await fetch(`${API_URL}/api/projects/${projectSlug}/members`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ email, role }),
+    body: JSON.stringify({ email, roleKey }),
   });
   if (!res.ok && res.status !== 409) throw new Error(`Add member failed: ${res.status} ${await res.text()}`);
 }

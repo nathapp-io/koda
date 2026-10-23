@@ -836,7 +836,6 @@ const AGENT_ITEM = {
   slug: 'builder',
   name: 'Build Agent',
   status: 'ACTIVE',
-  roles: ['CODER'],
   capabilities: ['code.write'],
   openTicketCount: 0,
   openTicketRefs: [],
@@ -851,13 +850,12 @@ interface AgentViewer {
 
 function mountProjectAgentsPage(global: readonly string[], viewer: AgentViewer): Mounted {
   // The page imports the real useProjectAgents, so the roster arrives through its GET.
-  const get = permissionsApi({ global, routes: { '/projects/web/agents': { scoping: true, items: [AGENT_ITEM] } } })
+  const get = permissionsApi({ global, routes: { '/projects/web/agents': { items: [AGENT_ITEM] } } })
   installPermissionsRuntime(get)
   const agents = {
     items: ref([AGENT_ITEM]),
     pending: ref(false),
     error: ref(null),
-    scoping: ref(true),
     refresh: jest.fn(async () => undefined),
     add: jest.fn(async () => undefined),
     remove: jest.fn(async () => undefined),

@@ -56,7 +56,7 @@ test.describe('Live updates (SSE through the Nuxt proxy)', () => {
     });
     projectSlug = project.slug;
     await createUser(token, MEMBER);
-    await addProjectMember(token, projectSlug, MEMBER.email, 'DEVELOPER');
+    await addProjectMember(token, projectSlug, MEMBER.email, 'developer');
   });
 
   test.afterAll(async () => {

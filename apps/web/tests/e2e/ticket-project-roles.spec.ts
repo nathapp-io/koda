@@ -37,8 +37,8 @@ test.describe('Ticket actions follow the project role (#144, M25)', () => {
     const suffix = Date.now().toString().slice(-6);
     slug = (await createProject(token, { name: 'E2E Roles', slug: `e2erl${suffix}`, key: generateUniqueProjectKey('RL') })).slug;
     for (const u of [PADMIN, DEV]) await createUser(token, u);
-    await addProjectMember(token, slug, PADMIN.email, 'ADMIN');
-    await addProjectMember(token, slug, DEV.email, 'DEVELOPER');
+    await addProjectMember(token, slug, PADMIN.email, 'project-admin');
+    await addProjectMember(token, slug, DEV.email, 'developer');
   });
 
   test('a DEVELOPER moves a ticket through the flow and sees Close but never Delete', async ({ page }) => {

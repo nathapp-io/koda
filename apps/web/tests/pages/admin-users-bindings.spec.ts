@@ -35,11 +35,11 @@ const OWNER = role({ id: 'r3', key: 'owner', name: 'Owner', locked: true })
 const ROLES = [MEMBER, DEVELOPER, OWNER]
 
 const user = (id: string, over: Record<string, unknown> = {}) => ({
-  id, email: `${id}@koda.test`, name: id.toUpperCase(), role: 'MEMBER', disabled: false,
+  id, email: `${id}@koda.test`, name: id.toUpperCase(), disabled: false,
   createdAt: '2026-10-01T00:00:00Z', ...over,
 })
 // `u1` is the signed-in admin: the page never offers to edit its own bindings.
-const USERS = [user('u1', { role: 'ADMIN' }), user('u2')]
+const USERS = [user('u1'), user('u2')]
 
 const binding = (id: string, over: Partial<RoleBinding> = {}): RoleBinding => ({
   id, principalType: 'USER', principalId: 'u2', roleId: 'r1', roleKey: 'member',

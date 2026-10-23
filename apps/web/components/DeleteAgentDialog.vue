@@ -27,11 +27,11 @@ import { ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
 import { extractApiError } from '~/composables/useApi'
 
+/** The agent fields this dialog renders; the legacy role list is not one of them (Permissions P1 US-011). */
 interface Agent {
   id: string
   name: string
   slug: string
-  roles: string[]
   capabilities: string[]
   status: 'ACTIVE' | 'PAUSED' | 'OFFLINE'
 }

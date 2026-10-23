@@ -4,7 +4,8 @@
  * `GET /projects/:slug/members?principals=all` answers one row per principal — a user, or an agent
  * the project works with — and each row carries the role bindings it holds in this project. The row
  * is what the panel renders: a name, one chip per binding, and the principal id a binding write
- * needs. `bindings[].id` is null for a legacy membership row, which has no binding to delete.
+ * needs. Every binding has a string `id` (Permissions P1 US-011), which is what
+ * `DELETE /role-bindings/:id` takes.
  *
  * Writes: only `add` (an existing user by email, with a role key) lives here. Adding a role to a
  * principal, removing a binding and removing a whole row all go through `useRoleBindings`, so the
@@ -16,9 +17,9 @@
 import { ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
 
-/** One role a principal holds in this project. `id` is null for a legacy membership row. */
+/** One role a principal holds in this project; `id` is the binding row's id. */
 export interface MemberBinding {
-  id: string | null
+  id: string
   roleKey: string
   roleName: string
 }
@@ -48,13 +49,13 @@ export interface ProjectPrincipalRow {
 
 /**
  * A user row of the default members page. Kept for `useProjectMemberNames`, `lib/mentions.ts` and
- * `MarkdownEditor`, which read display names and never look at bindings.
+ * `MarkdownEditor`, which read display names and never look at bindings or the retired `role` enum
+ * (Permissions P1 US-011).
  */
 export interface ProjectMember {
   userId: string
   email: string
   name: string | null
-  role: string
   joinedAt: string
   disabled: boolean
 }
@@ -70,11 +71,16 @@ function isPrincipalType(value: unknown): value is ProjectPrincipalType {
   return value === 'USER' || value === 'AGENT'
 }
 
+/**
+ * One binding, whatever the server said. A role a caller cannot name still renders its key, but a
+ * binding with no id is not a binding any more (Permissions P1 US-011 dropped the legacy null id):
+ * there would be nothing to delete, so it is dropped rather than rendered as an unremovable chip.
+ */
 function toBinding(value: unknown): MemberBinding | null {
   const binding = value as Partial<MemberBinding> | null
-  if (typeof binding?.roleKey !== 'string') return null
+  if (typeof binding?.roleKey !== 'string' || typeof binding.id !== 'string') return null
   return {
-    id: typeof binding.id === 'string' ? binding.id : null,
+    id: binding.id,
     roleKey: binding.roleKey,
     roleName: typeof binding.roleName === 'string' ? binding.roleName : binding.roleKey,
   }

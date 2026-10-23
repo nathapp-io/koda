@@ -20,7 +20,7 @@ test.describe('Notifications (S4a)', () => {
     const suffix = Date.now().toString().slice(-6);
     slug = (await createProject(token, { name: 'E2E Notify', slug: `e2entf${suffix}`, key: generateUniqueProjectKey('NT') })).slug;
     await createUser(token, MEMBER);
-    await addProjectMember(token, slug, MEMBER.email, 'DEVELOPER');
+    await addProjectMember(token, slug, MEMBER.email, 'developer');
     // Same cached session webLogin uses below: no extra /auth/login hit.
     ({ userId: memberId } = await login(MEMBER.email, MEMBER.password));
   });

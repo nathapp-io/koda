@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, jest } from '@jest/globals'
 import { join } from 'path'
 
 const composablePath = join(__dirname, '../..', 'composables', 'useAdminUsers.ts')
-const u = (id: string, over: Record<string, unknown> = {}) => ({ id, email: `${id}@k.t`, name: id, role: 'MEMBER', disabled: false, createdAt: '2026-09-26T00:00:00Z', ...over })
+const u = (id: string, over: Record<string, unknown> = {}) => ({ id, email: `${id}@k.t`, name: id, disabled: false, createdAt: '2026-09-26T00:00:00Z', ...over })
 
 function withApi(api: Record<string, jest.Mock>) {
   (globalThis as Record<string, unknown>).useApi = () => ({ $api: api })

@@ -146,6 +146,28 @@ describe('useProjectMembers', () => {
     expect(only.userId).toBeNull()
   })
 
+  test('a binding the server sends without an id is dropped, so every rendered chip is removable', async () => {
+    const get = jest.fn(async () => pageOf([
+      row({
+        bindings: [
+          { id: 'b1', roleKey: 'developer', roleName: 'Developer' },
+          { roleKey: 'viewer', roleName: 'Viewer' },
+        ],
+      }),
+    ]))
+    withApi({ get })
+    const { useProjectMembers } = await import(composablePath)
+    const members = useProjectMembers('team')
+
+    await members.load()
+
+    // Permissions P1 US-011: `MemberBinding.id` is a string, so a binding with no id is not a chip
+    // the panel could ever delete — it is dropped instead of rendered unremovable.
+    const bindings = (members.members.value[0] as { bindings: Array<{ id: string; roleKey: string }> }).bindings
+    expect(bindings.map((binding) => binding.id)).toEqual(['b1'])
+    expect(bindings.map((binding) => binding.roleKey)).toEqual(['developer'])
+  })
+
   test('the legacy member writer surface is gone', async () => {
     withApi({ get: jest.fn(async () => pageOf([])) })
     const module_ = await import(composablePath) as Record<string, unknown>
@@ -162,7 +184,7 @@ describe('useProjectMemberNames (US-013 keeps the default page)', () => {
   beforeEach(() => { (globalThis as Record<string, unknown>).useApi = undefined })
 
   test('AC-10: load still asks the members route for one page of users only', async () => {
-    const get = jest.fn(async () => ({ records: [{ userId: 'u1', email: 'u1@k.t', name: 'One', role: 'DEVELOPER', joinedAt: '2026-09-26T00:00:00Z', disabled: false }] }))
+    const get = jest.fn(async () => ({ records: [{ userId: 'u1', email: 'u1@k.t', name: 'One', joinedAt: '2026-09-26T00:00:00Z', disabled: false }] }))
     withApi({ get })
     const { useProjectMemberNames } = await import(namesPath)
     const names = useProjectMemberNames('web')

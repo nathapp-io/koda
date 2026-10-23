@@ -4,8 +4,8 @@
  *
  * One row per principal from `GET /projects/:slug/members?principals=all`, one chip per role that
  * principal holds in this project (`roleName`, straight from the API) and the binding writes beside
- * it. A chip whose `id` is null stands for a legacy membership row: it renders, but there is no
- * binding to delete and no way to remove the row.
+ * it. Every chip is a role binding with a string `id` (Permissions P1 US-011), so every chip and
+ * every row can be removed.
  *
  * Writes go through the API's own routes — the member add for a user by email, `POST`/`DELETE
  * /role-bindings` for everything else — and the panel never restates a server rule: a refusal is
@@ -68,10 +68,6 @@ function canEditRow(row: ProjectPrincipalRow): boolean {
   return canManageBindings.value && !row.disabled && !isSelf(row)
 }
 
-/** A row is removable only when at least one of its bindings is a real (non-legacy) row. */
-const hasRemovableBinding = (row: ProjectPrincipalRow): boolean =>
-  row.bindings.some((binding) => binding.id !== null)
-
 /** The roles this row does not hold yet: what its "add role" select may offer. */
 function rowRoles(row: ProjectPrincipalRow) {
   const held = new Set(row.bindings.map((binding) => binding.roleKey))
@@ -85,8 +81,6 @@ const offerableAgents = computed(() => {
   return agentChoices.value.filter((agent) => !listedIds.has(agent.id) && !listedSlugs.has(agent.slug))
 })
 
-const chipKey = (row: ProjectPrincipalRow, binding: MemberBinding): string =>
-  binding.id ?? `${rowKey(row)}:${binding.roleKey}`
 
 async function run(action: () => Promise<unknown>, successKey?: string): Promise<boolean> {
   try {
@@ -201,15 +195,13 @@ async function onAddChip(row: ProjectPrincipalRow): Promise<void> {
 }
 
 async function onRemoveChip(row: ProjectPrincipalRow, binding: MemberBinding): Promise<void> {
-  const id = binding.id
-  if (id === null || busyRow.value !== null) return
+  if (busyRow.value !== null) return
   busyRow.value = rowKey(row)
   try {
-    await removeBinding(id)
+    await removeBinding(binding.id)
     toast.success(t('projects.members.toast.roleRemoved'))
-    // The chip that goes is not always the only change: deleting a binding can uncover the same-key
-    // legacy membership the API was suppressing behind it, and a binding-only principal loses its row
-    // with its last binding. Only the server's answer says which, so the list is re-read rather than
+    // The chip that goes is not always the only change: a binding-only principal loses its row with
+    // its last binding. Only the server's answer says which, so the list is re-read rather than
     // patched, exactly as a row removal does.
     await run(reload)
   }
@@ -223,14 +215,11 @@ async function onRemoveChip(row: ProjectPrincipalRow, binding: MemberBinding): P
 
 /**
  * Remove a principal by deleting each binding it holds in this project, then re-reading the list.
- * Legacy bindings have no row to delete and are skipped — the legacy `DELETE …/members/:userId` is
- * deliberately not substituted. A refused delete stops the loop and still reloads, so what is on
- * screen is what the server now holds.
+ * Every binding is a real row with a string id (Permissions P1 US-011), so nothing is skipped. A
+ * refused delete stops the loop and still reloads, so what is on screen is what the server now holds.
  */
 async function onRemoveRow(row: ProjectPrincipalRow): Promise<void> {
-  const ids = row.bindings
-    .map((binding) => binding.id)
-    .filter((id): id is string => id !== null)
+  const ids = row.bindings.map((binding) => binding.id)
   if (ids.length === 0 || busyRow.value !== null) return
   const key = rowKey(row)
   if (!window.confirm(t('projects.members.removeConfirm', { name: displayName(row) }))) return
@@ -360,7 +349,7 @@ onMounted(async () => {
           <div class="mt-1 flex flex-wrap gap-1">
             <Badge
               v-for="binding in row.bindings"
-              :key="chipKey(row, binding)"
+              :key="binding.id"
               data-testid="member-chip"
               :data-role="binding.roleKey"
               variant="secondary"
@@ -368,7 +357,7 @@ onMounted(async () => {
             >
               <span>{{ binding.roleName }}</span>
               <button
-                v-if="binding.id && canEditRow(row)"
+                v-if="canEditRow(row)"
                 type="button"
                 data-testid="member-chip-remove"
                 class="text-muted-foreground hover:text-foreground"
@@ -406,7 +395,6 @@ onMounted(async () => {
             </Button>
           </template>
           <Button
-            v-if="hasRemovableBinding(row)"
             type="button"
             size="sm"
             variant="outline"

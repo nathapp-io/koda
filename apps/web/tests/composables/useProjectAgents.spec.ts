@@ -2,29 +2,31 @@ import { describe, test, expect, beforeEach, jest } from '@jest/globals'
 import { join } from 'path'
 
 const composablePath = join(__dirname, '../..', 'composables', 'useProjectAgents.ts')
-interface Agent { slug: string; name: string; status: string; roles: string[]; capabilities: string[]; openTicketCount: number; openTicketRefs: string[]; addedAt: string; addedBy: { id: string; name: string | null } | null }
-const agent = (slug: string, over: Partial<Agent> = {}): Agent => ({ slug, name: slug, status: 'ACTIVE', roles: ['CODER'], capabilities: ['code.write'], openTicketCount: 0, openTicketRefs: [], addedAt: '2026-01-01T00:00:00.000Z', addedBy: null, ...over })
-const list = (over: { scoping?: boolean; items?: Agent[] } = {}) => ({ scoping: over.scoping ?? true, items: over.items ?? [] })
+/** Permissions P1 US-011: the roster carries no `roles` (bindings are the role truth) and no `scoping`. */
+interface Agent { slug: string; name: string; status: string; capabilities: string[]; openTicketCount: number; openTicketRefs: string[]; addedAt: string; addedBy: { id: string; name: string | null } | null }
+const agent = (slug: string, over: Partial<Agent> = {}): Agent => ({ slug, name: slug, status: 'ACTIVE', capabilities: ['code.write'], openTicketCount: 0, openTicketRefs: [], addedAt: '2026-01-01T00:00:00.000Z', addedBy: null, ...over })
+const list = (over: { items?: unknown } = {}) => ({ items: over.items ?? [] })
 function withApi(api: Record<string, jest.Mock>): void { (globalThis as Record<string, unknown>).useApi = () => ({ $api: api }) }
 
 describe('useProjectAgents', () => {
   beforeEach(() => { (globalThis as Record<string, unknown>).useApi = undefined })
-  test('load populates items and scoping', async () => {
+  test('AC-1: load sets items to the one agent a { items } response carries', async () => {
     const get = jest.fn(async () => list({ items: [agent('builder')] })); withApi({ get })
-    const { useProjectAgents } = await import(composablePath); const roster = useProjectAgents('acme')
+    const { useProjectAgents } = await import(composablePath); const roster = useProjectAgents('p')
     await roster.load()
-    expect(get).toHaveBeenCalledWith('/projects/acme/agents'); expect(roster.items.value.map(a => a.slug)).toEqual(['builder'])
-    expect(roster.scoping.value).toBe(true); expect(roster.error.value).toBeNull()
+    expect(get).toHaveBeenCalledWith('/projects/p/agents')
+    expect(roster.items.value.map(a => a.slug)).toEqual(['builder'])
+    expect(roster.error.value).toBeNull()
   })
-  test('load uses scoping false when response says false', async () => {
-    withApi({ get: jest.fn(async () => list({ scoping: false, items: [agent('builder')] })) })
+  test('AC-2: the return value has no scoping property', async () => {
+    withApi({ get: jest.fn(async () => list({ items: [agent('builder')] })) })
     const { useProjectAgents } = await import(composablePath)
-    const roster = useProjectAgents('acme')
+    const roster = useProjectAgents('p')
     await roster.load()
-    expect(roster.scoping.value).toBe(false)
+    expect(roster).not.toHaveProperty('scoping')
   })
   test('load maps malformed items to an empty roster', async () => {
-    withApi({ get: jest.fn(async () => ({ scoping: true, items: 'not-an-array' })) })
+    withApi({ get: jest.fn(async () => list({ items: 'not-an-array' })) })
     const { useProjectAgents } = await import(composablePath)
     const roster = useProjectAgents('acme')
     await roster.load()
@@ -42,9 +44,9 @@ describe('useProjectAgents', () => {
     await pendingRequest
     expect(roster.pending.value).toBe(false)
   })
-  test('load defaults scoping to true for an empty response', async () => {
+  test('an empty response gives an empty roster', async () => {
     withApi({ get: jest.fn(async () => ({})) }); const { useProjectAgents } = await import(composablePath); const roster = useProjectAgents('acme')
-    await roster.load(); expect(roster.scoping.value).toBe(true); expect(roster.items.value).toEqual([])
+    await roster.load(); expect(roster.items.value).toEqual([]); expect(roster).not.toHaveProperty('scoping')
   })
   test('load records rejection and clears pending', async () => {
     withApi({ get: jest.fn(async () => { throw new Error('roster down') }) }); const { useProjectAgents } = await import(composablePath); const roster = useProjectAgents('acme')

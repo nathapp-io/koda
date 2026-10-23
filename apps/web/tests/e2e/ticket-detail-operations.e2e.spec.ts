@@ -87,7 +87,7 @@ test.describe('Ticket Detail Operations', () => {
     });
     projectSlug = proj.slug;
     await createUser(token, ASSIGNEE);
-    await addProjectMember(token, projectSlug, ASSIGNEE.email, 'DEVELOPER');
+    await addProjectMember(token, projectSlug, ASSIGNEE.email, 'developer');
     ({ userId: assigneeId } = await login(ASSIGNEE.email, ASSIGNEE.password));
   });
 

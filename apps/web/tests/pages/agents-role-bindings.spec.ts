@@ -41,14 +41,13 @@ const AGENT_ROLE = role({ id: 'r5', key: 'agent', name: 'Agent' })
 const ROLES = [MEMBER, DEVELOPER, REVIEWER, OWNER]
 
 /**
- * The legacy `roles` field is still on the wire (the API keeps it until US-015), so the fixture
- * carries one: the roles column must not render it.
+ * Permissions P1 US-011: `GET /agents` answers no `roles` property — an agent's roles are its role
+ * bindings, which is what the roles column renders. The fixture is the row the API sends today.
  */
 const agent = (id: string, over: Record<string, unknown> = {}) => ({
   id,
   name: `Agent ${id.toUpperCase()}`,
   slug: `agent-${id}`,
-  roles: [{ role: 'DEVELOPER' }],
   capabilities: [{ capability: 'code.write' }],
   status: 'ACTIVE',
   ...over,
@@ -226,7 +225,7 @@ afterEach(() => {
 })
 
 describe('AC-1: the roles column comes from the global AGENT bindings', () => {
-  test('one chip per binding, named by the joined role, and never the legacy agent.roles', async () => {
+  test('one chip per binding, named by the joined role', async () => {
     const m = await mountPage({ keys: ROLE_MANAGER_KEYS })
 
     // The listing is asked for the agent principals that apply everywhere.
@@ -238,10 +237,35 @@ describe('AC-1: the roles column comes from the global AGENT bindings', () => {
     expect(m.app.textOf(chips[0])).toBe('Member')
     // A PROJECT-scope role bound with no project applies everywhere.
     expect(m.app.textOf(chips[1])).toBe(allProjectsCopy('Developer'))
-
-    // The fixture's legacy role entry is DEVELOPER; nothing renders it.
-    expect(allById(m.app, 'agent-role-chip').map((chip) => m.app.textOf(chip))).not.toContain('DEVELOPER')
     expect(chips.map((chip) => chip.props['data-role'])).toEqual(['member', 'developer'])
+  })
+
+  test('AC-5: an agent the API answers without a roles property still shows its Developer chip', async () => {
+    // Permissions P1 US-011: `roles` is gone from the response, so the column may only be the
+    // binding join. The rows below carry the exact fields `GET /agents` sends today.
+    const rows = [
+      { id: 'a1', name: 'Agent A1', slug: 'agent-a1', capabilities: [{ capability: 'code.write' }], status: 'ACTIVE' },
+    ]
+    const m = await mountPage({
+      keys: ROLE_MANAGER_KEYS,
+      api: {
+        get: jest.fn(async (path: string) => {
+          if (path === '/agents') return rows.map((row) => ({ ...row }))
+          if (path === '/roles') return [...ROLES]
+          if (path === '/role-bindings') {
+            return bindingsPage([binding('b1', { roleId: DEVELOPER.id, roleKey: DEVELOPER.key })])
+          }
+          throw new Error(`unexpected GET ${path}`)
+        }),
+      },
+    })
+
+    const row = rowFor(m.app, 'a1')
+    expect(allById(m.app, 'agent-roles-cell', row)).toHaveLength(1)
+    const chips = allById(m.app, 'agent-role-chip', row)
+    expect(chips).toHaveLength(1)
+    expect(chips[0]?.props['data-role']).toBe('developer')
+    expect(m.app.textOf(chips[0] as FakeNode)).toBe(allProjectsCopy('Developer'))
   })
 
   test('an agent with no binding has the cell and the empty copy, not a chip', async () => {

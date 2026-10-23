@@ -40,11 +40,11 @@ import { ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
 import { extractApiError } from '~/composables/useApi'
 
+/** The agent fields these dialogs render. Permissions P1 US-011: there is no `roles` on the row. */
 interface Agent {
   id: string
   name: string
   slug: string
-  roles: string[]
   capabilities: string[]
   status: 'ACTIVE' | 'PAUSED' | 'OFFLINE'
 }

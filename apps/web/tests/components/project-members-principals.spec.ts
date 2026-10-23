@@ -42,7 +42,8 @@ interface RowFixture {
   name: string | null
   disabled: boolean
   joinedAt: string
-  bindings: Array<{ id: string | null; roleKey: string; roleName: string }>
+  /** Permissions P1 US-011: every binding id is a string, so every chip has a row to delete. */
+  bindings: Array<{ id: string; roleKey: string; roleName: string }>
 }
 
 const userRow = (over: Partial<RowFixture> = {}): RowFixture => ({
@@ -67,7 +68,7 @@ const agentRow = (over: Partial<RowFixture> = {}): RowFixture => ({
   name: 'Listed Bot',
   disabled: false,
   joinedAt: '2026-02-01T00:00:00Z',
-  bindings: [{ id: null, roleKey: 'viewer', roleName: 'Viewer' }],
+  bindings: [{ id: 'ag1', roleKey: 'viewer', roleName: 'Viewer' }],
   ...over,
 })
 
@@ -249,15 +250,15 @@ describe('AC-1: the panel loads both listings and renders one row per record', (
   })
 })
 
-describe('AC-2: one chip per binding, legacy chips are not removable', () => {
-  test('each binding renders its roleName, and a null-id chip has no remove button', async () => {
+describe('AC-2: one chip per binding, every chip removable', () => {
+  test('each binding renders its roleName and its own remove control', async () => {
     const m = await mountPanel({
       rows: [
         userRow({
           bindings: [
             { id: 'b1', roleKey: 'developer', roleName: 'Developer' },
             { id: 'b2', roleKey: 'verifier', roleName: 'Verifier' },
-            { id: null, roleKey: 'viewer', roleName: 'Viewer' },
+            { id: 'b3', roleKey: 'viewer', roleName: 'Viewer' },
           ],
         }),
       ],
@@ -267,11 +268,10 @@ describe('AC-2: one chip per binding, legacy chips are not removable', () => {
     const chips = allById(m.app, 'member-chip', row)
     expect(chips.map((chip) => m.app.textOf(chip))).toEqual(['Developer', 'Verifier', 'Viewer'])
 
-    // One remove control per real binding (b1, b2) and none for the legacy chip.
-    expect(allById(m.app, 'member-chip-remove', row)).toHaveLength(2)
-    const legacy = chips[2]
-    if (!legacy) throw new Error('legacy chip not rendered')
-    expect(allById(m.app, 'member-chip-remove', legacy)).toHaveLength(0)
+    // Permissions P1 US-011: every binding is a real row now, so every chip can be removed —
+    // one control per chip, no legacy exception.
+    expect(allById(m.app, 'member-chip-remove', row)).toHaveLength(3)
+    for (const chip of chips) expect(allById(m.app, 'member-chip-remove', chip)).toHaveLength(1)
     m.app.unmount()
   })
 
@@ -429,31 +429,6 @@ describe('AC-5: adding and removing a role chip on a row', () => {
     m.app.unmount()
   })
 
-  // Fix round 2 / B2: the chip that goes is not the only change. Deleting a real binding can uncover a
-  // same-key legacy membership the API was suppressing behind it, so a local filter would show no role
-  // and report success while the principal still holds the legacy authority.
-  test('a legacy same-key chip the API suppressed appears once the real binding is deleted', async () => {
-    const del = jest.fn(async () => undefined)
-    const m = await mountPanel({ delete: del })
-    // The legacy DEVELOPER membership is hidden behind the same-key binding; the delete leaves it as
-    // the principal's only source in the project, which the API then reports as a null-id chip.
-    del.mockImplementation(async () => {
-      const row = m.rows[0]
-      if (!row) throw new Error('row fixture missing')
-      row.bindings = [{ id: null, roleKey: 'developer', roleName: 'Developer' }]
-    })
-
-    call(byId(m.app, 'member-chip-remove', rowOf(m.app, 'User One')), 'onClick')
-    await settle()
-
-    expect(del).toHaveBeenCalledWith('/role-bindings/b1')
-    const chips = allById(m.app, 'member-chip', rowOf(m.app, 'User One'))
-    expect(chips.map((chip) => m.app.textOf(chip))).toEqual(['Developer'])
-    // ...and the uncovered legacy chip has no remove control.
-    expect(allById(m.app, 'member-chip-remove', rowOf(m.app, 'User One'))).toHaveLength(0)
-    m.app.unmount()
-  })
-
   // Fix round 2 / B2: a principal that exists *only* through its bindings loses its row with its last
   // binding, so patching the chip list locally left a member on screen that the API no longer lists.
   test('a binding-only agent disappears when its last binding is deleted', async () => {
@@ -475,15 +450,14 @@ describe('AC-5: adding and removing a role chip on a row', () => {
   })
 })
 
-describe('AC-6: removing a row deletes each real binding and reloads', () => {
-  test('null-id bindings are skipped and no other delete is sent', async () => {
+describe('AC-6: removing a row deletes each binding and reloads', () => {
+  test('every binding of the row is deleted, in order', async () => {
     const m = await mountPanel({
       rows: [
         userRow({
           bindings: [
             { id: 'b1', roleKey: 'developer', roleName: 'Developer' },
             { id: 'b2', roleKey: 'verifier', roleName: 'Verifier' },
-            { id: null, roleKey: 'viewer', roleName: 'Viewer' },
           ],
         }),
       ],
@@ -493,6 +467,7 @@ describe('AC-6: removing a row deletes each real binding and reloads', () => {
     call(byId(m.app, 'member-row-remove', rowOf(m.app, 'User One')), 'onClick')
     await settle()
 
+    // Permissions P1 US-011: no binding is legacy any more, so the row removal deletes b1 then b2.
     expect(m.del.mock.calls.map((args) => args[0])).toEqual(['/role-bindings/b1', '/role-bindings/b2'])
     expect(m.memberCalls.length).toBeGreaterThan(reloadsBefore)
     m.app.unmount()
@@ -614,19 +589,6 @@ describe('AC-9: the signed-in user\'s own row is read-only', () => {
     expect(allById(m.app, 'member-chip-add', other)).toHaveLength(1)
     expect(allById(m.app, 'member-chip-remove', other)).toHaveLength(1)
     expect(allById(m.app, 'member-row-remove', other)).toHaveLength(1)
-    m.app.unmount()
-  })
-})
-
-describe('AC-11: a row with only legacy bindings offers no row removal', () => {
-  test('no remove-row button even with role.binding.manage', async () => {
-    const m = await mountPanel({
-      rows: [agentRow({ bindings: [{ id: null, roleKey: 'viewer', roleName: 'Viewer' }] })],
-    })
-
-    expect(allById(m.app, 'member-row-remove', rowOf(m.app, 'Listed Bot'))).toHaveLength(0)
-    // The chip is still there; it simply cannot be removed.
-    expect(allById(m.app, 'member-chip', rowOf(m.app, 'Listed Bot'))).toHaveLength(1)
     m.app.unmount()
   })
 })

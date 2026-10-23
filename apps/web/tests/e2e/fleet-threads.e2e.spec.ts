@@ -201,7 +201,7 @@ test.describe('Fleet S5a B4-R2: thread web journey (scripted v4 runner)', () => 
     // A second member added as a VIEWER reads the same thread, without acting controls.
     const viewerEmail = `thread-viewer-${suffix}@koda-e2e.test`;
     await createUser(token, { email: viewerEmail, name: 'Thread Viewer', password: 'E2ePassword1!' });
-    await addProjectMember(token, SLUG, viewerEmail, 'VIEWER');
+    await addProjectMember(token, SLUG, viewerEmail, 'viewer');
     const viewerContext = await browser.newContext();
     const viewerPage = await viewerContext.newPage();
     await webLogin(viewerPage, viewerEmail, 'E2ePassword1!');

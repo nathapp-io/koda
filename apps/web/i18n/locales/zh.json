@@ -494,7 +494,6 @@
     "noRoles": "无角色",
     "project": {
       "empty": "该项目暂无代理。",
-      "scopingOff": "本实例已禁用项目代理范围。名单更改可能不会生效。",
       "openTickets": "未完成工单:{count}",
       "reassignFirst": "请先重新分配其 {count} 个未完成工单",
       "addedBy": "由 {name} 添加",
