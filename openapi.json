@@ -578,54 +578,6 @@
         ]
       }
     },
-    "/api/agents/{slug}/update-roles": {
-      "patch": {
-        "operationId": "AgentsController_updateRoles",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateRolesDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Roles updated successfully"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "agent.update is missing"
-          },
-          "404": {
-            "description": "Agent not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Update agent roles (agent.update)",
-        "tags": [
-          "agents"
-        ]
-      }
-    },
     "/api/agents/{slug}/update-capabilities": {
       "patch": {
         "operationId": "AgentsController_updateCapabilities",
@@ -1804,115 +1756,9 @@
         "tags": [
           "projects"
         ]
-      },
-      "post": {
-        "operationId": "ProjectsController_addProjectAgent",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AddProjectAgentDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Agent added to the roster",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectAgentDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request data"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Not a project member, or member.add is missing"
-          },
-          "404": {
-            "description": "Project or agent not found"
-          },
-          "409": {
-            "description": "Agent is already on the roster, or is OFFLINE"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Add an agent to the project roster (member.add)",
-        "tags": [
-          "projects"
-        ]
       }
     },
     "/api/projects/{slug}/agents/{agentSlug}": {
-      "delete": {
-        "operationId": "ProjectsController_removeProjectAgent",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "agentSlug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Agent removed from the roster"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Not a project member, or member.remove is missing"
-          },
-          "404": {
-            "description": "Project, agent or roster entry not found"
-          },
-          "409": {
-            "description": "The agent still holds open tickets in this project"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Remove an agent from the project roster (member.remove)",
-        "tags": [
-          "projects"
-        ]
-      },
       "patch": {
         "operationId": "ProjectsController_updateProjectAgent",
         "parameters": [
@@ -2340,7 +2186,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Page of members: { total, current, size, hasNext, hasPrev, records, canManage, viewerRole }"
+            "description": "Page of members: { total, current, size, hasNext, hasPrev, records }"
           },
           "403": {
             "description": "Not a project member, or member.read is missing"
@@ -2408,113 +2254,6 @@
           }
         ],
         "summary": "Add an existing user by email (member.add)",
-        "tags": [
-          "projects"
-        ]
-      }
-    },
-    "/api/projects/{slug}/members/{userId}": {
-      "patch": {
-        "operationId": "ProjectMembersController_updateRole",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "userId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateMemberRoleDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectMemberDto"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Not a project member, or role.binding.manage is missing"
-          },
-          "404": {
-            "description": "Not a member"
-          },
-          "409": {
-            "description": "Would leave the project without an ADMIN"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Change a member's project role (role.binding.manage)",
-        "tags": [
-          "projects"
-        ]
-      },
-      "delete": {
-        "operationId": "ProjectMembersController_remove",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "userId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Removed"
-          },
-          "403": {
-            "description": "Not a project member, or member.remove is missing"
-          },
-          "404": {
-            "description": "Not a member"
-          },
-          "409": {
-            "description": "Would leave the project without an ADMIN"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Remove a member (member.remove)",
         "tags": [
           "projects"
         ]
@@ -11998,14 +11737,6 @@
             "minLength": 8,
             "description": "Temporary password, handed over out of band",
             "example": "StrongPass123!"
-          },
-          "role": {
-            "enum": [
-              "MEMBER",
-              "ADMIN"
-            ],
-            "type": "string",
-            "default": "MEMBER"
           }
         },
         "required": [
@@ -12027,13 +11758,6 @@
             "type": "string",
             "nullable": true
           },
-          "role": {
-            "type": "string",
-            "enum": [
-              "MEMBER",
-              "ADMIN"
-            ]
-          },
           "disabled": {
             "type": "boolean"
           },
@@ -12049,7 +11773,6 @@
         "required": [
           "id",
           "email",
-          "role",
           "disabled",
           "createdAt",
           "updatedAt"
@@ -12058,13 +11781,6 @@
       "UpdateUserDto": {
         "type": "object",
         "properties": {
-          "role": {
-            "enum": [
-              "MEMBER",
-              "ADMIN"
-            ],
-            "type": "string"
-          },
           "disabled": {
             "type": "boolean",
             "description": "Disabling revokes every session of the user"
@@ -12088,23 +11804,6 @@
             "type": "number",
             "minimum": 1,
             "description": "Maximum concurrent tickets the agent can handle"
-          },
-          "roles": {
-            "items": {
-              "type": "string",
-              "enum": [
-                "DEVELOPER",
-                "REVIEWER",
-                "VERIFIER",
-                "TRIAGER"
-              ]
-            },
-            "description": "Agent roles (e.g. DEVELOPER, REVIEWER)",
-            "example": [
-              "DEVELOPER",
-              "REVIEWER"
-            ],
-            "type": "array"
           },
           "capabilities": {
             "description": "Agent capabilities (e.g. typescript, nestjs)",
@@ -12144,31 +11843,6 @@
             "description": "Max concurrent tickets agent can handle"
           }
         }
-      },
-      "UpdateRolesDto": {
-        "type": "object",
-        "properties": {
-          "roles": {
-            "items": {
-              "type": "string",
-              "enum": [
-                "DEVELOPER",
-                "REVIEWER",
-                "VERIFIER",
-                "TRIAGER"
-              ]
-            },
-            "description": "Agent roles",
-            "example": [
-              "DEVELOPER",
-              "REVIEWER"
-            ],
-            "type": "array"
-          }
-        },
-        "required": [
-          "roles"
-        ]
       },
       "UpdateCapabilitiesDto": {
         "type": "object",
@@ -12654,12 +12328,6 @@
           "status": {
             "type": "string"
           },
-          "roles": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
           "capabilities": {
             "type": "array",
             "items": {
@@ -12692,7 +12360,6 @@
           "slug",
           "name",
           "status",
-          "roles",
           "capabilities",
           "openTicketCount",
           "openTicketRefs",
@@ -12703,9 +12370,6 @@
       "ProjectAgentListDto": {
         "type": "object",
         "properties": {
-          "scoping": {
-            "type": "boolean"
-          },
           "items": {
             "type": "array",
             "items": {
@@ -12714,21 +12378,7 @@
           }
         },
         "required": [
-          "scoping",
           "items"
-        ]
-      },
-      "AddProjectAgentDto": {
-        "type": "object",
-        "properties": {
-          "agentSlug": {
-            "type": "string",
-            "description": "Slug of an existing agent",
-            "example": "bot-1"
-          }
-        },
-        "required": [
-          "agentSlug"
         ]
       },
       "MePermissionsDto": {
@@ -12811,18 +12461,10 @@
             "description": "Email of an existing user",
             "example": "dev@example.com"
           },
-          "role": {
-            "enum": [
-              "ADMIN",
-              "DEVELOPER",
-              "VIEWER"
-            ],
-            "type": "string"
-          },
           "roleKey": {
             "type": "string",
             "example": "triager",
-            "description": "kebab-case role key; mutually exclusive with role"
+            "description": "kebab-case role key; omitted grants viewer"
           }
         },
         "required": [
@@ -12834,8 +12476,7 @@
         "properties": {
           "id": {
             "type": "string",
-            "nullable": true,
-            "description": "The binding row; null for a legacy membership row"
+            "description": "The role binding row this chip is"
           },
           "roleKey": {
             "type": "string",
@@ -12869,15 +12510,6 @@
             "type": "string",
             "nullable": true
           },
-          "role": {
-            "type": "string",
-            "enum": [
-              "ADMIN",
-              "DEVELOPER",
-              "AGENT",
-              "VIEWER"
-            ]
-          },
           "disabled": {
             "type": "boolean"
           },
@@ -12910,28 +12542,11 @@
           }
         },
         "required": [
-          "role",
           "disabled",
           "joinedAt",
           "principalType",
           "principalId",
           "bindings"
-        ]
-      },
-      "UpdateMemberRoleDto": {
-        "type": "object",
-        "properties": {
-          "role": {
-            "enum": [
-              "ADMIN",
-              "DEVELOPER",
-              "VIEWER"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "role"
         ]
       },
       "ProjectRoleDto": {
@@ -20279,10 +19894,6 @@
           "email": {
             "type": "string"
           },
-          "role": {
-            "type": "string",
-            "nullable": true
-          },
           "roleKey": {
             "type": "string",
             "nullable": true
@@ -20316,7 +19927,6 @@
         "required": [
           "id",
           "email",
-          "role",
           "roleKey",
           "roleName",
           "status",
@@ -20334,19 +19944,10 @@
             "description": "Email to add or invite",
             "example": "dev@example.com"
           },
-          "role": {
-            "enum": [
-              "ADMIN",
-              "DEVELOPER",
-              "VIEWER"
-            ],
-            "type": "string",
-            "description": "Legacy role; mutually exclusive with roleKey"
-          },
           "roleKey": {
             "type": "string",
             "example": "triager",
-            "description": "kebab-case role key; mutually exclusive with role"
+            "description": "kebab-case role key; required by the service"
           }
         },
         "required": [
@@ -20411,10 +20012,6 @@
           "email": {
             "type": "string"
           },
-          "role": {
-            "type": "string",
-            "nullable": true
-          },
           "roleKey": {
             "type": "string",
             "nullable": true
@@ -20436,7 +20033,6 @@
           "projectName",
           "projectSlug",
           "email",
-          "role",
           "roleKey",
           "roleName",
           "expiresAt"

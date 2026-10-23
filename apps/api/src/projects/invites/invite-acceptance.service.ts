@@ -62,7 +62,6 @@ export class InviteAcceptanceService {
       projectName: invite.projectName,
       projectSlug: invite.projectSlug,
       email: invite.email,
-      role: invite.role,
       roleKey: invite.roleKey,
       roleName: invite.roleName,
       inviterName: invite.inviterName,

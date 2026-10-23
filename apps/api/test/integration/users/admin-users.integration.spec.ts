@@ -22,7 +22,7 @@ const LAST_ADMIN_REFUSED = (
   }
 ).lastAdmin['409'] as string;
 
-interface UserRow { id: string; email: string; role: string; disabled: boolean }
+interface UserRow { id: string; email: string; disabled: boolean }
 
 describeIntegration('/admin/users (PG)', () => {
   let app: NathApplication;
@@ -97,7 +97,8 @@ describeIntegration('/admin/users (PG)', () => {
 
   it('creates a user (email canonicalised) without leaking the hash; duplicate casing is 409', async () => {
     const created = await createUser('Alice@Koda.test');
-    expect(created).toEqual(expect.objectContaining({ email: 'alice@koda.test', role: 'MEMBER', disabled: false }));
+    expect(created).toEqual(expect.objectContaining({ email: 'alice@koda.test', disabled: false }));
+    expect(created).not.toHaveProperty('role');
     expect(created).not.toHaveProperty('passwordHash');
 
     // Exact and case-variant duplicates both conflict: the plain unique index
@@ -120,6 +121,7 @@ describeIntegration('/admin/users (PG)', () => {
     const page = data<{ total: number; hasNext: boolean; records: UserRow[] }>(res);
     expect(page.total).toBe(2);
     expect(page.records).toHaveLength(1);
+    expect(page.records.every((record) => !Object.hasOwn(record, 'role'))).toBe(true);
     expect(page.hasNext).toBe(true);
   });
 
@@ -144,6 +146,8 @@ describeIntegration('/admin/users (PG)', () => {
   it('demoting an admin revokes their ADMIN token immediately', async () => {
     const dave = await createUser('dave@koda.test', 'ADMIN');
     const daveToken = await loginToken(server, 'dave@koda.test');
+    const me = data<{ role: string }>(await request(server).get('/api/auth/me').set(auth(daveToken)).expect(200));
+    expect(me.role).toBe('ADMIN');
     await request(server).get('/api/admin/users').set(auth(daveToken)).expect(200);
 
     // A legacy role patch changes nothing: `disabled` is the only patch field.

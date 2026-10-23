@@ -231,7 +231,6 @@ export class ProjectInvitesService {
     return {
       id: record.id,
       email: record.email,
-      role: record.role,
       roleKey: record.roleKey,
       roleName: record.roleName,
       status: effectiveStatus(record, now),

@@ -20,7 +20,8 @@ const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : descr
 interface InviteDto {
   id: string;
   email: string;
-  role: string;
+  roleKey: string | null;
+  roleName: string | null;
   status: string;
   inviterName: string | null;
   expiresAt: string;
@@ -195,7 +196,7 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
       expect(invite).not.toHaveProperty('token');
       expect(invite).not.toHaveProperty('tokenHash');
       expect(Object.keys(invite).sort()).toEqual(
-        ['createdAt', 'email', 'expiresAt', 'id', 'inviterName', 'role', 'roleKey', 'roleName', 'status'].sort(),
+        ['createdAt', 'email', 'expiresAt', 'id', 'inviterName', 'roleKey', 'roleName', 'status'].sort(),
       );
     }
   });

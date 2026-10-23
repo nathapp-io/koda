@@ -21,7 +21,8 @@ const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : descr
 interface InviteDto {
   id: string;
   email: string;
-  role: string;
+  roleKey: string | null;
+  roleName: string | null;
   status: string;
   inviterName: string | null;
   expiresAt: string;
@@ -39,7 +40,8 @@ interface PreviewDto {
   projectName: string;
   projectSlug: string;
   email: string;
-  role: string;
+  roleKey: string | null;
+  roleName: string | null;
   inviterName: string | null;
   expiresAt: string;
 }
@@ -145,7 +147,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
   });
 
   // ── US-005 AC-1 ───────────────────────────────────────────────────────────
-  it('US-005 AC-1: previews a pending invite with exactly the eight public fields', async () => {
+  it('US-005 AC-1: previews a pending invite with exactly the seven public fields', async () => {
     const { token, row } = await freshInvite();
 
     const res = await preview(token);
@@ -153,13 +155,14 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     const view = data<PreviewDto>(res);
 
     expect(Object.keys(view).sort()).toEqual(
-      ['projectName', 'projectSlug', 'email', 'role', 'roleKey', 'roleName', 'inviterName', 'expiresAt'].sort(),
+      ['projectName', 'projectSlug', 'email', 'roleKey', 'roleName', 'inviterName', 'expiresAt'].sort(),
     );
     expect(view).toMatchObject({
       projectName: 'S5 Project',
       projectSlug: 's4b',
       email: row.email,
-      role: 'DEVELOPER',
+      roleKey: 'developer',
+      roleName: 'Developer',
       inviterName: 'S5 Root',
     });
     expect(new Date(view.expiresAt).getTime()).toBeGreaterThan(Date.now());
@@ -170,7 +173,9 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
 
     const view = data<PreviewDto>(await preview(token).expect(200));
 
-    expect(view.role).toBe('VIEWER');
+    expect(view.roleKey).toBe('viewer');
+    expect(view.roleName).toBe('Viewer');
+    expect(view).not.toHaveProperty('role');
     expect(view.email).toBe(row.email);
   });
 

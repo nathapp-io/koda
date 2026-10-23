@@ -454,7 +454,7 @@ describe('ProjectInvitesService.list (S4b US-004)', () => {
     const rows = await service.list('p', admin);
 
     expect(rows).toHaveLength(1);
-    expect(Object.keys(rows[0]).sort()).toEqual(['createdAt', 'email', 'expiresAt', 'id', 'inviterName', 'role', 'roleKey', 'roleName', 'status']);
+    expect(Object.keys(rows[0]).sort()).toEqual(['createdAt', 'email', 'expiresAt', 'id', 'inviterName', 'roleKey', 'roleName', 'status']);
     expect(JSON.stringify(rows)).not.toMatch(/[a-f0-9]{64}/);
   });
 
