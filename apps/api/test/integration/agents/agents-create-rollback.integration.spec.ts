@@ -135,8 +135,6 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
     // The agent row must have been rolled back: no Agent row with the requested slug exists.
     expect(await prisma.client.agent.findUnique({ where: { slug: 'rollback-agent' } })).toBeNull();
 
-    // AC-9: creation wrote no role row, in this attempt or before it.
-
     expect(await prisma.client.agentCapabilityEntry.count()).toBe(0);
 
     // AC25: the rollback takes the new agent's baseline binding with it.
@@ -177,7 +175,7 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
     expect(await agentBindingIds()).toEqual(bindingsBefore);
   });
 
-  it('AC-9 and AC-10: a successful create writes the capability and no role row', async () => {
+  it('AC-10: a successful create writes the capability and baseline binding', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/agents')
       .send({
@@ -191,8 +189,6 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
     const persisted = await prisma.client.agent.findUnique({ where: { slug: 'healthy-agent' } });
     expect(persisted).not.toBeNull();
     expect(persisted?.name).toBe('Healthy Agent');
-    // US-005: creation writes capabilities only.
-
     const capabilities = await prisma.client.agentCapabilityEntry.findMany({
       where: { agentId: persisted?.id as string },
       select: { capability: true },

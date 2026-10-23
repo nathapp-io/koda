@@ -128,10 +128,8 @@ describe('AuthService', () => {
       expect(mockMembership.isGlobalAdmin).toHaveBeenCalledWith('u1');
     });
 
-    it.each([1, 2])('AC-11/12: lookup failure %s propagates before either token is signed', async (lookup) => {
+    it('AC-11/12: lookup failure propagates before either token is signed', async () => {
       const error = new Error('binding lookup unavailable');
-      mockMembership.isGlobalAdmin.mockResolvedValueOnce(true);
-      if (lookup === 1) mockMembership.isGlobalAdmin.mockReset();
       mockMembership.isGlobalAdmin.mockRejectedValueOnce(error);
       mockAuthRepository.findUserByEmail.mockResolvedValue({ ...mockUser, passwordHash: await bcrypt.hash('Password123!', 4) });
       await expect(service.login({ email: mockUser.email, password: 'Password123!' })).rejects.toBe(error);
@@ -139,11 +137,26 @@ describe('AuthService', () => {
       expect(mockJwtRefreshStrategyProvider.sign).not.toHaveBeenCalled();
     });
 
-    it('awaits the derived response and claim', async () => {
-      mockMembership.isGlobalAdmin.mockResolvedValue(true);
+    it.each([true, false])('uses one role lookup for the response and claim (admin=%s)', async (admin) => {
+      mockMembership.isGlobalAdmin.mockResolvedValueOnce(admin).mockResolvedValue(!admin);
       const response = await service.issueSession(mockUser);
-      expect(response.user.role).toBe('ADMIN');
-      expect(mockJwtStrategyProvider.sign).toHaveBeenCalledWith(expect.objectContaining({ role: 'ADMIN' }));
+      const role = admin ? 'ADMIN' : 'MEMBER';
+      expect(response.user.role).toBe(role);
+      expect(mockJwtStrategyProvider.sign).toHaveBeenCalledWith(expect.objectContaining({ role }));
+      expect(mockMembership.isGlobalAdmin).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([true, false])('userResponse exposes only public fields (admin=%s)', async (admin) => {
+      mockMembership.isGlobalAdmin.mockResolvedValue(admin);
+      const response = await service.userResponse(mockUser);
+      expect(response).toEqual({
+        id: mockUser.id, email: mockUser.email, name: mockUser.name,
+        role: admin ? 'ADMIN' : 'MEMBER', disabled: mockUser.disabled,
+        createdAt: mockUser.createdAt, updatedAt: mockUser.updatedAt,
+      });
+      expect(response).not.toHaveProperty('passwordHash');
+      expect(response).not.toHaveProperty('tokenVersion');
+      expect(JSON.stringify(response)).not.toContain(mockUser.passwordHash);
     });
 
     it('re-reads the committed registration tokenVersion', async () => {

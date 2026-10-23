@@ -118,7 +118,7 @@ describe('FleetApprovalInbox', () => {
     expect(m.rowEl('a1').props['data-status']).toBe('pending')
     expect(m.app.textOf(m.rowEl('a1'))).toContain('Budget for project koda stopped at $0.60 of $0.50')
     m.app.unmount()
-  }, 15_000)
+  })
 
   test('the All tab and the type filter change the query', async () => {
     const get = jest.fn(async () => page([]))

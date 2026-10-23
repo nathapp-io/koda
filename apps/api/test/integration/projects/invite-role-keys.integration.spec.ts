@@ -255,13 +255,12 @@ describeIntegration('invite role keys (US-005)', () => {
     expect(await db.roleBinding.count()).toBe(bindingsBefore);
   }, TIMEOUT);
 
-  it('AC-7: accepting an invite with roleId and role both null is 409 invites.roleGone and leaves no user and no binding', async () => {
+  it('AC-7: accepting an invite with null roleId is 409 invites.roleGone and leaves no user and no binding', async () => {
     const bindingsBefore = await db.roleBinding.count();
     await db.projectInvite.create({
       data: {
         projectId,
         email: 'ac7@koda.test',
-
         roleId: null,
         tokenHash: hashInviteToken('ac7-raw-token'),
         expiresAt: new Date(Date.now() + 86_400_000),

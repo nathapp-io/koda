@@ -238,9 +238,9 @@ export class PrismaRoleBindingRepository
   }
 
   /**
-   * Takes the user's row lock (`SELECT … FOR UPDATE`) so the legacy `User.role` mirror of concurrent
-   * global `owner`/`admin` binding writes of that user is decided one transaction at a time: without
-   * it, two removals each count the other's uncommitted binding as still present and neither demotes.
+   * Takes the user's row lock (`SELECT … FOR UPDATE`) so concurrent global `owner`/`admin` binding
+   * writes decide derived-role flips and token revocation one transaction at a time: without it,
+   * two removals each count the other's uncommitted binding as present and neither revokes tokens.
    * Call inside `txManager.run` only, after `lockOwnerRole` when the same write takes that one too —
    * never in the opposite order, or two transactions deadlock.
    */

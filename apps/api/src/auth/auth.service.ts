@@ -163,8 +163,9 @@ export class AuthService {
 
   /** The session shape shared by register, login, refresh and invite acceptance. */
   async issueSession(user: UserDomain): Promise<AuthResponseDto> {
-    // Resolve both reads before signing anything: either can fail closed.
-    const [role, response] = await Promise.all([this.roleClaim(user.id), this.userResponse(user)]);
+    // Derive once so the JWT and response describe the same binding snapshot.
+    const role = await this.roleClaim(user.id);
+    const response = UserResponseDto.from(user, role);
     return {
       accessToken: this.generateAccessToken(user.id, user.email, role, user.tokenVersion),
       refreshToken: this.generateRefreshToken(user.id, user.tokenVersion),

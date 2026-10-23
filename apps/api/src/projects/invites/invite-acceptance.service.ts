@@ -20,23 +20,15 @@ const BCRYPT_ROUNDS = 12;
 /** Register's fallback display name when the body omits one (BUG-8: never the email local part). */
 const DEFAULT_NAME = 'User';
 
-/**
- * How acceptance names the invite's role: the persisted row when the invite has one, the legacy key a
- * pre-migration invite stands for otherwise.
- */
-type InvitedRole = { roleId: string } | { roleKey: string };
+/** The persisted role identity used for acceptance. */
+type InvitedRole = { roleId: string };
 
 /**
- * US-005 (AC-7): the role identity the invite *persisted*, never the key it displays.
- *
- * A row with a `roleId` binds that id. A pre-migration row (no `roleId`) binds the role its legacy enum
- * maps to, which the repository already resolved into `roleKey`. A row with neither names no role at all
- * — the custom role it carried was deleted before acceptance — and `null` makes the accept answer 409
- * `invites.roleGone`.
+ * Bind the persisted role id, never the display key. A null roleId means the invited role was
+ * deleted; acceptance returns 409 `invites.roleGone` rather than resolving a replacement by key.
  */
 function invitedRole(invite: ProjectInvitePreview): InvitedRole | null {
-  if (invite.roleId !== null) return { roleId: invite.roleId };
-  return invite.roleKey === null ? null : { roleKey: invite.roleKey };
+  return invite.roleId === null ? null : { roleId: invite.roleId };
 }
 
 /**
@@ -124,9 +116,7 @@ export class InviteAcceptanceService {
   ): Promise<RoleBindingView | null> {
     const principal = { type: 'USER' as const, id: userId };
     const grantedBy = { type: 'SYSTEM' as const, id: 'invite' };
-    return 'roleId' in role
-      ? this.membership.createBindingForRole({ principal, roleId: role.roleId, projectId }, grantedBy)
-      : this.membership.createBinding({ principal, roleKey: role.roleKey, projectId }, grantedBy);
+    return this.membership.createBindingForRole({ principal, roleId: role.roleId, projectId }, grantedBy);
   }
 
   private async createUser(email: string, name: string | undefined, passwordHash: string): Promise<UserDomain> {

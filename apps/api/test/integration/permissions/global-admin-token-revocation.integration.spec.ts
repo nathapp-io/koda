@@ -45,9 +45,9 @@ integration('global admin token revocation (PG)', () => {
   it('a failed token bump rolls back the binding and leaves caches usable', async () => {
     await me(member.accessToken).expect(200);
     const before = await version();
-    await db.$executeRawUnsafe(`CREATE FUNCTION reject_token_bump() RETURNS trigger LANGUAGE plpgsql AS $$
-      BEGIN IF NEW."tokenVersion" <> OLD."tokenVersion" THEN RAISE EXCEPTION 'token bump failure'; END IF; RETURN NEW; END $$`);
     try {
+      await db.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION reject_token_bump() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN IF NEW."tokenVersion" <> OLD."tokenVersion" THEN RAISE EXCEPTION 'token bump failure'; END IF; RETURN NEW; END $$`);
       await db.$executeRawUnsafe('CREATE TRIGGER reject_token_bump BEFORE UPDATE ON "User" FOR EACH ROW EXECUTE FUNCTION reject_token_bump()');
       await request(app.getHttpServer()).post('/api/role-bindings').auth(owner.accessToken, { type: 'bearer' })
         .send({ principalType: 'USER', principalId: member.user.id, roleKey: 'admin' }).expect(500);
@@ -56,7 +56,7 @@ integration('global admin token revocation (PG)', () => {
       await me(member.accessToken).expect(200);
     } finally {
       await db.$executeRawUnsafe('DROP TRIGGER IF EXISTS reject_token_bump ON "User"');
-      await db.$executeRawUnsafe('DROP FUNCTION reject_token_bump()');
+      await db.$executeRawUnsafe('DROP FUNCTION IF EXISTS reject_token_bump()');
     }
   });
   it('AC-11: project grant preserves warmed token', async () => {

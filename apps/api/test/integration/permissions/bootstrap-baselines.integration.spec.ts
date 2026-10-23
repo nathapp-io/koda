@@ -158,7 +158,6 @@ describeIntegration('registration with no owner email configured (US-004)', () =
     expect(retry.status).toBe(201);
     const created = data<{ user: UserRow }>(retry);
     expect(await h.boundRoles('USER', created.user.id)).toContainEqual({ roleKey: 'owner', projectId: null });
-    expect(await h.boundRoles('USER', created.user.id)).toContainEqual({ roleKey: 'owner', projectId: null });
   });
 });
 

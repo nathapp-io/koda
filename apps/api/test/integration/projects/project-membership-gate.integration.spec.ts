@@ -396,9 +396,6 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     expect(updated.body).toBe('agent edit');
     const row = await prisma.comment.findUnique({ where: { id: agentCommentId } });
     expect(row?.body).toBe('agent edit');
-    // Agents are cross-project: there is no ProjectMember row that could have
-    // admitted the agent.
-
   }, TEST_TIMEOUT_MS);
 
   // -------------------------------------------------------------------------
@@ -436,8 +433,6 @@ describeIntegration('US-002 project membership gate (PG)', () => {
   }, TEST_TIMEOUT_MS);
 
   it('AC5: DELETE /api/comments/:id returns 204 for a global ADMIN who is not a member', async () => {
-    // `root` is a global ADMIN with no ProjectMember row anywhere.
-
     const res = await send('delete', `/api/comments/${adminTargetCommentId}`, 'root');
 
     expect(res.status).toBe(204);

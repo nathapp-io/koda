@@ -126,10 +126,6 @@ describeIntegration('VCS webhook secret (M9)', () => {
         ],
       },
     );
-
-    // The hook agent holds no legacy role: its `roles` are empty, so production wrote no
-    // `AgentRoleEntry` row for it.
-
   });
 
   it('create returned the stored secret', async () => {
