@@ -9,9 +9,9 @@ import { MemberBindingDto } from './member-binding.dto';
  * an `Agent`: `userId` and `email` are null, `agentSlug` is set, and `disabled` is false because an
  * agent principal carries no account state. `principalType` + `principalId` are what a client keys on.
  *
- * `role` and `joinedAt` keep their pre-P1 meaning: the strongest legacy role of the principal's local
- * sources in the project, and the date of its earliest one. `bindings` says which roles it actually
- * holds, so a client renders chips instead of guessing from `role`.
+ * `joinedAt` keeps its pre-P1 meaning: the date of the principal's earliest binding in the project.
+ * `bindings` is which roles it holds — the legacy display `role` is gone (Permissions P1l US-006), so a
+ * client renders chips instead of a single merged role.
  */
 export class ProjectMemberDto {
   @ApiPropertyOptional({ nullable: true, type: String, description: 'Null for an agent' })
@@ -21,8 +21,6 @@ export class ProjectMemberDto {
   declare email: string | null;
 
   @ApiPropertyOptional({ nullable: true, type: String }) declare name: string | null;
-
-  @ApiProperty({ enum: ['ADMIN', 'DEVELOPER', 'AGENT', 'VIEWER'] }) declare role: string;
 
   /** Global account state (S4c US-003): a disabled member cannot act on the project. */
   @ApiProperty() declare disabled: boolean;
@@ -44,7 +42,6 @@ export class ProjectMemberDto {
       userId: r.userId,
       email: r.email,
       name: r.name,
-      role: r.role,
       disabled: r.disabled,
       joinedAt: r.joinedAt,
       principalType: r.principalType,

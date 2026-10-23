@@ -87,9 +87,12 @@ dbDescribe('agent access ignores the retired off flag', () => {
     await request(app.getHttpServer()).get('/api/projects/p1').set(agentAuth()).expect(200);
   });
 
-  it('AC-6: project admin sees scoping true', async () => {
+  it('AC-6: project admin sees the roster as { items } alone', async () => {
     const res = await request(app.getHttpServer()).get('/api/projects/p1/agents')
       .set({ Authorization: `Bearer ${adminToken}` }).expect(200);
-    expect(data<{ scoping: boolean }>(res).scoping).toBe(true);
+    // Permissions P1l US-006: `scoping` was always true, so the answer is the items alone.
+    const body = data<Record<string, unknown>>(res);
+    expect(Object.keys(body)).toEqual(['items']);
+    expect(body).not.toHaveProperty('scoping');
   });
 });

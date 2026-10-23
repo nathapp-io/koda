@@ -80,7 +80,6 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
           slug: 'bot',
           name: 'Bot',
           status: 'ACTIVE',
-          roles: [{ role: 'DEVELOPER' }],
           capabilities: [{ capability: 'typescript' }],
         },
       },
@@ -95,13 +94,16 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
       slug: 'bot',
       name: 'Bot',
       status: 'ACTIVE',
-      roles: ['DEVELOPER'],
       capabilities: ['typescript'],
       openTicketCount: 0,
       openTicketRefs: [],
       addedById: 'user-admin',
       addedByName: 'Admin',
     });
+    // US-006: an agent's roles are bindings, so the roster row carries no roles and the read selects
+    // no `AgentRoleEntry` rows for it.
+    expect(records[0]).not.toHaveProperty('roles');
+    expect(agentFindMany.mock.calls[0][0].select).not.toHaveProperty('roles');
 
     // Agent details, separate from membership provenance, retain name ordering.
     const where = agentFindMany.mock.calls[0][0].where;
@@ -119,7 +121,6 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
           slug: 'bot',
           name: 'Bot',
           status: 'ACTIVE',
-          roles: [],
           capabilities: [],
         },
       },
@@ -143,7 +144,6 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
           slug: 'bot',
           name: 'Bot',
           status: 'ACTIVE',
-          roles: [],
           capabilities: [],
         },
       },
@@ -167,7 +167,6 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
           slug: 'rostered-bot',
           name: 'Rostered Bot',
           status: 'ACTIVE',
-          roles: [],
           capabilities: [],
         },
       },
@@ -190,7 +189,6 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
           slug: 'bot',
           name: 'Bot',
           status: 'ACTIVE',
-          roles: [],
           capabilities: [],
         },
       },
@@ -223,7 +221,6 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
           slug: 'bot',
           name: 'Bot',
           status: 'ACTIVE',
-          roles: [],
           capabilities: [],
         },
       },

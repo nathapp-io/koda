@@ -191,7 +191,8 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
 
     expect(members.findUserIdByEmail).toHaveBeenCalledWith('new@x.io');
     expect(result.outcome).toBe('ADDED');
-    expect(result.member?.role).toBe('DEVELOPER');
+    // Permissions P1l US-006: the ADDED member answers its bindings, not a display role.
+    expect(result.member).not.toHaveProperty('role');
     expect(membership.createBinding).toHaveBeenCalledWith({ principal: { type: 'USER', id: 'u9' }, projectId: 'p1', roleKey: 'developer' }, { type: 'USER', id: 'admin' });
     expect(result.member).toMatchObject({ email: 'b@x.io', name: 'New User', joinedAt: NOW });
     expect(members.lockMembers.mock.invocationCallOrder[0]).toBeLessThan(members.findLocalRole.mock.invocationCallOrder[0]);

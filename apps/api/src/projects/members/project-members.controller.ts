@@ -15,10 +15,10 @@ import { ProjectMemberDto } from './dto/project-member.dto';
 /**
  * Permissions P1 (US-008): both guards sit at the class level, in order, so
  * `ProjectMembershipGuard` resolves `request.projectContext` and refuses a principal with no access
- * to the project (403 `projects`) once, before `RequiresGuard` reads the route's key. The former
- * `resolveMembership` / `assertProjectAdmin` checks inside `ProjectMembersService` are gone; every
- * handler now declares its own `member.*` key. `member.read` is what lets a plain member list the
- * members; `member.add` alone decides the page's `canManage`.
+ * to the project (403 `projects`) once, before `RequiresGuard` reads the route's key. Every handler
+ * declares its own `member.*` key: `member.read` is what lets a plain member list the members, and
+ * `member.add` is what lets one add. The listing answers the page alone (Permissions P1l US-006) — the
+ * former `canManage` and `viewerRole` described a UI state no endpoint decides any more.
  *
  * Permissions P1 (US-003): a member's role change and removal are no longer routes here. They are a
  * binding grant and a binding delete on `/role-bindings`, which `role.binding.manage` gates and
@@ -37,14 +37,14 @@ export class ProjectMembersController {
   @ApiOperation({ summary: 'List project members (any member)' })
   @ApiResponse({
     status: 200,
-    description: 'Page of members: { total, current, size, hasNext, hasPrev, records, canManage, viewerRole }',
+    description: 'Page of members: { total, current, size, hasNext, hasPrev, records }',
   })
   @ApiResponse({ status: 403, description: 'Not a project member, or member.read is missing' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   async list(@Param('slug') slug: string, @Query() rawQuery: ListMembersQuery, @Principal() principal: KodaPrincipal) {
     const { current, size, principals } = parseQuery(ListMembersQuery, rawQuery);
-    const { page, canManage, viewerRole } = await this.members.list(slug, principal, { current, size }, principals);
-    return JsonResponse.Ok({ ...toPageResult(page), canManage, viewerRole });
+    const page = await this.members.list(slug, principal, { current, size }, principals);
+    return JsonResponse.Ok(toPageResult(page));
   }
 
   @Post()

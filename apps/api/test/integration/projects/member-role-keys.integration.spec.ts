@@ -54,10 +54,9 @@ function sentence(
 interface MemberBody {
   userId: string | null;
   email: string | null;
-  role: string;
   principalType: string;
   principalId: string;
-  bindings: Array<{ id: string | null; roleKey: string; roleName: string }>;
+  bindings: Array<{ id: string; roleKey: string; roleName: string }>;
 }
 
 interface RoleBody {
@@ -148,8 +147,11 @@ describeIntegration('member role keys (US-004)', () => {
       .expect(201);
 
     // padmin joins through a role key (US-004 P1l: the only role field the add route accepts).
+    // Permissions P1l US-006: the added member names its bindings instead of a display role.
     const added = await as('owner').send({ email: 'padmin@koda.test', roleKey: 'project-admin' }).expect(201);
-    expect(data<MemberBody>(added)).toEqual(expect.objectContaining({ role: 'ADMIN' }));
+    const body = data<MemberBody>(added);
+    expect(body).not.toHaveProperty('role');
+    expect(body.bindings).toEqual([expect.objectContaining({ roleKey: 'project-admin', id: expect.any(String) })]);
   }, BOOT_TIMEOUT_MS);
 
   beforeEach(() => {

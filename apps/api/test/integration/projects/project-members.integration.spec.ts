@@ -12,7 +12,7 @@ import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
-interface Member { userId: string; email: string; role: string }
+interface Member { userId: string; email: string; bindings: { id: string; roleKey: string }[] }
 interface Page<T> { total: number; records: T[] }
 
 describeIntegration('/projects/:slug/members (PG)', () => {
@@ -53,7 +53,10 @@ describeIntegration('/projects/:slug/members (PG)', () => {
 
   it('a global admin adds a project admin and a developer', async () => {
     const pa = data<Member>(await request(server).post(base).set(auth('root')).send({ email: 'pa@koda.test', roleKey: 'project-admin' }).expect(201));
-    expect(pa).toEqual(expect.objectContaining({ userId: ids.pa, role: 'ADMIN' }));
+    // Permissions P1l US-006: a member row names its bindings instead of a display role.
+    expect(pa).toEqual(expect.objectContaining({ userId: ids.pa }));
+    expect(pa).not.toHaveProperty('role');
+    expect(pa.bindings).toEqual([expect.objectContaining({ roleKey: 'project-admin', id: expect.any(String) })]);
     await request(server).post(base).set(auth('root')).send({ email: 'dev@koda.test', roleKey: 'developer' }).expect(201);
   });
 
@@ -86,7 +89,10 @@ describeIntegration('/projects/:slug/members (PG)', () => {
     await request(server).delete(`/api/role-bindings/${viewer.id}`).set(auth('pa')).expect(204);
 
     const page = data<Page<Member>>(await request(server).get(base).set(auth('pa')).expect(200));
-    expect(page.records.find((member) => member.userId === ids.viewer)).toMatchObject({ role: 'DEVELOPER' });
+    // Permissions P1l US-006: the row's bindings are what says which role it holds.
+    const row = page.records.find((member) => member.userId === ids.viewer);
+    expect(row?.bindings.map((binding) => binding.roleKey)).toEqual(['developer']);
+    expect(row).not.toHaveProperty('role');
   });
 
   it('the last project ADMIN cannot have its binding revoked; a global admin can', async () => {

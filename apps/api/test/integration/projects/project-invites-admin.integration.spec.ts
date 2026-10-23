@@ -29,7 +29,7 @@ interface InviteDto {
 
 interface InviteCreateResult {
   outcome: string;
-  member?: { userId: string; email: string; role: string };
+  member?: { userId: string; email: string; bindings: { id: string; roleKey: string }[] };
   invite?: InviteDto;
   invitePath?: string;
   emailed?: boolean;
@@ -106,7 +106,8 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
     expect(body.outcome).toBe('ADDED');
     expect(body.member).toBeDefined();
     expect(body.member?.email).toBe(userEmail);
-    expect(body.member?.role).toBe('DEVELOPER');
+    // Permissions P1l US-006: the ADDED member names its bindings instead of a display role.
+    expect(body.member?.bindings).toEqual([expect.objectContaining({ roleKey: 'developer' })]);
 
     const projectId = (await prisma.client.project.findFirstOrThrow({ where: { slug } })).id;
     const user = await prisma.client.user.findFirstOrThrow({ where: { email: userEmail } });

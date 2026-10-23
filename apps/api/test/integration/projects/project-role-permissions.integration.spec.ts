@@ -275,8 +275,7 @@ describeIntegration('project-role permissions (#144)', () => {
       .toEqual({ kind: 'user', id: ids.pdev, name: 'pdev' });
   }, TIMEOUT);
 
-  it('members page reports viewerRole for the caller', async () => {
-    const res = await request(server).get('/api/projects/team/members').set(auth('pdev')).expect(200);
-    expect(data<{ viewerRole: string; canManage: boolean }>(res)).toEqual(expect.objectContaining({ viewerRole: 'DEVELOPER', canManage: false }));
-  }, TIMEOUT);
+  // Permissions P1l US-006: the members page no longer reports the caller's display role or a
+  // management flag, so the case that read `viewerRole` is gone. The list-access contract it stood on
+  // is pinned by test/integration/permissions/member-agent-response-fields.integration.spec.ts.
 });

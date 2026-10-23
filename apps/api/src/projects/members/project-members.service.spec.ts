@@ -6,12 +6,11 @@ import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 
 const globalAdmin = { actorType: 'user', id: 'g1', role: 'ADMIN', email: 'g@k.t' } as KodaPrincipal;
 const projectAdmin = { actorType: 'user', id: 'pa', role: 'MEMBER', email: 'pa@k.t' } as KodaPrincipal;
-const member = (userId: string, role: string, disabled = false) =>
+const member = (userId: string, disabled = false) =>
   ({
     userId,
     email: `${userId}@k.t`,
     name: userId,
-    role,
     disabled,
     joinedAt: new Date(0),
     principalType: 'USER' as const,
@@ -20,12 +19,14 @@ const member = (userId: string, role: string, disabled = false) =>
     bindings: [{ id: `bind-${userId}`, roleKey: 'developer', roleName: 'Developer' }],
   });
 
+/** An empty page, the shape `PrismaProjectMembersRepository.findMemberPage` answers. */
+const emptyPage = { total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] };
+
 describe('ProjectMembersService', () => {
   let repo: Record<string, Mock>;
   let access: Record<string, Mock>;
   let service: ProjectMembersService;
   let membership: Record<string, Mock>;
-  let permissions: Record<string, Mock>;
   let roles: { assertMayGrant: Mock };
 
   beforeEach(() => {
@@ -48,66 +49,61 @@ describe('ProjectMembersService', () => {
       createBinding: vi.fn(),
       removeProjectBindings: vi.fn(),
     };
-    permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) };
     roles = { assertMayGrant: vi.fn(async (): Promise<{ key: string }> => ({ key: 'viewer' })) };
+    // US-006: the service no longer depends on PermissionService — `member.add` is the route's key and
+    // the members page carries no canManage.
     service = new ProjectMembersService(
       repo as never,
       access as never,
       txManager as never,
       membership as never,
-      permissions as never,
       roles as never,
     );
   });
 
-  it('list resolves membership once for viewerRole and asks member.add for canManage', async () => {
-    repo.findMemberPage.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
+  it('list answers the page alone and keeps resolving the caller\'s membership for the 403 gate', async () => {
+    repo.findMemberPage.mockResolvedValue(emptyPage);
     access.resolveMembership.mockResolvedValue('ADMIN');
-    permissions.can.mockResolvedValue({ allowed: true, reason: 'granted' });
 
     const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
 
+    // The access gate still runs first: a principal without access never reaches the listing.
     expect(access.resolveMembership).toHaveBeenCalledTimes(1);
-    // US-008: canManage is the member.add key, asked for the project the slug resolved to.
-    expect(permissions.can).toHaveBeenCalledWith(projectAdmin, 'member.add', { projectId: 'p1' });
-    expect(result.canManage).toBe(true);
-    expect(result.viewerRole).toBe('ADMIN');
-    expect(result.page.total).toBe(0);
+    expect(access.resolveMembership).toHaveBeenCalledWith('p1', projectAdmin);
+    // US-006: the page is the whole answer — no canManage, no viewerRole.
+    expect(Object.keys(result).sort()).toEqual(['current', 'hasNext', 'hasPrev', 'records', 'size', 'total']);
+    expect(result).toEqual(emptyPage);
   });
 
-  it('list reports canManage false when member.add is refused, whatever the viewer role is', async () => {
-    repo.findMemberPage.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
+  it('list propagates the membership refusal and reads no page for a principal without access', async () => {
+    access.resolveMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+
+    const error = await service.list('proj', projectAdmin, { current: 1, size: 20 })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ForbiddenAppException);
+    expect((error as ForbiddenAppException).prefix).toBe('projects');
+    expect(repo.findMemberPage).not.toHaveBeenCalled();
+  });
+
+  it('US-006: list maps the repository records to member DTOs', async () => {
+    repo.findMemberPage.mockResolvedValue({ ...emptyPage, total: 1, records: [member('u1')] });
     access.resolveMembership.mockResolvedValue('ADMIN');
-    permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
 
     const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
 
-    // The legacy role says ADMIN, the key does not: the key decides.
-    expect(result).toEqual(expect.objectContaining({ canManage: false, viewerRole: 'ADMIN' }));
-  });
-
-  it('list reports viewerRole DEVELOPER and canManage false for a developer binding', async () => {
-    repo.findMemberPage.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
-    access.resolveMembership.mockResolvedValue('DEVELOPER');
-    permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
-
-    const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
-
-    expect(result).toEqual(expect.objectContaining({ canManage: false, viewerRole: 'DEVELOPER' }));
-  });
-
-  it('list reports viewerRole null and canManage false for an agent', async () => {
-    repo.findMemberPage.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
-    access.resolveMembership.mockResolvedValue(null);
-    permissions.can.mockResolvedValue({ allowed: false, reason: 'not-granted' });
-
-    const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
-
-    expect(result).toEqual(expect.objectContaining({ canManage: false, viewerRole: null }));
+    expect(result.total).toBe(1);
+    expect(result.records).toEqual([
+      expect.objectContaining({
+        userId: 'u1',
+        bindings: [{ id: 'bind-u1', roleKey: 'developer', roleName: 'Developer' }],
+      }),
+    ]);
+    expect(result.records[0]).not.toHaveProperty('role');
   });
 
   it('US-003: list passes the principals filter down, defaulting to users', async () => {
-    repo.findMemberPage.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
+    repo.findMemberPage.mockResolvedValue(emptyPage);
     access.resolveMembership.mockResolvedValue('VIEWER');
 
     await service.list('proj', projectAdmin, { current: 1, size: 20 });
@@ -123,7 +119,9 @@ describe('ProjectMembersService', () => {
     // add reads the member once to refuse a duplicate and once to return the written row.
     repo.findMember.mockResolvedValueOnce(null).mockResolvedValueOnce(member('u1', 'DEVELOPER'));
 
-    await expect(service.add('proj', { email: 'u1@k.t', roleKey: 'developer' }, projectAdmin)).resolves.toMatchObject({ role: 'DEVELOPER' });
+    // US-006: the written member answers its bindings, not a display role.
+    await expect(service.add('proj', { email: 'u1@k.t', roleKey: 'developer' }, projectAdmin))
+      .resolves.toMatchObject({ userId: 'u1', bindings: [{ roleKey: 'developer' }] });
   });
 
   it('add: unknown email is 404, duplicate member is 409', async () => {
@@ -133,14 +131,15 @@ describe('ProjectMembersService', () => {
 
     repo.findUserByEmail.mockResolvedValueOnce({ id: 'u1', disabled: false });
     repo.findUserIdByEmail.mockResolvedValueOnce('u1');
-    repo.findMember.mockResolvedValueOnce(member('u1', 'VIEWER'));
+    repo.findMember.mockResolvedValueOnce(member('u1'));
     await expect(service.add('proj', { email: 'u1@k.t', roleKey: 'viewer' }, globalAdmin)).rejects.toMatchObject({ prefix: 'members', httpStatus: 409 });
   });
 
   it('add grants the roleKey and reads the written member', async () => {
     repo.findUserByEmail.mockResolvedValue({ id: 'u1', disabled: false });
-    repo.findMember.mockResolvedValueOnce(null).mockResolvedValueOnce(member('u1', 'DEVELOPER'));
-    expect(await service.add('proj', { email: 'u1@k.t', roleKey: 'developer' }, projectAdmin)).toMatchObject({ role: 'DEVELOPER' });
+    repo.findMember.mockResolvedValueOnce(null).mockResolvedValueOnce(member('u1'));
+    expect(await service.add('proj', { email: 'u1@k.t', roleKey: 'developer' }, projectAdmin))
+      .toMatchObject({ userId: 'u1' });
     expect(membership.createBinding).toHaveBeenCalledWith({ principal: { type: 'USER', id: 'u1' }, projectId: 'p1', roleKey: 'developer' }, { type: 'USER', id: 'pa' });
   });
 
@@ -152,7 +151,7 @@ describe('ProjectMembersService', () => {
   describe('US-004: role keys through the grant rules', () => {
     beforeEach(() => {
       repo.findUserByEmail.mockResolvedValue({ id: 'u1', disabled: false });
-      repo.findMember.mockResolvedValueOnce(null).mockResolvedValueOnce(member('u1', 'DEVELOPER'));
+      repo.findMember.mockResolvedValueOnce(null).mockResolvedValueOnce(member('u1'));
     });
 
     it('AC-3: calls assertMayGrant once with the requested key and the target, before createBinding', async () => {
@@ -248,7 +247,7 @@ describe('ProjectMembersService', () => {
 
     it('the existing-member 409 comes after the grant rules', async () => {
       repo.findMember.mockReset();
-      repo.findMember.mockResolvedValue(member('u1', 'DEVELOPER'));
+      repo.findMember.mockResolvedValue(member('u1'));
 
       await expect(service.add('proj', { email: 'u1@k.t', roleKey: 'triager' }, projectAdmin))
         .rejects.toMatchObject({ prefix: 'members', httpStatus: 409 });
@@ -281,13 +280,13 @@ describe('ProjectMembersService', () => {
       size: 20,
       hasNext: false,
       hasPrev: false,
-      records: [member('disabled-user', 'VIEWER', true), member('enabled-user', 'DEVELOPER', false)],
+      records: [member('disabled-user', true), member('enabled-user', false)],
     });
     access.resolveMembership.mockResolvedValue('ADMIN');
 
     const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
 
-    expect(result.page.records).toEqual(expect.arrayContaining([
+    expect(result.records).toEqual(expect.arrayContaining([
       expect.objectContaining({ userId: 'disabled-user', disabled: true }),
       expect.objectContaining({ userId: 'enabled-user', disabled: false }),
     ]));

@@ -233,13 +233,15 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
     expect(res.status).toBe(200);
   }, TEST_TIMEOUT_MS);
 
-  it('AC-9: a project-admin binding makes its holder a project admin on the members route', async () => {
+  it('AC-9: a project-admin binding lets its holder list the members of the project', async () => {
     const res = await send('get', '/api/projects/p1/members', 'paBound');
 
     expect(res.status).toBe(200);
-    const body = data<{ canManage: boolean; viewerRole: string }>(res);
-    expect(body.canManage).toBe(true);
-    expect(body.viewerRole).toBe('ADMIN');
+    // Permissions P1l US-006: the page no longer answers a management flag or the caller's display role.
+    const body = data<Record<string, unknown>>(res);
+    expect(body).not.toHaveProperty('canManage');
+    expect(body).not.toHaveProperty('viewerRole');
+    expect(body.records).toEqual(expect.any(Array));
   }, TEST_TIMEOUT_MS);
 
   it('AC-10: GET /projects lists exactly the projects a user has a source in', async () => {
@@ -297,8 +299,9 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
   }, TEST_TIMEOUT_MS);
 
   // ---------------------------------------------------------------------------
-  // US-001 — access to a project is holding `project.read` in it, while the members page keeps
-  // showing the caller's display role (`viewerRole`).
+  // US-001 — access to a project is holding `project.read` in it. Permissions P1l US-006 removed the
+  // members page's display role, so AC-12 and AC-13 below assert the access the two cases were built
+  // on: those principals list the members.
   // ---------------------------------------------------------------------------
 
   it('US-001 AC-11: a custom PROJECT role without project.read gets 403 projects from the guard', async () => {
@@ -314,25 +317,23 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
     expect(res.body.message).toBe('projects.40003');
   }, TEST_TIMEOUT_MS);
 
-  it('US-001 AC-12: a global admin with no source in p1 gets viewerRole ADMIN', async () => {
+  it('US-001 AC-12: a global admin with no source in p1 lists the members through project.read', async () => {
     expect(await prisma.projectMember.count({ where: { projectId: projectIds.p1, userId: rootId } })).toBe(0);
     expect(await prisma.roleBinding.count({ where: { projectId: projectIds.p1, principalId: rootId } })).toBe(0);
 
     const res = await send('get', '/api/projects/p1/members', 'root');
 
     expect(res.status).toBe(200);
-    expect(data<{ viewerRole: string }>(res).viewerRole).toBe('ADMIN');
+    expect(data<Record<string, unknown>>(res).records).toEqual(expect.any(Array));
   }, TEST_TIMEOUT_MS);
 
-  it('US-001 AC-13: a viewer binding gets viewerRole VIEWER', async () => {
+  it('US-001 AC-13: a viewer binding lists the members of the project', async () => {
     expect(await prisma.projectMember.count({ where: { projectId: projectIds.p1, userId: ids.viewerBind } })).toBe(0);
 
     const res = await send('get', '/api/projects/p1/members', 'viewerBind');
 
     expect(res.status).toBe(200);
-    expect(data<{ canManage: boolean; viewerRole: string }>(res)).toEqual(
-      expect.objectContaining({ canManage: false, viewerRole: 'VIEWER' }),
-    );
+    expect(data<Record<string, unknown>>(res)).not.toHaveProperty('viewerRole');
   }, TEST_TIMEOUT_MS);
 });
 

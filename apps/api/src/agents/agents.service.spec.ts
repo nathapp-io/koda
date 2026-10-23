@@ -35,9 +35,6 @@ describe('AgentsService', () => {
     slug: 'test-agent',
     status: 'ACTIVE',
     maxConcurrentTickets: 3,
-    roles: [
-      { id: 'role-1', agentId: 'agent-123', role: 'DEVELOPER' },
-    ],
     capabilities: [
       { id: 'cap-1', agentId: 'agent-123', capability: 'typescript' },
       { id: 'cap-2', agentId: 'agent-123', capability: 'nestjs' },
@@ -50,9 +47,6 @@ describe('AgentsService', () => {
 
   const mockAgentWithRelations = {
     ...mockAgent,
-    roles: [
-      { id: 'role-1', agentId: 'agent-123', role: 'DEVELOPER' },
-    ],
     capabilities: [
       { id: 'cap-1', agentId: 'agent-123', capability: 'typescript' },
       { id: 'cap-2', agentId: 'agent-123', capability: 'nestjs' },
@@ -386,7 +380,7 @@ describe('AgentsService', () => {
   });
 
   describe('findAll', () => {
-    it('should return all agents with roles and capabilities', async () => {
+    it('should return all agents with their capabilities and no roles', async () => {
       const agents = [mockAgentWithRelations];
       mockAgentRepo.findAll.mockResolvedValue(agents);
 
@@ -396,15 +390,14 @@ describe('AgentsService', () => {
       expect(agentRepo.findAll).toHaveBeenCalled();
     });
 
-    it('should include role entries for each agent', async () => {
+    it('US-006: reports no roles property for any agent', async () => {
       const agents = [mockAgentWithRelations];
       mockAgentRepo.findAll.mockResolvedValue(agents);
 
       const result = await service.findAll();
 
-      expect(result[0].roles).toBeDefined();
-      expect(Array.isArray(result[0].roles)).toBe(true);
-      expect(result[0].roles.length).toBe(1);
+      // New data has no `AgentRoleEntry` row; an agent's roles are role bindings.
+      expect(result[0]).not.toHaveProperty('roles');
     });
 
     it('should include capability entries for each agent', async () => {
@@ -426,7 +419,7 @@ describe('AgentsService', () => {
       expect(result).toEqual([]);
     });
 
-    it('should fetch agents with related roles and capabilities', async () => {
+    it('should fetch agents with their capabilities', async () => {
       const agents = [mockAgentWithRelations];
       mockAgentRepo.findAll.mockResolvedValue(agents);
 
@@ -437,7 +430,7 @@ describe('AgentsService', () => {
   });
 
   describe('findBySlug', () => {
-    it('should return agent by slug with roles and capabilities', async () => {
+    it('should return agent by slug with its capabilities', async () => {
       mockAgentRepo.findBySlug.mockResolvedValue(mockAgentWithRelations);
 
       const result = await service.findBySlug('test-agent');
@@ -452,13 +445,12 @@ describe('AgentsService', () => {
       await expect(service.findBySlug('nonexistent')).rejects.toThrow();
     });
 
-    it('should include roles in response', async () => {
+    it('US-006: reports no roles in the response', async () => {
       mockAgentRepo.findBySlug.mockResolvedValue(mockAgentWithRelations);
 
       const result = await service.findBySlug('test-agent');
 
-      expect(result.roles).toBeDefined();
-      expect(Array.isArray(result.roles)).toBe(true);
+      expect(result).not.toHaveProperty('roles');
     });
 
     it('should include capabilities in response', async () => {
@@ -509,26 +501,6 @@ describe('AgentsService', () => {
         { slug: 'alpha', name: 'Alpha' },
         { slug: 'bravo', name: 'Bravo' },
       ]);
-    });
-
-    it('should include roles with all AgentRole enum values', async () => {
-      const agentWithAllRoles = {
-        ...mockAgentWithRelations,
-        roles: [
-          { id: 'role-1', agentId: 'agent-123', role: 'TRIAGER' },
-          { id: 'role-2', agentId: 'agent-123', role: 'DEVELOPER' },
-          { id: 'role-3', agentId: 'agent-123', role: 'REVIEWER' },
-        ],
-      };
-
-      mockAgentRepo.findById.mockResolvedValue(agentWithAllRoles);
-
-      const result = await service.findMe('agent-123');
-
-      expect(result.roles.length).toBe(3);
-      expect(result.roles.map((r: any) => r.role)).toContain('TRIAGER');
-      expect(result.roles.map((r: any) => r.role)).toContain('DEVELOPER');
-      expect(result.roles.map((r: any) => r.role)).toContain('REVIEWER');
     });
 
     it('should include capabilities', async () => {
@@ -992,7 +964,6 @@ describe('AgentsService', () => {
             maxConcurrentTickets: 3,
             createdAt: new Date(),
             updatedAt: new Date(),
-            roles: [{ id: 'r1', agentId: 'agent-1', role: 'DEVELOPER' }],
             capabilities: [{ id: 'c1', agentId: 'agent-1', capability: 'typescript' }],
           },
         ],
@@ -1024,7 +995,6 @@ describe('AgentsService', () => {
       slug: over.slug ?? 'bot',
       name: 'Bot',
       status: 'ACTIVE',
-      roles: ['DEVELOPER'],
       capabilities: ['typescript'],
       openTicketCount: over.openTicketCount ?? 0,
       openTicketRefs: over.openTicketRefs ?? [],
@@ -1033,7 +1003,7 @@ describe('AgentsService', () => {
       addedByName: over.addedByName === undefined ? 'Admin' : over.addedByName,
     });
 
-    it('returns the scoped project roster as ProjectAgentListDto', async () => {
+    it('US-006: answers the roster as { items } alone, with no roles on a row', async () => {
       mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: null });
       mockAgentRepo.findProjectRoster.mockResolvedValue([makeRecord()]);
 
@@ -1041,17 +1011,18 @@ describe('AgentsService', () => {
 
       expect(mockAgentRepo.findProjectBySlug).toHaveBeenCalledWith('alpha');
       expect(mockAgentRepo.findProjectRoster).toHaveBeenCalledWith('proj-1');
-      expect(result.scoping).toBe(true);
+      // `scoping` was always true; the roster answer is the items alone.
+      expect(Object.keys(result)).toEqual(['items']);
       expect(result.items).toHaveLength(1);
       expect(result.items[0]).toMatchObject({
         slug: 'bot',
         status: 'ACTIVE',
-        roles: ['DEVELOPER'],
         capabilities: ['typescript'],
         openTicketCount: 0,
         openTicketRefs: [],
         addedBy: { id: 'user-admin', name: 'Admin' },
       });
+      expect(result.items[0]).not.toHaveProperty('roles');
       expect(result.items[0].addedAt).toEqual(expect.any(String));
     });
 

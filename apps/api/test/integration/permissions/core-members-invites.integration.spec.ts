@@ -68,27 +68,19 @@ describeIntegration('member and invite route keys (US-008)', () => {
 
   /**
    * Permissions P1l (US-005): the create route takes no role, so an account starts as a plain member.
-   * `'ADMIN'` means "create it, then bind the global `admin` role" — the binding mirrors
-   * `User.role = 'ADMIN'` and revokes the token minted before it, so the login comes last.
+   * Every caller below acts through a project binding or the global `member` baseline; the file no
+   * longer needs a global admin (US-006 removed the AC-12 case that did).
    */
-  const createUser = async (who: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<void> => {
+  const createUser = async (who: string): Promise<void> => {
     const created = await request(server)
       .post('/api/admin/users')
       .set(auth('root'))
       .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD })
       .expect(201);
     userIds[who] = data<{ id: string }>(created).id;
-    if (role === 'ADMIN') await bindGlobal(who, 'admin');
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
   };
-
-  /** The global binding that makes a principal a global admin (role `admin`, no project). */
-  const bindGlobal = (who: string, roleKey: string): Promise<unknown> =>
-    membership.createBinding(
-      { principal: { type: 'USER', id: userIds[who] }, roleKey, projectId: null },
-      { type: 'SYSTEM', id: 'test' },
-    );
 
   /** The binding that is the caller's only source in p1. */
   const bind = (who: string, roleKey: RoleKey): Promise<unknown> =>
@@ -105,9 +97,9 @@ describeIntegration('member and invite route keys (US-008)', () => {
     });
 
   /** The member rows p1 lists, read through the route: what a refused write must not change. */
-  const listedMembers = async (who: string): Promise<{ userId: string; role: string }[]> => {
+  const listedMembers = async (who: string): Promise<{ userId: string | null }[]> => {
     const res = await request(server).get(membersUrl).set(auth(who)).expect(200);
-    return data<{ records: { userId: string; role: string }[] }>(res).records.map(({ userId, role }) => ({ userId, role }));
+    return data<{ records: { userId: string | null }[] }>(res).records.map(({ userId }) => ({ userId }));
   };
 
   const legacyMemberOf = (who: string) =>
@@ -142,8 +134,6 @@ describeIntegration('member and invite route keys (US-008)', () => {
     tokens.root = data<{ accessToken: string }>(root).accessToken;
 
     for (const who of ['developer', 'viewer', 'padmin', 'target', 'addable', 'removable']) await createUser(who);
-    // AC-12's caller: a global admin, and a source in no project at all.
-    await createUser('gadmin', 'ADMIN');
 
     const project = await request(server)
       .post('/api/projects')
@@ -202,10 +192,11 @@ describeIntegration('member and invite route keys (US-008)', () => {
       .send({ email: 'addable@koda.test', roleKey: 'developer' })
       .expect(201);
 
-    expect(data<{ userId: string; role: string }>(res)).toMatchObject({
-      userId: userIds.addable,
-      role: 'DEVELOPER',
-    });
+    // Permissions P1l US-006: the added member answers its bindings, not a display role.
+    const added = data<{ userId: string; bindings: { roleKey: string; id: string }[] }>(res);
+    expect(added.userId).toBe(userIds.addable);
+    expect(added).not.toHaveProperty('role');
+    expect(added.bindings).toEqual([expect.objectContaining({ roleKey: 'developer' })]);
     await expect(bindingsFor('addable')).resolves.toEqual([
       expect.objectContaining({ role: { key: 'developer' } }),
     ]);
@@ -244,37 +235,32 @@ describeIntegration('member and invite route keys (US-008)', () => {
     expectPermissionsRefusal(res);
     await expect(bindingsFor('removable')).resolves.toEqual(before);
     await expect(listedMembers('padmin')).resolves.toEqual(listedBefore);
-    expect(listedBefore).toContainEqual({ userId: userIds.removable, role: 'VIEWER' });
+    expect(listedBefore).toContainEqual({ userId: userIds.removable });
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
-  // AC-5 .. AC-6, AC-12 — GET /projects/:slug/members needs member.read; canManage follows member.add
+  // AC-5 .. AC-6 — GET /projects/:slug/members needs member.read, and answers the page alone
+  //
+  // Permissions P1l US-006: the page carries no `canManage` and no `viewerRole`. What these cases keep
+  // is the key they were written for — a viewer binding and a project-admin binding both list the
+  // members — and AC-12 (`a global admin with no source lists them`) moved to the me-permissions route.
   // -------------------------------------------------------------------------
 
-  it('AC-5: a viewer binding alone lists the members with 200 and canManage false', async () => {
+  /** The six fields a member page carries, and no other. */
+  const MEMBER_PAGE_FIELDS = ['current', 'hasNext', 'hasPrev', 'records', 'size', 'total'];
+
+  it('AC-5: a viewer binding alone lists the members with 200 and no management fields', async () => {
     const res = await request(server).get(membersUrl).set(auth('viewer')).expect(200);
 
-    const body = data<{ canManage: boolean; viewerRole: string | null }>(res);
-    expect(body.canManage).toBe(false);
-    expect(body.viewerRole).toBe('VIEWER');
+    const body = data<Record<string, unknown>>(res);
+    expect(Object.keys(body).sort()).toEqual(MEMBER_PAGE_FIELDS);
   }, TIMEOUT);
 
-  it('AC-6: a project-admin binding alone lists the members with 200 and canManage true', async () => {
+  it('AC-6: a project-admin binding alone lists the members with 200 and no management fields', async () => {
     const res = await request(server).get(membersUrl).set(auth('padmin')).expect(200);
 
-    const body = data<{ canManage: boolean; viewerRole: string | null }>(res);
-    expect(body.canManage).toBe(true);
-    expect(body.viewerRole).toBe('ADMIN');
-  }, TIMEOUT);
-
-  it('AC-12: a global admin with no source in p1 lists the members with 200 and canManage true', async () => {
-    const res = await request(server).get(membersUrl).set(auth('gadmin')).expect(200);
-
-    const body = data<{ canManage: boolean }>(res);
-    expect(body.canManage).toBe(true);
-    await expect(
-      db.roleBinding.count({ where: { projectId: p1Id, principalType: 'USER', principalId: userIds.gadmin } }),
-    ).resolves.toBe(0);
+    const body = data<Record<string, unknown>>(res);
+    expect(Object.keys(body).sort()).toEqual(MEMBER_PAGE_FIELDS);
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------

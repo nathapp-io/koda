@@ -18,21 +18,21 @@ export class PrismaAgentRepository {
 
   async findAll() {
     return this.db.agent.findMany({
-      include: { roles: true, capabilities: true },
+      include: { capabilities: true },
     });
   }
 
   async findBySlug(slug: string) {
     return this.db.agent.findUnique({
       where: { slug },
-      include: { roles: true, capabilities: true },
+      include: { capabilities: true },
     });
   }
 
   async findById(id: string) {
     return this.db.agent.findUnique({
       where: { id },
-      include: { roles: true, capabilities: true },
+      include: { capabilities: true },
     });
   }
 
@@ -64,7 +64,7 @@ export class PrismaAgentRepository {
     return this.db.agent.update({
       where: { id },
       data: { apiKeyHash },
-      include: { roles: true, capabilities: true },
+      include: { capabilities: true },
     });
   }
 
@@ -72,7 +72,7 @@ export class PrismaAgentRepository {
     return this.db.agent.update({
       where: { slug },
       data,
-      include: { roles: true, capabilities: true },
+      include: { capabilities: true },
     });
   }
 
@@ -152,7 +152,7 @@ export class PrismaAgentRepository {
           },
         },
       },
-      include: { roles: true, capabilities: true },
+      include: { capabilities: true },
     });
 
     return { project, agents };
@@ -175,8 +175,9 @@ export class PrismaAgentRepository {
 
   /**
    * US-002: the project's local agent roster — one row per locally bound principal,
-   * ordered by agent name, with roles, capabilities, the adding user's id and
-   * name, and a grouped open-ticket summary. "Open" excludes CLOSED, REJECTED,
+   * ordered by agent name, with its capabilities, the adding user's id and
+   * name, and a grouped open-ticket summary. Permissions P1l US-006: no `AgentRoleEntry` row is read
+   * — an agent's roles are role bindings. "Open" excludes CLOSED, REJECTED,
    * and soft-deleted tickets (soft-deleted rows are filtered server-side, not
    * counted and not surfaced as refs).
    *
@@ -195,7 +196,6 @@ export class PrismaAgentRepository {
         orderBy: { name: 'asc' },
         select: {
           id: true, slug: true, name: true, status: true,
-          roles: { select: { role: true } },
           capabilities: { select: { capability: true } },
         },
         take: memberships.length,
@@ -263,7 +263,6 @@ export class PrismaAgentRepository {
         slug: row.agent.slug,
         name: row.agent.name,
         status: row.agent.status,
-        roles: row.agent.roles.map((r) => r.role),
         capabilities: row.agent.capabilities.map((c) => c.capability),
         openTicketCount: bucket.count,
         openTicketRefs: bucket.refs,

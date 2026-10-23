@@ -164,15 +164,13 @@ describeIntegration('Agents API E2E', () => {
 
     const data = body<{
       slug: string;
-      roles: Array<{ role: string }>;
       capabilities: Array<{ capability: string }>;
     }>(res);
 
     expect(data.slug).toBe(agentSlug);
     expect(data.capabilities.map((item) => item.capability)).toEqual(expect.arrayContaining(['typescript', 'nestjs']));
-    // Permissions P1l (US-005): creation writes no `AgentRoleEntry`, so no legacy role is reported —
-    // the project roles the agent acts with are bindings granted by `rosterAgentIn`.
-    expect(data.roles).toEqual([]);
+    // Permissions P1l US-006: an agent's roles are role bindings, so the profile carries no `roles`.
+    expect(data).not.toHaveProperty('roles');
   });
 
   it('GET /api/agents/me — returns the current agent with its live roster projects (AC15)', async () => {

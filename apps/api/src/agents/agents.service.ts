@@ -173,12 +173,14 @@ export class AgentsService {
   }
 
   /**
-   * US-002 (D530): the project's explicit agent roster. Reads local compatibility
-   * membership sources — rostered agents without tickets appear; ticket holders without a
-   * roster row do not. Throws 404 when the project is missing or soft-deleted
-   * so callers can surface a stable error without guessing from an empty list.
+   * US-002 (D530): the project's explicit agent roster. Reads the project's local agent bindings —
+   * rostered agents without tickets appear; ticket holders without a roster row do not. Throws 404
+   * when the project is missing or soft-deleted so callers can surface a stable error without
+   * guessing from an empty list.
    *
-   * `scoping` is always true: agent project reach is decided by `project.read`.
+   * Permissions P1l US-006: the answer is `{ items }` alone. The old `scoping` flag was always true —
+   * agent project reach is decided by `project.read` — and a row carries no `roles`, because an
+   * agent's roles are role bindings.
    */
   async listProjectRoster(projectSlug: string): Promise<ProjectAgentListDto> {
     const project = await this.agentRepo.findProjectBySlug(projectSlug);
@@ -187,7 +189,7 @@ export class AgentsService {
     }
 
     const records = await this.agentRepo.findProjectRoster(project.id);
-    return ProjectAgentListDto.from(records, true);
+    return ProjectAgentListDto.from(records);
   }
 
   /**

@@ -1,9 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 /**
- * US-002: one row in a project's explicit agent roster. Reads from the
- * AgentProject table (not from ticket assignments), so rostered agents without
- * tickets appear and ticket holders without a roster row do not.
+ * US-002: one row in a project's explicit agent roster. Reads the project's local agent bindings
+ * (not ticket assignments), so rostered agents without tickets appear and ticket holders without a
+ * roster row do not.
+ *
+ * Permissions P1l US-006: the row carries no `roles` — an agent's roles are role bindings — and the
+ * roster envelope carries no `scoping` flag, which was always true.
  */
 export class ProjectAgentAddedByDto {
   @ApiProperty()
@@ -22,9 +25,6 @@ export class ProjectAgentDto {
 
   @ApiProperty()
   status!: string;
-
-  @ApiProperty({ type: String, isArray: true })
-  roles!: string[];
 
   @ApiProperty({ type: String, isArray: true })
   capabilities!: string[];
@@ -46,7 +46,6 @@ export class ProjectAgentDto {
       slug: record.slug,
       name: record.name,
       status: record.status,
-      roles: record.roles,
       capabilities: record.capabilities,
       openTicketCount: record.openTicketCount,
       openTicketRefs: record.openTicketRefs,
@@ -67,7 +66,6 @@ export interface ProjectAgentRecord {
   slug: string;
   name: string;
   status: string;
-  roles: string[];
   capabilities: string[];
   openTicketCount: number;
   openTicketRefs: string[];
@@ -77,18 +75,11 @@ export interface ProjectAgentRecord {
 }
 
 export class ProjectAgentListDto {
-  @ApiProperty()
-  scoping!: boolean;
-
   @ApiProperty({ type: ProjectAgentDto, isArray: true })
   items!: ProjectAgentDto[];
 
-  static from(
-    records: readonly ProjectAgentRecord[],
-    scoping: boolean,
-  ): ProjectAgentListDto {
+  static from(records: readonly ProjectAgentRecord[]): ProjectAgentListDto {
     return {
-      scoping,
       items: ProjectAgentDto.fromMany(records),
     };
   }

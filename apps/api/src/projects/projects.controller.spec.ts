@@ -316,7 +316,6 @@ describe('ProjectsController', () => {
       slug?: string;
       name?: string;
       status?: string;
-      roles?: string[];
       capabilities?: string[];
       openTicketCount?: number;
       openTicketRefs?: string[];
@@ -328,7 +327,6 @@ describe('ProjectsController', () => {
         slug: over.slug ?? 'bot',
         name: over.name ?? 'Bot',
         status: over.status ?? 'ACTIVE',
-        roles: over.roles ?? [],
         capabilities: over.capabilities ?? [],
         openTicketCount: over.openTicketCount ?? 0,
         openTicketRefs: over.openTicketRefs ?? [],
@@ -337,9 +335,8 @@ describe('ProjectsController', () => {
       };
     };
 
-    it('US-002 AC1: returns the scoped project roster including agents without tickets', async () => {
+    it('US-006: returns { items } alone, including agents without tickets', async () => {
       agentsService.listProjectRoster.mockResolvedValue({
-        scoping: true,
         items: [makeRosterDto()],
       } as any);
 
@@ -347,13 +344,13 @@ describe('ProjectsController', () => {
       const data = (result as any).data;
 
       expect(agentsService.listProjectRoster).toHaveBeenCalledWith('alpha');
-      expect(data.scoping).toBe(true);
+      // `scoping` was always true, so the envelope is the items alone.
+      expect(Object.keys(data)).toEqual(['items']);
       expect(data.items.map((agent: { slug: string }) => agent.slug)).toContain('bot');
     });
 
-    it('US-002 AC2: exposes roster metadata, roles, capabilities, and ticket summary', async () => {
+    it('US-006: exposes roster metadata, capabilities and the ticket summary, with no roles', async () => {
       agentsService.listProjectRoster.mockResolvedValue({
-        scoping: true,
         items: [makeRosterDto({ addedById: 'user-admin', addedByName: 'admin@example.com' })],
       } as any);
 
@@ -364,18 +361,17 @@ describe('ProjectsController', () => {
       expect(entry).toMatchObject({
         slug: 'bot',
         status: 'ACTIVE',
-        roles: [],
         capabilities: [],
         openTicketCount: 0,
         openTicketRefs: [],
         addedBy: { id: expect.any(String), name: expect.anything() },
       });
+      expect(entry).not.toHaveProperty('roles');
       expect(entry?.addedAt).toEqual(expect.any(String));
     });
 
     it('US-002 AC3: returns null addedBy for backfilled roster entries', async () => {
       agentsService.listProjectRoster.mockResolvedValue({
-        scoping: true,
         items: [makeRosterDto({ addedById: null, addedByName: null })],
       } as any);
 
@@ -387,7 +383,6 @@ describe('ProjectsController', () => {
 
     it('US-002 AC4: lists only roster entries rather than ticket-derived agents', async () => {
       agentsService.listProjectRoster.mockResolvedValue({
-        scoping: true,
         items: [makeRosterDto({ slug: 'bot' })],
       } as any);
 
@@ -400,7 +395,6 @@ describe('ProjectsController', () => {
 
     it('US-002 AC5: reports open ticket count and oldest-first references', async () => {
       agentsService.listProjectRoster.mockResolvedValue({
-        scoping: true,
         items: [makeRosterDto({ openTicketCount: 2, openTicketRefs: ['ALP-1', 'ALP-2'] })],
       } as any);
 
@@ -414,7 +408,6 @@ describe('ProjectsController', () => {
 
     it('US-002 AC6: caps open ticket refs at ten without capping the count', async () => {
       agentsService.listProjectRoster.mockResolvedValue({
-        scoping: true,
         items: [makeRosterDto({ openTicketCount: 12, openTicketRefs: Array.from({ length: 10 }, (_, i) => `ALP-${i + 1}`) })],
       } as any);
 
@@ -426,20 +419,8 @@ describe('ProjectsController', () => {
       expect(entry?.openTicketRefs).toHaveLength(10);
     });
 
-    it('US-002 AC9: reports roster scoping disabled when the feature flag is off', async () => {
-      agentsService.listProjectRoster.mockResolvedValue({
-        scoping: false,
-        items: [makeRosterDto()],
-      } as any);
-
-      const result = await controller.getProjectAgents('alpha');
-
-      expect((result as any).data.scoping).toBe(false);
-    });
-
     it('returns agents for a project member', async () => {
       agentsService.listProjectRoster.mockResolvedValue({
-        scoping: true,
         items: [makeRosterDto()],
       } as any);
 
@@ -452,7 +433,7 @@ describe('ProjectsController', () => {
     // plus `project.agent.read` decide, and the guard's 403/404 is covered over HTTP by
     // test/integration/permissions/core-project-routes.integration.spec.ts (AC-3 .. AC-5).
     it('US-007: reads the roster without a project lookup or a membership assertion', async () => {
-      agentsService.listProjectRoster.mockResolvedValue({ scoping: true, items: [makeRosterDto()] } as any);
+      agentsService.listProjectRoster.mockResolvedValue({ items: [makeRosterDto()] } as any);
 
       await controller.getProjectAgents('alpha');
 
@@ -467,7 +448,6 @@ describe('ProjectsController', () => {
       slug: 'bot',
       status: 'PAUSED',
       maxConcurrentTickets: 3,
-      roles: [],
       capabilities: [],
       createdAt: new Date(),
       updatedAt: new Date(),

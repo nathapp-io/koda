@@ -378,11 +378,11 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      const data = body<{ slug: string; roles: { role: string }[]; capabilities: { capability: string }[] }>(res);
+      const data = body<{ slug: string; capabilities: { capability: string }[] }>(res);
       expect(data.slug).toBe(agentSlug);
       expect(data.capabilities.map((c) => c.capability)).toEqual(expect.arrayContaining(['typescript', 'nestjs']));
-      // Permissions P1l (US-005): creation wrote no role row, so the response carries no legacy role.
-      expect(data.roles).toEqual([]);
+      // Permissions P1l US-006: an agent's roles are role bindings, so the profile carries no `roles`.
+      expect(data).not.toHaveProperty('roles');
     });
 
     it('POST /api/agents/:slug/rotate-key — rotates API key', async () => {
@@ -1716,9 +1716,9 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      // US-002: the response shape is { scoping, items: ProjectAgentDto[] }
-      const data = body<{ scoping: boolean; items: { slug: string; status: string }[] }>(res);
-      expect(data.scoping).toBe(true);
+      // Permissions P1l US-006: the roster answer is { items } alone — `scoping` was always true.
+      const data = body<{ items: { slug: string; status: string }[] }>(res);
+      expect(Object.keys(data)).toEqual(['items']);
       expect(Array.isArray(data.items)).toBe(true);
       // agentSlug has an assigned ticket (set up in beforeAll) and is on the
       // roster (also in beforeAll), so it must appear in items.
@@ -5255,9 +5255,6 @@ describeIntegration('API Integration Tests', () => {
         { type: 'AGENT', id: agentId },
         { type: 'AGENT', id: rosterAgentId },
       ],
-      // The agent's `roles` are the subject of this file (the agent API reports them), so its
-      // `AgentRoleEntry` row stays; every other grant of it is a binding.
-      { agentRoleEntries: [{ type: 'AGENT', id: agentId }] },
     );
     // Permissions P1 US-005: the admin's global access is the `admin` binding, not `User.role`.
     const adminBinding = await prisma.roleBinding.findFirst({

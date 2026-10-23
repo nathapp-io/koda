@@ -44,28 +44,25 @@ describe('ProjectMembersController', () => {
 
   afterEach(() => vi.clearAllMocks());
 
-  it('list parses paging strings and returns the page envelope with canManage', async () => {
+  it('list parses paging strings and answers the page envelope alone', async () => {
     const page = { total: 0, current: 2, size: 5, hasNext: false, hasPrev: true, records: [] };
-    service.list.mockResolvedValue({ page, canManage: true, viewerRole: 'ADMIN' });
+    service.list.mockResolvedValue(page);
     const res = await controller.list('proj', { current: '2', size: '5' } as never, principal);
     expect(service.list).toHaveBeenCalledWith('proj', principal, { current: 2, size: 5 }, undefined);
-    expect(res).toEqual(expect.objectContaining({ ret: 0, data: { ...page, canManage: true, viewerRole: 'ADMIN' } }));
+    // US-006: the envelope is the page — no canManage, no viewerRole.
+    expect(res).toEqual(expect.objectContaining({ ret: 0, data: page }));
+    expect(Object.keys((res as { data: object }).data).sort())
+      .toEqual(['current', 'hasNext', 'hasPrev', 'records', 'size', 'total']);
   });
 
   it('list ignores undeclared query keys', async () => {
-    service.list.mockResolvedValue({
-      page: { total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] },
-      canManage: false,
-    });
+    service.list.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
     await controller.list('proj', { projectId: 'other' } as never, principal);
     expect(service.list).toHaveBeenCalledWith('proj', principal, { current: 1, size: 20 }, undefined);
   });
 
   it('US-003: list forwards principals=all', async () => {
-    service.list.mockResolvedValue({
-      page: { total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] },
-      canManage: false,
-    });
+    service.list.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
     await controller.list('proj', { principals: 'all' } as never, principal);
     expect(service.list).toHaveBeenCalledWith('proj', principal, { current: 1, size: 20 }, 'all');
   });

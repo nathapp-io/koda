@@ -32,7 +32,7 @@ const THIN_PROJECT = { slug: 'pn', key: 'PNINE' };
 const PROJECT_ROLE_FIELDS = ['description', 'id', 'key', 'name', 'system'];
 
 interface MemberBinding {
-  id: string | null;
+  id: string;
   roleKey: string;
   roleName: string;
 }
@@ -41,7 +41,6 @@ interface MemberRecord {
   userId: string | null;
   email: string | null;
   name: string | null;
-  role: string;
   disabled: boolean;
   joinedAt: string;
   principalType: 'USER' | 'AGENT';
@@ -57,8 +56,6 @@ interface MemberPage {
   hasNext: boolean;
   hasPrev: boolean;
   records: MemberRecord[];
-  canManage: boolean;
-  viewerRole: string | null;
 }
 
 interface ProjectRole {

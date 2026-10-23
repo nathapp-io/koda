@@ -68,7 +68,6 @@ export class PrismaProjectMembersRepository {
           userId: user.id,
           email: user.email,
           name: user.name,
-          role: membership.role,
           disabled: user.disabled,
           joinedAt: membership.since,
           principalType: 'USER',
@@ -77,15 +76,13 @@ export class PrismaProjectMembersRepository {
           bindings: chips,
         };
       }
-      // An agent principal has no account state, so no row of it is disabled, and its legacy role is
-      // whatever `listProjectMemberships` merged from its sources.
+      // An agent principal has no account state, so no row of it is disabled.
       const agent = agentById.get(membership.principalId);
       if (!agent) throw new NotFoundAppException({}, 'members');
       return {
         userId: null,
         email: null,
         name: agent.name,
-        role: membership.role,
         disabled: false,
         joinedAt: membership.since,
         principalType: 'AGENT',

@@ -60,9 +60,6 @@ describe('AgentsController', () => {
     maxConcurrentTickets: 3,
     createdAt: new Date(),
     updatedAt: new Date(),
-    roles: [
-      { id: 'role-1', agentId: 'agent-123', role: 'DEVELOPER' },
-    ],
     capabilities: [
       { id: 'cap-1', agentId: 'agent-123', capability: 'typescript' },
       { id: 'cap-2', agentId: 'agent-123', capability: 'nestjs' },
@@ -101,7 +98,6 @@ describe('AgentsController', () => {
       const createAgentDto = {
         name: 'Test Agent',
         slug: 'test-agent',
-        roles: ['DEVELOPER'],
       };
 
       const generatedKey = {
@@ -127,7 +123,6 @@ describe('AgentsController', () => {
       const createAgentDto = {
         name: 'Test Agent',
         slug: 'test-agent',
-        roles: ['DEVELOPER'],
       };
 
       mockAgentsService.generateApiKey.mockResolvedValue({
@@ -142,7 +137,6 @@ describe('AgentsController', () => {
       const createAgentDto = {
         name: 'Test Agent',
         slug: 'test-agent',
-        roles: ['DEVELOPER'],
       };
 
       const rawKey = 'b'.repeat(64);
@@ -167,7 +161,6 @@ describe('AgentsController', () => {
       const createAgentDto = {
         name: 'Test Agent',
         slug: 'test-agent',
-        roles: ['DEVELOPER'],
       };
 
       mockAgentsService.generateApiKey.mockResolvedValue({
@@ -184,7 +177,6 @@ describe('AgentsController', () => {
       const createAgentDto = {
         name: 'Test Agent',
         slug: 'test-agent',
-        roles: ['DEVELOPER'],
       };
 
       const generatedKey = {
@@ -231,15 +223,14 @@ describe('AgentsController', () => {
       expect(result).toEqual([]);
     });
 
-    it('should include roles and capabilities for each agent', async () => {
+    it('US-006: reports capabilities and no roles for each agent', async () => {
       const agents = [mockAgent];
       mockAgentsService.findAll.mockResolvedValue(agents);
 
       const result = await controller.listAll();
 
-      expect((result as any)[0]).toHaveProperty('roles');
+      expect((result as any)[0]).not.toHaveProperty('roles');
       expect((result as any)[0]).toHaveProperty('capabilities');
-      expect(Array.isArray((result as any)[0].roles)).toBe(true);
       expect(Array.isArray((result as any)[0].capabilities)).toBe(true);
     });
 
@@ -276,13 +267,9 @@ describe('AgentsController', () => {
       expect(service.findMe).toHaveBeenCalledWith('agent-456');
     });
 
-    it('should include roles and capabilities in profile', async () => {
+    it('US-006: includes capabilities and no roles in the profile', async () => {
       const agentProfile = {
         ...mockAgent,
-        roles: [
-          { id: 'role-1', role: 'DEVELOPER' },
-          { id: 'role-2', role: 'REVIEWER' },
-        ],
         capabilities: [
           { id: 'cap-1', capability: 'typescript' },
           { id: 'cap-2', capability: 'nestjs' },
@@ -294,9 +281,8 @@ describe('AgentsController', () => {
 
       const result = await controller.getMe(mockAgentUser);
 
-      expect((result as any).roles).toBeDefined();
+      expect(result as any).not.toHaveProperty('roles');
       expect((result as any).capabilities).toBeDefined();
-      expect((result as any).roles.length).toBe(2);
       expect((result as any).capabilities.length).toBe(3);
     });
 
@@ -327,12 +313,12 @@ describe('AgentsController', () => {
       expect(service.findBySlug).toHaveBeenCalledWith('test-agent');
     });
 
-    it('should include roles and capabilities', async () => {
+    it('US-006: includes capabilities and no roles', async () => {
       mockAgentsService.findBySlug.mockResolvedValue(mockAgent);
 
       const result = await controller.getBySlug('test-agent');
 
-      expect((result as any).roles).toBeDefined();
+      expect(result as any).not.toHaveProperty('roles');
       expect((result as any).capabilities).toBeDefined();
     });
 
@@ -602,7 +588,7 @@ describe('AgentsController', () => {
 
   describe('Authorization & Auth Guards', () => {
     it('POST /agents requires JWT auth with ADMIN role', async () => {
-      const createDto = { name: 'Test', slug: 'test', roles: ['DEVELOPER'] };
+      const createDto = { name: 'Test', slug: 'test' };
 
       mockAgentsService.generateApiKey.mockResolvedValue({ apiKey: 'a'.repeat(64), agent: mockAgent });
       await expect(controller.createAgent(createDto, mockMemberUser)).resolves.toBeDefined();

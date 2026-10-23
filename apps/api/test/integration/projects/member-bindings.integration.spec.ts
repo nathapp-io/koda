@@ -63,7 +63,10 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
 
   it('AC-1: adds a developer binding with the caller as granter and no legacy row', async () => {
     const res = await post({ email: 'target@bindings.test', roleKey: 'developer' }).expect(201);
-    expect(data<{ role: string }>(res).role).toBe('DEVELOPER');
+    // Permissions P1l US-006: the member answers its bindings, not a display role.
+    const added = data<{ bindings: { roleKey: string }[] }>(res);
+    expect(added).not.toHaveProperty('role');
+    expect(added.bindings).toEqual([expect.objectContaining({ roleKey: 'developer' })]);
     expect(await bindings()).toEqual([expect.objectContaining({ role: expect.objectContaining({ key: 'developer' }), grantedByType: 'USER', grantedById: adminId })]);
     expect(await legacyCount()).toBe(0);
   });
@@ -159,7 +162,12 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
   });
   it('AC-11: existing-user invite grants developer with caller attribution', async () => {
     const res = await request(server).post(base.replace('/members', '/invites')).set(headers()).send({ email: 'target@bindings.test', roleKey: 'developer' }).expect(201);
-    expect(data(res)).toMatchObject({ outcome: 'ADDED', member: { email: 'target@bindings.test', role: 'DEVELOPER' } });
+    // Permissions P1l US-006: the ADDED member carries neither a display role nor a null chip id.
+    const invite = data<{ outcome: string; member: { email: string; bindings: { id: string }[] } }>(res);
+    expect(invite.outcome).toBe('ADDED');
+    expect(invite.member.email).toBe('target@bindings.test');
+    expect(invite.member).not.toHaveProperty('role');
+    expect(invite.member.bindings).toEqual([expect.objectContaining({ id: expect.any(String) })]);
     expect(await bindings()).toEqual([expect.objectContaining({ grantedById: adminId, role: expect.objectContaining({ key: 'developer' }) })]);
     expect(await legacyCount()).toBe(0);
   });
@@ -196,9 +204,12 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
       grantedByType: 'SYSTEM', grantedById: 'test', createdAt: bindingAt,
     } });
 
-    expect(await app.get(PrismaProjectMembersRepository).findMember(projectId, targetId)).toMatchObject({
-      userId: targetId, role: 'DEVELOPER', joinedAt: since,
-    });
+    // Permissions P1l US-006: the record carries its bindings and no display role; `joinedAt` is still
+    // the earliest local source, whichever calendar the row came from.
+    const record = await app.get(PrismaProjectMembersRepository).findMember(projectId, targetId);
+    expect(record).toMatchObject({ userId: targetId, joinedAt: since });
+    expect(record).not.toHaveProperty('role');
+    expect(record?.bindings).toEqual([expect.objectContaining({ roleKey: 'developer' })]);
     conflict(await post({ email: 'target@bindings.test' }), 'members');
     // F1: the member is beyond the project listing cap, so it cannot appear in the members page …
     const listed = data<{ records: { userId: string }[] }>(

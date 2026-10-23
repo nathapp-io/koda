@@ -54,7 +54,6 @@ interface AgentProfile {
   id: string;
   slug: string;
   name: string;
-  roles: { role: string }[];
   capabilities: { capability: string }[];
 }
 
