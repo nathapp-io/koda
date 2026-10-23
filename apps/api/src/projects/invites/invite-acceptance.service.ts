@@ -108,7 +108,7 @@ export class InviteAcceptanceService {
     }));
 
     // Issued after commit: a rolled-back accept never hands out a token for a user that does not exist.
-    return this.auth.issueSession(user);
+    return await this.auth.issueSession(user);
   }
 
   /**

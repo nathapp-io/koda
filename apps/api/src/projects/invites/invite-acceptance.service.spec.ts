@@ -40,7 +40,6 @@ const userDomain = (over: Partial<UserDomain> = {}): UserDomain => ({
   id: 'u1',
   email: 'new@x.io',
   name: 'New User',
-  role: 'MEMBER',
   passwordHash: 'hash',
   tokenVersion: 0,
   disabled: false,
@@ -100,9 +99,9 @@ function setup(opts: SetupOptions = {}) {
   };
 
   const auth = {
-    issueSession: vi.fn((user: UserDomain) => {
+    issueSession: vi.fn(async (user: UserDomain) => {
       calls.push('session');
-      return { accessToken: 'a', refreshToken: 'r', user: { id: user.id, email: user.email, role: user.role } };
+      return { accessToken: 'a', refreshToken: 'r', user: { id: user.id, email: user.email, role: 'MEMBER' } };
     }),
   };
 

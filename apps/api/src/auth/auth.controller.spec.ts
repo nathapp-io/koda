@@ -32,6 +32,7 @@ const mockUser = {
     login: vi.fn(),
     refresh: vi.fn(),
     validateUser: vi.fn(),
+    userResponse: vi.fn(async () => mockUser),
     generateAccessToken: vi.fn(),
     generateRefreshToken: vi.fn(),
     logout: vi.fn(),
@@ -248,6 +249,7 @@ const mockUser = {
       expect(result).toBeInstanceOf(JsonResponse);
       expect(result.data).toEqual(mockUser);
       expect(authService.validateUser).toHaveBeenCalledWith(user);
+      expect(authService.userResponse).toHaveBeenCalledWith(mockUser);
     });
 
     it('should return 401 when token is missing', async () => {

@@ -268,8 +268,10 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      const data = body<{ email: string }>(res);
+      const data = body<{ email: string; role: string }>(res);
       expect(data.email).toBe('admin@koda.test');
+      expect(data.role).toBe('ADMIN');
+      expect(data).not.toHaveProperty('passwordHash');
     });
 
     it('GET /api/auth/me — 401 without token', async () => {

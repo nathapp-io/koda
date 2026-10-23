@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { PrismaClient } from '../generated/prisma/client';
+import { PrismaClient, User } from '../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AgentDomain, RunnerDomain, UserDomain } from './domain/auth.domain';
@@ -16,13 +16,11 @@ export class PrismaAuthRepository {
     return this.prisma.client;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private toDomain(m: any): UserDomain {
+  private toDomain(m: User): UserDomain {
     return {
       id: m.id,
       email: m.email,
       name: m.name,
-      role: m.role,
       passwordHash: m.passwordHash,
       tokenVersion: m.tokenVersion,
       disabled: m.disabled,
@@ -39,7 +37,6 @@ export class PrismaAuthRepository {
     email: string;
     name: string;
     passwordHash: string;
-    role?: string;
   }): Promise<UserDomain> {
     const m = await this.db.user.create({ data });
     return this.toDomain(m);
@@ -48,7 +45,7 @@ export class PrismaAuthRepository {
   /**
    * Bootstrap-safe user creation. A transaction-scoped advisory lock taken
    * before the existence check serializes concurrent registrations, so on an
-   * empty table exactly one caller becomes ADMIN (Postgres has no SQLite-style
+   * empty table exactly one caller takes the Owner seat (Postgres has no SQLite-style
    * write serialization). Returns null and writes nothing when users already
    * exist and `allowWhenUsersExist` is false (registration closed).
    */
@@ -62,7 +59,7 @@ export class PrismaAuthRepository {
       const firstUser = existing === null;
       if (!firstUser && !options.allowWhenUsersExist) return null;
       const m = await this.db.user.create({
-        data: firstUser ? { ...data, role: 'ADMIN' } : data,
+        data,
       });
       return { user: this.toDomain(m), firstUser };
     });

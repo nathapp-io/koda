@@ -53,7 +53,7 @@ describe('PrismaAuthRepository.findAnyUserAndCreate bootstrap race', () => {
     return { prisma, findFirst, create, queryRaw };
   };
 
-  it('assigns ADMIN and reports firstUser=true when no user exists', async () => {
+  it('AC-13: writes only given data and reports firstUser=true when no user exists', async () => {
     const { prisma, findFirst, create } = makePrisma();
     findFirst.mockResolvedValueOnce(null);
     create.mockResolvedValueOnce({
@@ -72,10 +72,10 @@ describe('PrismaAuthRepository.findAnyUserAndCreate bootstrap race', () => {
     expect(findFirst).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ role: 'ADMIN' }) }),
+      { data: { email: 'a@example.com', name: 'A', passwordHash: 'h' } },
     );
     expect(result.firstUser).toBe(true);
-    expect(result.user.role).toBe('ADMIN');
+    expect(result.user).not.toHaveProperty('role');
   });
 
   it('does not pass role and reports firstUser=false when a user already exists', async () => {
@@ -98,7 +98,7 @@ describe('PrismaAuthRepository.findAnyUserAndCreate bootstrap race', () => {
       expect.objectContaining({ data: expect.not.objectContaining({ role: expect.anything() }) }),
     );
     expect(result.firstUser).toBe(false);
-    expect(result.user.role).toBe('MEMBER');
+    expect(result.user).not.toHaveProperty('role');
   });
 
   it('runs the existence-check and create inside the same transaction', async () => {
@@ -150,7 +150,7 @@ describe('PrismaAuthRepository.findAnyUserAndCreate bootstrap race', () => {
     );
 
     expect(result?.firstUser).toBe(true);
-    expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({ role: 'ADMIN' }) });
+    expect(create).toHaveBeenCalledWith({ data: { email: 'a@example.com', name: 'A', passwordHash: 'h' } });
   });
 
   it('takes the bootstrap lock before the existence check', async () => {

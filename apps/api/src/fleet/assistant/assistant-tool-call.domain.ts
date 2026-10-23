@@ -1,3 +1,4 @@
+import type { KodaUserRole } from '../../auth/principal/koda-principal.types';
 import type { ChatThreadKind } from '../common/thread-jobs';
 
 export const ASSISTANT_TOOL_CALL_REPOSITORY = Symbol('ASSISTANT_TOOL_CALL_REPOSITORY');
@@ -32,7 +33,7 @@ export interface UserToolCallCreator {
   type?: 'USER';
   id: string;
   email: string;
-  role: string;
+  role: KodaUserRole;
   disabled: boolean;
 }
 

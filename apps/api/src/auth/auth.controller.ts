@@ -107,7 +107,7 @@ export class AuthController {
     // Final-review Finding D: validateUser returns the full user row including
     // passwordHash — map through UserResponseDto (the same DTO login/register
     // use) so the hash is never serialized in the response.
-    return JsonResponse.Ok(UserResponseDto.from(validatedUser));
+    return JsonResponse.Ok(await this.authService.userResponse(validatedUser));
   }
 
   @Post('logout')

@@ -79,18 +79,17 @@ export class PrismaProjectInvitesMembersRepository {
   }
 
   /**
-   * US-005: the account an accepted invite creates. The role is always the global MEMBER role —
-   * project authority comes from the membership row, never from the user row.
+   * The account an accepted invite creates. Its session role comes from bindings,
+   * never from the user row.
    */
   async createInvitedUser(input: CreateInvitedUserInput): Promise<UserDomain> {
     const m = await this.db.user.create({
-      data: { email: input.email, name: input.name, passwordHash: input.passwordHash, role: 'MEMBER' },
+      data: { email: input.email, name: input.name, passwordHash: input.passwordHash },
     });
     return {
       id: m.id,
       email: m.email,
       name: m.name ?? input.name,
-      role: m.role,
       passwordHash: m.passwordHash,
       tokenVersion: m.tokenVersion,
       disabled: m.disabled,
