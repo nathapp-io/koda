@@ -3,7 +3,13 @@
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import { Logger } from '@nestjs/common';
+import { disableEnvProxy } from './test/helpers/no-env-proxy';
 config({ path: resolve(__dirname, '.env.test'), quiet: true });
+
+// The suites talk to an in-process server on loopback; a sandbox/CI HTTP proxy in the environment
+// would answer those requests itself (a 407 "Proxy Authentication Required" in an unrelated test).
+// Hermetic by construction: no proxy variables, loopback exempt.
+disableEnvProxy();
 
 // Mock NestJS Logger to no-ops to reduce test noise
 vi.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
