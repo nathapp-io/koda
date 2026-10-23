@@ -3,7 +3,7 @@
   "feature": "permissions-p1-drop-legacy-schema",
   "branchName": "feat/permissions-p1-drop-legacy-schema",
   "createdAt": "2026-10-23T00:00:00.000Z",
-  "updatedAt": "2026-10-23T12:52:18.037Z",
+  "updatedAt": "2026-10-23T13:14:19.588Z",
   "userStories": [
     {
       "id": "US-001",
@@ -267,14 +267,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Destructive schema evolution spans users, invites, auth fixtures, tickets and many DB suites; authentication/access-control implications require the security override."
+        "reasoning": "Destructive schema evolution spans users, invites, auth fixtures, tickets and many DB suites; authentication/access-control implications require the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/prisma/schema.prisma",
@@ -457,7 +460,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "79caf75491c37dba82cf71a40a5e34ea3c625fcb"
     },
     {
       "id": "US-004",
