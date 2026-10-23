@@ -3,7 +3,7 @@
   "feature": "permissions-p2-context",
   "branchName": "feat/permissions-p2-context",
   "createdAt": "2026-11-05T00:00:00.000Z",
-  "updatedAt": "2026-10-23T18:05:00.773Z",
+  "updatedAt": "2026-10-23T18:20:52.394Z",
   "userStories": [
     {
       "id": "US-001",
@@ -365,8 +365,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -378,7 +378,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.3799999999999999,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T18:05:04.775Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/vcs/vcs-webhook.service.ts",
@@ -396,7 +408,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "2fa5f009b7ffed97caac79f23559a99fdaf3840a"
     },
     {
       "id": "US-006",
