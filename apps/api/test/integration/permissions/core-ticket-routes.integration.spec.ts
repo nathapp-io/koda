@@ -452,4 +452,30 @@ describeIntegration('ticket CRUD route keys (US-004)', () => {
 
     expect(data<TicketDetail>(res).allowedActions).toEqual([]);
   }, TIMEOUT);
+
+  // -------------------------------------------------------------------------
+  // US-006 AC-8 — a direct HTTP ticket creation stamps the approval on the persisted envelope
+  // -------------------------------------------------------------------------
+
+  it('US-006 AC-8: POST …/tickets by a user enqueues a ticket_event whose payload approval is NO_APPROVAL', async () => {
+    const created = await request(server)
+      .post(`/api/projects/${P1_SLUG}/tickets`)
+      .set(auth('developer'))
+      .send({ type: 'BUG', title: 'envelope approval' })
+      .expect(201);
+    const ticketId = data<{ id: string }>(created).id;
+
+    const rows = await db.outboxEvent.findMany({
+      where: { type: 'ticket_event', projectId: p1Id },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    const payloads = rows.map((row) => JSON.parse(String(row.payload)) as Record<string, unknown>);
+    const payload = payloads.find((candidate) => candidate.ticketId === ticketId);
+
+    expect(payload).toBeDefined();
+    // A direct action needs no approval: the envelope carries the block, not an omission.
+    expect(payload).toHaveProperty('approval');
+    expect(payload?.approval).toEqual({ requiredMode: 'none', satisfiedBy: 'none' });
+  }, TIMEOUT);
 });
