@@ -64,6 +64,15 @@ describe('disableEnvProxy', () => {
 describe('the API test process', () => {
   let server: Server;
   let baseUrl = '';
+  let snapshot: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    snapshot = snapshotEnv();
+  });
+
+  afterEach(() => {
+    restoreEnv(snapshot);
+  });
 
   beforeAll(async () => {
     server = createServer((_req, res) => {
@@ -87,10 +96,12 @@ describe('the API test process', () => {
 
   it('answers a loopback HTTP request even when a proxy variable leaks back in', async () => {
     // A proxy on a closed port: anything routed through it fails, so a 200 proves loopback is direct.
-    process.env.HTTP_PROXY = 'http://127.0.0.1:1';
-    process.env.http_proxy = 'http://127.0.0.1:1';
+    // Snapshot before poisoning it, so finally restores the environment the test started with.
     const before = snapshotEnv();
     try {
+      process.env.HTTP_PROXY = 'http://127.0.0.1:1';
+      process.env.http_proxy = 'http://127.0.0.1:1';
+
       disableEnvProxy();
 
       const res = await request(baseUrl).get('/').expect(200);
