@@ -3,7 +3,7 @@
   "feature": "permissions-p1-drop-legacy-schema",
   "branchName": "feat/permissions-p1-drop-legacy-schema",
   "createdAt": "2026-10-23T00:00:00.000Z",
-  "updatedAt": "2026-10-23T13:14:19.588Z",
+  "updatedAt": "2026-10-23T13:29:55.745Z",
   "userStories": [
     {
       "id": "US-001",
@@ -488,14 +488,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three destructive table drops propagate through membership interfaces, DI, fixtures, seeds and DB regressions; permissions involvement requires strict isolated TDD."
+        "reasoning": "Three destructive table drops propagate through membership interfaces, DI, fixtures, seeds and DB regressions; permissions involvement requires strict isolated TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/prisma/schema.prisma",
@@ -678,7 +681,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "37ebb0ba7502b44737791c5920adee86c978802f"
     },
     {
       "id": "US-005",
