@@ -276,8 +276,10 @@ describeIntegration('admin, auth, home, notification and public invite route key
   it('AC-12: GET /invites/<token> of a pending invite with no token answers 200', async () => {
     const res = await request(server).get(`/api/invites/${inviteToken}`).expect(200);
 
-    const preview = data<{ projectSlug: string; email: string; role: string }>(res);
-    expect(preview).toMatchObject({ projectSlug: P1_SLUG, email: 'invited@koda.test', role: 'VIEWER' });
+    // US-007: the preview is exactly seven fields and names the role by key, never the legacy role.
+    const preview = data<{ projectSlug: string; email: string; roleKey: string | null }>(res);
+    expect(preview).toMatchObject({ projectSlug: P1_SLUG, email: 'invited@koda.test', roleKey: 'viewer' });
+    expect(preview).not.toHaveProperty('role');
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------

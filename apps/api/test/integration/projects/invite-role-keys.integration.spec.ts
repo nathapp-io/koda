@@ -49,7 +49,6 @@ function sentence(module: 'invites' | 'permissions', path: string, code: number)
 interface InviteBody {
   id: string;
   email: string;
-  role: string | null;
   roleKey: string | null;
   roleName: string | null;
 }
@@ -157,7 +156,7 @@ describeIntegration('invite role keys (US-005)', () => {
     await app.close();
   });
 
-  it('AC-1: a Project Admin invites a new address with roleKey triager; roleId is stored, role is null, the DTO names the role', async () => {
+  it('AC-1: a Project Admin invites a new address with roleKey triager; roleId is stored, the DTO names the role and carries no legacy role', async () => {
     const res = await invite('padmin').send({ email: 'ac1@koda.test', roleKey: 'triager' });
 
     expect(res.status).toBe(201);
@@ -169,7 +168,8 @@ describeIntegration('invite role keys (US-005)', () => {
     expect(stored?.role).toBeNull();
     expect(body.invite?.roleKey).toBe('triager');
     expect(body.invite?.roleName).toBe(triager.name);
-    expect(body.invite?.role).toBeNull();
+    // US-007 removed `InviteDto.role`: the key and the name are how the client words the role.
+    expect(body.invite).not.toHaveProperty('role');
   }, TIMEOUT);
 
   it('AC-2: a caller holding a custom role without the developer keys is refused 403 permissions.escalation and no invite is created', async () => {
@@ -332,18 +332,19 @@ describeIntegration('invite role keys (US-005)', () => {
     expect(after?.roleId).toBeNull();
   }, TIMEOUT);
 
-  it('AC-9: the preview answers exactly eight fields with roleKey triager', async () => {
+  it('AC-9: the preview answers exactly seven fields with roleKey triager', async () => {
     const created = data<CreateBody>(await invite('padmin').send({ email: 'ac9@koda.test', roleKey: 'triager' }).expect(201));
 
     const res = await request(server).get(`/api/invites/${tokenFrom(created.invitePath)}`);
 
     expect(res.status).toBe(200);
     const body = data<Record<string, unknown>>(res);
+    // US-007: `InvitePreviewDto.role` is gone, which leaves the seven fields the doc names.
     expect(Object.keys(body).sort()).toEqual(
-      ['email', 'expiresAt', 'inviterName', 'projectName', 'projectSlug', 'role', 'roleKey', 'roleName'].sort(),
+      ['email', 'expiresAt', 'inviterName', 'projectName', 'projectSlug', 'roleKey', 'roleName'].sort(),
     );
     expect(body.roleKey).toBe('triager');
-    expect(body.role).toBeNull();
+    expect(body).not.toHaveProperty('role');
   }, TIMEOUT);
 
   it('AC-11: inviting the caller own email is 403 permissions.selfBinding and leaves the bindings unchanged', async () => {
