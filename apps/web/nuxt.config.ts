@@ -1,4 +1,5 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+import { defineNuxtConfig } from 'nuxt/config'
 
 const isE2E = process.env['E2E_RUN'] === '1'
 const SHADCN_COMPONENT_DIR_SUFFIX = '/components/ui'

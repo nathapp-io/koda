@@ -3,13 +3,19 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "~": ["."],
-      "~/*": ["./*"]
+      "~": [
+        "."
+      ],
+      "~/*": [
+        "./*"
+      ]
     },
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "moduleResolution": "bundler"
   },
   "include": [
     ".nuxt/nuxt.d.ts",
+    ".nuxt/nuxt.node.d.ts",
     "**/*.d.ts",
     "**/*.ts",
     "**/*.tsx",

@@ -45,7 +45,7 @@ const { data: connectionData, pending: loadingConnection, error: connectionError
   { immediate: true }
 )
 
-const existingConnection = computed(() => connectionData.value)
+const existingConnection = computed(() => connectionData.value ?? null)
 
 // M9: the API returns the webhook secret only on create, on a legacy row
 // switching to webhook mode, and on rotation. Show it until the page reloads.

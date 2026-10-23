@@ -24,7 +24,7 @@ This is the app-specific source-of-truth context for `apps/web`.
 
 ## Role In The Monorepo
 
-`apps/web` is the human-facing Nuxt 3 client for Koda.
+`apps/web` is the human-facing Nuxt 4 client for Koda.
 
 It should:
 - provide the main interactive UI for projects, tickets, agents, labels, and KB workflows
@@ -38,7 +38,7 @@ It should not:
 
 ## Stack
 
-- Nuxt 3 SSR
+- Nuxt 4 SSR (4.6.2+); retain the existing root-level pages/components/composables layout
 - Tailwind CSS
 - Shadcn-nuxt components in `components/ui/`
 - `@nuxtjs/i18n`
