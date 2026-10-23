@@ -3,7 +3,7 @@
   "feature": "permissions-p1-drop-legacy-schema",
   "branchName": "feat/permissions-p1-drop-legacy-schema",
   "createdAt": "2026-10-23T00:00:00.000Z",
-  "updatedAt": "2026-10-23T12:36:09.272Z",
+  "updatedAt": "2026-10-23T12:52:18.037Z",
   "userStories": [
     {
       "id": "US-001",
@@ -120,14 +120,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Revocation semantics cross locked transactions, JWT validity, after-commit caches and a shared test double; this is security-critical regardless of code size."
+        "reasoning": "Revocation semantics cross locked transactions, JWT validity, after-commit caches and a shared test double; this is security-critical regardless of code size.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/permissions/membership.service.ts",
@@ -230,7 +233,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c80e29b1b4c2be7567f42df6efb32b0736befb74"
     },
     {
       "id": "US-003",
