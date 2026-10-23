@@ -17,6 +17,9 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { TicketsService } from '../../../src/tickets/tickets.service';
+import { AuthService } from '../../../src/auth/auth.service';
+import { currentContext, type ActionContext } from '../../../src/action-context/action-context';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
@@ -193,6 +196,48 @@ describeIntegration('ticket CRUD route keys (US-004)', () => {
       ...agentIds.map((id) => ({ type: 'AGENT' as const, id })),
     ]);
   });
+
+  it('AC-10: an agent HTTP ticket creation runs TicketsService.create as that agent', async () => {
+    const tickets = app.get(TicketsService);
+    let observed: ActionContext | undefined;
+    const create = tickets.create.bind(tickets);
+    const spy = vi.spyOn(tickets, 'create').mockImplementation(async (...args) => {
+      observed = currentContext();
+      return create(...args);
+    });
+
+    try {
+      await request(server)
+        .post(`/api/projects/${P1_SLUG}/tickets`)
+        .set(auth('p1-developer-agent'))
+        .send({ type: 'BUG', title: 'context from agent' })
+        .expect(201);
+      expect(observed?.actor).toEqual({ type: 'AGENT', id: agentIds[1] });
+    } finally {
+      spy.mockRestore();
+    }
+  }, TIMEOUT);
+
+  it('AC-11: a public login HTTP request runs AuthService.login as anonymous system', async () => {
+    const authService = app.get(AuthService);
+    let observed: ActionContext | undefined;
+    const login = authService.login.bind(authService);
+    const spy = vi.spyOn(authService, 'login').mockImplementation(async (...args) => {
+      observed = currentContext();
+      return login(...args);
+    });
+
+    try {
+      resetThrottle(app);
+      await request(server)
+        .post('/api/auth/login')
+        .send({ email: 'root@koda.test', password: TEST_PASSWORD })
+        .expect(200);
+      expect(observed?.actor).toEqual({ type: 'SYSTEM', id: 'anonymous' });
+    } finally {
+      spy.mockRestore();
+    }
+  }, TIMEOUT);
 
   // -------------------------------------------------------------------------
   // AC-1 / AC-2 / AC-3 — POST …/tickets needs ticket.create
