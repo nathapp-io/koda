@@ -144,8 +144,8 @@ export async function readMemberBindings(
 }
 
 /**
- * One member's record — the single-record shape `POST /members`, `PATCH /members/:userId` and an
- * invite's `ADDED` member return. Null when the principal has no project binding.
+ * One member's record — the single-record shape `POST /members` and an invite's `ADDED` member
+ * return. Null when the principal has no project binding.
  *
  * Not built on `listProjectMemberships`: that listing is capped and project-wide, and a single-record
  * read after a write must not depend on it.

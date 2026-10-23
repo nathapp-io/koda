@@ -1,3 +1,4 @@
+import { PATH_METADATA } from '@nestjs/common/constants';
 import { ProjectMembersController } from './project-members.controller';
 import { REQUIRES_METADATA } from '../../permissions/requires.decorator';
 
@@ -5,8 +6,6 @@ describe('US-008 permission keys on member routes', () => {
   it.each([
     ['list', 'member.read'],
     ['add', 'member.add'],
-    ['updateRole', 'role.binding.manage'],
-    ['remove', 'member.remove'],
   ] as const)('%s declares @Requires(%s)', (handler, key) => {
     const fn = (ProjectMembersController.prototype as unknown as Record<string, object>)[handler];
     expect(Reflect.getMetadata(REQUIRES_METADATA, fn)).toEqual({
@@ -14,6 +13,18 @@ describe('US-008 permission keys on member routes', () => {
       mode: 'all',
       enforcedBy: 'guard',
     });
+  });
+
+  // Permissions P1 US-003: the members PATCH and DELETE are gone. A role change and a removal are a
+  // grant and a delete on `/role-bindings`, so nothing here declares the keys they carried.
+  it('US-003: the controller no longer handles a member PATCH or DELETE', () => {
+    const prototype = ProjectMembersController.prototype as unknown as Record<string, unknown>;
+
+    // The class under test is the members controller, so the two absences below are about the
+    // handlers that used to sit on this route, not about a class that never had them.
+    expect(Reflect.getMetadata(PATH_METADATA, ProjectMembersController)).toBe('projects/:slug/members');
+    expect(prototype['updateRole']).toBeUndefined();
+    expect(prototype['remove']).toBeUndefined();
   });
 
   it('runs ProjectMembershipGuard before RequiresGuard at the class level', () => {
@@ -27,7 +38,7 @@ describe('US-008 permission keys on member routes', () => {
 });
 
 describe('ProjectMembersController', () => {
-  const service = { list: vi.fn(), add: vi.fn(), updateRole: vi.fn(), remove: vi.fn() };
+  const service = { list: vi.fn(), add: vi.fn() };
   const controller = new ProjectMembersController(service as never);
   const principal = { actorType: 'user', id: 'u1' } as never;
 
@@ -57,11 +68,5 @@ describe('ProjectMembersController', () => {
     });
     await controller.list('proj', { principals: 'all' } as never, principal);
     expect(service.list).toHaveBeenCalledWith('proj', principal, { current: 1, size: 20 }, 'all');
-  });
-
-  it('remove returns an empty Ok', async () => {
-    const res = await controller.remove('proj', 'u2', principal);
-    expect(service.remove).toHaveBeenCalledWith('proj', 'u2', principal);
-    expect(res).toEqual(expect.objectContaining({ ret: 0 }));
   });
 });

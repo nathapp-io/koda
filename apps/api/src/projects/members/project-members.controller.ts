@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { Principal } from '@nathapp/nestjs-auth';
@@ -10,7 +10,6 @@ import { ProjectMembershipGuard } from '../project-membership.guard';
 import { ProjectMembersService } from './project-members.service';
 import { ListMembersQuery } from './dto/list-members.query';
 import { AddMemberDto } from './dto/add-member.dto';
-import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { ProjectMemberDto } from './dto/project-member.dto';
 
 /**
@@ -20,6 +19,11 @@ import { ProjectMemberDto } from './dto/project-member.dto';
  * `resolveMembership` / `assertProjectAdmin` checks inside `ProjectMembersService` are gone; every
  * handler now declares its own `member.*` key. `member.read` is what lets a plain member list the
  * members; `member.add` alone decides the page's `canManage`.
+ *
+ * Permissions P1 (US-003): a member's role change and removal are no longer routes here. They are a
+ * binding grant and a binding delete on `/role-bindings`, which `role.binding.manage` gates and
+ * whose last-Project-Admin and open-ticket refusals live in `MembershipService.removeBinding`. This
+ * controller keeps the listing and the add; `PATCH`/`DELETE` answer 404.
  */
 @ApiTags('projects')
 @ApiBearerAuth()
@@ -53,33 +57,5 @@ export class ProjectMembersController {
   @ApiResponse({ status: 409, description: 'Already a member' })
   async add(@Param('slug') slug: string, @Body() dto: AddMemberDto, @Principal() principal: KodaPrincipal) {
     return JsonResponse.Ok(await this.members.add(slug, dto, principal));
-  }
-
-  @Patch(':userId')
-  @Requires('role.binding.manage')
-  @ApiOperation({ summary: 'Change a member\'s project role (role.binding.manage)' })
-  @ApiResponse({ status: 200, type: ProjectMemberDto })
-  @ApiResponse({ status: 403, description: 'Not a project member, or role.binding.manage is missing' })
-  @ApiResponse({ status: 404, description: 'Not a member' })
-  @ApiResponse({ status: 409, description: 'Would leave the project without an ADMIN' })
-  async updateRole(
-    @Param('slug') slug: string,
-    @Param('userId') userId: string,
-    @Body() dto: UpdateMemberRoleDto,
-    @Principal() principal: KodaPrincipal,
-  ) {
-    return JsonResponse.Ok(await this.members.updateRole(slug, userId, dto, principal));
-  }
-
-  @Delete(':userId')
-  @Requires('member.remove')
-  @ApiOperation({ summary: 'Remove a member (member.remove)' })
-  @ApiResponse({ status: 200, description: 'Removed' })
-  @ApiResponse({ status: 403, description: 'Not a project member, or member.remove is missing' })
-  @ApiResponse({ status: 404, description: 'Not a member' })
-  @ApiResponse({ status: 409, description: 'Would leave the project without an ADMIN' })
-  async remove(@Param('slug') slug: string, @Param('userId') userId: string, @Principal() principal: KodaPrincipal) {
-    await this.members.remove(slug, userId, principal);
-    return JsonResponse.Ok({});
   }
 }

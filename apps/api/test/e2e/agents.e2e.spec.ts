@@ -6,8 +6,7 @@ import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
-import { MembershipService } from '../../src/permissions/membership.service';
-import { expectBindingOnlyFixtures, grantRole, revokeProjectRoles } from '../../src/permissions/test-helpers/permission-fixtures';
+import { expectBindingOnlyFixtures, grantRole } from '../../src/permissions/test-helpers/permission-fixtures';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -35,7 +34,7 @@ describeIntegration('Agents API E2E', () => {
   /** The projects the agent is rostered in; its project grants follow the roles it acts with. */
   const rosteredProjectIds: string[] = [];
   /** The roles the agent API reports; the agent acts with the matching project bindings. */
-  let agentRoleNames: string[] = ['DEVELOPER', 'REVIEWER'];
+  const agentRoleNames: string[] = ['DEVELOPER', 'REVIEWER'];
 
   /** The system role key a legacy agent role is bound as. */
   const ROLE_KEY_BY_AGENT_ROLE: Record<string, string> = {
@@ -54,20 +53,6 @@ describeIntegration('Agents API E2E', () => {
       await grantRole(prisma, principal, ROLE_KEY_BY_AGENT_ROLE[role], projectId);
     }
     if (!rosteredProjectIds.includes(projectId)) rosteredProjectIds.push(projectId);
-  };
-
-  /** Replaces the agent's project grants after its roles changed. */
-  const syncAgentRoles = async (): Promise<void> => {
-    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
-    const principal = { type: 'AGENT' as const, id: agentId };
-    for (const projectId of rosteredProjectIds) {
-      await revokeProjectRoles(prisma, principal, projectId);
-      await grantRole(prisma, principal, 'viewer', projectId);
-      for (const role of agentRoleNames) {
-        await grantRole(prisma, principal, ROLE_KEY_BY_AGENT_ROLE[role], projectId);
-      }
-    }
-    await app.get(MembershipService).invalidatePermissions();
   };
 
   beforeAll(async () => {
@@ -247,21 +232,6 @@ describeIntegration('Agents API E2E', () => {
     expect(data.name).toBe('Agents E2E Bot Updated');
     expect(data.status).toBe('PAUSED');
     expect(data.maxConcurrentTickets).toBe(4);
-  });
-
-  it('PATCH /api/agents/:slug/update-roles — replaces roles', async () => {
-    const res = await request(httpServer)
-      .patch(`/api/agents/${agentSlug}/update-roles`)
-      .set('Authorization', `Bearer ${adminAccessToken}`)
-      .send({ roles: ['DEVELOPER'] })
-      .expect(200);
-
-    const data = body<{ roles: Array<{ role: string }> }>(res);
-    expect(data.roles.map((item) => item.role)).toEqual(['DEVELOPER']);
-    // Permissions P1 US-005: the roles the agent acts with are bindings, so they follow the roles the
-    // API just replaced.
-    agentRoleNames = ['DEVELOPER'];
-    await syncAgentRoles();
   });
 
   it('PATCH /api/agents/:slug/update-capabilities — replaces capabilities and removes duplicates', async () => {

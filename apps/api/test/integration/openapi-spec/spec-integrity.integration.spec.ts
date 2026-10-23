@@ -28,7 +28,6 @@ const EXPECTED_ENDPOINTS = [
   { path: '/api/agents/{slug}', method: 'patch' },
   // NOTE: DELETE /api/agents/{slug} not yet implemented — known gap
   { path: '/api/agents/{slug}/rotate-key', method: 'post' },
-  { path: '/api/agents/{slug}/update-roles', method: 'patch' },
   { path: '/api/agents/{slug}/update-capabilities', method: 'patch' },
   // Projects
   { path: '/api/projects', method: 'post' },

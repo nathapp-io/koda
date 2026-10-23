@@ -215,7 +215,17 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
     const conn = await stream('dev');
     await conn.next((m) => m.event === 'ready');
 
-    await request(server).delete(`/api/projects/live/members/${ids.dev}`).set(auth('root')).expect(200);
+    // Permissions P1 US-003: a member leaves a project by deleting its bindings, not through the
+    // deleted members DELETE.
+    const live = await prisma.project.findUniqueOrThrow({ where: { slug: 'live' } });
+    const bindings = await prisma.roleBinding.findMany({
+      where: { principalType: 'USER', principalId: ids.dev, projectId: live.id },
+      select: { id: true },
+    });
+    expect(bindings.length).toBeGreaterThan(0);
+    for (const binding of bindings) {
+      await request(server).delete(`/api/role-bindings/${binding.id}`).set(auth('root')).expect(204);
+    }
 
     await Promise.race([conn.closed, sleep(HEARTBEAT_MS * 4)]);
     expect(conn.isClosed()).toBe(true);

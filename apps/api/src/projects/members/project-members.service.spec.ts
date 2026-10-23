@@ -34,10 +34,6 @@ describe('ProjectMembersService', () => {
       findMember: vi.fn(),
       findUserByEmail: vi.fn(),
       findUserIdByEmail: vi.fn(),
-      createMember: vi.fn(async (_p: string, userId: string, role: string) => member(userId, role)),
-      updateMemberRole: vi.fn(async (_p: string, userId: string, role: string) => member(userId, role)),
-      deleteMember: vi.fn(),
-      deleteMemberIfPresent: vi.fn(),
       countProjectAdmins: vi.fn(),
       lockMembers: vi.fn(),
     };
@@ -128,9 +124,6 @@ describe('ProjectMembersService', () => {
     repo.findMember.mockResolvedValueOnce(null).mockResolvedValueOnce(member('u1', 'DEVELOPER'));
 
     await expect(service.add('proj', { email: 'u1@k.t', role: 'DEVELOPER' }, projectAdmin)).resolves.toMatchObject({ role: 'DEVELOPER' });
-    repo.findMember.mockResolvedValue(member('d1', 'DEVELOPER'));
-    await expect(service.updateRole('proj', 'd1', { role: 'VIEWER' }, projectAdmin)).resolves.toMatchObject({ role: 'DEVELOPER' });
-    await expect(service.remove('proj', 'd1', projectAdmin)).resolves.toBeUndefined();
   });
 
   it('add: unknown email is 404, duplicate member is 409', async () => {
@@ -290,96 +283,5 @@ describe('ProjectMembersService', () => {
       expect.objectContaining({ userId: 'disabled-user', disabled: true }),
       expect.objectContaining({ userId: 'enabled-user', disabled: false }),
     ]));
-  });
-
-  it('updateRole/remove 404 a non-member', async () => {
-    repo.findMember.mockResolvedValue(null);
-    await expect(service.updateRole('proj', 'nobody', { role: 'VIEWER' }, globalAdmin)).rejects.toMatchObject({ prefix: 'members', httpStatus: 404 });
-    await expect(service.remove('proj', 'nobody', globalAdmin)).rejects.toMatchObject({ prefix: 'members', httpStatus: 404 });
-  });
-
-  it('a project admin cannot demote or remove the last project ADMIN', async () => {
-    // Permissions P1 (US-002): the last-admin override is the `role.binding.global` key; this caller
-    // does not hold it, so the count decides.
-    permissions.can.mockImplementation(async (_principal: unknown, key: string) => ({
-      allowed: key !== 'role.binding.global',
-      reason: key === 'role.binding.global' ? 'not-granted' : 'granted',
-    }));
-    repo.findMember.mockResolvedValue(member('pa', 'ADMIN'));
-    repo.countProjectAdmins.mockResolvedValue(1);
-
-    await expect(service.updateRole('proj', 'pa', { role: 'DEVELOPER' }, projectAdmin)).rejects.toMatchObject({ prefix: 'members.lastAdmin', httpStatus: 409 });
-    await expect(service.remove('proj', 'pa', projectAdmin)).rejects.toBeInstanceOf(ConflictAppException);
-    expect(repo.lockMembers.mock.invocationCallOrder[0]).toBeLessThan(repo.countProjectAdmins.mock.invocationCallOrder[0]);
-    expect(membership.createBinding).not.toHaveBeenCalled();
-    expect(membership.removeProjectBindings).not.toHaveBeenCalled();
-    expect(repo.deleteMemberIfPresent).not.toHaveBeenCalled();
-  });
-
-  it('AC-12: a MEMBER-role caller holding role.binding.global removes the only active project ADMIN', async () => {
-    // The claim says MEMBER; the key says yes. The key decides.
-    permissions.can.mockImplementation(async (_principal: unknown, key: string) => ({
-      allowed: key === 'role.binding.global',
-      reason: key === 'role.binding.global' ? 'granted' : 'not-granted',
-    }));
-    repo.findMember.mockResolvedValue(member('pa', 'ADMIN'));
-    repo.countProjectAdmins.mockResolvedValue(1);
-
-    await service.remove('proj', 'pa', projectAdmin);
-
-    expect(permissions.can).toHaveBeenCalledWith(projectAdmin, 'role.binding.global');
-    expect(repo.deleteMemberIfPresent).toHaveBeenCalledWith('p1', 'pa');
-    expect(membership.removeProjectBindings).toHaveBeenCalledWith({ type: 'USER', id: 'pa' }, 'p1');
-    // The override answers before the count, so the last-admin rule never runs.
-    expect(repo.countProjectAdmins).not.toHaveBeenCalled();
-  });
-
-  it('AC-13: an ADMIN-role caller refused role.binding.global is held to the last-admin count', async () => {
-    permissions.can.mockImplementation(async (_principal: unknown, key: string) => ({
-      allowed: key !== 'role.binding.global',
-      reason: key === 'role.binding.global' ? 'not-granted' : 'granted',
-    }));
-    repo.findMember.mockResolvedValue(member('pa', 'ADMIN'));
-    repo.countProjectAdmins.mockResolvedValue(1);
-
-    const error = await service.remove('proj', 'pa', globalAdmin).catch((caught: unknown) => caught);
-
-    expect(error).toBeInstanceOf(ConflictAppException);
-    expect((error as ConflictAppException).prefix).toBe('members.lastAdmin');
-    expect(permissions.can).toHaveBeenCalledWith(globalAdmin, 'role.binding.global');
-    expect(repo.deleteMemberIfPresent).not.toHaveBeenCalled();
-  });
-
-  it('a global ADMIN may remove the last project ADMIN', async () => {
-    repo.findMember.mockResolvedValue(member('pa', 'ADMIN'));
-    repo.countProjectAdmins.mockResolvedValue(1);
-
-    await service.remove('proj', 'pa', globalAdmin);
-
-    expect(permissions.can).toHaveBeenCalledWith(globalAdmin, 'role.binding.global');
-    expect(repo.deleteMemberIfPresent).toHaveBeenCalledWith('p1', 'pa');
-    expect(membership.removeProjectBindings).toHaveBeenCalledWith({ type: 'USER', id: 'pa' }, 'p1');
-    expect(repo.countProjectAdmins).not.toHaveBeenCalled();
-  });
-
-  it('keeping ADMIN, or changing a non-admin, needs no count and asks no key', async () => {
-    repo.findMember.mockResolvedValue(member('d1', 'DEVELOPER'));
-    await service.updateRole('proj', 'd1', { role: 'VIEWER' }, projectAdmin);
-    expect(repo.countProjectAdmins).not.toHaveBeenCalled();
-    // A change that loses no active admin asks nothing at all.
-    expect(permissions.can).not.toHaveBeenCalled();
-    expect(membership.removeProjectBindings).toHaveBeenCalledWith({ type: 'USER', id: 'd1' }, 'p1', ['project-admin', 'developer', 'viewer']);
-    expect(repo.deleteMemberIfPresent).toHaveBeenCalledWith('p1', 'd1');
-    expect(membership.createBinding).toHaveBeenCalledWith({ principal: { type: 'USER', id: 'd1' }, projectId: 'p1', roleKey: 'viewer' }, { type: 'USER', id: 'pa' });
-  });
-
-  it('a disabled ADMIN does not trigger the last-admin guard, and no key is asked', async () => {
-    repo.findMember.mockResolvedValue(member('dis', 'ADMIN', true));
-
-    await service.remove('proj', 'dis', projectAdmin);
-
-    expect(repo.deleteMemberIfPresent).toHaveBeenCalledWith('p1', 'dis');
-    expect(repo.countProjectAdmins).not.toHaveBeenCalled();
-    expect(permissions.can).not.toHaveBeenCalled();
   });
 });

@@ -21,6 +21,7 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
   let targetId: string;
   let projectId: string;
   let base: string;
+  let passwordHash: string;
   let seq = 0;
   const headers = (token = adminToken) => ({ Authorization: `Bearer ${token}` });
   const post = (body: object, token = adminToken) => request(server).post(base).set(headers(token)).send(body);
@@ -44,6 +45,7 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     rootToken = data<{ accessToken: string }>(await request(server).post('/api/auth/register').send({ email: 'root@bindings.test', name: 'Root', password: TEST_PASSWORD }).expect(201)).accessToken;
     const root = await db.user.findUniqueOrThrow({ where: { email: 'root@bindings.test' } });
     rootId = root.id;
+    passwordHash = root.passwordHash;
     adminId = (await db.user.create({ data: { email: 'admin@bindings.test', passwordHash: root.passwordHash, role: 'MEMBER' } })).id;
     targetId = (await db.user.create({ data: { email: 'target@bindings.test', passwordHash: root.passwordHash, role: 'MEMBER' } })).id;
     adminToken = await loginToken(server, 'admin@bindings.test');
@@ -96,31 +98,64 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
   });
   it('AC-6: role replacement preserves reviewer', async () => {
     await bind('developer'); await bind('reviewer');
-    const res = await request(server).patch(`${base}/${targetId}`).set(headers()).send({ role: 'ADMIN' }).expect(200);
-    expect(data<{ role: string }>(res).role).toBe('ADMIN');
+    // Permissions P1 US-003: a role change is a grant of the new binding plus a delete of the old one
+    // on the role-bindings route.
+    await request(server).post('/api/role-bindings').set(headers())
+      .send({ principalType: 'USER', principalId: targetId, roleKey: 'project-admin', projectId }).expect(201);
+    const developer = await db.roleBinding.findFirstOrThrow({
+      where: { principalId: targetId, principalType: 'USER', projectId, role: { key: 'developer' } },
+    });
+    await request(server).delete(`/api/role-bindings/${developer.id}`).set(headers()).expect(204);
     expect((await bindings()).map(b => b.role.key).sort()).toEqual(['project-admin', 'reviewer']);
   });
-  it('AC-7: legacy-only member role update is members 404', async () => {
+  it('AC-7: a legacy-only member holds no binding, so no role change reaches it', async () => {
     await db.projectMember.create({ data: { projectId, userId: targetId, role: 'DEVELOPER' } });
-    const res = await request(server).patch(`${base}/${targetId}`).set(headers()).send({ role: 'VIEWER' }).expect(404);
-    expect(res.body).toMatchObject({ ret: 404, message: 'Member not found' });
-    expect(await legacyCount()).toBe(1);
+    // The retired members PATCH cannot change it …
+    await request(server).patch(`${base}/${targetId}`).set(headers())
+      .send({ role: 'VIEWER' }).expect(404);
+    // … and the role-bindings route has nothing of this member's to change.
     expect(await bindings()).toEqual([]);
+    expect(await legacyCount()).toBe(1);
   });
-  it('AC-8: binding-only last admin cannot self-demote', async () => {
-    conflict(await request(server).patch(`${base}/${adminId}`).set(headers()).send({ role: 'DEVELOPER' }), 'members.lastAdmin');
+  it('AC-8: the last admin binding cannot be revoked by a caller without global authority', async () => {
+    // A caller holding every *project* key but not `role.binding.global` (a GLOBAL key no PROJECT role
+    // confers): the custom co-admin role carries `*` in the project, so only the last-admin count can
+    // refuse the delete.
+    const coAdminId = (await db.user.create({
+      data: { email: 'co-admin@bindings.test', passwordHash, role: 'MEMBER' },
+    })).id;
+    const coAdminRole = await db.role.create({
+      data: {
+        key: `co-admin-${projectId}`, name: 'Co Admin', description: '', scope: 'PROJECT',
+        system: false, locked: false, permissions: ['*'],
+      },
+    });
+    await db.roleBinding.create({
+      data: {
+        principalType: 'USER', principalId: coAdminId, projectId,
+        roleId: coAdminRole.id, grantedByType: 'SYSTEM', grantedById: 'test',
+      },
+    });
+    const coAdminToken = await loginToken(server, 'co-admin@bindings.test');
+    const admin = await db.roleBinding.findFirstOrThrow({
+      where: { principalId: adminId, principalType: 'USER', projectId, role: { key: 'project-admin' } },
+    });
+
+    conflict(await request(server).delete(`/api/role-bindings/${admin.id}`).set(headers(coAdminToken)), 'members.lastAdmin');
     expect((await bindings(adminId)).map(b => b.role.key)).toEqual(['project-admin']);
   });
-  it('AC-9: removal deletes all local sources and revokes project access', async () => {
+  it('AC-9: removal deletes the member\'s bindings and revokes project access', async () => {
     await db.projectMember.create({ data: { projectId, userId: targetId, role: 'DEVELOPER' } });
     await bind('developer'); await bind('reviewer');
-    await request(server).delete(`${base}/${targetId}`).set(headers()).expect(200);
-    expect(await bindings()).toHaveLength(0); expect(await legacyCount()).toBe(0);
+    for (const binding of await bindings()) {
+      await request(server).delete(`/api/role-bindings/${binding.id}`).set(headers()).expect(204);
+    }
+    expect(await bindings()).toHaveLength(0);
     await request(server).get(base.replace('/members', '/tickets')).set(headers(targetToken)).expect(403);
   });
-  it('AC-10: removing no local member is members 404', async () => {
-    const res = await request(server).delete(`${base}/${targetId}`).set(headers()).expect(404);
-    expect(res.body).toMatchObject({ ret: 404, message: 'Member not found' });
+  it('AC-10: revoking no binding is the role-bindings 404', async () => {
+    const res = await request(server).delete('/api/role-bindings/no-such-binding').set(headers()).expect(404);
+    expect(res.body.ret).not.toBe(0);
   });
   it('AC-11: existing-user invite grants developer with caller attribution', async () => {
     const res = await request(server).post(base.replace('/members', '/invites')).set(headers()).send({ email: 'target@bindings.test', role: 'DEVELOPER' }).expect(201);
@@ -132,9 +167,14 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     await bind('viewer');
     conflict(await request(server).post(base.replace('/members', '/invites')).set(headers()).send({ email: 'target@bindings.test', role: 'DEVELOPER' }), 'invites.memberExists');
   });
-  it('AC-14: updating no local member is members 404', async () => {
-    const res = await request(server).patch(`${base}/${targetId}`).set(headers()).send({ role: 'DEVELOPER' }).expect(404);
-    expect(res.body).toMatchObject({ ret: 404, message: 'Member not found' });
+  it('AC-14: a member with no binding is not a member of the project', async () => {
+    await db.projectMember.create({ data: { projectId, userId: targetId, role: 'DEVELOPER' } });
+    await request(server).patch(`${base}/${targetId}`).set(headers()).send({ role: 'DEVELOPER' }).expect(404);
+    expect(await bindings()).toEqual([]);
+    const page = data<{ records: { userId: string }[] }>(
+      await request(server).get(base).set(headers()).expect(200),
+    );
+    expect(page.records.map(m => m.userId)).not.toContain(targetId);
   });
   it.each([
     { source: 'binding-only', legacyAt: null, bindingAt: new Date('2002-01-01'), since: new Date('2002-01-01') },
@@ -160,10 +200,24 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
       userId: targetId, role: 'DEVELOPER', joinedAt: since,
     });
     conflict(await post({ email: 'target@bindings.test' }), 'members');
-    await request(server).patch(`${base}/${targetId}`).set(headers()).send({ role: 'VIEWER' }).expect(200);
-    await request(server).delete(`${base}/${targetId}`).set(headers()).expect(200);
+    // F1: the member is beyond the project listing cap, so it cannot appear in the members page …
+    const listed = data<{ records: { userId: string }[] }>(
+      await request(server).get(`${base}?size=100&current=1`).set(headers()).expect(200),
+    );
+    expect(listed.records.map(record => record.userId)).not.toContain(targetId);
+    // … and its bindings are revoked by the principal-filtered binding listing, which is keyed by the
+    // member rather than by the project.
+    const found = data<{ records: { id: string }[] }>(
+      await request(server)
+        .get(`/api/role-bindings?principalType=USER&principalId=${targetId}&projectId=${projectId}`)
+        .set(headers(rootToken))
+        .expect(200),
+    );
+    expect(found.records.length).toBeGreaterThan(0);
+    for (const binding of found.records) {
+      await request(server).delete(`/api/role-bindings/${binding.id}`).set(headers(rootToken)).expect(204);
+    }
     expect(await bindings()).toHaveLength(0);
-    expect(await legacyCount()).toBe(0);
   });
 
   it('AC-15: concurrent member adds yield one binding and one members conflict', async () => {

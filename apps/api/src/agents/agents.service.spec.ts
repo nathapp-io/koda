@@ -71,7 +71,6 @@ describe('AgentsService', () => {
     update: vi.fn(),
     deleteBySlug: vi.fn(),
     createRolesAndCapabilities: vi.fn(),
-    replaceRoles: vi.fn(),
     replaceCapabilities: vi.fn(),
     findProjectBySlug: vi.fn(),
     findVerifiedUnassignedTickets: vi.fn(),
@@ -106,8 +105,6 @@ describe('AgentsService', () => {
     bindBaseline: vi.fn(),
     setGlobalAdmin: vi.fn(),
     removeAllBindings: vi.fn(),
-    // Permissions P1 (US-009): updateRoles invalidates the permission cache after its role write.
-    invalidatePermissions: vi.fn(),
     afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
   };
 
@@ -139,9 +136,7 @@ describe('AgentsService', () => {
     mockAgentRepo.createRolesAndCapabilities.mockResolvedValue(undefined);
     mockMembership.bindBaseline.mockResolvedValue(undefined);
     mockMembership.removeAllBindings.mockResolvedValue(undefined);
-    mockMembership.invalidatePermissions.mockResolvedValue(undefined);
 
-    mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
     mockAgentRepo.replaceCapabilities.mockResolvedValue(undefined);
     // S4c US-001: GET /agents/me always carries the roster projects, and a
     // rostered target agent is the default for the pickup tests.
@@ -589,94 +584,6 @@ describe('AgentsService', () => {
       mockAgentRepo.findBySlugScalar.mockResolvedValue(null);
 
       await expect(service.update('nonexistent', { name: 'New Name' })).rejects.toThrow();
-    });
-  });
-
-  describe('updateRoles', () => {
-    it('should delete all existing roles and insert new ones', async () => {
-      const updateData = { roles: ['DEVELOPER', 'REVIEWER'] };
-      const updatedAgent = {
-        ...mockAgentWithRelations,
-        roles: [
-          { id: 'new-role-1', agentId: 'agent-123', role: 'DEVELOPER' },
-          { id: 'new-role-2', agentId: 'agent-123', role: 'REVIEWER' },
-        ],
-      };
-
-      mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
-      mockAgentRepo.findById.mockResolvedValue(updatedAgent);
-
-      const result = await service.updateRoles('agent-123', updateData);
-
-      expect(agentRepo.replaceRoles).toHaveBeenCalledWith('agent-123', ['DEVELOPER', 'REVIEWER']);
-      expect(result.roles.length).toBe(2);
-      expect(result.roles.map((r: any) => r.role)).toEqual(['DEVELOPER', 'REVIEWER']);
-    });
-
-    it('should REPLACE roles, not append', async () => {
-      const updateData = { roles: ['TRIAGER'] };
-      const updatedAgent = {
-        ...mockAgentWithRelations,
-        roles: [
-          { id: 'new-role-1', agentId: 'agent-123', role: 'TRIAGER' },
-        ],
-      };
-
-      mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
-      mockAgentRepo.findById.mockResolvedValue(updatedAgent);
-
-      const result = await service.updateRoles('agent-123', updateData);
-
-      // Verify replaceRoles was called (handles delete + insert)
-      expect(agentRepo.replaceRoles).toHaveBeenCalledWith('agent-123', ['TRIAGER']);
-
-      // Verify only new role exists
-      expect(result.roles.length).toBe(1);
-      expect(result.roles[0].role).toBe('TRIAGER');
-    });
-
-    it('should allow updating to empty roles array', async () => {
-      const updateData = { roles: [] };
-      const updatedAgent = {
-        ...mockAgentWithRelations,
-        roles: [],
-      };
-
-      mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
-      mockAgentRepo.findById.mockResolvedValue(updatedAgent);
-
-      const result = await service.updateRoles('agent-123', updateData);
-
-      expect(result.roles.length).toBe(0);
-    });
-
-    it('should reject invalid roles before deleting existing roles', async () => {
-      await expect(service.updateRoles('agent-123', { roles: ['DEVLOPER'] }))
-        .rejects.toThrow(ValidationAppException);
-
-      expect(agentRepo.replaceRoles).not.toHaveBeenCalled();
-    });
-
-    it('invalidates the permission cache after the role write (US-009)', async () => {
-      mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
-      mockAgentRepo.findById.mockResolvedValue({ ...mockAgentWithRelations, roles: [] });
-
-      await service.updateRoles('agent-123', { roles: ['DEVELOPER'] });
-
-      // `AgentRoleEntry` is a legacy row the permission union reads but `MembershipService` does not
-      // write, so the write it does not own is the one that must drop the cache — after the role write.
-      expect(mockMembership.invalidatePermissions).toHaveBeenCalledTimes(1);
-      expect(agentRepo.replaceRoles.mock.invocationCallOrder[0]).toBeLessThan(
-        mockMembership.invalidatePermissions.mock.invocationCallOrder[0],
-      );
-    });
-
-    it('does not invalidate the permission cache when the roles are rejected (US-009)', async () => {
-      await expect(service.updateRoles('agent-123', { roles: ['DEVLOPER'] })).rejects.toThrow(
-        ValidationAppException,
-      );
-
-      expect(mockMembership.invalidatePermissions).not.toHaveBeenCalled();
     });
   });
 

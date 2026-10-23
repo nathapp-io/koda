@@ -75,7 +75,6 @@ describe('AgentsController', () => {
     findBySlug: vi.fn(),
     findMe: vi.fn(),
     update: vi.fn(),
-    updateRoles: vi.fn(),
     updateCapabilities: vi.fn(),
     rotateApiKey: vi.fn(),
   };
@@ -419,79 +418,6 @@ describe('AgentsController', () => {
       const result = await controller.updateAgent('test-agent', updateDto, mockAdminUser);
 
       expect((result as any).status).toBe('PAUSED');
-    });
-  });
-
-  describe('PATCH /api/agents/:slug/update-roles', () => {
-    it('should update agent roles for ADMIN user', async () => {
-      const updateRolesDto = {
-        roles: ['DEVELOPER', 'REVIEWER'],
-      };
-
-      const updatedAgent = {
-        ...mockAgent,
-        roles: [
-          { id: 'role-1', role: 'DEVELOPER' },
-          { id: 'role-2', role: 'REVIEWER' },
-        ],
-      };
-
-      mockAgentsService.updateRoles.mockResolvedValue(updatedAgent);
-      mockAgentsService.findBySlug.mockResolvedValue(mockAgent);
-
-      const result = await controller.updateAgentRoles('test-agent', updateRolesDto, mockAdminUser);
-
-      expect((result as any).roles.length).toBe(2);
-      expect((result as any).roles.map((r: any) => r.role)).toEqual(['DEVELOPER', 'REVIEWER']);
-    });
-
-    it('should REPLACE roles (not append)', async () => {
-      const updateRolesDto = {
-        roles: ['TRIAGER'],
-      };
-
-      const updatedAgent = {
-        ...mockAgent,
-        roles: [{ id: 'role-1', role: 'TRIAGER' }],
-      };
-
-      mockAgentsService.updateRoles.mockResolvedValue(updatedAgent);
-      mockAgentsService.findBySlug.mockResolvedValue(mockAgent);
-
-      const result = await controller.updateAgentRoles('test-agent', updateRolesDto, mockAdminUser);
-
-      expect((result as any).roles.length).toBe(1);
-      expect((result as any).roles[0].role).toBe('TRIAGER');
-    });
-
-    it('should delete all old roles before inserting new ones', async () => {
-      const updateRolesDto = {
-        roles: ['REVIEWER'],
-      };
-
-      const updatedAgent = {
-        ...mockAgent,
-        roles: [{ id: 'new-role', role: 'REVIEWER' }],
-      };
-
-      mockAgentsService.updateRoles.mockResolvedValue(updatedAgent);
-      mockAgentsService.findBySlug.mockResolvedValue(mockAgent);
-
-      const result = await controller.updateAgentRoles('test-agent', updateRolesDto, mockAdminUser);
-
-      // Old roles should be gone, new role should be present
-      expect((result as any).roles.length).toBe(1);
-      expect((result as any).roles[0].role).toBe('REVIEWER');
-    });
-
-    it('should delegate role updates regardless of role (guard enforces admin at HTTP layer)', async () => {
-      const updateRolesDto = {
-        roles: ['DEVELOPER'],
-      };
-
-      mockAgentsService.findBySlug.mockResolvedValue(mockAgent);
-      mockAgentsService.updateRoles.mockResolvedValue(mockAgent);
-      await expect(controller.updateAgentRoles('test-agent', updateRolesDto, mockMemberUser)).resolves.toBeDefined();
     });
   });
 

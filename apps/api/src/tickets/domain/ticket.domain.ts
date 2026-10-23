@@ -158,8 +158,9 @@ export interface ITicketRepository {
   isAgentOnProjectRoster(projectId: string, agentId: string): Promise<boolean>;
   /**
    * S4c US-004: serializes ticket assignment against roster removal for one
-   * project — `AgentsService.removeFromProject` takes the same lock. Call only
-   * inside `txManager.run`: the advisory lock is released at COMMIT/ROLLBACK.
+   * project — an agent-binding removal takes the same lock
+   * (`MembershipService.removeBinding`). Call only inside `txManager.run`: the
+   * advisory lock is released at COMMIT/ROLLBACK.
    */
   lockProjectAgents(projectId: string): Promise<void>;
   /**

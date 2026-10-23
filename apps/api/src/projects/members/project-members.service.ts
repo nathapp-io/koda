@@ -3,7 +3,6 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import type { IPageOption } from '@nathapp/nestjs-common';
 import { IPageResult, ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
-import { ActorRole } from '../../common/enums';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { MembershipService } from '../../permissions/membership.service';
@@ -12,9 +11,8 @@ import { RoleAdminService } from '../../permissions/role-admin.service';
 import { ROLE_KEY_FOR_LEGACY_ROLE } from '../../permissions/legacy-project-roles';
 import { ProjectAccessService } from '../project-access.service';
 import { PrismaProjectMembersRepository } from './prisma-project-members.repository';
-import { ProjectMemberRecord, ProjectMemberRole } from './domain/project-member.domain';
+import { ProjectMemberRecord } from './domain/project-member.domain';
 import { AddMemberDto } from './dto/add-member.dto';
-import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { ProjectMemberDto } from './dto/project-member.dto';
 import { DEFAULT_MEMBER_PRINCIPAL_FILTER, MemberPrincipalFilter } from './dto/list-members.query';
 
@@ -97,61 +95,9 @@ export class ProjectMembersService {
     }));
   }
 
-  /** The route's `role.binding.manage` key is the gate; the last-admin rule still applies. */
-  async updateRole(slug: string, userId: string, dto: UpdateMemberRoleDto, principal: KodaPrincipal): Promise<ProjectMemberDto> {
-    const projectId = await this.access.findProjectIdBySlug(slug);
-    const updated = await this.membership.afterCommit(() => this.txManager.run(async () => {
-      const current = await this.lockAndFind(projectId, userId);
-      await this.assertKeepsAnAdmin(projectId, current, dto.role, principal);
-      await this.membership.removeProjectBindings({ type: 'USER', id: userId }, projectId, ['project-admin', 'developer', 'viewer']);
-      await this.membersRepo.deleteMemberIfPresent(projectId, userId);
-      await this.membership.createBinding(
-        { principal: { type: 'USER', id: userId }, projectId, roleKey: ROLE_KEY_FOR_LEGACY_ROLE[dto.role] },
-        { type: 'USER', id: principal.id },
-      );
-      return this.findRequiredMember(projectId, userId);
-    }));
-    return ProjectMemberDto.from(updated);
-  }
-
-  /** The route's `member.remove` key is the gate; the last-admin rule still applies. */
-  async remove(slug: string, userId: string, principal: KodaPrincipal): Promise<void> {
-    const projectId = await this.access.findProjectIdBySlug(slug);
-    await this.membership.afterCommit(() => this.txManager.run(async () => {
-      const current = await this.lockAndFind(projectId, userId);
-      await this.assertKeepsAnAdmin(projectId, current, null, principal);
-      await this.membership.removeProjectBindings({ type: 'USER', id: userId }, projectId);
-      await this.membersRepo.deleteMemberIfPresent(projectId, userId);
-    }));
-  }
-
-  private async lockAndFind(projectId: string, userId: string): Promise<ProjectMemberRecord> {
-    await this.membersRepo.lockMembers(projectId);
-    return this.findRequiredMember(projectId, userId);
-  }
-
   private async findRequiredMember(projectId: string, userId: string): Promise<ProjectMemberRecord> {
     const current = await this.membersRepo.findMember(projectId, userId);
     if (!current) throw new NotFoundAppException({}, 'members');
     return current;
-  }
-
-  /** A change that drops the last project ADMIN is refused unless the caller may override the rule. */
-  private async assertKeepsAnAdmin(
-    projectId: string,
-    current: ProjectMemberRecord,
-    nextRole: ProjectMemberRole | null,
-    principal: KodaPrincipal,
-  ): Promise<void> {
-    // A disabled member is not an active admin: removing them cannot lock the
-    // project out, so they do not trigger the guard.
-    const losesAdmin = current.role === ActorRole.ADMIN && !current.disabled && nextRole !== ActorRole.ADMIN;
-    if (!losesAdmin) return;
-    // Permissions P1 (US-002): the override is `role.binding.global` (with the seeded roles: an Owner
-    // or an Admin), not the principal's `role` claim. A change that loses no admin asks nothing.
-    if ((await this.permissions.can(principal, 'role.binding.global')).allowed) return;
-    if ((await this.membersRepo.countProjectAdmins(projectId)) <= 1) {
-      throw new ConflictAppException({}, 'members.lastAdmin');
-    }
   }
 }

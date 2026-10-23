@@ -422,10 +422,11 @@ export class TicketsService {
 
     // S4c US-004: the ticket lookup, the assignee lookups, the eligibility
     // checks and the write share one transaction. The agent path takes the
-    // project's roster lock before reading the roster, the same lock
-    // `AgentsService.removeFromProject` holds, so a concurrent removal and
-    // assignment serialize and a ticket can never end up assigned to an agent
-    // that was just taken off the roster. Assignment eligibility is checked independently
+    // project's roster lock before reading the roster, the same lock an
+    // agent-binding removal takes (`MembershipService.removeBinding`, US-002),
+    // so a concurrent removal and assignment serialize and a ticket can never
+    // end up assigned to an agent that just lost its last binding in the
+    // project. Assignment eligibility is checked independently
     // of the calling agent's project access.
     const updated = await this.txManager.run(async () => {
       const ticket = await this.ticketRepo.findTicketScoped(project.id, project.key, ref);

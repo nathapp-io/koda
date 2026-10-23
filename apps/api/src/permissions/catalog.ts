@@ -48,10 +48,15 @@ export const PUBLIC_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Role keys whose surface arrives in a later phase: approvals and their policies (P3), the audit log (P2),
+ * Keys whose surface arrives in a later phase: approvals and their policies (P3), the audit log (P2),
  * and deciding an assistant action as an approval type (P3). No route, tool or system writer declares
  * them yet; the catalog contract test refuses an undeclared key unless it is listed here, and refuses a
  * listed key once a surface declares it, so the list shrinks as P2 and P3 land.
+ *
+ * `member.remove` joined the list in Permissions P1 US-003: the two member routes that declared it (the
+ * members PATCH and DELETE) are gone, and removing a principal from a project is now deleting its
+ * bindings, which `role.binding.manage` gates. The key stays in the catalog and the seeded project
+ * roles still hold it; it waits for P3 policy to decide whether it gates binding removal.
  */
 export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'approval.decide',
@@ -59,6 +64,7 @@ export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'approval.policy.manage',
   'audit.read',
   'fleet.approval.decide.assistant',
+  'member.remove',
 ]);
 
 /** Keys every authenticated principal holds on its own data; they cannot be removed by role edits. */

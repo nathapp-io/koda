@@ -4,8 +4,8 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TicketStatus } from '../common/enums';
 import { KodaError } from '../common/koda-error';
 import { lockProjectAgents } from '../common/utils/advisory-lock';
-import { accessibleProjectIds, agentHasProjectAccess, listProjectMemberships, localProjectRole } from '../permissions/membership.queries';
-import { MAX_OPEN_TICKET_REFS, countOpenAgentTickets } from '../permissions/open-agent-tickets.queries';
+import { accessibleProjectIds, agentHasProjectAccess, listProjectMemberships } from '../permissions/membership.queries';
+import { MAX_OPEN_TICKET_REFS } from '../permissions/open-agent-tickets.queries';
 import type { ProjectAgentRecord } from './dto/project-agent.dto';
 
 @Injectable()
@@ -99,15 +99,6 @@ export class PrismaAgentRepository {
     });
   }
 
-  async replaceRoles(agentId: string, roles: string[]) {
-    await this.db.agentRoleEntry.deleteMany({ where: { agentId } });
-    if (roles.length > 0) {
-      await this.db.agentRoleEntry.createMany({
-        data: roles.map((role) => ({ agentId, role })),
-      });
-    }
-  }
-
   async replaceCapabilities(agentId: string, capabilities: string[]) {
     await this.db.agentCapabilityEntry.deleteMany({ where: { agentId } });
     if (capabilities.length > 0) {
@@ -124,49 +115,6 @@ export class PrismaAgentRepository {
   /** Access sources include project-specific and global PROJECT bindings. */
   async isOnProjectRoster(agentId: string, projectId: string): Promise<boolean> {
     return agentHasProjectAccess(this.prisma.client, agentId, projectId);
-  }
-
-  /** Roster writes and lists use local sources only, not global project access. */
-  async hasLocalMembership(agentId: string, projectId: string): Promise<boolean> {
-    return (await localProjectRole(this.prisma.client, { type: 'AGENT', id: agentId }, projectId)) !== null;
-  }
-
-  /**
-   * S4c US-003 (D530): add the agent to the project's roster. The composite
-   * primary key makes a concurrent duplicate add a race, so the insert skips
-   * the conflicting row instead of throwing and reports which happened — the
-   * caller turns 'alreadyAssigned' into a 409.
-   */
-  async addToProjectRoster(
-    agentId: string,
-    projectId: string,
-    addedById: string,
-  ): Promise<'created' | 'alreadyAssigned'> {
-    const { count } = await this.db.agentProject.createMany({
-      data: [{ agentId, projectId, addedById }],
-      skipDuplicates: true,
-    });
-    return count === 1 ? 'created' : 'alreadyAssigned';
-  }
-
-  /**
-   * S4c US-003 (D531): the agent's open tickets in the project — `count` is the
-   * exact total, `refs` the oldest {@link MAX_OPEN_TICKET_REFS} as
-   * `<Project.key>-<number>`. "Open" means not CLOSED/REJECTED and not
-   * soft-deleted, the same rule the roster read uses.
-   *
-   * Permissions P1 US-002 moved the query itself to
-   * `permissions/open-agent-tickets.queries.ts` — the agent-binding removal guard counts open tickets
-   * too, and `permissions/` never imports from `agents/`. This delegate stays until US-003 deletes the
-   * roster routes that still reach it.
-   */
-  async countOpenProjectTickets(agentId: string, projectId: string): Promise<{ count: number; refs: string[] }> {
-    return countOpenAgentTickets(this.db, agentId, projectId);
-  }
-
-  /** S4c US-003 (D530): drop the agent's roster row. A missing row deletes nothing. */
-  async removeFromProjectRoster(agentId: string, projectId: string): Promise<void> {
-    await this.db.agentProject.deleteMany({ where: { agentId, projectId } });
   }
 
   /**

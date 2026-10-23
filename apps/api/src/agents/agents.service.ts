@@ -1,5 +1,5 @@
 import { Injectable, Optional, Inject } from '@nestjs/common';
-import { IsString, IsArray, IsIn } from 'class-validator';
+import { IsArray, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -7,7 +7,7 @@ import { createHmac, randomBytes } from 'crypto';
 import { AGENT_ROLES, type AgentRoleNames } from '../common/enums';
 import { AgentResponseDto } from './dto/agent-response.dto';
 import { AgentMeResponseDto } from './dto/agent-me-response.dto';
-import { ProjectAgentDto, ProjectAgentListDto } from './dto/project-agent.dto';
+import { ProjectAgentListDto } from './dto/project-agent.dto';
 import { TicketResponseDto } from '../tickets/dto/ticket-response.dto';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
@@ -20,14 +20,6 @@ import { ConflictAppException } from '../common/exceptions/conflict-app.exceptio
 import { isUniqueViolation } from '../common/utils/prisma-errors';
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { UpdateAgentDto } from './dto/update-agent.dto';
-
-export class UpdateRolesDto {
-  @ApiProperty({ example: ['DEVELOPER', 'REVIEWER'] })
-  @IsArray()
-  @IsString({ each: true })
-  @IsIn([...AGENT_ROLES], { each: true })
-  roles!: string[];
-}
 
 export class UpdateCapabilitiesDto {
   @ApiProperty({ example: ['typescript', 'nestjs'] })
@@ -216,47 +208,6 @@ export class AgentsService {
   }
 
   /**
-   * S4c US-003 (D530): put an agent on a project's roster. The caller's right to
-   * do so is checked at the boundary (project ADMIN or global ADMIN); this only
-   * knows the roster rules: the project and the agent must exist, an OFFLINE
-   * agent cannot be added (it could not authenticate anyway), and the row is
-   * keyed on (agent, project) so a duplicate add is a conflict.
-   *
-   * The insert and the re-read run under the same per-project roster lock
-   * `removeFromProject` takes, so a concurrent add/remove of the same agent
-   * serializes: a removal can no longer delete the row between the insert and
-   * the re-read, which would have reported 404 for a row that was just created.
-   *
-   * Returns the roster row as the list serves it, so POST and GET agree on the
-   * shape the CLI and the web read.
-   */
-  async addToProject(projectSlug: string, agentSlug: string, addedById: string): Promise<ProjectAgentDto> {
-    const project = await this.agentRepo.findProjectBySlug(projectSlug);
-    if (!project || project.deletedAt) throw new NotFoundAppException({}, 'projects');
-
-    const agent = await this.agentRepo.findBySlugScalar(agentSlug);
-    if (!agent) throw new NotFoundAppException({}, 'agents');
-    if (agent.status === 'OFFLINE') throw new ConflictAppException({}, 'projectAgents.agentOffline');
-
-    const record = await this.membership.afterCommit(() => this.txManager.run(async () => {
-      await this.agentRepo.lockProjectAgents(project.id);
-
-      if (await this.agentRepo.hasLocalMembership(agent.id, project.id)) {
-        throw new ConflictAppException({}, 'projectAgents.alreadyAssigned');
-      }
-      await this.membership.createBinding(
-        { principal: { type: 'AGENT', id: agent.id }, roleKey: 'viewer', projectId: project.id },
-        { type: 'USER', id: addedById },
-      );
-
-      return (await this.agentRepo.findProjectRoster(project.id)).find((row) => row.slug === agent.slug) ?? null;
-    }));
-
-    if (!record) throw new NotFoundAppException({}, 'projectAgents');
-    return ProjectAgentDto.from(record);
-  }
-
-  /**
    * True when the agent is on the project's roster. A single membership lookup:
    * no roster listing and no open-ticket scan, so it is cheap to call per request.
    */
@@ -266,40 +217,6 @@ export class AgentsService {
     const agent = await this.agentRepo.findBySlugScalar(agentSlug);
     if (!agent) return false;
     return this.agentRepo.isOnProjectRoster(agent.id, project.id);
-  }
-
-  /**
-   * S4c US-003 (D530/D531): take an agent off a project's roster. Removal is
-   * refused while the agent still holds open tickets in that project, and the
-   * whole read-then-write runs under the project's roster lock so a concurrent
-   * assignment cannot slip an open ticket in between the count and the delete
-   * (US-004 takes the same lock from the assignment side).
-   */
-  async removeFromProject(projectSlug: string, agentSlug: string): Promise<void> {
-    const project = await this.agentRepo.findProjectBySlug(projectSlug);
-    if (!project || project.deletedAt) throw new NotFoundAppException({}, 'projects');
-
-    const agent = await this.agentRepo.findBySlugScalar(agentSlug);
-    if (!agent) throw new NotFoundAppException({}, 'projectAgents');
-
-    await this.membership.afterCommit(() => this.txManager.run(async () => {
-      await this.agentRepo.lockProjectAgents(project.id);
-
-      if (!(await this.agentRepo.hasLocalMembership(agent.id, project.id))) {
-        throw new NotFoundAppException({}, 'projectAgents');
-      }
-
-      const open = await this.agentRepo.countOpenProjectTickets(agent.id, project.id);
-      if (open.count > 0) {
-        throw new ConflictAppException(
-          { count: open.count, refs: open.refs.join(', ') },
-          'projectAgents.hasOpenTickets',
-        );
-      }
-
-      await this.membership.removeProjectBindings({ type: 'AGENT', id: agent.id }, project.id);
-      await this.agentRepo.removeFromProjectRoster(agent.id, project.id);
-    }));
   }
 
   async update(slug: string, updateData: UpdateAgentDto): Promise<AgentResponseDto> {
@@ -313,19 +230,6 @@ export class AgentsService {
 
     const updated = await this.agentRepo.update(slug, data);
     await this.agentAuthProvider?.invalidateByTag(`AGENT:${updated.id}`);
-    return AgentResponseDto.from(updated);
-  }
-
-  async updateRoles(agentId: string, updateData: UpdateRolesDto): Promise<AgentResponseDto> {
-    const validatedRoles = AgentsService.validateAgentRoles(updateData.roles);
-
-    await this.agentRepo.replaceRoles(agentId, validatedRoles);
-    // Legacy roles remain display-only. Keep the existing cache invalidation on this write path.
-    await this.membership.invalidatePermissions();
-
-    // Return updated agent with roles
-    const updated = await this.agentRepo.findById(agentId);
-    await this.agentAuthProvider?.invalidateByTag(`AGENT:${agentId}`);
     return AgentResponseDto.from(updated);
   }
 

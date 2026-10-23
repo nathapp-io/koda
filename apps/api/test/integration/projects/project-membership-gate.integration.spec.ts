@@ -407,7 +407,17 @@ describeIntegration('US-002 project membership gate (PG)', () => {
   }, TEST_TIMEOUT_MS);
 
   it('AC4: PATCH /api/comments/:id returns 404 for the comment author after their project membership is removed', async () => {
-    await request(server).delete(`/api/projects/team/members/${ids.author}`).set(auth('root')).expect(200);
+    // Permissions P1 US-003: a member leaves a project by deleting its bindings, not through the
+    // deleted members DELETE.
+    const team = await prisma.project.findUniqueOrThrow({ where: { slug: 'team' } });
+    const authorBindings = await prisma.roleBinding.findMany({
+      where: { principalType: 'USER', principalId: ids.author, projectId: team.id },
+      select: { id: true },
+    });
+    expect(authorBindings.length).toBeGreaterThan(0);
+    for (const binding of authorBindings) {
+      await request(server).delete(`/api/role-bindings/${binding.id}`).set(auth('root')).expect(204);
+    }
 
     const res = await send('patch', `/api/comments/${authorCommentId}`, 'author', {
       body: 'still mine?',

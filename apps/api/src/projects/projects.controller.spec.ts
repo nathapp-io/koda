@@ -68,8 +68,6 @@ describe('ProjectsController route permission metadata (US-007)', () => {
     ['update', ['project.update'], 'guard'],
     ['remove', ['project.delete'], 'guard'],
     ['getProjectAgents', ['project.agent.read'], 'guard'],
-    ['addProjectAgent', ['member.add'], 'guard'],
-    ['removeProjectAgent', ['member.remove'], 'guard'],
     ['updateProjectAgent', ['agent.update'], 'service'],
     ['getChangeImpact', ['codeintel.impact.read'], 'guard'],
   ];

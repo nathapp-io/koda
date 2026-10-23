@@ -255,9 +255,13 @@ export class MembershipService {
   }
 
   /**
-   * Removes the principal's bindings in one project — what the membership routes do when a member or
-   * an agent is removed — restricted to the roles named by `roleKeys` when given, and answers how many
-   * rows went away.
+   * Removes the principal's bindings in one project, restricted to the roles named by `roleKeys` when
+   * given, and answers how many rows went away.
+   *
+   * Permissions P1 US-003 deleted the two membership routes that called this (`ProjectMembersService`
+   * `updateRole`/`remove`) and the roster removal that called it (`AgentsService.removeFromProject`),
+   * so it keeps no production caller: a member or an agent leaves a project by deleting its bindings
+   * one at a time on `/role-bindings`. It stays for the legacy-schema story to decide.
    *
    * It never touches a legacy `ProjectMember`/`AgentProject` row or a `projectId`-null binding, and it
    * never changes `User.role`: only global `owner`/`admin` bindings are mirrored. It takes the same
@@ -266,14 +270,12 @@ export class MembershipService {
    * `txManager.run`, the delete joins that transaction; the permission cache is invalidated after it
    * commits (through `afterCommit` when the caller owns the transaction).
    *
-   * The cache is invalidated even when no binding was removed. Every caller follows this delete with
-   * the legacy row the union also reads — `ProjectMembersService.remove`/`updateRole` delete the
-   * `ProjectMember` row, `AgentsService.removeFromProject` deletes the `AgentProject` row — and a
-   * principal whose only source in the project was that legacy row (a pre-bindings member, or a
-   * rostered agent with no binding) removes zero bindings here. Skipping the invalidation would leave
-   * its warmed effective keys alive for the full cache TTL, so a removed agent kept passing the
-   * `agent.pickup` check and a removed user kept its project keys. The deferred invalidation runs
-   * after the caller's transaction — legacy row included — has committed.
+   * The cache is invalidated even when no binding was removed. A caller may follow this delete with
+   * the legacy row the union also reads, and a principal whose only source in the project was that
+   * legacy row (a pre-bindings member, or a rostered agent with no binding) removes zero bindings
+   * here. Skipping the invalidation would leave its warmed effective keys alive for the full cache
+   * TTL, so a removed user kept its project keys. The deferred invalidation runs after the caller's
+   * transaction — legacy row included — has committed.
    */
   async removeProjectBindings(
     principal: PrincipalRef,
