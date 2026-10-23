@@ -42,7 +42,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -81,21 +81,21 @@ jobs:
     # unexpanded name, so the required lint / type-check checks would never arrive.
     steps:
       - if: needs.changes.outputs.code == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - if: needs.changes.outputs.code == 'true'
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.3"
+          bun-version: "1.4.4"
 
       - if: needs.changes.outputs.code == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
 
       - if: needs.changes.outputs.code == 'true'
         name: Cache bun dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -126,18 +126,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.3"
+          bun-version: "1.4.4"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
 
       - name: Cache bun dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -158,18 +158,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.3"
+          bun-version: "1.4.4"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
 
       - name: Cache bun dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -190,14 +190,14 @@ jobs:
 
       - name: Upload gate results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: policy-gate-results
           path: apps/api/test/policy-gates/results.json
 
       - name: Upload SLO snapshot
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: slo-snapshot
           path: apps/api/test/policy-gates/slo-snapshot.json
@@ -210,18 +210,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.3"
+          bun-version: "1.4.4"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
 
       - name: Cache bun dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -264,18 +264,18 @@ jobs:
           --health-retries 10
           --tmpfs /var/lib/postgresql/data
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.3"
+          bun-version: "1.4.4"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
 
       - name: Cache bun dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -331,18 +331,18 @@ jobs:
           --health-retries 10
           --tmpfs /var/lib/postgresql/data
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.3"
+          bun-version: "1.4.4"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
 
       - name: Cache bun dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -388,18 +388,18 @@ jobs:
           --health-retries 10
           --tmpfs /var/lib/postgresql/data
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.3"
+          bun-version: "1.4.4"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
 
       - name: Cache bun dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -422,7 +422,7 @@ jobs:
         run: bunx turbo run build --filter=@nathapp/koda-web
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -445,7 +445,7 @@ jobs:
 
       - name: Upload Playwright report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: |
@@ -477,18 +477,18 @@ jobs:
           --health-retries 10
           --tmpfs /var/lib/postgresql/data
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.3"
+          bun-version: "1.4.4"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
 
       - name: Cache bun dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -547,18 +547,18 @@ jobs:
           --health-retries 10
           --tmpfs /var/lib/postgresql/data
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.3"
+          bun-version: "1.4.4"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
 
       - name: Cache bun dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}

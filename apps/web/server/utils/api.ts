@@ -100,7 +100,8 @@ export function forwardToApi<T = unknown>(
   }
 
   return $fetch
-    .raw<T>(url, {
+    // This is an external API URL; do not infer a response from Nitro's local routes.
+    .raw<unknown, string>(url, {
       method: (init.method ?? 'POST') as 'POST',
       headers,
       body: init.body as Record<string, unknown>,

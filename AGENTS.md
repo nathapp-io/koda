@@ -60,7 +60,7 @@ koda/
 
 The architecture is client-server within a monorepo:
 - `apps/api` owns persistence, auth, domain rules, workflow transitions, RAG, and integrations
-- `apps/web` is a Nuxt 3 SSR client that proxies `/api/**` to the API service
+- `apps/web` is a Nuxt 4 SSR client that proxies `/api/**` to the API service
 - `apps/cli` is a thin CLI client that calls the API through a generated OpenAPI client
 - shared TypeScript and ESLint config live in `packages/*`; `apps/api` lints with oxlint (`apps/api/.oxlintrc.json`) instead of ESLint
 
@@ -70,11 +70,11 @@ The detailed architecture reference lives in `docs/architecture.md`.
 
 | Layer | Choice |
 |:------|:-------|
-| Runtime | Node.js 22+ and Bun workspaces |
+| Runtime | Node.js 22.22.3+ and Bun 1.4.4 workspaces |
 | Language | TypeScript strict |
 | Monorepo | Turborepo |
 | API | NestJS 12 + Fastify + Prisma |
-| Web | Nuxt 3 + Shadcn-nuxt + Tailwind CSS |
+| Web | Nuxt 4 + Shadcn-nuxt + Tailwind CSS |
 | CLI | Commander.js 12 |
 | Runner | Bun-only ESM (`bun:sqlite`, `bun build --compile`), Commander.js 12 |
 | Database | Prisma on PostgreSQL 16 |

@@ -5,7 +5,7 @@
 Koda is a Bun-managed Turborepo monorepo for developer ticket tracking. The system is split into three deployable applications and two shared workspace packages:
 
 - `apps/api`: NestJS 12 + Fastify REST API and system-of-record
-- `apps/web`: Nuxt 3 SSR web app for human users
+- `apps/web`: Nuxt 4 SSR web app for human users
 - `apps/cli`: Commander.js CLI for agents and terminal workflows
 - `packages/eslint-config`: shared lint presets
 - `packages/typescript-config`: shared TypeScript presets
@@ -70,7 +70,7 @@ The timeline (`GET /projects/:slug/timeline`) is the exception: an append-only f
 
 ### Web
 
-`apps/web` is a Nuxt 3 SSR application.
+`apps/web` is a Nuxt 4 SSR application.
 
 Key responsibilities:
 - human login and registration

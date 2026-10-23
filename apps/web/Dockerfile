@@ -1,6 +1,6 @@
 # ARGS: BUN_VERSION, BUILD_APP, BUILD_APP_PACKAGE, TURBO_VERSION, TURBO_TEAM, TURBO_API, DO_NOT_TRACK
 
-ARG BUN_VERSION=1.4.2
+ARG BUN_VERSION=1.4.4
 FROM oven/bun:${BUN_VERSION}-alpine AS base
 
 # -- stripe package.json version to avoid cache invalidation on only the app package.json changes
