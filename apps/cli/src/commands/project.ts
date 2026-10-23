@@ -7,9 +7,6 @@ import {
   projectsControllerRemove,
   projectsControllerUpdate,
   projectsControllerGetProjectAgents,
-  projectsControllerAddProjectAgent,
-  projectsControllerRemoveProjectAgent,
-  type ProjectAgentDto,
   type ProjectAgentListDto,
 } from '../generated';
 import { configureApiClient } from '../utils/api-client';
@@ -38,45 +35,6 @@ export function projectCommand(program: Command): void {
             item.slug, item.name, item.status, String(item.openTicketCount),
           ]));
         }
-        if (!roster.scoping) error('Agent scoping is off on this server');
-        process.exit(0);
-      } catch (err: unknown) {
-        handleApiError(err);
-      }
-    });
-
-  project
-    .command('agent-add <agentSlug>')
-    .description('Add an agent to a project roster')
-    .option('--project <slug>', 'Project slug')
-    .option('--json', 'Output as JSON')
-    .action(async (agentSlug: string, options) => {
-      try {
-        const ctx = await withContext({ projectSlug: options.project });
-        const response = await projectsControllerAddProjectAgent({
-          path: { slug: ctx.projectSlug },
-          body: { agentSlug },
-        });
-        const added = unwrap<ProjectAgentDto>(response);
-        if (options.json) console.log(JSON.stringify(added, null, 2));
-        else console.log(`Added ${added.slug} to ${ctx.projectSlug}`);
-        process.exit(0);
-      } catch (err: unknown) {
-        handleApiError(err);
-      }
-    });
-
-  project
-    .command('agent-remove <agentSlug>')
-    .description('Remove an agent from a project roster')
-    .option('--project <slug>', 'Project slug')
-    .option('--json', 'Output as JSON')
-    .action(async (agentSlug: string, options) => {
-      try {
-        const ctx = await withContext({ projectSlug: options.project });
-        await projectsControllerRemoveProjectAgent({ path: { slug: ctx.projectSlug, agentSlug } });
-        if (options.json) console.log(JSON.stringify({ removed: agentSlug }, null, 2));
-        else console.log(`Removed ${agentSlug} from ${ctx.projectSlug}`);
         process.exit(0);
       } catch (err: unknown) {
         handleApiError(err);

@@ -7,7 +7,6 @@ import {
   agentsControllerUpdate,
   agentsControllerRemove,
   agentsControllerRotateApiKey,
-  type CreateAgentDto,
 } from '../generated';
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
@@ -124,7 +123,6 @@ const response = await agentsControllerFindAll();
     .description('Create an agent and generate its API key (admin only)')
     .requiredOption('--name <name>', 'Agent name')
     .option('--slug <slug>', 'Agent slug (required by the API)')
-    .option('--roles <roles>', 'Comma-separated list of roles (e.g. DEVELOPER,AGENT)')
     .option('--max-concurrent-tickets <n>', 'Max concurrent tickets this agent can handle', parsePositiveInt)
     .option('--json', 'Output as JSON')
     .action(async (options) => {
@@ -134,9 +132,6 @@ const response = await agentsControllerGenerateApiKey({
   body: {
             name: options.name,
             slug: options.slug,
-            roles: ((options.roles
-              ? String(options.roles).split(',').map((r: string) => r.trim()).filter(Boolean)
-              : []) as CreateAgentDto['roles']),
             maxConcurrentTickets: options.maxConcurrentTickets,
           }
   });
