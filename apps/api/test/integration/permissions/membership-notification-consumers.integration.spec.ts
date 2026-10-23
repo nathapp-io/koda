@@ -93,7 +93,7 @@ describeIntegration('notification, mention and email consumers read bindings (US
     projectId: string | null,
     roleKey: string,
   ): Promise<void> => {
-    expect(await prisma.projectMember.count({ where: { userId } })).toBe(0);
+
     expect(await projectBindingsOf(userId)).toEqual([{ projectId, role: { key: roleKey } }]);
   };
 
@@ -101,7 +101,7 @@ describeIntegration('notification, mention and email consumers read bindings (US
   const expectNoSource = async (userId: string): Promise<void> => {
     expect((await prisma.user.findUniqueOrThrow({ where: { id: userId } })).disabled).toBe(false);
     expect(await projectBindingsOf(userId)).toEqual([]);
-    expect(await prisma.projectMember.count({ where: { userId } })).toBe(0);
+
   };
 
   const draft = (userId: string, over: Partial<NotificationDraft> = {}): NotificationDraft => ({

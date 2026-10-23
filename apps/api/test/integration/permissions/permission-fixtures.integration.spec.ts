@@ -48,12 +48,18 @@ describeIntegration('permission fixture bindings (PG)', () => {
   afterAll(async () => { await moduleRef?.close(); });
   beforeEach(async () => {
     await db.roleBinding.deleteMany();
-    await db.agentRoleEntry.deleteMany();
-    await db.projectMember.deleteMany();
-    await db.agentProject.deleteMany();
     await db.agent.deleteMany();
     await db.user.deleteMany();
     await db.project.deleteMany();
+  });
+
+  it('P1m AC-7: reports exactly the two binding invariants for a baseline user', async () => {
+    const u = await user();
+    await grantBaseline(db, ref(u.id));
+    expect(await fixtureGrantReport(db, ref(u.id))).toEqual({ hasGlobalBinding: true, globalProjectRoleBindings: 0 });
+  });
+  it('P1m AC-9: missing user returns exactly the empty binding report', async () => {
+    expect(await fixtureGrantReport(db, ref('missing-user'))).toEqual({ hasGlobalBinding: false, globalProjectRoleBindings: 0 });
   });
 
   it('AC-1/2: seeds exactly the system roles with seeded values idempotently', async () => {
@@ -173,29 +179,23 @@ describeIntegration('permission fixture bindings (PG)', () => {
     expect(await db.roleBinding.count({ where: { principalId: u.id } })).toBe(2);
     expect(await revokeProjectRoles(db, ref(u.id), p.id)).toBe(0);
   });
-  it('AC-10/11/16: reports legacy state and treats missing principals as empty', async () => {
-    const u = await user(); const p = await project();
-    await db.projectMember.create({ data: { userId: u.id, projectId: p.id, role: 'VIEWER' } });
-    expect(await fixtureGrantReport(db, ref(u.id))).toMatchObject({ legacyMemberships: 1, agentRoleEntries: 0, hasGlobalBinding: false, globalProjectRoleBindings: 0 });
+  it('AC-10/11/16: reports binding state and treats missing principals as empty', async () => {
+    const u = await user();
+    expect(await fixtureGrantReport(db, ref(u.id))).toMatchObject({ hasGlobalBinding: false, globalProjectRoleBindings: 0 });
     await grantRole(db, ref(u.id), 'admin');
-    await db.projectMember.deleteMany({ where: { userId: u.id } });
-    expect((await fixtureGrantReport(db, ref(u.id))).legacyMemberships).toBe(0);
     const a = await agent();
-    await db.agentProject.create({ data: { agentId: a.id, projectId: p.id } });
-    await db.agentRoleEntry.create({ data: { agentId: a.id, role: 'DEVELOPER' } });
     await grantRole(db, { type: 'AGENT', id: a.id }, 'developer');
-    expect(await fixtureGrantReport(db, { type: 'AGENT', id: a.id })).toEqual({ legacyMemberships: 1, agentRoleEntries: 1, hasGlobalBinding: true, globalProjectRoleBindings: 1 });
-    expect(await fixtureGrantReport(db, { type: 'USER', id: 'missing' })).toEqual({ legacyMemberships: 0, agentRoleEntries: 0, hasGlobalBinding: false, globalProjectRoleBindings: 0 });
+    expect(await fixtureGrantReport(db, { type: 'AGENT', id: a.id })).toEqual({ hasGlobalBinding: true, globalProjectRoleBindings: 1 });
+    expect(await fixtureGrantReport(db, { type: 'USER', id: 'missing' })).toEqual({ hasGlobalBinding: false, globalProjectRoleBindings: 0 });
   });
   it('AC-12/13/17: sentinel aggregates failures and supports exemptions', async () => {
     const u = await user(); const a = await agent();
-    await db.agentRoleEntry.create({ data: { agentId: a.id, role: 'DEVELOPER' } });
     await expect(expectBindingOnlyFixtures(db, [ref(u.id), { type: 'AGENT', id: a.id }])).rejects.toThrow(
-      new RegExp(`${u.id}.*hasGlobalBinding.*${a.id}.*agentRoleEntries`),
+      new RegExp(`${u.id}.*hasGlobalBinding.*${a.id}.*hasGlobalBinding`),
     );
     await grantBaseline(db, ref(u.id));
     await grantBaseline(db, { type: 'AGENT', id: a.id });
-    await expect(expectBindingOnlyFixtures(db, [ref(u.id), { type: 'AGENT', id: a.id }], { agentRoleEntries: [{ type: 'AGENT', id: a.id }] })).resolves.toBeUndefined();
+    await expect(expectBindingOnlyFixtures(db, [ref(u.id), { type: 'AGENT', id: a.id }])).resolves.toBeUndefined();
     await db.roleBinding.deleteMany({ where: { principalId: u.id } });
     await expect(expectBindingOnlyFixtures(db, [ref(u.id)])).rejects.toThrow(new RegExp(`${u.id}.*hasGlobalBinding`));
     await expect(expectBindingOnlyFixtures(db, [ref(u.id)], { noBaseline: [ref(u.id)] })).resolves.toBeUndefined();

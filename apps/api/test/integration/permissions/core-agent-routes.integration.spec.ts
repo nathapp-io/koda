@@ -139,9 +139,6 @@ describeIntegration('agent route keys (US-009)', () => {
       await grantRole(db, { type: 'AGENT', id: fixture.id }, 'viewer', p1Id);
       if (legacy.legacyRole) await grantRole(db, { type: 'AGENT', id: fixture.id }, 'developer', p1Id);
     }
-    if (legacy.legacyRole) {
-      await db.agentRoleEntry.create({ data: { agentId: fixture.id, role: legacy.legacyRole } });
-    }
     await membership.invalidatePermissions();
     resetThrottle(app);
     return fixture;
@@ -353,7 +350,7 @@ describeIntegration('agent route keys (US-009)', () => {
     expectPermissionsRefusal(res);
   }, TIMEOUT);
 
-  it('AC-15: an agent with a roster row and an AgentRoleEntry DEVELOPER gets 200 from its own pickup', async () => {
+  it('AC-15: a developer-bound agent gets 200 from its own pickup', async () => {
     const res = await request(server)
       .get('/api/agents/roster-dev-agent/pickup')
       .query({ project: P1_SLUG })
@@ -364,7 +361,7 @@ describeIntegration('agent route keys (US-009)', () => {
     expect(res.body).toHaveProperty('data');
   }, TIMEOUT);
 
-  it('AC-16: an agent with an AgentRoleEntry DEVELOPER and no source in p2 is refused with 403 permissions', async () => {
+  it('AC-16: an agent with no binding in p2 is refused with 403 permissions', async () => {
     const res = await request(server)
       .get('/api/agents/dev-only-agent/pickup')
       .query({ project: P2_SLUG })
@@ -372,9 +369,6 @@ describeIntegration('agent route keys (US-009)', () => {
 
     expectPermissionsRefusal(res);
     await expect(db.project.count({ where: { id: p2Id, deletedAt: null } })).resolves.toBe(1);
-    await expect(
-      db.agentProject.count({ where: { agentId: (await db.agent.findUniqueOrThrow({ where: { slug: 'dev-only-agent' } })).id } }),
-    ).resolves.toBe(0);
   }, TIMEOUT);
 
   it('AC-17: a user whose only source in p1 is a developer binding is refused pickup with 403 agents', async () => {

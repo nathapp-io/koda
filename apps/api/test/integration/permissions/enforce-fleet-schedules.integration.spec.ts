@@ -198,8 +198,6 @@ describeIntegration('fleet schedule keys and ownership (US-005)', () => {
   // -------------------------------------------------------------------------
 
   it('AC-1: a user whose only source in p1 is a viewer binding is refused by the create with the permissions code', async () => {
-    expect(await prisma.projectMember.count({ where: { userId: ids.viewerBind } })).toBe(0);
-
     expectPermissionsRefusal(await as('viewerBind', 'post', schedulesUrl(), createBody('viewer-create')));
 
     expect(await prisma.jobSchedule.count({ where: { projectId: p1Id } })).toBe(0);
@@ -298,7 +296,6 @@ describeIntegration('fleet schedule keys and ownership (US-005)', () => {
   // -------------------------------------------------------------------------
 
   it('AC-13: a due schedule owned by a developer-binding-only user fires one job', async () => {
-    expect(await prisma.projectMember.count({ where: { userId: ids.devBind } })).toBe(0);
     const due = await scheduleRow({ createdById: ids.devBind, feature: 'us005-fires' });
 
     expect(await ticker.runOnce(NOW)).toEqual(expect.objectContaining({ dispatched: 1, disabled: 0 }));

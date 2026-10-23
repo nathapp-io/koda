@@ -53,21 +53,18 @@ describeIntegration('bindings-only permission reads (PG)', () => {
     resetThrottle(app);
   });
 
-  it('AC-1: a legacy project ADMIN row grants no project.read', async () => {
+  it('AC-1: a baseline-only user has no project.read', async () => {
     const u = await newUser();
     const p = await newProject();
     await grantBaseline(db, { type: 'USER', id: u.id });
-    await db.projectMember.create({ data: { userId: u.id, projectId: p.id, role: 'ADMIN' } });
     await membership.invalidatePermissions();
     expect(await permissions.can(principal(u.id), 'project.read', { projectId: p.id })).toEqual({ allowed: false, reason: 'not-granted' });
   });
 
-  it.each([[2, 'ticket.create'], [3, 'project.read']] as const)('AC-%i: legacy agent roles grant no %s', async (_ac, key) => {
+  it.each([[2, 'ticket.create'], [3, 'project.read']] as const)('AC-%i: a baseline-only agent has no %s', async (_ac, key) => {
     const a = await newAgent();
     const p = await newProject();
     await grantBaseline(db, { type: 'AGENT', id: a.id });
-    await db.agentProject.create({ data: { agentId: a.id, projectId: p.id } });
-    await db.agentRoleEntry.create({ data: { agentId: a.id, role: 'DEVELOPER' } });
     await membership.invalidatePermissions();
     expect((await permissions.effectiveKeys({ type: 'AGENT', id: a.id }, { projectId: p.id })).has(key)).toBe(false);
   });

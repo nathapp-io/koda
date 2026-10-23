@@ -254,7 +254,6 @@ describeIntegration('assistant tools check their key (US-004)', () => {
   // -------------------------------------------------------------------------
 
   it('AC-2: a viewer binding reads the project\'s tickets through koda_search_tickets', async () => {
-    expect(await prisma.projectMember.count({ where: { userId: ids.viewerBind } })).toBe(0);
     const { jobId } = await threadJob('user', 'viewerBind');
 
     const answer = answerOf(await callTool(jobId, 'koda_search_tickets', 'ac2', {}).expect(200));

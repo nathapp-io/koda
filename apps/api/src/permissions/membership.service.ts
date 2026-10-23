@@ -212,7 +212,7 @@ export class MembershipService {
    * because the last-Project-Admin refusal counts the project's admins and another removal there must
    * not count this one as still present (US-001). `options.lastProjectAdminOverride` is the caller's
    * `role.binding.global`, which `RoleAdminService` computes from the stored row; the guards of
-   * `removeProjectBindings`/`removeAllBindings`/`setGlobalAdmin` do not read it.
+   * `removeAllBindings`/`setGlobalAdmin` do not read it.
    *
    * An AGENT binding in a project takes that project's agent-roster lock instead (US-002), the lock
    * `TicketsService` takes before it assigns: the open-ticket refusal counts the agent's tickets, and an
@@ -251,43 +251,6 @@ export class MembershipService {
       return this.afterRemoval([current]);
     });
     await this.afterWrite(outcome);
-  }
-
-  /**
-   * Removes the principal's bindings in one project, restricted to the roles named by `roleKeys` when
-   * given, and answers how many rows went away.
-   *
-   * Permissions P1 US-003 deleted the two membership routes that called this (`ProjectMembersService`
-   * `updateRole`/`remove`) and the roster removal that called it (`AgentsService.removeFromProject`),
-   * so it keeps no production caller: a member or an agent leaves a project by deleting its bindings
-   * one at a time on `/role-bindings`. It stays for the legacy-schema story to decide.
-   *
-   * It never touches a legacy `ProjectMember`/`AgentProject` row or a `projectId`-null binding, and it
-   * never revokes tokens: only global `owner`/`admin` bindings affect the role claim. It takes the same
-   * user row lock as every other binding write of this principal, so a concurrent global
-   * `owner`/`admin` change and this removal are decided one at a time. Nested inside a caller's
-   * `txManager.run`, the delete joins that transaction; the permission cache is invalidated after it
-   * commits (through `afterCommit` when the caller owns the transaction).
-   *
-   * The cache is invalidated even when no binding was removed. A caller may follow this delete with
-   * the legacy row the union also reads, and a principal whose only source in the project was that
-   * legacy row (a pre-bindings member, or a rostered agent with no binding) removes zero bindings
-   * here. Skipping the invalidation would leave its warmed effective keys alive for the full cache
-   * TTL, so a removed user kept its project keys. The deferred invalidation runs after the caller's
-   * transaction — legacy row included — has committed.
-   */
-  async removeProjectBindings(
-    principal: PrincipalRef,
-    projectId: string,
-    roleKeys?: readonly string[],
-  ): Promise<number> {
-    const outcome = await this.txManager.run(async (): Promise<WriteOutcome<number>> => {
-      await this.lockUserPrincipal(principal);
-      const removed = await this.bindings.deleteProjectBindings(principal, projectId, roleKeys);
-      return { value: removed, changed: true, revokedUserIds: [] };
-    });
-    await this.afterWrite(outcome);
-    return outcome.value;
   }
 
   async removeAllBindings(principal: PrincipalRef): Promise<void> {

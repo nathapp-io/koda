@@ -228,26 +228,6 @@ export class PrismaRoleBindingRepository
   }
 
   /**
-   * Deletes the principal's bindings in one project and answers how many rows went away. Restricted to
-   * the roles named by `roleKeys` when given. A `projectId`-null binding is a different projectId and
-   * is never matched; a legacy `ProjectMember` row is a different table and is never touched.
-   */
-  async deleteProjectBindings(
-    principal: PrincipalRef,
-    projectId: string,
-    roleKeys?: readonly string[],
-  ): Promise<number> {
-    const result = await this.db.roleBinding.deleteMany({
-      where: {
-        ...this.principalWhere(principal),
-        projectId,
-        ...(roleKeys === undefined ? {} : { role: { key: { in: [...roleKeys] } } }),
-      },
-    });
-    return result.count;
-  }
-
-  /**
    * Takes the `owner` Role row lock (`SELECT … FOR UPDATE`) and returns its id, or null when the role
    * is not seeded. Call inside `txManager.run` only: the lock lives until the transaction ends.
    */

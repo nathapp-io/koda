@@ -214,22 +214,6 @@ export class InMemoryPermissionStore {
       deleteForPrincipal: async (principal: PrincipalRef) => {
         this.bindings = this.bindings.filter((b) => !same(b, principal));
       },
-      deleteProjectBindings: async (
-        principal: PrincipalRef,
-        projectId: string,
-        roleKeys?: readonly string[],
-      ) => {
-        const keys = roleKeys === undefined ? null : new Set(roleKeys);
-        const before = this.bindings.length;
-        this.bindings = this.bindings.filter((b) => {
-          if (!same(b, principal) || b.projectId !== projectId) return true;
-          if (keys === null) return false;
-          const role = this.roles.find((candidate) => candidate.id === b.roleId) as RoleDomain;
-          return !keys.has(role.key);
-        });
-        this.calls.push(`delete-project-bindings:${principal.type}:${principal.id}:${projectId}`);
-        return before - this.bindings.length;
-      },
       lockOwnerRole: async () => {
         this.calls.push('lock-owner');
         return this.roleByKey('owner').id;

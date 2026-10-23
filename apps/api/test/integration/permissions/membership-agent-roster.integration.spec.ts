@@ -39,9 +39,6 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
     for (const row of rows) last = await request(server).delete(`/api/role-bindings/${row.id}`).set(auth());
     return last;
   };
-  const legacy = (agent: Agent, projectId = projects.p1) => db.agentProject.create({
-    data: { agentId: agent.id, projectId, addedById: adminId },
-  });
   const bind = (agent: Agent, projectId: string | null = projects.p1, roleKey = 'viewer') => membership.createBinding(
     { principal: { type: 'AGENT', id: agent.id }, roleKey, projectId }, { type: 'USER', id: adminId },
   );
@@ -97,7 +94,7 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
       roleKey: 'viewer',
     });
     expect(await bindings(a)).toMatchObject([{ role: { key: 'viewer' }, grantedByType: 'USER', grantedById: adminId }]);
-    expect(await db.agentProject.count({ where: { agentId: a.id, projectId: projects.p1 } })).toBe(0);
+
   });
   it('AC-2: GET preserves adding caller id and name', async () => {
     const a = await agent('provenance-bot');
@@ -116,19 +113,17 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
     expect(data<{ id: string }>(second).id).toBe(data<{ id: string }>(first).id);
     expect(await bindings(a)).toMatchObject([{ role: { key: 'viewer' } }]);
   });
-  it('AC-4: adding a legacy-only roster agent creates a binding', async () => {
+  it('AC-4: adding an unbound agent creates a binding', async () => {
     const a = await agent('legacy-duplicate-bot');
-    await legacy(a);
     await add(a).expect(201);
     expect(await bindings(a)).toMatchObject([{ role: { key: 'viewer' } }]);
   });
-  it('AC-5: list merges local sources in name order but excludes global-only agents', async () => {
+  it('AC-5: list sorts local bindings in name order but excludes global-only agents', async () => {
     const a = await agent('list-bound-bot', 'AAA Bound');
     const b = await agent('list-legacy-bot', 'AAB Legacy');
     const g = await agent('list-global-bot', 'AAC Global');
     await add(a).expect(201);
     expect(await bindings(a)).toMatchObject([{ role: { key: 'viewer' } }]);
-    await legacy(b);
     await bind(g, null, 'developer');
     const res = await request(server).get('/api/projects/p1/agents').set(auth()).expect(200);
     const rows = data<{ items: { slug: string; name: string }[] }>(res).items;
@@ -147,7 +142,6 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
   });
   it('AC-7: the binding DELETE removes the local binding but keeps global grants', async () => {
     const a = await agent('remove-both-bot');
-    await legacy(a);
     await bind(a);
     const global = await bind(a, null, 'developer');
     expect((await remove(a)).status).toBe(204);
@@ -195,10 +189,6 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
   });
   it('earliest local source determines provenance, and a SYSTEM granter is not a user', async () => {
     const a = await agent('earliest-bot');
-    await legacy(a);
-    const first = new Date('2020-01-01T00:00:00.000Z');
-    await db.agentProject.update({ where: { agentId_projectId: { agentId: a.id, projectId: projects.p1 } },
-      data: { createdAt: first } });
     const binding = await membership.createBinding({ principal: { type: 'AGENT', id: a.id }, roleKey: 'viewer', projectId: projects.p1 },
       { type: 'SYSTEM', id: adminId });
     const b = await agent('system-granter-bot');
@@ -243,10 +233,9 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
     const events = await db.agentEvent.findMany({ where: { projectId: projects.p1, agentId: a.id } });
     expect(events.map((event) => event.action)).toContain('TICKET_SUGGESTED');
   });
-  it('AC-12: me lists legacy and bound projects in slug order', async () => {
+  it('AC-12: me lists only bound projects', async () => {
     const a = await agent('me-bot');
     await bind(a, projects['p-beta']);
-    await legacy(a, projects['p-alpha']);
     const res = await request(server).get('/api/agents/me').set({ Authorization: `Bearer ${a.apiKey}` }).expect(200);
     expect(data<{ projects: { slug: string }[] }>(res).projects.map(p => p.slug)).toEqual(['p-beta']);
   });

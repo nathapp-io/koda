@@ -5,7 +5,7 @@ import { PrismaClient } from '../../generated/prisma/client';
 import { lockProjectMembers } from '../../common/utils/advisory-lock';
 import { localProjectRole } from '../../permissions/membership.queries';
 import { UserDomain } from '../../auth/domain/auth.domain';
-import { ProjectMemberRecord, ProjectMemberRole } from '../members/domain/project-member.domain';
+import { ProjectMemberRecord } from '../members/domain/project-member.domain';
 import { readMemberRecord } from '../members/project-member.queries';
 
 export interface InviteUserState {
@@ -71,11 +71,6 @@ export class PrismaProjectInvitesMembersRepository {
     const record = await this.findMember(projectId, userId);
     if (!record) throw new NotFoundAppException({}, 'members');
     return record;
-  }
-
-  async createMember(projectId: string, userId: string, role: ProjectMemberRole): Promise<ProjectMemberRecord> {
-    await this.db.projectMember.create({ data: { projectId, userId, role } });
-    return this.findRequiredMember(projectId, userId);
   }
 
   /**

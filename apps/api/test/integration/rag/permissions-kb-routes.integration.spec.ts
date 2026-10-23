@@ -167,8 +167,6 @@ describeIntegration('knowledge-base route keys and row ownership (US-007)', () =
   // -------------------------------------------------------------------------
 
   it('AC-1: a user whose only source in p1 is a viewer binding is refused kb.document.add and reads the list', async () => {
-    expect(await prisma.projectMember.count({ where: { userId: ids.viewer } })).toBe(0);
-
     expectPermissionsRefusal(await as('viewer', 'post', documentsUrl(), { source: 'manual', sourceId: 'm1', content: 'x' }));
 
     await as('viewer', 'get', documentsUrl()).expect(200);

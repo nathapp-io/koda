@@ -213,7 +213,6 @@ describeIntegration('user and agent creation carry no legacy roles (US-005)', ()
     const body = data<{ agent: { id: string; slug: string }; apiKey: string }>(res);
     expect(body.agent.slug).toBe('legacy-roles-agent');
 
-    await expect(db.agentRoleEntry.count({ where: { agentId: body.agent.id } })).resolves.toBe(0);
     const capabilities = await db.agentCapabilityEntry.findMany({
       where: { agentId: body.agent.id },
       select: { capability: true },

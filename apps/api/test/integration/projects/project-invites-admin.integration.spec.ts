@@ -116,7 +116,7 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
       where: { projectId, principalType: 'USER', principalId: user.id, role: { key: 'developer' } },
     });
     expect(membership.grantedByType).toBe('USER');
-    expect(await prisma.client.projectMember.count({ where: { projectId, userId: user.id } })).toBe(0);
+
   });
 
   // ── US-004 AC-3 (already-member) ──────────────────────────────────────────

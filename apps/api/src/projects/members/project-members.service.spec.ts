@@ -47,7 +47,6 @@ describe('ProjectMembersService', () => {
     membership = {
       afterCommit: vi.fn(fn => fn()),
       createBinding: vi.fn(),
-      removeProjectBindings: vi.fn(),
     };
     roles = { assertMayGrant: vi.fn(async (): Promise<{ key: string }> => ({ key: 'viewer' })) };
     // US-006: the service no longer depends on PermissionService — `member.add` is the route's key and

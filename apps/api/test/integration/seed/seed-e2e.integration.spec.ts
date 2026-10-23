@@ -59,6 +59,7 @@ describeIntegration('e2e seed (PG)', () => {
     await seedE2e(db);
 
     expect(await db.user.count()).toBe(1);
+    expect(await db.user.count({ where: { email: ADMIN_EMAIL } })).toBe(1);
     expect(await db.roleBinding.count()).toBe(3);
     expect(await db.project.count()).toBe(1);
   });

@@ -31,7 +31,6 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     roleId: (await db.role.findUniqueOrThrow({ where: { key } })).id,
     grantedByType: 'SYSTEM', grantedById: 'test',
   } });
-  const legacyCount = () => db.projectMember.count({ where: { projectId, userId: targetId } });
   const conflict = (res: request.Response, prefix: string) => {
     expect(res.status).toBe(409);
     expect(res.body).toMatchObject({ ret: 409, message: prefix === 'members.lastAdmin' ? 'A project must keep at least one admin' : 'User is already a member of this project' });
@@ -68,7 +67,6 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     expect(added).not.toHaveProperty('role');
     expect(added.bindings).toEqual([expect.objectContaining({ roleKey: 'developer' })]);
     expect(await bindings()).toEqual([expect.objectContaining({ role: expect.objectContaining({ key: 'developer' }), grantedByType: 'USER', grantedById: adminId })]);
-    expect(await legacyCount()).toBe(0);
   });
   it('AC-2: defaults to a viewer binding', async () => {
     await post({ email: 'target@bindings.test' }).expect(201);
@@ -89,11 +87,9 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     expect(await bindings()).toHaveLength(1);
     expect(await db.emailSchedule.count({ where: { projectId, userId: targetId, kind: 'MEMBER_ADDED' } })).toBe(1);
   });
-  it('AC-5: local listing omits legacy-only members, excluding global admin', async () => {
+  it('AC-5: local listing omits unbound users, excluding global admin', async () => {
     await db.roleBinding.deleteMany({ where: { projectId, principalId: adminId } });
-    await db.projectMember.create({ data: { projectId, userId: adminId, role: 'VIEWER', joinedAt: new Date(0) } });
     await post({ email: 'target@bindings.test' }, rootToken).expect(201);
-    expect(await legacyCount()).toBe(0);
     const page = data<{ total: number; records: { userId: string }[] }>(await request(server).get(base).set(headers(rootToken)).expect(200));
     expect(page.total).toBe(1);
     expect(page.records.map(m => m.userId)).toEqual([targetId]);
@@ -111,14 +107,12 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     await request(server).delete(`/api/role-bindings/${developer.id}`).set(headers()).expect(204);
     expect((await bindings()).map(b => b.role.key).sort()).toEqual(['project-admin', 'reviewer']);
   });
-  it('AC-7: a legacy-only member holds no binding, so no role change reaches it', async () => {
-    await db.projectMember.create({ data: { projectId, userId: targetId, role: 'DEVELOPER' } });
+  it('AC-7: the retired member PATCH cannot grant a binding', async () => {
     // The retired members PATCH cannot change it …
     await request(server).patch(`${base}/${targetId}`).set(headers())
       .send({ role: 'VIEWER' }).expect(404);
     // … and the role-bindings route has nothing of this member's to change.
     expect(await bindings()).toEqual([]);
-    expect(await legacyCount()).toBe(1);
   });
   it('AC-8: the last admin binding cannot be revoked by a caller without global authority', async () => {
     // A caller holding every *project* key but not `role.binding.global` (a GLOBAL key no PROJECT role
@@ -148,7 +142,6 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     expect((await bindings(adminId)).map(b => b.role.key)).toEqual(['project-admin']);
   });
   it('AC-9: removal deletes the member\'s bindings and revokes project access', async () => {
-    await db.projectMember.create({ data: { projectId, userId: targetId, role: 'DEVELOPER' } });
     await bind('developer'); await bind('reviewer');
     for (const binding of await bindings()) {
       await request(server).delete(`/api/role-bindings/${binding.id}`).set(headers()).expect(204);
@@ -169,14 +162,12 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     expect(invite.member).not.toHaveProperty('role');
     expect(invite.member.bindings).toEqual([expect.objectContaining({ id: expect.any(String) })]);
     expect(await bindings()).toEqual([expect.objectContaining({ grantedById: adminId, role: expect.objectContaining({ key: 'developer' }) })]);
-    expect(await legacyCount()).toBe(0);
   });
   it('AC-12: existing-user invite refuses a binding-only member', async () => {
     await bind('viewer');
     conflict(await request(server).post(base.replace('/members', '/invites')).set(headers()).send({ email: 'target@bindings.test', roleKey: 'developer' }), 'invites.memberExists');
   });
   it('AC-14: a member with no binding is not a member of the project', async () => {
-    await db.projectMember.create({ data: { projectId, userId: targetId, role: 'DEVELOPER' } });
     await request(server).patch(`${base}/${targetId}`).set(headers()).send({ role: 'DEVELOPER' }).expect(404);
     expect(await bindings()).toEqual([]);
     const page = data<{ records: { userId: string }[] }>(
@@ -185,20 +176,18 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     expect(page.records.map(m => m.userId)).not.toContain(targetId);
   });
   it.each([
-    { source: 'binding-only', legacyAt: null, bindingAt: new Date('2002-01-01'), since: new Date('2002-01-01') },
-    { source: 'binding-earliest', legacyAt: new Date('2002-01-01'), bindingAt: new Date('2001-01-01'), since: new Date('2001-01-01') },
-  ])('F1: finds and mutates a $source member beyond the project listing cap', async ({ legacyAt, bindingAt, since }) => {
+    { source: 'binding-only', bindingAt: new Date('2002-01-01'), since: new Date('2002-01-01') },
+    { source: 'binding-earliest', bindingAt: new Date('2001-01-01'), since: new Date('2001-01-01') },
+  ])('F1: finds and mutates a $source member beyond the project listing cap', async ({ bindingAt, since }) => {
     const fillerIds = Array.from({ length: MEMBERSHIP_READ_CAP }, (_, i) => `${projectId}-filler-${i}`);
     const developerId = (await db.role.findUniqueOrThrow({ where: { key: 'developer' } })).id;
     const fillerAt = new Date('2000-01-01');
     await db.user.createMany({ data: fillerIds.map(id => ({ id, email: `${id}@bindings.test`, passwordHash: 'unused' })) });
     // Fill both underlying listing sources so the target is outside either capped read.
-    await db.projectMember.createMany({ data: fillerIds.map(userId => ({ projectId, userId, role: 'VIEWER', joinedAt: fillerAt })) });
     await db.roleBinding.createMany({ data: fillerIds.map(principalId => ({
       projectId, principalId, principalType: 'USER', roleId: developerId,
       grantedByType: 'SYSTEM', grantedById: 'test', createdAt: fillerAt,
     })) });
-    if (legacyAt) await db.projectMember.create({ data: { projectId, userId: targetId, role: 'DEVELOPER', joinedAt: legacyAt } });
     if (bindingAt) await db.roleBinding.create({ data: {
       projectId, principalId: targetId, principalType: 'USER', roleId: developerId,
       grantedByType: 'SYSTEM', grantedById: 'test', createdAt: bindingAt,

@@ -102,14 +102,12 @@ describeIntegration('project.read notification recipients (PG)', () => {
     expect(await mentions.mentionedUserIds(projectId, `${mention(viewer.id)} ${mention(legacyAdmin.id)} ${mention(globalAdmin.id)}`))
       .toEqual([viewer.id, globalAdmin.id]);
   });
-  it('AC-11: global member binding and legacy ProjectMember do not admit a recipient', async () => {
+  it('AC-11: a global member binding alone does not admit a recipient', async () => {
     const user = await newUser();
-    await db.projectMember.create({ data: { userId: user.id, projectId, role: 'DEVELOPER' } });
     expect(await eligibility.filter([draft(user.id)])).toEqual([]);
   });
-  it('AC-12: global member binding and legacy ProjectMember do not admit a mention', async () => {
+  it('AC-12: a global member binding alone does not admit a mention', async () => {
     const user = await newUser();
-    await db.projectMember.create({ data: { userId: user.id, projectId, role: 'DEVELOPER' } });
     expect(await mentions.mentionedUserIds(projectId, mention(user.id))).toEqual([]);
   });
 });

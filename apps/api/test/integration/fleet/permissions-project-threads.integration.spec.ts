@@ -191,8 +191,6 @@ describeIntegration('project thread keys and ownership (US-002)', () => {
   const projectThreadBody = () => ({ kind: 'PROJECT', title: 'Brainstorm', backend: { kind: 'native', model: 'm1' } });
 
   it('AC-1: a user whose only source in p1 is a viewer binding is refused the create with the permissions code', async () => {
-    expect(await prisma.projectMember.count({ where: { userId: ids.viewerBind } })).toBe(0);
-
     expectPermissionsRefusal(await as('viewerBind', 'post', threadsUrl(), projectThreadBody()));
 
     expect(await prisma.chatThread.count({ where: { projectId: p1Id } })).toBe(0);

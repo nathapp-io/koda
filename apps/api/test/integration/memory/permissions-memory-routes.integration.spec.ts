@@ -233,8 +233,6 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
   // -------------------------------------------------------------------------
 
   it('AC-1: a viewer binding is refused memory.create on POST /memory and stores no item', async () => {
-    expect(await prisma.projectMember.count({ where: { userId: ids.viewer } })).toBe(0);
-
     expectPermissionsRefusal(await postMemory('viewer', { subject: 'ac1:viewer', predicate: 'uses', object: 'x' }));
 
     expect(await rows('ac1:viewer', 'uses')).toEqual([]);

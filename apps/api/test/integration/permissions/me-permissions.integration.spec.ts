@@ -139,9 +139,6 @@ describeIntegration('GET /me/permissions (US-001)', () => {
     expect(
       await db.roleBinding.count({ where: { principalType: 'USER', principalId: ids.plain } }),
     ).toBe(1);
-    expect(
-      await db.projectMember.count({ where: { userId: ids.plain } }),
-    ).toBe(0);
 
     const res = await mePermissions('plain').expect(200);
 
@@ -191,7 +188,6 @@ describeIntegration('GET /me/permissions (US-001)', () => {
     expect(
       await db.roleBinding.count({ where: { principalType: 'AGENT', principalId: ids.agent, projectId } }),
     ).toBe(1);
-    expect(await db.agentProject.count({ where: { agentId: ids.agent } })).toBe(0);
 
     const res = await mePermissions('agent', `?project=${PROJECT_SLUG}`).expect(200);
 

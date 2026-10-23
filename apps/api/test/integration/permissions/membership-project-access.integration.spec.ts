@@ -161,12 +161,6 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
 
     // The legacy rows: a ProjectMember row for legDev (US-002 AC-5) and for listUser in p2 (AC-10),
     // plus the AgentProject row AC-14's PATCH target needs.
-    await prisma.projectMember.createMany({
-      data: [
-        { projectId: projectIds.p1, userId: ids.legDev, role: 'DEVELOPER' },
-        { projectId: projectIds.p2, userId: ids.listUser, role: 'DEVELOPER' },
-      ],
-    });
     await membership.createBinding({ principal: { type: 'AGENT', id: agents.agRoster.id }, roleKey: 'viewer', projectId: projectIds.p1 }, { type: 'USER', id: rootId });
   }, 120_000);
 
@@ -175,8 +169,6 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
   });
 
   it('AC-1: a developer binding is enough to read the project tickets', async () => {
-    expect(await prisma.projectMember.count({ where: { projectId: projectIds.p1, userId: ids.devBind } })).toBe(0);
-
     const res = await send('get', '/api/projects/p1/tickets', 'devBind');
 
     expect(res.status).toBe(200);
@@ -226,8 +218,6 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
   }, TEST_TIMEOUT_MS);
 
   it('AC-8: a projectId-null reviewer binding reaches the project', async () => {
-    expect(await prisma.projectMember.count({ where: { projectId: projectIds.p1, userId: ids.globalRev } })).toBe(0);
-
     const res = await send('get', '/api/projects/p1/tickets', 'globalRev');
 
     expect(res.status).toBe(200);
@@ -257,7 +247,7 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
     // The source is the role binding, not a project row: the baseline member binding and the custom
     // GLOBAL role are the caller's only bindings, and there is no ProjectMember row in any project.
     expect(await prisma.roleBinding.count({ where: { principalId: ids.customGlobal as string, projectId: null } })).toBe(2);
-    expect(await prisma.projectMember.count({ where: { userId: ids.customGlobal } })).toBe(0);
+
     // The access-source read the old branch used has nothing for this caller: a GLOBAL-scope binding is
     // never a source, so `findAllForUser` would have answered an empty list.
     expect(await accessibleProjectIds(prisma, { type: 'USER', id: ids.customGlobal as string })).toEqual([]);
@@ -307,7 +297,7 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
   it('US-001 AC-11: a custom PROJECT role without project.read gets 403 projects from the guard', async () => {
     // The custom role grants `ticket.read` and nothing else, so the route's own key would pass: a 403
     // answered with the projects prefix can only come from ProjectMembershipGuard, before RequiresGuard.
-    expect(await prisma.projectMember.count({ where: { projectId: projectIds.p1, userId: ids.customReader } })).toBe(0);
+
     expect(await prisma.roleBinding.count({ where: { projectId: projectIds.p1, principalId: ids.customReader } })).toBe(1);
 
     const res = await send('get', '/api/projects/p1/tickets', 'customReader');
@@ -318,7 +308,6 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
   }, TEST_TIMEOUT_MS);
 
   it('US-001 AC-12: a global admin with no source in p1 lists the members through project.read', async () => {
-    expect(await prisma.projectMember.count({ where: { projectId: projectIds.p1, userId: rootId } })).toBe(0);
     expect(await prisma.roleBinding.count({ where: { projectId: projectIds.p1, principalId: rootId } })).toBe(0);
 
     const res = await send('get', '/api/projects/p1/members', 'root');
@@ -328,8 +317,6 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
   }, TEST_TIMEOUT_MS);
 
   it('US-001 AC-13: a viewer binding lists the members of the project', async () => {
-    expect(await prisma.projectMember.count({ where: { projectId: projectIds.p1, userId: ids.viewerBind } })).toBe(0);
-
     const res = await send('get', '/api/projects/p1/members', 'viewerBind');
 
     expect(res.status).toBe(200);
@@ -385,7 +372,7 @@ describeIntegration('project lists past the membership read cap (US-002 AC-11, P
       { principal: { type: 'AGENT', id: agent.agent.id }, roleKey: 'developer', projectId: null },
       { type: 'USER', id: rootId },
     );
-    expect(await prisma.agentProject.count()).toBe(0);
+
   }, 180_000);
 
   afterAll(async () => {

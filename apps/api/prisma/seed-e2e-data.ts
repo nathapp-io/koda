@@ -32,7 +32,6 @@ async function wipe(db: PrismaClient): Promise<void> {
   await db.ticketLabel.deleteMany();
   await db.ticket.deleteMany();
   await db.label.deleteMany();
-  await db.agentRoleEntry.deleteMany();
   await db.agentCapabilityEntry.deleteMany();
   await db.webhook.deleteMany();
   // The bindings go before the principals and the projects they name, so a second run leaves no

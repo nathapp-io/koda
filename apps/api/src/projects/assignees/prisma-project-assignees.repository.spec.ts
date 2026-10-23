@@ -1,13 +1,6 @@
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../generated/prisma/client';
-import type { ITransactionManager } from '@nathapp/nestjs-data';
 import { PrismaProjectAssigneesRepository } from './prisma-project-assignees.repository';
-
-const transactionManager = {
-  run: <T>(fn: () => Promise<T>) => fn(),
-  getClient: () => ({}),
-  isInTransaction: () => false,
-} as unknown as ITransactionManager;
 
 const PROJECT_ID = 'proj-1';
 
@@ -70,7 +63,6 @@ const repositoryWith = (fixtures: Fixtures) => {
 
   return {
     repository: new PrismaProjectAssigneesRepository(
-      transactionManager,
       prisma as unknown as PrismaService<PrismaClient>,
     ),
     userFindMany,

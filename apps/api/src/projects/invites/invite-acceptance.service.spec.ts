@@ -77,10 +77,6 @@ function setup(opts: SetupOptions = {}) {
       if (opts.createFails) throw opts.createFails;
       return userDomain({ name: input.name, passwordHash: input.passwordHash });
     }),
-    createMember: vi.fn(async (_projectId: string, userId: string, role: string) => {
-      calls.push('createMember');
-      return { userId, email: 'new@x.io', name: 'New User', role, disabled: false, joinedAt: NOW };
-    }),
   };
 
   let inTransaction = false;
@@ -200,7 +196,6 @@ describe('InviteAcceptanceService.accept (S4b US-005)', () => {
       { type: 'SYSTEM', id: 'invite' },
     );
     expect(membership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'u1' });
-    expect(members.createMember).not.toHaveBeenCalled();
     expect(invites.setAcceptedBy).toHaveBeenCalledWith('i1', 'u1', NOW);
     expect(session.user).toMatchObject({ id: 'u1', email: 'new@x.io', role: 'MEMBER' });
   });

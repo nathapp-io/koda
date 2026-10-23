@@ -102,8 +102,8 @@ describeIntegration('member and invite route keys (US-008)', () => {
     return data<{ records: { userId: string | null }[] }>(res).records.map(({ userId }) => ({ userId }));
   };
 
-  const legacyMemberOf = (who: string) =>
-    db.projectMember.findUnique({ where: { projectId_userId: { projectId: p1Id, userId: userIds[who] } } });
+  const memberBindingOf = (who: string) =>
+    db.roleBinding.findFirst({ where: { projectId: p1Id, principalType: 'USER', principalId: userIds[who] } });
 
   const inviteRow = (id: string) =>
     db.projectInvite.findUniqueOrThrow({ where: { id }, select: { status: true } });
@@ -162,7 +162,6 @@ describeIntegration('member and invite route keys (US-008)', () => {
     const payload = data<{ agent: { id: string; slug: string }; apiKey: string }>(createdAgent);
     agent = { ...payload.agent, apiKey: payload.apiKey };
     // AC-13: viewer reach lets the agent reach the permissions guard, which refuses member writes.
-    await db.agentProject.create({ data: { projectId: p1Id, agentId: agent.id } });
     await grantRole(db, { type: 'AGENT', id: agent.id }, 'viewer', p1Id);
   }, BOOT_TIMEOUT);
 
@@ -182,7 +181,7 @@ describeIntegration('member and invite route keys (US-008)', () => {
 
     expectPermissionsRefusal(res);
     await expect(bindingsFor('target')).resolves.toEqual([]);
-    await expect(legacyMemberOf('target')).resolves.toBeNull();
+    await expect(memberBindingOf('target')).resolves.toBeNull();
   }, TIMEOUT);
 
   it('AC-2: a project-admin binding alone adds a member with 201', async () => {

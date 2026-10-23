@@ -83,8 +83,6 @@ describeIntegration('fleet fixtures grant through bindings (PG, US-002)', () => 
   it('AC-4: a rostered fixture agent holds its project roles as bindings and nothing else', async () => {
     const created = await seedFleetHttpAgent(app.getHttpServer(), world.tokens.root);
 
-    expect(await prisma.agentRoleEntry.count({ where: { agentId: created.id } })).toBe(0);
-
     await rosterFleetAgent(prisma, created.id, world.projectId);
 
     expect(await roleKeysIn(agent(created.id), world.projectId))

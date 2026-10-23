@@ -110,7 +110,6 @@ export const mockMembershipService = {
   listBindings: vi.fn(async () => ({ records: [], total: 0, current: 1, size: 50, hasNext: false, hasPrev: false })),
   removeBinding: vi.fn(async () => undefined),
   removeAllBindings: vi.fn(async () => undefined),
-  removeProjectBindings: vi.fn(async () => 0),
   // Permissions P1 (US-003): `AgentsService` keeps no role write of its own, so nothing here calls
   // `invalidatePermissions`; a binding write invalidates the cache itself.
   invalidatePermissions: vi.fn(async () => undefined),
