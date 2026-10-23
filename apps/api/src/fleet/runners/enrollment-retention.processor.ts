@@ -1,6 +1,7 @@
 import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { runAsSystemWriter } from '../../action-context/action-context';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { IRunnerRepository, RUNNER_REPOSITORY } from './domain/runner.domain';
 
@@ -21,8 +22,13 @@ export class EnrollmentRetentionProcessor {
     @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'enrollmentRetentionDays'>,
   ) {}
 
+  /** Permissions P2 US-004: the cron method is the background entry; the purge runs as `enrollment`. */
   @Cron('30 4 * * *')
-  async scheduledPurge(): Promise<void> {
+  scheduledPurge(): Promise<void> {
+    return runAsSystemWriter(this, () => this.purgeSpentEnrollments());
+  }
+
+  private async purgeSpentEnrollments(): Promise<void> {
     const days = this.config.enrollmentRetentionDays;
     if (days === null || days <= 0) return;
     const before = new Date(Date.now() - days * EnrollmentRetentionProcessor.DAY_MS);

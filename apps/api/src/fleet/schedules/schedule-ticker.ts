@@ -2,7 +2,7 @@ import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { runWithActor } from '../../action-context/action-context';
+import { runAsSystem, runAsSystemWriter } from '../../action-context/action-context';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import type { PrincipalRef } from '../../permissions/permissions.types';
@@ -79,12 +79,17 @@ export class ScheduleTicker implements OnModuleInit, OnModuleDestroy {
     this.timer = null;
   }
 
-  /** One timer round; null when the previous round is still running (plan D198). */
+  /**
+   * One timer round; null when the previous round is still running (plan D198).
+   *
+   * Permissions P2 US-004: the interval callback is the background entry, so the round runs inside the
+   * `schedule` component's context. `tick` itself stays unwrapped — the test hook fires it from a request.
+   */
   async runOnce(now = new Date()): Promise<TickResult | null> {
     if (this.ticking) return null;
     this.ticking = true;
     try {
-      return await this.tick(now);
+      return await runAsSystemWriter(this, () => this.tick(now));
     } finally {
       this.ticking = false;
     }
@@ -147,8 +152,13 @@ export class ScheduleTicker implements OnModuleInit, OnModuleDestroy {
     let jobId: string;
     try {
       // No transaction is open here (plan D198): a 409 from the (repoId, feature) index must not poison one.
-      // The fire runs as the owner, so the job's `requestedByType` and its activity rows name the owner's type.
-      jobId = (await runWithActor(owner, () => this.jobs.dispatch(s.createdById, s.projectId, toDispatchDto(s), { scheduleId: s.id }))).job.id;
+      // The fire runs as the scheduler on the owner's behalf (decision 7), so `actorTypeFor(owner)` still
+      // answers the owner's type and the job's `requestedByType` and activity rows name it.
+      jobId = (await runAsSystem(
+        'schedule',
+        () => this.jobs.dispatch(s.createdById, s.projectId, toDispatchDto(s), { scheduleId: s.id }),
+        { onBehalfOf: owner },
+      )).job.id;
     } catch (error) {
       return this.onDispatchError(s, error);
     }

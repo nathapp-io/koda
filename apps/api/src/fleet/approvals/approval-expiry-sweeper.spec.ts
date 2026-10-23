@@ -1,3 +1,4 @@
+import { currentContext, type ActionContext } from '../../action-context/action-context';
 import { ApprovalExpirySweeper } from './approval-expiry-sweeper';
 
 const NOW = new Date('2026-10-04T10:00:00Z');
@@ -30,6 +31,23 @@ describe('ApprovalExpirySweeper (spec §2.4)', () => {
     const b = build();
     b.closer.expire.mockRejectedValueOnce(new Error('boom'));
     expect(await b.sweeper.tick(NOW)).toEqual({ expired: 0, failed: 1 });
+  });
+  it('AC-5: the interval callback looks for expired asks as SYSTEM/approval (permissions P2 US-004)', async () => {
+    vi.useFakeTimers();
+    const b = build({ sweepEnabled: true });
+    const seen: Array<ActionContext | undefined> = [];
+    b.repo.findExpiredPending.mockImplementation(async () => {
+      seen.push(currentContext());
+      return [];
+    });
+
+    b.sweeper.onModuleInit();
+    await vi.advanceTimersByTimeAsync(15_000);
+    b.sweeper.onModuleDestroy();
+    vi.useRealTimers();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'approval' });
   });
   it('starts no timer unless sweepEnabled', () => {
     vi.useFakeTimers();

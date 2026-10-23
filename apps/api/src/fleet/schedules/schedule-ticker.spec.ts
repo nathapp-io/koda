@@ -1,5 +1,5 @@
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import { currentActor } from '../../action-context/action-context';
+import { currentActor, currentContext, type ActionContext } from '../../action-context/action-context';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { BudgetPausedException } from '../budgets/budget.exceptions';
 import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
@@ -23,20 +23,25 @@ const schedule = (over: Partial<ScheduleRecord> = {}): ScheduleRecord => ({
   createdAt: NOW, updatedAt: NOW, ...over,
 });
 
-function build(due: ScheduleRecord[] = [schedule()]) {
+function build(due: ScheduleRecord[] = [schedule()], opts: { sweepEnabled?: boolean } = {}) {
+  /** US-004: the context each background entry point ran in, recorded where it was observed. */
+  let findDueContext: ActionContext | undefined;
+  let dispatchContext: ActionContext | undefined;
   const repo = {
-    findDue: vi.fn(async () => due),
+    findDue: vi.fn(async () => {
+      findDueContext = currentContext();
+      return due;
+    }),
     claimFire: vi.fn(async () => true),
     findActiveJob: vi.fn(async (): Promise<ScheduleActiveJob | null> => null),
     coalesceIntoQueued: vi.fn(async (): Promise<string | null> => null),
     findOwnerAccess: vi.fn(async (): Promise<OwnerAccess> => OWNER_OK),
     update: vi.fn(async () => schedule()),
   };
-  /** Records the action context `dispatch` was called in: US-005 fires as the schedule's owner. */
-  let dispatchActor: ReturnType<typeof currentActor> = undefined;
+  /** Records the action context `dispatch` was called in: US-004 fires as the schedule's component, on the owner's behalf. */
   const jobs = {
     dispatch: vi.fn(async () => {
-      dispatchActor = currentActor();
+      dispatchContext = currentContext();
       return { job: { id: 'job-1' } };
     }),
   };
@@ -47,12 +52,13 @@ function build(due: ScheduleRecord[] = [schedule()]) {
   const permissions = { effectiveKeys: vi.fn(async () => DISPATCH_KEYS) };
   const ticker = new ScheduleTicker(
     repo as never, jobs as never, progress as never, activity as never, txManager as never,
-    { sweepEnabled: false }, permissions as never,
+    { sweepEnabled: opts.sweepEnabled ?? false }, permissions as never,
   );
   const actions = () => activity.record.mock.calls.map((c) => (c as unknown as [{ action: string; payload: Record<string, unknown>; actorType: string }])[0]);
   return {
     repo, jobs, progress, activity, permissions, ticker, actions,
-    actorSeenByDispatch: () => dispatchActor,
+    contextSeenByDispatch: () => dispatchContext,
+    contextSeenByFindDue: () => findDueContext,
   };
 }
 
@@ -128,22 +134,34 @@ describe('ScheduleTicker.tick', () => {
     expect(untagged.permissions.effectiveKeys).toHaveBeenCalledWith({ type: 'USER', id: 'u1' }, { projectId: 'p1' });
   });
 
-  it('dispatches inside the owner\'s action context, and keeps its own rows a system actor (US-005)', async () => {
+  it('dispatches inside the schedule component\'s action context, on the owner\'s behalf, and keeps its own rows a system actor (US-004)', async () => {
     const h = build([schedule({ createdById: 'a1', createdByType: 'AGENT' })]);
 
     expect((await h.ticker.tick(NOW)).dispatched).toBe(1);
 
-    // The fire runs as the owner, so `actorTypeFor` inside dispatch names the agent's type.
-    expect(h.actorSeenByDispatch()).toEqual({ type: 'AGENT', id: 'a1' });
+    // The fire runs as the scheduler, so `actorTypeFor` inside dispatch still names the agent's type.
+    expect(h.contextSeenByDispatch()?.actor).toEqual({ type: 'SYSTEM', id: 'schedule' });
+    expect(h.contextSeenByDispatch()?.onBehalfOf).toEqual({ type: 'AGENT', id: 'a1' });
     expect(h.jobs.dispatch).toHaveBeenCalledWith('a1', 'p1', expect.objectContaining({ feature: 'login' }), { scheduleId: 's1' });
     // The ticker's own row is never relabelled: it is a SYSTEM entry, not the current actor's.
     expect(h.actions()).toEqual([expect.objectContaining({ action: 'schedule.tick_dispatched', actorType: 'SYSTEM' })]);
   });
 
-  it('leaves no actor in context after the tick (the runWithActor extent is the dispatch)', async () => {
+  it('leaves no actor in context after the tick (tick is not the wrapped entry; the fire is the only extent)', async () => {
     const h = build();
     await h.ticker.tick(NOW);
     expect(currentActor()).toBeUndefined();
+  });
+
+  it('AC-14: does not dispatch when the owner lost dispatch access, even though the fire was claimed', async () => {
+    const h = build();
+    h.permissions.effectiveKeys.mockResolvedValue(VIEWER_KEYS);
+
+    expect((await h.ticker.tick(NOW)).disabled).toBe(1);
+
+    expect(h.repo.claimFire).toHaveBeenCalledTimes(1);
+    expect(h.jobs.dispatch).not.toHaveBeenCalled();
+    expect(h.progress.disable).toHaveBeenCalledWith('s1', 'owner_lost_access');
   });
 
   it.each<[string, OwnerAccess, ReadonlySet<string>]>([
@@ -246,5 +264,53 @@ describe('ScheduleTicker timer', () => {
     build().ticker.onModuleInit();
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+/**
+ * Permissions P2 US-004: the interval callback — the background entry — opens the `schedule` component's
+ * context, while `tick` itself stays request-reachable and unwrapped.
+ */
+describe('ScheduleTicker background context (US-004)', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('AC-1: the interval callback scans the due schedules as SYSTEM/schedule', async () => {
+    vi.useFakeTimers();
+    const h = build([schedule()], { sweepEnabled: true });
+    h.ticker.onModuleInit();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    h.ticker.onModuleDestroy();
+
+    expect(h.repo.findDue).toHaveBeenCalledTimes(1);
+    expect(h.contextSeenByFindDue()?.actor).toEqual({ type: 'SYSTEM', id: 'schedule' });
+  });
+
+  it('AC-2: tick dispatches a due schedule whose fire it claimed as SYSTEM/schedule', async () => {
+    const h = build([schedule({ createdById: 'a1', createdByType: 'AGENT' })]);
+
+    expect((await h.ticker.tick(NOW)).dispatched).toBe(1);
+
+    expect(h.repo.claimFire).toHaveBeenCalledTimes(1);
+    expect(h.repo.findActiveJob).toHaveBeenCalledTimes(1);
+    expect(h.contextSeenByDispatch()?.actor).toEqual({ type: 'SYSTEM', id: 'schedule' });
+  });
+
+  it('AC-3: that dispatch runs on behalf of the agent owner a1', async () => {
+    const h = build([schedule({ createdById: 'a1', createdByType: 'AGENT' })]);
+
+    await h.ticker.tick(NOW);
+
+    expect(h.contextSeenByDispatch()?.onBehalfOf).toEqual({ type: 'AGENT', id: 'a1' });
+  });
+
+  it('AC-15: no context survives the tick, so a caller inside no context sees no actor', async () => {
+    const h = build([schedule()], { sweepEnabled: true });
+    h.ticker.onModuleInit();
+    await h.ticker.runOnce(NOW);
+    h.ticker.onModuleDestroy();
+
+    expect(currentActor()).toBeUndefined();
+    expect(currentContext()).toBeUndefined();
   });
 });

@@ -1,6 +1,8 @@
 import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { randomUUID } from 'node:crypto';
+import { runAsSystem } from '../../action-context/action-context';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { KnowledgeRepoIndexer } from './knowledge-repo-indexer';
 import {
@@ -83,19 +85,27 @@ export class KnowledgeIndexQueue {
   /**
    * One pass at a time. Ids enqueued while a pass runs wait for it; the loop keeps a single drain alive
    * instead of starting a second one, so passes never overlap.
+   *
+   * Permissions P2 US-004: the drain is the background entry, whoever enqueued it, so it runs as the
+   * `knowledge` component and takes a correlation id of its own instead of the first enqueuer's.
    */
   private async drain(): Promise<void> {
     if (this.draining) return;
     this.draining = true;
     try {
-      while (this.waiting.size > 0) {
-        const key = this.waiting.values().next().value;
-        if (key === undefined) return;
-        this.waiting.delete(key);
-        await this.run(key);
-      }
+      await runAsSystem('knowledge', () => this.runWaiting(), { correlationId: randomUUID() });
     } finally {
       this.draining = false;
+    }
+  }
+
+  /** The waiting loop, inside the `knowledge` context; ids enqueued meanwhile join it. */
+  private async runWaiting(): Promise<void> {
+    while (this.waiting.size > 0) {
+      const key = this.waiting.values().next().value;
+      if (key === undefined) return;
+      this.waiting.delete(key);
+      await this.run(key);
     }
   }
 

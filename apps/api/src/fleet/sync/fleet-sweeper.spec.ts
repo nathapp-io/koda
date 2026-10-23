@@ -1,4 +1,5 @@
 import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
+import { currentContext, type ActionContext } from '../../action-context/action-context';
 import { FleetSweeper } from './fleet-sweeper';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 
@@ -15,6 +16,32 @@ describe('FleetSweeper scheduling', () => {
     expect(vi.getTimerCount()).toBe(1);
     on.onModuleDestroy();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('FleetSweeper background context (US-004)', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('AC-10: the interval callback scans for silent held jobs as SYSTEM/job', async () => {
+    vi.useFakeTimers();
+    const seen: Array<ActionContext | undefined> = [];
+    const repo = {
+      findSilentHeldIds: vi.fn(async () => {
+        seen.push(currentContext());
+        return [];
+      }),
+    };
+    const sweeper = new FleetSweeper(
+      repo as never, {} as never, {} as never, { run: (fn: () => unknown) => fn() } as never,
+      testFleetConfig({ sweepEnabled: true }), {} as never, {} as never, {} as never,
+    );
+
+    sweeper.onModuleInit();
+    await vi.advanceTimersByTimeAsync(30_000);
+    sweeper.onModuleDestroy();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'job' });
   });
 });
 
