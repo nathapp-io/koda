@@ -20,6 +20,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { PermissionService } from '../../../src/permissions/permission.service';
+import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -151,9 +152,14 @@ describeIntegration('role bindings API (US-006)', () => {
       },
     });
 
-  const newUser = (email: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER') =>
+  /**
+   * Permissions P1l (US-005): an admin fixture is a plain user plus the global `admin` binding —
+   * `grantRole` mirrors it into `User.role = 'ADMIN'` exactly as the binding routes do, so the legacy
+   * mirror cases below still read the promoted column without writing it by hand.
+   */
+  const newUser = (email: string) =>
     db.user.create({
-      data: { email, name: email.split('@')[0], passwordHash: 'not-a-real-hash', role },
+      data: { email, name: email.split('@')[0], passwordHash: 'not-a-real-hash' },
     });
 
   const newAgent = (slug: string) =>
@@ -192,14 +198,21 @@ describeIntegration('role bindings API (US-006)', () => {
     expect(res.body.message).toBe(sentence(expected.key, expected.code, expected.args));
   };
 
-  /** Creates a user through the admin route, then logs in: the token carries no bypass of its own. */
+  /**
+   * Creates a user through the admin route, then logs in: the token carries no bypass of its own.
+   *
+   * Permissions P1l (US-005): the route takes no role, so `'ADMIN'` means "create it, then bind the
+   * global `admin` role" — binding before the login, because the grant revokes older tokens.
+   */
   const createUserWithToken = async (email: string, role: 'MEMBER' | 'ADMIN'): Promise<string> => {
     const created = await request(server)
       .post('/api/admin/users')
       .set(auth(ownerToken))
-      .send({ email, name: email.split('@')[0], password: TEST_PASSWORD, role })
+      .send({ email, name: email.split('@')[0], password: TEST_PASSWORD })
       .expect(201);
-    expect(data<{ id: string }>(created).id).toBeTruthy();
+    const id = data<{ id: string }>(created).id;
+    expect(id).toBeTruthy();
+    if (role === 'ADMIN') await grantRole(db, { type: 'USER', id }, 'admin');
     // Login is throttled to 5/min per instance; this hook performs more logins than that.
     resetThrottle(app);
     return loginToken(server, email);
@@ -248,12 +261,13 @@ describeIntegration('role bindings API (US-006)', () => {
     await bind('USER', escalator.id, 'bind-viewer');
 
     ownerOnlyTargetId = (await newUser('owner-target@koda.test')).id;
-    adminTargetAId = (await newUser('admin-target-a@koda.test', 'ADMIN')).id;
-    adminTargetBId = (await newUser('admin-target-b@koda.test', 'ADMIN')).id;
-    adminTargetCId = (await newUser('admin-target-c@koda.test', 'ADMIN')).id;
-    await bind('USER', adminTargetAId, 'admin');
-    await bind('USER', adminTargetBId, 'admin');
-    await bind('USER', adminTargetCId, 'admin');
+    adminTargetAId = (await newUser('admin-target-a@koda.test')).id;
+    adminTargetBId = (await newUser('admin-target-b@koda.test')).id;
+    adminTargetCId = (await newUser('admin-target-c@koda.test')).id;
+    // The global `admin` binding promotes `User.role`, which AC-14 reads before and after a removal.
+    await grantRole(db, { type: 'USER', id: adminTargetAId }, 'admin');
+    await grantRole(db, { type: 'USER', id: adminTargetBId }, 'admin');
+    await grantRole(db, { type: 'USER', id: adminTargetCId }, 'admin');
     ownerBId = (await newUser('owner-b@koda.test')).id;
     ownerCId = (await newUser('owner-c@koda.test')).id;
     devTargetId = (await newUser('dev-target@koda.test')).id;

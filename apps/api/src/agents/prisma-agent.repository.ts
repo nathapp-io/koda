@@ -81,19 +81,15 @@ export class PrismaAgentRepository {
   }
 
   /**
-   * US-003: writes roles and capabilities with sequential `createMany` calls
-   * on the ambient client so a failure rolls back as part of the caller's
-   * `txManager.run` — never wraps them in a nested `$transaction([...])`,
-   * which the caller's transaction manager cannot roll back.
+   * Permissions P1l (US-005): creation writes capabilities only — an agent's roles are role bindings,
+   * so no `AgentRoleEntry` row is created any more.
+   *
+   * US-003: writes them with one `createMany` call on the ambient client so a failure rolls back as
+   * part of the caller's `txManager.run` — never wraps it in a nested `$transaction([...])`, which the
+   * caller's transaction manager cannot roll back.
    */
-  async createRolesAndCapabilities(
-    agentId: string,
-    roles: string[],
-    capabilities: string[],
-  ) {
-    await this.db.agentRoleEntry.createMany({
-      data: roles.map((role) => ({ agentId, role })),
-    });
+  async createCapabilities(agentId: string, capabilities: string[]) {
+    if (capabilities.length === 0) return;
     await this.db.agentCapabilityEntry.createMany({
       data: capabilities.map((capability) => ({ agentId, capability })),
     });

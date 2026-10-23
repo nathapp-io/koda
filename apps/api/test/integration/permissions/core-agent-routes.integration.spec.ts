@@ -86,16 +86,29 @@ describeIntegration('agent route keys (US-009)', () => {
     expect(res.body.message).toBe(AGENTS_REFUSED);
   };
 
+  /**
+   * Permissions P1l (US-005): the create route takes no role, so an account starts as a plain member.
+   * `'ADMIN'` means "create it, then bind the global `admin` role" — the binding mirrors
+   * `User.role = 'ADMIN'` and revokes the token minted before it, so the login comes last.
+   */
   const createUser = async (who: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<void> => {
     const created = await request(server)
       .post('/api/admin/users')
       .set(auth('root'))
-      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role })
+      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD })
       .expect(201);
     userIds[who] = data<{ id: string }>(created).id;
+    if (role === 'ADMIN') await bindGlobal(who, 'admin');
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
   };
+
+  /** The global binding that makes a principal a global admin (role `admin`, no project). */
+  const bindGlobal = (who: string, roleKey: string): Promise<unknown> =>
+    membership.createBinding(
+      { principal: { type: 'USER', id: userIds[who] }, roleKey, projectId: null },
+      { type: 'SYSTEM', id: 'test' },
+    );
 
   /** The binding that is the caller's only source in p1. */
   const bind = (who: string, roleKey: RoleKey): Promise<unknown> =>

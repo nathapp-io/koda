@@ -10,14 +10,16 @@ import { isUniqueViolation } from '../common/utils/prisma-errors';
 import { userAuthStateCacheKey, userTokenVersionCacheTag } from '../auth/token-version.cache';
 import { MembershipService } from '../permissions/membership.service';
 import { PrismaUsersRepository } from './prisma-users.repository';
-import { GlobalRole, UserListFilters } from './domain/user-admin.domain';
+import { UserListFilters } from './domain/user-admin.domain';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserAdminDto } from './dto/user-admin.dto';
 
-/** Who the admin routes record as the granter of a global admin binding they created. */
-const ADMIN_USERS_GRANTER = { type: 'SYSTEM', id: 'admin-users' } as const;
-
+/**
+ * Permissions P1l (US-005): creating a user grants the `member` baseline and nothing else. A global
+ * admin is a `POST /role-bindings` grant afterwards, so the create has no role to promote and no
+ * granter to record.
+ */
 @Injectable()
 export class UsersAdminService {
   constructor(
@@ -39,28 +41,22 @@ export class UsersAdminService {
       throw new ConflictAppException({}, 'users');
     }
 
-    // US-004: an absent role is the least-privileged global role, so the web can create an account and
-    // bind roles to it afterwards.
-    const role: GlobalRole = dto.role ?? 'MEMBER';
+    // Permissions P1l (US-005): the request carries no role, so every created account is the
+    // least-privileged member — roles are bound to it afterwards.
     const passwordHash = await bcrypt.hash(dto.password, 12);
     try {
       // The user row and its baseline binding are one unit (B4): a user whose binding write failed must
-      // not stay behind. `setGlobalAdmin` keeps `User.role` in step with the binding model, and the
-      // cache invalidation it defers lands only after the commit.
+      // not stay behind. The cache invalidation the nested write defers lands only after the commit.
       const user = await this.membership.afterCommit(() =>
         this.txManager.run(async () => {
           const created = await this.usersRepo.createUser({
             email,
             name: dto.name,
             passwordHash,
-            role,
+            role: 'MEMBER',
           });
-          // Permissions P1a (US-004): every user starts at the member baseline; an ADMIN also gets the
-          // global admin binding.
+          // Permissions P1a (US-004): every user starts at the member baseline, and stays there.
           await this.membership.bindBaseline({ type: 'USER', id: created.id });
-          if (role === 'ADMIN') {
-            await this.membership.setGlobalAdmin(created.id, true, ADMIN_USERS_GRANTER);
-          }
           return created;
         }),
       );
@@ -72,36 +68,32 @@ export class UsersAdminService {
   }
 
   async update(actorId: string, userId: string, patch: UpdateUserDto): Promise<UserAdminDto> {
-    const demotes = patch.role !== undefined && patch.role !== 'ADMIN';
     const disables = patch.disabled === true;
-    if (actorId === userId && (demotes || disables)) {
+    // Permissions P1l (US-005): `disabled` is the only patchable field, so a self-disable is the only
+    // self-patch the rule refuses; asking to change your own "role" changes nothing at all.
+    if (actorId === userId && disables) {
       throw new ForbiddenAppException({}, 'users.self');
     }
 
-    // `setGlobalAdmin` runs inside this transaction (B3): its cache invalidation is deferred to the
-    // `afterCommit` scope, so no request can recompute the user's permissions from the pre-commit state.
+    // The permission-cache invalidation of the nested writes is deferred to the `afterCommit` scope,
+    // so no request can recompute the user's permissions from the pre-commit state.
     const updated = await this.membership.afterCommit(() =>
       this.txManager.run(async () => {
         await this.usersRepo.lockUserAdministration();
         const target = await this.usersRepo.findById(userId);
         if (!target) throw new NotFoundAppException({}, 'users');
 
-        const removesActiveAdmin = !target.disabled && (demotes || disables) && (await this.membership.isGlobalAdmin(target.id));
+        // The last-admin guard still applies to a disable: disabling the last active global admin would
+        // leave the installation unadministrable.
+        const removesActiveAdmin = !target.disabled && disables && (await this.membership.isGlobalAdmin(target.id));
         if (removesActiveAdmin && (await this.usersRepo.countActiveAdmins()) <= 1) {
           throw new ConflictAppException({}, 'users.lastAdmin');
         }
 
         const newlyDisabled = disables && !target.disabled;
 
-        // Permissions P1a (US-004): the role column belongs to the binding model. `setGlobalAdmin`
-        // removes only a global `admin` binding (an Owner keeps `ADMIN`) and revokes the user's tokens
-        // when the role changed, so `update` no longer writes `role` and no longer bumps for it.
-        if (patch.role !== undefined) {
-          await this.membership.setGlobalAdmin(userId, patch.role === 'ADMIN', { type: 'USER', id: actorId });
-        }
-
-        // Read back through the update so the response carries the stored role — after a requested
-        // demotion of an Owner that is still `ADMIN`, not the `MEMBER` the patch asked for.
+        // Permissions P1l (US-005): `update` never grants or removes a binding. Granting the global
+        // admin is `POST /role-bindings` (roleKey `admin`, no project); demoting is its `DELETE`.
         return this.usersRepo.updateUser(userId, {
           disabled: patch.disabled,
           bumpTokenVersion: newlyDisabled,

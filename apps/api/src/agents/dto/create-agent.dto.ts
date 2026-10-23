@@ -1,11 +1,12 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, IsIn, Min, Matches } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, Min, Matches } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { AGENT_ROLES } from '../../common/enums';
 
 /**
  * US-005 — canonical CreateAgentDto. The slug must be kebab-case lowercase
- * alphanumeric: `^[a-z0-9]+(-[a-z0-9]+)*$`. Roles and capabilities are
- * optional here.
+ * alphanumeric: `^[a-z0-9]+(-[a-z0-9]+)*$`. Capabilities are optional here.
+ *
+ * Permissions P1l (US-005): an agent's roles are role bindings, not an `AgentRoleEntry` list, so the
+ * create carries no `roles` field — `POST /role-bindings` grants them afterwards.
  */
 export class CreateAgentDto {
   @ApiProperty({ description: 'Agent name' })
@@ -30,19 +31,6 @@ export class CreateAgentDto {
   @IsNumber()
   @Min(1)
   maxConcurrentTickets?: number;
-
-  @ApiProperty({
-    description: 'Agent roles (e.g. DEVELOPER, REVIEWER)',
-    example: ['DEVELOPER', 'REVIEWER'],
-    required: false,
-    isArray: true,
-    type: String,
-  })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  @IsIn([...AGENT_ROLES], { each: true })
-  roles?: string[];
 
   @ApiProperty({ description: 'Agent capabilities (e.g. typescript, nestjs)', example: ['typescript', 'nestjs'], required: false })
   @IsOptional()

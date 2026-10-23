@@ -1,8 +1,11 @@
 /**
- * US-003 — AC7: when PrismaAgentRepository.createRolesAndCapabilities rejects
- * during POST /api/agents, no agent row with the requested slug exists
- * afterwards. The unit test in agents-create.routes.spec.ts cannot verify the
- * outcome (it has no real database to roll back); this integration test does.
+ * US-003 — AC7: when PrismaAgentRepository.createCapabilities rejects during POST /api/agents, no
+ * agent row with the requested slug exists afterwards. The unit test in
+ * agents-create.routes.spec.ts cannot verify the outcome (it has no real database to roll back);
+ * this integration test does.
+ *
+ * Permissions P1l (US-005): the failure seam moved from `agentRoleEntry.createMany` to
+ * `agentCapabilityEntry.createMany`, because creation no longer writes a role row at all.
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- agents-create-rollback
  */
@@ -101,62 +104,12 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
     if (module) await module.close();
   });
 
-  /**
-   * Force the role-entry write to fail by renaming the `AgentRoleEntry`
-   * table away, so the service's `agentRoleEntry.createMany` raises a
-   * "relation does not exist" error. After the request completes the table
-   * is renamed back so the rest of the suite (and subsequent tests) is
-   * unaffected.
-   */
-  async function withAgentRoleEntryUnavailable<T>(fn: () => Promise<T>): Promise<T> {
-    await prisma.client.$executeRawUnsafe('ALTER TABLE "AgentRoleEntry" RENAME TO "AgentRoleEntry_disabled"');
-    try {
-      return await fn();
-    } finally {
-      await prisma.client.$executeRawUnsafe(
-        'ALTER TABLE "AgentRoleEntry_disabled" RENAME TO "AgentRoleEntry"',
-      );
-    }
-  }
-
-  it('AC7: a failing agentRoleEntry.createMany rolls back the agent row (real Prisma transaction)', async () => {
+  it('AC7: a failing agentCapabilityEntry.createMany rolls back the agent row (real Prisma transaction)', async () => {
     const bindingsBefore = await agentBindingIds();
 
-    await withAgentRoleEntryUnavailable(async () => {
-      const res = await request(app.getHttpServer())
-        .post('/api/agents')
-        .send({
-          name: 'Rollback Agent',
-          slug: 'rollback-agent',
-          roles: ['DEVELOPER'],
-          capabilities: ['typescript'],
-        });
-
-      // The role write must have failed (relation does not exist) and the
-      // service must surface it as an HTTP 500 — it does not swallow the
-      // createRolesAndCapabilities error.
-      expect(res.status).toBe(500);
-    });
-
-    // The agent row must have been rolled back: no Agent row with the
-    // requested slug exists. This is the AC7 outcome the unit test cannot
-    // verify without faking the rollback.
-    const remaining = await prisma.client.agent.findUnique({ where: { slug: 'rollback-agent' } });
-    expect(remaining).toBeNull();
-
-    const remainingRoleEntries = await prisma.client.agentRoleEntry.count();
-    expect(remainingRoleEntries).toBe(0);
-
-    const remainingCapabilityEntries = await prisma.client.agentCapabilityEntry.count();
-    expect(remainingCapabilityEntries).toBe(0);
-
-    // AC25: the rollback takes the new agent's baseline binding with it.
-    expect(await agentBindingIds()).toEqual(bindingsBefore);
-  });
-
-  it('AC7 boundary: a failing agentCapabilityEntry.createMany also rolls back the agent row', async () => {
-    const bindingsBefore = await agentBindingIds();
-
+    // Force the capability write to fail by renaming its table away, so the service's
+    // `agentCapabilityEntry.createMany` raises a "relation does not exist" error. The table is
+    // renamed back afterwards so the rest of the suite is unaffected.
     await prisma.client.$executeRawUnsafe(
       'ALTER TABLE "AgentCapabilityEntry" RENAME TO "AgentCapabilityEntry_disabled"',
     );
@@ -170,6 +123,8 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
           capabilities: ['typescript'],
         });
 
+      // The capability write failed and the service surfaces it as an HTTP 500 — it does not
+      // swallow the createCapabilities error.
       expect(res.status).toBe(500);
     } finally {
       await prisma.client.$executeRawUnsafe(
@@ -177,14 +132,12 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
       );
     }
 
-    const remaining = await prisma.client.agent.findUnique({ where: { slug: 'rollback-agent' } });
-    expect(remaining).toBeNull();
+    // The agent row must have been rolled back: no Agent row with the requested slug exists.
+    expect(await prisma.client.agent.findUnique({ where: { slug: 'rollback-agent' } })).toBeNull();
 
-    const remainingRoleEntries = await prisma.client.agentRoleEntry.count();
-    expect(remainingRoleEntries).toBe(0);
-
-    const remainingCapabilityEntries = await prisma.client.agentCapabilityEntry.count();
-    expect(remainingCapabilityEntries).toBe(0);
+    // AC-9: creation wrote no role row, in this attempt or before it.
+    expect(await prisma.client.agentRoleEntry.count()).toBe(0);
+    expect(await prisma.client.agentCapabilityEntry.count()).toBe(0);
 
     // AC25: the rollback takes the new agent's baseline binding with it.
     expect(await agentBindingIds()).toEqual(bindingsBefore);
@@ -208,7 +161,6 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
         .send({
           name: 'Binding Failure Agent',
           slug: 'binding-failure-agent',
-          roles: ['DEVELOPER'],
           capabilities: ['typescript'],
         });
 
@@ -225,20 +177,27 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
     expect(await agentBindingIds()).toEqual(bindingsBefore);
   });
 
-  it('AC7 smoke: a successful create after rollback leaves the agent row intact', async () => {
+  it('AC-9 and AC-10: a successful create writes the capability and no role row', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/agents')
       .send({
         name: 'Healthy Agent',
         slug: 'healthy-agent',
         roles: ['DEVELOPER'],
-        capabilities: ['typescript'],
+        capabilities: ['nax'],
       });
 
     expect(res.status).toBe(201);
     const persisted = await prisma.client.agent.findUnique({ where: { slug: 'healthy-agent' } });
     expect(persisted).not.toBeNull();
     expect(persisted?.name).toBe('Healthy Agent');
+    // US-005: creation writes capabilities only.
+    expect(await prisma.client.agentRoleEntry.count()).toBe(0);
+    const capabilities = await prisma.client.agentCapabilityEntry.findMany({
+      where: { agentId: persisted?.id as string },
+      select: { capability: true },
+    });
+    expect(capabilities.map(({ capability }) => capability)).toEqual(['nax']);
     // US-004: the successful create committed exactly one new AGENT baseline binding.
     expect(await agentBindingIds()).toHaveLength(1);
   });

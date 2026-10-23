@@ -4,7 +4,6 @@ import { ApiProperty } from '@nestjs/swagger';
 import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { createHmac, randomBytes } from 'crypto';
-import { AGENT_ROLES, type AgentRoleNames } from '../common/enums';
 import { AgentResponseDto } from './dto/agent-response.dto';
 import { AgentMeResponseDto } from './dto/agent-me-response.dto';
 import { ProjectAgentListDto } from './dto/project-agent.dto';
@@ -41,17 +40,6 @@ export class AgentsService {
     @Optional() private readonly kodaDomainWriter?: KodaDomainWriter,
     @Optional() private readonly agentAuthProvider?: AgentAuthProvider,
   ) {}
-
-  private static assertAgentRole(role: string): AgentRoleNames {
-    if (!(AGENT_ROLES as readonly string[]).includes(role)) {
-      throw new ValidationAppException({}, 'agents');
-    }
-    return role as AgentRoleNames;
-  }
-
-  private static validateAgentRoles(roles: readonly string[] | undefined): AgentRoleNames[] {
-    return roles?.map((role) => AgentsService.assertAgentRole(role)) ?? [];
-  }
 
   /**
    * Records an agent action event through the KodaDomainWriter write gateway.
@@ -104,8 +92,7 @@ export class AgentsService {
       // client stuffs into the request body (status, id, …) is dropped here.
       // maxConcurrentTickets is intentionally omitted when undefined so the
       // schema default applies.
-      const { roles, capabilities, ...scalarFields } = agentIdOrDto;
-      const validatedRoles = AgentsService.validateAgentRoles(roles);
+      const { capabilities, ...scalarFields } = agentIdOrDto;
       // CreateAgentDto requires a non-empty, pattern-checked slug (#145).
       const { slug } = scalarFields;
       const createData = {
@@ -117,12 +104,13 @@ export class AgentsService {
           : {}),
       };
 
-      // US-003: wrap the agent row, role and capability writes in a single
-      // `txManager.run` callback. A failed role/capability write rejects out of
+      // US-003: wrap the agent row and capability writes in a single
+      // `txManager.run` callback. A failed capability write rejects out of
       // the callback and the transaction manager rolls back the agent row.
       // Permissions P1a (US-004): the baseline binding is inside the same callback, so a rolled-back
       // create leaves no RoleBinding row for the agent either. `afterCommit` keeps the permission-cache
       // invalidation of that nested write until this transaction committed (B3).
+      // Permissions P1l (US-005): creation writes no `AgentRoleEntry` — an agent's roles are bindings.
       const result = await this.membership.afterCommit(() =>
         this.txManager.run(async () => {
           const agent = await this.agentRepo.create(createData).catch((error: unknown) => {
@@ -131,19 +119,14 @@ export class AgentsService {
             }
             throw error;
           });
-          await this.agentRepo.createRolesAndCapabilities(agent.id, validatedRoles, capabilities ?? []);
+          await this.agentRepo.createCapabilities(agent.id, capabilities ?? []);
           await this.membership.bindBaseline({ type: 'AGENT', id: agent.id });
           return agent;
         }),
       );
       await this.agentAuthProvider?.invalidateByTag(`AGENT:${result.id}`);
-      const agentWithRelations = {
+      const agentWithCapabilities = {
         ...result,
-        roles: validatedRoles.map((role, index) => ({
-          id: `generated-role-${index}`,
-          agentId: result.id,
-          role,
-        })),
         capabilities: (capabilities ?? []).map((capability, index) => ({
           id: `generated-capability-${index}`,
           agentId: result.id,
@@ -154,7 +137,7 @@ export class AgentsService {
       // Return raw key ONCE to client (never return the hash)
       return {
         apiKey: rawKey,
-        agent: AgentResponseDto.from(agentWithRelations),
+        agent: AgentResponseDto.from(agentWithCapabilities),
       };
     }
   }

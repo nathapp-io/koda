@@ -66,13 +66,18 @@ describeIntegration('GET /me/permissions (US-001)', () => {
   };
 
   /** Creates a user through the admin route, then logs in: the token carries no bypass of its own. */
+  /**
+   * Permissions P1l (US-005): the create route takes no role. `'ADMIN'` means "create it, then bind
+   * the global `admin` role" — the binding is the admin, and it mirrors `User.role = 'ADMIN'`.
+   */
   const createUser = async (who: string, role: 'MEMBER' | 'ADMIN'): Promise<void> => {
     const created = await request(server)
       .post('/api/admin/users')
       .set(auth('root'))
-      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role })
+      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD })
       .expect(201);
     ids[who] = data<{ id: string }>(created).id;
+    if (role === 'ADMIN') await grantRole(db, { type: 'USER', id: ids[who] as string }, 'admin');
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
   };
@@ -116,6 +121,7 @@ describeIntegration('GET /me/permissions (US-001)', () => {
     // these actors its access.
     await grantRole(db, { type: 'USER', id: ids.dev }, 'developer', projectId);
     await grantRole(db, { type: 'AGENT', id: ids.agent }, 'developer', projectId);
+    // The admin bindings above were written with the fixture helper, which does not touch the cache.
     await membership.invalidatePermissions();
     resetThrottle(app);
   }, BOOT_TIMEOUT_MS);

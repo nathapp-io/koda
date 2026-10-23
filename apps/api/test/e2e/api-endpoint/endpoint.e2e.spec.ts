@@ -114,27 +114,26 @@ describeIntegration('API Integration Tests', () => {
   let adminUserId = '';
   let memberUserId = '';
   let rosterAgentId = '';
-  /** The roles the agent API reports; the agent acts with the matching project bindings. */
-  let agentRoleNames: readonly string[] = ['DEVELOPER', 'REVIEWER'];
-  /** The projects the agent is rostered in; its project grants follow the roles it acts with. */
+  /**
+   * The project role keys the agent acts with. Permissions P1l (US-005): an agent's roles are role
+   * bindings, not an `AgentRoleEntry` list, so this is the list of keys `rosterAgentIn` grants rather
+   * than a set of legacy role names the create request asked for.
+   */
+  let agentProjectRoleKeys: readonly string[] = ['developer', 'reviewer'];
+  /** The projects the agent is rostered in; its project grants follow the keys it acts with. */
   const agentRosterProjectIds: string[] = [];
-
-  /** The system role key a legacy agent role is bound as. */
-  const ROLE_KEY_BY_AGENT_ROLE: Record<string, string> = {
-    DEVELOPER: 'developer', REVIEWER: 'reviewer', VERIFIER: 'verifier', TRIAGER: 'triager',
-  };
 
   const prismaClient = (): PrismaClient => app.get<PrismaService<PrismaClient>>(PrismaService).client;
 
   /**
    * Permissions P1 US-005: the roster reach and the roles the agent acts with are role bindings —
-   * the `viewer` of the roster plus one binding per role, in that project only.
+   * the `viewer` of the roster plus one binding per project role key, in that project only.
    */
   const rosterAgentIn = async (projectId: string): Promise<void> => {
     const principal = { type: 'AGENT' as const, id: agentId };
     await grantRole(prismaClient(), principal, 'viewer', projectId);
-    for (const role of agentRoleNames) {
-      await grantRole(prismaClient(), principal, ROLE_KEY_BY_AGENT_ROLE[role], projectId);
+    for (const roleKey of agentProjectRoleKeys) {
+      await grantRole(prismaClient(), principal, roleKey, projectId);
     }
     if (!agentRosterProjectIds.includes(projectId)) agentRosterProjectIds.push(projectId);
   };
@@ -342,7 +341,6 @@ describeIntegration('API Integration Tests', () => {
           name: 'Subrina Coder',
           slug: 'subrina-coder',
           maxConcurrentTickets: 3,
-          roles: ['DEVELOPER', 'REVIEWER'],
           capabilities: ['typescript', 'nestjs'],
         })
         .expect(201);
@@ -351,6 +349,10 @@ describeIntegration('API Integration Tests', () => {
       expect(data.agent.name).toBe('Subrina Coder');
       expect(data.agent.slug).toBe('subrina-coder');
       expect(data.apiKey).toBeTruthy();
+      // Permissions P1l (US-005): the create carries capabilities, and writes no legacy role row —
+      // the agent's project roles are bindings granted below by `rosterAgentIn`.
+      const roles = await prismaClient().agentRoleEntry.count({ where: { agentId: data.agent.id } });
+      expect(roles).toBe(0);
 
       agentApiKey = data.apiKey;
       agentSlug = data.agent.slug;
@@ -378,8 +380,9 @@ describeIntegration('API Integration Tests', () => {
 
       const data = body<{ slug: string; roles: { role: string }[]; capabilities: { capability: string }[] }>(res);
       expect(data.slug).toBe(agentSlug);
-      expect(data.roles.map((r) => r.role)).toEqual(expect.arrayContaining(['DEVELOPER', 'REVIEWER']));
       expect(data.capabilities.map((c) => c.capability)).toEqual(expect.arrayContaining(['typescript', 'nestjs']));
+      // Permissions P1l (US-005): creation wrote no role row, so the response carries no legacy role.
+      expect(data.roles).toEqual([]);
     });
 
     it('POST /api/agents/:slug/rotate-key — rotates API key', async () => {
@@ -1231,7 +1234,7 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         // Permissions P1 US-005: the fixture agent carries no role and is rostered nowhere, so it holds
         // no project grant at all.
-        .send({ name: 'Temp Agent', slug: 'temp-agent', roles: [] })
+        .send({ name: 'Temp Agent', slug: 'temp-agent' })
         .expect(201);
       deleteAgentSlug = body<{ agent: { slug: string } }>(res).agent.slug;
     });
@@ -1987,7 +1990,7 @@ describeIntegration('API Integration Tests', () => {
       .set('Authorization', `Bearer ${userAccessToken}`)
       // Permissions P1 US-005: the fixture agent carries no role; the role it needs in the project it
       // is rostered in is a binding.
-      .send({ name: 'Pickup Empty Agent', slug: 'pickup-empty-agent', roles: [] })
+      .send({ name: 'Pickup Empty Agent', slug: 'pickup-empty-agent' })
       .expect(201);
 
     const freshAgentSlug = body<{ agent: { slug: string } }>(freshAgentRes).agent.slug;
@@ -2038,7 +2041,7 @@ describeIntegration('API Integration Tests', () => {
       const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
       const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
       const agent = await prisma.client.agent.findUniqueOrThrow({ where: { slug: agentSlug } });
-      // The roster granted this agent DEVELOPER and REVIEWER; the block pins DEVELOPER, so the
+      // The roster granted this agent developer and reviewer; the block pins developer, so the
       // reviewer binding goes (the viewer and developer bindings keep the open-ticket guard quiet).
       const reviewer = await prisma.client.roleBinding.findFirst({
         where: { principalType: 'AGENT', principalId: agent.id, projectId: project.id, role: { key: 'reviewer' } },
@@ -2058,8 +2061,8 @@ describeIntegration('API Integration Tests', () => {
           .expect(201);
       }
       // Every later roster grant in this file is written from this list, so the agent keeps the
-      // DEVELOPER key set the two ACs were written for.
-      agentRoleNames = ['DEVELOPER'];
+      // developer key set the two ACs were written for.
+      agentProjectRoleKeys = ['developer'];
 
       // Create a ticket that the agent will try to soft-delete (AC-6)
       const res = await request(httpServer)
@@ -2886,7 +2889,7 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         // Permissions P1 US-005: the fixture agent carries no role; the binding written below is its
         // `viewer` grant.
-        .send({ name: 'Roster Target', slug: 'roster-target', maxConcurrentTickets: 1, roles: [] })
+        .send({ name: 'Roster Target', slug: 'roster-target', maxConcurrentTickets: 1 })
         .expect(201);
       const created = body<{ agent: { id: string; slug: string }; apiKey: string }>(createRes);
       rosterAgentSlug = created.agent.slug;
@@ -2931,7 +2934,7 @@ describeIntegration('API Integration Tests', () => {
       const candidate = await request(httpServer)
         .post('/api/agents')
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .send({ name: 'Developer Blocked Target', slug: 'developer-blocked-target', roles: [] })
+        .send({ name: 'Developer Blocked Target', slug: 'developer-blocked-target' })
         .expect(201);
       const candidateAgent = body<{ agent: { slug: string; id: string } }>(candidate).agent;
 

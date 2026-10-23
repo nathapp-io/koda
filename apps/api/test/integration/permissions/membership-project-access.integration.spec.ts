@@ -87,7 +87,7 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
   const createAgent = async (name: string, slug: string): Promise<void> => {
     resetThrottle(app);
     const created = await request(server).post('/api/agents').set(auth('root'))
-      .send({ name, slug, roles: ['DEVELOPER'] })
+      .send({ name, slug })
       .expect(201);
     const payload = data<{ apiKey: string; agent: { id: string; slug: string } }>(created);
     agents[name] = { id: payload.agent.id, slug: payload.agent.slug, apiKey: payload.apiKey };
@@ -376,7 +376,7 @@ describeIntegration('project lists past the membership read cap (US-002 AC-11, P
     });
 
     const created = await request(server).post('/api/agents').set({ Authorization: `Bearer ${accessToken}` })
-      .send({ name: 'Cap Agent', slug: 'cap-agent', roles: ['DEVELOPER'] }).expect(201);
+      .send({ name: 'Cap Agent', slug: 'cap-agent' }).expect(201);
     const agent = data<{ apiKey: string; agent: { id: string } }>(created);
     agentKey = agent.apiKey;
     // The only source: a projectId-null PROJECT binding, which applies in every project.

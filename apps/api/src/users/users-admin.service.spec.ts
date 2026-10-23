@@ -48,7 +48,7 @@ describe('UsersAdminService', () => {
     it('hashes the password and never returns it', async () => {
       // A record carrying an extra passwordHash proves UserAdminDto.from drops it.
       repo.createUser.mockImplementation(async (d: { passwordHash: string }) => ({ ...user(), passwordHash: d.passwordHash }));
-      const dto = await service.create({ email: 'n@k.t', name: 'N', password: 'Admin1234!Aa', role: 'MEMBER' });
+      const dto = await service.create({ email: 'n@k.t', name: 'N', password: 'Admin1234!Aa' });
       const written = repo.createUser.mock.calls[0][0];
       expect(written.passwordHash).not.toBe('Admin1234!Aa');
       expect(dto).not.toHaveProperty('passwordHash');
@@ -58,14 +58,14 @@ describe('UsersAdminService', () => {
       repo.createUser.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('dup', {
         code: 'P2002', clientVersion: 'test', meta: { target: ['email'] },
       }));
-      await expect(service.create({ email: 'd@k.t', name: 'D', password: 'Admin1234!Aa', role: 'MEMBER' }))
+      await expect(service.create({ email: 'd@k.t', name: 'D', password: 'Admin1234!Aa' }))
         .rejects.toBeInstanceOf(ConflictAppException);
     });
 
     it('normalises the email to lower case before writing', async () => {
       repo.createUser.mockImplementation(async (d: { email: string }) => ({ ...user(), email: d.email }));
 
-      const created = await service.create({ email: '  Mixed@K.T ', name: 'M', password: 'Admin1234!Aa', role: 'MEMBER' });
+      const created = await service.create({ email: '  Mixed@K.T ', name: 'M', password: 'Admin1234!Aa' });
 
       expect(repo.findByEmail).toHaveBeenCalledWith('mixed@k.t');
       expect(repo.createUser).toHaveBeenCalledWith(expect.objectContaining({ email: 'mixed@k.t' }));
@@ -75,34 +75,32 @@ describe('UsersAdminService', () => {
     it('rejects a case-variant duplicate before the unique index is reached', async () => {
       repo.findByEmail.mockResolvedValue({ id: 'existing' });
 
-      await expect(service.create({ email: 'Dup@K.T', name: 'D', password: 'Admin1234!Aa', role: 'MEMBER' }))
+      await expect(service.create({ email: 'Dup@K.T', name: 'D', password: 'Admin1234!Aa' }))
         .rejects.toBeInstanceOf(ConflictAppException);
 
       expect(repo.createUser).not.toHaveBeenCalled();
     });
 
-    it('binds the new member to the baseline and grants no admin binding', async () => {
-      repo.createUser.mockResolvedValue(user({ id: 'new-member' }));
+    /**
+     * US-005: the request has no role any more, so every created account is the least-privileged
+     * member — the row says MEMBER and the only binding is the baseline. A global admin is a
+     * `POST /role-bindings` grant afterwards, so `create` never promotes.
+     */
+    it('AC-1 and AC-2: writes MEMBER, binds the member baseline and grants no admin binding', async () => {
+      repo.createUser.mockResolvedValue(user({ id: 'new-member', role: 'MEMBER' }));
 
-      await service.create({ email: 'm@k.t', name: 'M', password: 'Admin1234!Aa', role: 'MEMBER' });
+      const created = await service.create({ email: 'm@k.t', name: 'M', password: 'Admin1234!Aa' });
 
+      expect(repo.createUser).toHaveBeenCalledWith(expect.objectContaining({ role: 'MEMBER' }));
       expect(membership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'new-member' });
       expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
-    });
-
-    it('grants a global admin binding through setGlobalAdmin when the DTO asks for ADMIN', async () => {
-      repo.createUser.mockResolvedValue(user({ id: 'new-admin', role: 'ADMIN' }));
-
-      await service.create({ email: 'a@k.t', name: 'A', password: 'Admin1234!Aa', role: 'ADMIN' });
-
-      expect(membership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'new-admin' });
-      expect(membership.setGlobalAdmin).toHaveBeenCalledWith('new-admin', true, { type: 'SYSTEM', id: 'admin-users' });
+      expect(created.role).toBe('MEMBER');
     });
 
     it('B4: runs the user row and its bindings in one commit-aware transaction', async () => {
       repo.createUser.mockResolvedValue(user({ id: 'new-member' }));
 
-      await service.create({ email: 'm@k.t', name: 'M', password: 'Admin1234!Aa', role: 'MEMBER' });
+      await service.create({ email: 'm@k.t', name: 'M', password: 'Admin1234!Aa' });
 
       // The binding write is nested inside the create transaction; only the outer scope may invalidate
       // the permission cache, and only once that transaction committed.
@@ -114,33 +112,24 @@ describe('UsersAdminService', () => {
       membership.bindBaseline.mockRejectedValueOnce(new NotFoundAppException({}, 'permissions.roleNotFound'));
 
       await expect(
-        service.create({ email: 'm@k.t', name: 'M', password: 'Admin1234!Aa', role: 'MEMBER' }),
+        service.create({ email: 'm@k.t', name: 'M', password: 'Admin1234!Aa' }),
       ).rejects.toBeInstanceOf(NotFoundAppException);
 
       expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
     });
-
-    /**
-     * US-004: the web creates a user and then binds roles, so a create without a role must not be a
-     * validation error. An absent role is the least-privileged global role, `MEMBER`.
-     */
-    it('AC-10: an absent role writes MEMBER and grants no admin binding', async () => {
-      repo.createUser.mockResolvedValue(user({ id: 'new-member', role: 'MEMBER' }));
-
-      const created = await service.create({ email: 'm@k.t', name: 'M', password: 'Admin1234!Aa' });
-
-      expect(repo.createUser).toHaveBeenCalledWith(expect.objectContaining({ role: 'MEMBER' }));
-      expect(membership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'new-member' });
-      expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
-      expect(created.role).toBe('MEMBER');
-    });
   });
 
   describe('update', () => {
-    it('refuses to demote or disable yourself', async () => {
+    /**
+     * US-005: `disabled` is the only patchable field, so a self-disable is the only self-patch the
+     * rule refuses. A patch that asks for a role changes nothing, so it is not a refusal.
+     */
+    it('refuses a self-disable and accepts every other self-patch', async () => {
       await expect(service.update('u1', 'u1', { disabled: true })).rejects.toBeInstanceOf(ForbiddenAppException);
-      await expect(service.update('u1', 'u1', { role: 'MEMBER' })).rejects.toBeInstanceOf(ForbiddenAppException);
       expect(repo.updateUser).not.toHaveBeenCalled();
+
+      await expect(service.update('u1', 'u1', { disabled: false })).resolves.toBeDefined();
+      expect(repo.updateUser).toHaveBeenCalledWith('u1', { disabled: false, bumpTokenVersion: false });
     });
 
     it('404s an unknown user', async () => {
@@ -148,12 +137,12 @@ describe('UsersAdminService', () => {
       await expect(service.update('u1', 'nope', { disabled: true })).rejects.toBeInstanceOf(NotFoundAppException);
     });
 
-    it('refuses to remove the last active admin, under the lock', async () => {
+    it('refuses to disable the last active admin, under the lock', async () => {
       stored = user({ role: 'ADMIN' });
       membership.isGlobalAdmin.mockResolvedValue(true);
       repo.countActiveAdmins.mockResolvedValue(1);
 
-      await expect(service.update('u1', 'u2', { role: 'MEMBER' })).rejects.toBeInstanceOf(ConflictAppException);
+      await expect(service.update('u1', 'u2', { disabled: true })).rejects.toBeInstanceOf(ConflictAppException);
       expect(repo.lockUserAdministration).toHaveBeenCalled();
       expect(repo.lockUserAdministration.mock.invocationCallOrder[0]).toBeLessThan(repo.countActiveAdmins.mock.invocationCallOrder[0]);
       expect(repo.updateUser).not.toHaveBeenCalled();
@@ -175,49 +164,30 @@ describe('UsersAdminService', () => {
       expect(cache.invalidate).toHaveBeenCalledWith(['user-auth-state', 'u2']);
     });
 
-    it('grants the admin binding through setGlobalAdmin and leaves the role to it', async () => {
-      stored = user({ role: 'MEMBER' });
-
-      const updated = await service.update('u1', 'u2', { role: 'ADMIN' });
-
-      expect(membership.setGlobalAdmin).toHaveBeenCalledWith('u2', true, { type: 'USER', id: 'u1' });
-      // The role column belongs to setGlobalAdmin's mirror: `update` must not write it itself.
-      expect(repo.updateUser).toHaveBeenCalledWith('u2', { disabled: undefined, bumpTokenVersion: false });
-      expect(updated.role).toBe('MEMBER');
-    });
-
-    it('removes the admin binding through setGlobalAdmin on a demotion', async () => {
-      stored = user({ role: 'ADMIN' });
-      membership.isGlobalAdmin.mockResolvedValue(true);
-      repo.countActiveAdmins.mockResolvedValue(2);
-
-      await service.update('u1', 'u2', { role: 'MEMBER' });
-
-      expect(membership.setGlobalAdmin).toHaveBeenCalledWith('u2', false, { type: 'USER', id: 'u1' });
-      expect(repo.updateUser).toHaveBeenCalledWith('u2', { disabled: undefined, bumpTokenVersion: false });
-    });
-
-    it('returns the stored role after a requested demotion of an Owner', async () => {
-      // setGlobalAdmin refuses to touch an owner's binding, so `User.role` stays ADMIN.
-      stored = user({ role: 'ADMIN' });
-      membership.isGlobalAdmin.mockResolvedValue(true);
-      repo.countActiveAdmins.mockResolvedValue(2);
-
-      const updated = await service.update('u1', 'u2', { role: 'MEMBER' });
-
-      expect(updated.role).toBe('ADMIN');
-    });
-
-    it('bumps tokenVersion on re-enable, not on a role change', async () => {
-      stored = user({ role: 'ADMIN' });
-      membership.isGlobalAdmin.mockResolvedValue(true);
-      repo.countActiveAdmins.mockResolvedValue(2);
-      await service.update('u1', 'u2', { role: 'MEMBER' });
-      expect(repo.updateUser).toHaveBeenLastCalledWith('u2', { disabled: undefined, bumpTokenVersion: false });
-
+    it('re-enables a disabled user without bumping tokenVersion again', async () => {
       stored = user({ disabled: true });
+
       await service.update('u1', 'u2', { disabled: false });
-      expect(repo.updateUser).toHaveBeenLastCalledWith('u2', { disabled: false, bumpTokenVersion: false });
+
+      expect(repo.updateUser).toHaveBeenCalledWith('u2', { disabled: false, bumpTokenVersion: false });
+      expect(membership.isGlobalAdmin).not.toHaveBeenCalled();
+      expect(repo.countActiveAdmins).not.toHaveBeenCalled();
+    });
+
+    /**
+     * US-005: `update` never calls `setGlobalAdmin`, so no patch can promote or demote. The row it
+     * returns is what it read back — a legacy `role: 'ADMIN'` on the row is not a promotion.
+     */
+    it('never touches a binding, whatever the stored row says', async () => {
+      stored = user({ role: 'ADMIN' });
+      membership.isGlobalAdmin.mockResolvedValue(true);
+      repo.countActiveAdmins.mockResolvedValue(2);
+
+      const updated = await service.update('u1', 'u2', { disabled: false });
+
+      expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
+      expect(repo.updateUser).toHaveBeenCalledWith('u2', { disabled: false, bumpTokenVersion: false });
+      expect(updated.role).toBe('ADMIN');
     });
 
     it('does not count admins when isGlobalAdmin is false, even for legacy ADMIN', async () => {

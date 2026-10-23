@@ -169,7 +169,7 @@ describeIntegration('US-005 project skill enablement routes (PG)', () => {
     const agentRes = await request(server)
       .post('/api/agents')
       .set(auth(tokens.root))
-      .send({ name: 'Skills Agent', slug: 'skills-agent', roles: [], capabilities: ['typescript'] })
+      .send({ name: 'Skills Agent', slug: 'skills-agent', capabilities: ['typescript'] })
       .expect(201);
     tokens.agent = data<{ apiKey: string }>(agentRes).apiKey;
     const agent = await prisma.agent.findUniqueOrThrow({ where: { slug: 'skills-agent' } });

@@ -106,7 +106,7 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
     }
 
     const agent = await request(server).post('/api/agents').set(auth('root'))
-      .send({ name: 'Live Bot', slug: 'live-bot', roles: [] }).expect(201);
+      .send({ name: 'Live Bot', slug: 'live-bot' }).expect(201);
     tokens.agent = data<{ apiKey: string }>(agent).apiKey;
     ids.agent = (await prisma.agent.findUniqueOrThrow({ where: { slug: 'live-bot' } })).id;
     await grantBaseline(prisma, { type: 'AGENT', id: ids.agent });

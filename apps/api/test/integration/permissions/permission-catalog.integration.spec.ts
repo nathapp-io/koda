@@ -78,11 +78,12 @@ describeIntegration('permission catalog and expanded role keys (US-002)', () => 
   const roles = (token: string) => request(server).get('/api/roles').set(auth(token));
 
   /** Creates a user through the admin route, then logs in: the token carries no bypass of its own. */
-  const createUser = async (email: string, role: 'MEMBER' | 'ADMIN'): Promise<string> => {
+  /** Permissions P1l (US-005): the create route takes no role, so the account is a plain member. */
+  const createUser = async (email: string): Promise<string> => {
     const created = await request(server)
       .post('/api/admin/users')
       .set(auth(ownerToken))
-      .send({ email, name: email.split('@')[0], password: TEST_PASSWORD, role })
+      .send({ email, name: email.split('@')[0], password: TEST_PASSWORD })
       .expect(201);
     expect(data<{ id: string }>(created).id).toBeTruthy();
     // Login is throttled to 5/min per instance; this hook performs more logins than that.
@@ -102,7 +103,7 @@ describeIntegration('permission catalog and expanded role keys (US-002)', () => 
       .expect(201);
     ownerToken = data<{ accessToken: string }>(registered).accessToken;
 
-    memberToken = await createUser(MEMBER_EMAIL, 'MEMBER');
+    memberToken = await createUser(MEMBER_EMAIL);
     memberId = (await db.user.findUniqueOrThrow({ where: { email: MEMBER_EMAIL } })).id;
   }, BOOT_TIMEOUT_MS);
 

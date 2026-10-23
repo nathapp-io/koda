@@ -68,7 +68,7 @@ describeIntegration('VCS permission keys over HTTP (binding-only principals)', (
     }
     for (const [who, roleKey] of [['admin-agent', 'project-admin'], ['developer-agent', 'developer']] as const) {
       const response = await request(server).post('/api/agents').set(auth('root'))
-        .send({ name: who, slug: who, roles: [] }).expect(201);
+        .send({ name: who, slug: who }).expect(201);
       tokens[who] = data<{ apiKey: string }>(response).apiKey;
       const agent = await prisma.agent.findUniqueOrThrow({ where: { slug: who } });
       await prisma.roleBinding.deleteMany({ where: { principalType: 'AGENT', principalId: agent.id } });

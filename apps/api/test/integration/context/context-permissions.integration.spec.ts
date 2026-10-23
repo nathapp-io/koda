@@ -85,7 +85,7 @@ describeIntegration('US-003 context route permissions', () => {
     );
 
     const agent = await request(server).post('/api/agents').set(auth('root'))
-      .send({ name: 'Context Developer Agent', slug: 'context-developer-agent', roles: [] }).expect(201);
+      .send({ name: 'Context Developer Agent', slug: 'context-developer-agent' }).expect(201);
     agentKey = data<{ apiKey: string }>(agent).apiKey;
     agentId = (await db.agent.findUniqueOrThrow({
       where: { slug: 'context-developer-agent' }, select: { id: true },

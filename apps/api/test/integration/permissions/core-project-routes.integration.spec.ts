@@ -75,14 +75,19 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
     expect(res.body.message).toBe(PERMISSIONS_REFUSED);
   };
 
+  /**
+   * Permissions P1l (US-005): the create route takes no role, so an account starts as a plain member.
+   * `'ADMIN'` means "create it, then bind the global `admin` role" — the binding mirrors
+   * `User.role = 'ADMIN'` and revokes the token minted before it, so the login comes last.
+   */
   const createUser = async (who: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<void> => {
     const created = await asRoot('post', '/api/admin/users', {
       email: `${who}@koda.test`,
       name: who,
       password: TEST_PASSWORD,
-      role,
     }).expect(201);
     userIds[who] = data<{ id: string }>(created).id;
+    if (role === 'ADMIN') await bindGlobal(who, 'admin');
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
   };
@@ -103,7 +108,7 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
 
   /** An agent created by the Owner; created OFFLINE-free and not yet on any roster. */
   const createAgent = async (slug: string): Promise<Agent> => {
-    const created = await asRoot('post', '/api/agents', { name: slug, slug, roles: ['DEVELOPER'] }).expect(201);
+    const created = await asRoot('post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ agent: { id: string; slug: string }; apiKey: string }>(created);
     agents[slug] = { ...body.agent, apiKey: body.apiKey };
     return agents[slug] as Agent;

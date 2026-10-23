@@ -74,7 +74,7 @@ describeIntegration('code-intel project-role gate (Slice 4)', () => {
       { type: 'SYSTEM', id: 'integration-test' },
     );
     const agent = await request(server).post('/api/agents').set(auth('root'))
-      .send({ name: 'Intel Agent', slug: 'intel-agent', roles: [] }).expect(201);
+      .send({ name: 'Intel Agent', slug: 'intel-agent' }).expect(201);
     tokens.agent = data<{ apiKey: string }>(agent).apiKey;
 
     const intelAgent = await db.agent.findUniqueOrThrow({ where: { slug: 'intel-agent' } });

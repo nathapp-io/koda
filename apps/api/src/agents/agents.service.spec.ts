@@ -70,7 +70,7 @@ describe('AgentsService', () => {
     updateApiKeyHash: vi.fn(),
     update: vi.fn(),
     deleteBySlug: vi.fn(),
-    createRolesAndCapabilities: vi.fn(),
+    createCapabilities: vi.fn(),
     replaceCapabilities: vi.fn(),
     findProjectBySlug: vi.fn(),
     findVerifiedUnassignedTickets: vi.fn(),
@@ -133,7 +133,7 @@ describe('AgentsService', () => {
     agentRepo = module.get(PrismaAgentRepository);
     kodaDomainWriter = module.get(KodaDomainWriter);
 
-    mockAgentRepo.createRolesAndCapabilities.mockResolvedValue(undefined);
+    mockAgentRepo.createCapabilities.mockResolvedValue(undefined);
     mockMembership.bindBaseline.mockResolvedValue(undefined);
     mockMembership.removeAllBindings.mockResolvedValue(undefined);
 
@@ -161,7 +161,6 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         });
 
         expect(result).toHaveProperty('apiKey');
@@ -176,7 +175,6 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         });
 
         expect(agentRepo.create).toHaveBeenCalled();
@@ -192,7 +190,6 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         });
 
         expect(result).toHaveProperty('apiKey');
@@ -206,7 +203,6 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         });
 
         const createCall = (agentRepo.create as Mock).mock.calls[0][0];
@@ -222,7 +218,6 @@ describe('AgentsService', () => {
         await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         });
 
         expect(agentRepo.create).toHaveBeenCalled();
@@ -237,7 +232,6 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         });
 
         const expectedHash = createHmac('sha256', 'test-secret').update(result.apiKey).digest('hex');
@@ -265,18 +259,20 @@ describe('AgentsService', () => {
         await expect(serviceWithoutSecret.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         })).rejects.toThrow(ValidationAppException);
       });
 
-      it('should reject invalid roles before creating the agent', async () => {
-        await expect(service.generateApiKey({
-          name: 'Test Agent',
-          slug: 'test-agent',
-          roles: ['DEVLOPER'],
-        })).rejects.toThrow(ValidationAppException);
+      it('US-005: never writes an AgentRoleEntry, even when the body carries a legacy roles array', async () => {
+        mockAgentRepo.create.mockResolvedValue(mockAgent);
 
-        expect(agentRepo.create).not.toHaveBeenCalled();
+        const body = { name: 'Test Agent', slug: 'test-agent', capabilities: ['nax'] };
+        // A legacy client still sends `roles`; the whitelist pipe drops it before the service sees it.
+        Object.assign(body, { roles: ['DEVELOPER'] });
+
+        await service.generateApiKey(body);
+
+        expect(mockAgentRepo.createCapabilities).toHaveBeenCalledWith(mockAgent.id, ['nax']);
+        expect(mockAgentRepo).not.toHaveProperty('createRolesAndCapabilities');
       });
 
       it('should return created agent in response', async () => {
@@ -285,10 +281,9 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         });
 
-        // DTO strips apiKeyHash and formats roles/capabilities
+        // DTO strips apiKeyHash and formats capabilities
         expect(result.agent.id).toBe(mockAgent.id);
         expect(result.agent.name).toBe(mockAgent.name);
         expect(result.agent.slug).toBe(mockAgent.slug);
@@ -314,7 +309,7 @@ describe('AgentsService', () => {
         });
 
         try {
-          await service.generateApiKey({ name: 'Test Agent', slug: 'test-agent', roles: ['DEVELOPER'] });
+          await service.generateApiKey({ name: 'Test Agent', slug: 'test-agent' });
         } finally {
           mockTxManager.run.mockImplementation((fn: () => Promise<unknown>) => fn());
         }
@@ -1096,13 +1091,11 @@ describe('AgentsService', () => {
       const result1 = await service.generateApiKey({
         name: 'Agent 1',
         slug: 'agent-1',
-        roles: ['DEVELOPER'],
       });
 
       const result2 = await service.generateApiKey({
         name: 'Agent 2',
         slug: 'agent-2',
-        roles: ['DEVELOPER'],
       });
 
       // Raw keys should be different

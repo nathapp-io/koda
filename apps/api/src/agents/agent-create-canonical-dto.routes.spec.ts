@@ -7,6 +7,9 @@ import type { Mock } from 'vitest';
  * Boots a real Fastify HTTP server with the production validation pipe settings
  * (`useAppGlobalPipes`: `forbidUnknownValues: false, stopAtFirstError: true, whitelist: true`) and
  * the real AgentsService over a stubbed repository. No database, no network.
+ *
+ * Permissions P1l (US-005): the create writes capabilities only, so the repository stub exposes
+ * `createCapabilities`, and a body that still carries `roles` exercises the whitelist pipe.
  */
 import { CanActivate, ExecutionContext, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -25,7 +28,7 @@ import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 interface AgentRepositoryStub {
   create: Mock;
-  createRolesAndCapabilities: Mock;
+  createCapabilities: Mock;
 }
 
 interface TxManagerStub {
@@ -65,7 +68,7 @@ describe('POST /api/agents with the canonical CreateAgentDto (US-005 AC3)', () =
   beforeAll(async () => {
     agentRepo = {
       create: vi.fn(),
-      createRolesAndCapabilities: vi.fn().mockResolvedValue(undefined),
+      createCapabilities: vi.fn().mockResolvedValue(undefined),
     };
     txManager = {
       run: vi.fn((fn: () => Promise<unknown>) => fn()),
@@ -132,7 +135,7 @@ describe('POST /api/agents with the canonical CreateAgentDto (US-005 AC3)', () =
   beforeEach(() => {
     vi.clearAllMocks();
     txManager.run.mockImplementation((fn: () => Promise<unknown>) => fn());
-    agentRepo.createRolesAndCapabilities.mockResolvedValue(undefined);
+    agentRepo.createCapabilities.mockResolvedValue(undefined);
   });
 
   it('AC3: POST /api/agents with a valid body returns 201 and creates the agent', async () => {
@@ -158,6 +161,27 @@ describe('POST /api/agents with the canonical CreateAgentDto (US-005 AC3)', () =
     );
     expect(res.body.data.agent.slug).toBe('good-slug-1');
     expect(res.body.data.apiKey).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('AC-8, AC-9 and AC-10: a body with roles and capabilities answers 201 and writes capabilities only', async () => {
+    agentRepo.create.mockResolvedValue({
+      id: 'agent-1',
+      name: 'Subrina Coder',
+      slug: 'good-slug-1',
+      apiKeyHash: 'hash',
+      status: 'ACTIVE',
+      maxConcurrentTickets: 3,
+      createdAt: new Date('2026-09-27T00:00:00.000Z'),
+      updatedAt: new Date('2026-09-27T00:00:00.000Z'),
+    });
+
+    const res = await request(app.getHttpServer())
+      .post('/api/agents')
+      .send({ name: 'Subrina Coder', slug: 'good-slug-1', roles: ['DEVELOPER'], capabilities: ['nax'] });
+
+    expect(res.status).toBe(201);
+    // The pipe strips the legacy `roles` field; only the capabilities reach the repository.
+    expect(agentRepo.createCapabilities).toHaveBeenCalledWith('agent-1', ['nax']);
   });
 
   it('AC3 boundary: a body without a slug is rejected with 400 by the canonical CreateAgentDto', async () => {

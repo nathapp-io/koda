@@ -33,24 +33,23 @@ describeIntegration('Agents API E2E', () => {
   let agentId = '';
   /** The projects the agent is rostered in; its project grants follow the roles it acts with. */
   const rosteredProjectIds: string[] = [];
-  /** The roles the agent API reports; the agent acts with the matching project bindings. */
-  const agentRoleNames: string[] = ['DEVELOPER', 'REVIEWER'];
-
-  /** The system role key a legacy agent role is bound as. */
-  const ROLE_KEY_BY_AGENT_ROLE: Record<string, string> = {
-    DEVELOPER: 'developer', REVIEWER: 'reviewer', VERIFIER: 'verifier', TRIAGER: 'triager',
-  };
+  /**
+   * The project role keys the agent acts with. Permissions P1l (US-005): an agent's roles are role
+   * bindings, not an `AgentRoleEntry` list, so this is the list of keys `rosterAgentIn` grants rather
+   * than legacy role names a create request asked for.
+   */
+  const agentProjectRoleKeys: string[] = ['developer', 'reviewer'];
 
   /**
    * Permissions P1 US-005: the roster reach and the roles the agent acts with are role bindings —
-   * the `viewer` of the roster plus one binding per role, in that project only.
+   * the `viewer` of the roster plus one binding per project role key, in that project only.
    */
   const rosterAgentIn = async (projectId: string): Promise<void> => {
     const prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
     const principal = { type: 'AGENT' as const, id: agentId };
     await grantRole(prisma, principal, 'viewer', projectId);
-    for (const role of agentRoleNames) {
-      await grantRole(prisma, principal, ROLE_KEY_BY_AGENT_ROLE[role], projectId);
+    for (const roleKey of agentProjectRoleKeys) {
+      await grantRole(prisma, principal, roleKey, projectId);
     }
     if (!rosteredProjectIds.includes(projectId)) rosteredProjectIds.push(projectId);
   };
@@ -121,7 +120,6 @@ describeIntegration('Agents API E2E', () => {
         name: 'Agents E2E Bot',
         slug: baseAgentSlug,
         maxConcurrentTickets: 2,
-        roles: ['DEVELOPER', 'REVIEWER'],
         capabilities: ['typescript', 'nestjs'],
       })
       .expect(201);
@@ -134,7 +132,7 @@ describeIntegration('Agents API E2E', () => {
     agentId = data.agent.id;
 
     // Permissions P1 US-005: the agent reaches the setup project through the `viewer` binding of its
-    // roster, and acts there with a binding per role it reports.
+    // roster, and acts there with a binding per project role key it holds.
     const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
     const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
     await rosterAgentIn(project.id);
@@ -171,8 +169,10 @@ describeIntegration('Agents API E2E', () => {
     }>(res);
 
     expect(data.slug).toBe(agentSlug);
-    expect(data.roles.map((item) => item.role)).toEqual(expect.arrayContaining(['DEVELOPER', 'REVIEWER']));
     expect(data.capabilities.map((item) => item.capability)).toEqual(expect.arrayContaining(['typescript', 'nestjs']));
+    // Permissions P1l (US-005): creation writes no `AgentRoleEntry`, so no legacy role is reported —
+    // the project roles the agent acts with are bindings granted by `rosterAgentIn`.
+    expect(data.roles).toEqual([]);
   });
 
   it('GET /api/agents/me — returns the current agent with its live roster projects (AC15)', async () => {
@@ -315,8 +315,8 @@ describeIntegration('Agents API E2E', () => {
 
     // S4c US-001: the pickup target needs a roster row on the empty project too
     // (it has no VERIFIED tickets, so pickup returns null rather than 403).
-    // Permissions P1 US-005: that roster is a `viewer` binding plus the bindings of the roles the
-    // agent acts with.
+    // Permissions P1 US-005: that roster is a `viewer` binding plus the bindings of the project role
+    // keys the agent acts with.
     const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
     const emptyProject = await prisma.client.project.findUniqueOrThrow({ where: { slug: emptyProjectSlug } });
     await rosterAgentIn(emptyProject.id);
@@ -341,17 +341,13 @@ describeIntegration('Agents API E2E', () => {
 
   it('fixtures grant through bindings only', async () => {
     const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-    await expectBindingOnlyFixtures(
-      prisma.client,
-      [
-        { type: 'USER', id: adminUserId },
-        { type: 'USER', id: memberUserId },
-        { type: 'AGENT', id: agentId },
-      ],
-      // The agent's `roles` are the subject of this file (the agent API reports them), so its
-      // `AgentRoleEntry` rows stay; every other grant of it is a binding.
-      { agentRoleEntries: [{ type: 'AGENT', id: agentId }] },
-    );
+    // Permissions P1l (US-005): creation writes no `AgentRoleEntry`, so no exemption is needed —
+    // every grant of the agent (baseline, roster viewer and project role keys) is a binding.
+    await expectBindingOnlyFixtures(prisma.client, [
+      { type: 'USER', id: adminUserId },
+      { type: 'USER', id: memberUserId },
+      { type: 'AGENT', id: agentId },
+    ]);
     // Permissions P1 US-005: the admin's global access is the `admin` binding, not `User.role`.
     const adminBinding = await prisma.client.roleBinding.findFirst({
       where: { principalType: 'USER', principalId: adminUserId, projectId: null, role: { key: 'admin' } },

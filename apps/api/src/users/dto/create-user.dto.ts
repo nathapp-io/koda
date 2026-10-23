@@ -1,8 +1,11 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { IsEmail, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { PASSWORD_COMPLEXITY } from '../../auth/dto/register.dto';
-import { GLOBAL_ROLES, GlobalRole } from '../domain/user-admin.domain';
 
+/**
+ * Permissions P1l (US-005): an account is created as a plain member. There is no request field for a
+ * global role — granting one is `POST /role-bindings` (roleKey `admin`, no project) after the create.
+ */
 export class CreateUserDto {
   @ApiProperty({ example: 'dev@example.com' })
   @IsEmail({}, { message: '$t(common.validation.isEmail)' })
@@ -20,13 +23,4 @@ export class CreateUserDto {
   @MinLength(8, { message: '$t(common.validation.minLength)' })
   @Matches(PASSWORD_COMPLEXITY, { message: '$t(common.validation.passwordComplexity)' })
   declare password: string;
-
-  /**
-   * US-004: optional. An absent role is the least-privileged global role, `MEMBER`, so the web can
-   * create an account and then bind roles to it.
-   */
-  @ApiPropertyOptional({ enum: GLOBAL_ROLES, default: 'MEMBER' })
-  @IsOptional()
-  @IsIn(GLOBAL_ROLES, { message: '$t(common.validation.isEnum)' })
-  declare role?: GlobalRole;
 }

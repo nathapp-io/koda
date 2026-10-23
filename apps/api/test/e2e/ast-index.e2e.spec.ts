@@ -91,7 +91,7 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
       const agentRes = await request(httpServer)
         .post('/api/agents')
         .set('Authorization', `Bearer ${adminAccessToken}`)
-        .send({ name: 'AST Developer Agent', slug: 'ast-developer-agent', roles: [] });
+        .send({ name: 'AST Developer Agent', slug: 'ast-developer-agent' });
 
       expect(agentRes.status).toBe(201);
       // POST /api/agents returns { apiKey, agent } — the agent's own fields live
@@ -283,7 +283,7 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
         .set('Authorization', `Bearer ${adminAccessToken}`)
         // Permissions P1 US-005: the fixture agent carries no role, and it is rostered in no project,
         // so it holds no project key at all — the refusal is unchanged.
-        .send({ name: 'Non-Developer Agent', slug: 'non-developer-agent', roles: [] });
+        .send({ name: 'Non-Developer Agent', slug: 'non-developer-agent' });
 
       expect(agentRes.status).toBe(201);
       const nonDevAgent = body<{ apiKey: string }>(agentRes);

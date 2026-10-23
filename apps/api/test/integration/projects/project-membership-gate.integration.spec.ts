@@ -115,11 +115,17 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     return body === undefined ? req : req.send(body);
   };
 
+  /**
+   * Permissions P1l (US-005): the create route takes no role, so `'ADMIN'` means "create a plain
+   * member, then bind the global `admin` role" — the binding IS the admin, and it mirrors
+   * `User.role = 'ADMIN'` as the route used to.
+   */
   const createUser = async (who: string, role: 'MEMBER' | 'ADMIN'): Promise<string> => {
     const created = await request(server).post('/api/admin/users').set(auth('root'))
-      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role }).expect(201);
+      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD }).expect(201);
     const id = data<{ id: string }>(created).id;
     ids[who] = id;
+    if (role === 'ADMIN') await grantRole(prisma, { type: 'USER', id }, 'admin');
     tokens[who] = await loginToken(server, `${who}@koda.test`);
     // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
     // baseline production writes for every user it creates.
@@ -182,8 +188,8 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     // baseline production writes for every user it creates.
     await grantBaseline(prisma, { type: 'USER', id: rootUserId });
 
-    // dev/outside/author/multi are plain users; adminMember carries the global
-    // role the project CASL factory needs for Ticket/Label writes.
+    // dev/outside/author/multi are plain users; adminMember holds the global `admin` binding the
+    // project Ticket/Label writes need.
     for (const who of ['dev', 'outside', 'author', 'multi']) await createUser(who, 'MEMBER');
     await createUser('adminMember', 'ADMIN');
 
@@ -244,7 +250,7 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     otherCommentBaseline = 'comment in another project';
 
     const createdAgent = await request(server).post('/api/agents').set(auth('root'))
-      .send({ name: 'Team Bot', slug: 'team-bot', roles: [] }).expect(201);
+      .send({ name: 'Team Bot', slug: 'team-bot' }).expect(201);
     const agentPayload = data<{ apiKey: string; agent: { id: string; slug: string } }>(createdAgent);
     agent.id = agentPayload.agent.id;
     agent.slug = agentPayload.agent.slug;

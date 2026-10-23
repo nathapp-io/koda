@@ -72,7 +72,7 @@ describeIntegration('notifications API (PG)', () => {
         .send({ email: `${who}@koda.test`, roleKey: 'developer' }).expect(201);
     }
     const agent = await request(server).post('/api/agents').set(auth('root'))
-      .send({ name: 'Notif Bot', slug: 'notif-bot', roles: [] }).expect(201);
+      .send({ name: 'Notif Bot', slug: 'notif-bot' }).expect(201);
     tokens.agent = data<{ apiKey: string }>(agent).apiKey;
     ids.agent = (await prisma.agent.findUniqueOrThrow({ where: { slug: 'notif-bot' } })).id;
     await grantBaseline(prisma, { type: 'AGENT', id: ids.agent });

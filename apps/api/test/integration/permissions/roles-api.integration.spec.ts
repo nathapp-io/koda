@@ -18,6 +18,7 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { PermissionService } from '../../../src/permissions/permission.service';
 import { SYSTEM_ROLES } from '../../../src/permissions/system-roles';
+import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -105,13 +106,19 @@ describeIntegration('roles API (US-005)', () => {
     expect(res.body.message).toBe(sentence(expected.key, expected.code, expected.args));
   };
 
-  /** Creates a user through the admin route, then logs in: the token carries no bypass of its own. */
+  /**
+   * Creates a user through the admin route, then logs in: the token carries no bypass of its own.
+   *
+   * Permissions P1l (US-005): the route takes no role, so `'ADMIN'` means "create it, then bind the
+   * global `admin` role" — the binding mirrors `User.role = 'ADMIN'`, which some cases read back.
+   */
   const createUser = async (email: string, role: 'MEMBER' | 'ADMIN'): Promise<string> => {
-    await request(server)
+    const created = await request(server)
       .post('/api/admin/users')
       .set(auth(ownerToken))
-      .send({ email, name: email.split('@')[0], password: TEST_PASSWORD, role })
+      .send({ email, name: email.split('@')[0], password: TEST_PASSWORD })
       .expect(201);
+    if (role === 'ADMIN') await grantRole(db, { type: 'USER', id: data<{ id: string }>(created).id }, 'admin');
     return loginToken(server, email);
   };
 
