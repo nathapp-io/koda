@@ -486,7 +486,8 @@ const sha256 = (text: string): string => createHash('sha256').update(text).diges
 /**
  * Permissions P2 US-003: the approval block an approved action carries — what policy demanded, how it was satisfied,
  * and who approved it. Before P3 sets a floor the only approval an assistant action carries is the approving human or
- * agent (`approvalMode`), and a `none`-mode action records `satisfiedBy: 'none'` with no approver at all.
+ * agent (`approvalMode`), and an action with no approver type records `satisfiedBy: 'none'` with no approver fields at
+ * all: `approverType` and `approverId` are independently nullable, and an id without a type names nobody.
  */
 function approvalFor(action: PendingActionRecord): ActionApproval {
   const approval: ActionApproval = {
@@ -494,8 +495,10 @@ function approvalFor(action: PendingActionRecord): ActionApproval {
     satisfiedBy: approverTier(action.approverType),
     requestId: action.id,
   };
-  if (action.approverType !== null) approval.approverType = action.approverType === 'user' ? 'USER' : 'AGENT';
-  if (action.approverId !== null) approval.approverId = action.approverId;
+  if (action.approverType !== null) {
+    approval.approverType = action.approverType === 'user' ? 'USER' : 'AGENT';
+    if (action.approverId !== null) approval.approverId = action.approverId;
+  }
   return approval;
 }
 

@@ -266,6 +266,15 @@ describe('Permissions P2 US-003: an approved action runs as the assistant for it
     expect(context?.approval).toEqual({ requiredMode: 'none', satisfiedBy: 'none', requestId: 'pa9' });
   });
 
+  it('AC-9 boundary: a null approverType drops a populated approverId, naming no approver at all', async () => {
+    // The two columns are independently nullable, so a row may carry an id with no type; an id alone names nobody.
+    const context = await contextOfAction(action({
+      id: 'pa9b', actorId: U1.id, approvalMode: 'none', approverType: null, approverId: 'u3',
+    }));
+
+    expect(context?.approval).toEqual({ requiredMode: 'none', satisfiedBy: 'none', requestId: 'pa9b' });
+  });
+
   it('AC-13: a disabled requester still runs nothing at all', async () => {
     const seen: Array<ActionContext | undefined> = [];
     const { executor, tool } = setup({ [U1.id]: { ...U1, disabled: true } });
