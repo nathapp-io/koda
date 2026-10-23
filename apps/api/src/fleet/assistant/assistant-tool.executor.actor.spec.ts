@@ -11,6 +11,7 @@
  * test/integration/fleet/assistant-action-actor.integration.spec.ts and the end-to-end approve is in
  * test/integration/fleet/assistant-actor-approve.integration.spec.ts.
  */
+import { currentContext, type ActionContext } from '../../action-context/action-context';
 import type { PermissionService } from '../../permissions/permission.service';
 import type { ProjectAccessService } from '../../projects/project-access.service';
 import type { PendingActionRecord } from './actions/pending-action.domain';
@@ -200,5 +201,78 @@ describe('S5b 3-D12: executeAction runs the tool as the action\'s actor', () => 
 
     expect(await executor.executeAction(action())).toEqual({ ok: false, text: 'error: koda_add_comment failed' });
     expect(tool.execute).not.toHaveBeenCalled();
+  });
+});
+/**
+ * Permissions P2 US-003: an approved action is the assistant acting for the requester that asked for the write, so
+ * the run is attributed to `SYSTEM/assistant` with the requester as `onBehalfOf` and the action's approval block.
+ * The authorization principal and `ctx.actor` stay the requester's (asserted above); a SYSTEM action context changes
+ * attribution, not authority.
+ */
+const U1 = { id: 'u1', email: 'u1@koda.test', role: 'MEMBER', disabled: false };
+
+/** `pa1`, requested by the user `u1` and approved by the user `u2` — the approver is deliberately not the actor. */
+const APPROVED = action({ id: 'pa1', actorId: U1.id, approvalMode: 'human', approverType: 'user', approverId: 'u2' });
+
+/** Runs one approved action through the real executor, answering the context its tool observed. */
+async function contextOfAction(record: PendingActionRecord, users: Record<string, UserRow> = { [U1.id]: U1 }): Promise<ActionContext | undefined> {
+  const seen: Array<ActionContext | undefined> = [];
+  const { executor, tool } = setup(users);
+  vi.mocked(tool.execute).mockImplementation(async () => { seen.push(currentContext()); return 'comment c1 added to OPS-1'; });
+  await executor.executeAction(record);
+  return seen[0];
+}
+
+describe('Permissions P2 US-003: an approved action runs as the assistant for its requester', () => {
+  it('AC-5: the tool observes currentContext().actor SYSTEM/assistant', async () => {
+    const context = await contextOfAction(APPROVED);
+
+    expect(context?.actor).toEqual({ type: 'SYSTEM', id: 'assistant' });
+  });
+
+  it('AC-6: the tool observes onBehalfOf the action\'s requester u1', async () => {
+    const context = await contextOfAction(APPROVED);
+
+    expect(context?.onBehalfOf).toEqual({ type: 'USER', id: 'u1' });
+  });
+
+  it("AC-7: a human approval by the user u2 carries requiredMode human, satisfiedBy human and approverType USER", async () => {
+    const context = await contextOfAction(APPROVED);
+
+    expect(context?.approval).toEqual({
+      requiredMode: 'human', satisfiedBy: 'human', approverType: 'USER', approverId: 'u2', requestId: 'pa1',
+    });
+  });
+
+  it("AC-7: the action's own context has origin 'thread'", async () => {
+    const context = await contextOfAction(APPROVED);
+
+    expect(context?.origin).toBe('thread');
+  });
+
+  it("AC-8: an agent approver a9 is satisfiedBy agent with approverType AGENT", async () => {
+    const context = await contextOfAction(action({
+      id: 'pa8', actorId: U1.id, approvalMode: 'agent', approverType: 'agent', approverId: 'a9',
+    }));
+
+    expect(context?.approval).toMatchObject({ satisfiedBy: 'agent', approverType: 'AGENT', approverId: 'a9' });
+  });
+
+  it('AC-9: an unapproved action carries requiredMode none, satisfiedBy none and no approver fields', async () => {
+    const context = await contextOfAction(action({
+      id: 'pa9', actorId: U1.id, approvalMode: 'none', approverType: null, approverId: null,
+    }));
+
+    expect(context?.approval).toEqual({ requiredMode: 'none', satisfiedBy: 'none', requestId: 'pa9' });
+  });
+
+  it('AC-13: a disabled requester still runs nothing at all', async () => {
+    const seen: Array<ActionContext | undefined> = [];
+    const { executor, tool } = setup({ [U1.id]: { ...U1, disabled: true } });
+    vi.mocked(tool.execute).mockImplementation(async () => { seen.push(currentContext()); return 'ran'; });
+
+    expect(await executor.executeAction(APPROVED)).toEqual({ ok: false, text: 'error: koda_add_comment failed' });
+    expect(tool.execute).not.toHaveBeenCalled();
+    expect(seen).toEqual([]);
   });
 });

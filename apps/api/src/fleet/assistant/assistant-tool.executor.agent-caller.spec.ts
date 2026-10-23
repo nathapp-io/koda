@@ -1,16 +1,17 @@
 /**
- * Permissions P1 US-001 — a thread job runs its tools as its requester.
+ * Permissions P1 US-001 / P2 US-003 — a thread job runs its tools as its requester, attributed to the assistant.
  *
- * `findCallContext` now answers the job's requester, which is an agent when an agent sent the message or called the
+ * `findCallContext` answers the job's requester, which is an agent when an agent sent the message or called the
  * action. `execute` builds that requester's principal (`agentPrincipal` for an agent), passes its type to
- * `approvalModeFor`, and runs the tool inside the requester's action context, so an agent's thread write executes at
- * once and everything the tool records carries the agent's type.
+ * `approvalModeFor`, and runs the tool inside the assistant's action context — actor `SYSTEM/assistant`, `onBehalfOf`
+ * the requester, origin `thread` — so an agent's thread write executes at once and everything the tool records still
+ * carries the requester's type through `actorTypeFor`.
  *
  * Every case drives the real executor over a stub tool, a stub registry and a stub repository; the DB-backed
  * `findCallContext` reads are in test/integration/fleet/thread-creator-type.integration.spec.ts.
  */
 import { NotFoundAppException } from '@nathapp/nestjs-common';
-import { currentActor } from '../../action-context/action-context';
+import { currentActor, currentContext, type ActionContext } from '../../action-context/action-context';
 import type { PermissionService } from '../../permissions/permission.service';
 import type { ProjectAccessService } from '../../projects/project-access.service';
 import type { ActionProposer } from './actions/pending-action.domain';
@@ -106,7 +107,19 @@ function commentTool(): AssistantTool<unknown> {
   };
 }
 
-describe('AssistantToolExecutor as the thread requester (US-001)', () => {
+/**
+ * One thread call through the real executor, answering the action context its tool observed. The tool records
+ * `currentContext()` itself, so each assertion reads what the executor really set around the run.
+ */
+async function contextOfThreadCall(context: ToolCallContext): Promise<ActionContext | undefined> {
+  const seen: Array<ActionContext | undefined> = [];
+  const tool = readTool(async () => { seen.push(currentContext()); return 'read text'; });
+  const { executor } = setup(context, tool);
+  await executor.execute({ ...CALL, name: 'koda_get_ticket', input: { ref: 'WEB-1' } });
+  return seen[0];
+}
+
+describe('AssistantToolExecutor as the assistant for a thread call (US-001, P2 US-003)', () => {
   it("AC-8: an AGENT creator runs the tool with ctx.actor.actorType 'agent' and its id", async () => {
     const tool = readTool();
     const { executor } = setup(AGENT_CONTEXT, tool);
@@ -126,20 +139,52 @@ describe('AssistantToolExecutor as the thread requester (US-001)', () => {
     });
   });
 
-  it('AC-11: an AGENT creator with id a1 runs the tool with currentActor() { type: AGENT, id: a1 }', async () => {
+  it('AC-11: an AGENT creator with id a1 runs the tool with currentActor() SYSTEM/assistant and onBehalfOf a1', async () => {
     const seen: Array<ReturnType<typeof currentActor>> = [];
-    const tool = readTool(async () => { seen.push(currentActor()); return 'read text'; });
+    const behalf: Array<ActionContext['onBehalfOf']> = [];
+    const tool = readTool(async () => {
+      seen.push(currentActor());
+      behalf.push(currentContext()?.onBehalfOf);
+      return 'read text';
+    });
     const { executor } = setup(AGENT_CONTEXT, tool);
     await executor.execute({ ...CALL, name: 'koda_get_ticket', input: {} });
-    expect(seen).toEqual([{ type: 'AGENT', id: 'a1' }]);
+    expect(seen).toEqual([{ type: 'SYSTEM', id: 'assistant' }]);
+    expect(behalf).toEqual([{ type: 'AGENT', id: 'a1' }]);
   });
 
-  it('AC-11: a USER creator runs the tool with currentActor() { type: USER, id: u1 }', async () => {
+  it('AC-11: a USER creator runs the tool with currentActor() SYSTEM/assistant and onBehalfOf u1', async () => {
     const seen: Array<ReturnType<typeof currentActor>> = [];
-    const tool = readTool(async () => { seen.push(currentActor()); return 'read text'; });
+    const behalf: Array<ActionContext['onBehalfOf']> = [];
+    const tool = readTool(async () => {
+      seen.push(currentActor());
+      behalf.push(currentContext()?.onBehalfOf);
+      return 'read text';
+    });
     const { executor } = setup(USER_CONTEXT, tool);
     await executor.execute({ ...CALL, name: 'koda_get_ticket', input: {} });
-    expect(seen).toEqual([{ type: 'USER', id: 'u1' }]);
+    expect(seen).toEqual([{ type: 'SYSTEM', id: 'assistant' }]);
+    expect(behalf).toEqual([{ type: 'USER', id: 'u1' }]);
+  });
+
+  it("AC-1: a USER creator's read call runs the tool with currentContext().actor SYSTEM/assistant", async () => {
+    const context = await contextOfThreadCall(USER_CONTEXT);
+    expect(context?.actor).toEqual({ type: 'SYSTEM', id: 'assistant' });
+  });
+
+  it('AC-2: that call runs on behalf of the USER creator u1', async () => {
+    const context = await contextOfThreadCall(USER_CONTEXT);
+    expect(context?.onBehalfOf).toEqual({ type: 'USER', id: 'u1' });
+  });
+
+  it("AC-3: that call's context has origin 'thread'", async () => {
+    const context = await contextOfThreadCall(USER_CONTEXT);
+    expect(context?.origin).toBe('thread');
+  });
+
+  it("AC-4: an AGENT creator's call runs on behalf of the AGENT a1", async () => {
+    const context = await contextOfThreadCall(AGENT_CONTEXT);
+    expect(context?.onBehalfOf).toEqual({ type: 'AGENT', id: 'a1' });
   });
 
   it("AC-9: an AGENT creator's write runs at once and records a thread-origin agent action", async () => {
