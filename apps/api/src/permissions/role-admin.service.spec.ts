@@ -66,7 +66,6 @@ describe('RoleAdminService', () => {
       store.roleRepo() as never,
       store.bindingRepo() as never,
       permissionCache,
-      { agentProjectScoping: true } as never,
     );
     const membership = new MembershipService(
       store.roleRepo() as never,
@@ -454,7 +453,6 @@ describe('RoleAdminService', () => {
           store.roleRepo() as never,
           store.bindingRepo() as never,
           permissionCache,
-          { agentProjectScoping: true } as never,
         ),
         permissionCache,
         new MembershipService(

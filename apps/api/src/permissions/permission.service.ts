@@ -1,6 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
-import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { findCatalogEntry } from './catalog';
 import { expandEntries } from './entry-matcher';
 import { PermissionCache } from './permission-cache';
@@ -9,6 +8,7 @@ import type {
   BindingWithRole,
   PermissionDecision,
   PrincipalRef,
+  PrincipalType,
   RoleDomain,
 } from './permissions.types';
 import type { PrismaRoleBindingRepository } from './prisma-role-binding.repository';
@@ -18,9 +18,8 @@ const OWN_SUFFIX = '.own';
 const APPROVAL_DECIDE = 'approval.decide';
 const APPROVAL_DECIDE_NARROWED_PREFIX = 'approval.decide@';
 const GLOBAL_ADMIN_ROLE_KEYS: readonly string[] = ['owner', 'admin'];
-/** The baseline role of a principal that has no GLOBAL binding: every principal starts with it. */
-const BASELINE_ROLE_KEYS: Readonly<Record<PrincipalRef['type'], string>> = { USER: 'member', AGENT: 'agent' };
-
+/** Bound database pressure from cold-cache principal enumeration (two types per assignee search). */
+const PRINCIPAL_KEY_READ_CONCURRENCY = 10;
 export type PermissionScope = { projectId: string } | 'global';
 
 export interface PermissionContext {
@@ -34,12 +33,9 @@ const deny = (reason: PermissionDecision['reason']): PermissionDecision => ({ al
 /**
  * Permissions P1a: the one place that decides whether a principal holds a permission key.
  *
- * Effective keys are the union of three sources: the principal's `RoleBinding` rows, the legacy rows
- * that stand in for bindings (`ProjectMember`, `AgentProject`, `AgentRoleEntry`), and — for a
- * principal with no global-scope binding — its baseline `member`/`agent` role. The result is cached
- * per principal and scope under the `permissions` tag; every binding write and every legacy role
- * change invalidates it (`MembershipService`). Global Owners and Admins, and legacy
- * `User.role = 'ADMIN'` users, also hold every project key in every project.
+ * Effective keys are the principal's bindings alone. The result is cached per principal and
+ * scope under the `permissions` tag; binding writes invalidate it through `MembershipService`.
+ * Global Owner and Admin bindings also hold every project key in every project.
  */
 @Injectable()
 export class PermissionService {
@@ -49,7 +45,6 @@ export class PermissionService {
     @Inject(ROLE_REPOSITORY) private readonly roles: PrismaRoleRepository,
     @Inject(ROLE_BINDING_REPOSITORY) private readonly bindings: PrismaRoleBindingRepository,
     private readonly cache: PermissionCache,
-    @Inject(AUTH_CFG) private readonly authConfig: IAuthConfig,
   ) {}
 
   async can(principal: KodaPrincipal, key: string, ctx: PermissionContext = {}): Promise<PermissionDecision> {
@@ -91,9 +86,8 @@ export class PermissionService {
    * it holds `key`, ascending.
    *
    * The filtered listings (`GET /fleet/activity`, `GET /fleet/approval-counts`) use this to scope the
-   * rows they return. A runner principal holds nothing. The candidates are the principal's access
-   * sources — the roster and binding projects — not every project, which is also what an agent gets
-   * with `AGENT_PROJECT_SCOPING=off`.
+   * rows they return. A runner principal holds nothing. The candidates are the principal's role
+   * bindings' project scopes, not every project.
    */
   async projectIdsWithKey(
     principal: KodaPrincipal,
@@ -111,56 +105,50 @@ export class PermissionService {
     return { all: false, projectIds: held.filter((projectId): projectId is string => projectId !== null) };
   }
 
+  /**
+   * Ascending, distinct ids of principals holding `key` in the project. Candidates have an
+   * applicable PROJECT binding or a null-project GLOBAL binding that can grant the key.
+   * Every candidate is checked through effectiveKeys; read failures propagate without a partial list.
+   */
+  async principalIdsWithKey(type: PrincipalType, projectId: string, key: string): Promise<string[]> {
+    const roles = await this.roles.findRolesByScope('GLOBAL');
+    const globalRoleIds = roles.filter((role) => {
+      if (GLOBAL_ADMIN_ROLE_KEYS.includes(role.key)) return true;
+      try {
+        return expandEntries(role.permissions, 'GLOBAL').has(key);
+      } catch {
+        // A hand-edited invalid role grants nothing; computeKeys owns its warning on evaluation.
+        return false;
+      }
+    }).map((role) => role.id);
+    const candidates = await this.bindings.findCandidatePrincipalIds(type, projectId, globalRoleIds);
+    const held: string[] = [];
+    // Candidates are membership-capped. Finish each small chunk before starting another so a
+    // cold cache cannot fan thousands of concurrent reads out to the database. Keep candidate order.
+    for (let offset = 0; offset < candidates.length; offset += PRINCIPAL_KEY_READ_CONCURRENCY) {
+      const chunk = candidates.slice(offset, offset + PRINCIPAL_KEY_READ_CONCURRENCY);
+      const matches = await Promise.all(chunk.map(async (id) =>
+        (await this.effectiveKeys({ type, id }, { projectId })).has(key) ? id : null,
+      ));
+      held.push(...matches.filter((id): id is string => id !== null));
+    }
+    return held;
+  }
+
   private async computeKeys(principal: PrincipalRef, projectId: string | null): Promise<Set<string>> {
     const rows = await this.bindings.findEffectiveBindings(principal, projectId);
     const keys = new Set<string>();
     let globalAdmin = false;
-    let hasGlobalRoleBinding = false;
 
     for (const row of rows) {
       if (!appliesIn(row, projectId)) continue;
       this.addEntries(keys, row.roleKey, row.roleScope, row.rolePermissions);
       if (isGlobalAdminBinding(row)) globalAdmin = true;
-      if (row.binding.projectId === null && row.roleScope === 'GLOBAL') hasGlobalRoleBinding = true;
-    }
-
-    // The legacy rows are virtual bindings: a `ProjectMember`/`AgentProject`/`AgentRoleEntry` row
-    // grants exactly what the system role it maps to grants, so a principal that predates the
-    // bindings keeps the permissions it had. A key with no role row (an unseeded role) adds nothing.
-    const legacyKeys = await this.bindings.findLegacyRoleKeys(
-      principal,
-      projectId,
-      this.authConfig.agentProjectScoping !== false,
-    );
-    await this.addRoleKeys(keys, legacyKeys);
-
-    // The baseline: a principal with no global-scope binding starts with the `member`/`agent` role.
-    // Principals created before the bindings existed have no baseline binding, and test fixtures
-    // write users and agents directly, so the role is added rather than read from a binding.
-    if (!hasGlobalRoleBinding) await this.addRoleKeys(keys, [BASELINE_ROLE_KEYS[principal.type]]);
-
-    if (principal.type === 'USER' && (await this.isLegacyAdmin(principal.id))) {
-      globalAdmin = true;
-      const admin = await this.roles.findOne({ key: 'admin' });
-      if (admin) this.addEntries(keys, admin.key, admin.scope, admin.permissions);
     }
 
     // A global Owner or Admin can do everything inside any project.
     if (globalAdmin) for (const key of expandEntries(['*'], 'PROJECT')) keys.add(key);
     return keys;
-  }
-
-  /** Adds the entries of each role key that has a role row; an unknown key adds nothing. */
-  private async addRoleKeys(target: Set<string>, roleKeys: readonly string[]): Promise<void> {
-    if (roleKeys.length === 0) return;
-    const roles = await Promise.all(roleKeys.map((key) => this.roles.findOne({ key })));
-    for (const role of roles) {
-      if (role) this.addEntries(target, role.key, role.scope, role.permissions);
-    }
-  }
-
-  private async isLegacyAdmin(userId: string): Promise<boolean> {
-    return (await this.bindings.findUserState(userId))?.role === 'ADMIN';
   }
 
   /** A role row that no longer expands (hand-edited) grants nothing instead of failing every check. */

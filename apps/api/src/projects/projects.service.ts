@@ -71,9 +71,7 @@ export class ProjectsService {
    * US-002: list projects scoped to the calling principal.
    *  - A principal that holds `project.read` globally (with the seeded roles: Owner and Admin) sees
    *    every non-deleted project. That is the key, not the `role` claim (Permissions P1 US-002).
-   *  - Otherwise user principals get only projects where they hold a `ProjectMember` row.
-   *  - Agents (S4c US-001, D533) see exactly their AgentProject roster unless
-   *    `AGENT_PROJECT_SCOPING=off`.
+   *  - Otherwise users and agents see only projects accessible through their role bindings.
    *  - Soft-deleted projects are never returned.
    *
    * Returns domain objects; callers wrap them in the HTTP DTO at the boundary.
@@ -83,9 +81,7 @@ export class ProjectsService {
       return this.projectRepo.findAll();
     }
     if (principal.actorType === 'agent') {
-      return this.access.agentScopingEnabled()
-        ? this.projectRepo.findAllForAgent(principal.id)
-        : this.projectRepo.findAll();
+      return this.projectRepo.findAllForAgent(principal.id);
     }
     return this.projectRepo.findAllForUser(principal.id);
   }

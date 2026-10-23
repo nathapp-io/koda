@@ -7,7 +7,6 @@ import {
 } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaClient, ProjectMember } from '../../generated/prisma/client';
-import { principalIdsWithAccess } from '../../permissions/legacy-membership.queries';
 import {
   AssigneeDomain,
   IProjectAssigneesRepository,
@@ -56,20 +55,13 @@ export class PrismaProjectAssigneesRepository
   }
 
   /**
-   * Two bounded reads per principal type (users, then agents) over the ids that have an **access**
-   * source in the project — their legacy `ProjectMember` / `AgentProject` row unioned with their
-   * PROJECT-scope bindings, `projectId`-null ones included (permissions P1b US-003). The filters are
-   * unchanged: enabled users, assignable agent statuses, and `contains` keeps `%` and `_` literal
-   * (Prisma escapes them), so q is a plain substring, not a pattern.
+   * Bounded account reads over the supplied project.read holders. Enabled/status filters,
+   * ordering and the combined limit stay here. q is a literal, case-insensitive substring.
    */
-  async search(projectId: string, q: string, limit: number): Promise<AssigneeDomain[]> {
+  async search(_projectId: string, q: string, limit: number, ids: { userIds: string[]; agentIds: string[] }): Promise<AssigneeDomain[]> {
     const needle = q.length > 0 ? q : undefined;
     const db = this.prisma.client;
-
-    const [userIds, agentIds] = await Promise.all([
-      principalIdsWithAccess(db, projectId, 'USER'),
-      principalIdsWithAccess(db, projectId, 'AGENT'),
-    ]);
+    const { userIds, agentIds } = ids;
 
     const [users, agents] = await Promise.all([
       db.user.findMany({

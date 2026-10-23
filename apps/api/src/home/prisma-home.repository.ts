@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../generated/prisma/client';
-import { accessibleProjectIds } from '../permissions/legacy-membership.queries';
+import { accessibleProjectIds } from '../permissions/membership.queries';
 import {
   ACTIVE_JOB_STATES, FAILED_JOB_STATES, OPEN_TICKET_STATUSES, type HomeActivityRow, type HomeApprovalRow, type HomeApprovalScope,
   type HomeCaller, type HomeJobRow, type HomeProjectRow, type HomeTicketRow,
@@ -17,8 +17,7 @@ export class PrismaHomeRepository {
   /**
    * The caller's projects: every live project for a global admin (mirrors
    * ProjectsService.findAllForPrincipal); otherwise the live projects the
-   * caller's access sources name — its legacy `ProjectMember` rows unioned with
-   * its PROJECT-scope bindings, where a `projectId`-null project binding reaches
+   * caller's PROJECT-scope bindings name, where a `projectId`-null project binding reaches
    * every live project (US-002).
    */
   async findProjects(caller: HomeCaller): Promise<HomeProjectRow[]> {

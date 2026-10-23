@@ -107,9 +107,9 @@ describeIntegration('PermissionService (PG)', () => {
     expect((await permissions.can(userPrincipal(user.id), 'role.binding.owner')).allowed).toBe(false);
   });
 
-  it('AC-7: legacy User.role ADMIN with no bindings grants user.create', async () => {
+  it('AC-7: legacy User.role ADMIN with no bindings grants nothing', async () => {
     const user = await newUser('ADMIN');
-    expect((await permissions.can(userPrincipal(user.id), 'user.create')).allowed).toBe(true);
+    expect(await permissions.can(userPrincipal(user.id), 'user.create')).toEqual({ allowed: false, reason: 'not-granted' });
   });
 
   it('AC-8: notification.read is implicit', async () => {

@@ -17,6 +17,7 @@ import { AppModule } from '../../../src/app.module';
 import { authConfig } from '../../../src/config/auth.config';
 import { KodaPrincipal, UserPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { resetDb } from '../../helpers/reset-db';
+import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -65,9 +66,8 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
     prisma = module.get(PrismaService);
     await prisma.onModuleInit();
 
-    // Permissions P1 (US-009): `POST /agents` now checks `agent.create` through `PermissionService`,
-    // which reads the caller's rows — a synthetic principal with `role: 'ADMIN'` grants nothing on its
-    // own. The principal the guard injects therefore names a real admin user.
+    // `POST /agents` checks `agent.create` from bindings alone. Neither the injected principal's
+    // ADMIN claim nor the legacy User.role column grants permission without an explicit binding.
     await prisma.client.user.create({
       data: {
         id: adminUser.id,
@@ -77,6 +77,7 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
         role: 'ADMIN',
       },
     });
+    await grantRole(prisma.client, { type: 'USER', id: adminUser.id }, 'admin');
 
     app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
     app.setGlobalPrefix('api');
@@ -197,7 +198,10 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
   it('AC25: a failing baseline-binding write rolls back the agent row and leaves no binding', async () => {
     const bindingsBefore = await agentBindingIds();
 
-    await prisma.client.$executeRawUnsafe('ALTER TABLE "RoleBinding" RENAME TO "RoleBinding_disabled"');
+    // Reject the transaction's agent-binding write while leaving authorization reads available.
+    await prisma.client.$executeRawUnsafe(
+      'ALTER TABLE "RoleBinding" ADD CONSTRAINT "test_reject_agent_binding" CHECK ("principalType" <> \'AGENT\') NOT VALID',
+    );
     try {
       const res = await request(app.getHttpServer())
         .post('/api/agents')
@@ -210,7 +214,9 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
 
       expect(res.status).toBe(500);
     } finally {
-      await prisma.client.$executeRawUnsafe('ALTER TABLE "RoleBinding_disabled" RENAME TO "RoleBinding"');
+      await prisma.client.$executeRawUnsafe(
+        'ALTER TABLE "RoleBinding" DROP CONSTRAINT "test_reject_agent_binding"',
+      );
     }
 
     expect(await prisma.client.agent.findUnique({ where: { slug: 'binding-failure-agent' } })).toBeNull();

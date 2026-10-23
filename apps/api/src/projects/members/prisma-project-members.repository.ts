@@ -4,7 +4,7 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { PrismaClient, ProjectMember } from '../../generated/prisma/client';
-import { countActiveProjectAdmins, listProjectMemberships, type ProjectMembership } from '../../permissions/legacy-membership.queries';
+import { countActiveProjectAdmins, listProjectMemberships, type ProjectMembership } from '../../permissions/membership.queries';
 import { lockProjectMembers } from '../../common/utils/advisory-lock';
 import { MemberPrincipalType, ProjectMemberRecord, ProjectMemberRole } from './domain/project-member.domain';
 import { MemberPrincipalFilter } from './dto/list-members.query';

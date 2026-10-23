@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   AbstractPrismaRepository,
   PrismaClientLike,
@@ -10,7 +10,7 @@ import { Paginate } from '@nathapp/nestjs-prisma';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient, Role as RoleModel, RoleBinding as RoleBindingModel } from '../generated/prisma/client';
-import { accessibleProjectIds, legacyRoleKeys } from './legacy-membership.queries';
+import { accessibleProjectIds, MEMBERSHIP_READ_CAP } from './membership.queries';
 import type {
   BindingFilter,
   BindingWithRole,
@@ -142,30 +142,38 @@ export class PrismaRoleBindingRepository
   }
 
   /**
-   * The system role keys the principal's legacy rows stand for in `projectId` (`null` = the global
-   * scope, which answers none): its `ProjectMember.role` for a USER, its `AgentProject` roster row and
-   * `AgentRoleEntry` roles for an AGENT. The union itself lives in `legacy-membership.queries.ts`,
-   * which is the one place that reads the compatibility rows; this method is the read
-   * `PermissionService` reaches it through, so the permission layer keeps its repository-only Prisma
-   * access.
-   */
-  async findLegacyRoleKeys(
-    principal: PrincipalRef,
-    projectId: string | null,
-    agentScoping: boolean,
-  ): Promise<string[]> {
-    return legacyRoleKeys(this.db, principal, projectId, agentScoping);
-  }
-
-  /**
    * The ids of the non-deleted projects the principal has an access source in, ascending: its
-   * `ProjectMember`/`AgentProject` rows and its project-scope bindings (every live project when it
-   * holds a global project binding). The union itself lives in `legacy-membership.queries.ts`; this
+   * project-scope bindings (every live project when it
+   * holds a global project binding). The query itself lives in `membership.queries.ts`; this
    * method is the read `PermissionService.projectIdsWithKey` reaches it through, so the permission
    * layer keeps its repository-only Prisma access.
    */
   async findAccessibleProjectIds(principal: PrincipalRef): Promise<string[]> {
     return accessibleProjectIds(this.db, principal);
+  }
+
+  /** Applicable binding holders, distinct and ascending, bounded like membership listings. */
+  async findCandidatePrincipalIds(type: PrincipalType, projectId: string, globalRoleIds: string[]): Promise<string[]> {
+    const rows = await this.db.roleBinding.findMany({
+      where: {
+        principalType: type,
+        OR: [
+          { projectId, role: { scope: 'PROJECT' } },
+          { projectId: null, role: { scope: 'PROJECT' } },
+          { projectId: null, roleId: { in: globalRoleIds } },
+        ],
+      },
+      select: { principalId: true },
+      distinct: ['principalId'],
+      orderBy: { principalId: 'asc' },
+      take: MEMBERSHIP_READ_CAP,
+    });
+    if (rows.length >= MEMBERSHIP_READ_CAP) {
+      new Logger(PrismaRoleBindingRepository.name).warn(
+        `findCandidatePrincipalIds read its ${MEMBERSHIP_READ_CAP}-row cap for ${type} in project ${projectId} and answered the first page`,
+      );
+    }
+    return rows.map(({ principalId }) => principalId);
   }
 
   async findExisting(

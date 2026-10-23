@@ -14,6 +14,9 @@ import request from 'supertest';
 import { CommonExceptionCode } from '@nathapp/nestjs-common';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { MembershipService } from '../../../src/permissions/membership.service';
+import { PrismaUsersRepository } from '../../../src/users/prisma-users.repository';
+import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
@@ -244,30 +247,28 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
   const patchUser = (id: string, patch: Record<string, unknown>) =>
     request(h.server).patch(`/api/admin/users/${id}`).set(auth(rootToken)).send(patch);
 
-  /**
-   * What the last-admin guard counts (`PrismaUsersRepository.countActiveAdmins`):
-   * `user.count({ where: { role: 'ADMIN', disabled: false } })`. Asserted, not assumed, so a test
-   * whose premise is "exactly one active admin" cannot pass while the table holds more.
-   */
-  const activeAdminCount = (): Promise<number> => h.db.user.count({ where: { role: 'ADMIN', disabled: false } });
+  /** Count enabled users with global owner/admin bindings, as the guard does. */
+  const activeAdminCount = () => app.get(PrismaUsersRepository).countActiveAdmins();
 
-  /**
-   * Runs `fn` with `targetId` as the installation's only active admin: the other tests in this
-   * describe leave their own ADMIN users behind, and the guard counts every one of them. The other
-   * admins are demoted with a direct write (their `tokenVersion` is untouched, so their tokens stay
-   * valid) and restored afterwards.
-   */
-  const withOnlyActiveAdmin = async (targetId: string, fn: () => Promise<void>): Promise<void> => {
-    const others = await h.db.user.findMany({
-      where: { role: 'ADMIN', id: { not: targetId } },
-      select: { id: true },
-    });
-    const ids = others.map((user) => user.id);
-    await h.db.user.updateMany({ where: { id: { in: ids } }, data: { role: 'MEMBER' } });
+  /** Temporarily withdraw all other privileged bindings, without changing mirrors or tokens. */
+  const withOnlyActiveAdmin = async (targetId: string, fn: (token: string) => Promise<void>): Promise<void> => {
+    const actor = await createUser(`updater-${targetId}@koda.test`);
+    const role = await h.db.role.create({ data: {
+      key: `updater-${targetId}`, name: 'Updater', scope: 'GLOBAL', permissions: ['user.update'],
+    } });
+    await grantRole(h.db, { type: 'USER', id: actor.id }, role.key);
+    resetThrottle(app);
+    const token = await loginToken(h.server, actor.email);
+    const where = { principalType: 'USER', principalId: { not: targetId }, projectId: null,
+      role: { key: { in: ['owner', 'admin'] } } };
+    const others = await h.db.roleBinding.findMany({ where, take: 5000 });
+    await h.db.roleBinding.deleteMany({ where });
+    await app.get(MembershipService).invalidatePermissions();
     try {
-      await fn();
+      await fn(token);
     } finally {
-      await h.db.user.updateMany({ where: { id: { in: ids } }, data: { role: 'ADMIN' } });
+      await h.db.roleBinding.createMany({ data: others });
+      await app.get(MembershipService).invalidatePermissions();
     }
   };
 
@@ -338,11 +339,11 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
 
   it('AC-16: demoting the last active admin answers the existing last-admin error', async () => {
     const target = await createUser('last-admin@koda.test', 'ADMIN');
-    await withOnlyActiveAdmin(target.id, async () => {
-      // The premise of the AC, checked rather than assumed: the guard counts `User.role`.
+    await withOnlyActiveAdmin(target.id, async (token) => {
+      // The premise is exactly one enabled bound admin.
       expect(await activeAdminCount()).toBe(1);
 
-      const res = await patchUser(target.id, { role: 'MEMBER' });
+      const res = await request(h.server).patch(`/api/admin/users/${target.id}`).set(auth(token)).send({ role: 'MEMBER' });
 
       expect(res.status).toBe(409);
       // `ConflictAppException({}, 'users.lastAdmin')` translates `users.lastAdmin.409`.
@@ -352,10 +353,10 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
 
   it("AC-17: the refused demotion leaves the target's admin binding in place", async () => {
     const target = await createUser('last-admin2@koda.test', 'ADMIN');
-    await withOnlyActiveAdmin(target.id, async () => {
+    await withOnlyActiveAdmin(target.id, async (token) => {
       expect(await activeAdminCount()).toBe(1);
 
-      await patchUser(target.id, { role: 'MEMBER' }).expect(409);
+      await request(h.server).patch(`/api/admin/users/${target.id}`).set(auth(token)).send({ role: 'MEMBER' }).expect(409);
     });
 
     expect(await h.boundRoles('USER', target.id)).toContainEqual({ roleKey: 'admin', projectId: null });

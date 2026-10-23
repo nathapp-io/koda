@@ -3,7 +3,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { EmailAvailability } from '../../../src/email/email-availability';
-import { MEMBERSHIP_READ_CAP } from '../../../src/permissions/legacy-membership.queries';
+import { MEMBERSHIP_READ_CAP } from '../../../src/permissions/membership.queries';
 import { PrismaProjectMembersRepository } from '../../../src/projects/members/prisma-project-members.repository';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
@@ -84,14 +84,14 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     expect(await bindings()).toHaveLength(1);
     expect(await db.emailSchedule.count({ where: { projectId, userId: targetId, kind: 'MEMBER_ADDED' } })).toBe(1);
   });
-  it('AC-5: local union lists binding and legacy members in since order, excluding global admin', async () => {
+  it('AC-5: local listing omits legacy-only members, excluding global admin', async () => {
     await db.roleBinding.deleteMany({ where: { projectId, principalId: adminId } });
     await db.projectMember.create({ data: { projectId, userId: adminId, role: 'VIEWER', joinedAt: new Date(0) } });
     await post({ email: 'target@bindings.test' }, rootToken).expect(201);
     expect(await legacyCount()).toBe(0);
     const page = data<{ total: number; records: { userId: string }[] }>(await request(server).get(base).set(headers(rootToken)).expect(200));
-    expect(page.total).toBe(2);
-    expect(page.records.map(m => m.userId)).toEqual([adminId, targetId]);
+    expect(page.total).toBe(1);
+    expect(page.records.map(m => m.userId)).toEqual([targetId]);
     expect(page.records.map(m => m.userId)).not.toContain(rootId);
   });
   it('AC-6: role replacement preserves reviewer', async () => {
@@ -100,11 +100,12 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     expect(data<{ role: string }>(res).role).toBe('ADMIN');
     expect((await bindings()).map(b => b.role.key).sort()).toEqual(['project-admin', 'reviewer']);
   });
-  it('AC-7: role update migrates a legacy row to viewer', async () => {
+  it('AC-7: legacy-only member role update is members 404', async () => {
     await db.projectMember.create({ data: { projectId, userId: targetId, role: 'DEVELOPER' } });
-    await request(server).patch(`${base}/${targetId}`).set(headers()).send({ role: 'VIEWER' }).expect(200);
-    expect(await legacyCount()).toBe(0);
-    expect((await bindings()).map(b => b.role.key)).toEqual(['viewer']);
+    const res = await request(server).patch(`${base}/${targetId}`).set(headers()).send({ role: 'VIEWER' }).expect(404);
+    expect(res.body).toMatchObject({ ret: 404, message: 'Member not found' });
+    expect(await legacyCount()).toBe(1);
+    expect(await bindings()).toEqual([]);
   });
   it('AC-8: binding-only last admin cannot self-demote', async () => {
     conflict(await request(server).patch(`${base}/${adminId}`).set(headers()).send({ role: 'DEVELOPER' }), 'members.lastAdmin');
@@ -136,9 +137,7 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     expect(res.body).toMatchObject({ ret: 404, message: 'Member not found' });
   });
   it.each([
-    { source: 'legacy-only', legacyAt: new Date('2002-01-01'), bindingAt: null, since: new Date('2002-01-01') },
     { source: 'binding-only', legacyAt: null, bindingAt: new Date('2002-01-01'), since: new Date('2002-01-01') },
-    { source: 'legacy-earliest', legacyAt: new Date('2001-01-01'), bindingAt: new Date('2002-01-01'), since: new Date('2001-01-01') },
     { source: 'binding-earliest', legacyAt: new Date('2002-01-01'), bindingAt: new Date('2001-01-01'), since: new Date('2001-01-01') },
   ])('F1: finds and mutates a $source member beyond the project listing cap', async ({ legacyAt, bindingAt, since }) => {
     const fillerIds = Array.from({ length: MEMBERSHIP_READ_CAP }, (_, i) => `${projectId}-filler-${i}`);

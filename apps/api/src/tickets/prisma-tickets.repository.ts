@@ -5,7 +5,7 @@ import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { parseTicketRef } from '../common/utils/ticket-ref.util';
 import { lockProjectAgents } from '../common/utils/advisory-lock';
-import { agentHasProjectAccess } from '../permissions/legacy-membership.queries';
+import { agentHasProjectAccess } from '../permissions/membership.queries';
 import { TicketLinkSource } from '../common/enums';
 import { ACTIVE_STATES } from '../fleet/jobs/job-state';
 import type {

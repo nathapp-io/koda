@@ -1,13 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Paginate, PrismaService } from '@nathapp/nestjs-prisma';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient, User } from '../generated/prisma/client';
 import { GlobalLock, lockGlobal } from '../common/utils/advisory-lock';
+import { MEMBERSHIP_READ_CAP } from '../permissions/membership.queries';
 import { GlobalRole, UserAdminRecord, UserAdminWrite, UserListFilters } from './domain/user-admin.domain';
 
 @Injectable()
 export class PrismaUsersRepository {
+  private readonly logger = new Logger(PrismaUsersRepository.name);
   constructor(private readonly prisma: PrismaService<PrismaClient>) {}
 
   private get db() {
@@ -48,7 +50,17 @@ export class PrismaUsersRepository {
   }
 
   async countActiveAdmins(): Promise<number> {
-    return this.db.user.count({ where: { role: 'ADMIN', disabled: false } });
+    const bindings = await this.db.roleBinding.findMany({
+      where: { principalType: 'USER', projectId: null, role: { key: { in: ['owner', 'admin'] } } },
+      select: { principalId: true },
+      take: MEMBERSHIP_READ_CAP,
+    });
+    if (bindings.length >= MEMBERSHIP_READ_CAP) {
+      this.logger.warn(`countActiveAdmins read its ${MEMBERSHIP_READ_CAP}-row cap for global admins and answered the first page`);
+    }
+    return this.db.user.count({
+      where: { id: { in: [...new Set(bindings.map((binding) => binding.principalId))] }, disabled: false },
+    });
   }
 
   async updateUser(id: string, write: UserAdminWrite): Promise<UserAdminRecord> {

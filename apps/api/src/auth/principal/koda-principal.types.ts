@@ -19,7 +19,6 @@ export interface AgentPrincipal extends IPrincipal {
   readonly sub?: string;
   slug: string;
   status: KodaAgentStatus;
-  agentRoles: readonly KodaAgentRole[];
   capabilities: readonly string[];
 }
 

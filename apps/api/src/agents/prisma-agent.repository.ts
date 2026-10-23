@@ -4,7 +4,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TicketStatus } from '../common/enums';
 import { KodaError } from '../common/koda-error';
 import { lockProjectAgents } from '../common/utils/advisory-lock';
-import { accessibleProjectIds, agentHasProjectAccess, listProjectMemberships, localProjectRole } from '../permissions/legacy-membership.queries';
+import { accessibleProjectIds, agentHasProjectAccess, listProjectMemberships, localProjectRole } from '../permissions/membership.queries';
 import type { ProjectAgentRecord } from './dto/project-agent.dto';
 
 /** US-002: at most this many refs surface in the open-ticket list per roster row. */
@@ -123,7 +123,7 @@ export class PrismaAgentRepository {
     return this.db.project.findUnique({ where: { slug } });
   }
 
-  /** Access sources include project-specific and global PROJECT bindings plus legacy rows. */
+  /** Access sources include project-specific and global PROJECT bindings. */
   async isOnProjectRoster(agentId: string, projectId: string): Promise<boolean> {
     return agentHasProjectAccess(this.prisma.client, agentId, projectId);
   }
@@ -257,7 +257,7 @@ export class PrismaAgentRepository {
   }
 
   /**
-   * US-002: the project's local agent roster — one row per compatibility membership,
+   * US-002: the project's local agent roster — one row per locally bound principal,
    * ordered by agent name, with roles, capabilities, the adding user's id and
    * name, and a grouped open-ticket summary. "Open" excludes CLOSED, REJECTED,
    * and soft-deleted tickets (soft-deleted rows are filtered server-side, not

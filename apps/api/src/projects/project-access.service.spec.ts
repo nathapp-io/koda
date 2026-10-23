@@ -170,21 +170,6 @@ describe('ProjectAccessService', () => {
       expect(mockProjectRepo.isAgentOnRoster).not.toHaveBeenCalled();
     });
 
-    it('AC-6: admits an agent without asking when agent project scoping is off', async () => {
-      const unscoped = new ProjectAccessService(
-        mockProjectRepo as any,
-        permissions,
-        { agentProjectScoping: false } as any,
-      );
-      can.mockImplementation(neverAsk);
-
-      await expect(unscoped.resolveMembership('p1', agentPrincipal)).resolves.toBeNull();
-
-      expect(can).not.toHaveBeenCalled();
-      expect(mockProjectRepo.isAgentOnRoster).not.toHaveBeenCalled();
-      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
-    });
-
     it('AC-7: admits a runner without asking', async () => {
       can.mockImplementation(neverAsk);
 

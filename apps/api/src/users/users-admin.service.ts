@@ -86,7 +86,7 @@ export class UsersAdminService {
         const target = await this.usersRepo.findById(userId);
         if (!target) throw new NotFoundAppException({}, 'users');
 
-        const removesActiveAdmin = target.role === 'ADMIN' && !target.disabled && (demotes || disables);
+        const removesActiveAdmin = !target.disabled && (demotes || disables) && (await this.membership.isGlobalAdmin(target.id));
         if (removesActiveAdmin && (await this.usersRepo.countActiveAdmins()) <= 1) {
           throw new ConflictAppException({}, 'users.lastAdmin');
         }

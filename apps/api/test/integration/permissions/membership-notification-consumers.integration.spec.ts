@@ -6,7 +6,7 @@
  * when the reader consults the access sources: `NotificationWriter.deliver` (through
  * `NotificationEligibility.filter`), `TicketMentionResolver.mentionedUserIds` and
  * `EmailContentBuilder.build` for MEMBER_ADDED on one side, and the compatibility queries in
- * `src/permissions/legacy-membership.queries.ts` on the other. Sources are real rows — bindings
+ * `src/permissions/membership.queries.ts` on the other. Sources are real rows — bindings
  * through `MembershipService.createBinding` and the fixture module's `grantRole`/`grantBaseline`
  * (booting `AppModule` runs `SystemRoleSeeder`, so the seeded role keys exist), and deliberately no
  * legacy `ProjectMember` row anywhere in this spec.

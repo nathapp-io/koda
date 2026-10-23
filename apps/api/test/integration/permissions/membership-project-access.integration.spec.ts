@@ -10,9 +10,6 @@
  * `SystemRoleSeeder`, so the seeded keys exist), legacy rows through Prisma, which is what a
  * pre-bindings installation looks like.
  *
- * `agent project scoping` is a boot-time config flag, so AC-12 (scoping off) boots its own app, as
- * `bootstrap-baselines.integration.spec.ts` does for `KODA_OWNER_EMAIL`.
- *
  * Run: cd apps/api && bun run test:db:up &&
  *      bun run test:scoped test/integration/permissions/membership-project-access.integration.spec.ts
  */
@@ -21,7 +18,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { InternalAppException } from '@nathapp/nestjs-common';
 import { PrismaClient } from '../../../src/generated/prisma/client';
-import { MEMBERSHIP_READ_CAP, accessibleProjectIds, readAccessibleProjectIds } from '../../../src/permissions/legacy-membership.queries';
+import { MEMBERSHIP_READ_CAP, accessibleProjectIds, readAccessibleProjectIds } from '../../../src/permissions/membership.queries';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import type { PrincipalRef } from '../../../src/permissions/permissions.types';
 import { resetDb } from '../../helpers/reset-db';
@@ -170,9 +167,7 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
         { projectId: projectIds.p2, userId: ids.listUser, role: 'DEVELOPER' },
       ],
     });
-    await prisma.agentProject.create({
-      data: { projectId: projectIds.p1, agentId: agents.agRoster.id, addedById: rootId },
-    });
+    await membership.createBinding({ principal: { type: 'AGENT', id: agents.agRoster.id }, roleKey: 'viewer', projectId: projectIds.p1 }, { type: 'USER', id: rootId });
   }, 120_000);
 
   afterAll(async () => {
@@ -212,10 +207,10 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
     expect(res.status).toBe(403);
   }, TEST_TIMEOUT_MS);
 
-  it('AC-5: a legacy ProjectMember DEVELOPER row keeps its access', async () => {
+  it('AC-5: a legacy ProjectMember DEVELOPER row grants no access', async () => {
     const res = await send('get', '/api/projects/p1/tickets', 'legDev');
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
   }, TEST_TIMEOUT_MS);
 
   it('AC-6: with scoping on, a viewer binding gives an agent project reach', async () => {
@@ -252,7 +247,7 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
 
     expect(res.status).toBe(200);
     // p1 through a developer binding, p2 through a legacy row, and not the bound-less p3.
-    expect(projectSlugs(res).sort()).toEqual(['p1', 'p2']);
+    expect(projectSlugs(res).sort()).toEqual(['p1']);
     expect(projectSlugs(res)).not.toContain('p3');
   }, TEST_TIMEOUT_MS);
 
@@ -288,7 +283,7 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
     expect(slugs).toEqual(['p1']);
   }, TEST_TIMEOUT_MS);
 
-  it('AC-14: a global admin may update an agent that is on the legacy roster', async () => {
+  it('AC-14: a global admin may update an agent that has a viewer binding', async () => {
     // US-001: the project-scoped `project.agent.update` is folded into the global `agent.update`, so
     // the caller that may update an agent is a global admin; the legacy roster row is still what
     // makes the agent reachable in the project (without it the route answers 404).
@@ -338,59 +333,6 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
     expect(data<{ canManage: boolean; viewerRole: string }>(res)).toEqual(
       expect.objectContaining({ canManage: false, viewerRole: 'VIEWER' }),
     );
-  }, TEST_TIMEOUT_MS);
-});
-
-/**
- * AC-12 needs `AGENT_PROJECT_SCOPING=off`, which is read once at `AppFactory.create`: its own app and
- * its own world, reset and re-seeded by this describe.
- */
-describeIntegration('project lists with agent project scoping off (US-002 AC-12, PG)', () => {
-  let app: NathApplication;
-  let server: ReturnType<NathApplication['getHttpServer']>;
-  let prisma: PrismaClient;
-  let agentKey = '';
-  let accessToken = '';
-
-  beforeAll(async () => {
-    await resetDb();
-    // `AGENT_PROJECT_SCOPING` is read once, at `AppFactory.create`.
-    const previousScoping = process.env.AGENT_PROJECT_SCOPING;
-    process.env.AGENT_PROJECT_SCOPING = 'off';
-    try {
-      app = await bootHttpApp({ registrationEnabled: false });
-    } finally {
-      if (previousScoping === undefined) delete process.env.AGENT_PROJECT_SCOPING;
-      else process.env.AGENT_PROJECT_SCOPING = previousScoping;
-    }
-    server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
-
-    const root = await request(server).post('/api/auth/register')
-      .send({ email: 'scoping-root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
-    accessToken = data<{ accessToken: string }>(root).accessToken;
-
-    for (const [index, slug] of (['p1', 'p2'] as const).entries()) {
-      await request(server).post('/api/projects').set({ Authorization: `Bearer ${accessToken}` })
-        .send({ name: `Project ${slug}`, slug, key: ['SA', 'SB'][index] }).expect(201);
-    }
-
-    const created = await request(server).post('/api/agents').set({ Authorization: `Bearer ${accessToken}` })
-      .send({ name: 'Unscoped Agent', slug: 'unscoped-agent', roles: ['DEVELOPER'] }).expect(201);
-    agentKey = data<{ apiKey: string }>(created).apiKey;
-    // No AgentProject row, no binding: the agent has no membership source at all.
-    expect(await prisma.agentProject.count()).toBe(0);
-  }, 120_000);
-
-  afterAll(async () => {
-    await app?.close();
-  });
-
-  it('AC-12: with scoping off, an unscoped agent lists every non-deleted project', async () => {
-    const res = await request(server).get('/api/projects').set({ Authorization: `Bearer ${agentKey}` });
-
-    expect(res.status).toBe(200);
-    expect(data<{ slug: string }[]>(res).map((project) => project.slug).sort()).toEqual(['p1', 'p2']);
   }, TEST_TIMEOUT_MS);
 });
 

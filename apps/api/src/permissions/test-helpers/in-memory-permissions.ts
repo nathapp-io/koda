@@ -131,21 +131,17 @@ export class InMemoryPermissionStore {
     const isAdminBinding = (row: BindingWithRole) =>
       row.binding.projectId === null && (row.roleKey === 'owner' || row.roleKey === 'admin');
     return {
+      findCandidatePrincipalIds: async (type: PrincipalRef['type'], projectId: string, globalRoleIds: string[]) =>
+        [...new Set(this.bindings.filter((binding) => {
+          if (binding.principalType !== type) return false;
+          const role = this.roles.find((candidate) => candidate.id === binding.roleId);
+          return (role?.scope === 'PROJECT' && (binding.projectId === projectId || binding.projectId === null)) ||
+            (binding.projectId === null && globalRoleIds.includes(binding.roleId));
+        }).map((binding) => binding.principalId))].sort(),
       findEffectiveBindings: async (principal: PrincipalRef, projectId: string | null) =>
         this.bindings
           .filter((b) => same(b, principal) && (b.projectId === null || b.projectId === projectId))
           .map(withRole),
-      /**
-       * The legacy rows a principal stands for. The double has none — no `ProjectMember`,
-       * `AgentProject` or `AgentRoleEntry` row is ever written here — so this answers `[]` and the
-       * unit assertions that predate the union are unchanged. The Postgres union is covered by
-       * `test/integration/permissions/core-legacy-union.integration.spec.ts`.
-       */
-      findLegacyRoleKeys: async (
-        _principal: PrincipalRef,
-        _projectId: string | null,
-        _agentScoping: boolean,
-      ): Promise<string[]> => [],
       findExisting: async (principal: PrincipalRef, roleId: string, projectId: string | null) =>
         this.bindings.find(
           (b) => same(b, principal) && b.roleId === roleId && b.projectId === projectId,

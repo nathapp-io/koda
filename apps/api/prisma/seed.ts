@@ -1,6 +1,6 @@
 /**
  * Production database seed.
- * Creates an initial ADMIN user if no users exist. Safe to re-run (idempotent).
+ * Creates a bound admin user when the configured email is absent. Safe to re-run (idempotent).
  *
  * Usage:
  *   bun run seed:prod
@@ -13,7 +13,7 @@
  */
 import { PrismaClient } from '../src/generated/prisma/client';
 import { createPgAdapter } from '../src/prisma/pg-adapter';
-import * as bcrypt from 'bcrypt';
+import { seedAdminUser } from './seed-admin-data';
 
 const prisma = new PrismaClient({ adapter: createPgAdapter(process.env.DATABASE_URL ?? '') });
 
@@ -22,15 +22,13 @@ async function main() {
   const password = process.env.KODA_ADMIN_PASSWORD ?? 'Admin123!';
   const name = process.env.KODA_ADMIN_NAME ?? 'Admin';
 
-  const existingUser = await prisma.user.findUnique({ where: { email } });
+  const outcome = await seedAdminUser(prisma, { email, name, password });
 
-  if (existingUser) {
+  if (!outcome.created) {
+    const existingUser = await prisma.user.findUniqueOrThrow({ where: { email } });
     console.log(`ℹ️  User "${email}" already exists (role: ${existingUser.role}). Skipping.`);
   } else {
-    const passwordHash = await bcrypt.hash(password, 12);
-    const user = await prisma.user.create({
-      data: { email, name, passwordHash, role: 'ADMIN' },
-    });
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: outcome.userId } });
     console.log(`✅ Admin user created:`);
     console.log(`   Email:    ${user.email}`);
     console.log(`   Password: ${password}`);

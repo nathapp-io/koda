@@ -1,5 +1,5 @@
+import { Logger } from '@nestjs/common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
-import type { IAuthConfig } from '../config/auth.config';
 import { PermissionCache } from './permission-cache';
 import { PermissionService } from './permission.service';
 import { FakeCacheManager, InMemoryPermissionStore } from './test-helpers/in-memory-permissions';
@@ -8,9 +8,6 @@ import { FakeCacheManager, InMemoryPermissionStore } from './test-helpers/in-mem
  * US-003 — PermissionService.can rules 1-10 and the cached effective keys, without a database.
  * The integration spec covers the same acceptance criteria against Postgres.
  */
-
-/** Agent project scoping on, the installation default (`authConfig.agentProjectScoping !== false`). */
-const AUTH_CONFIG = { agentProjectScoping: true } as IAuthConfig;
 
 const user = (id: string): KodaPrincipal =>
   ({ actorType: 'user', id, role: 'MEMBER', email: `${id}@x.test` }) as KodaPrincipal;
@@ -31,11 +28,23 @@ describe('PermissionService', () => {
       store.roleRepo() as never,
       store.bindingRepo() as never,
       permissionCache,
-      AUTH_CONFIG,
     );
     store.addUser('u1');
     store.projects.add('p1');
     store.projects.add('p2');
+  });
+
+  it('bindings-only AC-8: three arguments and no legacy repository methods are needed', async () => {
+    const findEffectiveBindings = vi.fn(async () => [{
+      binding: { projectId: null }, roleKey: 'member', roleScope: 'GLOBAL', rolePermissions: ['agent.read'],
+    }]);
+    const bindings = { findEffectiveBindings, findAccessibleProjectIds: vi.fn() };
+    const roles = {};
+    const passThrough = { remember: async (_parts: string[], load: () => Promise<string[]>) => load() };
+    const subject = new PermissionService(roles as never, bindings as never, passThrough as never);
+    expect(await subject.can(user('u1'), 'agent.read')).toEqual({ allowed: true, reason: 'granted' });
+    expect(findEffectiveBindings).toHaveBeenCalledExactlyOnceWith({ type: 'USER', id: 'u1' }, null);
+    expect(bindings.findAccessibleProjectIds).not.toHaveBeenCalled();
   });
 
   it('AC-1: a developer binding in p1 grants ticket.create there', async () => {
@@ -76,9 +85,11 @@ describe('PermissionService', () => {
     expect((await service.can(user('u1'), 'role.binding.owner')).allowed).toBe(false);
   });
 
-  it('AC-7: legacy User.role ADMIN with no bindings grants user.create', async () => {
+  it('AC-7: legacy User.role ADMIN with no bindings grants nothing', async () => {
     store.addUser('legacy', 'ADMIN');
-    expect((await service.can(user('legacy'), 'user.create')).allowed).toBe(true);
+    expect(await service.can(user('legacy'), 'user.create')).toEqual({ allowed: false, reason: 'not-granted' });
+    expect(await service.effectiveKeys({ type: 'USER', id: 'legacy' }, 'global')).toEqual(new Set());
+    expect((await service.effectiveKeys({ type: 'USER', id: 'legacy' }, { projectId: 'p1' })).has('ticket.delete')).toBe(false);
   });
 
   it('AC-8: an implicit key is allowed with reason implicit', async () => {
@@ -170,11 +181,10 @@ describe('PermissionService', () => {
       }
     });
 
-    it('the global set of an owner or legacy admin also holds project keys', async () => {
+    it('the global set of an owner also holds project keys', async () => {
       store.addUser('owner1');
       store.bind({ type: 'USER', id: 'owner1' }, 'owner', null);
-      store.addUser('legacy', 'ADMIN');
-      for (const id of ['owner1', 'legacy']) {
+      for (const id of ['owner1']) {
         const keys = await service.effectiveKeys({ type: 'USER', id }, 'global');
         expect(keys.has('ticket.delete')).toBe(true);
         const inProject = await service.effectiveKeys({ type: 'USER', id }, { projectId: 'p1' });
@@ -197,6 +207,98 @@ describe('PermissionService', () => {
       });
       store.bind({ type: 'USER', id: 'u1' }, 'narrow', 'p1');
       expect((await service.can(user('u1'), 'approval.decide', { projectId: 'p1' })).allowed).toBe(true);
+    });
+  });
+
+  describe('principalIdsWithKey', () => {
+    const setup = () => {
+      const roles = { findRolesByScope: vi.fn().mockResolvedValue([
+        { id: 'admin', key: 'admin', permissions: [] },
+        { id: 'owner', key: 'owner', permissions: [] },
+        { id: 'read', key: 'read', permissions: ['project.read'] },
+        { id: 'bad', key: 'bad', permissions: ['not.a.key'] },
+        { id: 'other', key: 'other', permissions: ['agent.read'] },
+      ]) };
+      const bindings = { findCandidatePrincipalIds: vi.fn().mockResolvedValue(['u1', 'u2']) };
+      const subject = new PermissionService(roles as never, bindings as never, permissionCache);
+      return { subject, roles, bindings };
+    };
+    it('enumerates real keys using the shared repository doubles', async () => {
+      store.bind({ type: 'USER', id: 'u1' }, 'developer', 'p1');
+      store.bind({ type: 'USER', id: 'u1' }, 'viewer');
+      store.addUser('u2');
+      store.bind({ type: 'USER', id: 'u2' }, 'admin');
+      store.addUser('u3');
+      store.bind({ type: 'USER', id: 'u3' }, 'developer', 'p2');
+      store.bind({ type: 'AGENT', id: 'a1' }, 'viewer', 'p1');
+      expect(await service.principalIdsWithKey('USER', 'p1', 'project.read')).toEqual(['u1', 'u2']);
+      expect(await service.principalIdsWithKey('AGENT', 'p1', 'project.read')).toEqual(['a1']);
+    });
+    it('expands global roles, excludes invalid entries, and filters every candidate by effectiveKeys', async () => {
+      const { subject, roles, bindings } = setup();
+      const effective = vi.spyOn(subject, 'effectiveKeys').mockImplementation(async (ref) => new Set(ref.id === 'u2' ? ['project.read'] : []));
+      expect(await subject.principalIdsWithKey('USER', 'p1', 'project.read')).toEqual(['u2']);
+      expect(roles.findRolesByScope).toHaveBeenCalledExactlyOnceWith('GLOBAL');
+      expect(bindings.findCandidatePrincipalIds).toHaveBeenCalledExactlyOnceWith('USER', 'p1', ['admin', 'owner', 'read']);
+      expect(effective.mock.calls).toEqual([
+        [{ type: 'USER', id: 'u1' }, { projectId: 'p1' }],
+        [{ type: 'USER', id: 'u2' }, { projectId: 'p1' }],
+      ]);
+    });
+    it('F1: bounds concurrent effectiveKeys reads across multiple chunks and preserves sorted holders', async () => {
+      const { subject, bindings } = setup();
+      const candidates = Array.from({ length: 37 }, (_, i) => `u${String(i).padStart(2, '0')}`);
+      bindings.findCandidatePrincipalIds.mockResolvedValue(candidates);
+      let active = 0;
+      let peak = 0;
+      const effective = vi.spyOn(subject, 'effectiveKeys').mockImplementation(async (ref) => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await Promise.resolve();
+        active -= 1;
+        return new Set(Number(ref.id.slice(1)) % 2 === 0 ? ['project.read'] : []);
+      });
+      expect(await subject.principalIdsWithKey('USER', 'p1', 'project.read')).toEqual(
+        candidates.filter((_, i) => i % 2 === 0),
+      );
+      expect(peak).toBeLessThanOrEqual(10);
+      expect(active).toBe(0);
+      expect(effective).toHaveBeenCalledTimes(candidates.length);
+    });
+    it('F1: a later chunk failure rejects unchanged without starting further chunks', async () => {
+      const { subject, bindings } = setup();
+      bindings.findCandidatePrincipalIds.mockResolvedValue(Array.from({ length: 37 }, (_, i) => `u${i}`));
+      const error = new Error('later candidate read');
+      const effective = vi.spyOn(subject, 'effectiveKeys').mockImplementation(async (ref) => {
+        if (ref.id === 'u11') throw error;
+        return new Set(['project.read']);
+      });
+      await expect(subject.principalIdsWithKey('USER', 'p1', 'project.read')).rejects.toBe(error);
+      expect(effective).toHaveBeenCalledTimes(20);
+      expect(effective).not.toHaveBeenCalledWith({ type: 'USER', id: 'u20' }, { projectId: 'p1' });
+    });
+    it('AC-10: propagates the original candidate effectiveKeys error without a partial answer', async () => {
+      const { subject } = setup();
+      const error = new Error('candidate read');
+      vi.spyOn(subject, 'effectiveKeys').mockResolvedValueOnce(new Set(['project.read'])).mockRejectedValueOnce(error);
+      await expect(subject.principalIdsWithKey('USER', 'p1', 'project.read')).rejects.toBe(error);
+    });
+    it.each(['roles', 'candidates'])('AC-16: propagates the original %s read error', async (source) => {
+      const { subject, roles, bindings } = setup();
+      const error = new Error(source);
+      (source === 'roles' ? roles.findRolesByScope : bindings.findCandidatePrincipalIds).mockRejectedValueOnce(error);
+      await expect(subject.principalIdsWithKey('USER', 'p1', 'project.read')).rejects.toBe(error);
+    });
+    it('AC-17: effectiveKeys keeps the invalid GLOBAL entry warning and grants nothing', async () => {
+      const bindings = { findEffectiveBindings: vi.fn().mockResolvedValue([
+        { binding: { projectId: null }, roleKey: 'bad', roleScope: 'GLOBAL', rolePermissions: ['not.a.key'] },
+      ]) };
+      const subject = new PermissionService({} as never, bindings as never, permissionCache);
+      const warn = vi.spyOn(Logger.prototype, 'warn');
+      warn.mockClear();
+      expect(await subject.effectiveKeys({ type: 'USER', id: 'u1' }, { projectId: 'p1' })).toEqual(new Set());
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('role bad has an invalid permission entry'));
     });
   });
 

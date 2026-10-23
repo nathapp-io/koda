@@ -3,7 +3,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { PrismaClient } from '../../generated/prisma/client';
 import { lockProjectMembers } from '../../common/utils/advisory-lock';
-import { localProjectRole } from '../../permissions/legacy-membership.queries';
+import { localProjectRole } from '../../permissions/membership.queries';
 import { UserDomain } from '../../auth/domain/auth.domain';
 import { ProjectMemberRecord, ProjectMemberRole } from '../members/domain/project-member.domain';
 import { readMemberRecord } from '../members/project-member.queries';

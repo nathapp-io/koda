@@ -32,16 +32,17 @@ describe('PrismaAgentRepository.findProjectRoster (US-002)', () => {
     ticketFindMany = vi.fn();
     projectFindUnique = vi.fn();
 
-    prisma.client.agentProject = { findMany: vi.fn(async () => (await rosterFixtures()).map(
+    prisma.client.roleBinding = { findMany: vi.fn(async () => (await rosterFixtures()).map(
       (row: { createdAt: Date; addedById: string | null; agent: { slug: string } }) => ({
-        agentId: row.agent.slug, createdAt: row.createdAt, addedById: row.addedById,
+        principalId: row.agent.slug, createdAt: row.createdAt,
+        grantedByType: row.addedById ? 'USER' : 'SYSTEM', grantedById: row.addedById ?? 'test',
+        role: { key: 'viewer' },
       }),
     )) };
     agentFindMany = vi.fn(async () => (await rosterFixtures()).map(
       (row: { agent: object & { slug: string } }) => ({ id: row.agent.slug, ...row.agent }),
     ));
     prisma.client.agent = { findMany: agentFindMany };
-    prisma.client.roleBinding = { findMany: vi.fn().mockResolvedValue([]) };
     prisma.client.user = { findMany: vi.fn().mockResolvedValue([{ id: 'user-admin', name: 'Admin' }]) };
     prisma.client.ticket = { findMany: ticketFindMany };
     prisma.client.project = { findUnique: projectFindUnique };

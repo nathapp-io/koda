@@ -397,12 +397,12 @@ describeIntegration('project roles and the unified members list (US-003)', () =>
     ).resolves.toBe(1);
   }, TIMEOUT);
 
-  it('AC-8: a user whose only source in p is a legacy ProjectMember row of DEVELOPER carries exactly one binding { id: null, roleKey: developer, roleName: <the developer role name> }', async () => {
+  it('AC-8: a user whose only source in p is a legacy ProjectMember row of DEVELOPER is absent from the members listing', async () => {
     const body = await page(PROJECT.slug, 'viewer');
 
     const row = body.records.find((record) => record.principalId === userIds.legacydev);
-    expect(row).toBeDefined();
-    expect(row?.bindings).toEqual([{ id: null, roleKey: 'developer', roleName: 'Developer' }]);
+    expect(row).toBeUndefined();
+    expect(body.records.flatMap(record => record.bindings).every(binding => binding.id !== null)).toBe(true);
   }, TIMEOUT);
 
   it('AC-9: GET /api/projects/<p.slug>/members?principals=agents answers 400 validation', async () => {

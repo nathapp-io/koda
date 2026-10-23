@@ -6,24 +6,14 @@ import {
   accessibleProjectIds,
   agentHasProjectAccess,
   countActiveProjectAdmins,
-  legacyRoleKeys,
   listProjectMemberships,
   localProjectRole,
   principalIdsWithAccess,
   readAccessibleProjectIds,
   userProjectRole,
-} from './legacy-membership.queries';
+} from './membership.queries';
 
-/**
- * US-001 — the compatibility queries' source union without a database.
- *
- * The Postgres behaviour is pinned by `test/integration/permissions/legacy-membership-queries.integration.spec.ts`;
- * this spec drives the same functions through a stub client so the merge logic (which sources count,
- * strongest role, `since`, `addedByUserId`, ordering) is pinned by a run that needs no database.
- * The stub keeps the rows in their relational shape and matches `where` the way Prisma does
- * (equality, `in`, `null`, nested relation filters, `OR`), so a query shape the stub cannot answer
- * fails loudly instead of answering with the unfiltered rows.
- */
+/** Binding-only membership mapping, scope, ordering, provenance and bounded paging without a DB. */
 
 type Row = Record<string, unknown>;
 
@@ -123,7 +113,6 @@ function stubClient(rows: {
     roleBinding: { findMany: findMany(rows.roleBinding), findUnique: findUnique(rows.roleBinding) },
     projectMember: { findMany: findMany(rows.projectMember), findUnique: findUnique(rows.projectMember) },
     agentProject: { findMany: findMany(rows.agentProject), findUnique: findUnique(rows.agentProject) },
-    agentRoleEntry: { findMany: findMany(rows.agentRoleEntry), findUnique: findUnique(rows.agentRoleEntry) },
     project: {
       findMany: findMany(rows.project),
       count: async (args: Row = {}) =>
@@ -151,7 +140,6 @@ interface World {
   ): void;
   addLegacyMember(projectId: string, userId: string, role: string, joinedAt?: Date): void;
   addRosterRow(agentId: string, projectId: string, addedById: string | null, createdAt?: Date): void;
-  addAgentRole(agentId: string, role: string): void;
 }
 
 const ROLES: ReadonlyArray<{ key: string; scope: 'GLOBAL' | 'PROJECT' }> = [
@@ -173,7 +161,6 @@ function world(): World {
     roleBinding: [] as Row[],
     projectMember: [] as Row[],
     agentProject: [] as Row[],
-    agentRoleEntry: [] as Row[],
     project: [] as Row[],
     user: [] as Row[],
     agent: [] as Row[],
@@ -219,13 +206,10 @@ function world(): World {
     addRosterRow(agentId, projectId, addedById, createdAt) {
       rows.agentProject.push({ agentId, projectId, addedById, createdAt: createdAt ?? next() });
     },
-    addAgentRole(agentId, role) {
-      rows.agentRoleEntry.push({ agentId, role });
-    },
   };
 }
 
-describe('legacy-membership.queries', () => {
+describe('membership.queries', () => {
   let fixture: World;
   let db: PrismaClient;
 
@@ -245,7 +229,7 @@ describe('legacy-membership.queries', () => {
       expect(await userProjectRole(db, 'u1', 'p1')).toBe('DEVELOPER');
     });
 
-    it('AC-4: the strongest of a legacy row and a project binding wins', async () => {
+    it('AC-4: a legacy row cannot override the bound role', async () => {
       fixture.addUser('u1');
       fixture.addProject('p1');
       fixture.addLegacyMember('p1', 'u1', 'VIEWER');
@@ -304,19 +288,19 @@ describe('legacy-membership.queries', () => {
   });
 
   describe('localProjectRole', () => {
-    it('reads the legacy row for a USER and the roster row for an AGENT', async () => {
+    it('ignores legacy-only USER and AGENT sources', async () => {
       fixture.addUser('u1');
       fixture.addAgent('a1');
       fixture.addProject('p1');
       fixture.addLegacyMember('p1', 'u1', 'AGENT');
       fixture.addRosterRow('a1', 'p1', null);
 
-      expect(await localProjectRole(db, user('u1'), 'p1')).toBe('AGENT');
-      expect(await localProjectRole(db, { type: 'AGENT', id: 'a1' }, 'p1')).toBe('VIEWER');
+      expect(await localProjectRole(db, user('u1'), 'p1')).toBeNull();
+      expect(await localProjectRole(db, { type: 'AGENT', id: 'a1' }, 'p1')).toBeNull();
       expect(await localProjectRole(db, { type: 'AGENT', id: 'ghost' }, 'p1')).toBeNull();
     });
 
-    it('takes the strongest of a legacy row and the project bindings', async () => {
+    it('takes the strongest project binding role', async () => {
       fixture.addUser('u1');
       fixture.addProject('p1');
       fixture.addLegacyMember('p1', 'u1', 'VIEWER');
@@ -347,98 +331,8 @@ describe('legacy-membership.queries', () => {
     });
   });
 
-  describe('legacyRoleKeys', () => {
-    const agent = (id: string) => ({ type: 'AGENT' as const, id });
-
-    it('answers no keys for the global scope', async () => {
-      fixture.addUser('u1');
-      fixture.addAgent('a1');
-      fixture.addProject('p1');
-      fixture.addLegacyMember('p1', 'u1', 'ADMIN');
-      fixture.addRosterRow('a1', 'p1', null);
-
-      expect(await legacyRoleKeys(db, user('u1'), null, true)).toEqual([]);
-      expect(await legacyRoleKeys(db, agent('a1'), null, true)).toEqual([]);
-    });
-
-    it('maps a legacy ProjectMember role to its system role key', async () => {
-      fixture.addProject('p1');
-      fixture.addUser('admin');
-      fixture.addUser('dev');
-      fixture.addUser('viewer');
-      fixture.addUser('agent-role');
-      fixture.addLegacyMember('p1', 'admin', 'ADMIN');
-      fixture.addLegacyMember('p1', 'dev', 'DEVELOPER');
-      fixture.addLegacyMember('p1', 'viewer', 'VIEWER');
-      fixture.addLegacyMember('p1', 'agent-role', 'AGENT');
-
-      expect(await legacyRoleKeys(db, user('admin'), 'p1', true)).toEqual(['project-admin']);
-      expect(await legacyRoleKeys(db, user('dev'), 'p1', true)).toEqual(['developer']);
-      // Any other stored role is the viewer role: the least-privileged legacy set.
-      expect(await legacyRoleKeys(db, user('viewer'), 'p1', true)).toEqual(['viewer']);
-      expect(await legacyRoleKeys(db, user('agent-role'), 'p1', true)).toEqual(['viewer']);
-    });
-
-    it('answers no keys for a user with no row in the project, and for unknown ids', async () => {
-      fixture.addUser('u1');
-      fixture.addProject('p1');
-      fixture.addProject('p2');
-      fixture.addLegacyMember('p1', 'u1', 'DEVELOPER');
-
-      expect(await legacyRoleKeys(db, user('u1'), 'p2', true)).toEqual([]);
-      expect(await legacyRoleKeys(db, user('ghost'), 'p1', true)).toEqual([]);
-      expect(await legacyRoleKeys(db, user('u1'), 'ghost-project', true)).toEqual([]);
-    });
-
-    it('answers the viewer role for a roster row and one key per AgentRoleEntry with access', async () => {
-      fixture.addProject('p1');
-      fixture.addAgent('a1');
-      fixture.addAgent('a2');
-      fixture.addAgent('a3');
-      fixture.addRosterRow('a1', 'p1', null);
-      fixture.addRosterRow('a2', 'p1', null);
-      fixture.addAgentRole('a2', 'DEVELOPER');
-      fixture.addAgentRole('a2', 'REVIEWER');
-      fixture.addAgentRole('a2', 'VERIFIER');
-      fixture.addAgentRole('a2', 'TRIAGER');
-      fixture.addAgentRole('a2', 'DEVELOPER');
-      fixture.addAgentRole('a3', 'DEVELOPER');
-
-      expect(await legacyRoleKeys(db, agent('a1'), 'p1', true)).toEqual(['viewer']);
-      expect(await legacyRoleKeys(db, agent('a2'), 'p1', true)).toEqual([
-        'viewer',
-        'developer',
-        'reviewer',
-        'verifier',
-        'triager',
-      ]);
-      // No roster row and no binding: the agent has no source here, so its global roles add nothing.
-      expect(await legacyRoleKeys(db, agent('a3'), 'p1', true)).toEqual([]);
-    });
-
-    it('reads an agent role through a binding-only source too', async () => {
-      fixture.addProject('p1');
-      fixture.addAgent('a1');
-      fixture.bind('AGENT', 'a1', 'viewer', 'p1');
-      fixture.addAgentRole('a1', 'DEVELOPER');
-
-      expect(await legacyRoleKeys(db, agent('a1'), 'p1', true)).toEqual(['developer']);
-    });
-
-    it('with scoping off, answers the viewer role and the agent roles in every live project', async () => {
-      fixture.addProject('p1');
-      fixture.addProject('gone', true);
-      fixture.addAgent('a1');
-      fixture.addAgentRole('a1', 'DEVELOPER');
-
-      expect(await legacyRoleKeys(db, agent('a1'), 'p1', false)).toEqual(['viewer', 'developer']);
-      expect(await legacyRoleKeys(db, agent('a1'), 'ghost-project', false)).toEqual([]);
-      expect(await legacyRoleKeys(db, agent('a1'), 'gone', false)).toEqual([]);
-    });
-  });
-
   describe('accessibleProjectIds', () => {
-    it('AC-8: legacy roster row and project bindings, without soft-deleted projects', async () => {
+    it('AC-8: only binding projects, without soft-deleted projects', async () => {
       fixture.addAgent('a1');
       fixture.addProject('p2');
       fixture.addProject('p1');
@@ -447,7 +341,7 @@ describe('legacy-membership.queries', () => {
       fixture.bind('AGENT', 'a1', 'viewer', 'p2');
       fixture.bind('AGENT', 'a1', 'viewer', 'gone');
 
-      expect(await accessibleProjectIds(db, { type: 'AGENT', id: 'a1' })).toEqual(['p1', 'p2']);
+      expect(await accessibleProjectIds(db, { type: 'AGENT', id: 'a1' })).toEqual(['p2']);
     });
 
     it('AC-9: a global project binding answers every non-deleted project', async () => {
@@ -521,7 +415,7 @@ describe('legacy-membership.queries', () => {
   });
 
   describe('principalIdsWithAccess', () => {
-    it('AC-10: legacy rows, project bindings and global project bindings; nothing else', async () => {
+    it('AC-10: project bindings and global project bindings; legacy rows are inert', async () => {
       fixture.addProject('p1');
       fixture.addProject('p2');
       fixture.addUser('legacy');
@@ -535,7 +429,7 @@ describe('legacy-membership.queries', () => {
       fixture.bind('USER', 'global-admin', 'admin', null);
       fixture.bind('USER', 'other-project', 'developer', 'p2');
 
-      expect(await principalIdsWithAccess(db, 'p1', 'USER')).toEqual(['bound', 'global', 'legacy']);
+      expect(await principalIdsWithAccess(db, 'p1', 'USER')).toEqual(['bound', 'global']);
     });
 
     it('includes disabled users: the caller filters on disabled', async () => {
@@ -568,6 +462,12 @@ describe('legacy-membership.queries', () => {
   });
 
   describe('listProjectMemberships', () => {
+    it('AC-15: propagates the exact binding read error', async () => {
+      const error = new Error('binding read failed');
+      vi.spyOn(db.roleBinding, 'findMany').mockRejectedValueOnce(error);
+      await expect(listProjectMemberships(db, 'p1', 'USER')).rejects.toBe(error);
+    });
+
     it('AC-11: one entry per principal with a local source, from its earliest one', async () => {
       const earliest = new Date('2026-01-01T00:00:00.000Z');
       const later = new Date('2026-02-01T00:00:00.000Z');
@@ -581,11 +481,9 @@ describe('legacy-membership.queries', () => {
       fixture.addLegacyMember('p1', 'u1', 'ADMIN', later);
 
       expect(await listProjectMemberships(db, 'p1', 'AGENT')).toEqual<ProjectMembership[]>([
-        { principalId: 'a1', role: 'VIEWER', since: earliest, addedByUserId: 'u1' },
+        { principalId: 'a1', role: 'VIEWER', since: later, addedByUserId: null },
       ]);
-      expect(await listProjectMemberships(db, 'p1', 'USER')).toEqual<ProjectMembership[]>([
-        { principalId: 'u1', role: 'ADMIN', since: later, addedByUserId: null },
-      ]);
+      expect(await listProjectMemberships(db, 'p1', 'USER')).toEqual([]);
     });
 
     it('carries the granter of an earliest binding and null for a non-user granter', async () => {
@@ -631,7 +529,7 @@ describe('legacy-membership.queries', () => {
       expect(await listProjectMemberships(db, 'ghost-project', 'AGENT')).toEqual([]);
     });
 
-    it('keeps a legacy role that is not one of the three, and takes the strongest of the sources', async () => {
+    it('ignores stored legacy roles and maps only binding role keys', async () => {
       fixture.addProject('p1');
       fixture.addUser('u1');
       fixture.addUser('u2');
@@ -663,7 +561,7 @@ describe('legacy-membership.queries', () => {
       fixture.bind('USER', 'd', 'project-admin', 'p1');
       fixture.bind('USER', 'viewer-only', 'viewer', 'p1');
 
-      expect(await countActiveProjectAdmins(db, 'p1')).toBe(3);
+      expect(await countActiveProjectAdmins(db, 'p1')).toBe(2);
     });
 
     it('ignores a global project-admin binding, another project and unknown ids', async () => {

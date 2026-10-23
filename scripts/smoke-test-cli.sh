@@ -148,20 +148,8 @@ else
 fi
 
 JWT=$(echo "$REGISTER" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['accessToken'])" 2>/dev/null)
-USER_ID=$(echo "$REGISTER" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['user']['id'])" 2>/dev/null)
-
-# Promote user to ADMIN (idempotent; the first registered user is already ADMIN on a fresh DB)
-if ! (cd "$API_DIR" && echo "UPDATE \"User\" SET \"role\" = 'ADMIN' WHERE \"id\" = '${USER_ID}';" \
-    | DATABASE_URL="$SMOKE_DATABASE_URL" bunx prisma db execute --stdin > /tmp/koda-smoke-promote-$$.log 2>&1); then
-  fail "ADMIN promotion failed: $(cat /tmp/koda-smoke-promote-$$.log)"; exit 1
-fi
-
-# Re-login to get a fresh JWT with ADMIN role
-LOGIN=$(curl -sf -X POST "$API_URL/api/auth/login" \
-  -H "Content-Type: application/json" \
-  -d '{"email":"smoke@koda.test","password":"SmokeSecure123!"}' 2>&1)
-JWT=$(echo "$LOGIN" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['accessToken'])" 2>/dev/null)
-ok "Promoted user to ADMIN"
+# Registration on the freshly reset database grants the first user the member
+# and owner bindings. User.role is display-only and must not be used to grant access.
 
 PROJECT=$(curl -sf -X POST "$API_URL/api/projects" \
   -H "Content-Type: application/json" \
@@ -184,9 +172,8 @@ else
   fail "Create agent: $AGENT"; exit 1
 fi
 
-# S4c US-001: agent project reach is roster-scoped (fail closed). The CLI
-# below authenticates as this agent, so put it on the project roster —
-# without the row every project-scoped command 403s.
+# The roster route grants a viewer binding. Legacy AgentRoleEntry rows from
+# agent creation no longer grant keys, so grant the workflow roles separately.
 ROSTER=$(curl -s -X POST "$API_URL/api/projects/koda/agents" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $JWT" \
@@ -196,6 +183,23 @@ if echo "$ROSTER" | grep -q '"slug"'; then
 else
   fail "Add agent to roster: $ROSTER"; exit 1
 fi
+
+PROJECT_ID=$(echo "$PROJECT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['id'])" 2>/dev/null)
+AGENT_ID=$(echo "$AGENT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['agent']['id'])" 2>/dev/null)
+if [[ -z "$PROJECT_ID" || -z "$AGENT_ID" ]]; then
+  fail "Missing project or agent id for role bindings"; exit 1
+fi
+for ROLE_KEY in developer reviewer verifier triager; do
+  BINDING_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API_URL/api/role-bindings" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $JWT" \
+    -d "{\"principalType\":\"AGENT\",\"principalId\":\"$AGENT_ID\",\"roleKey\":\"$ROLE_KEY\",\"projectId\":\"$PROJECT_ID\"}" 2>&1)
+  if [[ "$BINDING_CODE" == "201" ]]; then
+    ok "Grant agent $ROLE_KEY binding"
+  else
+    fail "Grant agent $ROLE_KEY binding — expected HTTP 201, got $BINDING_CODE"; exit 1
+  fi
+done
 
 # =============================================================================
 # STEP 5: Configure CLI

@@ -35,7 +35,7 @@ describe('AgentsService project roster writes (S4c US-003)', () => {
   let service: AgentsService;
   let membership: { createBinding: Mock; removeProjectBindings: Mock; afterCommit: Mock };
 
-  const authConfig: IAuthConfig = { apiKeySecret: 'test-secret', agentProjectScoping: true } as IAuthConfig;
+  const authConfig: IAuthConfig = { apiKeySecret: 'test-secret' } as IAuthConfig;
   const project = { id: 'proj-1', slug: 'alpha', deletedAt: null };
 
   /** Permissions P1 (US-009): the roster writes never check a key — the route does. */

@@ -119,7 +119,7 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
     effectiveKeys: vi.fn(async () => new Set<string>(['agent.pickup'])),
   };
 
-  const DEFAULT_AUTH_CONFIG: Omit<IAuthConfig, 'agentProjectScoping'> = {
+  const DEFAULT_AUTH_CONFIG: IAuthConfig = {
     jwtSecret: 'jwt-secret',
     jwtExpiresIn: '15m',
     jwtRefreshSecret: 'jwt-refresh-secret',
@@ -322,26 +322,6 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.ticket.ref).toBe('KT-1');
     expect(permissions.effectiveKeys).toHaveBeenCalledTimes(1);
-    expect(agentRepo.isOnProjectRoster).not.toHaveBeenCalled();
-  });
-
-  it('US-009: still asks the target agent keys when agent project scoping is off', async () => {
-    await app.close();
-    await bootApp({ agentProjectScoping: false });
-    seedHappyPath();
-    permissions.effectiveKeys.mockResolvedValue(new Set<string>());
-    currentPrincipal = userPrincipal('ADMIN');
-
-    const res = await request(app.getHttpServer())
-      .get('/api/agents/test-agent/pickup')
-      .query({ project: 'koda' });
-
-    expect(res.status).toBe(403);
-    // Scoping off changes what the rows grant, not whether the key is asked for.
-    expect(permissions.effectiveKeys).toHaveBeenCalledWith(
-      { type: 'AGENT', id: 'agent-123' },
-      { projectId: 'project-1' },
-    );
     expect(agentRepo.isOnProjectRoster).not.toHaveBeenCalled();
   });
 

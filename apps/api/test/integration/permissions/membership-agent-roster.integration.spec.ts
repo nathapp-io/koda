@@ -1,3 +1,4 @@
+import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -96,10 +97,11 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
     expect(await bindings(a)).toMatchObject([{ role: { key: 'viewer' } }]);
     refusal(await add(a), 409, 'Agent is already on the project roster');
   });
-  it('AC-4: duplicate legacy add is a conflict', async () => {
+  it('AC-4: adding a legacy-only roster agent creates a binding', async () => {
     const a = await agent('legacy-duplicate-bot');
     await legacy(a);
-    refusal(await add(a), 409, 'Agent is already on the project roster');
+    await add(a).expect(201);
+    expect(await bindings(a)).toMatchObject([{ role: { key: 'viewer' } }]);
   });
   it('AC-5: list merges local sources in name order but excludes global-only agents', async () => {
     const a = await agent('list-bound-bot', 'AAA Bound');
@@ -111,7 +113,8 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
     await bind(g, null, 'developer');
     const res = await request(server).get('/api/projects/p1/agents').set(auth()).expect(200);
     const rows = data<{ items: { slug: string; name: string }[] }>(res).items;
-    expect(rows.map(row => row.slug)).toEqual(expect.arrayContaining([a.slug, b.slug]));
+    expect(rows.map(row => row.slug)).toContain(a.slug);
+    expect(rows.map(row => row.slug)).not.toContain(b.slug);
     expect(rows.map(row => row.slug)).not.toContain(g.slug);
     expect(rows.map(row => row.name)).toEqual(rows.map(row => row.name).sort());
   });
@@ -173,20 +176,21 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
     const first = new Date('2020-01-01T00:00:00.000Z');
     await db.agentProject.update({ where: { agentId_projectId: { agentId: a.id, projectId: projects.p1 } },
       data: { createdAt: first } });
-    await membership.createBinding({ principal: { type: 'AGENT', id: a.id }, roleKey: 'viewer', projectId: projects.p1 },
+    const binding = await membership.createBinding({ principal: { type: 'AGENT', id: a.id }, roleKey: 'viewer', projectId: projects.p1 },
       { type: 'SYSTEM', id: adminId });
     const b = await agent('system-granter-bot');
     await membership.createBinding({ principal: { type: 'AGENT', id: b.id }, roleKey: 'viewer', projectId: projects.p1 },
       { type: 'SYSTEM', id: adminId });
     const res = await request(server).get('/api/projects/p1/agents').set(auth()).expect(200);
     const rows = data<{ items: { slug: string; addedAt: string; addedBy: unknown }[] }>(res).items;
-    expect(rows.find(row => row.slug === a.slug)).toMatchObject({ addedAt: first.toISOString(),
-      addedBy: { id: adminId, name: 'Roster Admin' } });
+    expect(rows.find(row => row.slug === a.slug)).toMatchObject({ addedAt: binding.createdAt.toISOString(), addedBy: null });
     expect(rows.find(row => row.slug === b.slug)?.addedBy).toBeNull();
   });
-  it('AC-10: viewer-only agent can pick up from project', async () => {
+  it('AC-10: explicitly bound developer agent can pick up from project', async () => {
     const a = await agent('pickup-bound-bot');
     await bind(a);
+    await grantRole(db, { type: 'AGENT', id: a.id }, 'developer', projects.p1);
+    await membership.invalidatePermissions();
     await request(server).get(`/api/agents/${a.slug}/pickup?project=p1`).set({ Authorization: `Bearer ${a.apiKey}` }).expect(200);
   });
   it('AC-11: agent without access cannot pick up from project', async () => {
@@ -198,19 +202,15 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
   // VERIFIER, so a VERIFIER-only agent's pickup was refused *after* the pickup itself was allowed.
   it('US-003 AC-11: a rostered VERIFIER-only agent picks up and its TICKET_SUGGESTED event is stored', async () => {
     const a = await agent('pickup-verifier-bot', 'Pickup Verifier', ['VERIFIER']);
-    // Its only legacy membership source is the AgentProject roster row; its only legacy role is the
-    // VERIFIER AgentRoleEntry. No binding, no ProjectMember row (agents have none).
-    await legacy(a);
-    expect(await db.agentRoleEntry.findMany({ where: { agentId: a.id }, select: { role: true } }))
-      .toEqual([{ role: 'VERIFIER' }]);
-    expect(await bindings(a)).toEqual([]);
+    await bind(a);
+    await bind(a, projects.p1, 'verifier');
     const ticket = await db.ticket.create({
       data: {
         projectId: projects.p1, number: 900, title: 'Verifier pickup', type: 'BUG',
         status: 'VERIFIED', createdByUserId: adminId,
       },
     });
-    // The roster row and the ticket were written behind the API's back, so drop the cached keys.
+    // Recompute keys after the fixture writes.
     await membership.invalidatePermissions();
 
     const res = await request(server).get(`/api/agents/${a.slug}/pickup?project=p1`)
@@ -225,7 +225,7 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
     await bind(a, projects['p-beta']);
     await legacy(a, projects['p-alpha']);
     const res = await request(server).get('/api/agents/me').set({ Authorization: `Bearer ${a.apiKey}` }).expect(200);
-    expect(data<{ projects: { slug: string }[] }>(res).projects.map(p => p.slug)).toEqual(['p-alpha', 'p-beta']);
+    expect(data<{ projects: { slug: string }[] }>(res).projects.map(p => p.slug)).toEqual(['p-beta']);
   });
   it('AC-13: concurrent adds produce one 201, one 409, and exactly one binding', async () => {
     const a = await agent('race-bot');

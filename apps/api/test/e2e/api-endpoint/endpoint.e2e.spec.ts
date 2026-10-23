@@ -19,7 +19,7 @@ import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { MembershipService } from '../../../src/permissions/membership.service';
-import { expectBindingOnlyFixtures, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
+import { expectBindingOnlyFixtures, grantBaseline, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { SKILL_RESOLVER, SkillResolver } from '../../../src/skills/skill-resolver';
@@ -1579,6 +1579,35 @@ describeIntegration('API Integration Tests', () => {
       expect(agents.map((item) => item.name)).toEqual([...agents.map((item) => item.name)].sort((a, b) => a.localeCompare(b)));
     });
 
+    it('binding-only assignees: offers a custom GLOBAL project.read holder with no project binding', async () => {
+      const db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+      const membership = app.get(MembershipService);
+      const role = await db.role.create({ data: {
+        key: 'endpoint-assignee-reader', name: 'Assignee reader', scope: 'GLOBAL', permissions: ['project.read'],
+      } });
+      const holder = await db.user.create({ data: {
+        email: 'endpoint-assignee-reader@koda.test', name: 'Assignee reader', passwordHash: 'unused-login',
+      } });
+      try {
+        await grantBaseline(db, { type: 'USER', id: holder.id });
+        await grantRole(db, { type: 'USER', id: holder.id }, role.key);
+        await membership.invalidatePermissions();
+        const res = await request(httpServer)
+          .get(`/api/projects/${projectSlug}/assignees`)
+          .query({ q: '' })
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .expect(200);
+        expect(body<{ items: { id: string; type: string }[] }>(res).items).toContainEqual(
+          expect.objectContaining({ id: holder.id, type: 'user' }),
+        );
+      } finally {
+        await db.roleBinding.deleteMany({ where: { principalType: 'USER', principalId: holder.id } });
+        await db.user.delete({ where: { id: holder.id } });
+        await db.role.delete({ where: { id: role.id } });
+        await membership.invalidatePermissions();
+      }
+    });
+
     it('US-004 AC11: matches users and agents by case-insensitive name or slug query', async () => {
       const res = await request(httpServer)
         .get(`/api/projects/${projectSlug}/assignees`)
@@ -1715,7 +1744,7 @@ describeIntegration('API Integration Tests', () => {
 
       // US-002: the response shape is { scoping, items: ProjectAgentDto[] }
       const data = body<{ scoping: boolean; items: { slug: string; status: string }[] }>(res);
-      expect(data).toHaveProperty('scoping');
+      expect(data.scoping).toBe(true);
       expect(Array.isArray(data.items)).toBe(true);
       // agentSlug has an assigned ticket (set up in beforeAll) and is on the
       // roster (also in beforeAll), so it must appear in items.

@@ -4,7 +4,7 @@ import { PrismaClient } from '../generated/prisma/client';
 import { EmailAvailability } from './email-availability';
 import { EmailScheduleRow, SkipReason } from './schedule/email-schedule.types';
 import { NotificationPreferencesService } from '../notifications/notification-preferences.service';
-import { userProjectRole } from '../permissions/legacy-membership.queries';
+import { userProjectRole } from '../permissions/membership.queries';
 import type { NotificationCategory } from '../notifications/notification.types';
 
 /**
@@ -63,8 +63,8 @@ export class EmailContentBuilder {
    * soft-deleted → SOURCE_GONE; no access source in the project → SOURCE_GONE; otherwise the member
    * data.
    *
-   * Permissions P1b US-005: the role comes from `userProjectRole`, the compatibility union over the
-   * user's legacy `ProjectMember` row and its PROJECT-scope bindings — in the project and
+   * Permissions P1b US-005: the role comes from `userProjectRole` over the
+   * user's PROJECT-scope bindings — in the project and
    * `projectId`-null — so a membership that lives only in a binding answers its own legacy role
    * (`ADMIN`/`DEVELOPER`/`VIEWER`) instead of falling through to SOURCE_GONE.
    */

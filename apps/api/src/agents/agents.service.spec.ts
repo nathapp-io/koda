@@ -949,34 +949,6 @@ describe('AgentsService', () => {
       expect(agentRepo.isOnProjectRoster).not.toHaveBeenCalled();
     });
 
-    it('still asks the target agent keys when agent project scoping is off (US-009)', async () => {
-      const unscoped = new AgentsService(
-        mockAgentRepo as never,
-        { ...mockAuthConfig, agentProjectScoping: false },
-        mockTxManager as never,
-        // Permissions P1a (US-004): MembershipService is the required fourth parameter.
-        mockMembership as never,
-        // Permissions P1 (US-009): PermissionService is the required fifth, before the optional seams.
-        mockPermissions as never,
-        mockKodaDomainWriter as never,
-      );
-
-      mockAgentRepo.findBySlugWithCapabilities.mockResolvedValue(mockAgentForPickup);
-      mockAgentRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockAgentRepo.findVerifiedUnassignedTickets.mockResolvedValue([]);
-      // Scoping off widens what an agent's rows grant; it does not skip the key check.
-      mockPermissions.effectiveKeys.mockResolvedValue(new Set<string>());
-
-      await expect(unscoped.suggestTicket('test-agent', 'koda', authorizedPrincipal)).rejects.toBeInstanceOf(
-        ForbiddenAppException,
-      );
-      expect(mockPermissions.effectiveKeys).toHaveBeenCalledWith(
-        { type: 'AGENT', id: 'agent-123' },
-        { projectId: 'project-1' },
-      );
-      expect(agentRepo.findVerifiedUnassignedTickets).not.toHaveBeenCalled();
-    });
-
     it('should return highest-priority ticket when all scores are 0 (score-0 fallback)', async () => {
       mockAgentRepo.findBySlugWithCapabilities.mockResolvedValue(mockAgentForPickup);
       mockAgentRepo.findProjectBySlug.mockResolvedValue(mockProject);
@@ -1200,29 +1172,6 @@ describe('AgentsService', () => {
 
       expect(result.items[0].openTicketCount).toBe(3);
       expect(result.items[0].openTicketRefs).toEqual(['ALP-1', 'ALP-2', 'ALP-3']);
-    });
-
-    it('returns scoping: false when AGENT_PROJECT_SCOPING is off', async () => {
-      // Reboot the module with scoping off
-      const modOff = await Test.createTestingModule({
-        providers: [
-          AgentsService,
-          { provide: PrismaAgentRepository, useValue: mockAgentRepo },
-          { provide: AUTH_CFG, useValue: { ...mockAuthConfig, agentProjectScoping: false } },
-          { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
-          { provide: MembershipService, useValue: mockMembership },
-          { provide: PermissionService, useValue: mockPermissions },
-          { provide: KodaDomainWriter, useValue: mockKodaDomainWriter },
-        ],
-      }).compile();
-      const offService = modOff.get<AgentsService>(AgentsService);
-      mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: null });
-      mockAgentRepo.findProjectRoster.mockResolvedValue([]);
-
-      const result = await offService.listProjectRoster('alpha');
-
-      expect(result.scoping).toBe(false);
-      expect(result.items).toEqual([]);
     });
 
     it('throws NotFoundAppException when the project is missing or soft-deleted', async () => {

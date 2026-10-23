@@ -5,7 +5,7 @@ import {
   accessibleProjectIds,
   agentHasProjectAccess,
   userProjectRole,
-} from '../permissions/legacy-membership.queries';
+} from '../permissions/membership.queries';
 import type { PrincipalRef } from '../permissions/permissions.types';
 import { ProjectDomain, CreateProjectData } from './domain/project.domain';
 
@@ -76,22 +76,16 @@ export class PrismaProjectRepository {
   }
 
   /**
-   * The caller's legacy project role over its **access sources**: its legacy
-   * `ProjectMember` row unioned with its PROJECT-scope bindings, in this project
-   * and `projectId`-null. `null` when it has none — the same answer the legacy
-   * read gave a non-member.
+   * The caller's display project role over its PROJECT-scope bindings, in this project
+   * and `projectId`-null. `null` when it has none.
    */
   async findMembershipRole(projectId: string, userId: string): Promise<string | null> {
     return userProjectRole(this.prisma.client, userId, projectId);
   }
 
   /**
-   * S4c US-001: membership of the agent roster. The row carries no role — it
-   * grants project reach only; permissions come from AgentRoleEntry.
-   *
-   * US-002: reach comes from the agent's access sources — its `AgentProject`
-   * row unioned with its project bindings (and its `projectId`-null PROJECT
-   * bindings, which reach every project).
+   * Agent reach comes from PROJECT-scope bindings in the project or globally.
+   * Global project bindings count only in live projects.
    */
   async isAgentOnRoster(projectId: string, agentId: string): Promise<boolean> {
     return agentHasProjectAccess(this.prisma.client, agentId, projectId);
@@ -107,7 +101,7 @@ export class PrismaProjectRepository {
 
   /**
    * US-002: the access-source read both list methods share. The ids come from
-   * the compatibility queries (legacy rows unioned with bindings; every
+   * the binding-only queries (every
    * non-deleted project for a `projectId`-null PROJECT binding), and the rows
    * are then read in ascending id order.
    */

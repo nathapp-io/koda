@@ -1,6 +1,6 @@
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../generated/prisma/client';
-import { MEMBERSHIP_READ_CAP } from '../permissions/legacy-membership.queries';
+import { MEMBERSHIP_READ_CAP } from '../permissions/membership.queries';
 import { PrismaProjectRepository } from './prisma-project.repository';
 
 /**
@@ -15,7 +15,7 @@ import { PrismaProjectRepository } from './prisma-project.repository';
  * the access sources cannot pass, and a real binding row is invisible to the legacy query.
  *
  * The queries' own union logic (which source counts, strongest role) is pinned by
- * `src/permissions/legacy-membership.queries.spec.ts`; here the question is only that each method
+ * `src/permissions/membership.queries.spec.ts`; here the question is only that each method
  * reaches it.
  */
 
@@ -240,7 +240,7 @@ describe('PrismaProjectRepository — membership reads (US-002)', () => {
       expect(client.roleBinding.findMany).toHaveBeenCalled();
     });
 
-    it('keeps a legacy ProjectMember role', async () => {
+    it('ignores a legacy-only ProjectMember role', async () => {
       const { repository } = repositoryFor({
         projects,
         members: [{ projectId: 'p1', userId: 'u1', role: 'DEVELOPER', joinedAt: new Date() }],
@@ -248,7 +248,7 @@ describe('PrismaProjectRepository — membership reads (US-002)', () => {
         bindings: [],
       });
 
-      await expect(repository.findMembershipRole('p1', 'u1')).resolves.toBe('DEVELOPER');
+      await expect(repository.findMembershipRole('p1', 'u1')).resolves.toBeNull();
     });
 
     it('takes the strongest of a legacy row and a binding', async () => {
@@ -297,7 +297,7 @@ describe('PrismaProjectRepository — membership reads (US-002)', () => {
       await expect(repository.isAgentOnRoster('p1', 'a1')).resolves.toBe(true);
     });
 
-    it('keeps a legacy AgentProject row, and answers false without any source', async () => {
+    it('ignores a legacy-only AgentProject row, and answers false without any source', async () => {
       const rostered = repositoryFor({
         projects,
         members: [],
@@ -306,7 +306,7 @@ describe('PrismaProjectRepository — membership reads (US-002)', () => {
       });
       const none = repositoryFor({ projects, members: [], roster: [], bindings: [] });
 
-      await expect(rostered.repository.isAgentOnRoster('p1', 'a1')).resolves.toBe(true);
+      await expect(rostered.repository.isAgentOnRoster('p1', 'a1')).resolves.toBe(false);
       await expect(none.repository.isAgentOnRoster('p1', 'a1')).resolves.toBe(false);
     });
 
@@ -336,17 +336,17 @@ describe('PrismaProjectRepository — membership reads (US-002)', () => {
       expect(found.map((project) => project.slug)).toEqual(['p1']);
     });
 
-    it('unions a legacy row with a binding and de-duplicates the project', async () => {
+    it('ignores a legacy-only project when listing bound projects', async () => {
       const { repository } = repositoryFor({
         projects,
         members: [{ projectId: 'p2', userId: 'u1', role: 'DEVELOPER', joinedAt: new Date() }],
         roster: [],
-        bindings: [bind('USER', 'u1', 'viewer', 'p2'), bind('USER', 'u1', 'viewer', 'p1')],
+        bindings: [bind('USER', 'u1', 'viewer', 'p1')],
       });
 
       const found = await repository.findAllForUser('u1');
 
-      expect(found.map((project) => project.slug)).toEqual(['p1', 'p2']);
+      expect(found.map((project) => project.slug)).toEqual(['p1']);
     });
 
     it('lists every non-deleted project for a projectId-null project binding', async () => {
@@ -371,7 +371,7 @@ describe('PrismaProjectRepository — membership reads (US-002)', () => {
   });
 
   describe('findAllForAgent', () => {
-    it('lists the projects of the agent bindings and of its roster row', async () => {
+    it('lists only the projects of the agent bindings', async () => {
       const { repository } = repositoryFor({
         projects,
         members: [],
@@ -381,7 +381,7 @@ describe('PrismaProjectRepository — membership reads (US-002)', () => {
 
       const found = await repository.findAllForAgent('a1');
 
-      expect(found.map((project) => project.slug)).toEqual(['p1', 'p2']);
+      expect(found.map((project) => project.slug)).toEqual(['p1']);
     });
 
     it('never returns a soft-deleted project', async () => {

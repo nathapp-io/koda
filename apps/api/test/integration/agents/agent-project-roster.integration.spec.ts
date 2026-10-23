@@ -7,6 +7,7 @@
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/agents/agent-project-roster.integration.spec.ts
  */
+import { ensureSystemRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { resetDb } from '../../helpers/reset-db';
@@ -26,6 +27,7 @@ describeIntegration('PrismaAgentRepository.findProjectRoster (PG)', () => {
 
   beforeAll(async () => {
     await resetDb();
+    await ensureSystemRoles(prisma);
 
     const project = await prisma.project.create({
       data: { name: 'Roster Project', slug: 'roster-proj', key: 'RPJ' },
@@ -52,9 +54,8 @@ describeIntegration('PrismaAgentRepository.findProjectRoster (PG)', () => {
     const adder = await prisma.user.create({
       data: { email: 'adder@koda.test', name: 'Adder', passwordHash: 'x' },
     });
-    await prisma.agentProject.create({
-      data: { projectId, agentId: rosterAgentId, addedById: adder.id },
-    });
+    const viewer = await prisma.role.findUniqueOrThrow({ where: { key: 'viewer' } });
+    await prisma.roleBinding.create({ data: { projectId, principalType: 'AGENT', principalId: rosterAgentId, roleId: viewer.id, grantedByType: 'USER', grantedById: adder.id } });
 
     // Build 12 open tickets (CREATED) for the rostered agent + 1 CLOSED + 1
     // REJECTED + 1 soft-deleted CREATED. Of the 12, only the first 10 surface as
