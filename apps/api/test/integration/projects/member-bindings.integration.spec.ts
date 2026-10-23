@@ -233,7 +233,8 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
       await request(server).delete(`/api/role-bindings/${binding.id}`).set(headers()).expect(204);
     }
     expect(await bindings()).toHaveLength(0);
-  });
+    // Seeding MEMBERSHIP_READ_CAP rows and walking ~50 listing pages takes seconds on a loaded runner.
+  }, 120_000);
 
   it('AC-15: concurrent member adds yield one binding and one members conflict', async () => {
     const results = (await Promise.all([post({ email: 'target@bindings.test' }), post({ email: 'target@bindings.test' })])).sort((a, b) => a.status - b.status);
