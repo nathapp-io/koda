@@ -3,7 +3,7 @@
   "feature": "permissions-p1-drop-legacy-routes",
   "branchName": "feat/permissions-p1-drop-legacy-routes",
   "createdAt": "2026-10-23T00:00:00Z",
-  "updatedAt": "2026-10-23T05:21:35.377Z",
+  "updatedAt": "2026-10-23T06:09:17.853Z",
   "userStories": [
     {
       "id": "US-001",
@@ -358,8 +358,8 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -371,7 +371,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.4400000000000004,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T05:21:39.580Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/projects/members/dto/add-member.dto.ts",
@@ -497,7 +509,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "9cb716333c2d542340df5e1b8112c702600ac37d"
     },
     {
       "id": "US-005",
