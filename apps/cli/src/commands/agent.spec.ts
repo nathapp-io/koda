@@ -449,10 +449,10 @@ describe('agentCommand', () => {
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const createCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'create');
 
-      await createCmd?.parseAsync(['node', 'test', '--name', 'New Agent']);
+      await createCmd?.parseAsync(['node', 'test', '--name', 'Bot']);
 
       expect(agentsControllerGenerateApiKey).toHaveBeenCalledWith({ body: {
-          name: 'New Agent',
+          name: 'Bot',
           slug: undefined,
           maxConcurrentTickets: undefined,
         }});

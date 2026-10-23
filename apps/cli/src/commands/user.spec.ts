@@ -8,11 +8,13 @@ jest.mock('../generated', () => ({
   adminUsersControllerCreate: jest.fn(),
   adminUsersControllerUpdate: jest.fn(),
 }));
+jest.mock('../utils/output', () => ({ table: jest.fn() }));
 jest.mock('../config', () => ({ resolveContext: jest.fn() }));
 
 import { Command } from 'commander';
 import { userCommand } from './user';
 import { adminUsersControllerCreate, adminUsersControllerList, adminUsersControllerUpdate } from '../generated';
+import { table } from '../utils/output';
 import { resolveContext } from '../config';
 
 const CTX = { apiKey: 'jwt', apiUrl: 'http://localhost:3100/api', projectSlug: 'p' };
@@ -52,12 +54,7 @@ describe('userCommand', () => {
   it('AC-3: list prints the table without a Role column', async () => {
     (adminUsersControllerList as jest.Mock).mockResolvedValue({ ret: 0, data: page });
     await program.parseAsync(['node', 'koda', 'user', 'list']);
-    const tableOutput = logSpy.mock.calls.map(([output]) => String(output)).join(' ');
-    expect(tableOutput).toContain('ID');
-    expect(tableOutput).toContain('Email');
-    expect(tableOutput).toContain('Name');
-    expect(tableOutput).toContain('Disabled');
-    expect(tableOutput).not.toContain('Role');
+    expect(table).toHaveBeenCalledWith(['ID', 'Email', 'Name', 'Disabled'], expect.any(Array));
   });
 
   it('list --json prints the page', async () => {
@@ -68,8 +65,8 @@ describe('userCommand', () => {
 
   it('AC-2: create sends email, name and password without role', async () => {
     (adminUsersControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: { id: 'u2', email: 'b@k.t' } });
-    await program.parseAsync(['node', 'koda', 'user', 'create', '--email', 'b@k.t', '--name', 'B', '--password', 'Admin1234!Aa']);
-    expect(adminUsersControllerCreate).toHaveBeenCalledWith({ body: { email: 'b@k.t', name: 'B', password: 'Admin1234!Aa' } });
+    await program.parseAsync(['node', 'koda', 'user', 'create', '--email', 'e@x.io', '--name', 'E', '--password', 'StrongPass123!']);
+    expect(adminUsersControllerCreate).toHaveBeenCalledWith({ body: { email: 'e@x.io', name: 'E', password: 'StrongPass123!' } });
   });
 
   it('AC-7: rejects the removed --role option through Commander', async () => {
