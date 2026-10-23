@@ -10,12 +10,13 @@ import { Paginate } from '@nathapp/nestjs-prisma';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient, Role as RoleModel, RoleBinding as RoleBindingModel } from '../generated/prisma/client';
-import { lockProjectMembers } from '../common/utils/advisory-lock';
+import { lockProjectAgents, lockProjectMembers } from '../common/utils/advisory-lock';
 import {
   accessibleProjectIds,
   countActiveProjectAdmins as countActiveProjectAdminsQuery,
   MEMBERSHIP_READ_CAP,
 } from './membership.queries';
+import { countOpenAgentTickets as countOpenAgentTicketsQuery } from './open-agent-tickets.queries';
 import type {
   BindingFilter,
   BindingWithRole,
@@ -283,6 +284,46 @@ export class PrismaRoleBindingRepository
    */
   async countActiveProjectAdmins(projectId: string): Promise<number> {
     return countActiveProjectAdminsQuery(this.db, projectId);
+  }
+
+  /**
+   * Takes the project's agent-roster advisory lock, the one the deleted roster routes took, so a
+   * removal that counts an agent's open tickets cannot interleave with ticket assignment there
+   * (`TicketsService` takes the same lock before assigning). Call inside `txManager.run` only, and
+   * before the row locks — the order every membership write uses.
+   */
+  async lockProjectAgents(projectId: string): Promise<void> {
+    await lockProjectAgents(this.db, projectId);
+  }
+
+  /**
+   * The principal's PROJECT-scope bindings in the project other than `excludingId` — "does this agent
+   * keep another way into the project once this binding goes?". A `projectId`-null binding is a
+   * different project and is never counted.
+   */
+  async countOtherProjectBindings(
+    principal: PrincipalRef,
+    projectId: string,
+    excludingId: string,
+  ): Promise<number> {
+    return this.db.roleBinding.count({
+      where: {
+        ...this.principalWhere(principal),
+        projectId,
+        id: { not: excludingId },
+        role: { scope: 'PROJECT' },
+      },
+    });
+  }
+
+  /**
+   * The agent's open tickets in the project — `count` exact, `refs` the oldest
+   * {@link MAX_OPEN_TICKET_REFS} as `<key>-<number>`. The query lives in
+   * `open-agent-tickets.queries.ts`; this method is the removal guard's read, so the permission layer
+   * keeps its repository-only Prisma access.
+   */
+  async countOpenAgentTickets(agentId: string, projectId: string): Promise<{ count: number; refs: string[] }> {
+    return countOpenAgentTicketsQuery(this.db, agentId, projectId);
   }
 
   /** Owner bindings of enabled users, leaving out `excludeIds` (the bindings about to be removed). */

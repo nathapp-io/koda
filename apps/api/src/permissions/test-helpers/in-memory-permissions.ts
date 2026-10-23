@@ -42,6 +42,13 @@ export class InMemoryPermissionStore {
    * the removal's transaction must roll back on (US-001). `null` counts normally.
    */
   activeAdminCountFailure: Error | null = null;
+  /**
+   * US-002: what `countOpenAgentTickets` answers, per `"<agentId>:<projectId>"`. An unconfigured pair
+   * answers `{ count: 0, refs: [] }`, like an agent with no open ticket in the project.
+   */
+  openAgentTickets = new Map<string, { count: number; refs: string[] }>();
+  /** The error the next `countOpenAgentTickets` throws instead of answering (US-002). */
+  openAgentTicketsFailure: Error | null = null;
   private counter = 0;
 
   addUser(id: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER', disabled = false): void {
@@ -264,6 +271,31 @@ export class InMemoryPermissionStore {
           .filter((b) => same(b, { type: 'USER', id: userId }))
           .map(withRole)
           .filter(isAdminBinding).length,
+      /** US-002: the project's agent-roster advisory lock is a no-op here, recorded like every call. */
+      lockProjectAgents: async (projectId: string) => {
+        this.calls.push(`lock-project-agents:${projectId}`);
+      },
+      /**
+       * US-002: the principal's other PROJECT-scope bindings in the project. A `projectId`-null binding
+       * is a different project and is never counted, which is what makes a global binding neither
+       * block nor allow the open-ticket refusal.
+       */
+      countOtherProjectBindings: async (principal: PrincipalRef, projectId: string, excludingId: string) => {
+        this.calls.push(`count-other-project-bindings:${principal.type}:${principal.id}:${projectId}`);
+        return this.bindings.filter((b) => {
+          if (!same(b, principal) || b.projectId !== projectId || b.id === excludingId) return false;
+          return this.roles.find((role) => role.id === b.roleId)?.scope === 'PROJECT';
+        }).length;
+      },
+      /**
+       * US-002: the agent's open tickets in the project, configured per pair through
+       * `openAgentTickets`; `openAgentTicketsFailure` makes the call fail like a database error would.
+       */
+      countOpenAgentTickets: async (agentId: string, projectId: string) => {
+        this.calls.push(`count-open-agent-tickets:${agentId}:${projectId}`);
+        if (this.openAgentTicketsFailure) throw this.openAgentTicketsFailure;
+        return this.openAgentTickets.get(`${agentId}:${projectId}`) ?? { count: 0, refs: [] };
+      },
       findUserState: async (userId: string): Promise<UserLegacyState | null> => {
         const user = this.users.get(userId);
         return user ? { role: user.role, disabled: user.disabled } : null;

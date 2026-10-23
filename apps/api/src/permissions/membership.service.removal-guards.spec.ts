@@ -8,14 +8,16 @@ import type { Granter } from './permissions.types';
 import { FakeCacheManager, InMemoryPermissionStore } from './test-helpers/in-memory-permissions';
 
 /**
- * Permissions P1 US-001 — the removal guards of `MembershipService.removeBinding` without a database:
- * the project-members advisory lock, the last-active-Project-Admin refusal, its override, and the
- * step order that keeps them under the lock. The integration suite runs the HTTP criteria against
- * Postgres; this file pins the service's own contract.
+ * Permissions P1 US-001 and US-002 — the removal guards of `MembershipService.removeBinding` without a
+ * database: the project-members and project-agents advisory locks, the last-active-Project-Admin
+ * refusal, its override, the agent's open-ticket refusal, and the step order that keeps them under the
+ * lock. The integration suite runs the HTTP criteria against Postgres; this file pins the service's own
+ * contract.
  */
 
 const BY: Granter = { type: 'SYSTEM', id: 'test' };
 const USER = (id: string) => ({ type: 'USER' as const, id });
+const AGENT = (id: string) => ({ type: 'AGENT' as const, id });
 
 /** A transaction manager double that runs the callback immediately, outside any transaction. */
 const immediateTx = () => ({
@@ -164,6 +166,149 @@ describe('MembershipService.removeBinding removal guards (US-001)', () => {
       expect(error).toBeInstanceOf(NotFoundAppException);
       expect(JSON.stringify(error)).toContain('permissions.bindingNotFound');
       expect(store.calls).toEqual([]);
+    });
+  });
+});
+
+/**
+ * US-002 — the agent project lock and the open-ticket guard. An agent's bindings are projected on
+ * `store.agents`/`store.bindings` directly: the guard reads them, not a service call.
+ */
+describe('MembershipService.removeBinding open-ticket guard (US-002)', () => {
+  let store: InMemoryPermissionStore;
+  let cache: FakeCacheManager;
+  let service: MembershipService;
+
+  const agentBinding = (agentId: string, roleKey: string, projectId: string | null) => {
+    store.agents.add(agentId);
+    return store.bind(AGENT(agentId), roleKey, projectId);
+  };
+
+  beforeEach(() => {
+    store = new InMemoryPermissionStore();
+    cache = new FakeCacheManager();
+    service = new MembershipService(
+      store.roleRepo() as never,
+      store.bindingRepo() as never,
+      immediateTx() as never,
+      new PermissionCache(cache as never),
+      cache as never,
+      new AfterCommitService(),
+    );
+    store.projects.add('p1');
+    store.projects.add('p2');
+  });
+
+  describe('AC-7: the project-agents lock', () => {
+    it('records lockProjectAgents for the binding\'s project', async () => {
+      const binding = agentBinding('a1', 'viewer', 'p1');
+      store.calls.length = 0;
+
+      await service.removeBinding(binding.id);
+
+      expect(store.calls).toContain('lock-project-agents:p1');
+    });
+
+    it('takes the project-agents lock before reading the bindings it guards', async () => {
+      const binding = agentBinding('a1', 'viewer', 'p1');
+      store.calls.length = 0;
+
+      await service.removeBinding(binding.id);
+
+      const agentsLock = store.calls.indexOf('lock-project-agents:p1');
+      const otherBindings = store.calls.indexOf('count-other-project-bindings:AGENT:a1:p1');
+      const openTickets = store.calls.indexOf('count-open-agent-tickets:a1:p1');
+      expect(agentsLock).toBeGreaterThanOrEqual(0);
+      expect(otherBindings).toBeGreaterThan(agentsLock);
+      expect(openTickets).toBeGreaterThan(otherBindings);
+    });
+
+    it('takes no project-agents lock for a binding outside any project', async () => {
+      const binding = agentBinding('a1', 'agent', null);
+      store.calls.length = 0;
+
+      await service.removeBinding(binding.id);
+
+      expect(store.calls.some((call) => call.startsWith('lock-project-agents:'))).toBe(false);
+    });
+
+    it('takes no project-agents lock for a user binding, even an agent-roster one', async () => {
+      store.addUser('u1');
+      const binding = store.bind(USER('u1'), 'viewer', 'p1');
+      store.calls.length = 0;
+
+      await service.removeBinding(binding.id);
+
+      expect(store.calls.some((call) => call.startsWith('lock-project-agents:'))).toBe(false);
+    });
+  });
+
+  describe('AC-8: the open-ticket count fails', () => {
+    it('rejects with that error and leaves the binding in place', async () => {
+      const binding = agentBinding('a1', 'viewer', 'p1');
+      const failure = new Error('countOpenAgentTickets failed');
+      store.openAgentTicketsFailure = failure;
+
+      await expect(service.removeBinding(binding.id)).rejects.toBe(failure);
+
+      expect(store.bindings.some((row) => row.id === binding.id)).toBe(true);
+    });
+  });
+
+  describe('the open-ticket refusal', () => {
+    it('refuses the last binding in P with the count and the refs of the open tickets', async () => {
+      const binding = agentBinding('a1', 'viewer', 'p1');
+      store.openAgentTickets.set('a1:p1', { count: 2, refs: ['P1-7', 'P1-9'] });
+
+      const error = await service.removeBinding(binding.id).catch((reason: unknown) => reason);
+
+      expect(error).toBeInstanceOf(ConflictAppException);
+      expect((error as AppException).prefix).toBe('projectAgents.hasOpenTickets');
+      expect((error as AppException).httpStatus).toBe(409);
+      expect((error as AppException).args).toEqual({ count: 2, refs: 'P1-7, P1-9' });
+      expect(store.bindings.some((row) => row.id === binding.id)).toBe(true);
+    });
+
+    it('removes the binding while the agent holds another binding in the same project', async () => {
+      const kept = agentBinding('a1', 'viewer', 'p1');
+      const binding = agentBinding('a1', 'developer', 'p1');
+      expect(kept.id).not.toBe(binding.id);
+      store.openAgentTickets.set('a1:p1', { count: 2, refs: ['P1-7', 'P1-9'] });
+
+      await expect(service.removeBinding(binding.id)).resolves.toBeUndefined();
+
+      expect(store.bindings.some((row) => row.id === binding.id)).toBe(false);
+    });
+
+    it('removes the last binding in P when the agent holds no open ticket there', async () => {
+      const binding = agentBinding('a1', 'viewer', 'p1');
+
+      await expect(service.removeBinding(binding.id)).resolves.toBeUndefined();
+
+      expect(store.bindings.some((row) => row.id === binding.id)).toBe(false);
+    });
+
+    it('refuses the last PROJECT-scope binding in P although the agent holds a projectId-null one', async () => {
+      agentBinding('a1', 'viewer', null);
+      const binding = agentBinding('a1', 'viewer', 'p1');
+      store.openAgentTickets.set('a1:p1', { count: 1, refs: ['P1-7'] });
+
+      const error = await service.removeBinding(binding.id).catch((reason: unknown) => reason);
+
+      expect(error).toBeInstanceOf(ConflictAppException);
+      expect(store.bindings.some((row) => row.id === binding.id)).toBe(true);
+    });
+
+    it('counts open tickets in the binding\'s own project only', async () => {
+      const binding = agentBinding('a1', 'viewer', 'p1');
+      store.openAgentTickets.set('a1:p2', { count: 3, refs: ['P2-1'] });
+      store.calls.length = 0;
+
+      await expect(service.removeBinding(binding.id)).resolves.toBeUndefined();
+
+      expect(store.calls).toContain('count-open-agent-tickets:a1:p1');
+      expect(store.calls).not.toContain('count-open-agent-tickets:a1:p2');
+      expect(store.bindings.some((row) => row.id === binding.id)).toBe(false);
     });
   });
 });

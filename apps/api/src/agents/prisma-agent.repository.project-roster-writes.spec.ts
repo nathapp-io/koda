@@ -1,10 +1,13 @@
 import type { Mock } from 'vitest';
 /**
  * S4c US-003 — PrismaAgentRepository's roster-write surface: the insert that
- * must report a duplicate instead of throwing, the open-ticket read that feeds
- * the removal conflict, the roster delete, and the per-project advisory lock
- * the removal shares with ticket assignment (US-004). The Postgres form of the
- * duplicate path is covered by the acceptance run; this pins the query shape.
+ * must report a duplicate instead of throwing, the roster delete, and the
+ * per-project advisory lock the removal shares with ticket assignment (US-004).
+ * The Postgres form of the duplicate path is covered by the acceptance run.
+ *
+ * The open-ticket read these writes used to pin moved to
+ * `permissions/open-agent-tickets.queries.spec.ts` (permissions P1 US-002): the repository now
+ * delegates `countOpenProjectTickets` to that query.
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService, createMockPrismaService } from '@nathapp/nestjs-prisma';
@@ -20,9 +23,6 @@ describe('PrismaAgentRepository roster writes (S4c US-003)', () => {
   let agentProjectCreateMany: Mock;
   let agentProjectDeleteMany: Mock;
   let agentProjectFindUnique: Mock;
-  let ticketCount: Mock;
-  let ticketFindMany: Mock;
-  let projectFindUnique: Mock;
   let queryRaw: Mock;
 
   beforeEach(async () => {
@@ -31,9 +31,6 @@ describe('PrismaAgentRepository roster writes (S4c US-003)', () => {
     agentProjectCreateMany = vi.fn();
     agentProjectDeleteMany = vi.fn();
     agentProjectFindUnique = vi.fn();
-    ticketCount = vi.fn();
-    ticketFindMany = vi.fn();
-    projectFindUnique = vi.fn();
     queryRaw = prisma.client.$queryRaw as Mock;
 
     prisma.client.agentProject = {
@@ -41,8 +38,6 @@ describe('PrismaAgentRepository roster writes (S4c US-003)', () => {
       deleteMany: agentProjectDeleteMany,
       findUnique: agentProjectFindUnique,
     };
-    prisma.client.ticket = { count: ticketCount, findMany: ticketFindMany };
-    prisma.client.project = { findUnique: projectFindUnique };
 
     testingModule = await Test.createTestingModule({
       providers: [PrismaAgentRepository, { provide: PrismaService, useValue: prisma }],
@@ -74,28 +69,8 @@ describe('PrismaAgentRepository roster writes (S4c US-003)', () => {
     await expect(repository.addToProjectRoster('agent-1', 'proj-1', 'user-admin')).resolves.toBe('alreadyAssigned');
   });
 
-  it('countOpenProjectTickets counts the open tickets and refs the 10 oldest as <key>-<number>', async () => {
-    ticketCount.mockResolvedValue(12);
-    ticketFindMany.mockResolvedValue([{ number: 3 }, { number: 4 }]);
-    projectFindUnique.mockResolvedValue({ key: 'ALP' });
-
-    const result = await repository.countOpenProjectTickets('agent-1', 'proj-1');
-
-    expect(result).toEqual({ count: 12, refs: ['ALP-3', 'ALP-4'] });
-    const where = ticketCount.mock.calls[0][0].where;
-    expect(where).toEqual({
-      projectId: 'proj-1',
-      assignedToAgentId: 'agent-1',
-      status: { notIn: ['CLOSED', 'REJECTED'] },
-      deletedAt: null,
-    });
-    expect(ticketFindMany.mock.calls[0][0]).toMatchObject({
-      where,
-      select: { number: true },
-      take: 10,
-    });
-    expect(ticketFindMany.mock.calls[0][0].orderBy).toEqual([{ createdAt: 'asc' }, { number: 'asc' }]);
-  });
+  // The counting and ref-shape assertions of the open-ticket read moved to
+  // `permissions/open-agent-tickets.queries.spec.ts` (US-002): the repository delegates to that query.
 
   it('removeFromProjectRoster deletes the roster row by agent and project', async () => {
     await repository.removeFromProjectRoster('agent-1', 'proj-1');
