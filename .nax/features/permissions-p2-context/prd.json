@@ -3,7 +3,7 @@
   "feature": "permissions-p2-context",
   "branchName": "feat/permissions-p2-context",
   "createdAt": "2026-11-05T00:00:00.000Z",
-  "updatedAt": "2026-10-23T17:21:39.658Z",
+  "updatedAt": "2026-10-23T17:38:58.285Z",
   "userStories": [
     {
       "id": "US-001",
@@ -196,8 +196,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -209,7 +209,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.05999999999999961,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T17:21:44.375Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
@@ -234,7 +246,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "abd8c258a7981c368e60d8ef8a04038e27e4fd3a"
     },
     {
       "id": "US-004",
