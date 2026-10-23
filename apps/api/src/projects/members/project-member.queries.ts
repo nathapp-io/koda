@@ -146,8 +146,8 @@ export async function readMemberBindings(
  * One member's record — the single-record shape `POST /members` and an invite's `ADDED` member
  * return. Null when the principal has no project binding.
  *
- * Not built on `listProjectMemberships`: that listing is capped and project-wide, and a single-record
- * read after a write must not depend on it.
+ * Not built on `listProjectMemberships`: that listing is project-wide and reads the whole project's
+ * bindings, while a single-record read after a write needs only this principal's rows.
  *
  * Permissions P1l US-006: the record carries no display role, so the membership test is the earliest
  * binding's date — the same `PROJECT`-scope, project-local binding set the legacy role was read from,

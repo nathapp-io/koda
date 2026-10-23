@@ -10,6 +10,7 @@ import {
   localProjectRole,
   principalIdsWithAccess,
   readAccessibleProjectIds,
+  readProjectBindingSources,
   userProjectRole,
 } from './membership.queries';
 
@@ -543,6 +544,44 @@ describe('membership.queries', () => {
         ['u1', 'VIEWER'],
         ['u2', 'ADMIN'],
       ]);
+    });
+
+    it('AC-P1l-F1: lists a member bound past the first read cap instead of truncating the listing', async () => {
+      // One full page of bindings for another member, then the target: a single capped read would stop
+      // after that page and report the project's last member as absent.
+      fixture.addProject('p1');
+      fixture.addUser('early');
+      fixture.addUser('late');
+      for (let index = 0; index < MEMBERSHIP_READ_CAP; index += 1) {
+        fixture.bind('USER', 'early', 'viewer', 'p1', {
+          createdAt: new Date(1_700_000_000_000 + index * 1_000),
+        });
+      }
+      fixture.bind('USER', 'late', 'developer', 'p1', {
+        createdAt: new Date(1_700_000_000_000 + MEMBERSHIP_READ_CAP * 1_000),
+      });
+
+      expect((await listProjectMemberships(db, 'p1', 'USER')).map((m) => m.principalId)).toEqual(['early', 'late']);
+    });
+
+    it('AC-P1l-F1: fails loudly instead of answering a partial listing when the page bound is reached', async () => {
+      const fullPage = Array.from({ length: MEMBERSHIP_READ_CAP }, (_, index) => ({
+        id: `b${String(index).padStart(8, '0')}`,
+        principalId: `u${index}`,
+        principalType: 'USER',
+        projectId: 'p1',
+        createdAt: new Date(1_700_000_000_000 + index * 1_000),
+        grantedByType: 'SYSTEM',
+        grantedById: 'test',
+        role: { key: 'viewer', scope: 'PROJECT' },
+      }));
+      const client = {
+        roleBinding: { findMany: async () => fullPage },
+      } as unknown as PrismaClient;
+
+      await expect(readProjectBindingSources(client, 'p1', 'USER', 'listProjectMemberships', 1)).rejects.toBeInstanceOf(
+        InternalAppException,
+      );
     });
   });
 

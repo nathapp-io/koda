@@ -65,6 +65,10 @@ const MEMBER_LOOKUP_PAGE_SIZE = 100;
  * The user member row for `userId`, walking the members pages until it shows up or the API says there is
  * no next page. Only a `USER` principal matches: an agent may carry the same id and its bindings are its
  * own, so a removal that matched one would revoke the wrong principal's roles.
+ *
+ * The walk is sound because the listing is exhaustive: the API reads a project's bindings in keyset pages
+ * instead of truncating at its per-read cap, so a member cannot hide past it (F1). A caller holding only
+ * project keys can use it too — unlike `GET /role-bindings`, which needs the global `role.read`.
  */
 async function findMemberUser(slug: string, userId: string): Promise<MemberPrincipalRow | undefined> {
   for (let current = 1; ; current += 1) {

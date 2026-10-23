@@ -211,22 +211,26 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     expect(record).not.toHaveProperty('role');
     expect(record?.bindings).toEqual([expect.objectContaining({ roleKey: 'developer' })]);
     conflict(await post({ email: 'target@bindings.test' }), 'members');
-    // F1: the member is beyond the project listing cap, so it cannot appear in the members page …
-    const listed = data<{ records: { userId: string }[] }>(
-      await request(server).get(`${base}?size=100&current=1`).set(headers()).expect(200),
-    );
-    expect(listed.records.map(record => record.userId)).not.toContain(targetId);
-    // … and its bindings are revoked by the principal-filtered binding listing, which is keyed by the
-    // member rather than by the project.
-    const found = data<{ records: { id: string }[] }>(
-      await request(server)
-        .get(`/api/role-bindings?principalType=USER&principalId=${targetId}&projectId=${projectId}`)
-        .set(headers(rootToken))
-        .expect(200),
-    );
-    expect(found.records.length).toBeGreaterThan(0);
-    for (const binding of found.records) {
-      await request(server).delete(`/api/role-bindings/${binding.id}`).set(headers(rootToken)).expect(204);
+    // F1: `koda member remove` finds its target by paging this listing, so the member past the read cap
+    // must be reachable by that walk — a truncated listing reports a real member as absent and leaves it
+    // impossible to remove. A Project Admin (no global `role.read`) does the paging and the revoking, as
+    // the CLI does.
+    const memberPage = async (current: number) => data<{
+      hasNext: boolean;
+      records: { userId: string; bindings: { id: string }[] }[];
+    }>(await request(server).get(`${base}?size=100&current=${current}`).set(headers()).expect(200));
+    const first = await memberPage(1);
+    expect(first.records.map(record => record.userId)).not.toContain(targetId);
+    let target: { userId: string; bindings: { id: string }[] } | undefined;
+    let page = first;
+    for (let current = 1; ; current += 1) {
+      target = page.records.find(record => record.userId === targetId);
+      if (target || !page.hasNext) break;
+      page = await memberPage(current + 1);
+    }
+    expect(target?.bindings.length).toBeGreaterThan(0);
+    for (const binding of target?.bindings ?? []) {
+      await request(server).delete(`/api/role-bindings/${binding.id}`).set(headers()).expect(204);
     }
     expect(await bindings()).toHaveLength(0);
   });
