@@ -23,6 +23,7 @@ import { authCommand } from './commands/auth';
 import { adminCommand } from './commands/admin';
 import { userCommand } from './commands/user';
 import { memberCommand } from './commands/member';
+import { roleBindingCommand } from './commands/role-binding';
 import { notificationsCommand } from './commands/notifications';
 import { ciWebhookCommand } from './commands/ci-webhook';
 import { fleetCommand } from './commands/fleet';
@@ -263,6 +264,9 @@ userCommand(program);
 
 // Project membership command
 memberCommand(program);
+
+// Role binding command (grants of roles to users and agents)
+roleBindingCommand(program);
 
 // Notifications command (S4a)
 notificationsCommand(program);
