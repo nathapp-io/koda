@@ -3,7 +3,7 @@
   "feature": "permissions-p2-context",
   "branchName": "feat/permissions-p2-context",
   "createdAt": "2026-11-05T00:00:00.000Z",
-  "updatedAt": "2026-10-23T17:38:58.285Z",
+  "updatedAt": "2026-10-23T18:05:00.773Z",
   "userStories": [
     {
       "id": "US-001",
@@ -281,8 +281,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -294,7 +294,19 @@
         "profileModelTier": "balanced",
         "initialAgent": "native",
         "initialProfileId": "native-deepseek",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.09999999999999964,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T17:39:02.411Z"
+        }
       },
       "contextFiles": [
         "apps/api/src/fleet/schedules/schedule-ticker.ts",
@@ -320,7 +332,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1c22daf55d08ba409d170255d9de50f848fd0267"
     },
     {
       "id": "US-005",
