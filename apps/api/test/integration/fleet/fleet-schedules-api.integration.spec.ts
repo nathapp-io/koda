@@ -49,7 +49,7 @@ describeIntegration('fleet schedules API (PG)', () => {
     world = await seedFleetHttpWorld(server, prisma);
     // A second DEVELOPER of web (fourth login: within the 5/min throttle). The root global admin stands in for a project ADMIN.
     await request(server).post('/api/admin/users').set(tok('root')).send({ email: 'dev2@koda.test', name: 'dev2', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
-    await request(server).post('/api/projects/web/members').set(tok('root')).send({ email: 'dev2@koda.test', role: 'DEVELOPER' }).expect(201);
+    await request(server).post('/api/projects/web/members').set(tok('root')).send({ email: 'dev2@koda.test', roleKey: 'developer' }).expect(201);
     dev2 = await loginToken(server, 'dev2@koda.test');
     dev2Id = (await prisma.user.findUniqueOrThrow({ where: { email: 'dev2@koda.test' } })).id;
   });

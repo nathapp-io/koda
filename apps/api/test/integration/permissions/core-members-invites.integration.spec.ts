@@ -108,7 +108,7 @@ describeIntegration('member and invite route keys (US-008)', () => {
     const res = await request(server)
       .post(invitesUrl)
       .set(auth('root'))
-      .send({ email, role: 'VIEWER' })
+      .send({ email, roleKey: 'viewer' })
       .expect(201);
     const id = data<{ invite?: { id: string } }>(res).invite?.id;
     if (!id) throw new Error('invite create answered no invite id');
@@ -148,7 +148,7 @@ describeIntegration('member and invite route keys (US-008)', () => {
     await request(server)
       .post(membersUrl)
       .set(auth('root'))
-      .send({ email: 'removable@koda.test', role: 'VIEWER' })
+      .send({ email: 'removable@koda.test', roleKey: 'viewer' })
       .expect(201);
 
     const createdAgent = await request(server)
@@ -186,7 +186,7 @@ describeIntegration('member and invite route keys (US-008)', () => {
     const res = await request(server)
       .post(membersUrl)
       .set(auth('padmin'))
-      .send({ email: 'addable@koda.test', role: 'DEVELOPER' })
+      .send({ email: 'addable@koda.test', roleKey: 'developer' })
       .expect(201);
 
     expect(data<{ userId: string; role: string }>(res)).toMatchObject({
@@ -284,7 +284,7 @@ describeIntegration('member and invite route keys (US-008)', () => {
     const res = await request(server)
       .post(invitesUrl)
       .set(auth('padmin'))
-      .send({ email: 'no-account@koda.test', role: 'VIEWER' })
+      .send({ email: 'no-account@koda.test', roleKey: 'viewer' })
       .expect(201);
 
     const body = data<{ outcome: string; invite?: { id: string; email: string; status: string } }>(res);
@@ -348,7 +348,7 @@ describeIntegration('member and invite route keys (US-008)', () => {
     const created = await request(server)
       .post(invitesUrl)
       .set({ Authorization: `Bearer ${agent.apiKey}` })
-      .send({ email: 'agent-invited@koda.test', role: 'VIEWER' })
+      .send({ email: 'agent-invited@koda.test', roleKey: 'viewer' })
       .expect(201);
 
     const body = data<{ outcome: string; invite?: { id: string; email: string; status: string; inviterName: string | null } }>(created);

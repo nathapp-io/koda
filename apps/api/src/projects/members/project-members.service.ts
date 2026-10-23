@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import { IPageResult, ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
@@ -8,7 +8,6 @@ import { ConflictAppException } from '../../common/exceptions/conflict-app.excep
 import { MembershipService } from '../../permissions/membership.service';
 import { PermissionService } from '../../permissions/permission.service';
 import { RoleAdminService } from '../../permissions/role-admin.service';
-import { ROLE_KEY_FOR_LEGACY_ROLE } from '../../permissions/legacy-project-roles';
 import { ProjectAccessService } from '../project-access.service';
 import { PrismaProjectMembersRepository } from './prisma-project-members.repository';
 import { ProjectMemberRecord } from './domain/project-member.domain';
@@ -64,11 +63,9 @@ export class ProjectMembersService {
 
   /** The route's `member.add` key is the gate: the caller may add anyone the project can hold. */
   async add(slug: string, dto: AddMemberDto, principal: KodaPrincipal): Promise<ProjectMemberDto> {
-    // US-004: two ways to name the role is a client bug, not a precedence question.
-    if (dto.role !== undefined && dto.roleKey !== undefined) {
-      throw new ValidationAppException({}, 'members.roleAndRoleKey');
-    }
-    const roleKey = dto.roleKey ?? ROLE_KEY_FOR_LEGACY_ROLE[dto.role ?? 'VIEWER'];
+    // US-004 (P1l): `roleKey` is the only role field; the pipe strips a legacy `role`, so an add that
+    // sends one and no key grants the least-privileged `viewer`, exactly as an omitted key does.
+    const roleKey = dto.roleKey ?? 'viewer';
     const projectId = await this.access.findProjectIdBySlug(slug);
     const user = await this.membersRepo.findUserByEmail(dto.email);
     if (!user) throw new NotFoundAppException({}, 'members.user');

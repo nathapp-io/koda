@@ -55,7 +55,7 @@ describeIntegration('@mention notifications (PG)', () => {
     }
     for (const who of ['author', 'member', 'muted']) {
       await request(server).post('/api/projects/men/members').set(auth('root'))
-        .send({ email: `${who}@koda.test`, role: 'DEVELOPER' }).expect(201);
+        .send({ email: `${who}@koda.test`, roleKey: 'developer' }).expect(201);
     }
     await drain();
   });

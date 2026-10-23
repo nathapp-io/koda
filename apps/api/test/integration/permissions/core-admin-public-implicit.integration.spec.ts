@@ -135,7 +135,7 @@ describeIntegration('admin, auth, home, notification and public invite route key
     const invite = await request(server)
       .post(`/api/projects/${P1_SLUG}/invites`)
       .set(auth('root'))
-      .send({ email: 'invited@koda.test', role: 'VIEWER' })
+      .send({ email: 'invited@koda.test', roleKey: 'viewer' })
       .expect(201);
     const inviteBody = data<{ outcome: string; invitePath?: string }>(invite);
     expect(inviteBody.outcome).toBe('INVITED');

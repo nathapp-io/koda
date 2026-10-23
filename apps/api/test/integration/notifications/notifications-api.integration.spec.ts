@@ -69,7 +69,7 @@ describeIntegration('notifications API (PG)', () => {
     }
     for (const who of ['dev', 'watcher']) {
       await request(server).post('/api/projects/notif/members').set(auth('root'))
-        .send({ email: `${who}@koda.test`, role: 'DEVELOPER' }).expect(201);
+        .send({ email: `${who}@koda.test`, roleKey: 'developer' }).expect(201);
     }
     const agent = await request(server).post('/api/agents').set(auth('root'))
       .send({ name: 'Notif Bot', slug: 'notif-bot', roles: [] }).expect(201);

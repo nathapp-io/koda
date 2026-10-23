@@ -151,18 +151,18 @@ describeIntegration('US-005 project skill enablement routes (PG)', () => {
     }
 
     // web: pa is ADMIN, dev is DEVELOPER. other: pa and dev are DEVELOPER, no project admin.
-    for (const [who, role] of [['pa', 'ADMIN'], ['dev', 'DEVELOPER']] as const) {
+    for (const [who, roleKey] of [['pa', 'project-admin'], ['dev', 'developer']] as const) {
       await request(server)
         .post('/api/projects/web/members')
         .set(auth(tokens.root))
-        .send({ email: `${who}@koda.test`, role })
+        .send({ email: `${who}@koda.test`, roleKey })
         .expect(201);
     }
     for (const who of ['pa', 'dev']) {
       await request(server)
         .post('/api/projects/other/members')
         .set(auth(tokens.root))
-        .send({ email: `${who}@koda.test`, role: 'DEVELOPER' })
+        .send({ email: `${who}@koda.test`, roleKey: 'developer' })
         .expect(201);
     }
 

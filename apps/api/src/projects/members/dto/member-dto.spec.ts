@@ -6,23 +6,34 @@ const errorsOf = async (cls: new () => object, raw: object) =>
   (await validate(plainToInstance(cls, raw))).map((e) => e.property);
 
 describe('member DTOs', () => {
-  it('AddMemberDto needs an email and an assignable role', async () => {
+  it('AddMemberDto needs an email and an optional role key', async () => {
     // NB: 'a@k.t' from the draft brief fails IsEmail (single-char TLD), so a
     // realistic two-label TLD is used for the valid case.
-    expect(await errorsOf(AddMemberDto, { email: 'a@koda.test', role: 'DEVELOPER' })).toEqual([]);
-    expect(await errorsOf(AddMemberDto, { email: 'a@koda.test', role: 'AGENT' })).toContain('role');
-    expect(await errorsOf(AddMemberDto, { email: 'nope', role: 'VIEWER' })).toContain('email');
+    expect(await errorsOf(AddMemberDto, { email: 'a@koda.test', roleKey: 'developer' })).toEqual([]);
+    expect(await errorsOf(AddMemberDto, { email: 'nope', roleKey: 'viewer' })).toContain('email');
   });
 
   /**
-   * US-004: `roleKey` is the new way to name the granted role and the legacy `role` stays for the CLI.
-   * Both are optional, so at most one may be sent — that is the service's `members.roleAndRoleKey` 400,
-   * not a DTO shape error, because the DTO cannot express "at most one of two".
+   * US-004 (P1l): `roleKey` is the only role field. The legacy `role` is not declared any more, so the
+   * DTO validates nothing about it — the global ValidationPipe strips it before the service defaults the
+   * grant to `viewer`.
    */
-  it('AddMemberDto accepts a role key, a legacy role, both, or neither', async () => {
-    expect(await errorsOf(AddMemberDto, { email: 'a@koda.test', roleKey: 'triager' })).toEqual([]);
-    expect(await errorsOf(AddMemberDto, { email: 'a@koda.test' })).toEqual([]);
+  it('AddMemberDto ignores a legacy role value: it is stripped, not validated', async () => {
+    expect(await errorsOf(AddMemberDto, { email: 'a@koda.test', role: 'ADMIN' })).toEqual([]);
+    expect(await errorsOf(AddMemberDto, { email: 'a@koda.test', role: 'AGENT' })).toEqual([]);
     expect(await errorsOf(AddMemberDto, { email: 'a@koda.test', role: 'DEVELOPER', roleKey: 'developer' })).toEqual([]);
+  });
+
+  it('AddMemberDto accepts an absent role key — the service defaults it to viewer', async () => {
+    expect(await errorsOf(AddMemberDto, { email: 'a@koda.test' })).toEqual([]);
+  });
+
+  /**
+   * An explicit `null` is the one role-key shape the DTO refuses: `@ValidateIf` runs the pattern check
+   * for any present value, where the old `@IsOptional` would have skipped `null`.
+   */
+  it('AddMemberDto refuses an explicit null role key', async () => {
+    expect(await errorsOf(AddMemberDto, { email: 'a@koda.test', roleKey: null })).toEqual(['roleKey']);
   });
 
   it('AddMemberDto refuses a role key outside the key grammar', async () => {

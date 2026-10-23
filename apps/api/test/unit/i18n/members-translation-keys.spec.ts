@@ -62,31 +62,4 @@ describe('S4c US-003: disabled-member refusal translation key', () => {
     expect(translated).toContain('禁用');
     expect(translated).toBe(i18n.translate('invites.userDisabled.409', { lang: 'zh' }));
   });
-
-  /**
-   * Permissions P1 web US-004: `POST /projects/:slug/members` with both `role` and `roleKey` throws
-   * `new ValidationAppException({}, 'members.roleAndRoleKey')`. A validation refusal is rendered under
-   * both the `-2` code the envelope carries and the `400` status, as `permissions.scopeMismatch` is.
-   */
-  describe('members.roleAndRoleKey (US-004)', () => {
-    it.each(['en', 'zh'])('%s: resolves under both the -2 and the 400 code', (lang) => {
-      for (const code of ['-2', '400']) {
-        const key = `members.roleAndRoleKey.${code}`;
-        const translated = i18n.translate(key, { lang });
-
-        expect(translated).not.toBe(key);
-        expect(translated).not.toContain('roleAndRoleKey');
-        expect(translated.trim().length).toBeGreaterThan(0);
-      }
-    });
-
-    it('en: names both fields so the client knows what to remove', () => {
-      const translated = i18n.translate('members.roleAndRoleKey.-2', { lang: 'en' });
-
-      expect(translated).toContain('role');
-      expect(translated).toContain('role key');
-      // The same sentence under both codes: one validation text, two lookup keys.
-      expect(translated).toBe(i18n.translate('members.roleAndRoleKey.400', { lang: 'en' }));
-    });
-  });
 });

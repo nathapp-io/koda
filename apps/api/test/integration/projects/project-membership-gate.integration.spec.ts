@@ -127,9 +127,10 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     return id;
   };
 
-  const addMember = (slug: string, who: string, role: string): request.Test =>
+  /** US-004 (P1l): the members route takes a role key. */
+  const addMember = (slug: string, who: string, roleKey: string): request.Test =>
     request(server).post(`/api/projects/${slug}/members`).set(auth('root'))
-      .send({ email: `${who}@koda.test`, role });
+      .send({ email: `${who}@koda.test`, roleKey });
 
   const createTicket = async (slug: string, title: string): Promise<string> => {
     const res = await request(server).post(`/api/projects/${slug}/tickets`).set(auth('root'))
@@ -195,13 +196,13 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     await request(server).patch('/api/projects/team').set(auth('root'))
       .send({ graphifyEnabled: true }).expect(200);
 
-    await addMember('team', 'dev', 'DEVELOPER').expect(201);
-    await addMember('team', 'adminMember', 'DEVELOPER').expect(201);
-    await addMember('team', 'author', 'DEVELOPER').expect(201);
-    await addMember('team', 'multi', 'DEVELOPER').expect(201);
-    await addMember('other', 'outside', 'DEVELOPER').expect(201);
-    await addMember('other', 'multi', 'DEVELOPER').expect(201);
-    await addMember('softdel', 'multi', 'DEVELOPER').expect(201);
+    await addMember('team', 'dev', 'developer').expect(201);
+    await addMember('team', 'adminMember', 'developer').expect(201);
+    await addMember('team', 'author', 'developer').expect(201);
+    await addMember('team', 'multi', 'developer').expect(201);
+    await addMember('other', 'outside', 'developer').expect(201);
+    await addMember('other', 'multi', 'developer').expect(201);
+    await addMember('softdel', 'multi', 'developer').expect(201);
     // Soft-delete here (not inside AC9) so every list-scoping assertion below
     // (AC6/AC7/AC8/AC9) can run independently of the others' execution order.
     await request(server).delete('/api/projects/softdel').set(auth('root')).expect(204);

@@ -43,8 +43,10 @@ describeIntegration('project-role permissions (#144)', () => {
     ids[who] = data<{ id: string }>(res).id;
     tokens[who] = await loginToken(server, `${who}@koda.test`);
   };
+  /** US-004 (P1l): the members route takes a role key; the caller-role labels map to the seeded keys. */
+  const ROLE_KEY: Record<Role, string> = { ADMIN: 'project-admin', DEVELOPER: 'developer', VIEWER: 'viewer' };
   const addMember = (slug: string, who: string, role: Role) =>
-    asRoot('post', `/api/projects/${slug}/members`, { email: `${who}@koda.test`, role }).expect(201);
+    asRoot('post', `/api/projects/${slug}/members`, { email: `${who}@koda.test`, roleKey: ROLE_KEY[role] }).expect(201);
 
   const ticketIn = async (status: 'CREATED' | 'VERIFIED' | 'IN_PROGRESS' | 'VERIFY_FIX', slug = 'team') => {
     const res = await asRoot('post', `/api/projects/${slug}/tickets`, { type: 'BUG', title: `t${counter++}` }).expect(201);

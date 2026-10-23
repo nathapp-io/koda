@@ -53,7 +53,7 @@ describeIntegration('fleet budgets API (PG)', () => {
     world = await seedFleetHttpWorld(server, prisma);
     // A project ADMIN of web who is not a global admin (fourth login: within the 5/min throttle).
     await request(server).post('/api/admin/users').set(tok('root')).send({ email: 'padmin@koda.test', name: 'padmin', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
-    await request(server).post('/api/projects/web/members').set(tok('root')).send({ email: 'padmin@koda.test', role: 'ADMIN' }).expect(201);
+    await request(server).post('/api/projects/web/members').set(tok('root')).send({ email: 'padmin@koda.test', roleKey: 'project-admin' }).expect(201);
     padmin = await loginToken(server, 'padmin@koda.test');
     padminId = (await prisma.user.findUniqueOrThrow({ where: { email: 'padmin@koda.test' } })).id;
   });

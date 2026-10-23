@@ -1,5 +1,5 @@
 import type { Mock } from 'vitest';
-import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { ProjectMembersService } from './project-members.service';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
@@ -123,24 +123,24 @@ describe('ProjectMembersService', () => {
     // add reads the member once to refuse a duplicate and once to return the written row.
     repo.findMember.mockResolvedValueOnce(null).mockResolvedValueOnce(member('u1', 'DEVELOPER'));
 
-    await expect(service.add('proj', { email: 'u1@k.t', role: 'DEVELOPER' }, projectAdmin)).resolves.toMatchObject({ role: 'DEVELOPER' });
+    await expect(service.add('proj', { email: 'u1@k.t', roleKey: 'developer' }, projectAdmin)).resolves.toMatchObject({ role: 'DEVELOPER' });
   });
 
   it('add: unknown email is 404, duplicate member is 409', async () => {
     repo.findUserByEmail.mockResolvedValueOnce(null);
     repo.findUserIdByEmail.mockResolvedValueOnce(null);
-    await expect(service.add('proj', { email: 'ghost@k.t', role: 'VIEWER' }, globalAdmin)).rejects.toBeInstanceOf(NotFoundAppException);
+    await expect(service.add('proj', { email: 'ghost@k.t', roleKey: 'viewer' }, globalAdmin)).rejects.toBeInstanceOf(NotFoundAppException);
 
     repo.findUserByEmail.mockResolvedValueOnce({ id: 'u1', disabled: false });
     repo.findUserIdByEmail.mockResolvedValueOnce('u1');
     repo.findMember.mockResolvedValueOnce(member('u1', 'VIEWER'));
-    await expect(service.add('proj', { email: 'u1@k.t', role: 'VIEWER' }, globalAdmin)).rejects.toMatchObject({ prefix: 'members', httpStatus: 409 });
+    await expect(service.add('proj', { email: 'u1@k.t', roleKey: 'viewer' }, globalAdmin)).rejects.toMatchObject({ prefix: 'members', httpStatus: 409 });
   });
 
-  it('add maps DEVELOPER to developer and reads the written member', async () => {
+  it('add grants the roleKey and reads the written member', async () => {
     repo.findUserByEmail.mockResolvedValue({ id: 'u1', disabled: false });
     repo.findMember.mockResolvedValueOnce(null).mockResolvedValueOnce(member('u1', 'DEVELOPER'));
-    expect(await service.add('proj', { email: 'u1@k.t', role: 'DEVELOPER' }, projectAdmin)).toMatchObject({ role: 'DEVELOPER' });
+    expect(await service.add('proj', { email: 'u1@k.t', roleKey: 'developer' }, projectAdmin)).toMatchObject({ role: 'DEVELOPER' });
     expect(membership.createBinding).toHaveBeenCalledWith({ principal: { type: 'USER', id: 'u1' }, projectId: 'p1', roleKey: 'developer' }, { type: 'USER', id: 'pa' });
   });
 
@@ -185,17 +185,19 @@ describe('ProjectMembersService', () => {
       expect(membership.createBinding).not.toHaveBeenCalled();
     });
 
-    it('the legacy role field is granted through the same rules, mapped to its role key', async () => {
-      await service.add('proj', { email: 'u1@k.t', role: 'DEVELOPER' }, projectAdmin);
+    it('US-004 (P1l): a stray legacy role is ignored and the grant falls back to viewer', async () => {
+      // The pipe strips `role`, so the service never reads it: a body that only carries the legacy field
+      // grants the same least-privileged role as a body with neither field.
+      await service.add('proj', { email: 'u1@k.t', role: 'ADMIN' } as never, projectAdmin);
 
       expect(roles.assertMayGrant).toHaveBeenCalledWith(projectAdmin, {
-        roleKey: 'developer',
+        roleKey: 'viewer',
         projectId: 'p1',
         principalType: 'USER',
         principalId: 'u1',
       });
       expect(membership.createBinding).toHaveBeenCalledWith(
-        { principal: { type: 'USER', id: 'u1' }, projectId: 'p1', roleKey: 'developer' },
+        { principal: { type: 'USER', id: 'u1' }, projectId: 'p1', roleKey: 'viewer' },
         { type: 'USER', id: 'pa' },
       );
     });
@@ -215,15 +217,21 @@ describe('ProjectMembersService', () => {
       );
     });
 
-    it('both fields is 400 members.roleAndRoleKey, before any lookup or write', async () => {
-      const error = await service.add('proj', { email: 'u1@k.t', role: 'DEVELOPER', roleKey: 'developer' }, projectAdmin)
-        .catch((caught: unknown) => caught);
+    it('US-004 (P1l): the roleKey decides and a legacy role beside it changes nothing', async () => {
+      // `role: 'VIEWER'` would have been stripped by the pipe; the service sees only the key it grants.
+      await service.add('proj', { email: 'u1@k.t', roleKey: 'developer' }, projectAdmin);
 
-      expect(error).toBeInstanceOf(ValidationAppException);
-      expect((error as ValidationAppException).prefix).toBe('members.roleAndRoleKey');
-      expect((error as ValidationAppException).httpStatus).toBe(400);
-      expect(roles.assertMayGrant).not.toHaveBeenCalled();
-      expect(membership.createBinding).not.toHaveBeenCalled();
+      expect(roles.assertMayGrant).toHaveBeenCalledWith(projectAdmin, {
+        roleKey: 'developer',
+        projectId: 'p1',
+        principalType: 'USER',
+        principalId: 'u1',
+      });
+      expect(membership.createBinding).toHaveBeenCalledTimes(1);
+      expect(membership.createBinding).toHaveBeenCalledWith(
+        { principal: { type: 'USER', id: 'u1' }, projectId: 'p1', roleKey: 'developer' },
+        { type: 'USER', id: 'pa' },
+      );
     });
 
     it('the user lookup and the disabled refusal come before the grant rules', async () => {
@@ -257,7 +265,7 @@ describe('ProjectMembersService', () => {
     // The disabled refusal is the `members.userDisabled.409` AppException (the
     // i18n key lives in `prefix`; the HTTP body renders it through the global
     // exception filter, which a service-level test does not run).
-    const error = await service.add('proj', { email: 'disabled@k.t', role: 'VIEWER' }, globalAdmin)
+    const error = await service.add('proj', { email: 'disabled@k.t', roleKey: 'viewer' }, globalAdmin)
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ConflictAppException);
     expect((error as ConflictAppException).prefix).toBe('members.userDisabled');

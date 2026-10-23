@@ -102,7 +102,7 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
     }
     for (const who of ['dev', 'capper']) {
       await request(server).post('/api/projects/live/members').set(auth('root'))
-        .send({ email: `${who}@koda.test`, role: 'DEVELOPER' }).expect(201);
+        .send({ email: `${who}@koda.test`, roleKey: 'developer' }).expect(201);
     }
 
     const agent = await request(server).post('/api/agents').set(auth('root'))

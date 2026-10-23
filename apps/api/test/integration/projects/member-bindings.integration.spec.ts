@@ -62,7 +62,7 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
   afterAll(async () => { await app?.close(); });
 
   it('AC-1: adds a developer binding with the caller as granter and no legacy row', async () => {
-    const res = await post({ email: 'target@bindings.test', role: 'DEVELOPER' }).expect(201);
+    const res = await post({ email: 'target@bindings.test', roleKey: 'developer' }).expect(201);
     expect(data<{ role: string }>(res).role).toBe('DEVELOPER');
     expect(await bindings()).toEqual([expect.objectContaining({ role: expect.objectContaining({ key: 'developer' }), grantedByType: 'USER', grantedById: adminId })]);
     expect(await legacyCount()).toBe(0);
@@ -73,12 +73,12 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
   });
   it('AC-3: binding-only duplicate is members conflict and adds nothing', async () => {
     await bind('reviewer');
-    conflict(await post({ email: 'target@bindings.test', role: 'DEVELOPER' }), 'members');
+    conflict(await post({ email: 'target@bindings.test', roleKey: 'developer' }), 'members');
     expect((await bindings()).map(b => b.role.key)).toEqual(['reviewer']);
   });
   it('AC-4: concurrent invites add one binding and one MEMBER_ADDED schedule', async () => {
     vi.spyOn(app.get(EmailAvailability), 'configured', 'get').mockReturnValue(true);
-    const invite = () => request(server).post(base.replace('/members', '/invites')).set(headers()).send({ email: 'target@bindings.test', role: 'DEVELOPER' });
+    const invite = () => request(server).post(base.replace('/members', '/invites')).set(headers()).send({ email: 'target@bindings.test', roleKey: 'developer' });
     const results = (await Promise.all([invite(), invite()])).sort((a, b) => a.status - b.status);
     expect(results.map(r => r.status).sort()).toEqual([201, 409]);
     expect(data<{ outcome: string }>(results[0]).outcome).toBe('ADDED');
@@ -158,14 +158,14 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     expect(res.body.ret).not.toBe(0);
   });
   it('AC-11: existing-user invite grants developer with caller attribution', async () => {
-    const res = await request(server).post(base.replace('/members', '/invites')).set(headers()).send({ email: 'target@bindings.test', role: 'DEVELOPER' }).expect(201);
+    const res = await request(server).post(base.replace('/members', '/invites')).set(headers()).send({ email: 'target@bindings.test', roleKey: 'developer' }).expect(201);
     expect(data(res)).toMatchObject({ outcome: 'ADDED', member: { email: 'target@bindings.test', role: 'DEVELOPER' } });
     expect(await bindings()).toEqual([expect.objectContaining({ grantedById: adminId, role: expect.objectContaining({ key: 'developer' }) })]);
     expect(await legacyCount()).toBe(0);
   });
   it('AC-12: existing-user invite refuses a binding-only member', async () => {
     await bind('viewer');
-    conflict(await request(server).post(base.replace('/members', '/invites')).set(headers()).send({ email: 'target@bindings.test', role: 'DEVELOPER' }), 'invites.memberExists');
+    conflict(await request(server).post(base.replace('/members', '/invites')).set(headers()).send({ email: 'target@bindings.test', roleKey: 'developer' }), 'invites.memberExists');
   });
   it('AC-14: a member with no binding is not a member of the project', async () => {
     await db.projectMember.create({ data: { projectId, userId: targetId, role: 'DEVELOPER' } });

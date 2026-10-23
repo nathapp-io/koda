@@ -3,8 +3,8 @@ import { validate } from 'class-validator';
 import { CreateInviteDto } from './create-invite.dto';
 
 /** Mirrors the global ValidationPipe: plainToInstance (transforms) then validate. */
-async function check(email: unknown, role: unknown = 'DEVELOPER') {
-  const dto = plainToInstance(CreateInviteDto, { email, role });
+async function check(email: unknown, roleKey: unknown = 'developer') {
+  const dto = plainToInstance(CreateInviteDto, { email, roleKey });
   const errors = await validate(dto);
   return {
     email: dto.email,
@@ -37,19 +37,24 @@ describe('CreateInviteDto (S4b US-004)', () => {
     expect(failed).toEqual([{ property: 'email', rules: ['isEmail'] }]);
   });
 
-  it('rejects a role outside ADMIN | DEVELOPER | VIEWER (including AGENT)', async () => {
-    expect((await check('dev@example.com', 'AGENT')).failed).toEqual([
-      { property: 'role', rules: ['isIn'] },
-    ]);
+  /**
+   * US-004 (P1l): the legacy `role` field is gone. The DTO ignores it (the global ValidationPipe strips
+   * it) and the service answers 400 `invites.roleRequired` when no key arrived.
+   */
+  it('ignores a legacy role value, whatever it holds', async () => {
+    const legacy = plainToInstance(CreateInviteDto, { email: 'dev@example.com', role: 'AGENT' });
+
+    expect(await validate(legacy)).toEqual([]);
   });
 
-  it('US-005: role and roleKey may both be absent here (the service decides), but an explicit null is rejected', async () => {
+  it('roleKey may be absent at the DTO (the service decides), but an explicit null is rejected', async () => {
     const absent = await validate(plainToInstance(CreateInviteDto, { email: 'a@x.io' }));
     const nullRole = await validate(plainToInstance(CreateInviteDto, { email: 'a@x.io', role: null }));
     const nullKey = await validate(plainToInstance(CreateInviteDto, { email: 'a@x.io', roleKey: null }));
 
     expect(absent).toEqual([]);
-    expect(nullRole.map((error) => error.property)).toEqual(['role']);
+    // A legacy `role` is not a declared property any more, so a null one is nothing to validate.
+    expect(nullRole.map((error) => error.property)).toEqual([]);
     expect(nullKey.map((error) => error.property)).toEqual(['roleKey']);
   });
 });

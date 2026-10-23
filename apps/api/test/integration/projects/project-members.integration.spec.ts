@@ -52,20 +52,20 @@ describeIntegration('/projects/:slug/members (PG)', () => {
   });
 
   it('a global admin adds a project admin and a developer', async () => {
-    const pa = data<Member>(await request(server).post(base).set(auth('root')).send({ email: 'pa@koda.test', role: 'ADMIN' }).expect(201));
+    const pa = data<Member>(await request(server).post(base).set(auth('root')).send({ email: 'pa@koda.test', roleKey: 'project-admin' }).expect(201));
     expect(pa).toEqual(expect.objectContaining({ userId: ids.pa, role: 'ADMIN' }));
-    await request(server).post(base).set(auth('root')).send({ email: 'dev@koda.test', role: 'DEVELOPER' }).expect(201);
+    await request(server).post(base).set(auth('root')).send({ email: 'dev@koda.test', roleKey: 'developer' }).expect(201);
   });
 
   it('unknown email is 404; an existing member is 409 (lookup is case-insensitive)', async () => {
-    await request(server).post(base).set(auth('root')).send({ email: 'ghost@koda.test', role: 'VIEWER' }).expect(404);
-    await request(server).post(base).set(auth('root')).send({ email: 'DEV@KODA.TEST', role: 'VIEWER' }).expect(409);
+    await request(server).post(base).set(auth('root')).send({ email: 'ghost@koda.test', roleKey: 'viewer' }).expect(404);
+    await request(server).post(base).set(auth('root')).send({ email: 'DEV@KODA.TEST', roleKey: 'viewer' }).expect(409);
   });
 
   it('a DEVELOPER can list but cannot add members', async () => {
     const page = data<Page<Member>>(await request(server).get(base).set(auth('dev')).expect(200));
     expect(page.total).toBe(2);
-    await request(server).post(base).set(auth('dev')).send({ email: 'viewer@koda.test', role: 'VIEWER' }).expect(403);
+    await request(server).post(base).set(auth('dev')).send({ email: 'viewer@koda.test', roleKey: 'viewer' }).expect(403);
   });
 
   it('a non-member cannot list members', async () => {
@@ -73,7 +73,7 @@ describeIntegration('/projects/:slug/members (PG)', () => {
   });
 
   it('a project admin adds a viewer and changes their role', async () => {
-    await request(server).post(base).set(auth('pa')).send({ email: 'viewer@koda.test', role: 'VIEWER' }).expect(201);
+    await request(server).post(base).set(auth('pa')).send({ email: 'viewer@koda.test', roleKey: 'viewer' }).expect(201);
     // Permissions P1 US-003: a role change is a grant of the new binding plus a delete of the old one
     // on the role-bindings route; the members list is where the outcome is read.
     const project = await db.project.findUniqueOrThrow({ where: { slug: 'team' } });
@@ -145,7 +145,7 @@ describeIntegration('/projects/:slug/members (PG)', () => {
     await request(server).post('/api/role-bindings').set(auth('root'))
       .send({ principalType: 'USER', principalId: ids.pa, roleKey: 'project-admin', projectId: (await db.project.findUniqueOrThrow({ where: { slug: 'team' } })).id })
       .expect(201);
-    await request(server).post(base).set(auth('root')).send({ email: 'viewer@koda.test', role: 'ADMIN' }).expect(201);
+    await request(server).post(base).set(auth('root')).send({ email: 'viewer@koda.test', roleKey: 'project-admin' }).expect(201);
     await request(server).patch(`/api/admin/users/${ids.viewer}`).set(auth('root')).send({ disabled: true }).expect(200);
 
     // viewer is disabled, so pa is the only active project ADMIN: the co-admin's delete is refused.
@@ -161,7 +161,13 @@ describeIntegration('/projects/:slug/members (PG)', () => {
     await request(server).delete(`/api/role-bindings/${paAdmin.id}`).set({ Authorization: `Bearer ${coAdminToken}` }).expect(409);
   });
 
-  it('rejects an unassignable role with 400', async () => {
-    await request(server).post(base).set(auth('root')).send({ email: 'outsider@koda.test', role: 'AGENT' }).expect(400);
+  it('rejects an unassignable role key with 400 permissions.scopeMismatch', async () => {
+    // `agent` is a GLOBAL role: naming it for a project member is a scope mismatch, not a legacy enum
+    // error — the `role` field that used to carry `AGENT` is gone.
+    const res = await request(server).post(base).set(auth('root')).send({ email: 'outsider@koda.test', roleKey: 'agent' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.ret).toBe(-2);
+    expect(res.body.message).toContain('agent');
   });
 });

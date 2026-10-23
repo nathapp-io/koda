@@ -89,7 +89,7 @@ describeIntegration('fleet approvals API (PG)', () => {
     evaluator = app.get(BudgetEvaluator);
     approvals = app.get(ApprovalsService);
     await request(server).post('/api/admin/users').set(tok('root')).send({ email: 'padmin@koda.test', name: 'padmin', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
-    await request(server).post('/api/projects/web/members').set(tok('root')).send({ email: 'padmin@koda.test', role: 'ADMIN' }).expect(201);
+    await request(server).post('/api/projects/web/members').set(tok('root')).send({ email: 'padmin@koda.test', roleKey: 'project-admin' }).expect(201);
     padmin = await loginToken(server, 'padmin@koda.test');
     padminId = (await prisma.user.findUniqueOrThrow({ where: { email: 'padmin@koda.test' } })).id;
     await prisma.webhook.create({
