@@ -88,7 +88,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.4"
 
       - uses: actions/setup-node@v4
         with:
@@ -141,7 +141,7 @@ jobs:
           push: true
           tags: ${{ needs.info.outputs.docker_tags_api }}
           build-args: |
-            BUN_VERSION=1.4.2
+            BUN_VERSION=1.4.4
             TURBO_VERSION=2.11.4
             BUILD_APP=api
             BUILD_APP_PACKAGE=@nathapp/koda-api
@@ -178,7 +178,7 @@ jobs:
           push: true
           tags: ${{ needs.info.outputs.docker_tags_web }}
           build-args: |
-            BUN_VERSION=1.4.2
+            BUN_VERSION=1.4.4
             TURBO_VERSION=2.11.4
             BUILD_APP=web
             BUILD_APP_PACKAGE=@nathapp/koda-web

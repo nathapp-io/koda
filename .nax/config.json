@@ -1,23 +1,6 @@
 {
     "name": "koda",
     "version": 1,
-    "models": {
-        "claude": {
-            "fast": "haiku",
-            "balanced": "sonnet",
-            "powerful": "sonnet"
-        },
-        "opencode": {
-            "fast": "minimax/MiniMax-M2.7",
-            "balanced": "minimax/MiniMax-M2.7",
-            "powerful": "minimax/MiniMax-M2.7"
-        },
-        "codex": {
-            "fast": "gpt-5.4-mini/medium",
-            "balanced": "gpt-5.3-codex/medium",
-            "powerful": "gpt-5.4/medium"
-        }
-    },
     "quality": {
         "commands": {
             "test": "npx turbo test",
@@ -37,27 +20,6 @@
             "lint": "bunx turbo lint",
             "lintFix": "bunx turbo lint:fix"
         }
-    },
-    "context": {
-        "fileInjection": "keyword",
-        "featureEngine": {
-            "enabled": true,
-            "budgetTokens": 2048
-        },
-        "v2": {
-            "enabled": true,
-            "minScore": 0.1,
-            "rules": {
-                "allowLegacyClaudeMd": false
-            }
-        }
-    },
-    "plan": {
-        "model": "balanced"
-    },
-    "acceptance": {
-        "enabled": true,
-        "maxRetries": 3
     },
     "precheck": {
         "storySizeGate": {

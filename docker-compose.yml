@@ -3,7 +3,7 @@ x-api-build: &api-build
   context: .
   dockerfile: apps/api/Dockerfile
   args:
-    BUN_VERSION: 1.4.2
+    BUN_VERSION: 1.4.4
     TURBO_VERSION: 2.11.4
     BUILD_APP: api
     BUILD_APP_PACKAGE: "@nathapp/koda-api"
@@ -77,7 +77,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        BUN_VERSION: 1.4.2
+        BUN_VERSION: 1.4.4
         TURBO_VERSION: 2.11.4
         BUILD_APP: web
         BUILD_APP_PACKAGE: "@nathapp/koda-web"
