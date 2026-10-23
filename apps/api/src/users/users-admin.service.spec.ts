@@ -94,7 +94,7 @@ describe('UsersAdminService', () => {
       expect(repo.createUser).toHaveBeenCalledWith(expect.objectContaining({ role: 'MEMBER' }));
       expect(membership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'new-member' });
       expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
-      expect(created.role).toBe('MEMBER');
+      expect(created).not.toHaveProperty('role');
     });
 
     it('B4: runs the user row and its bindings in one commit-aware transaction', async () => {
@@ -187,7 +187,7 @@ describe('UsersAdminService', () => {
 
       expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
       expect(repo.updateUser).toHaveBeenCalledWith('u2', { disabled: false, bumpTokenVersion: false });
-      expect(updated.role).toBe('ADMIN');
+      expect(updated).not.toHaveProperty('role');
     });
 
     it('does not count admins when isGlobalAdmin is false, even for legacy ADMIN', async () => {
