@@ -21,7 +21,8 @@ const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : descr
 interface InviteDto {
   id: string;
   email: string;
-  role: string;
+  roleKey: string | null;
+  roleName: string | null;
   status: string;
   inviterName: string | null;
   expiresAt: string;
@@ -39,7 +40,8 @@ interface PreviewDto {
   projectName: string;
   projectSlug: string;
   email: string;
-  role: string;
+  roleKey: string | null;
+  roleName: string | null;
   inviterName: string | null;
   expiresAt: string;
 }
@@ -92,8 +94,8 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
 
   const inviteRow = (id: string) => prisma.client.projectInvite.findUniqueOrThrow({ where: { id } });
 
-  const freshInvite = async (email: string = `${unique()}@example.com`, role = 'DEVELOPER') => {
-    const res = await post('/projects/s4b/invites', { email, role }).expect(201);
+  const freshInvite = async (email: string = `${unique()}@example.com`, roleKey = 'developer') => {
+    const res = await post('/projects/s4b/invites', { email, roleKey }).expect(201);
     const body = data<InviteCreateResult>(res);
     expect(body.outcome).toBe('INVITED');
     expect(body.invite).toBeDefined();
@@ -145,7 +147,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
   });
 
   // ── US-005 AC-1 ───────────────────────────────────────────────────────────
-  it('US-005 AC-1: previews a pending invite with exactly the eight public fields', async () => {
+  it('US-005 AC-1: previews a pending invite with exactly the seven public fields', async () => {
     const { token, row } = await freshInvite();
 
     const res = await preview(token);
@@ -153,24 +155,27 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     const view = data<PreviewDto>(res);
 
     expect(Object.keys(view).sort()).toEqual(
-      ['projectName', 'projectSlug', 'email', 'role', 'roleKey', 'roleName', 'inviterName', 'expiresAt'].sort(),
+      ['projectName', 'projectSlug', 'email', 'roleKey', 'roleName', 'inviterName', 'expiresAt'].sort(),
     );
     expect(view).toMatchObject({
       projectName: 'S5 Project',
       projectSlug: 's4b',
       email: row.email,
-      role: 'DEVELOPER',
+      roleKey: 'developer',
+      roleName: 'Developer',
       inviterName: 'S5 Root',
     });
     expect(new Date(view.expiresAt).getTime()).toBeGreaterThan(Date.now());
   });
 
   it('US-005 AC-1: previews an invite role that differs from the default', async () => {
-    const { token, row } = await freshInvite(`${unique()}@example.com`, 'VIEWER');
+    const { token, row } = await freshInvite(`${unique()}@example.com`, 'viewer');
 
     const view = data<PreviewDto>(await preview(token).expect(200));
 
-    expect(view.role).toBe('VIEWER');
+    expect(view.roleKey).toBe('viewer');
+    expect(view.roleName).toBe('Viewer');
+    expect(view).not.toHaveProperty('role');
     expect(view.email).toBe(row.email);
   });
 
@@ -228,7 +233,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
 
   // ── US-005 AC-4 ───────────────────────────────────────────────────────────
   it('US-005 AC-4: AC-13: accept creates project and baseline bindings for the new user', async () => {
-    const { token, row } = await freshInvite(`${unique()}@example.com`, 'DEVELOPER');
+    const { token, row } = await freshInvite(`${unique()}@example.com`, 'developer');
 
     await accept(token).expect(201);
     const accepted = await inviteRow(row.id);
@@ -354,7 +359,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
   it('US-005 AC-10: resending an invite id from another project responds 404 and leaves the row unchanged', async () => {
     const otherSlug = `other-${unique()}`;
     await post('/projects', { name: 'Other S5', slug: otherSlug, key: randomKey() }).expect(201);
-    const otherInvite = await post(`/projects/${otherSlug}/invites`, { email: `${unique()}@example.com`, role: 'DEVELOPER' })
+    const otherInvite = await post(`/projects/${otherSlug}/invites`, { email: `${unique()}@example.com`, roleKey: 'developer' })
       .expect(201);
     const otherResult = data<InviteCreateResult>(otherInvite);
     const id = otherResult.invite?.id ?? '';

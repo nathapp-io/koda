@@ -176,7 +176,7 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
   it('US-008 AC-2: create no longer consults a legacy admin gate — the route key refuses non-admins', async () => {
     const { service, invites, membership, access } = setup({ existingUser: null });
 
-    const result = await service.create('p', { email: 'new@x.io', role: 'DEVELOPER' }, admin, 'en');
+    const result = await service.create('p', { email: 'new@x.io', roleKey: 'developer' }, admin, 'en');
 
     expect(access.findProjectIdBySlug).toHaveBeenCalledWith('p');
     expect(result.outcome).toBe('INVITED');
@@ -187,11 +187,12 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
   it('AC-3: normalises the email and adds an existing active user as DEVELOPER', async () => {
     const { service, members, membership } = setup({ existingUser: { id: 'u9', disabled: false } });
 
-    const result = await service.create('p', { email: ' New@X.io ', role: 'DEVELOPER' }, admin, 'en');
+    const result = await service.create('p', { email: ' New@X.io ', roleKey: 'developer' }, admin, 'en');
 
     expect(members.findUserIdByEmail).toHaveBeenCalledWith('new@x.io');
     expect(result.outcome).toBe('ADDED');
-    expect(result.member?.role).toBe('DEVELOPER');
+    // Permissions P1l US-006: the ADDED member answers its bindings, not a display role.
+    expect(result.member).not.toHaveProperty('role');
     expect(membership.createBinding).toHaveBeenCalledWith({ principal: { type: 'USER', id: 'u9' }, projectId: 'p1', roleKey: 'developer' }, { type: 'USER', id: 'admin' });
     expect(result.member).toMatchObject({ email: 'b@x.io', name: 'New User', joinedAt: NOW });
     expect(members.lockMembers.mock.invocationCallOrder[0]).toBeLessThan(members.findLocalRole.mock.invocationCallOrder[0]);
@@ -200,7 +201,7 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
   it('US-003: the ADDED outcome carries the written membership bindings, read back through the repository', async () => {
     const { service, members } = setup({ existingUser: { id: 'u9', disabled: false } });
 
-    const result = await service.create('p', { email: 'b@x.io', role: 'DEVELOPER' }, admin, 'en');
+    const result = await service.create('p', { email: 'b@x.io', roleKey: 'developer' }, admin, 'en');
 
     expect(members.findRequiredMember).toHaveBeenCalledWith('p1', 'u9');
     expect(result.member).toMatchObject({
@@ -214,7 +215,7 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
   it('AC-13: adding an existing active user schedules exactly one MEMBER_ADDED and no INVITE', async () => {
     const { service, schedule, mailer } = setup({ existingUser: { id: 'u9', disabled: false } });
 
-    await service.create('p', { email: 'b@x.io', role: 'VIEWER' }, admin, 'en');
+    await service.create('p', { email: 'b@x.io', roleKey: 'viewer' }, admin, 'en');
 
     expect(schedule.scheduleMemberAdded).toHaveBeenCalledTimes(1);
     expect(schedule.scheduleMemberAdded).toHaveBeenCalledWith(
@@ -226,9 +227,9 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
   it('AC-4: an address that is already a project member is a 409 conflict', async () => {
     const { service, members, membership } = setup({ existingUser: { id: 'u9', disabled: false }, memberExists: true });
 
-    await expect(service.create('p', { email: 'b@x.io', role: 'VIEWER' }, admin, 'en'))
+    await expect(service.create('p', { email: 'b@x.io', roleKey: 'viewer' }, admin, 'en'))
       .rejects.toBeInstanceOf(ConflictAppException);
-    await expect(service.create('p', { email: 'b@x.io', role: 'VIEWER' }, admin, 'en'))
+    await expect(service.create('p', { email: 'b@x.io', roleKey: 'viewer' }, admin, 'en'))
       .rejects.toMatchObject({ prefix: 'invites.memberExists', httpStatus: 409 });
     expect(members.findLocalRole).toHaveBeenCalledWith('p1', 'u9');
     expect(membership.createBinding).not.toHaveBeenCalled();
@@ -237,7 +238,7 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
   it('AC-5: a disabled account is a 409 conflict and writes nothing else', async () => {
     const { service, invites, membership } = setup({ existingUser: { id: 'u9', disabled: true } });
 
-    await expect(service.create('p', { email: 'b@x.io', role: 'VIEWER' }, admin, 'en'))
+    await expect(service.create('p', { email: 'b@x.io', roleKey: 'viewer' }, admin, 'en'))
       .rejects.toBeInstanceOf(ConflictAppException);
     expect(membership.createBinding).not.toHaveBeenCalled();
     expect(invites.create).not.toHaveBeenCalled();
@@ -246,7 +247,7 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
   it('AC-6: a new address stores only the hash of the returned raw token', async () => {
     const { service, invites } = setup({ existingUser: null });
 
-    const result = await service.create('p', { email: 'new@x.io', role: 'DEVELOPER' }, admin, 'en');
+    const result = await service.create('p', { email: 'new@x.io', roleKey: 'developer' }, admin, 'en');
 
     expect(result.outcome).toBe('INVITED');
     const raw = rawOf(result.invitePath);
@@ -264,7 +265,7 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
     const { service, invites } = setup({ existingUser: null });
     const agent = { actorType: 'agent', id: 'agent-1', slug: 'roster-agent' } as KodaPrincipal;
 
-    const result = await service.create('p', { email: 'new@x.io', role: 'VIEWER' }, agent, 'en');
+    const result = await service.create('p', { email: 'new@x.io', roleKey: 'viewer' }, agent, 'en');
 
     expect(result.outcome).toBe('INVITED');
     expect(invites.create).toHaveBeenCalledWith(
@@ -276,7 +277,7 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
   it('B4: a user inviter keeps invitedByAgentId null', async () => {
     const { service, invites } = setup({ existingUser: null });
 
-    await service.create('p', { email: 'new@x.io', role: 'VIEWER' }, admin, 'en');
+    await service.create('p', { email: 'new@x.io', roleKey: 'viewer' }, admin, 'en');
 
     expect(invites.create).toHaveBeenCalledWith(
       expect.objectContaining({ invitedById: 'admin', invitedByAgentId: null }),
@@ -287,7 +288,7 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
     const { service, membership } = setup({ existingUser: { id: 'u9', disabled: false } });
     const agent = { actorType: 'agent', id: 'agent-1', slug: 'roster-agent' } as KodaPrincipal;
 
-    await service.create('p', { email: 'b@x.io', role: 'VIEWER' }, agent, 'en');
+    await service.create('p', { email: 'b@x.io', roleKey: 'viewer' }, agent, 'en');
 
     expect(membership.createBinding).toHaveBeenCalledWith(
       expect.objectContaining({ principal: { type: 'USER', id: 'u9' } }),
@@ -298,8 +299,8 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
   it('AC-7: creating a second invite for the same project and email cancels the earlier one', async () => {
     const { service, store } = setup({ existingUser: null });
 
-    await service.create('p', { email: 'new@x.io', role: 'DEVELOPER' }, admin, 'en');
-    await service.create('p', { email: ' New@X.io ', role: 'DEVELOPER' }, admin, 'en');
+    await service.create('p', { email: 'new@x.io', roleKey: 'developer' }, admin, 'en');
+    await service.create('p', { email: ' New@X.io ', roleKey: 'developer' }, admin, 'en');
 
     expect(store).toHaveLength(2);
     expect(store[0].status).toBe('CANCELLED');
@@ -309,7 +310,7 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
   it('AC-10: a configured invite mails the raw link once and reports emailed true', async () => {
     const { service, mailer } = setup({ existingUser: null });
 
-    const result = await service.create('p', { email: 'new@x.io', role: 'DEVELOPER' }, admin, 'en');
+    const result = await service.create('p', { email: 'new@x.io', roleKey: 'developer' }, admin, 'en');
 
     expect(result.emailed).toBe(true);
     expect(mailer.sendInvite).toHaveBeenCalledTimes(1);
@@ -323,14 +324,14 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
     const { service, mailer } = setup({ existingUser: null });
     mailer.sendInvite.mockRejectedValueOnce(new Error('SMTP down'));
 
-    await expect(service.create('p', { email: 'new@x.io', role: 'DEVELOPER' }, admin, 'en'))
+    await expect(service.create('p', { email: 'new@x.io', roleKey: 'developer' }, admin, 'en'))
       .resolves.toMatchObject({ outcome: 'INVITED', emailed: false });
   });
 
   it('AC-12: without email configured no invite mail is attempted and emailed is false', async () => {
     const { service, mailer } = setup({ existingUser: null, configured: false });
 
-    const result = await service.create('p', { email: 'new@x.io', role: 'DEVELOPER' }, admin, 'en');
+    const result = await service.create('p', { email: 'new@x.io', roleKey: 'developer' }, admin, 'en');
 
     expect(result.outcome).toBe('INVITED');
     expect(result.emailed).toBe(false);
@@ -340,7 +341,7 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
   it('AC-12: without email configured an existing user is added without a MEMBER_ADDED email', async () => {
     const { service, schedule, mailer } = setup({ existingUser: { id: 'u9', disabled: false }, configured: false });
 
-    const result = await service.create('p', { email: 'b@x.io', role: 'VIEWER' }, admin, 'en');
+    const result = await service.create('p', { email: 'b@x.io', roleKey: 'viewer' }, admin, 'en');
 
     expect(result.member?.userId).toBe('u9');
     expect(schedule.scheduleMemberAdded).not.toHaveBeenCalled();
@@ -371,10 +372,10 @@ describe('ProjectInvitesService.create role keys (permissions P1 web US-005)', (
     expect(invites.create).toHaveBeenCalledWith(expect.objectContaining({ role: null, roleId: 'id-triager' }));
   });
 
-  it('maps the legacy role to its key for the grant rules and keeps the legacy enum beside roleId', async () => {
+  it('US-004 (P1l): a legacy role beside the key is ignored — the key names the granted role', async () => {
     const { service, invites, roles } = setup({ existingUser: null });
 
-    await service.create('p', { email: 'new@x.io', role: 'ADMIN' }, admin, 'en');
+    await service.create('p', { email: 'new@x.io', roleKey: 'project-admin', role: 'VIEWER' } as never, admin, 'en');
 
     expect(roles.assertMayGrant).toHaveBeenCalledWith(admin, expect.objectContaining({ roleKey: 'project-admin' }));
     expect(invites.create).toHaveBeenCalledWith(expect.objectContaining({ role: 'ADMIN', roleId: 'id-project-admin' }));
@@ -400,12 +401,13 @@ describe('ProjectInvitesService.create role keys (permissions P1 web US-005)', (
     );
   });
 
-  it('refuses a request that sends both role and roleKey, and one that sends neither, before any lookup', async () => {
+  it('US-004 (P1l): refuses a request without roleKey before any lookup; a legacy role does not count', async () => {
     const { service, members, roles } = setup({ existingUser: null });
 
-    await expect(service.create('p', { email: 'a@x.io', role: 'VIEWER', roleKey: 'viewer' }, admin, 'en'))
-      .rejects.toMatchObject({ prefix: 'invites.roleAndRoleKey' });
     await expect(service.create('p', { email: 'a@x.io' }, admin, 'en'))
+      .rejects.toMatchObject({ prefix: 'invites.roleRequired' });
+    // `role` is stripped by the pipe, so a body that only carries it is the same as a body with neither.
+    await expect(service.create('p', { email: 'a@x.io', role: 'VIEWER' } as never, admin, 'en'))
       .rejects.toMatchObject({ prefix: 'invites.roleRequired' });
     expect(members.findUserIdByEmail).not.toHaveBeenCalled();
     expect(roles.assertMayGrant).not.toHaveBeenCalled();
@@ -452,7 +454,7 @@ describe('ProjectInvitesService.list (S4b US-004)', () => {
     const rows = await service.list('p', admin);
 
     expect(rows).toHaveLength(1);
-    expect(Object.keys(rows[0]).sort()).toEqual(['createdAt', 'email', 'expiresAt', 'id', 'inviterName', 'role', 'roleKey', 'roleName', 'status']);
+    expect(Object.keys(rows[0]).sort()).toEqual(['createdAt', 'email', 'expiresAt', 'id', 'inviterName', 'roleKey', 'roleName', 'status']);
     expect(JSON.stringify(rows)).not.toMatch(/[a-f0-9]{64}/);
   });
 

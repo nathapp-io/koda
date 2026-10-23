@@ -1,11 +1,11 @@
 import { ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
 
+/** A row of `GET /admin/users`. Permissions P1 US-011: the legacy `role` enum is not in the response. */
 export interface AdminUser {
   id: string
   email: string
   name: string | null
-  role: string
   disabled: boolean
   createdAt: string
 }

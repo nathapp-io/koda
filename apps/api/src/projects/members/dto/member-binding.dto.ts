@@ -4,13 +4,12 @@ import type { MemberBinding } from '../domain/project-member.domain';
 /**
  * One role chip of a project member (US-003): a role the principal holds in this project.
  *
- * `id` is the `RoleBinding` row, or null for the entry that stands for a legacy row
- * (`ProjectMember` of `DEVELOPER`, an `AgentProject` roster row of `VIEWER`) which has no binding to
- * edit. `roleName` is the role's display name, so a client renders the chip without a role lookup.
+ * `id` is the `RoleBinding` row a client edits — every chip is a binding (Permissions P1l US-006).
+ * `roleName` is the role's display name, so a client renders the chip without a role lookup.
  */
 export class MemberBindingDto {
-  @ApiProperty({ nullable: true, type: String, description: 'The binding row; null for a legacy membership row' })
-  declare id: string | null;
+  @ApiProperty({ type: String, description: 'The role binding row this chip is' })
+  declare id: string;
 
   @ApiProperty({ example: 'developer' }) declare roleKey: string;
 

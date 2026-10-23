@@ -35,9 +35,6 @@ describe('AgentsService', () => {
     slug: 'test-agent',
     status: 'ACTIVE',
     maxConcurrentTickets: 3,
-    roles: [
-      { id: 'role-1', agentId: 'agent-123', role: 'DEVELOPER' },
-    ],
     capabilities: [
       { id: 'cap-1', agentId: 'agent-123', capability: 'typescript' },
       { id: 'cap-2', agentId: 'agent-123', capability: 'nestjs' },
@@ -50,9 +47,6 @@ describe('AgentsService', () => {
 
   const mockAgentWithRelations = {
     ...mockAgent,
-    roles: [
-      { id: 'role-1', agentId: 'agent-123', role: 'DEVELOPER' },
-    ],
     capabilities: [
       { id: 'cap-1', agentId: 'agent-123', capability: 'typescript' },
       { id: 'cap-2', agentId: 'agent-123', capability: 'nestjs' },
@@ -70,8 +64,7 @@ describe('AgentsService', () => {
     updateApiKeyHash: vi.fn(),
     update: vi.fn(),
     deleteBySlug: vi.fn(),
-    createRolesAndCapabilities: vi.fn(),
-    replaceRoles: vi.fn(),
+    createCapabilities: vi.fn(),
     replaceCapabilities: vi.fn(),
     findProjectBySlug: vi.fn(),
     findVerifiedUnassignedTickets: vi.fn(),
@@ -106,8 +99,6 @@ describe('AgentsService', () => {
     bindBaseline: vi.fn(),
     setGlobalAdmin: vi.fn(),
     removeAllBindings: vi.fn(),
-    // Permissions P1 (US-009): updateRoles invalidates the permission cache after its role write.
-    invalidatePermissions: vi.fn(),
     afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
   };
 
@@ -136,12 +127,10 @@ describe('AgentsService', () => {
     agentRepo = module.get(PrismaAgentRepository);
     kodaDomainWriter = module.get(KodaDomainWriter);
 
-    mockAgentRepo.createRolesAndCapabilities.mockResolvedValue(undefined);
+    mockAgentRepo.createCapabilities.mockResolvedValue(undefined);
     mockMembership.bindBaseline.mockResolvedValue(undefined);
     mockMembership.removeAllBindings.mockResolvedValue(undefined);
-    mockMembership.invalidatePermissions.mockResolvedValue(undefined);
 
-    mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
     mockAgentRepo.replaceCapabilities.mockResolvedValue(undefined);
     // S4c US-001: GET /agents/me always carries the roster projects, and a
     // rostered target agent is the default for the pickup tests.
@@ -166,7 +155,6 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         });
 
         expect(result).toHaveProperty('apiKey');
@@ -181,7 +169,6 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         });
 
         expect(agentRepo.create).toHaveBeenCalled();
@@ -197,7 +184,6 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         });
 
         expect(result).toHaveProperty('apiKey');
@@ -211,7 +197,6 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         });
 
         const createCall = (agentRepo.create as Mock).mock.calls[0][0];
@@ -227,7 +212,6 @@ describe('AgentsService', () => {
         await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         });
 
         expect(agentRepo.create).toHaveBeenCalled();
@@ -242,7 +226,6 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         });
 
         const expectedHash = createHmac('sha256', 'test-secret').update(result.apiKey).digest('hex');
@@ -270,18 +253,20 @@ describe('AgentsService', () => {
         await expect(serviceWithoutSecret.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         })).rejects.toThrow(ValidationAppException);
       });
 
-      it('should reject invalid roles before creating the agent', async () => {
-        await expect(service.generateApiKey({
-          name: 'Test Agent',
-          slug: 'test-agent',
-          roles: ['DEVLOPER'],
-        })).rejects.toThrow(ValidationAppException);
+      it('US-005: never writes an AgentRoleEntry, even when the body carries a legacy roles array', async () => {
+        mockAgentRepo.create.mockResolvedValue(mockAgent);
 
-        expect(agentRepo.create).not.toHaveBeenCalled();
+        const body = { name: 'Test Agent', slug: 'test-agent', capabilities: ['nax'] };
+        // A legacy client still sends `roles`; the whitelist pipe drops it before the service sees it.
+        Object.assign(body, { roles: ['DEVELOPER'] });
+
+        await service.generateApiKey(body);
+
+        expect(mockAgentRepo.createCapabilities).toHaveBeenCalledWith(mockAgent.id, ['nax']);
+        expect(mockAgentRepo).not.toHaveProperty('createRolesAndCapabilities');
       });
 
       it('should return created agent in response', async () => {
@@ -290,10 +275,9 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-          roles: ['DEVELOPER'],
         });
 
-        // DTO strips apiKeyHash and formats roles/capabilities
+        // DTO strips apiKeyHash and formats capabilities
         expect(result.agent.id).toBe(mockAgent.id);
         expect(result.agent.name).toBe(mockAgent.name);
         expect(result.agent.slug).toBe(mockAgent.slug);
@@ -319,7 +303,7 @@ describe('AgentsService', () => {
         });
 
         try {
-          await service.generateApiKey({ name: 'Test Agent', slug: 'test-agent', roles: ['DEVELOPER'] });
+          await service.generateApiKey({ name: 'Test Agent', slug: 'test-agent' });
         } finally {
           mockTxManager.run.mockImplementation((fn: () => Promise<unknown>) => fn());
         }
@@ -396,7 +380,7 @@ describe('AgentsService', () => {
   });
 
   describe('findAll', () => {
-    it('should return all agents with roles and capabilities', async () => {
+    it('should return all agents with their capabilities and no roles', async () => {
       const agents = [mockAgentWithRelations];
       mockAgentRepo.findAll.mockResolvedValue(agents);
 
@@ -406,15 +390,14 @@ describe('AgentsService', () => {
       expect(agentRepo.findAll).toHaveBeenCalled();
     });
 
-    it('should include role entries for each agent', async () => {
+    it('US-006: reports no roles property for any agent', async () => {
       const agents = [mockAgentWithRelations];
       mockAgentRepo.findAll.mockResolvedValue(agents);
 
       const result = await service.findAll();
 
-      expect(result[0].roles).toBeDefined();
-      expect(Array.isArray(result[0].roles)).toBe(true);
-      expect(result[0].roles.length).toBe(1);
+      // New data has no `AgentRoleEntry` row; an agent's roles are role bindings.
+      expect(result[0]).not.toHaveProperty('roles');
     });
 
     it('should include capability entries for each agent', async () => {
@@ -436,7 +419,7 @@ describe('AgentsService', () => {
       expect(result).toEqual([]);
     });
 
-    it('should fetch agents with related roles and capabilities', async () => {
+    it('should fetch agents with their capabilities', async () => {
       const agents = [mockAgentWithRelations];
       mockAgentRepo.findAll.mockResolvedValue(agents);
 
@@ -447,7 +430,7 @@ describe('AgentsService', () => {
   });
 
   describe('findBySlug', () => {
-    it('should return agent by slug with roles and capabilities', async () => {
+    it('should return agent by slug with its capabilities', async () => {
       mockAgentRepo.findBySlug.mockResolvedValue(mockAgentWithRelations);
 
       const result = await service.findBySlug('test-agent');
@@ -462,13 +445,12 @@ describe('AgentsService', () => {
       await expect(service.findBySlug('nonexistent')).rejects.toThrow();
     });
 
-    it('should include roles in response', async () => {
+    it('US-006: reports no roles in the response', async () => {
       mockAgentRepo.findBySlug.mockResolvedValue(mockAgentWithRelations);
 
       const result = await service.findBySlug('test-agent');
 
-      expect(result.roles).toBeDefined();
-      expect(Array.isArray(result.roles)).toBe(true);
+      expect(result).not.toHaveProperty('roles');
     });
 
     it('should include capabilities in response', async () => {
@@ -521,26 +503,6 @@ describe('AgentsService', () => {
       ]);
     });
 
-    it('should include roles with all AgentRole enum values', async () => {
-      const agentWithAllRoles = {
-        ...mockAgentWithRelations,
-        roles: [
-          { id: 'role-1', agentId: 'agent-123', role: 'TRIAGER' },
-          { id: 'role-2', agentId: 'agent-123', role: 'DEVELOPER' },
-          { id: 'role-3', agentId: 'agent-123', role: 'REVIEWER' },
-        ],
-      };
-
-      mockAgentRepo.findById.mockResolvedValue(agentWithAllRoles);
-
-      const result = await service.findMe('agent-123');
-
-      expect(result.roles.length).toBe(3);
-      expect(result.roles.map((r: any) => r.role)).toContain('TRIAGER');
-      expect(result.roles.map((r: any) => r.role)).toContain('DEVELOPER');
-      expect(result.roles.map((r: any) => r.role)).toContain('REVIEWER');
-    });
-
     it('should include capabilities', async () => {
       mockAgentRepo.findById.mockResolvedValue(mockAgentWithRelations);
 
@@ -589,94 +551,6 @@ describe('AgentsService', () => {
       mockAgentRepo.findBySlugScalar.mockResolvedValue(null);
 
       await expect(service.update('nonexistent', { name: 'New Name' })).rejects.toThrow();
-    });
-  });
-
-  describe('updateRoles', () => {
-    it('should delete all existing roles and insert new ones', async () => {
-      const updateData = { roles: ['DEVELOPER', 'REVIEWER'] };
-      const updatedAgent = {
-        ...mockAgentWithRelations,
-        roles: [
-          { id: 'new-role-1', agentId: 'agent-123', role: 'DEVELOPER' },
-          { id: 'new-role-2', agentId: 'agent-123', role: 'REVIEWER' },
-        ],
-      };
-
-      mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
-      mockAgentRepo.findById.mockResolvedValue(updatedAgent);
-
-      const result = await service.updateRoles('agent-123', updateData);
-
-      expect(agentRepo.replaceRoles).toHaveBeenCalledWith('agent-123', ['DEVELOPER', 'REVIEWER']);
-      expect(result.roles.length).toBe(2);
-      expect(result.roles.map((r: any) => r.role)).toEqual(['DEVELOPER', 'REVIEWER']);
-    });
-
-    it('should REPLACE roles, not append', async () => {
-      const updateData = { roles: ['TRIAGER'] };
-      const updatedAgent = {
-        ...mockAgentWithRelations,
-        roles: [
-          { id: 'new-role-1', agentId: 'agent-123', role: 'TRIAGER' },
-        ],
-      };
-
-      mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
-      mockAgentRepo.findById.mockResolvedValue(updatedAgent);
-
-      const result = await service.updateRoles('agent-123', updateData);
-
-      // Verify replaceRoles was called (handles delete + insert)
-      expect(agentRepo.replaceRoles).toHaveBeenCalledWith('agent-123', ['TRIAGER']);
-
-      // Verify only new role exists
-      expect(result.roles.length).toBe(1);
-      expect(result.roles[0].role).toBe('TRIAGER');
-    });
-
-    it('should allow updating to empty roles array', async () => {
-      const updateData = { roles: [] };
-      const updatedAgent = {
-        ...mockAgentWithRelations,
-        roles: [],
-      };
-
-      mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
-      mockAgentRepo.findById.mockResolvedValue(updatedAgent);
-
-      const result = await service.updateRoles('agent-123', updateData);
-
-      expect(result.roles.length).toBe(0);
-    });
-
-    it('should reject invalid roles before deleting existing roles', async () => {
-      await expect(service.updateRoles('agent-123', { roles: ['DEVLOPER'] }))
-        .rejects.toThrow(ValidationAppException);
-
-      expect(agentRepo.replaceRoles).not.toHaveBeenCalled();
-    });
-
-    it('invalidates the permission cache after the role write (US-009)', async () => {
-      mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
-      mockAgentRepo.findById.mockResolvedValue({ ...mockAgentWithRelations, roles: [] });
-
-      await service.updateRoles('agent-123', { roles: ['DEVELOPER'] });
-
-      // `AgentRoleEntry` is a legacy row the permission union reads but `MembershipService` does not
-      // write, so the write it does not own is the one that must drop the cache — after the role write.
-      expect(mockMembership.invalidatePermissions).toHaveBeenCalledTimes(1);
-      expect(agentRepo.replaceRoles.mock.invocationCallOrder[0]).toBeLessThan(
-        mockMembership.invalidatePermissions.mock.invocationCallOrder[0],
-      );
-    });
-
-    it('does not invalidate the permission cache when the roles are rejected (US-009)', async () => {
-      await expect(service.updateRoles('agent-123', { roles: ['DEVLOPER'] })).rejects.toThrow(
-        ValidationAppException,
-      );
-
-      expect(mockMembership.invalidatePermissions).not.toHaveBeenCalled();
     });
   });
 
@@ -1090,7 +964,6 @@ describe('AgentsService', () => {
             maxConcurrentTickets: 3,
             createdAt: new Date(),
             updatedAt: new Date(),
-            roles: [{ id: 'r1', agentId: 'agent-1', role: 'DEVELOPER' }],
             capabilities: [{ id: 'c1', agentId: 'agent-1', capability: 'typescript' }],
           },
         ],
@@ -1122,7 +995,6 @@ describe('AgentsService', () => {
       slug: over.slug ?? 'bot',
       name: 'Bot',
       status: 'ACTIVE',
-      roles: ['DEVELOPER'],
       capabilities: ['typescript'],
       openTicketCount: over.openTicketCount ?? 0,
       openTicketRefs: over.openTicketRefs ?? [],
@@ -1131,7 +1003,7 @@ describe('AgentsService', () => {
       addedByName: over.addedByName === undefined ? 'Admin' : over.addedByName,
     });
 
-    it('returns the scoped project roster as ProjectAgentListDto', async () => {
+    it('US-006: answers the roster as { items } alone, with no roles on a row', async () => {
       mockAgentRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: null });
       mockAgentRepo.findProjectRoster.mockResolvedValue([makeRecord()]);
 
@@ -1139,17 +1011,18 @@ describe('AgentsService', () => {
 
       expect(mockAgentRepo.findProjectBySlug).toHaveBeenCalledWith('alpha');
       expect(mockAgentRepo.findProjectRoster).toHaveBeenCalledWith('proj-1');
-      expect(result.scoping).toBe(true);
+      // `scoping` was always true; the roster answer is the items alone.
+      expect(Object.keys(result)).toEqual(['items']);
       expect(result.items).toHaveLength(1);
       expect(result.items[0]).toMatchObject({
         slug: 'bot',
         status: 'ACTIVE',
-        roles: ['DEVELOPER'],
         capabilities: ['typescript'],
         openTicketCount: 0,
         openTicketRefs: [],
         addedBy: { id: 'user-admin', name: 'Admin' },
       });
+      expect(result.items[0]).not.toHaveProperty('roles');
       expect(result.items[0].addedAt).toEqual(expect.any(String));
     });
 
@@ -1189,13 +1062,11 @@ describe('AgentsService', () => {
       const result1 = await service.generateApiKey({
         name: 'Agent 1',
         slug: 'agent-1',
-        roles: ['DEVELOPER'],
       });
 
       const result2 = await service.generateApiKey({
         name: 'Agent 2',
         slug: 'agent-2',
-        roles: ['DEVELOPER'],
       });
 
       // Raw keys should be different

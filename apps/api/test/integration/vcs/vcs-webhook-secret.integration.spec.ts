@@ -50,12 +50,12 @@ describeIntegration('VCS webhook secret (M9)', () => {
       ids[who] = (await prisma.user.findUniqueOrThrow({ where: { email: `${who}@koda.test` } })).id;
     }
     await request(server).post('/api/projects').set(auth('root')).send({ name: 'Hooks', slug: 'hooks', key: 'HOOK' }).expect(201);
-    for (const [who, role] of [['padmin', 'ADMIN'], ['pdev', 'DEVELOPER'], ['pviewer', 'VIEWER']]) {
+    for (const [who, roleKey] of [['padmin', 'project-admin'], ['pdev', 'developer'], ['pviewer', 'viewer']]) {
       await request(server).post('/api/projects/hooks/members').set(auth('root'))
-        .send({ email: `${who}@koda.test`, role }).expect(201);
+        .send({ email: `${who}@koda.test`, roleKey }).expect(201);
     }
     const agent = await request(server).post('/api/agents').set(auth('root'))
-      .send({ name: 'Hook Agent', slug: 'hook-agent', roles: [] }).expect(201);
+      .send({ name: 'Hook Agent', slug: 'hook-agent' }).expect(201);
     tokens.agent = data<{ apiKey: string }>(agent).apiKey;
     ids.agent = (await prisma.agent.findUniqueOrThrow({ where: { slug: 'hook-agent' } })).id;
 
@@ -68,7 +68,7 @@ describeIntegration('VCS webhook secret (M9)', () => {
       ['binding-developer-agent', developerRole.id],
     ] as const) {
       const response = await request(server).post('/api/agents').set(auth('root'))
-        .send({ name: who, slug: who, roles: [] }).expect(201);
+        .send({ name: who, slug: who }).expect(201);
       const agent = data<{ apiKey: string }>(response);
       tokens[who] = agent.apiKey;
       const agentRow = await prisma.agent.findUniqueOrThrow({ where: { slug: who } });

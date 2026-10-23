@@ -235,14 +235,29 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
 
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 
-  const createUser = async (email: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<UserRow> =>
-    data<UserRow>(
+  /**
+   * Permissions P1l (US-005): the create route takes no role, so `'ADMIN'` means "create a plain
+   * member, then bind the global `admin` role" — the binding is the admin, and it mirrors
+   * `User.role = 'ADMIN'` as the route used to.
+   */
+  const createUser = async (email: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<UserRow> => {
+    const created = data<UserRow>(
       await request(h.server)
         .post('/api/admin/users')
         .set(auth(rootToken))
-        .send({ email, name: email.split('@')[0], password: TEST_PASSWORD, role })
+        .send({ email, name: email.split('@')[0], password: TEST_PASSWORD })
         .expect(201),
     );
+    if (role === 'ADMIN') await grantRole(h.db, { type: 'USER', id: created.id }, 'admin');
+    return created;
+  };
+
+  /** The user's global `admin` binding id, for a demotion through the role-binding route. */
+  const adminBindingId = async (userId: string): Promise<string> =>
+    (await h.db.roleBinding.findFirstOrThrow({
+      where: { principalType: 'USER', principalId: userId, projectId: null, role: { key: 'admin' } },
+      select: { id: true },
+    })).id;
 
   const patchUser = (id: string, patch: Record<string, unknown>) =>
     request(h.server).patch(`/api/admin/users/${id}`).set(auth(rootToken)).send(patch);
@@ -310,40 +325,65 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
     expect(await h.boundRoles('USER', created.id)).toEqual([{ roleKey: 'member', projectId: null }]);
   });
 
-  it('AC-12: an admin-created ADMIN gets a projectId-null admin binding', async () => {
-    const created = await createUser('admin@koda.test', 'ADMIN');
+  /**
+   * Permissions P1l (US-005) supersedes US-004's AC-12 and AC-13: the create request has no role any
+   * more, so a body that still sends `role: ADMIN` is stripped and the account is a plain member.
+   */
+  it('AC-12: a create that sends { role: ADMIN } gets only the member baseline', async () => {
+    // Sent straight at the route: `createUser`'s `'ADMIN'` means "bind the admin role", which is not
+    // what this case is about.
+    const created = data<UserRow>(
+      await request(h.server).post('/api/admin/users').set(auth(rootToken))
+        .send({ email: 'admin@koda.test', name: 'admin', password: TEST_PASSWORD, role: 'ADMIN' })
+        .expect(201),
+    );
 
-    expect(await h.boundRoles('USER', created.id)).toContainEqual({ roleKey: 'admin', projectId: null });
+    expect(await h.boundRoles('USER', created.id)).toEqual([{ roleKey: 'member', projectId: null }]);
   });
 
-  it('AC-13: an admin-created ADMIN stores User.role ADMIN', async () => {
-    const created = await createUser('admin2@koda.test', 'ADMIN');
+  it('AC-13: a create that sends { role: ADMIN } stores User.role MEMBER', async () => {
+    const created = data<UserRow>(
+      await request(h.server).post('/api/admin/users').set(auth(rootToken))
+        .send({ email: 'admin2@koda.test', name: 'admin2', password: TEST_PASSWORD, role: 'ADMIN' })
+        .expect(201),
+    );
 
-    expect(await h.storedRole(created.id)).toBe('ADMIN');
+    expect(await h.storedRole(created.id)).toBe('MEMBER');
   });
 
-  it('AC-14: demoting an admin removes the admin binding (a second active admin exists)', async () => {
+  /**
+   * Permissions P1l (US-005) supersedes US-004's AC-14 and AC-15: demoting is the `DELETE` of the
+   * global admin binding, so a patch that still sends `role` changes neither the binding nor the row.
+   */
+  it('AC-14: a role patch leaves the admin binding in place', async () => {
     const target = await createUser('demoted@koda.test', 'ADMIN');
+    const bindingId = await adminBindingId(target.id);
 
     await patchUser(target.id, { role: 'MEMBER' }).expect(200);
 
-    expect(await h.boundRoles('USER', target.id)).toEqual([{ roleKey: 'member', projectId: null }]);
+    expect(await h.boundRoles('USER', target.id)).toHaveLength(2);
+    expect(await h.boundRoles('USER', target.id)).toContainEqual({ roleKey: 'admin', projectId: null });
+    expect(await h.db.roleBinding.count({ where: { id: bindingId } })).toBe(1);
   });
 
-  it('AC-15: demoting an admin stores User.role MEMBER', async () => {
+  it('AC-15: a role patch leaves User.role ADMIN', async () => {
     const target = await createUser('demoted2@koda.test', 'ADMIN');
     await patchUser(target.id, { role: 'MEMBER' }).expect(200);
 
-    expect(await h.storedRole(target.id)).toBe('MEMBER');
+    expect(await h.storedRole(target.id)).toBe('ADMIN');
   });
 
-  it('AC-16: demoting the last active admin answers the existing last-admin error', async () => {
+  /**
+   * Permissions P1l (US-005): `disabled` is the only patch field the last-admin guard still applies
+   * to, so AC-16 and AC-17 exercise the refusal through a disable.
+   */
+  it('AC-16: disabling the last active admin answers the existing last-admin error', async () => {
     const target = await createUser('last-admin@koda.test', 'ADMIN');
     await withOnlyActiveAdmin(target.id, async (token) => {
       // The premise is exactly one enabled bound admin.
       expect(await activeAdminCount()).toBe(1);
 
-      const res = await request(h.server).patch(`/api/admin/users/${target.id}`).set(auth(token)).send({ role: 'MEMBER' });
+      const res = await request(h.server).patch(`/api/admin/users/${target.id}`).set(auth(token)).send({ disabled: true });
 
       expect(res.status).toBe(409);
       // `ConflictAppException({}, 'users.lastAdmin')` translates `users.lastAdmin.409`.
@@ -351,12 +391,12 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
     });
   });
 
-  it("AC-17: the refused demotion leaves the target's admin binding in place", async () => {
+  it("AC-17: the refused disable leaves the target's admin binding in place", async () => {
     const target = await createUser('last-admin2@koda.test', 'ADMIN');
     await withOnlyActiveAdmin(target.id, async (token) => {
       expect(await activeAdminCount()).toBe(1);
 
-      await request(h.server).patch(`/api/admin/users/${target.id}`).set(auth(token)).send({ role: 'MEMBER' }).expect(409);
+      await request(h.server).patch(`/api/admin/users/${target.id}`).set(auth(token)).send({ disabled: true }).expect(409);
     });
 
     expect(await h.boundRoles('USER', target.id)).toContainEqual({ roleKey: 'admin', projectId: null });
@@ -366,7 +406,7 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
     const res = await request(h.server)
       .post('/api/agents')
       .set(auth(rootToken))
-      .send({ name: 'Bound Agent', slug: 'bound-agent', roles: ['DEVELOPER'], capabilities: ['typescript'] });
+      .send({ name: 'Bound Agent', slug: 'bound-agent', capabilities: ['typescript'] });
 
     expect(res.status).toBe(201);
     const created = data<{ agent: { id: string } }>(res);
@@ -378,7 +418,7 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
     const res = await request(h.server)
       .post('/api/agents')
       .set(auth(rootToken))
-      .send({ name: 'Doomed Agent', slug: 'doomed-agent', roles: ['DEVELOPER'] });
+      .send({ name: 'Doomed Agent', slug: 'doomed-agent' });
     expect(res.status).toBe(201);
     const agentId = data<{ agent: { id: string } }>(res).agent.id;
 
@@ -387,21 +427,24 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
     expect(await h.db.roleBinding.count({ where: { principalType: 'AGENT', principalId: agentId } })).toBe(0);
   });
 
-  it('AC-20: demoting an admin revokes their earlier access token', async () => {
+  /** Permissions P1l (US-005): demoting is the DELETE of the admin binding, and it revokes the token. */
+  it('AC-20: deleting the admin binding revokes the earlier access token', async () => {
     const target = await createUser('token-user@koda.test', 'ADMIN');
     const token = await loginToken(h.server, 'token-user@koda.test');
     await request(h.server).get('/api/auth/me').set(auth(token)).expect(200);
 
-    await patchUser(target.id, { role: 'MEMBER' }).expect(200);
+    await request(h.server).delete(`/api/role-bindings/${await adminBindingId(target.id)}`)
+      .set(auth(rootToken)).expect(204);
 
     await request(h.server).get('/api/auth/me').set(auth(token)).expect(401);
   });
 
-  it('AC-21: demoting a user who holds owner and admin bindings leaves only the owner binding', async () => {
+  it('AC-21: removing a user\'s admin binding leaves only the owner binding', async () => {
     const target = await createUser('owner-admin@koda.test', 'ADMIN');
     await grantOwner(target.id);
 
-    await patchUser(target.id, { role: 'MEMBER' }).expect(200);
+    await request(h.server).delete(`/api/role-bindings/${await adminBindingId(target.id)}`)
+      .set(auth(rootToken)).expect(204);
 
     // Of the two global admin roles, only `owner` survives; the baseline `member` is untouched.
     const bindings = await h.boundRoles('USER', target.id);
@@ -414,12 +457,13 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
     const target = await createUser('owner-admin2@koda.test', 'ADMIN');
     await grantOwner(target.id);
 
-    await patchUser(target.id, { role: 'MEMBER' }).expect(200);
+    await request(h.server).delete(`/api/role-bindings/${await adminBindingId(target.id)}`)
+      .set(auth(rootToken)).expect(204);
 
     expect(await h.storedRole(target.id)).toBe('ADMIN');
   });
 
-  it('AC-23: demoting a legacy ADMIN that holds no binding stores User.role MEMBER', async () => {
+  it('AC-23: a role patch never writes User.role, so a legacy ADMIN keeps it', async () => {
     const legacy = await h.db.user.create({
       data: { email: 'legacy-admin@koda.test', name: 'Legacy', passwordHash: 'not-a-real-hash', role: 'ADMIN' },
     });
@@ -427,7 +471,7 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
 
     await patchUser(legacy.id, { role: 'MEMBER' }).expect(200);
 
-    expect(await h.storedRole(legacy.id)).toBe('MEMBER');
+    expect(await h.storedRole(legacy.id)).toBe('ADMIN');
   });
 
   it('AC-26: disabling a user without a role change still revokes their session', async () => {
@@ -456,7 +500,6 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
           email: 'no-baseline@koda.test',
           name: 'No baseline',
           password: TEST_PASSWORD,
-          role: 'MEMBER',
         });
 
       expect(res.status).toBe(404);

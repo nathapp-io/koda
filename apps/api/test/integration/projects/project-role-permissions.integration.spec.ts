@@ -43,8 +43,10 @@ describeIntegration('project-role permissions (#144)', () => {
     ids[who] = data<{ id: string }>(res).id;
     tokens[who] = await loginToken(server, `${who}@koda.test`);
   };
+  /** US-004 (P1l): the members route takes a role key; the caller-role labels map to the seeded keys. */
+  const ROLE_KEY: Record<Role, string> = { ADMIN: 'project-admin', DEVELOPER: 'developer', VIEWER: 'viewer' };
   const addMember = (slug: string, who: string, role: Role) =>
-    asRoot('post', `/api/projects/${slug}/members`, { email: `${who}@koda.test`, role }).expect(201);
+    asRoot('post', `/api/projects/${slug}/members`, { email: `${who}@koda.test`, roleKey: ROLE_KEY[role] }).expect(201);
 
   const ticketIn = async (status: 'CREATED' | 'VERIFIED' | 'IN_PROGRESS' | 'VERIFY_FIX', slug = 'team') => {
     const res = await asRoot('post', `/api/projects/${slug}/tickets`, { type: 'BUG', title: `t${counter++}` }).expect(201);
@@ -273,8 +275,7 @@ describeIntegration('project-role permissions (#144)', () => {
       .toEqual({ kind: 'user', id: ids.pdev, name: 'pdev' });
   }, TIMEOUT);
 
-  it('members page reports viewerRole for the caller', async () => {
-    const res = await request(server).get('/api/projects/team/members').set(auth('pdev')).expect(200);
-    expect(data<{ viewerRole: string; canManage: boolean }>(res)).toEqual(expect.objectContaining({ viewerRole: 'DEVELOPER', canManage: false }));
-  }, TIMEOUT);
+  // Permissions P1l US-006: the members page no longer reports the caller's display role or a
+  // management flag, so the case that read `viewerRole` is gone. The list-access contract it stood on
+  // is pinned by test/integration/permissions/member-agent-response-fields.integration.spec.ts.
 });

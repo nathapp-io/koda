@@ -9,10 +9,14 @@ import type { Mock } from 'vitest';
  * the Prisma schema defaults (Agent.status defaults to 'ACTIVE') and raises
  * a Prisma P2002 error on a duplicate slug.
  *
- * AC7 — that no agent row remains after a failed roles/capabilities write —
+ * AC7 — that no agent row remains after a failed capabilities write —
  * CANNOT be verified in this unit test without faking the rollback. It is
  * verified in `test/integration/agents/agents-create-rollback.integration.spec.ts`
  * with a real Prisma instance and database.
+ *
+ * Permissions P1l (US-005): creation writes capabilities only, so the failure seam moved from
+ * `agentRoleEntry.createMany` to `agentCapabilityEntry.createMany`, and the test asserts that no
+ * role row is written at all.
  *
  * No database, no network: everything runs in-process.
  */
@@ -296,7 +300,6 @@ describe('POST /api/agents (US-003)', () => {
         slug: 'subrina-coder',
         status: 'OFFLINE',
         id: 'x',
-        roles: ['DEVELOPER'],
         capabilities: ['typescript'],
       });
 
@@ -325,12 +328,12 @@ describe('POST /api/agents (US-003)', () => {
   it('AC5: returns 409 when the slug already exists', async () => {
     await request(app.getHttpServer())
       .post('/api/agents')
-      .send({ name: 'First Agent', slug: 'taken-slug', roles: ['DEVELOPER'] })
+      .send({ name: 'First Agent', slug: 'taken-slug' })
       .expect(201);
 
     const res = await request(app.getHttpServer())
       .post('/api/agents')
-      .send({ name: 'Second Agent', slug: 'taken-slug', roles: ['DEVELOPER'] });
+      .send({ name: 'Second Agent', slug: 'taken-slug' });
 
     expect(res.status).toBe(409);
     expect(agents.filter((agent) => agent.slug === 'taken-slug')).toHaveLength(1);
@@ -339,21 +342,36 @@ describe('POST /api/agents (US-003)', () => {
   it('AC5 boundary: a slug that does not exist yet is created with 201', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/agents')
-      .send({ name: 'Fresh Agent', slug: 'fresh-slug', roles: ['DEVELOPER'] });
+      .send({ name: 'Fresh Agent', slug: 'fresh-slug' });
 
     expect(res.status).toBe(201);
     expect(agents.filter((agent) => agent.slug === 'fresh-slug')).toHaveLength(1);
   });
 
-  it('AC7: a failing roles/capabilities write is wrapped in a single txManager.run callback and surfaces as HTTP 500', async () => {
+  it('AC-9: a create writes no AgentRoleEntry row, even when the body carries a legacy roles array', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/agents')
+      .send({
+        name: 'Legacy Roles Agent',
+        slug: 'legacy-roles-agent',
+        roles: ['DEVELOPER'],
+        capabilities: ['nax'],
+      });
+
+    expect(res.status).toBe(201);
+    expect(roleEntries).toEqual([]);
+    expect(capabilityEntries).toEqual([{ agentId: expect.any(String), capability: 'nax' }]);
+  });
+
+  it('AC7: a failing capabilities write is wrapped in a single txManager.run callback and surfaces as HTTP 500', async () => {
     // The structural assertion for AC7: the production service MUST run
-    // `agent.create` and `createRolesAndCapabilities` inside one
-    // `txManager.run` callback (which is what triggers the rollback a real
-    // Prisma `$transaction` performs). Verifying that the row is actually
-    // gone after a failure requires a real database; see
+    // `agent.create` and `createCapabilities` inside one `txManager.run`
+    // callback (which is what triggers the rollback a real Prisma
+    // `$transaction` performs). Verifying that the row is actually gone after a
+    // failure requires a real database; see
     // `test/integration/agents/agents-create-rollback.integration.spec.ts`.
-    (prisma.client.agentRoleEntry.createMany as Mock).mockRejectedValue(
-      new Error('agentRoleEntry insert failed'),
+    (prisma.client.agentCapabilityEntry.createMany as Mock).mockRejectedValue(
+      new Error('agentCapabilityEntry insert failed'),
     );
 
     const res = await request(app.getHttpServer())
@@ -365,33 +383,17 @@ describe('POST /api/agents (US-003)', () => {
         capabilities: ['typescript'],
       });
 
-    // Both writes happened (the agent row first, then the failing roles).
+    // Both writes happened (the agent row first, then the failing capabilities), and no role row.
     expect(prisma.client.agent.create).toHaveBeenCalledTimes(1);
-    expect(prisma.client.agentRoleEntry.createMany).toHaveBeenCalledTimes(1);
+    expect(prisma.client.agentCapabilityEntry.createMany).toHaveBeenCalledTimes(1);
+    expect(prisma.client.agentRoleEntry.createMany).not.toHaveBeenCalled();
     // The failure surfaces as an HTTP 500 — the service does not swallow it.
     expect(res.status).toBe(500);
     // The production transaction manager was used: the real
     // `PrismaTransactionManager.run` wraps the callback in
     // `prisma.$transaction(...)`, so exactly one `$transaction` call means
     // exactly one `txManager.run` call. The callback must receive both the
-    // agent write and the failing role write.
-    expect(ambientClient.$transaction).toHaveBeenCalledTimes(1);
-  });
-
-  it('AC7 boundary: a failing capability write is also wrapped in one txManager.run callback', async () => {
-    (prisma.client.agentCapabilityEntry.createMany as Mock).mockRejectedValue(
-      new Error('agentCapabilityEntry insert failed'),
-    );
-
-    const res = await request(app.getHttpServer())
-      .post('/api/agents')
-      .send({ name: 'Rollback Agent', slug: 'rollback-agent', roles: ['DEVELOPER'] });
-
-    // All three writes happened (agent row, then roles, then failing caps).
-    expect(prisma.client.agent.create).toHaveBeenCalledTimes(1);
-    expect(prisma.client.agentRoleEntry.createMany).toHaveBeenCalledTimes(1);
-    expect(prisma.client.agentCapabilityEntry.createMany).toHaveBeenCalledTimes(1);
-    expect(res.status).toBe(500);
+    // agent write and the failing capability write.
     expect(ambientClient.$transaction).toHaveBeenCalledTimes(1);
   });
 });

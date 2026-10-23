@@ -75,14 +75,19 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
     expect(res.body.message).toBe(PERMISSIONS_REFUSED);
   };
 
+  /**
+   * Permissions P1l (US-005): the create route takes no role, so an account starts as a plain member.
+   * `'ADMIN'` means "create it, then bind the global `admin` role" — the binding mirrors
+   * `User.role = 'ADMIN'` and revokes the token minted before it, so the login comes last.
+   */
   const createUser = async (who: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<void> => {
     const created = await asRoot('post', '/api/admin/users', {
       email: `${who}@koda.test`,
       name: who,
       password: TEST_PASSWORD,
-      role,
     }).expect(201);
     userIds[who] = data<{ id: string }>(created).id;
+    if (role === 'ADMIN') await bindGlobal(who, 'admin');
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
   };
@@ -103,15 +108,18 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
 
   /** An agent created by the Owner; created OFFLINE-free and not yet on any roster. */
   const createAgent = async (slug: string): Promise<Agent> => {
-    const created = await asRoot('post', '/api/agents', { name: slug, slug, roles: ['DEVELOPER'] }).expect(201);
+    const created = await asRoot('post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ agent: { id: string; slug: string }; apiKey: string }>(created);
     agents[slug] = { ...body.agent, apiKey: body.apiKey };
     return agents[slug] as Agent;
   };
 
-  /** Adds the agent to p1's roster through the real route, as the Owner. */
+  /** Puts the agent on p1's roster: a viewer binding in the project, as the Owner. */
   const roster = async (slug: string): Promise<void> => {
-    await asRoot('post', `/api/projects/${P1_SLUG}/agents`, { agentSlug: slug }).expect(201);
+    await membership.createBinding(
+      { principal: { type: 'AGENT', id: agents[slug]?.id ?? '' }, roleKey: 'viewer', projectId: p1Id },
+      { type: 'SYSTEM', id: 'test' },
+    );
   };
 
   /** The roster bindings the agent holds in p1 — what "no binding created" is measured against. */
@@ -277,48 +285,60 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
-  // AC-11 .. AC-12 — POST /projects/:slug/agents needs member.add
+  // AC-11 .. AC-12 — an agent joins the roster through a viewer binding (role.binding.manage)
+  //
+  // Permissions P1 US-003 deleted the roster POST; a viewer binding for the agent in the project is
+  // what puts it on the roster, and `/role-bindings` is the route that writes it.
   // -------------------------------------------------------------------------
 
-  it('AC-11: a developer binding alone is refused by POST /projects/p1/agents and writes no binding', async () => {
+  it('AC-11: a developer binding alone is refused a viewer binding for an agent and writes no binding', async () => {
     const res = await request(server)
-      .post(`/api/projects/${P1_SLUG}/agents`)
+      .post('/api/role-bindings')
       .set(auth('developer'))
-      .send({ agentSlug: 'blocked' });
+      .send({ principalType: 'AGENT', principalId: agents['blocked']?.id, roleKey: 'viewer', projectId: p1Id });
 
     expectPermissionsRefusal(res);
     await expect(rosterBindings('blocked')).resolves.toEqual([]);
   }, TIMEOUT);
 
-  it('AC-12: a project-admin binding alone adds an agent to the roster with 201', async () => {
+  it('AC-12: a project-admin binding alone puts an agent on the roster with 201', async () => {
     const res = await request(server)
-      .post(`/api/projects/${P1_SLUG}/agents`)
+      .post('/api/role-bindings')
       .set(auth('padmin'))
-      .send({ agentSlug: 'addable' })
+      .send({ principalType: 'AGENT', principalId: agents['addable']?.id, roleKey: 'viewer', projectId: p1Id })
       .expect(201);
 
-    expect(data<{ slug: string }>(res).slug).toBe('addable');
+    expect(data<{ principalId: string; roleKey: string }>(res)).toMatchObject({
+      principalId: agents['addable']?.id,
+      roleKey: 'viewer',
+    });
     await expect(rosterBindings('addable')).resolves.toEqual([
       expect.objectContaining({ role: { key: 'viewer' } }),
     ]);
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
-  // AC-13 .. AC-14 — DELETE /projects/:slug/agents/:agentSlug needs member.remove
+  // AC-13 .. AC-14 — an agent leaves the roster through its binding (role.binding.manage)
   // -------------------------------------------------------------------------
 
-  it('AC-13: a project-admin binding alone removes a rostered agent with no open tickets, 204', async () => {
+  it('AC-13: a project-admin binding alone revokes a rostered agent\'s binding with no open tickets, 204', async () => {
+    const [binding] = await rosterBindings('removable');
+    if (!binding) throw new Error('removable holds no binding to revoke');
+
     await request(server)
-      .delete(`/api/projects/${P1_SLUG}/agents/removable`)
+      .delete(`/api/role-bindings/${binding.id}`)
       .set(auth('padmin'))
       .expect(204);
 
     await expect(rosterBindings('removable')).resolves.toEqual([]);
   }, TIMEOUT);
 
-  it('AC-14: a developer binding alone is refused by DELETE /projects/p1/agents/<slug> with 403 permissions', async () => {
+  it('AC-14: a developer binding alone is refused the agent binding delete with 403 permissions', async () => {
+    const [binding] = await rosterBindings('roster-a');
+    if (!binding) throw new Error('roster-a holds no binding to revoke');
+
     const res = await request(server)
-      .delete(`/api/projects/${P1_SLUG}/agents/roster-a`)
+      .delete(`/api/role-bindings/${binding.id}`)
       .set(auth('developer'));
 
     expectPermissionsRefusal(res);

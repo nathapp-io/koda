@@ -54,10 +54,9 @@ function sentence(
 interface MemberBody {
   userId: string | null;
   email: string | null;
-  role: string;
   principalType: string;
   principalId: string;
-  bindings: Array<{ id: string | null; roleKey: string; roleName: string }>;
+  bindings: Array<{ id: string; roleKey: string; roleName: string }>;
 }
 
 interface RoleBody {
@@ -95,6 +94,8 @@ describeIntegration('member role keys (US-004)', () => {
       .expect(201);
     ids[who] = data<{ id: string }>(created).id;
     tokens[who] = await loginToken(server, `${who}@koda.test`);
+    // The boot creates several accounts and logs each in; the login route allows five a minute.
+    resetThrottle(app);
     return ids[who] as string;
   };
 
@@ -122,7 +123,7 @@ describeIntegration('member role keys (US-004)', () => {
     // are plain MEMBER accounts with no project of their own.
     const customId = await createUser('custom');
     await createUser('padmin');
-    for (const target of ['blocked', 'triager-target', 'shape-target']) await createUser(target);
+    for (const target of ['blocked', 'triager-target', 'shape-target', 'legacy-target', 'both-target']) await createUser(target);
 
     // The one role-binding path the add route has to respect: the caller holds member.add/read and
     // project.read, and none of the keys of a broader role.
@@ -145,9 +146,12 @@ describeIntegration('member role keys (US-004)', () => {
       .send({ principalType: 'USER', principalId: customId, roleKey: 'contributor', projectId })
       .expect(201);
 
-    // padmin joins through the legacy field, which the add route still maps to its role key.
-    const added = await as('owner').send({ email: 'padmin@koda.test', role: 'ADMIN' }).expect(201);
-    expect(data<MemberBody>(added)).toEqual(expect.objectContaining({ role: 'ADMIN' }));
+    // padmin joins through a role key (US-004 P1l: the only role field the add route accepts).
+    // Permissions P1l US-006: the added member names its bindings instead of a display role.
+    const added = await as('owner').send({ email: 'padmin@koda.test', roleKey: 'project-admin' }).expect(201);
+    const body = data<MemberBody>(added);
+    expect(body).not.toHaveProperty('role');
+    expect(body.bindings).toEqual([expect.objectContaining({ roleKey: 'project-admin', id: expect.any(String) })]);
   }, BOOT_TIMEOUT_MS);
 
   beforeEach(() => {
@@ -178,17 +182,16 @@ describeIntegration('member role keys (US-004)', () => {
     expect(await bindingsInTeam(ids.blocked as string)).toEqual([]);
   }, TIMEOUT);
 
-  it('AC-4: sending both role and roleKey is 400 members.roleAndRoleKey and writes nothing', async () => {
+  it('AC-4: a legacy role beside the roleKey is stripped, so the add answers 201 with the key role', async () => {
     const res = await as('padmin').send({
-      email: 'blocked@koda.test',
-      role: 'DEVELOPER',
+      email: 'both-target@koda.test',
+      role: 'VIEWER',
       roleKey: 'developer',
     });
 
-    expect(res.status).toBe(400);
-    expect(res.body.ret).toBe(CODE.validation);
-    expect(res.body.message).toBe(sentence('members', 'roleAndRoleKey', CODE.validation));
-    expect(await bindingsInTeam(ids.blocked as string)).toEqual([]);
+    expect(res.status).toBe(201);
+    // `role` never reaches the service: the key decides, so the grant is developer.
+    expect((await bindingsInTeam(ids['both-target'] as string)).map((binding) => binding.role.key)).toEqual(['developer']);
   }, TIMEOUT);
 
   it('AC-5: an unknown role key is 404 permissions.roleNotFound', async () => {
@@ -200,13 +203,12 @@ describeIntegration('member role keys (US-004)', () => {
     expect(await bindingsInTeam(ids.blocked as string)).toEqual([]);
   }, TIMEOUT);
 
-  it('AC-6: the legacy role field only goes through the same rules — 403 permissions.escalation for DEVELOPER', async () => {
-    const res = await as('custom').send({ email: 'blocked@koda.test', role: 'DEVELOPER' });
+  it('AC-6: a legacy role with no roleKey grants viewer and writes a viewer binding', async () => {
+    const res = await as('padmin').send({ email: 'legacy-target@koda.test', role: 'DEVELOPER' });
 
-    expect(res.status).toBe(403);
-    expect(res.body.ret).toBe(CODE.forbidden);
-    expect(res.body.message).toBe(sentence('permissions', 'escalation', CODE.forbidden));
-    expect(await bindingsInTeam(ids.blocked as string)).toEqual([]);
+    expect(res.status).toBe(201);
+    // The legacy field is stripped: the grant is the least-privileged role, never `developer`.
+    expect((await bindingsInTeam(ids['legacy-target'] as string)).map((binding) => binding.role.key)).toEqual(['viewer']);
   }, TIMEOUT);
 
   it('AC-7: a GLOBAL role inside a project is 400 permissions.scopeMismatch', async () => {

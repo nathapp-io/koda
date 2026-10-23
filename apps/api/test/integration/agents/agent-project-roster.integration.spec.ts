@@ -45,9 +45,8 @@ describeIntegration('PrismaAgentRepository.findProjectRoster (PG)', () => {
     });
     unrosteredAgentId = unrosteredAgent.id;
 
-    // Roles/capabilities for the rostered agent — used to verify they ride
-    // through to the DTO.
-    await prisma.agentRoleEntry.create({ data: { agentId: rosterAgentId, role: 'DEVELOPER' } });
+    // A capability for the rostered agent — it rides through to the record. Permissions P1l US-006
+    // removed the row's `roles`, so no `AgentRoleEntry` is written for it either.
     await prisma.agentCapabilityEntry.create({ data: { agentId: rosterAgentId, capability: 'typescript' } });
 
     // Roster row added by a user (addedById != null).
@@ -131,7 +130,7 @@ describeIntegration('PrismaAgentRepository.findProjectRoster (PG)', () => {
     await prisma.$disconnect();
   });
 
-  it('AC1+AC2: returns a roster row with slug, name, status, roles, capabilities, addedBy', async () => {
+  it('AC1+AC2: returns a roster row with slug, name, status, capabilities and addedBy, and no roles', async () => {
     const records = await repository.findProjectRoster(projectId);
 
     expect(records).toHaveLength(1);
@@ -140,9 +139,10 @@ describeIntegration('PrismaAgentRepository.findProjectRoster (PG)', () => {
       slug: 'roster-agent',
       name: 'Roster Agent',
       status: 'ACTIVE',
-      roles: ['DEVELOPER'],
       capabilities: ['typescript'],
     });
+    // Permissions P1l US-006: an agent's roles are bindings, so the roster row carries none.
+    expect(row).not.toHaveProperty('roles');
     expect(row.addedById).toBeTruthy();
     expect(row.addedByName).toBe('Adder');
   });

@@ -10,10 +10,8 @@ interface InvitePreview {
   projectName: string
   projectSlug: string
   email: string
-  /** Legacy enum, kept nullable in the contract: the UI shows `roleName` instead. */
-  role?: string | null
   roleKey?: string | null
-  /** Permissions P1 US-014: the project role's label, as the API resolved it. */
+  /** Permissions P1 US-014: the project role's label, as the API resolved it — the only role copy. */
   roleName?: string | null
   inviterName?: string | null
   expiresAt?: string

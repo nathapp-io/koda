@@ -100,8 +100,9 @@ export async function seedFleetHttpWorld(server: Parameters<typeof request>[0], 
 /**
  * Creates an active agent with a real API key, without changing the user-only world seed.
  *
- * Permissions P1 US-002: the agent is created with no legacy role (`roles: []`); the roles it acts
- * with are role bindings in the projects it is rostered in (see `rosterFleetAgent`).
+ * Permissions P1 US-002: the agent is created with no role — Permissions P1l (US-005) removed the
+ * `roles` request field, so creation writes no `AgentRoleEntry`; the roles it acts with are role
+ * bindings in the projects it is rostered in (see `rosterFleetAgent`).
  */
 export async function seedFleetHttpAgent(
   server: Parameters<typeof request>[0],
@@ -110,7 +111,7 @@ export async function seedFleetHttpAgent(
   const slug = `fleet-agent-${++seq}`;
   const created = data<{ apiKey: string; agent: { id: string; slug: string } }>(
     await request(server).post('/api/agents').set({ Authorization: `Bearer ${adminToken}` })
-      .send({ name: slug, slug, roles: [], capabilities: ['typescript', 'nestjs'] }).expect(201),
+      .send({ name: slug, slug, capabilities: ['typescript', 'nestjs'] }).expect(201),
   );
   return { id: created.agent.id, slug: created.agent.slug, apiKey: created.apiKey };
 }

@@ -1,20 +1,16 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import { IPageResult, ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
-import { ActorRole } from '../../common/enums';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { MembershipService } from '../../permissions/membership.service';
-import { PermissionService } from '../../permissions/permission.service';
 import { RoleAdminService } from '../../permissions/role-admin.service';
-import { ROLE_KEY_FOR_LEGACY_ROLE } from '../../permissions/legacy-project-roles';
 import { ProjectAccessService } from '../project-access.service';
 import { PrismaProjectMembersRepository } from './prisma-project-members.repository';
-import { ProjectMemberRecord, ProjectMemberRole } from './domain/project-member.domain';
+import { ProjectMemberRecord } from './domain/project-member.domain';
 import { AddMemberDto } from './dto/add-member.dto';
-import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { ProjectMemberDto } from './dto/project-member.dto';
 import { DEFAULT_MEMBER_PRINCIPAL_FILTER, MemberPrincipalFilter } from './dto/list-members.query';
 
@@ -22,9 +18,9 @@ import { DEFAULT_MEMBER_PRINCIPAL_FILTER, MemberPrincipalFilter } from './dto/li
  * Project membership management over the role bindings (Permissions P1a US-004).
  *
  * US-008: the routes carry the `member.*` keys, so this service keeps no admin assertion. `list` still
- * resolves the caller's membership (its `viewerRole`, and the 403 `projects` a non-member gets), and it
- * derives `canManage` from `member.add` so the button the UI renders and the write the API accepts
- * answer to the same key.
+ * resolves the caller's membership — the 403 `projects` a non-member gets — and answers the page alone
+ * (Permissions P1l US-006): the display `role`, the page-level `viewerRole` and `canManage` are gone,
+ * because `bindings` says what a member holds and `member.add` is the add route's own key.
  *
  * US-004 (P1 web): `add` grants through `RoleAdminService.assertMayGrant`, so a member without the keys
  * of the role it is handing out is refused before any binding is written.
@@ -36,41 +32,35 @@ export class ProjectMembersService {
     private readonly access: ProjectAccessService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly membership: MembershipService,
-    private readonly permissions: PermissionService,
     private readonly roles: RoleAdminService,
   ) {}
 
   /**
-   * `canManage` travels with the page so the UI does not have to guess from the
-   * rows it happens to have loaded (a project ADMIN can be on a later page).
+   * The project's members, and nothing else (Permissions P1l US-006).
    *
    * US-003: `principals` decides whether the page also holds the project's agent principals —
    * `'users'` (the default) is the user rows alone, `'all'` appends them.
+   *
+   * Access is still decided here, before any row is read: `resolveMembership` refuses a principal
+   * without `project.read` in the project with the 403 `projects` the route has always answered. The
+   * route's `member.read` key is the rest of the gate.
    */
   async list(
     slug: string,
     principal: KodaPrincipal,
     page: IPageOption,
     principals: MemberPrincipalFilter = DEFAULT_MEMBER_PRINCIPAL_FILTER,
-  ): Promise<{ page: IPageResult<ProjectMemberDto>; canManage: boolean; viewerRole: string | null }> {
+  ): Promise<IPageResult<ProjectMemberDto>> {
     const projectId = await this.access.findProjectIdBySlug(slug);
-    // One membership read serves the gate and viewerRole; the key decides canManage, so a role
-    // binding that grants `member.read` without `member.add` lists members without managing them.
-    const viewerRole = await this.access.resolveMembership(projectId, principal);
-    const [memberPage, decision] = await Promise.all([
-      this.membersRepo.findMemberPage(projectId, page, principals),
-      this.permissions.can(principal, 'member.add', { projectId }),
-    ]);
-    return { page: remapPage(memberPage, ProjectMemberDto.from), canManage: decision.allowed, viewerRole };
+    await this.access.resolveMembership(projectId, principal);
+    return remapPage(await this.membersRepo.findMemberPage(projectId, page, principals), ProjectMemberDto.from);
   }
 
   /** The route's `member.add` key is the gate: the caller may add anyone the project can hold. */
   async add(slug: string, dto: AddMemberDto, principal: KodaPrincipal): Promise<ProjectMemberDto> {
-    // US-004: two ways to name the role is a client bug, not a precedence question.
-    if (dto.role !== undefined && dto.roleKey !== undefined) {
-      throw new ValidationAppException({}, 'members.roleAndRoleKey');
-    }
-    const roleKey = dto.roleKey ?? ROLE_KEY_FOR_LEGACY_ROLE[dto.role ?? 'VIEWER'];
+    // US-004 (P1l): `roleKey` is the only role field; the pipe strips a legacy `role`, so an add that
+    // sends one and no key grants the least-privileged `viewer`, exactly as an omitted key does.
+    const roleKey = dto.roleKey ?? 'viewer';
     const projectId = await this.access.findProjectIdBySlug(slug);
     const user = await this.membersRepo.findUserByEmail(dto.email);
     if (!user) throw new NotFoundAppException({}, 'members.user');
@@ -97,61 +87,9 @@ export class ProjectMembersService {
     }));
   }
 
-  /** The route's `role.binding.manage` key is the gate; the last-admin rule still applies. */
-  async updateRole(slug: string, userId: string, dto: UpdateMemberRoleDto, principal: KodaPrincipal): Promise<ProjectMemberDto> {
-    const projectId = await this.access.findProjectIdBySlug(slug);
-    const updated = await this.membership.afterCommit(() => this.txManager.run(async () => {
-      const current = await this.lockAndFind(projectId, userId);
-      await this.assertKeepsAnAdmin(projectId, current, dto.role, principal);
-      await this.membership.removeProjectBindings({ type: 'USER', id: userId }, projectId, ['project-admin', 'developer', 'viewer']);
-      await this.membersRepo.deleteMemberIfPresent(projectId, userId);
-      await this.membership.createBinding(
-        { principal: { type: 'USER', id: userId }, projectId, roleKey: ROLE_KEY_FOR_LEGACY_ROLE[dto.role] },
-        { type: 'USER', id: principal.id },
-      );
-      return this.findRequiredMember(projectId, userId);
-    }));
-    return ProjectMemberDto.from(updated);
-  }
-
-  /** The route's `member.remove` key is the gate; the last-admin rule still applies. */
-  async remove(slug: string, userId: string, principal: KodaPrincipal): Promise<void> {
-    const projectId = await this.access.findProjectIdBySlug(slug);
-    await this.membership.afterCommit(() => this.txManager.run(async () => {
-      const current = await this.lockAndFind(projectId, userId);
-      await this.assertKeepsAnAdmin(projectId, current, null, principal);
-      await this.membership.removeProjectBindings({ type: 'USER', id: userId }, projectId);
-      await this.membersRepo.deleteMemberIfPresent(projectId, userId);
-    }));
-  }
-
-  private async lockAndFind(projectId: string, userId: string): Promise<ProjectMemberRecord> {
-    await this.membersRepo.lockMembers(projectId);
-    return this.findRequiredMember(projectId, userId);
-  }
-
   private async findRequiredMember(projectId: string, userId: string): Promise<ProjectMemberRecord> {
     const current = await this.membersRepo.findMember(projectId, userId);
     if (!current) throw new NotFoundAppException({}, 'members');
     return current;
-  }
-
-  /** A change that drops the last project ADMIN is refused unless the caller may override the rule. */
-  private async assertKeepsAnAdmin(
-    projectId: string,
-    current: ProjectMemberRecord,
-    nextRole: ProjectMemberRole | null,
-    principal: KodaPrincipal,
-  ): Promise<void> {
-    // A disabled member is not an active admin: removing them cannot lock the
-    // project out, so they do not trigger the guard.
-    const losesAdmin = current.role === ActorRole.ADMIN && !current.disabled && nextRole !== ActorRole.ADMIN;
-    if (!losesAdmin) return;
-    // Permissions P1 (US-002): the override is `role.binding.global` (with the seeded roles: an Owner
-    // or an Admin), not the principal's `role` claim. A change that loses no admin asks nothing.
-    if ((await this.permissions.can(principal, 'role.binding.global')).allowed) return;
-    if ((await this.membersRepo.countProjectAdmins(projectId)) <= 1) {
-      throw new ConflictAppException({}, 'members.lastAdmin');
-    }
   }
 }

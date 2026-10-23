@@ -19,7 +19,6 @@ interface AgentRow {
   id: string
   name: string
   slug: string
-  roles: (string | { role: string })[]
   capabilities: (string | { capability: string })[]
   status: 'ACTIVE' | 'PAUSED' | 'OFFLINE'
 }
@@ -28,18 +27,14 @@ interface Agent {
   id: string
   name: string
   slug: string
-  roles: string[]
   capabilities: string[]
   status: 'ACTIVE' | 'PAUSED' | 'OFFLINE'
 }
 
-// The API returns roles/capabilities as entry objects ({ role }, { capability });
-// older mocks/tests may still use plain strings. Normalize once at fetch so the
-// table and the edit dialogs all work with plain strings.
-function roleLabel(role: string | { role: string }) {
-  return typeof role === 'string' ? role : role.role
-}
-
+// The API returns capabilities as entry objects ({ capability }); older mocks/tests may still use
+// plain strings. Normalize once at fetch so the table and the edit dialogs all work with plain
+// strings. Roles are not on the row at all (Permissions P1 US-011): the roles column joins the
+// agent's role bindings against the role listing.
 function capabilityLabel(capability: string | { capability: string }) {
   return typeof capability === 'string' ? capability : capability.capability
 }
@@ -59,16 +54,15 @@ const { data: agentsData, pending, error, refresh } = useAsyncData(
 const agents = computed<Agent[]>(() =>
   (agentsData.value ?? []).map((agent) => ({
     ...agent,
-    roles: agent.roles.map(roleLabel),
     capabilities: agent.capabilities.map(capabilityLabel),
   })),
 )
 
 /**
  * US-012: every control on this page is gated on the global key its API route requires. Roles are
- * data now (`agent.roles` is the legacy field, still on the wire until US-015), so the roles column
- * and "Edit roles" ask the binding routes' own keys. A gate only hides a control: the API still
- * refuses a write, and every refusal is toasted with `extractApiError`.
+ * data (`GET /agents` no longer carries a role list at all — Permissions P1 US-011), so the roles
+ * column and "Edit roles" ask the binding routes' own keys. A gate only hides a control: the API
+ * still refuses a write, and every refusal is toasted with `extractApiError`.
  */
 const can = (key: string): boolean => permissions.value.has(key)
 

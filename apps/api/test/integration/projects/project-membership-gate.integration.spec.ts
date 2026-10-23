@@ -115,11 +115,17 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     return body === undefined ? req : req.send(body);
   };
 
+  /**
+   * Permissions P1l (US-005): the create route takes no role, so `'ADMIN'` means "create a plain
+   * member, then bind the global `admin` role" — the binding IS the admin, and it mirrors
+   * `User.role = 'ADMIN'` as the route used to.
+   */
   const createUser = async (who: string, role: 'MEMBER' | 'ADMIN'): Promise<string> => {
     const created = await request(server).post('/api/admin/users').set(auth('root'))
-      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role }).expect(201);
+      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD }).expect(201);
     const id = data<{ id: string }>(created).id;
     ids[who] = id;
+    if (role === 'ADMIN') await grantRole(prisma, { type: 'USER', id }, 'admin');
     tokens[who] = await loginToken(server, `${who}@koda.test`);
     // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
     // baseline production writes for every user it creates.
@@ -127,9 +133,10 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     return id;
   };
 
-  const addMember = (slug: string, who: string, role: string): request.Test =>
+  /** US-004 (P1l): the members route takes a role key. */
+  const addMember = (slug: string, who: string, roleKey: string): request.Test =>
     request(server).post(`/api/projects/${slug}/members`).set(auth('root'))
-      .send({ email: `${who}@koda.test`, role });
+      .send({ email: `${who}@koda.test`, roleKey });
 
   const createTicket = async (slug: string, title: string): Promise<string> => {
     const res = await request(server).post(`/api/projects/${slug}/tickets`).set(auth('root'))
@@ -181,8 +188,8 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     // baseline production writes for every user it creates.
     await grantBaseline(prisma, { type: 'USER', id: rootUserId });
 
-    // dev/outside/author/multi are plain users; adminMember carries the global
-    // role the project CASL factory needs for Ticket/Label writes.
+    // dev/outside/author/multi are plain users; adminMember holds the global `admin` binding the
+    // project Ticket/Label writes need.
     for (const who of ['dev', 'outside', 'author', 'multi']) await createUser(who, 'MEMBER');
     await createUser('adminMember', 'ADMIN');
 
@@ -195,13 +202,13 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     await request(server).patch('/api/projects/team').set(auth('root'))
       .send({ graphifyEnabled: true }).expect(200);
 
-    await addMember('team', 'dev', 'DEVELOPER').expect(201);
-    await addMember('team', 'adminMember', 'DEVELOPER').expect(201);
-    await addMember('team', 'author', 'DEVELOPER').expect(201);
-    await addMember('team', 'multi', 'DEVELOPER').expect(201);
-    await addMember('other', 'outside', 'DEVELOPER').expect(201);
-    await addMember('other', 'multi', 'DEVELOPER').expect(201);
-    await addMember('softdel', 'multi', 'DEVELOPER').expect(201);
+    await addMember('team', 'dev', 'developer').expect(201);
+    await addMember('team', 'adminMember', 'developer').expect(201);
+    await addMember('team', 'author', 'developer').expect(201);
+    await addMember('team', 'multi', 'developer').expect(201);
+    await addMember('other', 'outside', 'developer').expect(201);
+    await addMember('other', 'multi', 'developer').expect(201);
+    await addMember('softdel', 'multi', 'developer').expect(201);
     // Soft-delete here (not inside AC9) so every list-scoping assertion below
     // (AC6/AC7/AC8/AC9) can run independently of the others' execution order.
     await request(server).delete('/api/projects/softdel').set(auth('root')).expect(204);
@@ -243,7 +250,7 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     otherCommentBaseline = 'comment in another project';
 
     const createdAgent = await request(server).post('/api/agents').set(auth('root'))
-      .send({ name: 'Team Bot', slug: 'team-bot', roles: [] }).expect(201);
+      .send({ name: 'Team Bot', slug: 'team-bot' }).expect(201);
     const agentPayload = data<{ apiKey: string; agent: { id: string; slug: string } }>(createdAgent);
     agent.id = agentPayload.agent.id;
     agent.slug = agentPayload.agent.slug;
@@ -407,7 +414,17 @@ describeIntegration('US-002 project membership gate (PG)', () => {
   }, TEST_TIMEOUT_MS);
 
   it('AC4: PATCH /api/comments/:id returns 404 for the comment author after their project membership is removed', async () => {
-    await request(server).delete(`/api/projects/team/members/${ids.author}`).set(auth('root')).expect(200);
+    // Permissions P1 US-003: a member leaves a project by deleting its bindings, not through the
+    // deleted members DELETE.
+    const team = await prisma.project.findUniqueOrThrow({ where: { slug: 'team' } });
+    const authorBindings = await prisma.roleBinding.findMany({
+      where: { principalType: 'USER', principalId: ids.author, projectId: team.id },
+      select: { id: true },
+    });
+    expect(authorBindings.length).toBeGreaterThan(0);
+    for (const binding of authorBindings) {
+      await request(server).delete(`/api/role-bindings/${binding.id}`).set(auth('root')).expect(204);
+    }
 
     const res = await send('patch', `/api/comments/${authorCommentId}`, 'author', {
       body: 'still mine?',

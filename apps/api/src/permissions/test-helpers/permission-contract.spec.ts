@@ -14,6 +14,10 @@ describe('permission contract checker', () => {
     'approval.policy.manage',
     'audit.read',
     'fleet.approval.decide.assistant',
+    // Permissions P1 US-003 deleted the two member routes that declared this key. Removing a
+    // principal from a project is now deleting its bindings, which `role.binding.manage` gates, and
+    // the key waits for P3 policy to decide whether it gates binding removal.
+    'member.remove',
   ]);
   const requires = (keys: readonly string[], enforcedBy: 'guard' | 'service' = 'guard'): RequiresMetadata => ({
     keys,

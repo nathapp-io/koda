@@ -425,20 +425,22 @@ describeIntegration('binding-only membership queries (PG)', () => {
     expect(data<{ slug: string }[]>(response).map(row => row.slug)).toEqual([p2.slug]);
   });
 
-  it('legacy-only member PATCH is 404 and adding a legacy-only roster agent succeeds', async () => {
+  it('a legacy-only roster agent joins the project through a viewer binding', async () => {
+    // Permissions P1 US-003: the roster POST and the members PATCH are gone. Adding the agent is a
+    // viewer binding on `/role-bindings`; the legacy roster row alone grants nothing.
     const admin = await newUser();
-    const user = await newUser();
     const agent = await newAgent();
     const p = await newProject('legacy-writes');
     await bind(USER(admin.id), 'project-admin', p.id);
-    await addLegacyMember(p.id, user.id, 'DEVELOPER');
     await addRosterRow(p.id, agent.id);
     const token = await loginToken(moduleRef.getHttpServer(), admin.email);
-    const response = await request(moduleRef.getHttpServer()).patch(`/api/projects/${p.slug}/members/${user.id}`)
-      .auth(token, { type: 'bearer' }).send({ role: 'VIEWER' }).expect(404);
-    expect(response.body.ret).not.toBe(0);
-    await request(moduleRef.getHttpServer()).post(`/api/projects/${p.slug}/agents`)
-      .auth(token, { type: 'bearer' }).send({ agentSlug: agent.slug }).expect(201);
+    await request(moduleRef.getHttpServer()).post('/api/role-bindings')
+      .auth(token, { type: 'bearer' })
+      .send({ principalType: 'AGENT', principalId: agent.id, roleKey: 'viewer', projectId: p.id })
+      .expect(201);
+    expect(await prisma.client.roleBinding.count({
+      where: { principalType: 'AGENT', principalId: agent.id, projectId: p.id },
+    })).toBe(1);
   });
 
 });

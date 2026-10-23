@@ -129,7 +129,7 @@ describeIntegration('US-004 admin skill source update + delete (PG)', () => {
     const agentRes = await request(server)
       .post('/api/agents')
       .set(auth(admin))
-      .send({ name: 'Skill Update Agent', slug: 'skill-update-agent', roles: [], capabilities: ['typescript'] })
+      .send({ name: 'Skill Update Agent', slug: 'skill-update-agent', capabilities: ['typescript'] })
       .expect(201);
     agentApiKey = data<{ apiKey: string }>(agentRes).apiKey;
     agentId = (await prisma.agent.findUniqueOrThrow({ where: { slug: 'skill-update-agent' } })).id;

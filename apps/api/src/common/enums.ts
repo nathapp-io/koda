@@ -79,7 +79,7 @@ export type ActorRole = (typeof ActorRole)[keyof typeof ActorRole];
 /**
  * Roles that may be stored on a ProjectMember row today. Legacy rows can still
  * carry 'AGENT' or 'MEMBER' (pre-PROJECT_MEMBER_ROLES narrowing); nothing decides
- * access on them — the role is display only (`viewerRole`), and access is the
+ * access on them — the role is display only, and access is the
  * `project.read` key. The `(string & {})` escape hatch keeps `ProjectMemberRole`
  * assignable from arbitrary legacy DB strings while still surfacing typos at
  * every typed call site.

@@ -36,14 +36,15 @@ describe('DeleteAgentDialog: required props', () => {
     expect(hasAgentProp).not.toBeNull()
   })
 
-  test('agent prop has id, name, slug, roles, capabilities, and status fields', () => {
+  test('agent prop has id, name, slug, capabilities and status fields, and no legacy roles', () => {
     const source = getSource()
     expect(source).toContain('id')
     expect(source).toContain('name')
     expect(source).toContain('slug')
-    expect(source).toContain('roles')
     expect(source).toContain('capabilities')
     expect(source).toContain('status')
+    // Permissions P1 US-011: the agent row carries no `roles` any more, so the prop must not declare one.
+    expect(source).not.toContain('roles')
   })
 })
 

@@ -18,6 +18,9 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { CaslAbilityFactory, JwtCaslAbilityFactory } from '@nathapp/nestjs-auth';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '../../../src/generated/prisma/client';
+import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -37,6 +40,7 @@ const TICKETS_VALIDATION = readI18n('tickets')['-2'];
 describeIntegration('retired CASL factory and IN_PROGRESS -> VERIFIED (US-005)', () => {
   let app: NathApplication;
   let server: ReturnType<NathApplication['getHttpServer']>;
+  let db: PrismaClient;
 
   const tokens: Record<string, string> = {};
 
@@ -50,13 +54,20 @@ describeIntegration('retired CASL factory and IN_PROGRESS -> VERIFIED (US-005)',
     return body === undefined ? req : req.send(body);
   };
 
+  /**
+   * Permissions P1l (US-005): the create route takes no role. `'ADMIN'` means "create it, then bind
+   * the global `admin` role" — the binding is the admin, and it mirrors `User.role = 'ADMIN'`.
+   */
   const createUser = async (who: string, role: 'MEMBER' | 'ADMIN'): Promise<void> => {
     await asRoot('post', '/api/admin/users', {
       email: `${who}@koda.test`,
       name: who,
       password: TEST_PASSWORD,
-      role,
     }).expect(201);
+    if (role === 'ADMIN') {
+      const user = await db.user.findUniqueOrThrow({ where: { email: `${who}@koda.test` }, select: { id: true } });
+      await grantRole(db, { type: 'USER', id: user.id }, 'admin');
+    }
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
   };
@@ -81,6 +92,7 @@ describeIntegration('retired CASL factory and IN_PROGRESS -> VERIFIED (US-005)',
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
+    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
 
     const root = await request(server)
       .post('/api/auth/register')
@@ -88,7 +100,7 @@ describeIntegration('retired CASL factory and IN_PROGRESS -> VERIFIED (US-005)',
       .expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
 
-    // A global admin (user-row role ADMIN, which PermissionService treats as every project key).
+    // A global admin: the `admin` binding, which mirrors the legacy user-row role ADMIN.
     await createUser('gadmin', 'ADMIN');
     await asRoot('post', '/api/projects', { name: 'P1', slug: P1_SLUG, key: P1_KEY }).expect(201);
   }, BOOT_TIMEOUT);

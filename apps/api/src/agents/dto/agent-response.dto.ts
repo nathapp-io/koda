@@ -1,16 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-export class AgentRoleDto {
-  @ApiProperty()
-  id!: string;
-
-  @ApiProperty()
-  agentId!: string;
-
-  @ApiProperty()
-  role!: string;
-}
-
+/**
+ * One capability of an agent. An agent's roles are role bindings, not an `AgentRoleEntry` list
+ * (Permissions P1l US-006), so there is no `AgentRoleDto`: read `GET /role-bindings` for them.
+ */
 export class AgentCapabilityDto {
   @ApiProperty()
   id!: string;
@@ -38,9 +31,6 @@ export class AgentResponseDto {
   @ApiProperty()
   maxConcurrentTickets!: number;
 
-  @ApiProperty({ type: AgentRoleDto, isArray: true })
-  roles!: AgentRoleDto[];
-
   @ApiProperty({ type: AgentCapabilityDto, isArray: true })
   capabilities!: AgentCapabilityDto[];
 
@@ -58,7 +48,6 @@ export class AgentResponseDto {
       slug: agent.slug,
       status: agent.status,
       maxConcurrentTickets: agent.maxConcurrentTickets,
-      roles: Array.isArray(agent.roles) ? agent.roles : [],
       capabilities: Array.isArray(agent.capabilities) ? agent.capabilities : [],
       createdAt: agent.createdAt,
       updatedAt: agent.updatedAt,

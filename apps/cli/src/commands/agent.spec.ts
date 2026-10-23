@@ -449,12 +449,13 @@ describe('agentCommand', () => {
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const createCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'create');
 
-      await createCmd?.parseAsync(['node', 'test', '--name', 'New Agent', '--roles', 'DEVELOPER,AGENT']);
+      await createCmd?.parseAsync(['node', 'test', '--name', 'Bot']);
 
-      expect(agentsControllerGenerateApiKey).toHaveBeenCalledWith({ body: expect.objectContaining({
-          name: 'New Agent',
-          roles: ['DEVELOPER', 'AGENT'],
-        })});
+      expect(agentsControllerGenerateApiKey).toHaveBeenCalledWith({ body: {
+          name: 'Bot',
+          slug: undefined,
+          maxConcurrentTickets: undefined,
+        }});
       expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('sk-generated-key'));
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -468,20 +469,6 @@ describe('agentCommand', () => {
       expect(slugOption?.description).toContain('required');
     });
 
-    it('defaults roles to an empty array when --roles is omitted', async () => {
-      (agentsControllerGenerateApiKey as jest.Mock).mockResolvedValue({
-        ret: 0,
-        data: { name: 'New Agent', slug: 'new-agent' },
-      });
-
-      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
-      const createCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'create');
-
-      await createCmd?.parseAsync(['node', 'test', '--name', 'New Agent']);
-
-      expect(agentsControllerGenerateApiKey).toHaveBeenCalledWith({ body: expect.objectContaining({ roles: [] })});
-      expect(exitSpy).toHaveBeenCalledWith(0);
-    });
   });
 
   describe('agent update', () => {

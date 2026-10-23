@@ -7,6 +7,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -72,14 +73,19 @@ describeIntegration('webhook route permission keys (US-005)', () => {
     expect(res.body.message).toBe('You do not have permissions to perform this action');
   };
 
+  /**
+   * Permissions P1l (US-005): the create route takes no role, so `'ADMIN'` means "create a plain
+   * member, then bind the global `admin` role" — binding before the login, because the grant
+   * promotes `User.role` and revokes older tokens.
+   */
   const createUser = async (who: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<void> => {
     const created = await asRoot('post', '/api/admin/users', {
       email: `${who}@webhook-permissions.test`,
       name: who,
       password: TEST_PASSWORD,
-      role,
     }).expect(201);
     userIds[who] = data<{ id: string }>(created).id;
+    if (role === 'ADMIN') await grantRole(db, { type: 'USER', id: userIds[who] as string }, 'admin');
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@webhook-permissions.test`);
   };

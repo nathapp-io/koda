@@ -83,13 +83,13 @@ describeIntegration('fleet approvals API (PG)', () => {
     } });
     // Prove the key authenticates as this agent and has access through the real project membership guard.
     expect(data<{ id: string }>(await request(server).get('/api/agents/me').set(as(agent.apiKey)).expect(200)).id).toBe(agent.id);
-    expect(data<{ scoping: boolean; items: { id?: string; slug: string }[] }>(
+    expect(data<{ items: { id?: string; slug: string }[] }>(
       await request(server).get('/api/projects/web/agents').set(as(agent.apiKey)).expect(200),
     ).items.map((a) => a.slug)).toContain(agent.slug);
     evaluator = app.get(BudgetEvaluator);
     approvals = app.get(ApprovalsService);
     await request(server).post('/api/admin/users').set(tok('root')).send({ email: 'padmin@koda.test', name: 'padmin', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
-    await request(server).post('/api/projects/web/members').set(tok('root')).send({ email: 'padmin@koda.test', role: 'ADMIN' }).expect(201);
+    await request(server).post('/api/projects/web/members').set(tok('root')).send({ email: 'padmin@koda.test', roleKey: 'project-admin' }).expect(201);
     padmin = await loginToken(server, 'padmin@koda.test');
     padminId = (await prisma.user.findUniqueOrThrow({ where: { email: 'padmin@koda.test' } })).id;
     await prisma.webhook.create({

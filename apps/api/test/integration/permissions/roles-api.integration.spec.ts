@@ -18,6 +18,7 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { PermissionService } from '../../../src/permissions/permission.service';
 import { SYSTEM_ROLES } from '../../../src/permissions/system-roles';
+import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -105,13 +106,19 @@ describeIntegration('roles API (US-005)', () => {
     expect(res.body.message).toBe(sentence(expected.key, expected.code, expected.args));
   };
 
-  /** Creates a user through the admin route, then logs in: the token carries no bypass of its own. */
+  /**
+   * Creates a user through the admin route, then logs in: the token carries no bypass of its own.
+   *
+   * Permissions P1l (US-005): the route takes no role, so `'ADMIN'` means "create it, then bind the
+   * global `admin` role" — the binding mirrors `User.role = 'ADMIN'`, which some cases read back.
+   */
   const createUser = async (email: string, role: 'MEMBER' | 'ADMIN'): Promise<string> => {
-    await request(server)
+    const created = await request(server)
       .post('/api/admin/users')
       .set(auth(ownerToken))
-      .send({ email, name: email.split('@')[0], password: TEST_PASSWORD, role })
+      .send({ email, name: email.split('@')[0], password: TEST_PASSWORD })
       .expect(201);
+    if (role === 'ADMIN') await grantRole(db, { type: 'USER', id: data<{ id: string }>(created).id }, 'admin');
     return loginToken(server, email);
   };
 
@@ -543,6 +550,28 @@ describeIntegration('roles API (US-005)', () => {
     operation('/api/roles', 'post');
     operation('/api/roles/{id}', 'patch');
     operation('/api/roles/{id}', 'delete');
+  });
+
+  it('US-007 AC-9..11: the booted app OpenAPI document excludes retired paths, operations, and role fields', () => {
+    const nestApp = app.getNestApp<INestApplication>();
+    const config = new DocumentBuilder()
+      .setTitle('Koda API')
+      .setDescription('Dev ticket tracker API')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(nestApp, config);
+
+    expect(document.paths).not.toHaveProperty('/api/agents/{slug}/update-roles');
+    expect(document.paths['/api/projects/{slug}/members/{userId}']?.patch).toBeUndefined();
+    expect(document.paths['/api/projects/{slug}/members/{userId}']?.delete).toBeUndefined();
+    expect(document.paths['/api/projects/{slug}/agents']?.post).toBeUndefined();
+
+    for (const schemaName of ['ProjectMemberDto', 'InviteDto', 'InvitePreviewDto', 'UserAdminDto']) {
+      const schema = document.components?.schemas?.[schemaName] as { properties?: Record<string, unknown> } | undefined;
+      expect(schema, `missing OpenAPI schema ${schemaName}`).toBeDefined();
+      expect(schema?.properties).not.toHaveProperty('role');
+    }
   });
 
   it('AC-23: the first registration can read roles through its owner binding', async () => {

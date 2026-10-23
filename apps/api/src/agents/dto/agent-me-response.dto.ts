@@ -17,7 +17,6 @@ export interface AgentProfileRecord {
   slug: string;
   status: string;
   maxConcurrentTickets: number;
-  roles: unknown[];
   capabilities: unknown[];
   createdAt: Date;
   updatedAt: Date;

@@ -87,7 +87,7 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
   const createAgent = async (name: string, slug: string): Promise<string> => {
     resetThrottle(app);
     const created = await request(server).post('/api/agents').set(auth())
-      .send({ name, slug, roles: ['DEVELOPER'] })
+      .send({ name, slug })
       .expect(201);
     const payload = data<{ agent: { id: string; status: string } }>(created);
     expect(payload.agent.status).toBe('ACTIVE');

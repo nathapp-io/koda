@@ -49,7 +49,7 @@ describeIntegration('fleet repos (PG)', () => {
     await request(server).post('/api/projects').set(auth(admin)).send({ name: 'Ops', slug: 'ops', key: 'OPS' }).expect(201);
     await request(server).post('/api/admin/users').set(auth(admin)).send({ email: 'm@koda.test', name: 'm', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
     member = await loginToken(server, 'm@koda.test');
-    await request(server).post('/api/projects/web/members').set(auth(admin)).send({ email: 'm@koda.test', role: 'VIEWER' }).expect(201);
+    await request(server).post('/api/projects/web/members').set(auth(admin)).send({ email: 'm@koda.test', roleKey: 'viewer' }).expect(201);
 
     forge.routes.set('GET /repos/Acme/App/installation', () => ({ status: 200, body: { id: 77 } }));
     forge.routes.set('POST /app/installations/77/access_tokens', () => ({ status: 201, body: { token: 'ghs_1', expires_at: '2099-01-01T00:00:00Z' } }));

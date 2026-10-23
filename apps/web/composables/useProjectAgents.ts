@@ -1,12 +1,16 @@
 import { ref } from 'vue'
 import { apiPath } from '~/lib/api-path'
 
-/** One row in the project agent roster (GET /projects/:slug/agents). */
+/**
+ * One row in the project agent roster (GET /projects/:slug/agents).
+ *
+ * Permissions P1 US-011: the response no longer carries `roles` (an agent's roles are its role
+ * bindings, read from `/role-bindings`) nor a `scoping` flag, so neither is part of this shape.
+ */
 export interface ProjectAgent {
   slug: string
   name: string
   status: string
-  roles: string[]
   capabilities: string[]
   openTicketCount: number
   openTicketRefs: string[]
@@ -15,7 +19,6 @@ export interface ProjectAgent {
 }
 
 export interface ProjectAgentListDto {
-  scoping: boolean
   items: ProjectAgent[]
 }
 
@@ -25,7 +28,6 @@ export interface ProjectAgentListDto {
 export function useProjectAgents(slug: string) {
   const { $api } = useApi()
   const items = ref<ProjectAgent[]>([])
-  const scoping = ref(true)
   const pending = ref(false)
   const error = ref<unknown>(null)
 
@@ -34,7 +36,6 @@ export function useProjectAgents(slug: string) {
     try {
       const res = await $api.get<ProjectAgentListDto>(apiPath`/projects/${slug}/agents`)
       items.value = Array.isArray(res?.items) ? res.items : []
-      scoping.value = res?.scoping !== false
       error.value = null
     } catch (caught) {
       error.value = caught
@@ -51,5 +52,5 @@ export function useProjectAgents(slug: string) {
     await $api.patch(apiPath`/projects/${slug}/agents/${agentSlug}`, { status })
   }
 
-  return { items, scoping, pending, error, load, refresh, changeStatus }
+  return { items, pending, error, load, refresh, changeStatus }
 }

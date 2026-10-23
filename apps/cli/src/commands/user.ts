@@ -10,7 +10,6 @@ interface UserRow {
   id: string;
   email: string;
   name?: string | null;
-  role: string;
   disabled: boolean;
 }
 
@@ -46,8 +45,8 @@ export function userCommand(program: Command): void {
         if (options.json) {
           console.log(JSON.stringify(page, null, 2));
         } else {
-          const rows = page.records.map((u) => [u.id, u.email, u.name ?? '', u.role, u.disabled ? 'yes' : 'no']);
-          table(['ID', 'Email', 'Name', 'Role', 'Disabled'], rows);
+          const rows = page.records.map((u) => [u.id, u.email, u.name ?? '', u.disabled ? 'yes' : 'no']);
+          table(['ID', 'Email', 'Name', 'Disabled'], rows);
           if (page.hasNext) console.log(`Next: --page ${page.current + 1}`);
         }
         process.exit(0);
@@ -62,13 +61,12 @@ export function userCommand(program: Command): void {
     .requiredOption('--email <email>', 'Email address')
     .requiredOption('--name <name>', 'Display name')
     .requiredOption('--password <password>', 'Temporary password (min 8 chars, mixed case, digit, symbol)')
-    .option('--role <role>', 'Global role: MEMBER or ADMIN', 'MEMBER')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
         await withContext({}, { requireProject: false });
         const response = await adminUsersControllerCreate({
-          body: { email: options.email, name: options.name, password: options.password, role: options.role as 'MEMBER' | 'ADMIN' },
+          body: { email: options.email, name: options.name, password: options.password },
         });
         const created = unwrap<UserRow>(response);
         if (options.json) console.log(JSON.stringify(created, null, 2));

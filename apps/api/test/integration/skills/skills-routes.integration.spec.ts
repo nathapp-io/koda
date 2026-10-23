@@ -68,7 +68,7 @@ describeIntegration('US-003 admin skill sources (PG)', () => {
     const agentRes = await request(server)
       .post('/api/agents')
       .set(auth(admin))
-      .send({ name: 'Skill Agent', slug: 'skill-agent', roles: [], capabilities: ['typescript'] })
+      .send({ name: 'Skill Agent', slug: 'skill-agent', capabilities: ['typescript'] })
       .expect(201);
     agentApiKey = data<{ apiKey: string }>(agentRes).apiKey;
     agentId = (await prisma.agent.findUniqueOrThrow({ where: { slug: 'skill-agent' } })).id;

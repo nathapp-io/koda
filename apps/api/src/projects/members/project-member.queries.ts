@@ -1,7 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { InternalAppException } from '@nathapp/nestjs-common';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client';
-import { localProjectRole } from '../../permissions/membership.queries';
 import type { MemberBinding, MemberPrincipalType, ProjectMemberRecord } from './domain/project-member.domain';
 
 /**
@@ -144,20 +143,21 @@ export async function readMemberBindings(
 }
 
 /**
- * One member's record — the single-record shape `POST /members`, `PATCH /members/:userId` and an
- * invite's `ADDED` member return. Null when the principal has no project binding.
+ * One member's record — the single-record shape `POST /members` and an invite's `ADDED` member
+ * return. Null when the principal has no project binding.
  *
- * Not built on `listProjectMemberships`: that listing is capped and project-wide, and a single-record
- * read after a write must not depend on it.
+ * Not built on `listProjectMemberships`: that listing is project-wide and reads the whole project's
+ * bindings, while a single-record read after a write needs only this principal's rows.
+ *
+ * Permissions P1l US-006: the record carries no display role, so the membership test is the earliest
+ * binding's date — the same `PROJECT`-scope, project-local binding set the legacy role was read from,
+ * in one read instead of two.
  */
 export async function readMemberRecord(
   db: PrismaClient,
   projectId: string,
   principal: { type: MemberPrincipalType; id: string },
 ): Promise<ProjectMemberRecord | null> {
-  const role = await localProjectRole(db, principal, projectId);
-  if (role === null) return null;
-
   const owners: BindingOwners = principal.type === 'USER' ? { userIds: [principal.id] } : { agentIds: [principal.id] };
   const [account, bindingSince, bindings] = await Promise.all([
     principal.type === 'USER'
@@ -184,7 +184,6 @@ export async function readMemberRecord(
       userId: user.id,
       email: user.email,
       name: user.name,
-      role,
       disabled: user.disabled,
       joinedAt: since,
       principalType: 'USER',
@@ -198,7 +197,6 @@ export async function readMemberRecord(
     userId: null,
     email: null,
     name: agent.name,
-    role,
     disabled: false,
     joinedAt: since,
     principalType: 'AGENT',

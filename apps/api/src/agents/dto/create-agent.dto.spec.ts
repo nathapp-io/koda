@@ -37,12 +37,24 @@ describe('CreateAgentDto slug validation (US-005)', () => {
       expect(properties).toEqual([]);
     });
 
-    it('roles and capabilities stay optional on the canonical DTO', async () => {
+    it('capabilities stay optional, and roles is no longer a request field', async () => {
+      const properties = await errorProperties(CreateAgentDto, {
+        name: 'Good Agent',
+        slug: 'good-slug-1',
+        capabilities: ['typescript'],
+      });
+
+      expect(properties).toEqual([]);
+      // Permissions P1l (US-005): an agent's roles are bindings, so the DTO has no `roles` member —
+      // whatever a legacy client sends is stripped by the global whitelist pipe.
+      expect(Object.keys(plainToInstance(CreateAgentDto, {})).sort()).not.toContain('roles');
+    });
+
+    it('accepts a create that still carries a legacy roles array: the field is not validated', async () => {
       const properties = await errorProperties(CreateAgentDto, {
         name: 'Good Agent',
         slug: 'good-slug-1',
         roles: ['DEVELOPER'],
-        capabilities: ['typescript'],
       });
 
       expect(properties).toEqual([]);

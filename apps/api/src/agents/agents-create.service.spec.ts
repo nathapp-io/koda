@@ -4,9 +4,12 @@ import type { Mock } from 'vitest';
  *
  * The request body used to be spread straight into Prisma (M8), so any field the
  * caller sent — `status`, `id`, … — reached the database. The create payload is
- * now an explicit whitelist, and the agent row plus its roles/capabilities are
- * written inside a single txManager.run callback so a failing role/capability
- * write rolls the agent row back.
+ * now an explicit whitelist, and the agent row plus its capabilities are written
+ * inside a single txManager.run callback so a failing capability write rolls the
+ * agent row back.
+ *
+ * Permissions P1l (US-005): the create writes no `AgentRoleEntry` — a legacy `roles` field in the
+ * body reaches nothing — so the transaction has one write to roll back, not two.
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsService } from './agents.service';
@@ -24,7 +27,7 @@ describe('AgentsService create path (US-003)', () => {
 
   let agentRepo: {
     create: Mock;
-    createRolesAndCapabilities: Mock;
+    createCapabilities: Mock;
   };
 
   /** Permissions P1a (US-004): the create path binds the new agent to the baseline. */
@@ -75,7 +78,7 @@ describe('AgentsService create path (US-003)', () => {
 
     agentRepo = {
       create: vi.fn().mockResolvedValue(mockAgent),
-      createRolesAndCapabilities: vi.fn().mockResolvedValue(undefined),
+      createCapabilities: vi.fn().mockResolvedValue(undefined),
     };
 
     membership = {
@@ -129,7 +132,6 @@ describe('AgentsService create path (US-003)', () => {
         name: 'Subrina Coder',
         slug: 'subrina-coder',
         maxConcurrentTickets: 4,
-        roles: ['DEVELOPER'],
         capabilities: ['typescript'],
       }),
     );
@@ -144,13 +146,11 @@ describe('AgentsService create path (US-003)', () => {
   });
 
   it('AC1 boundary: never forwards the client-supplied status, id, roles or capabilities', async () => {
-    await service.generateApiKey(
-      withClientSuppliedFields({
-        name: 'Subrina Coder',
-        slug: 'subrina-coder',
-        roles: ['DEVELOPER'],
-      }),
-    );
+    const body = withClientSuppliedFields({ name: 'Subrina Coder', slug: 'subrina-coder' });
+    // A legacy client still sends `roles`; the whitelist drops it and nothing writes a role row.
+    Object.assign(body, { roles: ['DEVELOPER'] });
+
+    await service.generateApiKey(body);
 
     const createArg = agentRepo.create.mock.calls[0][0];
     expect(createArg).not.toHaveProperty('status');
@@ -160,17 +160,19 @@ describe('AgentsService create path (US-003)', () => {
     expect(createArg.name).toBe('Subrina Coder');
     expect(createArg.slug).toBe('subrina-coder');
     expect(createArg.apiKeyHash).toMatch(/^[a-f0-9]{64}$/);
+    // AC-9: creation writes no AgentRoleEntry, whatever the body carried.
+    expect(agentRepo.createCapabilities).toHaveBeenCalledWith(mockAgent.id, []);
   });
 
   it('AC1 boundary: uses the provided slug directly', async () => {
-    await service.generateApiKey({ name: 'Subrina Coder', slug: 'subrina-coder', roles: ['DEVELOPER'] });
+    await service.generateApiKey({ name: 'Subrina Coder', slug: 'subrina-coder' });
 
     const createArg = agentRepo.create.mock.calls[0][0];
     expect(createArg.slug).toBe('subrina-coder');
   });
 
-  it('AC6: rejects with the createRolesAndCapabilities error and runs both writes in one txManager.run callback', async () => {
-    const failure = new Error('agentRoleEntry insert failed');
+  it('AC6: rejects with the createCapabilities error and runs both writes in one txManager.run callback', async () => {
+    const failure = new Error('agentCapabilityEntry insert failed');
     const writes: Array<{ op: string; runId: number | null }> = [];
 
     agentRepo.create.mockImplementation(async () => {
@@ -178,20 +180,16 @@ describe('AgentsService create path (US-003)', () => {
       return mockAgent;
     });
 
-    agentRepo.createRolesAndCapabilities.mockImplementation(async () => {
-      writes.push({ op: 'createRolesAndCapabilities', runId: activeRunId });
+    agentRepo.createCapabilities.mockImplementation(async () => {
+      writes.push({ op: 'createCapabilities', runId: activeRunId });
       throw failure;
     });
 
     await expect(
-      service.generateApiKey({
-        name: 'Subrina Coder',
-        slug: 'subrina-coder',
-        roles: ['DEVELOPER'],
-      }),
+      service.generateApiKey({ name: 'Subrina Coder', slug: 'subrina-coder' }),
     ).rejects.toBe(failure);
 
-    expect(writes.map((write) => write.op)).toEqual(['create', 'createRolesAndCapabilities']);
+    expect(writes.map((write) => write.op)).toEqual(['create', 'createCapabilities']);
     expect(writes[0].runId).not.toBeNull();
     expect(writes[0].runId).toBe(writes[1].runId);
     expect(txManager.run).toHaveBeenCalledTimes(1);
@@ -205,20 +203,27 @@ describe('AgentsService create path (US-003)', () => {
       return mockAgent;
     });
 
-    agentRepo.createRolesAndCapabilities.mockImplementation(async () => {
-      writes.push({ op: 'createRolesAndCapabilities', runId: activeRunId });
+    agentRepo.createCapabilities.mockImplementation(async () => {
+      writes.push({ op: 'createCapabilities', runId: activeRunId });
     });
 
-    await service.generateApiKey({
-      name: 'Subrina Coder',
-      slug: 'subrina-coder',
-      roles: ['DEVELOPER'],
-    });
+    await service.generateApiKey({ name: 'Subrina Coder', slug: 'subrina-coder' });
 
-    expect(writes.map((write) => write.op)).toEqual(['create', 'createRolesAndCapabilities']);
+    expect(writes.map((write) => write.op)).toEqual(['create', 'createCapabilities']);
     expect(writes[0].runId).not.toBeNull();
     expect(writes[0].runId).toBe(writes[1].runId);
     expect(txManager.run).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC-10: writes exactly the capabilities the request named', async () => {
+    await service.generateApiKey({
+      name: 'Subrina Coder',
+      slug: 'subrina-coder',
+      capabilities: ['nax'],
+    });
+
+    expect(agentRepo.createCapabilities).toHaveBeenCalledTimes(1);
+    expect(agentRepo.createCapabilities).toHaveBeenCalledWith(mockAgent.id, ['nax']);
   });
 
   it('US-004: binds the created agent to the baseline once, inside the create transaction', async () => {
@@ -227,11 +232,7 @@ describe('AgentsService create path (US-003)', () => {
       bindings.push({ principal, runId: activeRunId });
     });
 
-    await service.generateApiKey({
-      name: 'Subrina Coder',
-      slug: 'subrina-coder',
-      roles: ['DEVELOPER'],
-    });
+    await service.generateApiKey({ name: 'Subrina Coder', slug: 'subrina-coder' });
 
     expect(bindings).toEqual([{ principal: { type: 'AGENT', id: mockAgent.id }, runId: 1 }]);
   });

@@ -2,7 +2,6 @@ import { Controller, Post, Get, Patch, Delete, Body, Param, Query, HttpCode, Htt
 import { AgentsService } from './agents.service';
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { UpdateAgentDto } from './dto/update-agent.dto';
-import { UpdateRolesDto } from './dto/update-roles.dto';
 import { UpdateCapabilitiesDto } from './dto/update-capabilities.dto';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { JsonResponse, ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
@@ -18,6 +17,10 @@ import { Requires } from '../permissions/requires.decorator';
 // catalog key with `@Requires` and lists `RequiresGuard` alone. The agent-management keys are
 // GLOBAL-scope role keys, so a project-admin binding does not satisfy them. Pickup is the one
 // service-level check: the key belongs to the *target* agent, not the caller.
+//
+// Permissions P1 (US-003): an agent's roles are role bindings, not an `AgentRoleEntry` list, so the
+// `PATCH /agents/:slug/update-roles` route is gone. `PATCH /role-bindings` grants and `DELETE
+// /role-bindings/:id` revokes what the agent acts with.
 @ApiTags('agents')
 @ApiBearerAuth()
 @Controller('agents')
@@ -58,11 +61,6 @@ export class AgentsController {
 
   async updateAgent(slug: string, updateDto: UpdateAgentDto, _principal?: KodaPrincipal) {
     return this.agentsService.update(slug, updateDto);
-  }
-
-  async updateAgentRoles(slug: string, updateRolesDto: UpdateRolesDto, _principal?: KodaPrincipal) {
-    const agent = await this.agentsService.findBySlug(slug);
-    return this.agentsService.updateRoles(agent.id, updateRolesDto);
   }
 
   async updateAgentCapabilities(slug: string, updateCapabilitiesDto: UpdateCapabilitiesDto, _principal?: KodaPrincipal) {
@@ -156,19 +154,6 @@ export class AgentsController {
   @ApiResponse({ status: 404, description: 'Agent not found' })
   async update(@Param('slug') slug: string, @Body() updateDto: UpdateAgentDto, @Principal() principal: KodaPrincipal) {
     const data = await this.updateAgent(slug, updateDto, principal);
-    return JsonResponse.Ok(data);
-  }
-
-  @Patch(':slug/update-roles')
-  @UseGuards(RequiresGuard)
-  @Requires('agent.update')
-  @ApiOperation({ summary: 'Update agent roles (agent.update)' })
-  @ApiResponse({ status: 200, description: 'Roles updated successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'agent.update is missing' })
-  @ApiResponse({ status: 404, description: 'Agent not found' })
-  async updateRoles(@Param('slug') slug: string, @Body() updateRolesDto: UpdateRolesDto, @Principal() principal: KodaPrincipal) {
-    const data = await this.updateAgentRoles(slug, updateRolesDto, principal);
     return JsonResponse.Ok(data);
   }
 

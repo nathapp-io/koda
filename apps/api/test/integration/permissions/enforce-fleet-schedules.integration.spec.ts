@@ -100,7 +100,7 @@ describeIntegration('fleet schedule keys and ownership (US-005)', () => {
 
   /** A roster-only agent: its one key source in p1 is the `viewer` binding plus its role binding. */
   const createAgent = async (slug: string): Promise<string> => {
-    const created = await asRoot('post', '/api/agents', { name: slug, slug, roles: [] }).expect(201);
+    const created = await asRoot('post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
     const agent = { type: 'AGENT' as const, id: body.agent.id };
     await grantBaseline(prisma, agent);

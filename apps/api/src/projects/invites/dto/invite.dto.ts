@@ -2,11 +2,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ProjectMemberDto } from '../../members/dto/project-member.dto';
 import { InviteStatus } from '../domain/project-invite.domain';
 
-/** Fleet S4b US-004: the public invite shape. Never carries a token or a token hash. */
+/** Public invite shape. Never carries a token, token hash, or legacy role. */
 export class InviteDto {
   @ApiProperty() declare id: string;
   @ApiProperty() declare email: string;
-  @ApiProperty({ nullable: true, type: String }) declare role: string | null;
   @ApiProperty({ nullable: true, type: String }) declare roleKey: string | null;
   @ApiProperty({ nullable: true, type: String }) declare roleName: string | null;
   @ApiProperty({ enum: ['PENDING', 'ACCEPTED', 'EXPIRED', 'CANCELLED'] }) declare status: InviteStatus;

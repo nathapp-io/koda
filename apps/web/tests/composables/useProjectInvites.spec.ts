@@ -48,7 +48,6 @@ describe('useProjectInvites (US-007)', () => {
     const invites = [{
       id: 'i1',
       email: 'pending@x.io',
-      role: null,
       roleKey: 'developer',
       roleName: 'Developer',
       status: 'PENDING',

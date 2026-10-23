@@ -102,11 +102,11 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
     }
     for (const who of ['dev', 'capper']) {
       await request(server).post('/api/projects/live/members').set(auth('root'))
-        .send({ email: `${who}@koda.test`, role: 'DEVELOPER' }).expect(201);
+        .send({ email: `${who}@koda.test`, roleKey: 'developer' }).expect(201);
     }
 
     const agent = await request(server).post('/api/agents').set(auth('root'))
-      .send({ name: 'Live Bot', slug: 'live-bot', roles: [] }).expect(201);
+      .send({ name: 'Live Bot', slug: 'live-bot' }).expect(201);
     tokens.agent = data<{ apiKey: string }>(agent).apiKey;
     ids.agent = (await prisma.agent.findUniqueOrThrow({ where: { slug: 'live-bot' } })).id;
     await grantBaseline(prisma, { type: 'AGENT', id: ids.agent });
@@ -215,7 +215,17 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
     const conn = await stream('dev');
     await conn.next((m) => m.event === 'ready');
 
-    await request(server).delete(`/api/projects/live/members/${ids.dev}`).set(auth('root')).expect(200);
+    // Permissions P1 US-003: a member leaves a project by deleting its bindings, not through the
+    // deleted members DELETE.
+    const live = await prisma.project.findUniqueOrThrow({ where: { slug: 'live' } });
+    const bindings = await prisma.roleBinding.findMany({
+      where: { principalType: 'USER', principalId: ids.dev, projectId: live.id },
+      select: { id: true },
+    });
+    expect(bindings.length).toBeGreaterThan(0);
+    for (const binding of bindings) {
+      await request(server).delete(`/api/role-bindings/${binding.id}`).set(auth('root')).expect(204);
+    }
 
     await Promise.race([conn.closed, sleep(HEARTBEAT_MS * 4)]);
     expect(conn.isClosed()).toBe(true);

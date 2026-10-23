@@ -155,7 +155,7 @@ test.describe('Fleet repo config (S3)', () => {
   test('a project VIEWER can read the files but gets no edit, save or drift controls', async ({ page }) => {
     const viewer = { email: `config-viewer-${suffix}@koda-e2e.test`, name: 'Config Viewer', password: 'Passw0rd!e2e' };
     await createUser(token, viewer);
-    await addProjectMember(token, SLUG, viewer.email, 'VIEWER');
+    await addProjectMember(token, SLUG, viewer.email, 'viewer');
     await webLogin(page, viewer.email, viewer.password);
     await openConfig(page, repoId);
     await expect(page.getByTestId('config-readonly-notice')).toBeVisible();

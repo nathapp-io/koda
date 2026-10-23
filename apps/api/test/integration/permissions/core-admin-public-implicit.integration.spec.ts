@@ -20,6 +20,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
+import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
@@ -73,13 +74,19 @@ describeIntegration('admin, auth, home, notification and public invite route key
     expect(res.body.message).toBe(PERMISSIONS_REFUSED);
   };
 
+  /**
+   * Permissions P1l (US-005): the create route takes no role, so every account starts as a plain
+   * member. `'ADMIN'` now means "create it, then bind the global `admin` role to it" — the binding is
+   * what makes it a global admin (and it mirrors `User.role = 'ADMIN'`, as the route used to).
+   */
   const createUser = async (who: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<void> => {
     const created = await request(server)
       .post('/api/admin/users')
       .set(auth('root'))
-      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role })
+      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD })
       .expect(201);
     userIds[who] = data<{ id: string }>(created).id;
+    if (role === 'ADMIN') await grantRole(db, { type: 'USER', id: userIds[who] as string }, 'admin');
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
     resetThrottle(app);
@@ -113,6 +120,7 @@ describeIntegration('admin, auth, home, notification and public invite route key
     // AC-13, AC-14 and AC-17's caller holds *no* binding row at all: the baseline `member` binding
     // the admin route writes is removed here, so the 200s cannot come from a role.
     await db.roleBinding.deleteMany({ where: { principalType: 'USER', principalId: userIds.plain } });
+    // The admin bindings were written with the fixture helper, which does not touch the cache.
     await membership.invalidatePermissions();
 
     const project = await request(server)
@@ -135,7 +143,7 @@ describeIntegration('admin, auth, home, notification and public invite route key
     const invite = await request(server)
       .post(`/api/projects/${P1_SLUG}/invites`)
       .set(auth('root'))
-      .send({ email: 'invited@koda.test', role: 'VIEWER' })
+      .send({ email: 'invited@koda.test', roleKey: 'viewer' })
       .expect(201);
     const inviteBody = data<{ outcome: string; invitePath?: string }>(invite);
     expect(inviteBody.outcome).toBe('INVITED');
@@ -188,15 +196,16 @@ describeIntegration('admin, auth, home, notification and public invite route key
     expect(page.records.map(({ id }) => id)).toContain(userIds.member);
   }, TIMEOUT);
 
-  it('AC-5: a global admin gets 403 users.self from PATCH /admin/users/<own id> with { role: MEMBER }', async () => {
+  it('AC-5: a global admin gets 403 users.self from PATCH /admin/users/<own id> with { disabled: true }', async () => {
     const res = await request(server)
       .patch(`/api/admin/users/${userIds.gadmin}`)
       .set(auth('gadmin'))
-      .send({ role: 'MEMBER' });
+      .send({ disabled: true });
 
     expect(res.status).toBe(403);
     expect(res.body.ret).toBe(40003);
     expect(res.body.message).toBe(USERS_SELF_REFUSED);
+    // US-005: `disabled` is the only patchable field, so the self rule refuses a self-disable.
     await expect(roleOf('gadmin')).resolves.toBe('ADMIN');
   }, TIMEOUT);
 
@@ -267,8 +276,10 @@ describeIntegration('admin, auth, home, notification and public invite route key
   it('AC-12: GET /invites/<token> of a pending invite with no token answers 200', async () => {
     const res = await request(server).get(`/api/invites/${inviteToken}`).expect(200);
 
-    const preview = data<{ projectSlug: string; email: string; role: string }>(res);
-    expect(preview).toMatchObject({ projectSlug: P1_SLUG, email: 'invited@koda.test', role: 'VIEWER' });
+    // US-007: the preview is exactly seven fields and names the role by key, never the legacy role.
+    const preview = data<{ projectSlug: string; email: string; roleKey: string | null }>(res);
+    expect(preview).toMatchObject({ projectSlug: P1_SLUG, email: 'invited@koda.test', roleKey: 'viewer' });
+    expect(preview).not.toHaveProperty('role');
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------

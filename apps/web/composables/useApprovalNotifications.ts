@@ -167,9 +167,10 @@ export function useApprovalNotifications(counts: Ref<ApprovalCountsDto | null>) 
   async function refresh(): Promise<void> {
     const token = ++generation
     const userId = auth.user.value?.id
-    const role = auth.user.value?.role
+    // Permissions P1 US-011: the account is its id. A role-only change of the same user must neither
+    // invalidate this refresh nor discard its answer — those are the same caller's approvals.
+    const current = (): boolean => mounted && generation === token && auth.user.value?.id === userId
     const snapshot = counts.value
-    const current = (): boolean => mounted && generation === token && auth.user.value?.id === userId && auth.user.value?.role === role
     if (!snapshot || !userId || !current()) return
     // Bound retained dedupe history; terminal approvals cannot become pending again.
     const history = seen.value[userId]
@@ -254,10 +255,13 @@ export function useApprovalNotifications(counts: Ref<ApprovalCountsDto | null>) 
     try { enabled.value = supported.value && Notification.permission === 'granted' && localStorage.getItem(preferenceKey()) === 'true' } catch { /* Defaults to opt-out. */ }
     timer = setInterval(() => { for (const id of active.keys()) render(id) }, 1000)
   })
-  watch(() => [auth.user.value?.id, auth.user.value?.role] as const, (identity, previous) => {
+  // Permissions P1 US-011: the identity is the user id. Watching the scalar id (not `[id, role]`)
+  // means a same-id role update does not fire at all, so it cannot invalidate or tear down a refresh
+  // that is already running; a real id change still closes every alert and re-reads the preference.
+  watch(() => auth.user.value?.id ?? null, () => {
     generation += 1
     for (const id of active.keys()) dismiss(id)
-    if (identity[0] !== previous[0]) enabled.value = false
+    enabled.value = false
     closed.clear()
   })
   onBeforeUnmount(() => {

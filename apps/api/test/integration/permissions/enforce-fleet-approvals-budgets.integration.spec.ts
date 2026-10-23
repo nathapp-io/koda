@@ -124,7 +124,7 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
    * `roles` names (none when it is empty).
    */
   const createAgent = async (slug: string, roles: AgentRole[] = []): Promise<string> => {
-    const created = await asRoot('post', '/api/agents', { name: slug, slug, roles: [] }).expect(201);
+    const created = await asRoot('post', '/api/agents', { name: slug, slug }).expect(201);
     const body = data<{ apiKey: string; agent: { id: string } }>(created);
     const agent = { type: 'AGENT' as const, id: body.agent.id };
     await grantBaseline(prisma, agent);

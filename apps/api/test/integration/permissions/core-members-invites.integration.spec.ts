@@ -20,7 +20,6 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
-import { ProjectMembersService } from '../../../src/projects/members/project-members.service';
 import { PermissionService } from '../../../src/permissions/permission.service';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 
@@ -67,11 +66,16 @@ describeIntegration('member and invite route keys (US-008)', () => {
     expect(res.body.message).toBe(PERMISSIONS_REFUSED);
   };
 
-  const createUser = async (who: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<void> => {
+  /**
+   * Permissions P1l (US-005): the create route takes no role, so an account starts as a plain member.
+   * Every caller below acts through a project binding or the global `member` baseline; the file no
+   * longer needs a global admin (US-006 removed the AC-12 case that did).
+   */
+  const createUser = async (who: string): Promise<void> => {
     const created = await request(server)
       .post('/api/admin/users')
       .set(auth('root'))
-      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role })
+      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD })
       .expect(201);
     userIds[who] = data<{ id: string }>(created).id;
     resetThrottle(app);
@@ -93,9 +97,9 @@ describeIntegration('member and invite route keys (US-008)', () => {
     });
 
   /** The member rows p1 lists, read through the route: what a refused write must not change. */
-  const listedMembers = async (who: string): Promise<{ userId: string; role: string }[]> => {
+  const listedMembers = async (who: string): Promise<{ userId: string | null }[]> => {
     const res = await request(server).get(membersUrl).set(auth(who)).expect(200);
-    return data<{ records: { userId: string; role: string }[] }>(res).records.map(({ userId, role }) => ({ userId, role }));
+    return data<{ records: { userId: string | null }[] }>(res).records.map(({ userId }) => ({ userId }));
   };
 
   const legacyMemberOf = (who: string) =>
@@ -109,7 +113,7 @@ describeIntegration('member and invite route keys (US-008)', () => {
     const res = await request(server)
       .post(invitesUrl)
       .set(auth('root'))
-      .send({ email, role: 'VIEWER' })
+      .send({ email, roleKey: 'viewer' })
       .expect(201);
     const id = data<{ invite?: { id: string } }>(res).invite?.id;
     if (!id) throw new Error('invite create answered no invite id');
@@ -130,8 +134,6 @@ describeIntegration('member and invite route keys (US-008)', () => {
     tokens.root = data<{ accessToken: string }>(root).accessToken;
 
     for (const who of ['developer', 'viewer', 'padmin', 'target', 'addable', 'removable']) await createUser(who);
-    // AC-12's caller: a global admin, and a source in no project at all.
-    await createUser('gadmin', 'ADMIN');
 
     const project = await request(server)
       .post('/api/projects')
@@ -149,7 +151,7 @@ describeIntegration('member and invite route keys (US-008)', () => {
     await request(server)
       .post(membersUrl)
       .set(auth('root'))
-      .send({ email: 'removable@koda.test', role: 'VIEWER' })
+      .send({ email: 'removable@koda.test', roleKey: 'viewer' })
       .expect(201);
 
     const createdAgent = await request(server)
@@ -187,76 +189,78 @@ describeIntegration('member and invite route keys (US-008)', () => {
     const res = await request(server)
       .post(membersUrl)
       .set(auth('padmin'))
-      .send({ email: 'addable@koda.test', role: 'DEVELOPER' })
+      .send({ email: 'addable@koda.test', roleKey: 'developer' })
       .expect(201);
 
-    expect(data<{ userId: string; role: string }>(res)).toMatchObject({
-      userId: userIds.addable,
-      role: 'DEVELOPER',
-    });
+    // Permissions P1l US-006: the added member answers its bindings, not a display role.
+    const added = data<{ userId: string; bindings: { roleKey: string; id: string }[] }>(res);
+    expect(added.userId).toBe(userIds.addable);
+    expect(added).not.toHaveProperty('role');
+    expect(added.bindings).toEqual([expect.objectContaining({ roleKey: 'developer' })]);
     await expect(bindingsFor('addable')).resolves.toEqual([
       expect.objectContaining({ role: { key: 'developer' } }),
     ]);
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
-  // AC-3 .. AC-4 — PATCH/DELETE /projects/:slug/members/:userId need role.binding.manage / member.remove
+  // AC-3 .. AC-4 — a member's binding write needs role.binding.manage, on the role-bindings route
+  //
+  // Permissions P1 US-003 deleted the members PATCH and DELETE, and a member's role change or removal
+  // is a binding write. These two cases keep the key they were written for: `role.binding.manage`
+  // refused the developer, and the member's bindings did not change.
   // -------------------------------------------------------------------------
 
-  it("AC-3: a developer binding alone is refused by PATCH /projects/p1/members/<user id> with 403 permissions and the role is unchanged", async () => {
+  it('AC-3: a developer binding alone is refused a binding write on /role-bindings with 403 permissions and the role is unchanged', async () => {
     const before = await bindingsFor('removable');
 
     const res = await request(server)
-      .patch(`${membersUrl}/${userIds.removable}`)
+      .post('/api/role-bindings')
       .set(auth('developer'))
-      .send({ role: 'VIEWER' });
+      .send({ principalType: 'USER', principalId: userIds.removable, roleKey: 'developer', projectId: p1Id });
 
     expectPermissionsRefusal(res);
     await expect(bindingsFor('removable')).resolves.toEqual(before);
   }, TIMEOUT);
 
-  it('AC-4: a developer binding alone is refused by DELETE /projects/p1/members/<user id> with 403 permissions and the member stays', async () => {
+  it('AC-4: a developer binding alone is refused a binding delete on /role-bindings with 403 permissions and the member stays', async () => {
     const before = await bindingsFor('removable');
     const listedBefore = await listedMembers('padmin');
+    const [binding] = before;
+    if (!binding) throw new Error('removable holds no binding to revoke');
 
     const res = await request(server)
-      .delete(`${membersUrl}/${userIds.removable}`)
+      .delete(`/api/role-bindings/${binding.id}`)
       .set(auth('developer'));
 
     expectPermissionsRefusal(res);
     await expect(bindingsFor('removable')).resolves.toEqual(before);
     await expect(listedMembers('padmin')).resolves.toEqual(listedBefore);
-    expect(listedBefore).toContainEqual({ userId: userIds.removable, role: 'VIEWER' });
+    expect(listedBefore).toContainEqual({ userId: userIds.removable });
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
-  // AC-5 .. AC-6, AC-12 — GET /projects/:slug/members needs member.read; canManage follows member.add
+  // AC-5 .. AC-6 — GET /projects/:slug/members needs member.read, and answers the page alone
+  //
+  // Permissions P1l US-006: the page carries no `canManage` and no `viewerRole`. What these cases keep
+  // is the key they were written for — a viewer binding and a project-admin binding both list the
+  // members — and AC-12 (`a global admin with no source lists them`) moved to the me-permissions route.
   // -------------------------------------------------------------------------
 
-  it('AC-5: a viewer binding alone lists the members with 200 and canManage false', async () => {
+  /** The six fields a member page carries, and no other. */
+  const MEMBER_PAGE_FIELDS = ['current', 'hasNext', 'hasPrev', 'records', 'size', 'total'];
+
+  it('AC-5: a viewer binding alone lists the members with 200 and no management fields', async () => {
     const res = await request(server).get(membersUrl).set(auth('viewer')).expect(200);
 
-    const body = data<{ canManage: boolean; viewerRole: string | null }>(res);
-    expect(body.canManage).toBe(false);
-    expect(body.viewerRole).toBe('VIEWER');
+    const body = data<Record<string, unknown>>(res);
+    expect(Object.keys(body).sort()).toEqual(MEMBER_PAGE_FIELDS);
   }, TIMEOUT);
 
-  it('AC-6: a project-admin binding alone lists the members with 200 and canManage true', async () => {
+  it('AC-6: a project-admin binding alone lists the members with 200 and no management fields', async () => {
     const res = await request(server).get(membersUrl).set(auth('padmin')).expect(200);
 
-    const body = data<{ canManage: boolean; viewerRole: string | null }>(res);
-    expect(body.canManage).toBe(true);
-    expect(body.viewerRole).toBe('ADMIN');
-  }, TIMEOUT);
-
-  it('AC-12: a global admin with no source in p1 lists the members with 200 and canManage true', async () => {
-    const res = await request(server).get(membersUrl).set(auth('gadmin')).expect(200);
-
-    const body = data<{ canManage: boolean }>(res);
-    expect(body.canManage).toBe(true);
-    await expect(
-      db.roleBinding.count({ where: { projectId: p1Id, principalType: 'USER', principalId: userIds.gadmin } }),
-    ).resolves.toBe(0);
+    const body = data<Record<string, unknown>>(res);
+    expect(Object.keys(body).sort()).toEqual(MEMBER_PAGE_FIELDS);
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
@@ -279,7 +283,7 @@ describeIntegration('member and invite route keys (US-008)', () => {
     const res = await request(server)
       .post(invitesUrl)
       .set(auth('padmin'))
-      .send({ email: 'no-account@koda.test', role: 'VIEWER' })
+      .send({ email: 'no-account@koda.test', roleKey: 'viewer' })
       .expect(201);
 
     const body = data<{ outcome: string; invite?: { id: string; email: string; status: string } }>(res);
@@ -343,7 +347,7 @@ describeIntegration('member and invite route keys (US-008)', () => {
     const created = await request(server)
       .post(invitesUrl)
       .set({ Authorization: `Bearer ${agent.apiKey}` })
-      .send({ email: 'agent-invited@koda.test', role: 'VIEWER' })
+      .send({ email: 'agent-invited@koda.test', roleKey: 'viewer' })
       .expect(201);
 
     const body = data<{ outcome: string; invite?: { id: string; email: string; status: string; inviterName: string | null } }>(created);
@@ -372,32 +376,24 @@ describeIntegration('member and invite route keys (US-008)', () => {
   // -------------------------------------------------------------------------
   // B2 (whole-branch review) — a binding member removal invalidates the cache
   // -------------------------------------------------------------------------
-  it('B2: removing a member whose project source is a developer binding ends its warmed project keys', async () => {
+  it('B2: revoking a member\'s developer binding ends its warmed project keys', async () => {
     await createUser('legacymember');
-    await grantRole(db, { type: 'USER', id: userIds.legacymember }, 'developer', p1Id);
+    const binding = await grantRole(db, { type: 'USER', id: userIds.legacymember }, 'developer', p1Id);
+    await membership.invalidatePermissions();
     const permissions = app.get(PermissionService);
-    const members = app.get(ProjectMembersService);
     const principal = {
       actorType: 'user',
       id: userIds.legacymember,
       role: 'MEMBER',
       email: 'legacymember@koda.test',
     } as KodaPrincipal;
-    const padmin = {
-      actorType: 'user',
-      id: userIds.padmin,
-      role: 'MEMBER',
-      email: 'padmin@koda.test',
-    } as KodaPrincipal;
-    await membership.invalidatePermissions();
     await expect(permissions.can(principal, 'ticket.create', { projectId: p1Id })).resolves.toEqual(
       expect.objectContaining({ allowed: true }),
     );
 
     // The DELETE route's own service call: no explicit invalidation follows it here.
-    await members.remove(P1_SLUG, userIds.legacymember, padmin);
+    await request(server).delete(`/api/role-bindings/${binding.id}`).set(auth('padmin')).expect(204);
 
-    await expect(db.projectMember.count({ where: { projectId: p1Id, userId: userIds.legacymember } })).resolves.toBe(0);
     await expect(bindingsFor('legacymember')).resolves.toEqual([]);
     await expect(permissions.can(principal, 'ticket.create', { projectId: p1Id })).resolves.toEqual(
       expect.objectContaining({ allowed: false }),

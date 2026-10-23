@@ -22,8 +22,9 @@ export class ProjectAccessService {
   }
 
   /**
-   * The access gate, and the caller's display role for the members page (`viewerRole`, read by the web until
-   * permissions-p1-web). A runner is not checked (unchanged; `CombinedAuthGuard` keeps runners off project routes),
+   * The access gate, and the caller's display role for the reads that still render one (the workspace
+   * thread stream). Permissions P1l US-006 removed the members page's `viewerRole`, so no members response
+   * carries it. A runner is not checked (unchanged; `CombinedAuthGuard` keeps runners off project routes),
    * and every agent is checked for `project.read`.
    *
    * Access is holding `project.read` in the project, whatever the caller's `role` claim or legacy membership row
@@ -53,8 +54,8 @@ export class ProjectAccessService {
 
   /**
    * Thin wrapper over PrismaProjectRepository.findMembershipRole: a project's raw membership role for a
-   * display-only read (the workspace thread stream, `viewerRole`). It decides no access — that is
-   * `resolveMembership`'s 403 on `project.read`.
+   * display-only read (the workspace thread stream). It decides no access — that is `resolveMembership`'s
+   * 403 on `project.read`.
    */
   async findMembershipRole(projectId: string, userId: string): Promise<string | null> {
     return this.projectRepo.findMembershipRole(projectId, userId);

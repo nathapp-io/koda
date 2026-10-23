@@ -7,7 +7,7 @@ import type { ProjectMember } from '~/composables/useProjectMembers'
 const ID = 'c000000000000000000000001'
 const ID2 = 'c000000000000000000000002'
 const member = (userId: string, name: string | null, email: string): ProjectMember =>
-  ({ userId, name, email, role: 'DEVELOPER', joinedAt: '2026-10-01T00:00:00.000Z' })
+  ({ userId, name, email, disabled: false, joinedAt: '2026-10-01T00:00:00.000Z' })
 
 describe('mentionToken (D504)', () => {
   test('builds the API grammar', () => {

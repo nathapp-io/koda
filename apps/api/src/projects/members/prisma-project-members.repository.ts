@@ -3,10 +3,10 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
-import { PrismaClient, ProjectMember } from '../../generated/prisma/client';
+import { PrismaClient } from '../../generated/prisma/client';
 import { countActiveProjectAdmins, listProjectMemberships, type ProjectMembership } from '../../permissions/membership.queries';
 import { lockProjectMembers } from '../../common/utils/advisory-lock';
-import { MemberPrincipalType, ProjectMemberRecord, ProjectMemberRole } from './domain/project-member.domain';
+import { MemberPrincipalType, ProjectMemberRecord } from './domain/project-member.domain';
 import { MemberPrincipalFilter } from './dto/list-members.query';
 import { memberKey, readMemberBindings, readMemberRecord } from './project-member.queries';
 
@@ -68,7 +68,6 @@ export class PrismaProjectMembersRepository {
           userId: user.id,
           email: user.email,
           name: user.name,
-          role: membership.role,
           disabled: user.disabled,
           joinedAt: membership.since,
           principalType: 'USER',
@@ -77,15 +76,13 @@ export class PrismaProjectMembersRepository {
           bindings: chips,
         };
       }
-      // An agent principal has no account state, so no row of it is disabled, and its legacy role is
-      // whatever `listProjectMemberships` merged from its sources.
+      // An agent principal has no account state, so no row of it is disabled.
       const agent = agentById.get(membership.principalId);
       if (!agent) throw new NotFoundAppException({}, 'members');
       return {
         userId: null,
         email: null,
         name: agent.name,
-        role: membership.role,
         disabled: false,
         joinedAt: membership.since,
         principalType: 'AGENT',
@@ -110,10 +107,6 @@ export class PrismaProjectMembersRepository {
     return readMemberRecord(this.db, projectId, { type: 'USER', id: userId });
   }
 
-  async deleteMemberIfPresent(projectId: string, userId: string): Promise<void> {
-    await this.db.projectMember.deleteMany({ where: { projectId, userId } });
-  }
-
   /** Case-insensitive so admins do not need the exact stored casing. */
   async findUserIdByEmail(email: string): Promise<string | null> {
     const u = await this.db.user.findFirst({
@@ -135,22 +128,6 @@ export class PrismaProjectMembersRepository {
     return u ?? null;
   }
 
-  /** The written legacy row, read back as the full record so the response carries its chips. */
-  async createMember(projectId: string, userId: string, role: ProjectMemberRole): Promise<ProjectMemberRecord> {
-    const row: ProjectMember = await this.db.projectMember.create({ data: { projectId, userId, role } });
-    return this.findRequiredMember(projectId, row.userId);
-  }
-
-  /** The updated legacy row, read back as the full record so the response carries its chips. */
-  async updateMemberRole(projectId: string, userId: string, role: ProjectMemberRole): Promise<ProjectMemberRecord> {
-    await this.db.projectMember.update({ where: { projectId_userId: { projectId, userId } }, data: { role } });
-    return this.findRequiredMember(projectId, userId);
-  }
-
-  async deleteMember(projectId: string, userId: string): Promise<void> {
-    await this.db.projectMember.delete({ where: { projectId_userId: { projectId, userId } } });
-  }
-
   /** Active admins only: a disabled user cannot act, so must not satisfy the guard. */
   async countProjectAdmins(projectId: string): Promise<number> {
     return countActiveProjectAdmins(this.db, projectId);
@@ -159,12 +136,6 @@ export class PrismaProjectMembersRepository {
   /** Serializes last-project-admin checks. Call inside txManager.run only. */
   async lockMembers(projectId: string): Promise<void> {
     await lockProjectMembers(this.db, projectId);
-  }
-
-  private async findRequiredMember(projectId: string, userId: string): Promise<ProjectMemberRecord> {
-    const record = await this.findMember(projectId, userId);
-    if (!record) throw new NotFoundAppException({}, 'members');
-    return record;
   }
 
   /** The account state of the page's user rows, in one read (the ids are the page's, so bounded). */

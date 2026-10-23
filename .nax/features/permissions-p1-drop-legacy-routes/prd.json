@@ -1,0 +1,1288 @@
+{
+  "project": "koda",
+  "feature": "permissions-p1-drop-legacy-routes",
+  "branchName": "feat/permissions-p1-drop-legacy-routes",
+  "createdAt": "2026-10-23T00:00:00Z",
+  "updatedAt": "2026-10-23T09:15:56.432Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Move the last-Project-Admin guard onto binding removal",
+      "description": "**Goal** — Protect a project's last active Project Admin on binding DELETE, with an explicit global-binding override.\n\n**Motivation** — Today a project can lose its last admin, and an agent can lose access while it still holds tickets.\n\n**Interface** —\n```ts\n// apps/api/src/permissions/membership.service.ts\nexport interface RemoveBindingOptions {\n  /** The caller may remove a project's last active Project Admin (it holds role.binding.global). */\n  lastProjectAdminOverride?: boolean;\n}\n\nasync removeBinding(id: string, options: RemoveBindingOptions = {}): Promise<void>\n```\n\n**Approach** — The shared removal algorithm is reproduced verbatim below; the steps marked US-002 are implemented by the dependent story, not this one.\n\nInside the existing transaction, in this order:\n1. `first = bindings.findViewById(id)`; absent → 404 `permissions.bindingNotFound` (unchanged).\n2. **Project locks, before the existing locks.** When `first.binding.projectId` is a project id P: a `USER` binding whose `roleKey` is `project-admin` takes `bindings.lockProjectMembers(P)` (US-001); an `AGENT` binding takes `bindings.lockProjectAgents(P)` (US-002). These are the advisory locks the deleted member and roster routes took, in the same order: the project lock first, then `lockUser`. Ticket assignment takes the agent lock too (`TicketsService`), so an agent-binding removal and an assign stay serialized. An `owner` binding is always global, so no removal takes both a project lock and the `owner` Role lock.\n3. The `owner` Role lock and `lockUser` (unchanged).\n4. **Re-read** `current = bindings.findViewById(id)` whenever step 2 or the owner lock took a lock; absent → 404 `permissions.bindingNotFound`.\n5. **Last Project Admin (US-001).** For a `USER` `project-admin` binding in P, the removal is refused with `ConflictAppException({}, 'members.lastAdmin')` when all of these hold: `options.lastProjectAdminOverride` is not `true`; `bindings.findUserState(userId)` answers a row whose `disabled` is `false` (a missing user row — the binding's `principalId` has no foreign key — is not an active admin, so the guard does not apply); and `bindings.countActiveProjectAdmins(P) <= 1`.\n6. **Open tickets (US-002).** For an `AGENT` binding in P, the removal is refused with `ConflictAppException({ count, refs: refs.join(', ') }, 'projectAgents.hasOpenTickets')` when `bindings.countOtherProjectBindings({ type: 'AGENT', id }, P, id)` is 0 and `bindings.countOpenAgentTickets(agentId, P).count > 0`. No caller overrides it.\n7. The owner check, the delete and the after-removal mirror (unchanged).\n\n- `RoleAdminService.removeBinding(principal, id)` keeps its order (lookup, binding keys, self-binding, escalation). Right before `membership.removeBinding`, it computes `lastProjectAdminOverride` as `(await this.permissions.can(principal, 'role.binding.global')).allowed` when the binding is a `USER` `project-admin` binding with a project id, and `false` otherwise, and passes `{ lastProjectAdminOverride }` (US-001).\n- `PrismaRoleBindingRepository` gains:\n  - US-001: `lockProjectMembers(projectId)` (delegates to `lockProjectMembers` in `common/utils/advisory-lock.ts`) and `countActiveProjectAdmins(projectId)` (delegates to `countActiveProjectAdmins` from `membership.queries.ts`; it counts per project);\n- The guards apply only to `DELETE /role-bindings/:id`. `MembershipService.removeProjectBindings`, `removeAllBindings` and `setGlobalAdmin` are unchanged.\n- `InMemoryPermissionStore`'s binding repository double (`src/permissions/test-helpers/in-memory-permissions.ts`) gains the new methods; it records every call in `store.calls`, as it does today.\n\nThe double's project-members lock resolves and records its call; its active-admin count answers from enabled users holding project-admin in that project and can be made to reject. Preserve every existing test case and owner/global legacy-mirror behavior. Add the guard integration suite and service/override unit suites in expectedFiles. Add one role-binding case to test/e2e/api-endpoint/endpoint.e2e.spec.ts: the custom co-admin's deletion of the last enabled Project Admin answers 409 members.lastAdmin; existing cases remain unchanged.\n\nDB-backed ACs seed system roles. The custom co-admin is a user with a custom PROJECT role with permissions ['*'] in P and no project-admin binding; create this role with Prisma and invalidate permissions after direct fixture changes between requests. A global admin holds a global admin binding. Binding route grants precede login if they revoke tokenVersion.\n\n**Scope** — In: RemoveBindingOptions, project-members lock/counter, guarded transactional removal, override propagation, in-memory double and targeted tests. Out: US-002 agent locks/open-ticket logic; US-003 route deletion; US-004..007 DTO cleanup; client work; last-global-admin guard, user-disable/project-role-deletion guards and schema migration.",
+      "acceptanceCriteria": [
+        "[integration] Given P has exactly one enabled user U with a project-admin binding, when the custom co-admin sends DELETE /role-bindings/:id for U's binding, then the response is 409 members.lastAdmin.",
+        "[integration] After that refused DELETE, U's project-admin binding in P still exists.",
+        "[integration] In the same data, a global admin's DELETE /role-bindings/:id for U's project-admin binding answers 204.",
+        "[integration] Given P has two enabled users with project-admin bindings, when the custom co-admin deletes one of them, then the response is 204.",
+        "[integration] Given P has two users with project-admin bindings and one is disabled, when the custom co-admin deletes the enabled user's binding, then the response is 409 members.lastAdmin.",
+        "[integration] Given P's only project-admin binding belongs to a disabled user, when the custom co-admin deletes it, then the response is 204.",
+        "[integration] Given P's only enabled Project Admin is U and P2 has another enabled Project Admin, when the custom co-admin of P deletes U's project-admin binding in P, then the response is 409 members.lastAdmin.",
+        "[integration] Given P has exactly two enabled users with project-admin bindings, when two custom co-admin DELETE /role-bindings/:id requests for the two bindings are sent concurrently, then exactly one project-admin binding remains in P, and the two responses are exactly one 204 and one 409 members.lastAdmin.",
+        "[unit] Over InMemoryPermissionStore, when a caller holding a global admin binding calls RoleAdminService.removeBinding(caller, id) for a USER project-admin binding in P, then MembershipService.removeBinding receives (id, { lastProjectAdminOverride: true }).",
+        "[unit] Over InMemoryPermissionStore, when a caller holding only a project role with permissions ['*'] in P calls RoleAdminService.removeBinding(caller, id) for a USER project-admin binding in P, then MembershipService.removeBinding receives (id, { lastProjectAdminOverride: false }).",
+        "[unit] Over InMemoryPermissionStore, MembershipService.removeBinding(id) for a USER project-admin binding in P records lockProjectMembers for P before lockUser for that user in store.calls.",
+        "[unit] Over InMemoryPermissionStore, MembershipService.removeBinding(id) resolves for P's only project-admin binding when findUserState for its user answers null.",
+        "[unit] Over InMemoryPermissionStore, MembershipService.removeBinding(id) for an enabled user's project-admin binding rejects with the error countActiveProjectAdmins was set to reject with.",
+        "[unit] MembershipService.removeBinding('missing-binding') called without options still rejects with NotFoundAppException keyed permissions.bindingNotFound when findViewById returns null."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "security",
+        "concurrency"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Security-critical transactional access removal, advisory-lock ordering, concurrency and service-to-service override propagation.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.019999999999999574,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T03:44:17.611Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/membership.service.ts",
+        "apps/api/src/permissions/role-admin.service.ts",
+        "apps/api/src/permissions/prisma-role-binding.repository.ts",
+        "apps/api/src/permissions/test-helpers/in-memory-permissions.ts",
+        "apps/api/src/common/utils/advisory-lock.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/permissions/last-project-admin-guard.integration.spec.ts",
+        "apps/api/src/permissions/membership.service.removal-guards.spec.ts",
+        "apps/api/src/permissions/role-admin.service.removal-override.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/test-helpers/in-memory-permissions.ts",
+          "reason": "bindingRepo() has no lockProjectMembers or countActiveProjectAdmins, so a MembershipService built on it throws when removeBinding reaches a project-admin binding, and it cannot be set to reject for AC-13. The replacing invariant: the double gains both methods; the lock resolves and is recorded in store.calls; the counter answers the enabled users holding a project-admin binding in the project from the store, and a test can make it reject; every existing case is unchanged."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": ".nax/rules/api-testing.md asks endpoint changes to be reflected here, and DELETE /role-bindings/:id gains a 409. The replacing invariant: one case is added in the role-bindings section: the last enabled Project Admin's project-admin binding, deleted by a caller without role.binding.global, answers 409 members.lastAdmin; every existing case is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "7685d8dd75f43c25774d894e610d9e2e1b65af57"
+    },
+    {
+      "id": "US-002",
+      "title": "Move the open-ticket guard onto binding removal",
+      "description": "**Goal** — Refuse removal of an agent's last project binding while it holds open tickets there, using the same advisory lock as ticket assignment.\n\n**Motivation** — The web members panel already removes principals with `DELETE /role-bindings/:id`, which checks neither the last-Project-Admin rule nor the agent's open tickets.\n\n**Interface** — Extend the upstream `async removeBinding(id: string, options: RemoveBindingOptions = {}): Promise<void>`; add `countOpenAgentTickets(db, agentId, projectId)` and exported `MAX_OPEN_TICKET_REFS` in apps/api/src/permissions/open-agent-tickets.queries.ts.\n\n**Approach** —\nInside the existing transaction, in this order:\n1. `first = bindings.findViewById(id)`; absent → 404 `permissions.bindingNotFound` (unchanged).\n2. **Project locks, before the existing locks.** When `first.binding.projectId` is a project id P: a `USER` binding whose `roleKey` is `project-admin` takes `bindings.lockProjectMembers(P)` (US-001); an `AGENT` binding takes `bindings.lockProjectAgents(P)` (US-002). These are the advisory locks the deleted member and roster routes took, in the same order: the project lock first, then `lockUser`. Ticket assignment takes the agent lock too (`TicketsService`), so an agent-binding removal and an assign stay serialized. An `owner` binding is always global, so no removal takes both a project lock and the `owner` Role lock.\n3. The `owner` Role lock and `lockUser` (unchanged).\n4. **Re-read** `current = bindings.findViewById(id)` whenever step 2 or the owner lock took a lock; absent → 404 `permissions.bindingNotFound`.\n5. **Last Project Admin (US-001).** For a `USER` `project-admin` binding in P, the removal is refused with `ConflictAppException({}, 'members.lastAdmin')` when all of these hold: `options.lastProjectAdminOverride` is not `true`; `bindings.findUserState(userId)` answers a row whose `disabled` is `false` (a missing user row — the binding's `principalId` has no foreign key — is not an active admin, so the guard does not apply); and `bindings.countActiveProjectAdmins(P) <= 1`.\n6. **Open tickets (US-002).** For an `AGENT` binding in P, the removal is refused with `ConflictAppException({ count, refs: refs.join(', ') }, 'projectAgents.hasOpenTickets')` when `bindings.countOtherProjectBindings({ type: 'AGENT', id }, P, id)` is 0 and `bindings.countOpenAgentTickets(agentId, P).count > 0`. No caller overrides it.\n7. The owner check, the delete and the after-removal mirror (unchanged).\n\n- `PrismaRoleBindingRepository` gains:\n  - US-002: `lockProjectAgents(projectId)` (delegates to `lockProjectAgents`), `countOtherProjectBindings(principal, projectId, excludingId)` (the PROJECT-scope bindings of the principal with that `projectId` and an id other than `excludingId`) and `countOpenAgentTickets(agentId, projectId)` (delegates to the query below).\n- **`countOpenAgentTickets(db, agentId, projectId)`** (US-002) lives in a new `apps/api/src/permissions/open-agent-tickets.queries.ts`, beside `membership.queries.ts`, so `permissions/` never imports from `agents/`. It is the body of today's `PrismaAgentRepository.countOpenProjectTickets`, moved: tickets assigned to the agent in the project, not `CLOSED` or `REJECTED`, not soft-deleted; `count`, plus the refs (`<project key>-<number>`) of the oldest `MAX_OPEN_TICKET_REFS` (10, exported from the new module; `PrismaAgentRepository` imports it from there instead of keeping its own constant, which `findProjectRoster` still uses); a project row that disappears while refs are built throws `KodaError('PROJECT_NOT_FOUND', …)`. `PrismaAgentRepository.countOpenProjectTickets` delegates to it until US-003 deletes it.\n- \"The agent's last binding\" counts only the agent's PROJECT-scope bindings with `projectId` P. A `projectId`-null binding is not a binding in P, so it neither blocks nor allows the refusal.\n- The guards apply only to `DELETE /role-bindings/:id`. `MembershipService.removeProjectBindings`, `removeAllBindings` and `setGlobalAdmin` are unchanged.\n- `InMemoryPermissionStore`'s binding repository double (`src/permissions/test-helpers/in-memory-permissions.ts`) gains the new methods; it records every call in `store.calls`, as it does today.\n\nExtend the existing removal-guards unit suite from US-001. The double's lock resolves and records; countOtherProjectBindings answers from its store; countOpenAgentTickets defaults to { count: 0, refs: [] } unless configured or set to reject. Move counting/ref assertions from agents/prisma-agent.repository.project-roster-writes.spec.ts to target countOpenAgentTickets(db, agentId, projectId); other cases remain unchanged until US-003. Preserve sequential query execution on the ambient client, including oldest createdAt/number order and the 10-ref bound. Seed system roles and invalidate warmed permissions after direct fixture binding changes.\n\n**Scope** — In: agent project lock, last-binding guard, extracted query and constant, repository delegation and double, integration/unit regressions. Out: US-001 override changes; US-003 deletion of the temporary agent repository delegate/roster routes; applying the guard to agent deletion or removeProjectBindings; an assignment-versus-removal race test; OFFLINE access refusals.",
+      "acceptanceCriteria": [
+        "[integration] Given agent A's only binding in P is viewer and a ticket in P not CLOSED or REJECTED is assigned to A, when a global admin deletes that binding, then DELETE /role-bindings/:id answers 409 projectAgents.hasOpenTickets.",
+        "[integration] After that refused DELETE, A's viewer binding in P still exists.",
+        "[integration] Given A holds viewer and developer bindings in P and one open ticket there, when a global admin deletes the developer binding, then the response is 204.",
+        "[integration] Given A's only binding in P is viewer and its only ticket in P is CLOSED, when a global admin deletes that binding, then the response is 204.",
+        "[integration] Given A's only binding in P is viewer and its only open ticket is in P2, when a global admin deletes the P binding, then the response is 204.",
+        "[integration] Given A's only binding in P is viewer and A also holds a projectId-null binding with one open ticket in P, when a global admin deletes the P binding, then the response is 409 projectAgents.hasOpenTickets.",
+        "[unit] Over InMemoryPermissionStore, MembershipService.removeBinding(id) for an AGENT binding in P records lockProjectAgents for P in store.calls.",
+        "[unit] Over InMemoryPermissionStore, when countOpenAgentTickets rejects during removal of an agent's only binding in P, then MembershipService.removeBinding(id) rejects with that error without deleting the binding.",
+        "[integration] countOpenAgentTickets(db, agentId, P) returns count: 2 for an agent with two open tickets in P, one CLOSED ticket in P and one soft-deleted open ticket in P.",
+        "[integration] For that agent, countOpenAgentTickets(db, agentId, P).refs is [<older ticket's ref>, <newer ticket's ref>], each <project key>-<number>.",
+        "[unit] countOpenAgentTickets(db, agentId, P), with a client double whose ticket count answers 1, ticket list answers one ticket and project lookup answers null, rejects with a KodaError whose code is PROJECT_NOT_FOUND.",
+        "[integration] When the open-ticket guard refuses removal, then ConflictAppException for projectAgents.hasOpenTickets carries { count, refs: refs.join(', ') } from the open-ticket query for P, including for a caller with global authority."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "security",
+        "concurrency",
+        "agents"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Access-revocation safety crosses permissions, ticket assignment locking and ambient transaction queries.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.17999999999999972,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T03:59:34.685Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/membership.service.ts",
+        "apps/api/src/permissions/prisma-role-binding.repository.ts",
+        "apps/api/src/agents/prisma-agent.repository.ts",
+        "apps/api/src/permissions/test-helpers/in-memory-permissions.ts",
+        "apps/api/src/tickets/tickets.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/permissions/open-agent-tickets.queries.ts",
+        "apps/api/test/integration/permissions/open-ticket-guard.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/test-helpers/in-memory-permissions.ts",
+          "reason": "bindingRepo() has no lockProjectAgents, countOtherProjectBindings or countOpenAgentTickets, so removeBinding throws for an AGENT binding in a project. The replacing invariant: the double gains the three methods; the lock resolves and is recorded in store.calls; countOtherProjectBindings answers from the store; countOpenAgentTickets answers count 0 and no refs unless a test sets it or makes it reject."
+        },
+        {
+          "path": "apps/api/src/agents/prisma-agent.repository.project-roster-writes.spec.ts",
+          "reason": "'countOpenProjectTickets counts...' pins the body that moves to permissions/open-agent-tickets.queries.ts. The replacing invariant: the same counting and ref assertions run against countOpenAgentTickets(db, agentId, projectId); the other cases are unchanged here (US-003 deletes the roster-write cases)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e8ec03b58b301e0d6e8f01791f172d5e51992061"
+    },
+    {
+      "id": "US-003",
+      "title": "Delete the legacy write routes",
+      "description": "**Goal** — Remove five legacy-shaped write endpoints and their dead implementation while retaining supported reads and status updates.\n\n**Motivation** — Five routes write legacy-shaped state.\n\n**Approach** —\n| Site | Baseline (locate only) | Target |\n|:--|:--|:--|\n| `ProjectMembersController` | `@Patch(':userId')` `updateRole`, `@Delete(':userId')` `remove` | both handlers deleted; `GET` and `POST` stay |\n| `ProjectMembersService` | `updateRole`, `remove`, `lockAndFind`, `assertKeepsAnAdmin` | deleted |\n| `ProjectsController` | `@Post(':slug/agents')` `addProjectAgent`, `@Delete(':slug/agents/:agentSlug')` `removeProjectAgent` | both handlers deleted; `GET :slug/agents` and `PATCH :slug/agents/:agentSlug` stay |\n| `AgentsController` | `@Patch(':slug/update-roles')` `updateRoles` and `updateAgentRoles` | deleted |\n| `AgentsService` | `addToProject`, `removeFromProject`, `updateRoles` | deleted; `isOnProjectRosterBySlug` stays |\n| `PrismaAgentRepository` | `addToProjectRoster`, `removeFromProjectRoster`, `replaceRoles`, `countOpenProjectTickets`, `hasLocalMembership` | deleted |\n| `PrismaProjectMembersRepository` | `createMember`, `updateMemberRole`, `deleteMemberIfPresent`, `deleteMember` | deleted (`lockMembers`, `findMember`, `findUserByEmail` stay) |\n| DTOs | `UpdateMemberRoleDto`, `UpdateRolesDto`, `AddProjectAgentDto` | files deleted |\n| `scripts/smoke-test-cli.sh` | `POST /api/projects/koda/agents` | replaced by a `viewer` `POST /api/role-bindings` for the agent in the project, placed after the `PROJECT_ID` / `AGENT_ID` extraction and before the four workflow role bindings |\n\n- **`member.remove` keeps its catalog entry and joins `PENDING_SURFACE_KEYS`** (`src/permissions/catalog.ts`). The two deleted handlers were the only surfaces that declared it, and the catalog contract test refuses an undeclared key that is not pending. Removing a principal from a project is now deleting its bindings, which `role.binding.manage` gates; the key stays held by the seeded roles that hold it (Appendix A), and the list's doc comment says it waits for P3 policy to decide whether it gates binding removal.\n- **A duplicate roster add is no longer a 409.** `POST /role-bindings` answers an existing binding with 201 and the same binding (`MembershipService.createBinding`), so the roster route's 409 `projectAgents.alreadyAssigned` goes with the route.\n- Comments and `@ApiResponse` texts that name the deleted routes or methods are reworded: `MembershipService.removeProjectBindings`' doc, the stale `AgentsService.updateRoles` comment in `common/test-helpers/global-stubs.module.ts`, and the `AgentsService.removeFromProject` mentions in `tickets/tickets.service.ts`, `tickets/prisma-tickets.repository.ts`, `tickets/domain/ticket.domain.ts` and `projects/members/project-member.queries.ts`.\n- `MembershipService.removeProjectBindings` keeps no production caller after this story and stays (drop-legacy-schema decides it).\n\n**Interface** — Retired routes answer 404 because no handler remains: PATCH/DELETE /projects/:slug/members/:userId; POST /projects/:slug/agents; DELETE /projects/:slug/agents/:agentSlug; PATCH /agents/:slug/update-roles. Supported membership writes are POST/DELETE /role-bindings; a role change grants the replacement then revokes the old binding.\n\nDelete agents-project-roster.service.spec.ts; remove only dead handler/method/DTO mocks and cases from project-members service/controller/dto, agents service/controller, projects controller and repository roster-write specs. Keep query/lock behavior now covered by US-002. Update folded-keys.spec.ts tables to retain only PATCH roster status with agent.update, and permission-contract.spec.ts pending expectations to include member.remove. Rewrite member-bindings, project-members, core-members-invites, membership-agent-roster, core-project-routes, membership-queries, project-membership-gate and live-stream integration consumers to binding POST/DELETE. Preserve their prior outcomes: anti-escalation/self-binding refusals, last-admin 409, immediate warmed-key revocation and heartbeat stream close. F1's member beyond the listing cap is found through the members list and its bindings revoked. Remove obsolete update-roles assertions from core-agent-routes, spec-integrity, agents.e2e and endpoint.e2e; endpoint workflow setup grants the matching project bindings, roster duplicate asserts 201/same id, own-agent binding writes assert 403, open-ticket deletion asserts 409 and successful removal asserts 204. Smoke viewer binding checks HTTP 201 like the four following workflow bindings. Do not weaken unrelated tests. Verify removal edits with bun run --cwd apps/api type-check and bun run --cwd apps/api lint.\n\n**Scope** — In: route/service/repository/DTO deletion, catalog pending key, stale comments, migrated consumers/tests and smoke-script roster setup. Out: US-004 legacy member/invite request fields; US-005 user/agent role fields; US-006/007 response fields and final contract export; US-008..011 clients; deletion of removeProjectBindings or legacy tables; OFFLINE liveness checks on bindings.",
+      "acceptanceCriteria": [
+        "[integration] PATCH /projects/:slug/members/:userId with { role: 'VIEWER' }, sent by a global admin, answers 404.",
+        "[integration] DELETE /projects/:slug/members/:userId, sent by a global admin for a user with a developer binding in P, answers 404.",
+        "[integration] After that DELETE, the user's developer binding in P still exists.",
+        "[integration] POST /projects/:slug/agents with { agentSlug }, sent by a global admin, answers 404.",
+        "[integration] DELETE /projects/:slug/agents/:agentSlug, sent by a global admin for an agent with a viewer binding in P, answers 404.",
+        "[integration] PATCH /agents/:slug/update-roles with { roles: ['DEVELOPER'] }, sent by a global admin, answers 404.",
+        "[integration] PATCH /projects/:slug/agents/:agentSlug with { status: 'PAUSED' }, sent by a global admin for an agent with a viewer binding in P, still answers 200.",
+        "[unit] PENDING_SURFACE_KEYS from src/permissions/catalog.ts contains member.remove.",
+        "[integration] A Project Admin's second POST /role-bindings of the same viewer binding for an agent in P answers 201 with the binding id the first answered."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "security",
+        "delete",
+        "refactor"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Broad security-route retirement and caller/test rewiring across projects, agents, permissions, live streams and smoke setup.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.4800000000000004,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T04:12:02.284Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/projects/members/project-members.service.ts",
+        "apps/api/src/agents/agents.service.ts",
+        "apps/api/src/projects/projects.controller.ts",
+        "apps/api/src/agents/agents.controller.ts",
+        "apps/api/src/projects/members/project-members.controller.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/permissions/legacy-routes-removed.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/agents/agents-project-roster.service.spec.ts",
+          "reason": "the whole file tests AgentsService.addToProject and removeFromProject, which are deleted. The replacing invariant: the file is deleted; roster writes are POST and DELETE on the role-bindings route, and the open-ticket refusal is pinned by US-002."
+        },
+        {
+          "path": "apps/api/src/projects/members/project-members.service.spec.ts",
+          "reason": "the doubles createMember, updateMemberRole and deleteMemberIfPresent and the cases 'updateRole/remove 404 a non-member', 'a project admin cannot demote or remove the last project ADMIN', AC-12, AC-13, 'a global ADMIN may remove the last project ADMIN', 'keeping ADMIN, or changing a non-admin...' and 'a disabled ADMIN does not trigger the last-admin guard' test the deleted updateRole and remove. The replacing invariant: those cases and doubles are removed; the add and list cases are unchanged here (US-004 and US-006 change them)."
+        },
+        {
+          "path": "apps/api/src/projects/members/project-members.controller.spec.ts",
+          "reason": "the it.each row ['updateRole', 'role.binding.manage'] and 'remove returns an empty Ok' name deleted handlers. The replacing invariant: the row and the case are removed; the guard-order and list cases are unchanged here."
+        },
+        {
+          "path": "apps/api/src/projects/members/dto/member-dto.spec.ts",
+          "reason": "it imports the deleted UpdateMemberRoleDto, and 'UpdateMemberRoleDto accepts ADMIN | DEVELOPER | VIEWER only' tests it. The replacing invariant: the import and the case are removed; the AddMemberDto cases are unchanged here (US-004 changes them)."
+        },
+        {
+          "path": "apps/api/src/agents/agents.service.spec.ts",
+          "reason": "the describe('updateRoles') block and the replaceRoles mocks test a deleted method. The replacing invariant: the block and the mocks are removed; every other case is unchanged here."
+        },
+        {
+          "path": "apps/api/src/agents/agents.controller.spec.ts",
+          "reason": "describe('PATCH /api/agents/:slug/update-roles') (four cases) and the updateRoles mock name the deleted handler. The replacing invariant: the block and the mock are removed."
+        },
+        {
+          "path": "apps/api/src/agents/prisma-agent.repository.project-roster-writes.spec.ts",
+          "reason": "'addToProjectRoster inserts...', 'addToProjectRoster reports alreadyAssigned...', 'removeFromProjectRoster deletes...' and any hasLocalMembership case test deleted methods, and the countOpenProjectTickets case targets a deleted delegate. The replacing invariant: those cases are removed (the counting is pinned on countOpenAgentTickets by US-002); 'lockProjectAgents takes the PROJECT_AGENTS advisory lock' is unchanged."
+        },
+        {
+          "path": "apps/api/src/permissions/folded-keys.spec.ts",
+          "reason": "FOLDED_ROUTES and FOLDED_OPERATIONS name addProjectAgent, removeProjectAgent, ProjectMembersController.updateRole and AgentsController.updateRoles, so AC-5 and AC-6 fail. The replacing invariant: the tables hold only PATCH /projects/:slug/agents/:agentSlug with agent.update; AC-1 to AC-4 are unchanged."
+        },
+        {
+          "path": "apps/api/src/projects/projects.controller.spec.ts",
+          "reason": "the it.each rows addProjectAgent and removeProjectAgent in requiresCases and projectScoped name deleted handlers. The replacing invariant: the four rows are removed."
+        },
+        {
+          "path": "apps/api/test/integration/projects/member-bindings.integration.spec.ts",
+          "reason": "AC-6, AC-7, AC-8 and AC-14 (PATCH on the member route), AC-9 (DELETE on the member route) and the F1 it.each (PATCH and DELETE) use deleted routes. The replacing invariant: a role change is a POST of the new binding plus a DELETE of the old one on the role-bindings route; a removal deletes each of the member's bindings there; F1 finds the member beyond the listing cap through the members list and removes it through the role-bindings route; the last-admin refusal is asserted on the binding DELETE (409 members.lastAdmin)."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-members.integration.spec.ts",
+          "reason": "'a project admin adds a viewer and changes their role', 'the last project ADMIN cannot demote or remove themselves', 'removal takes effect on the next request' and 'a disabled project ADMIN does not count as an active admin' use the deleted PATCH and DELETE. The replacing invariant: the same outcomes through the role-bindings route (a role change is grant then revoke; the last-admin case answers 409 members.lastAdmin on the binding DELETE by the custom co-admin; a self-removal answers the self-binding 403)."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-members-invites.integration.spec.ts",
+          "reason": "AC-3 (PATCH on the member route answers 403), AC-4 (DELETE on the member route answers 403) and 'B2: removing a member ... ends its warmed project keys' (DELETE on the member route) use deleted routes. The replacing invariant: AC-3 and AC-4 assert that a developer's DELETE of another member's binding on the role-bindings route answers 403 permissions; B2 removes the member's binding there and its warmed keys end at once."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-agent-roster.integration.spec.ts",
+          "reason": "its add and remove helpers drive the deleted roster routes, so AC-1, AC-3, AC-4, AC-6, AC-7, AC-8, AC-9 and AC-13 fail (AC-2 and AC-5 through the same setup). The replacing invariant: add is a viewer binding POST for the agent on the role-bindings route and remove deletes the agent's bindings in the project there; a duplicate add answers 201 with the same binding id (the old 409 projectAgents.alreadyAssigned case, AC-3, becomes that assertion); AC-8 asserts 409 projectAgents.hasOpenTickets on the binding DELETE and the viewer binding stays; the pickup and me cases are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-agent-routes.integration.spec.ts",
+          "reason": "'AC-13: a non-admin user is refused by PATCH /agents/<slug>/update-roles...', 'AC-11: a global admin updates the roles of a roster-only agent' and 'AC-12: updating legacy roles grants no key on the next ticket create' test the deleted route. The replacing invariant: the three cases are removed; the pickup cases are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-project-routes.integration.spec.ts",
+          "reason": "AC-11 to AC-14 test POST and DELETE on the project roster route. The replacing invariant: AC-11 asserts that a developer's viewer binding POST for an agent in p1 on the role-bindings route answers 403 permissions; AC-12 that a project admin's answers 201; AC-13 that a project admin's DELETE of the binding of an agent with no open tickets answers 204; AC-14 that a developer's DELETE answers 403."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-queries.integration.spec.ts",
+          "reason": "'legacy-only member PATCH is 404 and adding a legacy-only roster agent succeeds' expects 201 from the roster POST. The replacing invariant: the roster add is a viewer binding POST for the agent on the role-bindings route (201); the PATCH half is removed."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-membership-gate.integration.spec.ts",
+          "reason": "'AC4: PATCH /api/comments/:id returns 404... after their project membership is removed' removes the member with the deleted member DELETE (expects 200). The replacing invariant: the member's bindings are deleted through the role-bindings route (204) and the comment PATCH still answers 404."
+        },
+        {
+          "path": "apps/api/test/integration/live/live-stream.integration.spec.ts",
+          "reason": "'removing the member closes their stream within one heartbeat' removes the member with the deleted member DELETE. The replacing invariant: the member's binding is deleted through the role-bindings route and the stream closes within one heartbeat."
+        },
+        {
+          "path": "apps/api/test/integration/openapi-spec/spec-integrity.integration.spec.ts",
+          "reason": "the update-roles PATCH row generates a failing presence case. The replacing invariant: the row is removed; the other rows are unchanged."
+        },
+        {
+          "path": "apps/api/test/e2e/agents.e2e.spec.ts",
+          "reason": "'PATCH /api/agents/:slug/update-roles — replaces roles' tests the deleted route. The replacing invariant: the case is removed."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "'PATCH /api/agents/:slug/update-roles — replaces agent roles' tests the deleted route; the 'Agent Permissions (AC-5 & AC-6)' beforeAll gives the agent its roles through update-roles, so the whole describe fails in setup; the roster cases AC2, AC4, AC12, AC13, AC7 and AC8 use the deleted roster routes. The replacing invariant: the update-roles case is removed; the beforeAll grants the agent the matching project role bindings through the role-bindings route; roster adds are viewer binding POSTs (201; AC4's duplicate add answers 201 with the same binding id); an agent's own key is refused by POST and DELETE on the role-bindings route (403); AC7 answers 409 projectAgents.hasOpenTickets on the binding DELETE; AC8 answers 204 and the viewer binding is gone."
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "its expectedPending set pins PENDING_SURFACE_KEYS to the five approval and audit keys. The replacing invariant: the set also holds member.remove; every other case is unchanged."
+        },
+        {
+          "path": "scripts/smoke-test-cli.sh",
+          "reason": "it calls the roster POST for koda, which answers 404 after this story, so the CI Smoke test step fails at 'Add agent to project roster'. The replacing invariant: the roster call is replaced by a viewer binding POST for the agent in the project on the role-bindings route (HTTP 201 checked like the four workflow bindings after it); every later step is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "db02d060fd0e68b995cb7fd96f462e7a1e50bed4"
+    },
+    {
+      "id": "US-004",
+      "title": "Accept role keys only for member adds and invites",
+      "description": "**Goal** — Remove legacy member/invite role request fields, preserving whitelist stripping and role-key grant rules.\n\n**Motivation** — Request DTOs still accept legacy enums, so a client can create an ADMIN user, a DEVELOPER member or an agent with REVIEWER roles without naming a role key.\n\n**Approach** —\n| Site | Baseline (locate only) | Target |\n|:--|:--|:--|\n| `AddMemberDto` / `ProjectMembersService.add` (US-004) | `role?` and `roleKey?` (`@IsOptional`); the `members.roleAndRoleKey` refusal | `roleKey?` only, validated with `@ValidateIf((dto) => dto.roleKey !== undefined)` + the key pattern as `CreateInviteDto` does, so an explicit `null` is a 400 validation error; `add` takes `roleKey = dto.roleKey ?? 'viewer'`; the refusal is deleted |\n| `CreateInviteDto` / `ProjectInvitesService` (US-004) | `role?` and `roleKey?`; `effectiveRoleKey` maps the enum and refuses both | `roleKey?` only; an absent `roleKey` answers 400 `invites.roleRequired` (unchanged key); `invites.roleAndRoleKey` deleted |\n| i18n (US-004) | `members.roleAndRoleKey`, `invites.roleAndRoleKey` in `src/i18n/{en,zh}` | deleted |\n\n**Interface** — `AddMemberDto.roleKey?: string`; `CreateInviteDto.roleKey?: string`; both use the key pattern, not an enum alias. The global ValidationPipe runs whitelist: true without forbidNonWhitelisted, so obsolete role fields are stripped, not refused. Leave email/trim validation and RoleAdminService.assertMayGrant authorization unchanged.\n\nTest setups name role keys. A test that adds a member or creates an invite sends roleKey with the key the legacy value maps to (ADMIN → project-admin, DEVELOPER → developer, VIEWER → viewer). A test that changes a role does it with POST / DELETE /api/role-bindings. legacy-project-roles.ts stays: invites still write ProjectInvite.role (legacyNameOf), acceptance resolves pre-migration rows, and internal membership queries retain ProjectMembership.role.\n\nUpdate existing service/DTO tests: adds default viewer through assertMayGrant/createBinding, remove both-fields rejection cases, accept ignored role values, reject explicit null roleKey. Invite service tests pass mapped keys and replace legacy mapping/both-field refusals with missing-key invites.roleRequired. Remove members.roleAndRoleKey translation tests. Update integration setups and assertions in projects/member-bindings, project-members, member-role-keys, invite-role-keys, project-invites-admin/public; permissions/core-members-invites, core-admin-public-implicit, membership-queries; project-members-principals, project-membership-gate, project-role-permissions; fleet approval/budget/repo/schedule tests, live streams, notifications/mentions, skills, vcs-webhook-secret and endpoint.e2e. Both role+roleKey now use roleKey, role-only member adds default viewer, role-only invites fail roleRequired; explicit role null is stripped whereas null roleKey fails validation. Unassignable roleKey agent yields 400 permissions.scopeMismatch, not a legacy enum error. Preserve all unrelated permission, invite lifecycle and fixture outcomes. Verify removals with bun run --cwd apps/api type-check and bun run --cwd apps/api lint.\n\n**Scope** — In: member/invite request DTOs, service role-key selection, deleted refusal translations, test setup migration. Out: US-005 user/agent role request changes; US-006/007 response cleanup and OpenAPI export; US-009 CLI options; schema columns, legacy-project-roles.ts and global request-pipe changes.",
+      "acceptanceCriteria": [
+        "[integration] POST /projects/:slug/members with { email, role: 'ADMIN' } and no roleKey, sent by a Project Admin of P, answers 201.",
+        "[integration] After that add, the added user's bindings in P are exactly one viewer binding.",
+        "[integration] POST /projects/:slug/members with { email, roleKey: 'developer', role: 'VIEWER' }, sent by a Project Admin of P, leaves the added user with exactly one developer binding in P.",
+        "[integration] POST /projects/:slug/members with { email, roleKey: null }, sent by a Project Admin of P, answers 400.",
+        "[integration] POST /projects/:slug/invites with { email, role: 'DEVELOPER' } for an address with no account, sent by a Project Admin of P, answers 400 invites.roleRequired.",
+        "[integration] After that refused invite, no ProjectInvite row exists for the address.",
+        "[integration] POST /projects/:slug/invites with { email, roleKey: 'developer', role: 'ADMIN' } for an address with no account answers 201 with outcome: 'INVITED'.",
+        "[integration] The invite that create answered has roleKey: 'developer'."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "security",
+        "dto",
+        "refactor"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two existing DTO/service grant paths need conventional field deletion, optional-key validation and fixture updates; strict three-session TDD remains required because these inputs grant access.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.4400000000000004,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T05:21:39.580Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/projects/members/dto/add-member.dto.ts",
+        "apps/api/src/projects/members/project-members.service.ts",
+        "apps/api/src/projects/invites/dto/create-invite.dto.ts",
+        "apps/api/src/projects/invites/project-invites.service.ts",
+        "apps/api/src/i18n/en/members.json"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/permissions/member-invite-role-keys-only.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/members/project-members.service.spec.ts",
+          "reason": "'writes never assert the caller's admin role', 'add maps DEVELOPER to developer and reads the written member', 'the legacy role field is granted through the same rules' and 'both fields is 400 members.roleAndRoleKey' add with the legacy role field. The replacing invariant: adds pass roleKey; an add with no roleKey grants viewer through assertMayGrant and createBinding; the both-fields case is removed."
+        },
+        {
+          "path": "apps/api/src/projects/members/dto/member-dto.spec.ts",
+          "reason": "'AddMemberDto needs an email and an assignable role' expects a role error, and 'AddMemberDto accepts a role key, a legacy role, both, or neither' validates the legacy field. The replacing invariant: AddMemberDto validates email and an optional roleKey only; a role value produces no error; an explicit roleKey null is a validation error."
+        },
+        {
+          "path": "apps/api/src/projects/invites/dto/create-invite.dto.spec.ts",
+          "reason": "'rejects a role outside ADMIN | DEVELOPER | VIEWER (including AGENT)' and 'US-005: role and roleKey may both be absent here...' (its nullRole expectation) test the removed field. The replacing invariant: CreateInviteDto has no role; roleKey stays optional at the DTO with its key-grammar check; the trim and email cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/projects/invites/project-invites.service.spec.ts",
+          "reason": "US-008 AC-2, AC-3, 'US-003: the ADDED outcome...', AC-13, AC-4, AC-5, AC-6, the three B4 inviter cases, AC-7, AC-10, AC-11 and both AC-12 cases create with role and no roleKey; 'maps the legacy role to its key...' and 'refuses a request that sends both role and roleKey...' test the removed mapping and invites.roleAndRoleKey. The replacing invariant: every create passes the mapped roleKey with the same expectations; the two mapping cases become one case that a create without roleKey rejects with invites.roleRequired."
+        },
+        {
+          "path": "apps/api/test/unit/i18n/members-translation-keys.spec.ts",
+          "reason": "the members.roleAndRoleKey (US-004) describe pins a key this story deletes. The replacing invariant: the describe is removed; the other key cases are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/projects/member-bindings.integration.spec.ts",
+          "reason": "AC-1 (an add with role DEVELOPER expects developer), AC-4 and AC-11/AC-12 (invites with role) use the removed fields. The replacing invariant: those requests send the mapped roleKey with the same expectations."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-members.integration.spec.ts",
+          "reason": "'a global admin adds a project admin and a developer' and 'rejects an unassignable role with 400' send the legacy role. The replacing invariant: the adds send roleKey project-admin and developer; the unassignable case sends roleKey agent and expects the permissions.scopeMismatch 400."
+        },
+        {
+          "path": "apps/api/test/integration/projects/member-role-keys.integration.spec.ts",
+          "reason": "'AC-4: sending both role and roleKey is 400 members.roleAndRoleKey' and 'AC-6: the legacy role field only goes through the same rules' test the removed field, and the case around its line 149 expects role ADMIN from a legacy-field add. The replacing invariant: a body with both answers 201 with the roleKey role; a body with only role grants viewer; the line-149 case sends roleKey project-admin."
+        },
+        {
+          "path": "apps/api/test/integration/projects/invite-role-keys.integration.spec.ts",
+          "reason": "'AC-3: neither role nor roleKey is 400...; both is 400 invites.roleAndRoleKey' and 'AC-3: an explicit null roleKey or role is a 400 validation error' test the removed field, and its member-add setup sends role. The replacing invariant: neither is 400 invites.roleRequired; both answers 201 with the roleKey role; an explicit roleKey null is a 400 validation error and role null is stripped; the setup sends roleKey."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-invites-admin.integration.spec.ts",
+          "reason": "the setup adds members with role (they come out viewer), and US-004 AC-2 to AC-8 create invites with role. The replacing invariant: the setup and the creates send the mapped roleKey; AC-1 and AC-9 are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-invites-public.integration.spec.ts",
+          "reason": "its invite creates, including 'US-005 AC-10: resending an invite id from another project 404...', send role. The replacing invariant: the creates send the mapped roleKey."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-members-invites.integration.spec.ts",
+          "reason": "AC-2 (expects developer from a role add), AC-9 and B4 (invites with role) and the setups send the legacy role. The replacing invariant: those requests send the mapped roleKey with the same expectations."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-admin-public-implicit.integration.spec.ts",
+          "reason": "its beforeAll creates the AC-12 invite with role VIEWER and no roleKey, which now answers 400, so the whole file fails in setup. The replacing invariant: the invite sends roleKey viewer."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approvals-api.integration.spec.ts",
+          "reason": "its setup adds members with role ADMIN or DEVELOPER, which now grants viewer, so padmin cannot decide approvals. The replacing invariant: the setup sends the mapped roleKey; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-budgets-api.integration.spec.ts",
+          "reason": "its setup adds members with a legacy role, which now grants viewer. The replacing invariant: the setup sends the mapped roleKey; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-repos.integration.spec.ts",
+          "reason": "its setup adds members with a legacy role, which now grants viewer. The replacing invariant: the setup sends the mapped roleKey; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-schedules-api.integration.spec.ts",
+          "reason": "its setup adds members with a legacy role, which now grants viewer. The replacing invariant: the setup sends the mapped roleKey; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/live/live-stream.integration.spec.ts",
+          "reason": "its setup adds members with a legacy role, which now grants viewer. The replacing invariant: the setup sends the mapped roleKey; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/notifications/mentions.integration.spec.ts",
+          "reason": "its setup adds members with a legacy role, which now grants viewer. The replacing invariant: the setup sends the mapped roleKey; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/notifications/notifications-api.integration.spec.ts",
+          "reason": "its setup adds members with a legacy role, which now grants viewer. The replacing invariant: the setup sends the mapped roleKey; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-queries.integration.spec.ts",
+          "reason": "its member adds send a legacy role. The replacing invariant: they send the mapped roleKey; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-members-principals.integration.spec.ts",
+          "reason": "its member adds send a legacy role. The replacing invariant: they send the mapped roleKey; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-membership-gate.integration.spec.ts",
+          "reason": "its member adds send a legacy role. The replacing invariant: they send the mapped roleKey; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-role-permissions.integration.spec.ts",
+          "reason": "its addMember(slug, who, role) helper sends the legacy role. The replacing invariant: the helper takes and sends a roleKey and its callers pass the mapped key; every assertion is unchanged here (US-006 changes the viewerRole case)."
+        },
+        {
+          "path": "apps/api/test/integration/skills/project-skills-routes.integration.spec.ts",
+          "reason": "its member adds send a legacy role. The replacing invariant: they send the mapped roleKey; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-webhook-secret.integration.spec.ts",
+          "reason": "its padmin/pdev/pviewer setup loop adds members with a legacy role. The replacing invariant: the loop sends the mapped roleKey; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "its member adds and invites send a legacy role. The replacing invariant: they send the mapped roleKey; every assertion is unchanged."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "9cb716333c2d542340df5e1b8112c702600ac37d"
+    },
+    {
+      "id": "US-005",
+      "title": "Remove legacy roles from user and agent creation and user patches",
+      "description": "**Goal** — Make user creation baseline-only and user patch disabled-only, and create agents with capabilities but no legacy roles.\n\n**Motivation** — Request DTOs still accept legacy enums, so a client can create an ADMIN user, a DEVELOPER member or an agent with REVIEWER roles without naming a role key.\n\n**Approach** —\n| Site | Baseline (locate only) | Target |\n|:--|:--|:--|\n| `CreateUserDto` / `UsersAdminService.create` (US-005) | `role?: GlobalRole`; an `ADMIN` gets the global `admin` binding | field removed; every created user gets the `member` baseline only, and the row is written with `role: 'MEMBER'` |\n| `UpdateUserDto` / `UsersAdminService.update` (US-005) | `role?` and `disabled?`; `demotes` and `setGlobalAdmin` on a role change | `disabled?` only; `update` never calls `setGlobalAdmin`; the self rule refuses only a self-disable (403 `users.self`); the last-admin guard keeps applying to a disable |\n| `CreateAgentDto` / `AgentsService.generateApiKey` (US-005) | `roles?: string[]`; `validateAgentRoles`, `assertAgentRole` | field and both helpers removed; creation writes no `AgentRoleEntry` row |\n| `PrismaAgentRepository` (US-005) | `createRolesAndCapabilities(agentId, roles, capabilities)` | `createCapabilities(agentId, capabilities)`: writes only `AgentCapabilityEntry` rows, on the ambient client as today |\n| `scripts/smoke-test-cli.sh` (US-005) | creates the agent with `roles` | the agent create body has no `roles` |\n\n- Granting a global admin is `POST /role-bindings` with `roleKey: 'admin'` and `projectId` null; demoting is the `DELETE` of that binding. Neither changes here.\n- `AGENT_ROLES` stays in `common/enums.ts` while anything imports it.\n\n**Interface** — `UpdateUserDto.disabled?: boolean` is the only user patch field; `createCapabilities(agentId, capabilities)` replaces createRolesAndCapabilities on the ambient client with no nested transaction. Unknown role/roles fields are stripped by the existing whitelist pipe, not refused. Keep baseline binding and row creation atomic, capability failure rollback, bcrypt, last-admin lock/count disable protection, self-disable, tokenVersion and auth-cache behavior. Do not change token claims or delete schema rows/columns.\n\nA test that needs a global admin creates the user through POST /api/admin/users and then gives it the global admin binding, with grantRole(prisma, { type: 'USER', id }, 'admin') from src/permissions/test-helpers/permission-fixtures.ts or with POST /api/role-bindings (roleKey: 'admin', projectId: null). The route write bumps the user's tokenVersion, so the test binds first and logs in after; grantRole does not bump it. Direct writes between requests invalidate membership permissions.\n\nUpdate user-dto and users-admin.service specs: no role validation/promotion/demotion calls, disable still locks before counting and refuses last active admin, self only refuses disable, preserve re-enable behavior. Remove invalid-agent-role service case; replace all createRolesAndCapabilities mocks/write-order assertions with createCapabilities in agent service/create routes/create service/canonical DTO/repository specs. Failure injection moves from agentRoleEntry.createMany to agentCapabilityEntry.createMany in unit/routes and agents-create-rollback.integration.spec.ts, preserving 500/rejection and rolled-back agent row. No nested $transaction and no role writes. Retitle capabilities-only CreateAgentDto case.\n\nMigrate admin fixture setup in admin-users, bootstrap-baselines and permissions core/implicit/catalog/me/remaining/retired-CASL/role-binding/filter/role API suites, project-membership-gate, webhook permissions and fleet approval/budget suites. Demotion deletes the target admin binding and still immediately revokes its token; Owner keeps User.role ADMIN after its admin binding is deleted. Concurrent last-admin safety test uses two disables and gets exactly one users.lastAdmin 409; self case tests disabled:true. endpoint.e2e creates agents without roles, asserts capabilities and grants project bindings instead of agentRoleNames/syncAgentRoles. Remove roles from smoke agent body. Verify removals with bun run --cwd apps/api type-check and bun run --cwd apps/api lint.\n\n**Scope** — In: user/agent request DTO and service cleanup, capabilities-only repository write, smoke payload and binding-based fixtures. Out: US-006/007 public response fields; US-010 CLI creation options; user-role mirror/schema removal, JWT/auth-me changes, last-global-admin rule on binding DELETE or last-Project-Admin rule on user disables.",
+      "acceptanceCriteria": [
+        "[integration] POST /admin/users with { email, name, password, role: 'ADMIN' }, sent by a global admin, answers 201.",
+        "[integration] After that create, the created user's projectId-null bindings are exactly one member binding.",
+        "[integration] PATCH /admin/users/:id with { role: 'ADMIN' } for a user with only the member baseline, sent by a global admin, answers 200.",
+        "[integration] After that patch, the user has no admin or owner binding.",
+        "[integration] PATCH /admin/users/:id with { role: 'MEMBER' } for a user with a global admin binding, sent by another global admin, leaves the target's admin binding in place.",
+        "[integration] PATCH /admin/users/:id with { disabled: true } sent by a global admin for their own id answers 403 users.self.",
+        "[integration] PATCH /admin/users/:id with { role: 'MEMBER' } sent by a global admin for their own id answers 200.",
+        "[integration] POST /agents with { name, slug, roles: ['DEVELOPER'], capabilities: ['nax'] }, sent by a global admin, answers 201.",
+        "[integration] After that create, no AgentRoleEntry row exists for the created agent.",
+        "[integration] After that create, the agent's capability rows are exactly ['nax']."
+      ],
+      "tags": [
+        "api",
+        "security",
+        "permissions",
+        "users",
+        "agents",
+        "refactor"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "User privilege creation/demotion and agent credential creation change across services, transactional rollback paths and authentication fixtures.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.08000000000000007,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T06:09:22.480Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/users/users-admin.service.ts",
+        "apps/api/src/users/dto/create-user.dto.ts",
+        "apps/api/src/users/dto/update-user.dto.ts",
+        "apps/api/src/agents/agents.service.ts",
+        "apps/api/src/agents/prisma-agent.repository.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/permissions/user-agent-no-legacy-roles.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/users/dto/user-dto.spec.ts",
+          "reason": "'CreateUserDto accepts a valid user and rejects... unknown roles', 'US-004: CreateUserDto accepts an absent role...' and 'UpdateUserDto allows an empty patch...' expect role errors. The replacing invariant: neither DTO validates a role and a role value produces no error; the disabled and ListUsersQuery cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/users/users-admin.service.spec.ts",
+          "reason": "'grants a global admin binding through setGlobalAdmin when the DTO asks for ADMIN', 'refuses to remove the last active admin, under the lock' (patch role MEMBER), 'grants the admin binding through setGlobalAdmin and leaves the role to it', 'removes the admin binding through setGlobalAdmin on a demotion', 'returns the stored role after a requested demotion of an Owner' and 'bumps tokenVersion on re-enable, not on a role change' create or patch with role. The replacing invariant: create never calls setGlobalAdmin; the last-admin case disables the target and still asserts lockUserAdministration before countActiveAdmins and the 409; the role-change cases are removed; update never calls setGlobalAdmin; re-enable still bumps tokenVersion."
+        },
+        {
+          "path": "apps/api/src/agents/agents.service.spec.ts",
+          "reason": "'should reject invalid roles before creating the agent' tests the removed validation, and the create cases expect createRolesAndCapabilities. The replacing invariant: the case is removed; create calls createCapabilities(agentId, capabilities)."
+        },
+        {
+          "path": "apps/api/src/agents/agents-create.routes.spec.ts",
+          "reason": "'AC7: a failing roles/capabilities write ... HTTP 500' and 'AC7 boundary: a failing capability write...' expect agentRoleEntry.createMany to be called. The replacing invariant: no agentRoleEntry write is expected; the injected failure is the agentCapabilityEntry.createMany write, and the 500 and the rolled-back agent row are unchanged."
+        },
+        {
+          "path": "apps/api/src/agents/agents-create.service.spec.ts",
+          "reason": "'AC6: rejects with the createRolesAndCapabilities error...' and 'AC6 boundary' assert the write order with createRolesAndCapabilities. The replacing invariant: the same order and rejection with createCapabilities(agentId, capabilities)."
+        },
+        {
+          "path": "apps/api/src/agents/prisma-agent.repository.spec.ts",
+          "reason": "describe('PrismaAgentRepository.createRolesAndCapabilities (US-003)') tests the renamed method and its agentRoleEntry write. The replacing invariant: the describe tests createCapabilities(agentId, capabilities): one agentCapabilityEntry.createMany on the ambient client, no agentRoleEntry write, no nested transaction."
+        },
+        {
+          "path": "apps/api/src/agents/agent-create-canonical-dto.routes.spec.ts",
+          "reason": "it mocks agentRepo.createRolesAndCapabilities, so after the rename POST /api/agents answers 500. The replacing invariant: the mock is createCapabilities; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/agents/agents-create-rollback.integration.spec.ts",
+          "reason": "'AC7: a failing agentRoleEntry.createMany rolls back the agent row' injects a failure into a write that no longer happens. The replacing invariant: the failure is injected into agentCapabilityEntry.createMany and the agent row is rolled back; the other cases are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/users/admin-users.integration.spec.ts",
+          "reason": "'demoting an admin revokes their ADMIN token immediately', 'an admin cannot demote or disable themselves' and 'two admins demoting each other at once...' patch role, and its admin users are created with role. The replacing invariant: admins get a global admin binding after creation; demotion is the DELETE of the target's global admin binding on the role-bindings route (token revoked immediately); the self case asserts only the self-disable 403 users.self; the concurrent case is two concurrent disables of the two admins, of which exactly one answers 409 users.lastAdmin."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/bootstrap-baselines.integration.spec.ts",
+          "reason": "'AC-14: demoting an admin removes the admin binding', 'AC-22: an Owner keeps User.role ADMIN...' and the cases that patch role MEMBER (one expecting 409) use the removed field, and admins are created with role. The replacing invariant: admins get a global admin binding after creation; demotion deletes the admin binding on the role-bindings route; AC-22 deletes an Owner's admin binding and the Owner keeps User.role ADMIN; the 409 case is a disable of the last admin; AC-19 is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-admin-public-implicit.integration.spec.ts",
+          "reason": "'AC-5: a global admin gets 403 users.self from PATCH /admin/users/<own id> with { role: MEMBER }' now answers 200, and its admins are created with role. The replacing invariant: AC-5 sends disabled true for the admin's own id and expects 403 users.self; admins get a global admin binding after creation."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-agent-routes.integration.spec.ts",
+          "reason": "its users are created through POST /api/admin/users with a role field, and the ones meant as global admins get no admin binding. The replacing invariant: those users get a global admin binding after creation; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-members-invites.integration.spec.ts",
+          "reason": "its users are created with a role field, and the ones meant as global admins get no admin binding. The replacing invariant: those users get a global admin binding after creation; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-project-routes.integration.spec.ts",
+          "reason": "its users are created with a role field, and the ones meant as global admins get no admin binding. The replacing invariant: those users get a global admin binding after creation; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/me-permissions.integration.spec.ts",
+          "reason": "its user helper sends a role field, so a user meant as a global admin gets no admin binding. The replacing invariant: the helper gives a global admin binding after creation when asked for an admin; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-catalog.integration.spec.ts",
+          "reason": "its users are created with a role field, and the ones meant as global admins get no admin binding. The replacing invariant: those users get a global admin binding after creation; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/remaining-route-permissions.integration.spec.ts",
+          "reason": "its users are created with a role field, and the ones meant as global admins get no admin binding. The replacing invariant: those users get a global admin binding after creation; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/retired-casl-factory.integration.spec.ts",
+          "reason": "its users are created with a role field, and the ones meant as global admins get no admin binding. The replacing invariant: those users get a global admin binding after creation; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/role-bindings-api.integration.spec.ts",
+          "reason": "its users are created with a role field, and the ones meant as global admins get no admin binding. The replacing invariant: those users get a global admin binding after creation; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/role-bindings-filters.integration.spec.ts",
+          "reason": "its user helper sends a role field, so a user meant as a global admin gets no admin binding. The replacing invariant: the helper gives a global admin binding after creation when asked for an admin; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/roles-api.integration.spec.ts",
+          "reason": "its user helper sends a role field, so a user meant as a global admin gets no admin binding. The replacing invariant: the helper gives a global admin binding after creation when asked for an admin; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-membership-gate.integration.spec.ts",
+          "reason": "its users are created with a role field, and the ones meant as global admins get no admin binding. The replacing invariant: those users get a global admin binding after creation; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/webhook/webhook-permissions.integration.spec.ts",
+          "reason": "its users are created with a role field, and the ones meant as global admins get no admin binding. The replacing invariant: those users get a global admin binding after creation; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approvals-api.integration.spec.ts",
+          "reason": "its users are created with a role field, and the ones meant as global admins get no admin binding. The replacing invariant: those users get a global admin binding after creation; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-budgets-api.integration.spec.ts",
+          "reason": "its users are created with a role field, and the ones meant as global admins get no admin binding. The replacing invariant: those users get a global admin binding after creation; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "it creates an agent with roles DEVELOPER and REVIEWER and asserts them on GET /api/agents/:slug, and the agentRoleNames / syncAgentRoles helpers are built around those roles. The replacing invariant: the agent is created without roles and the case asserts its capabilities; the helpers grant project role bindings instead of legacy roles."
+        },
+        {
+          "path": "apps/api/src/agents/dto/create-agent.dto.spec.ts",
+          "reason": "'roles and capabilities stay optional' passes roles to a DTO that no longer has them (it still passes, since the pipe strips it, but pins a removed field). The replacing invariant: the case is titled for capabilities and passes no roles."
+        },
+        {
+          "path": "scripts/smoke-test-cli.sh",
+          "reason": "it creates the agent with a roles array that the API now strips. The replacing invariant: the create body has no roles; every later step is unchanged."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "02ba3b4d52317d7782c9d2f20766e4bfbf730e4a"
+    },
+    {
+      "id": "US-006",
+      "title": "Remove legacy fields from member, roster and agent responses",
+      "description": "**Goal** — Return binding-based member identities and role-free agent profiles, without legacy page management/scoping flags.\n\n**Motivation** — Responses still carry legacy values: a member's display role and the page's viewerRole (mapped from bindings back to the enum), canManage, an always-true scoping, and agent roles that are always empty in new data.\n\n**Approach** —\n| Response | Baseline (locate only) | Target |\n|:--|:--|:--|\n| `GET /projects/:slug/members` (US-006) | `{ ...page, canManage, viewerRole }` | the page alone: `{ total, current, size, hasNext, hasPrev, records }`; `ProjectMembersService.list` returns `IPageResult<ProjectMemberDto>`, still calls `ProjectAccessService.resolveMembership` (the 403 `projects` of a principal without access) and no longer calls `can`; the now unused `PermissionService` constructor parameter of `ProjectMembersService` is removed |\n| `ProjectMemberDto` (members list, member add, invite `ADDED`) (US-006) | `role` and `bindings[].id: string | null` | no `role`; `MemberBindingDto.id: string` (non-null in the schema and the type); `ProjectMemberRecord.role` and `MemberBinding.id`'s `null` are removed |\n| `GET /projects/:slug/agents` (`ProjectAgentListDto`) (US-006) | `{ scoping, items }`; `from(records, scoping)` | `{ items }`; `from(records)` |\n| `ProjectAgentDto` / `ProjectAgentRecord` (US-006) | `roles: string[]` | removed; the roster read selects no `AgentRoleEntry` rows |\n| `AgentResponseDto` (`GET /agents`, `GET /agents/:slug`, `GET /agents/me`, `PATCH /agents/:slug`, `POST /agents` `agent`, `DELETE /agents/:slug`) (US-006) | `roles: AgentRoleDto[]`; `AgentRoleDto` | `roles` and `AgentRoleDto` removed; `AgentProfileRecord.roles` removed; `PrismaAgentRepository` reads stop including `roles` |\n\n**Interface** — `ProjectMembersService.list(...): Promise<IPageResult<ProjectMemberDto>>`; `MemberBindingDto.id: string`; `ProjectAgentListDto.from(records)` produces `{ items }`. Change DTO mappers, internal response records, query shaping, includes/selects and controller envelope together, not just types. The doc comments of the changed DTOs stop describing the removed fields.\n\n- **Unchanged:** `UserResponseDto.role` (`GET /auth/me`, login and register), the JWT `role` claim, the invite email's role text (`roleName`, falling back to the stored legacy role), and the internal records `ProjectInviteRecord.role`, `UserAdminRecord.role` and `ProjectMembership.role`.\n\nAlso edit project-members.controller.ts, dto/member-binding.dto.ts, domain/project-member.domain.ts, project-member.queries.ts, prisma-project-members.repository.ts, agents/dto/agent-me-response.dto.ts and agents.service.ts. Preserve access resolution before listing; do not replace it with an optional UI gate. Remove PermissionService from service construction in specs. Update four list cases and controller envelope assertions to the page alone with no can calls. Agent service/controller/repository fixtures and assertions keep capabilities/metadata and lose roles; delete enum-role-only tests and scoping-disabled-only case. Roster result is {items}. Update core-members-invites list-access cases (remove viewerRole-only case), project-role-permissions (remove viewerRole case), agent-scoping-removed, membership-project-access, agent-project-roster and project-members-principals response types, plus both agents e2e suites. Each now asserts absence of retired fields while preserving original access/status/metadata behavior. Verify removals with bun run --cwd apps/api type-check and bun run --cwd apps/api lint.\n\n**Scope** — In: member/page/binding-id, roster/scoping and agent response contracts and producers. Out: US-007 invite/admin-user fields and final OpenAPI generation; US-010 CLI contract adaptation and regeneration; US-011 web consumers; internal membership role, legacy schema and auth role claims.",
+      "acceptanceCriteria": [
+        "[integration] GET /projects/:slug/members, sent by a Project Admin of P, answers a data object whose keys are exactly total, current, size, hasNext, hasPrev and records.",
+        "[integration] In that answer, no record has a role property.",
+        "[integration] In that answer, every item of every record's bindings has a string id.",
+        "[integration] GET /projects/:slug/members, sent by a user without access to P, answers 403 projects.",
+        "[integration] GET /projects/:slug/agents, sent by a Project Admin of P with one viewer-bound agent in P, answers a data object whose only key is items.",
+        "[integration] In that answer, the one item has no roles property.",
+        "[integration] GET /agents, sent by a global admin, answers agents none of which has a roles property.",
+        "[integration] GET /agents/me, sent with an agent's API key, answers a profile with no roles property.",
+        "[integration] POST /agents, sent by a global admin, answers an agent object with no roles property.",
+        "[integration] POST /projects/:slug/members with { email, roleKey: 'developer' } answers a member with no role property."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "security",
+        "dto",
+        "refactor"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module response refactor touches membership access resolution, domain/query records and shared agent serializers.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.1200000000000001,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T07:19:48.325Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/projects/members/project-members.service.ts",
+        "apps/api/src/projects/members/dto/project-member.dto.ts",
+        "apps/api/src/agents/dto/agent-response.dto.ts",
+        "apps/api/src/agents/dto/project-agent.dto.ts",
+        "apps/api/src/agents/prisma-agent.repository.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/permissions/member-agent-response-fields.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/members/project-members.service.spec.ts",
+          "reason": "the four list cases assert canManage and viewerRole, and the service is built with a PermissionService double. The replacing invariant: list resolves to the page alone, still calls resolveMembership (a refusal propagates) and never calls can; the service is built without the PermissionService argument."
+        },
+        {
+          "path": "apps/api/src/projects/members/project-members.controller.spec.ts",
+          "reason": "'list parses paging strings and returns the page envelope with canManage' expects canManage. The replacing invariant: the envelope is the page fields alone."
+        },
+        {
+          "path": "apps/api/src/agents/agents.service.spec.ts",
+          "reason": "the shared mockAgentDto fixtures carry roles, so 'should return all agents with roles and capabilities', 'should include role entries for each agent', 'should return agent by slug with roles and capabilities', 'should include roles in response', the findMe case, 'should include roles with all AgentRole enum values' and 'returns the scoped project roster as ProjectAgentListDto' (scoping, roles) fail. The replacing invariant: the fixtures and expectations have no roles; the roster answer is { items } without roles; the role-enum case is removed."
+        },
+        {
+          "path": "apps/api/src/agents/agents.controller.spec.ts",
+          "reason": "'should include roles and capabilities for each agent', 'should include roles and capabilities in profile' and 'should include roles and capabilities' expect roles. The replacing invariant: the same cases assert capabilities and no roles property."
+        },
+        {
+          "path": "apps/api/src/projects/projects.controller.spec.ts",
+          "reason": "'US-002 AC1: returns the scoped project roster...' (data.scoping), 'US-002 AC2: exposes roster metadata, roles, capabilities' and 'US-002 AC9: reports roster scoping disabled' pin removed fields. The replacing invariant: AC1 asserts { items }, AC2 asserts the metadata and capabilities with no roles, AC9 is removed."
+        },
+        {
+          "path": "apps/api/src/agents/prisma-agent.repository.find-roster.spec.ts",
+          "reason": "its fixtures carry roles and it expects roles DEVELOPER on the roster record. The replacing invariant: the fixtures and the record have no roles; every other field is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-members-invites.integration.spec.ts",
+          "reason": "AC-5, AC-6 and AC-12 assert canManage and viewerRole. The replacing invariant: AC-5 and AC-6 assert the members list answers 200 or 403 as before, without the two fields; AC-12 is removed (its gate is the me-permissions route, pinned by p1-web)."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-role-permissions.integration.spec.ts",
+          "reason": "'members page reports viewerRole for the caller'. The replacing invariant: the case is removed."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/agent-scoping-removed.integration.spec.ts",
+          "reason": "'AC-6: project admin sees scoping true'. The replacing invariant: the roster answer for that Project Admin is { items } with no scoping key."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-project-access.integration.spec.ts",
+          "reason": "the member-page case that asserts canManage and viewerRole ADMIN, 'US-001 AC-12: a global admin with no source... viewerRole ADMIN' and 'US-001 AC-13: a viewer binding gets viewerRole VIEWER'. The replacing invariant: the member-page case asserts 200 without the two fields; AC-12 and AC-13 assert the members list answers 200 for those principals."
+        },
+        {
+          "path": "apps/api/test/integration/agents/agent-project-roster.integration.spec.ts",
+          "reason": "'AC1+AC2: returns a roster row with ... roles, capabilities, addedBy' expects roles DEVELOPER. The replacing invariant: the row has no roles property; the other fields are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-members-principals.integration.spec.ts",
+          "reason": "its local response type declares canManage and viewerRole. The replacing invariant: the two fields are removed from the type; every assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/e2e/agents.e2e.spec.ts",
+          "reason": "'GET /api/agents/:slug — returns agent details' expects roles. The replacing invariant: it expects no roles property."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "'GET /api/projects/:slug/agents — 200 returns agents with assigned tickets' asserts scoping. The replacing invariant: the answer has only items."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e1f22cbafbc69fae18b67606cb2126cd388351d1"
+    },
+    {
+      "id": "US-007",
+      "title": "Remove invite and admin-user role responses and export OpenAPI",
+      "description": "**Goal** — Remove remaining legacy public invite/admin-user role fields and publish the final API contract for client migration.\n\n**Motivation** — drop-legacy-schema can then remove the remaining legacy writes and drop the tables, with no route or client left that names them.\n\n**Approach** —\n| Response | Baseline (locate only) | Target |\n|:--|:--|:--|\n| `InviteDto` (`GET` / `POST` / resend invites) (US-007) | `role: string | null` | removed; `roleKey` and `roleName` stay |\n| `InvitePreviewDto` (`GET /invites/:token`) (US-007) | `role: string | null` | removed; the doc's field count becomes seven |\n| `UserAdminDto` (`GET` / `POST` / `PATCH /admin/users`) (US-007) | `role: string` | removed |\n| `openapi.json` (US-007) | records every field above | regenerated with `bun run api:export-spec` after the last API change. US-007 runs only `api:export-spec`: `bun run generate` / `generate:cli` waits for US-010, because the CLI files that still use the removed operations change in US-009 and US-010 |\n\n- **Unchanged:** `UserResponseDto.role` (`GET /auth/me`, login and register), the JWT `role` claim, the invite email's role text (`roleName`, falling back to the stored legacy role), and the internal records `ProjectInviteRecord.role`, `UserAdminRecord.role` and `ProjectMembership.role`.\n- The doc comments of the changed DTOs stop describing the removed fields.\n\n**Interface** — InviteDto and InvitePreviewDto expose roleKey/roleName, not role; InvitePreviewDto has exactly seven public fields. UserAdminDto.from omits role. The generated OpenAPI artifact is the producer consumed by US-010; preserve every unrelated path/schema. Update ProjectInvitesService.toDto and InviteAcceptanceService preview, not legacy invite storage or mail text.\n\nUpdate exact public-key lists in project-invites.service.spec.ts and invite-acceptance.service.spec.ts; the custom role preview asserts roleKey/roleName only. Update invite-role-keys and project-invites-public integration cases from eight to seven preview fields, no legacy role; admin-users create expects no role and unchanged email/disabled. New integration coverage checks role fields absent, auth/me role retained and live-app OpenAPI paths/schemas without retired routes/fields. Preserve the invalid-token negative path: GET /invites/definitely-not-a-real-token still returns 404 invites, without leaking preview data, as InviteAcceptanceService.preview already does. After final API edits run bun run api:export-spec from repo root and commit openapi.json; do not invoke generate or generate:cli in this story. Verify removals with bun run --cwd apps/api type-check and bun run --cwd apps/api lint.\n\n**Scope** — In: invite/admin-user DTOs and mapping, public shape regressions, final committed OpenAPI export. Out: US-008..010 CLI command adaptations/client regeneration; US-011 web types; auth/me UserResponseDto.role, JWT role, stored invite/user role, mail fallback and schema changes.",
+      "acceptanceCriteria": [
+        "[integration] GET /projects/:slug/invites, sent by a Project Admin of P with one pending developer invite, answers an invite with no role property.",
+        "[integration] In that answer, the invite has roleKey: 'developer' and roleName: 'Developer'.",
+        "[integration] POST /projects/:slug/invites with { email, roleKey: 'viewer' } for an existing user answers outcome: 'ADDED' with a member that has no role property.",
+        "[integration] GET /invites/:token for a pending developer invite answers a preview with no role property.",
+        "[integration] In that preview, roleKey is 'developer' and roleName is 'Developer'.",
+        "[integration] GET /admin/users, sent by a global admin, answers records none of which has a role property.",
+        "[integration] POST /admin/users, sent by a global admin, answers a user with no role property.",
+        "[integration] GET /auth/me, sent by a user with a global admin binding, still answers role: 'ADMIN'.",
+        "[integration] The OpenAPI document built from the booted app has no /agents/{slug}/update-roles path.",
+        "[integration] In that document, /projects/{slug}/members/{userId} has no patch and no delete operation, and /projects/{slug}/agents has no post operation.",
+        "[integration] In that document, none of the ProjectMemberDto, InviteDto, InvitePreviewDto and UserAdminDto schemas has a role property.",
+        "[integration] GET /invites/definitely-not-a-real-token still answers 404 invites after the preview response fields change."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "security",
+        "openapi",
+        "dto",
+        "refactor"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing DTO/mapping field deletions and the established OpenAPI exporter require no new abstraction; strict three-session TDD protects the public invite/admin boundary and retained auth role contract.",
+        "agentProfileId": "native-luna",
+        "agent": "native",
+        "profileModelTier": "fast",
+        "initialAgent": "native",
+        "initialProfileId": "native-luna",
+        "initialModelTier": "fast",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.52,
+          "plannedProfileId": "native-luna",
+          "applied": false,
+          "decidedAt": "2026-10-23T08:12:52.198Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/projects/invites/dto/invite.dto.ts",
+        "apps/api/src/projects/invites/dto/invite-preview.dto.ts",
+        "apps/api/src/projects/invites/project-invites.service.ts",
+        "apps/api/src/projects/invites/invite-acceptance.service.ts",
+        "apps/api/src/users/dto/user-admin.dto.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/permissions/invite-user-response-fields.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/invites/project-invites.service.spec.ts",
+          "reason": "'AC-8: an invite DTO exposes exactly the public fields' lists role. The replacing invariant: the field list has no role."
+        },
+        {
+          "path": "apps/api/src/projects/invites/invite-acceptance.service.spec.ts",
+          "reason": "the preview field-set case (its key list includes role) and 'US-005: a custom role key shows with a null legacy role'. The replacing invariant: the preview keys have no role; the custom-role case asserts roleKey and roleName only."
+        },
+        {
+          "path": "apps/api/test/integration/projects/invite-role-keys.integration.spec.ts",
+          "reason": "'AC-1: ...the DTO names the role' (asserts role null) and 'AC-9: the preview answers exactly eight fields'. The replacing invariant: AC-1 asserts roleKey and roleName and no role; AC-9 expects exactly seven fields."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-invites-public.integration.spec.ts",
+          "reason": "'US-005 AC-1: previews a pending invite with exactly the eight public fields' and 'US-005 AC-1: previews an invite role that differs from the default'. The replacing invariant: seven fields, no role; the second case asserts roleKey and roleName."
+        },
+        {
+          "path": "apps/api/test/integration/users/admin-users.integration.spec.ts",
+          "reason": "the create case expects role MEMBER in the created user. The replacing invariant: the created user has no role property; email and disabled are unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "records the routes and DTOs this feature removes. The replacing invariant: regenerated with bun run api:export-spec after the last API change; every other path and schema unchanged."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2f9ed8fdad52ce6abe3440a337b1796b16397a01"
+    },
+    {
+      "id": "US-008",
+      "title": "Add the koda role-binding command group",
+      "description": "**Goal** — Provide list, grant and revoke CLI workflows for project and global role bindings without reproducing API rules.\n\n**Motivation** — The CLI only speaks the enums. It cannot grant a custom role, a reviewer, verifier or triager role, or any global role.\n\n**Interface** — New apps/cli/src/commands/role-binding.ts exports `roleBindingCommand(program: Command): void`, like the other command modules, and is called from src/index.ts beside them.\n\n**Approach** —\n**`koda role-binding`** (US-008, new `apps/cli/src/commands/role-binding.ts` exporting `roleBindingCommand(program: Command): void` like the other command modules, and called from `src/index.ts` beside them). It sets up the client with `withContext({}, { requireProject: false })`, as `user list` does, and never reads the context's `projectSlug`: no `--project` means a global binding or no project filter.\n\n| Command | Calls | Output (non-`--json`) |\n|:--|:--|:--|\n| `role-binding list [--project <slug>] [--global] [--type <USER|AGENT>] [--principal <id>] [--page <n>] [--size <n>] [--json]` | `--project` resolves the id with `projectsControllerFindBySlug`; then `roleBindingsControllerList` with `query: { current, size, projectId?, scope: 'global'?, principalType?, principalId? }` | `table(['ID', 'Type', 'Principal', 'Role', 'Project', 'Granted'], …)` with `projectId ?? 'global'` in the Project column; `Next: --page <n>` when `hasNext` |\n| `role-binding grant --role <key> (--user <userId> | --agent <agentSlug>) [--project <slug>] [--json]` | `--agent` resolves the id with `agentsControllerFindBySlug`; `--project` with `projectsControllerFindBySlug`; then `roleBindingsControllerCreate` with `body: { principalType, principalId, roleKey, projectId }` (`projectId: null` without `--project`) | `Granted <roleKey> to <userId or agentSlug> (binding <id>)` |\n| `role-binding revoke <bindingId> [--json]` | `roleBindingsControllerRemove({ path: { id } })` | `Revoked <bindingId>` |\n\n- `list` passes its flags through: a combination the API refuses (`--global` with `--project`, `--principal` without `--type`) reaches the API, and its 400 goes through `handleApiError` (exit 3).\n- `grant` with both `--user` and `--agent`, or neither, reports `Choose exactly one of --user or --agent` through `handleApiError(new Error(...), { validationError: true })` (exit 3, `.nax/rules/cli.md`) and calls no API function.\n- API refusals (403, 404, 409) go through `handleApiError` unchanged, so the server's message is what the user reads.\n- `--json` prints the unwrapped response (`list`: the page; `grant`: the `RoleBindingDto`; `revoke`: `{ \"revoked\": \"<id>\" }`).\n\n- `--role` takes a role key verbatim (`project-admin`, `developer`, `viewer`, a custom key). The CLI does not validate or map it; the API answers 404 `permissions.roleNotFound` for an unknown key.\n\nMirror label.ts command structure and user.ts global-context bootstrap, generated services and shared unwrap/table/error helpers. Existing helper semantics are retained: pass API refusals unchanged, do not add custom remapping or authorization rules. Validate exactly-one-principal before any API lookup, including project/agent. Resolve explicit --project only; an implicit local config project never supplies a filter or grant scope. Use generated-compatible types; the current generated role-binding functions already exist, and regeneration is reserved for US-010. Add Jest tests mocking generated boundaries. Test module registration directly on a new Command; review the src/index.ts registration call because importing that executable parses process.argv and exports nothing.\n\n**Scope** — In: new command module, tests and index registration. Out: US-009 member rewiring; US-010 other command cleanup/client regeneration; role aliases, principal display-name lookup, local list-combination validation, and tests explicitly deferred for list/revoke JSON, revoke text, next hint and pagination defaults.",
+      "acceptanceCriteria": [
+        "[unit] koda role-binding list --project koda, with projectsControllerFindBySlug answering id p1, calls roleBindingsControllerList with query.projectId equal to 'p1'.",
+        "[unit] koda role-binding list --global calls roleBindingsControllerList with query.scope equal to 'global'.",
+        "[unit] koda role-binding list --type AGENT --principal a1 --page 2 --size 50 calls roleBindingsControllerList with query equal to { principalType: 'AGENT', principalId: 'a1', current: 2, size: 50 }.",
+        "[unit] koda role-binding list prints a table with header ['ID', 'Type', 'Principal', 'Role', 'Project', 'Granted'].",
+        "[unit] koda role-binding list prints 'global' in the Project cell of a binding whose projectId is null.",
+        "[unit] koda role-binding grant --role developer --user u1 --project koda, with project lookup id p1, calls roleBindingsControllerCreate with body { principalType: 'USER', principalId: 'u1', roleKey: 'developer', projectId: 'p1' }.",
+        "[unit] koda role-binding grant --role reviewer --agent bot-1 --project koda, with agent lookup id a1 and project lookup id p1, calls roleBindingsControllerCreate with body { principalType: 'AGENT', principalId: 'a1', roleKey: 'reviewer', projectId: 'p1' }.",
+        "[unit] koda role-binding grant --role admin --user u1 with no --project, even with a local project config naming a project, calls roleBindingsControllerCreate with projectId: null.",
+        "[unit] koda role-binding grant --role admin --user u1 prints Granted admin to u1 (binding <id>) with the id roleBindingsControllerCreate answered.",
+        "[unit] koda role-binding grant --role developer --user u1 --agent bot-1 exits with code 3 without calling any API function.",
+        "[unit] koda role-binding grant --role developer with neither principal flag exits with code 3 without calling any API function.",
+        "[unit] koda role-binding grant --role developer --agent nope, with agentsControllerFindBySlug rejecting with a 404 error, does not call roleBindingsControllerCreate.",
+        "[unit] koda role-binding revoke b1 calls roleBindingsControllerRemove with { path: { id: 'b1' } }.",
+        "[unit] koda role-binding grant --role admin --user u1 --json prints the RoleBindingDto that roleBindingsControllerCreate answered, as JSON.",
+        "[unit] roleBindingCommand(program) on a new Command registers a role-binding command whose subcommands are list, grant and revoke."
+      ],
+      "tags": [
+        "cli",
+        "permissions",
+        "security",
+        "feature"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Well-specified command group mirrors existing helpers, but grants/revokes access and must preserve explicit project scope and security error boundaries.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.4800000000000004,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T08:27:17.087Z"
+        }
+      },
+      "contextFiles": [
+        "apps/cli/src/index.ts",
+        "apps/cli/src/commands/label.ts",
+        "apps/cli/src/commands/user.ts",
+        "apps/cli/src/utils/error.ts",
+        "apps/cli/src/generated/sdk.gen.ts"
+      ],
+      "expectedFiles": [
+        "apps/cli/src/commands/role-binding.ts",
+        "apps/cli/src/commands/role-binding.spec.ts"
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "c1b32f350e8bac3695b7e9aa05d648d762686b67"
+    },
+    {
+      "id": "US-009",
+      "title": "Move member commands onto role keys and binding revocation",
+      "description": "**Goal** — Use role keys for member grants/invites and binding ids for listing/removal, deleting the enum-based role subcommand.\n\n**Motivation** — The CLI only speaks the enums. It cannot grant a custom role, a reviewer, verifier or triager role, or any global role.\n\n**Approach** —\n**The `member` commands (US-009)** keep the generated client as it is (every function they call already exists):\n\n| Command | Target |\n|:--|:--|\n| `member list [--all]` | `--all` sends `principals: 'all'`; the table is `['Type', 'ID', 'Email/Slug', 'Name', 'Roles']` with `principalType`, `principalId`, `email ?? agentSlug`, `name ?? ''` and the bindings as `<roleKey> (<id>)` joined by `, ` |\n| `member add --email <email> --role <key>` | `projectMembersControllerAdd` with `body: { email, roleKey }`; prints `Added <email> as <roleName joined by ', '>` |\n| `member invite --email <email> --role <key>` | `projectInvitesControllerCreate` with `body: { email, roleKey }`; the `ADDED` line prints the member's bindings' `roleName`s; the `INVITED` lines are unchanged |\n| `member invites` | the table's `Role` column shows `roleName ?? roleKey ?? ''` |\n| `member remove <userId>` | pages `projectMembersControllerList` (`size: 100`, default principals) until a record has `principalType: 'USER'` and `principalId === userId`, then calls `roleBindingsControllerRemove` once per binding id of that record, in order; prints `Removed <userId>`. No such record → `handleApiError(new Error('Not a member: <userId>'))` (exit 1) and no delete. A refused delete stops the loop and goes through `handleApiError` |\n| `member role` | deleted |\n\n- `--role` takes a role key verbatim (`project-admin`, `developer`, `viewer`, a custom key). The CLI does not validate or map it; the API answers 404 `permissions.roleNotFound` for an unknown key.\n- The `member` group's description says writes need `member.add` / `role.binding.manage`, not \"project-admin\".\n\n**Interface** — Keep `memberCommand(program: Command): void`; member grant bodies are `{ email, roleKey }`; removal calls `roleBindingsControllerRemove({ path: { id } })`, independently of the new US-008 module. Preserve --project override through withContext, existing INVITED messages, and `member remove --json` printing `{ \"removed\": \"<userId>\" }`. Page until found or hasNext is false; do not cap to the first page or accidentally match an AGENT principal with the same id. Sequential deletes are deliberately not atomic: a failure stops later deletions and earlier completed deletions remain done. Do not preflight/reimplement API permission rules.\n\nUpdate member.spec.ts generated mock with roleBindingsControllerRemove; drop old projectMembersControllerRemove/UpdateRole usage and the role-command case. Update add/invite expected roleKey bodies, ADDED roleName output, list identities/role ids and invite roleName fallback. The --project removal regression now lists pages for that slug then revokes each binding. Include plain missing-member error exit 1, pagination and stop-on-409. No client regeneration in this story. Verify removals with bun run --cwd apps/cli type-check and bun run --cwd apps/cli lint.\n\n**Scope** — In: member module/types/help, role-key payloads, principal listing and paged sequential binding removal with tests. Out: US-008 role-binding group; US-010 project/user/agent cleanup and client regeneration; role-key aliases, server invariant changes and testing member remove JSON.",
+      "acceptanceCriteria": [
+        "[unit] koda member add --email dev@x.io --role developer calls projectMembersControllerAdd with body { email: 'dev@x.io', roleKey: 'developer' }.",
+        "[unit] koda member add --email dev@x.io --role developer, with the add answering a member whose email is dev@x.io and bindings are [{ id: 'b1', roleKey: 'developer', roleName: 'Developer' }], prints Added dev@x.io as Developer.",
+        "[unit] koda member invite --email new@x.io --role triager calls projectInvitesControllerCreate with body { email: 'new@x.io', roleKey: 'triager' }.",
+        "[unit] koda member invite --email existing@x.io --role viewer, with the create answering outcome: 'ADDED' and a member whose email is existing@x.io and one binding has roleName Viewer, prints Added existing@x.io as Viewer.",
+        "[unit] koda member list --all calls projectMembersControllerList with query.principals equal to 'all'.",
+        "[unit] koda member list prints a table with header ['Type', 'ID', 'Email/Slug', 'Name', 'Roles'].",
+        "[unit] koda member list --all prints an agent row whose Email/Slug cell is its agentSlug.",
+        "[unit] koda member list prints developer (b1), viewer (b2) in the Roles cell of a record with those two bindings.",
+        "[unit] koda member invites prints the Role cell of an invite as its roleName.",
+        "[unit] koda member remove u2, with a first members page lacking u2 and hasNext: true and a second page holding u2 with bindings b1 and b2, calls roleBindingsControllerRemove with b1 and then b2.",
+        "[unit] koda member remove u9, with a single members page lacking u9, exits with code 1 without calling roleBindingsControllerRemove.",
+        "[unit] koda member remove u2, with roleBindingsControllerRemove rejecting for b1 with a 409 error, does not call it for b2.",
+        "[unit] memberCommand(program) on a new Command registers no role subcommand under member.",
+        "[unit] When a binding delete is refused during member remove, then that refusal is passed unchanged to handleApiError."
+      ],
+      "tags": [
+        "cli",
+        "permissions",
+        "security",
+        "refactor"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Localized command migration has nontrivial paginated access revocation, partial failure semantics and security-sensitive grant inputs.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.5,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T08:32:35.770Z"
+        }
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/member.ts",
+        "apps/cli/src/commands/member.spec.ts",
+        "apps/cli/src/utils/error.ts",
+        "apps/cli/src/generated/types.gen.ts"
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/commands/member.spec.ts",
+          "reason": "'add sends email and role' and 'AC11: member add still calls projectMembersControllerAdd with the resolved slug and body' expect a body with role; 'role changes a member role' tests the deleted command; 'remove targets the --project override' expects projectMembersControllerRemove; 'AC1: member invite sends ... the email/role body' expects role; 'AC4: member invite prints the added message when the user already existed' prints member.role; 'AC6: member invites prints a table with ID/Email/Role/Status/Expires' fills the Role cell from invite.role; the generated-module mock lacks roleBindingsControllerRemove. The replacing invariant: adds and invites send email and roleKey; the role command case is removed; remove pages the members list for the --project slug and calls roleBindingsControllerRemove per binding id; the added message prints the bindings' role names; the Role cell is roleName; the mock gains roleBindingsControllerRemove."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "6b500da148723facd5845ef1e8b97f6af0973688"
+    },
+    {
+      "id": "US-010",
+      "title": "Retire remaining CLI legacy commands/options and regenerate the client",
+      "description": "**Goal** — Remove unsupported project roster writes and user/agent role options, and regenerate the CLI against the final contract.\n\n**Motivation** — Since drop-legacy-reads, no legacy row grants anything, but the API still offers ways to write and show the legacy model.\n\n**Approach** —\n**The `project`, `user` and `agent` commands and the generated client (US-010):**\n\n| Command | Target |\n|:--|:--|\n| `project agents` | the `Agent scoping is off on this server` warning is deleted; the table is unchanged |\n| `project agent-add`, `project agent-remove` | deleted |\n| `user create` | the `--role` option is deleted; the body has no `role` |\n| `user list` | the `Role` column is deleted |\n| `agent create` | the `--roles` option is deleted; the body has no `roles` |\n| `apps/cli/src/generated/` | regenerated with `bun run generate:cli` (repo root) from the US-007 `openapi.json`, so the CLI `type-check` runs against the new contract; no generated file is edited by hand. The directory is gitignored (`.gitignore`), so the output is in no diff; CI regenerates it the same way |\n\n- `--role` takes a role key verbatim (`project-admin`, `developer`, `viewer`, a custom key). The CLI does not validate or map it; the API answers 404 `permissions.roleNotFound` for an unknown key.\n\n**Interface** — Preserve `projectCommand(program: Command): void`, `userCommand(program: Command): void` and `agentCommand(program: Command): void`. user create sends email/name/password only; agent create sends no roles; user table header is ['ID', 'Email', 'Name', 'Disabled']. The role-key statement above applies to remaining grant/member options, not the deleted user/agent options.\n\nRemove dead generated operation imports, local response role fields, roster scoping/roles fixtures and command help for removed commands/options. project agents keeps its existing table, metadata, JSON and errors without a scoping warning. In project.spec.ts delete scoping-off and agent-add/remove tests only; keep AC-1/AC-2 with {items} fixtures. In user.spec.ts change create expectation to email/name/password without role and assert Role column absent. Pin the removed option's failure path through Commander: a Command configured with exitOverride() rejects user create with --role ADMIN as commander.unknownOption (exitCode 1), rather than sending a legacy role to the API. In agent.spec.ts remove --roles input/body expectation from create and delete the defaults-empty-roles case. After US-008/009 are merged and remaining commands no longer call removed functions, run bun run generate:cli from repository root on US-007's openapi.json, never hand-edit or force-add generated output. Verify removals with bun run --cwd apps/cli type-check and bun run --cwd apps/cli lint against that regenerated client.\n\n**Scope** — In: project/user/agent command cleanup, their existing Jest specs, client regeneration. Out: US-008/009 role-binding/member implementation; API/schema edits; web changes; koda auth me role line and aliases mapping legacy enums.",
+      "acceptanceCriteria": [
+        "[unit] koda project agents, with the roster answering { items: [] }, prints no Agent scoping is off message.",
+        "[unit] koda user create --email e@x.io --name E --password StrongPass123! calls adminUsersControllerCreate with a body that has no role property.",
+        "[unit] koda user list prints a table whose header is ['ID', 'Email', 'Name', 'Disabled'].",
+        "[unit] koda agent create --name Bot calls agentsControllerGenerateApiKey with a body that has no roles property.",
+        "[unit] projectCommand(program) on a new Command registers no agent-add subcommand under project.",
+        "[unit] projectCommand(program) on a new Command registers no agent-remove subcommand under project.",
+        "[unit] When userCommand is registered on a Command with exitOverride(), parsing user create --email e@x.io --name E --password StrongPass123! --role ADMIN rejects with a CommanderError whose code is commander.unknownOption and exitCode is 1."
+      ],
+      "tags": [
+        "cli",
+        "permissions",
+        "security",
+        "delete",
+        "refactor",
+        "codegen"
+      ],
+      "dependencies": [
+        "US-008",
+        "US-009"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Explicit mechanical security-client cleanup across three sibling modules and deterministic generation follows existing command patterns.",
+        "agentProfileId": "native-luna",
+        "agent": "native",
+        "profileModelTier": "fast",
+        "initialAgent": "native",
+        "initialProfileId": "native-luna",
+        "initialModelTier": "fast",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.5,
+          "plannedProfileId": "native-luna",
+          "applied": false,
+          "decidedAt": "2026-10-23T08:44:10.925Z"
+        }
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/project.ts",
+        "apps/cli/src/commands/user.ts",
+        "apps/cli/src/commands/agent.ts",
+        "openapi.json",
+        "apps/cli/src/generated/sdk.gen.ts"
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/commands/project.spec.ts",
+          "reason": "'US-005 AC-3: warns when agent scoping is off' tests the removed warning; 'US-005 AC-4: adds an agent to the project', 'US-005: prints the server-returned agent slug after adding', 'US-005: prints the added agent DTO as JSON', 'US-005: prints the removal result as JSON', 'US-005 AC-5: removes an agent from the project' and 'US-005 AC-6: reports an API conflict when removing an agent' test the deleted commands; fixtures carry scoping and roles. The replacing invariant: those cases are removed; the roster fixtures are { items } without roles; AC-1 and AC-2 are unchanged."
+        },
+        {
+          "path": "apps/cli/src/commands/user.spec.ts",
+          "reason": "'create sends the body with role MEMBER by default' expects role MEMBER. The replacing invariant: the create body is email, name and password with no role."
+        },
+        {
+          "path": "apps/cli/src/commands/agent.spec.ts",
+          "reason": "'creates an agent and prints the generated API key' passes --roles DEVELOPER,AGENT and expects roles, and 'defaults roles to an empty array when --roles is omitted' expects an empty roles array. The replacing invariant: the create case passes no --roles and its body has no roles; the defaults case is removed."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "cc98c16dd17eeee1c4afabaed4e3b7729e82efed"
+    },
+    {
+      "id": "US-011",
+      "title": "Remove web dependencies on the retired role fields",
+      "description": "**Goal** — Render binding-based web state without removed roles/scoping fields and key approval refresh identity on user id alone.\n\n**Motivation** — Responses still carry legacy values: a member's display role and the page's viewerRole (mapped from bindings back to the enum), canManage, an always-true scoping, and agent roles that are always empty in new data.\n\n**Approach** —\n| Site | Baseline (locate only) | Target |\n|:--|:--|:--|\n| `composables/useProjectAgents.ts` | `ProjectAgent.roles`; `ProjectAgentListDto.scoping`; `scoping` ref, returned | `roles` and `scoping` removed from the types and the return value |\n| `pages/[project]/agents.vue` | the scoping-off note (`data-testid=\"project-agents-scoping-off\"`) and the Roles column | both removed; the other columns, the status select and its gate are unchanged |\n| `pages/agents.vue` | `AgentRow.roles` and its normalization of `agent.roles` | removed; the roles column keeps rendering binding chips |\n| `composables/useProjectMembers.ts` | `ProjectMember.role`; `MemberBinding.id: string | null` | `role` removed; `id: string` |\n| `components/ProjectMembersPanel.vue` | skips null binding ids; doc says a null chip is a legacy row | every chip is removable when the gate allows; the null filter and the legacy wording are removed |\n| `composables/useProjectInvites.ts`, `pages/invite/[token].vue` | `role?: string | null` on the invite and preview types | removed |\n| `composables/useAdminUsers.ts` | `AdminUser.role` | removed |\n| `composables/useApprovalNotifications.ts` | identity = `[auth.user.id, auth.user.role]` in `refresh`'s `current()` and the `watch` | identity = the user id alone |\n| `i18n/locales/{en,zh}.json` | `agents.project.scopingOff` | removed |\n| `tests/e2e/fixtures/api-client.ts` (Playwright only, not run by the story's gates) | `createAgent` sends `roles`; `createUser` sends `role`; `addProjectMember(token, slug, email, role)` sends `{ email, role }` | no `roles`; no `role`; `addProjectMember(token, slug, email, roleKey)` sends `{ email, roleKey }`, and its callers pass the mapped key |\n\n- `AuthUser.role` in `composables/useAuth.ts` stays (`GET /auth/me` still answers it).\n\n**Interface** — `MemberBinding.id: string`; `useProjectAgents(slug)` returns items/pending/error/load/refresh/changeStatus without scoping; approval identity is auth.user.id. Retain generation/mounted safeguards and permissionKeys-based approval rights; a same-id role-only update must neither invalidate nor discard the running refresh, while id changes must discard old results. This is not an approval-policy change. Preserve useRoleBindings().remove(id), user/self/disabled/key gates and row confirmation, delete each string binding id in order without legacy-null skips. Global agent role chips remain binding-driven even when GET /agents omits roles; invite renders roleName with no role fallback field.\n\nUpdate existing useProjectAgents unit fixture helper to {items}; assert items and absence of scoping, remove scoping-false case, empty response gives empty items. Update project agents page tests and fixtures to no roles/scoping, delete scoping-off behavior case, preserve name/slug/capabilities/status/open-ticket assertions and conditional actions gate. In project-members-principals.spec.ts give every chip a string id, assert one remove control per chip and sequential row removal; remove synthetic legacy-chip case. Extend existing global agents binding-chip and invite page tests for the stated ACs. For notification identity, extend the existing mountNotifications harness in tests/pages/fleet-schedule-approval-gates.spec.ts, which mounts the real header badge and useApprovalNotifications: expose one shared mutable auth user ref and use deferred API responses so a same-id role update and a u1-to-u2 id switch occur during an actual running refresh. Do not assume a standalone useApprovalNotifications.spec.ts already exists. Playwright fixtures are updated but not run by this story's gates: change callers in fleet-config.e2e.spec.ts, fleet-threads.e2e.spec.ts, live-board.spec.ts, ticket-project-roles.spec.ts, ticket-detail-operations.e2e.spec.ts and notifications.e2e.spec.ts to viewer/developer/project-admin as appropriate. Update both locales only for deleted scopingOff key. Verify removals with bun run --cwd apps/web type-check and bun run --cwd apps/web lint.\n\n**Scope** — In: web composables/types/normalization, project roster presentation, binding chip removal, notification identity, translations, unit tests and Playwright fixture compatibility. Out: US-001/002 backend invariants; US-003..007 API changes; US-008..010 CLI work; AuthUser.role removal, JWT changes, approval-policy redesign, navigation/token/layout redesign, Playwright gate execution and stale root apps/web/.nax-acceptance.test.ts.",
+      "acceptanceCriteria": [
+        "[unit] useProjectAgents('p').load(), with $api.get answering { items: [<one agent>] }, sets items to that one agent.",
+        "[unit] The return value of useProjectAgents('p') has no scoping property.",
+        "[unit] The project agents page, mounted with one roster agent, renders no element with data-testid=project-agents-scoping-off.",
+        "[unit] The project agents page's table header cells are name, slug, capabilities, status and open tickets, plus actions when agent.update is held.",
+        "[unit] The global agents page, with GET /agents answering an agent without a roles property and GET /role-bindings answering one developer binding for it, renders that agent's Developer chip.",
+        "[unit] ProjectMembersPanel, given a member row whose bindings are [{ id: 'b1', … }, { id: 'b2', … }], calls useRoleBindings().remove with b1 and then b2 when the row is removed and confirmed.",
+        "[unit] useApprovalNotifications, after a refresh started for user u1, keeps the refresh's result when auth.user changes only its role value while the id stays u1.",
+        "[unit] useApprovalNotifications discards a running refresh's result when auth.user's id changes from u1 to u2.",
+        "[unit] The invite page, given a preview with roleName: 'Developer' and no role property, renders data-testid=invite-role-name with the role name."
+      ],
+      "tags": [
+        "web",
+        "permissions",
+        "security",
+        "ui",
+        "refactor",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Multiple Vue client surfaces consume access contracts, and user-identity cancellation must prevent stale cross-user notification results.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.040000000000000036,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T08:50:21.111Z"
+        }
+      },
+      "contextFiles": [
+        "apps/web/composables/useProjectAgents.ts",
+        "apps/web/pages/[project]/agents.vue",
+        "apps/web/composables/useApprovalNotifications.ts",
+        "apps/web/components/ProjectMembersPanel.vue",
+        "apps/web/composables/useProjectMembers.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/web/tests/composables/useProjectAgents.spec.ts",
+          "reason": "'load populates items and scoping', 'load uses scoping false when response says false' and 'load defaults scoping to true for an empty response' assert the removed scoping ref; the list helper builds { scoping, items }. The replacing invariant: the helper builds { items }; the first case asserts items and no scoping; the scoping-false case is removed; the empty-response case asserts items is empty."
+        },
+        {
+          "path": "apps/web/tests/pages/agents.spec.ts",
+          "reason": "'AC1: GET /projects/:slug/agents populates one row per item with name, slug, roles, capabilities, status, and open-ticket count' expects CODER and REVIEWER from roles, and 'AC9: a roster response with scoping: false renders the scoping-off note' tests the removed note; fixtures carry scoping and roles. The replacing invariant: AC1's item has no roles and the row text asserts name, slug, capabilities, status and open-ticket count; AC9 is removed; the fixtures drop both fields."
+        },
+        {
+          "path": "apps/web/tests/components/project-members-principals.spec.ts",
+          "reason": "'AC-2: one chip per binding, legacy chips are not removable' and 'a legacy same-key chip the API suppressed appears once the real binding is deleted' use null-id chips, and the base fixture has one. The replacing invariant: every fixture chip has a string id; AC-2 asserts one remove control per chip; the legacy-chip case is removed."
+        },
+        {
+          "path": "apps/web/tests/e2e/fixtures/api-client.ts",
+          "reason": "createAgent sends roles, createUser sends role, and addProjectMember sends email and role (the API now strips both and grants viewer). The replacing invariant: no roles, no role, and addProjectMember(token, slug, email, roleKey) posts email and roleKey."
+        },
+        {
+          "path": "apps/web/tests/e2e/fleet-config.e2e.spec.ts",
+          "reason": "calls addProjectMember with VIEWER. The replacing invariant: it passes viewer."
+        },
+        {
+          "path": "apps/web/tests/e2e/fleet-threads.e2e.spec.ts",
+          "reason": "calls addProjectMember with VIEWER. The replacing invariant: it passes viewer."
+        },
+        {
+          "path": "apps/web/tests/e2e/live-board.spec.ts",
+          "reason": "calls addProjectMember with DEVELOPER. The replacing invariant: it passes developer."
+        },
+        {
+          "path": "apps/web/tests/e2e/ticket-project-roles.spec.ts",
+          "reason": "calls addProjectMember with ADMIN and DEVELOPER. The replacing invariant: it passes project-admin and developer."
+        },
+        {
+          "path": "apps/web/tests/e2e/ticket-detail-operations.e2e.spec.ts",
+          "reason": "calls addProjectMember with DEVELOPER. The replacing invariant: it passes developer."
+        },
+        {
+          "path": "apps/web/tests/e2e/notifications.e2e.spec.ts",
+          "reason": "calls addProjectMember with DEVELOPER. The replacing invariant: it passes developer."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "9887c3bfdcc194efc7f31a578ec60383d0fc7042"
+    }
+  ],
+  "analysis": "ARCHITECTURE AND DISCOVERY\nThis is an existing Bun/Turborepo TypeScript monorepo, not greenfield. The detected Express/Next.js labels are inaccurate: the authoritative app contexts specify NestJS 12 + Fastify via Nathapp, Prisma 7 with PostgreSQL, and Vitest in apps/api; Commander.js with the generated Hey API/Axios client and Jest in apps/cli; Nuxt 3 SSR/Vue with native API composables, Jest and Playwright in apps/web (.nax/mono/apps/api/context.md:21, .nax/mono/apps/cli/context.md:22, .nax/mono/apps/web/context.md:21). apps/runner is unaffected. Codebase-memory MCP is unavailable in this session, so discovery used direct reads and text searches. Before implementing API code, read the nathapp-nestjs-patterns skill and scoped rules; do not substitute generic Express, Nest or direct-Prisma patterns. No production code is being changed by this PRD.\n\nGOAL AND RELEASE SEQUENCE\nThis is P1l, the twelfth feature after drop-legacy-reads (#321), before drop-legacy-schema. One capability spans API and both clients: retire five legacy write routes and legacy request/response role fields, install membership-removal invariants on binding DELETE, and use role keys/bindings in clients. Exactly US-001..US-011 with the supplied workdirs and dependency DAG are required. US-001 -> US-002 -> US-003 -> US-004 -> US-005 -> US-006 -> US-007; US-008, US-009 and US-011 branch from US-007; US-010 joins US-008 and US-009. Root smoke-script and OpenAPI edits still belong to the explicitly assigned apps/api stories. The feature is deliberately a breaking API/client contract change, with no data/schema migration or legacy enum aliases. Retired routes must disappear rather than redirect. Old request role/roles fields are stripped by the existing whitelist pipe, not rejected: member add defaults to viewer, invite requires roleKey, user creation grants only member, role-only user patches do not alter bindings, and agent creation ignores roles. Do not change the global pipe.\n\nSHARED PERMISSION CONVENTIONS\nPermissionsModule already is @Global(), imports PrismaModule, registers repositories and exports PermissionService, MembershipService and RoleAdminService (apps/api/src/permissions/permissions.module.ts:22-55); do not re-import it per feature module or expose repositories. Seed system roles in every DB-backed test via ensureSystemRoles or the booted app. Direct binding fixture writes between requests must call MembershipService.invalidatePermissions() (apps/api/src/permissions/membership.service.ts:78-86). Test setup must name role keys: ADMIN -> project-admin, DEVELOPER -> developer, VIEWER -> viewer for project adds/invites. Admin users created via POST /api/admin/users need an explicit global admin binding using grantRole(prisma, { type: 'USER', id }, 'admin') or POST /api/role-bindings with roleKey admin and projectId null. Route grants can bump tokenVersion, so bind first and log in after; grantRole does not bump it. Preserve legacy-project-roles.ts: invite persistence still writes ProjectInvite.role via legacyNameOf; acceptance must still resolve pre-migration invites; membership queries still answer internal ProjectMembership.role for ProjectAccessService.resolveMembership. No Prisma schema edits or migrations, no approval/audit changes. UserResponseDto.role, AuthUser.role and JWT role remain.\n\nBINDING REMOVAL SEAM AND RISKS (US-001/002)\nMembershipService.removeBinding currently takes only id and runs a transaction: lookup, optional owner Role lock, user lock, owner-only re-read, owner survivor check, deleteById and afterRemoval (apps/api/src/permissions/membership.service.ts:201-225). MembershipService.afterCommit scopes and afterWrite defer cache/auth invalidation until commit (same file:70-73, 349-376); preserve this and the legacy User.role mirror/token revocation, idempotent create and owner protection. RoleAdminService.removeBinding performs stored-binding lookup, binding-key gate, self-binding and escalation, then calls membership.removeBinding(id) (apps/api/src/permissions/role-admin.service.ts:304-327). Compute the global override only after those existing checks and only for a project USER project-admin binding; never confuse a custom PROJECT ['*'] co-admin with a global admin. The options seam is tested through both services and the HTTP endpoint. PrismaRoleBindingRepository uses the ambient prisma.client, has findViewById/deleteById, owner and user locks, and findUserState including disabled; principalId intentionally has no foreign key (apps/api/src/permissions/prisma-role-binding.repository.ts:35-41, 183-208, 236-259, 286-292). Add project locking/counters there rather than querying Prisma in the services; keep structural repository doubles/contracts compatible as needed. countActiveProjectAdmins already counts distinct enabled user rows with a local PROJECT project-admin binding, per project (apps/api/src/permissions/membership.queries.ts:189-209). Use it rather than recreating a role-enum count. Missing and disabled users do not trigger the last-active-admin refusal.\nProject advisory locks are transaction-scoped and use distinct PROJECT_MEMBERS=72401 and PROJECT_AGENTS=72402 classes (apps/api/src/common/utils/advisory-lock.ts:3-36). Always take the relevant project lock before lockUser, then re-read the binding. Never reverse lock ordering; owner is global and cannot also take a project lock. Two removals must see the post-wait state: one succeeds and the other is refused. TicketsService.assign already takes lockProjectAgents (apps/api/src/tickets/tickets.service.ts:426,464), so the new agent removal must use exactly that lock, not a new namespace or per-agent lock. Only DELETE /role-bindings/:id acquires these new guards; removeProjectBindings/removeAllBindings/setGlobalAdmin and agent deletion do not. Counter failures must propagate without deletion or partial transaction side effects.\nPrismaAgentRepository.countOpenProjectTickets contains the query to extract: assignedToAgentId + projectId, excluding CLOSED/REJECTED and soft-deleted tickets, exact count plus oldest 10 refs, sequential queries on the ambient transaction, PROJECT_NOT_FOUND invariant error if project lookup disappears (apps/api/src/agents/prisma-agent.repository.ts:152-192). MAX_OPEN_TICKET_REFS currently is private at line 11 and roster read uses it at line 338. Move body and exported constant into permissions/open-agent-tickets.queries.ts, delegate temporarily from the old method, then delete the delegate in US-003. permissions must never import agents. Other bindings count only PROJECT-scope rows in P excluding the removed id, never a projectId-null role. InMemoryPermissionStore holds roles/bindings/users and calls and already models repository behaviors (apps/api/src/permissions/test-helpers/in-memory-permissions.ts:15-35). Extend its repository double with recorded project locks, real enabled-admin/other-binding counts and configurable open-ticket counts/errors. Existing permission tests live alongside these modules, including membership.service.spec.ts, role-admin.service.spec.ts, membership.queries.spec.ts and prisma-role-binding.repository.spec.ts; add the guard-focused tests listed in expectedFiles and update endpoint.e2e.spec.ts for the new 409.\n\nLEGACY ROUTE DELETION IMPACT (US-003)\nProjectMembersController PATCH/DELETE handlers are at apps/api/src/projects/members/project-members.controller.ts:58-84; GET/POST and class-level ProjectMembershipGuard -> RequiresGuard ordering remain. The deleted service updateRole/remove and lockAndFind/assertKeepsAnAdmin are at apps/api/src/projects/members/project-members.service.ts:104-157. Leave findRequiredMember used by add, lockMembers/findMember/findUserByEmail repository operations. ProjectsController roster POST/DELETE are at apps/api/src/projects/projects.controller.ts:190-226; retain GET roster and PATCH status at :227. AgentsController has both updateAgentRoles helper (:63) and PATCH updateRoles (:162-172), both removed, while capabilities/profile/key operations remain. PrismaAgentRepository roster writes/replaceRoles/hasLocalMembership are at :102-108, :129-149, :195-198. Remove their DTO imports and DTO files, not merely route decorators. Retain isOnProjectRosterBySlug and the shared repository lock still used by assignment-related tests. member.remove catalog entry exists (apps/api/src/permissions/catalog.ts:272); add it to PENDING_SURFACE_KEYS (:56) and document that P3 must decide whether it gates binding removal. Do not remove it from seeded roles. A binding POST is idempotent 201 with the same id, unlike the removed duplicate-roster 409.\nUpdate stale production comments in membership.service.ts, global-stubs.module.ts, tickets.service.ts, prisma-tickets.repository.ts, ticket.domain.ts and project-member.queries.ts; no stale references to removed service methods or route behavior. In scripts/smoke-test-cli.sh replace roster POST with viewer binding POST after PROJECT_ID/AGENT_ID extraction and before the four workflow bindings; assert 201. US-005 removes roles from the same script's agent create payload.\nRegression inventory: remove agents-project-roster.service.spec.ts entirely; remove only deleted-method cases/mocks from project-members.service.spec.ts, project-members.controller.spec.ts, dto/member-dto.spec.ts, agents.service.spec.ts, agents.controller.spec.ts, prisma-agent.repository.project-roster-writes.spec.ts and projects.controller.spec.ts. Keep unrelated coverage; move the counting assertions to the extracted query in US-002 and retain the advisory-lock assertion. Folded-keys.spec.ts tables retain only PATCH roster status with agent.update; permission-contract.spec.ts expected pending includes member.remove. Rewrite integration route consumers in projects/{member-bindings,project-members,project-membership-gate}.integration.spec.ts; permissions/{core-members-invites,membership-agent-roster,core-project-routes,membership-queries}.integration.spec.ts; and live/live-stream.integration.spec.ts. Role change is grant new then revoke old; removal revokes bindings, with self-binding 403 and last-admin 409 now coming from binding DELETE. Remove retired update-roles cases from core-agent-routes.integration.spec.ts, openapi-spec/spec-integrity.integration.spec.ts, agents.e2e.spec.ts and api-endpoint/endpoint.e2e.spec.ts. Rewrite endpoint roster setup and permission helpers to grant project bindings, including idempotent duplicate 201, own-agent refusal 403, open-ticket 409 and successful removal 204. Preserve warmed-key invalidation and stream-close outcomes.\n\nREQUEST FIELD IMPACT (US-004/005)\nAddMemberDto still has role and roleKey with @IsOptional; explicit null currently skips validation (apps/api/src/projects/members/dto/add-member.dto.ts:13-33). Replace roleKey optional validation with @ValidateIf(dto.roleKey !== undefined) plus ROLE_KEY_PATTERN. ProjectMembersService.add currently rejects both fields and maps enums (project-members.service.ts:70-74); remove mapping/refusal and default to viewer, keeping disabled-user, grant/escalation, duplicate-member and transaction logic. CreateInviteDto already has the required ValidateIf key pattern and email normalization, but also role (apps/api/src/projects/invites/dto/create-invite.dto.ts:18-35). Keep email rules, key validation, missing-key service error invites.roleRequired and internal legacy persistence. ProjectInvitesService.create consumes effectiveRoleKey before writing and runs disabled/grant checks in both paths (apps/api/src/projects/invites/project-invites.service.ts:52-84). Delete both roleAndRoleKey translations in en/zh members/invites JSON.\nUsersAdminService currently defaults dto.role, binds baseline then promotes ADMIN, and update combines demotion with disabled logic (apps/api/src/users/users-admin.service.ts:43-66,74-111). Remove role request fields and setGlobalAdmin calls from create/update; write MEMBER and baseline only on create. Keep password hashing, unique handling, ambient transaction, self-disable users.self, locked last-active-global-admin disable users.lastAdmin and auth cache invalidation/token behavior. Update must accept a role-only patch as a no-op, including self. Do not change global binding deletion to enforce last-global-admin. AgentsService currently validates roles before scalar creation and writes them with capabilities (apps/api/src/agents/agents.service.ts:60,115-150); remove roles/helpers and change repository method to createCapabilities, retaining atomic rollback and capability creation in the ambient transaction (prisma-agent.repository.ts:83-100). AgentRoleEntry is retained as schema but no longer written by create. AGENT_ROLES constant stays while imported elsewhere.\nFixture/test sweeps are essential: typed fixtures can compile yet silently grant viewer/member when their removed fields are stripped. Update member and invite unit/DTO tests, members-translation-keys.spec.ts, project invite admin/public and role-key tests, membership-queries and members-principals integration tests, project-role-permissions tests and endpoint fixtures. Project member setups using legacy role across fleet/{fleet-approvals-api,fleet-budgets-api,fleet-repos,fleet-schedules-api}, live/live-stream, notifications/{mentions,notifications-api}, skills/project-skills-routes and vcs/vcs-webhook-secret must send mapped roleKey. Update admin-binding setup throughout users/admin-users, permissions/{bootstrap-baselines,core-admin-public-implicit,core-agent-routes,core-members-invites,core-project-routes,me-permissions,permission-catalog,remaining-route-permissions,retired-casl-factory,role-bindings-api,role-bindings-filters,roles-api}, projects/project-membership-gate, webhook/webhook-permissions and fleet approval/budget integration files. Demotion now deletes the global admin binding, first user Owner keeps its mirror; concurrent admin safety test is concurrent disables, not role patches. Agent rollback/service/routes/repository/canonical-DTO tests must inject capability-write failures instead of now-nonexistent role writes and retain rollback expectations.\n\nRESPONSE CONTRACT AND GENERATION (US-006/007)\nProjectMembersService.list currently returns {page,canManage,viewerRole}, consults PermissionService, and resolves membership (apps/api/src/projects/members/project-members.service.ts:49-65); return IPageResult<ProjectMemberDto> alone, still resolve membership for the access refusal, remove unused PermissionService injection. Controller currently spreads the page plus flags (project-members.controller.ts:34-43); retain JsonResponse envelope and page fields only. ProjectMemberDto maps role in from and declares it (:12-14,25,48); remove role from DTO/domain/query output, make MemberBinding.id non-null string in runtime types and Swagger, not just one layer. PrismaAgentRepository reads include roles at :22,29,36,68,76,246 and roster select :294; remove those includes/select and role shaping. AgentResponseDto declares AgentRoleDto (:3-12), roles (:41-42), and defaults roles in from (:61); remove all, retain capabilities and other fields. ProjectAgentListDto becomes {items}, ProjectAgentDto loses roles, AgentProfileRecord/ProjectAgentRecord lose roles, and agent-me DTO stays consistent. GET/PATCH/POST/DELETE agent serializers all share the change.\nInviteDto.role is at apps/api/src/projects/invites/dto/invite.dto.ts:9; preview role and eight-field wording are at invite-preview.dto.ts:3-12. Remove role and update mapper/acceptance preview; preview has exactly seven fields, with roleKey/roleName intact. UserAdminDto declares/maps role at apps/api/src/users/dto/user-admin.dto.ts:8,15; remove only public role, not internal UserAdminRecord.role. Keep invite mail roleName/fallback and ProjectInviteRecord.role, ProjectMembership.role, auth/me role and JWT claims. Update exact-field unit/integration assertions rather than replacing them with weak shape checks. Response-regression files include core-members-invites, agent-scoping-removed, membership-project-access, agent-project-roster, project-members-principals, project-role-permissions, both agents e2e suites, invite-role-keys, project-invites-public and admin-users.\nRegenerate committed root openapi.json only after final API edits in US-007. package.json:20-23 defines api:export-spec as API build/export, generate:cli as openapi-ts, generate as both. US-007 deliberately runs only bun run api:export-spec; do not regenerate CLI until US-010 finishes removing old calls. The generated role binding functions already exist at apps/cli/src/generated/sdk.gen.ts:2653,2663,2677, so US-008/009 can use them before regeneration. .gitignore:22-25 ignores generated CLI output except .gitkeep; this source-of-truth overrides the stale CLI context sentence calling it source controlled. US-010 runs bun run generate:cli from root; never hand-edit or force-add generated client files. Other paths/schemas must remain unchanged; generation must remove retired routes/fields and preserve auth/me role.\n\nCLI IMPLEMENTATION AND ERROR BOUNDARIES (US-008..010)\nCommand modules use generated functions, unwrap, table, handleApiError and withContext. labelCommand mirrors module registration style (apps/cli/src/commands/label.ts:13-49). user list provides global-context example (apps/cli/src/commands/user.ts:39-55). withContext configures URL/key and only suppresses requiring a project when requireProject:false, but may still return a local projectSlug (apps/cli/src/utils/context.ts:24-51). Thus new role-binding must never use that implicit project: resolve project only from its own --project. index.ts imports command modules at :10-28 and executes process argv on import; add registration, review wiring rather than importing entrypoint in tests. list passes filter combinations to server without client RBAC or scope validation. grant validates exactly one --user/--agent BEFORE lookups, resolves only agent/project ids as needed, and sends role keys verbatim. No enums or fallback aliases. Mock generated function boundaries in Jest.\nmember.ts currently owns legacy MemberRow/AssignableRole/InviteRow (:16-43), add/invite role bodies (:89,:115), role command (:172-193) and old remove (:196-214). Replace with generated-compatible binding/principal shapes and RoleBinding DELETE. list --all includes agents, prints identity/binding ids; remove searches user pages size 100, then deletes ids sequentially. Missing user is a plain Error so exit 1, not a synthesized HTTP 404/exit 4. A later delete failure is partial progress, not a client transaction or a rollback/retry of prior successful deletes. user.ts includes role in table/body/option (:13,48-49,64,71); project.ts scoping warning and agent-add/remove are at :41,49,70; agent.ts uses generated CreateAgentDto and must stop sending roles. Update their existing specs rather than adding separate validation stories.\nhandleApiError is the existing behavior authority (apps/cli/src/utils/error.ts:94-138): validation=true exits 3; HTTP 400 exits 3; 401/403 exit 2; 404 exit 4; 409 and unknown errors exit 1. Existing helper emits a generic Not found for a 404 without custom notFoundMessage; do not redesign the shared error helper to resolve a prose ambiguity about server text. Pass API errors unchanged through the helper and preserve its current behavior; grant unknown-agent stops before create. New mutually-exclusive grant error must be exactly Choose exactly one of --user or --agent. Plain member missing error must be Not a member: <userId>. CLI rules mention older OpenAPI config forms; mirror current withContext/unwrap implementation, not obsolete handwritten HTTP wiring.\n\nWEB IMPACT AND ASYNC IDENTITY (US-011)\nuseProjectAgents explicitly exposes roles/scoping in types/ref/load/return (apps/web/composables/useProjectAgents.ts:4-20,28,37,54). Remove them and keep load/error/status behavior. Project roster page binds scoping at apps/web/pages/[project]/agents.vue:19, renders note :52-54 and role column/cells :62,70; remove only these, preserve agent.update-gated status/actions and other columns. Global pages/agents.vue currently normalizes agent.roles (:22,31,36,62), but actual chips already join binding data (:123-132); remove legacy normalization without deleting the binding-driven roles column/dialog. useProjectMembers has null-id docs/conversion and legacy ProjectMember.role (apps/web/composables/useProjectMembers.ts:7,19-23,57,74-79); make binding ids strings, drop old role. ProjectMembersPanel documents and filters legacy/null chips (apps/web/components/ProjectMembersPanel.vue:4-8,71-73,88-89); remove null branches while preserving permissions/self/disabled gates, confirmation and sequential deletion with errors surfaced. Remove role from invite/admin-user/preview client types, but AuthUser.role stays. Delete only agents.project.scopingOff in both locales, not valid role-binding copy.\nApproval notifications already use permissionKeys for decide/read rights; role is only incorrectly part of async identity (apps/web/composables/useApprovalNotifications.ts:168-174,254-260). Identity becomes user id alone in current() and watcher; retain generation cancellation, mounted checks and user-switch dismissal so same-user role updates keep an in-flight result, different-user results never leak. This is identity cleanup, not P3 approval policy. Unit regressions include useProjectAgents.spec.ts, project roster agents.spec.ts, global agents-role-bindings.spec.ts/agents-standalone.spec.ts as relevant, project-members-principals.spec.ts, existing notification composable tests and invite-accept.spec.ts. The discovered tree has agents-role-bindings and invite-accept coverage; extend existing tests rather than create new unlisted files unnecessarily. Playwright fixture API client must remove createUser.role/createAgent.roles, rename addProjectMember's role argument to roleKey and update callers in fleet-config, fleet-threads, live-board, ticket-project-roles, ticket-detail-operations and notifications. Story does not run Playwright gates. Leave stale root apps/web/.nax-acceptance.test.ts untouched.\n\nVALIDATION AND DELIVERY\nAll stories touch access-control contracts and use three-session-tdd with strict test/implementation isolation. DB tests are genuinely integration tests, not DI-only tests. Use API Vitest vi mocks, no jest mocks, hoisted factories and lazy await import for TS as required by scoped context; CLI/web Jest retain their own conventions. API DB runs require KODA_DB_TESTS=1 and bun run test:scoped on targeted integration files; without it describes skip and a green zero-test run is not evidence. Compose test PostgreSQL must be running outside the sandbox via bun run test:db:up when Docker is unavailable. DB suites reset the database and cannot run concurrently against one database; a concurrent HTTP race is within one suite, not parallel suite execution. Generated acceptance files are immutable and run only through package-specific .nax commands; never copy or rename them. Unit/behavior tests accompany each production change, and type-check/lint are validation gates, not acceptance criteria. API removal stories verify bun run --cwd apps/api type-check and lint; CLI removals use apps/cli equivalents; web uses apps/web equivalents. The overall done state is preserved binding safety under concurrency/errors, all removed routes absent, all removed wire fields absent, role-only legacy requests safely stripped, supported GET/PATCH/auth behavior retained, regenerated root contract and CLI client, CLI role-binding workflows and binding-only web rendering. No schema reset, backfill, migration, approval redesign, audit expansion or runner changes belong here.\n\nREFINE-PASS SELF-AUDIT\nAll 115 acceptance criteria in the supplied spec were enumerated and checked individually against their original story and ordinal. Preservation map (1-based, no original assertions removed or reordered): US-001 spec AC-1..13 -> acceptanceCriteria[1..13]; US-002 AC-1..11 -> [1..11]; US-003 AC-1..9 -> [1..9]; US-004 AC-1..8 -> [1..8]; US-005 AC-1..10 -> [1..10]; US-006 AC-1..10 -> [1..10]; US-007 AC-1..11 -> [1..11]; US-008 AC-1..15 -> [1..15]; US-009 AC-1..13 -> [1..13]; US-010 AC-1..6 -> [1..6]; US-011 AC-1..9 -> [1..9]. Compound original assertions and qualifying clauses are retained, especially roster PATCH still 200, auth/me still ADMIN, override options under the stated caller, same-id role updates, local-config-but-no-explicit-project global grants, and first-response binding id on duplicate creation. No deprecated grep/file/verbatim AC tags occur. For independent testability, US-001 AC-10 now spells out the service call/target instead of referring to the same call, and US-009 AC-2/4 supply the required email/role CLI arguments rather than implying that a flagless command reaches the API.\nThe revised PRD has 126 criteria: 115 preserved spec ACs plus 11 failure-table or audit-derived assertions. Existing failure-table additions cover concurrent 204/409 outcomes, rollback-preserved binding, conflict count/refs payload, exact CLI principal-validation error, unknown-agent error forwarding, exact missing-member message, refusal forwarding and partial progress. New audit regressions append US-001's default-options missing-binding 404, US-007's invalid preview token 404 and US-010's removed user --role option rejected by Commander. Negative-path anchors by story are US-001 last-admin/count error, US-002 open-ticket/query error, US-003 retired-route 404, US-004 null/missing roleKey, US-005 self-disable, US-006 forbidden membership read, US-007 invalid token, US-008 principal/lookup refusal, US-009 absent member/refused delete, US-010 unknown removed option, US-011 discarded cross-user result. Each assertion is observable through an HTTP/exception result, calls, output, state, registration or generated contract; no quality gates or coverage counts are ACs.\nNew negative-path checks are grounded in current code: InviteAcceptanceService.preview rejects unusable rows with NotFoundAppException({}, 'invites') (apps/api/src/projects/invites/invite-acceptance.service.ts:57-59,148-150); the existing public-invite integration suite already pins unknown/expired/cancelled 404 responses (apps/api/test/integration/projects/project-invites-public.integration.spec.ts:178-198). CLI parser tests use new Command().exitOverride() and assert CommanderError code/exitCode (apps/cli/src/commands/user.spec.ts:27,43-48), so the removed user --role option is tested at parsing, not erroneously routed through the API whitelist or handleApiError. Existing notification tests mount the real header badge and useApprovalNotifications through mountNotifications in apps/web/tests/pages/fleet-schedule-approval-gates.spec.ts:611-669; extend that harness with one shared mutable auth ref and deferred API results to test role-only updates and actual user-id switches, rather than inventing a nonexistent notification composable test file.\nAll 17 feature-level exclusions remain verbatim in their original order, including the explicitly US-specific test exclusions that the spec places in its feature-level list. Story scopes continue to echo nearby boundaries. All eleven contextFiles lists retain the spec's most critical recommended inputs within the five-file limit, contain no newly authored outputs, and expectedFiles remain exactly the prescribed creates. Workdirs and the binding dependency DAG remain unchanged with no missing IDs. Security-critical content still requires three-session-tdd; US-004 and US-007 were reduced to medium complexity because their DTO/service field edits and established exporter require no new abstraction. US-007 uses native-luna for the explicit deletion/codegen pattern; concurrency and broad rewiring stories retain stronger routing.\nOne misleading preexisting test title was checked: users-admin.service.spec.ts says tokenVersion bumps on re-enable, but its actual re-enable assertion passes bumpTokenVersion:false (apps/api/src/users/users-admin.service.spec.ts:211-220); UsersAdminService and PrismaUsersRepository increment only for newlyDisabled/write.bumpTokenVersion. Do not introduce a new re-enable token rule in this feature. Shared CLI error formatting is also unchanged: forward the original error to handleApiError, with its existing 404 formatting, rather than inventing per-command error mapping. This refine pass audited source and the JSON text manually; no executable validator or test-running capability is exposed in this session.",
+  "outOfScope": [
+    "Dropping `AgentRoleEntry`, `AgentProject`, `ProjectMember`, `User.role` and `ProjectInvite.role`, stopping the remaining legacy writes (the `User.role` mirror in `MembershipService`, `role: 'ADMIN'` for the first user, `role: 'MEMBER'` for created and invited users, `ProjectInvite.role` on invite create), deleting `legacy-project-roles.ts`, and deciding `MembershipService.removeProjectBindings` (no production caller after US-003), are out of scope (`permissions-p1-drop-legacy-schema`).",
+    "Deriving the JWT `role` claim and `UserResponseDto.role` (`GET /auth/me`, login, register) from bindings, and removing `AuthUser.role` from the web and the `role` line of `koda auth me`, are out of scope (`permissions-p1-drop-legacy-schema`).",
+    "Refusing a binding for an `OFFLINE` agent on `POST /role-bindings` is out of scope (ruling 2026-10-23: status is liveness, not access).",
+    "A last-global-admin guard on `DELETE /role-bindings/:id` of a global `admin` binding is out of scope: the `users.lastAdmin` guard keeps applying only to `PATCH /admin/users/:id` disables, and the last `owner` binding stays protected by the existing owner lock.",
+    "Applying the last-Project-Admin rule to a user disable (`PATCH /admin/users/:id` `{ disabled: true }`), to `MembershipService.removeAllBindings`, or to deleting a custom role, is out of scope; only `DELETE /role-bindings/:id` gains it.",
+    "Applying the open-ticket rule to agent deletion (`DELETE /agents/:slug`) and to `MembershipService.removeProjectBindings` is out of scope.",
+    "US-002 only: a test that races a ticket assign against an agent-binding removal is out of scope; both take the same `PROJECT_AGENTS` advisory lock, which `TicketsService.assign` already takes and US-002 AC-7 pins on the removal side.",
+    "Answering a duplicate roster add with 409 `projectAgents.alreadyAssigned` is out of scope: it goes with `POST /projects/:slug/agents`, and `POST /role-bindings` answers an existing binding with 201.",
+    "US-008 only: tests for `role-binding list --json`, `revoke --json`, the `Revoked <id>` line, the `Next: --page <n>` hint and the default page and size are out of scope; they follow the pattern of `user list` and the other command modules.",
+    "US-009 only: a test for `member remove --json` (it keeps printing `{ \"removed\": \"<userId>\" }`) is out of scope.",
+    "A test that drives the new `DELETE /role-bindings/:id` 409 `members.lastAdmin` through the e2e suite is out of scope beyond the US-001 Modifies entry for `endpoint.e2e.spec.ts`.",
+    "Rejecting a request that still sends `role` / `roles` with 400 (`forbidNonWhitelisted`) is out of scope; the global pipe keeps stripping unknown fields.",
+    "CLI aliases that map `ADMIN` / `DEVELOPER` / `VIEWER` onto role keys are out of scope (ruling 2026-10-22: role keys only).",
+    "`koda role-binding list` resolving principal ids to names or emails, and checking flag combinations before the API does, are out of scope; it prints the ids the API answers and passes its flags through.",
+    "The stale root `apps/web/.nax-acceptance.test.ts` (it matches no jest `testMatch` and pins the removed `EditAgentRolesDialog.vue`) is out of scope; it is not run.",
+    "Re-seeding or resetting koda-wk is out of scope for the run; it is a manual step after P1 (design decision 2).",
+    "Approval policies, the audit log and `ActionContext` are out of scope (P3, P2)."
+  ],
+  "routingProfile": "cross-agent"
+}

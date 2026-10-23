@@ -494,7 +494,6 @@
     "noRoles": "No roles",
     "project": {
       "empty": "No agents on this project yet.",
-      "scopingOff": "Project agent scoping is disabled on this instance. Roster changes may be ignored.",
       "openTickets": "Open tickets: {count}",
       "reassignFirst": "Reassign its {count} open tickets first",
       "addedBy": "Added by {name}",

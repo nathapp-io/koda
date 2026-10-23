@@ -80,7 +80,7 @@ describeIntegration('US-006 skills route permissions', () => {
 
     for (const who of ['baseline', 'admin']) {
       const created = await request(server).post('/api/agents').set(auth(tokens.root)).send({
-        name: `Skills ${who}`, slug: `skills-permissions-${who}`, roles: [], capabilities: [],
+        name: `Skills ${who}`, slug: `skills-permissions-${who}`, capabilities: [],
       }).expect(201);
       agentKeys[who] = data<{ apiKey: string }>(created).apiKey;
       agentIds[who] = (await db.agent.findUniqueOrThrow({

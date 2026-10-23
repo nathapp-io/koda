@@ -54,7 +54,6 @@ interface AgentProfile {
   id: string;
   slug: string;
   name: string;
-  roles: { role: string }[];
   capabilities: { capability: string }[];
 }
 
@@ -86,16 +85,29 @@ describeIntegration('agent route keys (US-009)', () => {
     expect(res.body.message).toBe(AGENTS_REFUSED);
   };
 
+  /**
+   * Permissions P1l (US-005): the create route takes no role, so an account starts as a plain member.
+   * `'ADMIN'` means "create it, then bind the global `admin` role" — the binding mirrors
+   * `User.role = 'ADMIN'` and revokes the token minted before it, so the login comes last.
+   */
   const createUser = async (who: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<void> => {
     const created = await request(server)
       .post('/api/admin/users')
       .set(auth('root'))
-      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role })
+      .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD })
       .expect(201);
     userIds[who] = data<{ id: string }>(created).id;
+    if (role === 'ADMIN') await bindGlobal(who, 'admin');
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
   };
+
+  /** The global binding that makes a principal a global admin (role `admin`, no project). */
+  const bindGlobal = (who: string, roleKey: string): Promise<unknown> =>
+    membership.createBinding(
+      { principal: { type: 'USER', id: userIds[who] }, roleKey, projectId: null },
+      { type: 'SYSTEM', id: 'test' },
+    );
 
   /** The binding that is the caller's only source in p1. */
   const bind = (who: string, roleKey: RoleKey): Promise<unknown> =>
@@ -182,7 +194,7 @@ describeIntegration('agent route keys (US-009)', () => {
     await bind('developer', 'developer');
     await bind('padmin', 'project-admin');
 
-    // AC-11: a roster row and no AgentRoleEntry — the updateRoles target, mutated by that test.
+    // AC-9 and AC-10: a roster binding and no AgentRoleEntry — listed and read by those cases.
     await createAgent('rosterless-agent', { roster: 'p1' });
     // AC-14: the same shape, kept role-less so its refusal cannot depend on test order.
     await createAgent('roster-only-agent', { roster: 'p1' });
@@ -328,56 +340,6 @@ describeIntegration('agent route keys (US-009)', () => {
     );
   }, TIMEOUT);
 
-  it('AC-13: a non-admin user is refused by PATCH /agents/<slug>/update-roles with 403 permissions and the roles are unchanged', async () => {
-    const before = await profile('roster-dev-agent');
-
-    const res = await request(server)
-      .patch('/api/agents/roster-dev-agent/update-roles')
-      .set(auth('developer'))
-      .send({ roles: ['REVIEWER'] });
-
-    expectPermissionsRefusal(res);
-    await expect(profile('roster-dev-agent')).resolves.toEqual(
-      expect.objectContaining({ roles: before.roles }),
-    );
-    expect(before.roles.map((role) => role.role)).toEqual(['DEVELOPER']);
-  }, TIMEOUT);
-
-  // -------------------------------------------------------------------------
-  // AC-11 / AC-12 — updateRoles invalidates the permission cache after its write
-  // -------------------------------------------------------------------------
-
-  it('AC-11: a global admin updates the roles of a roster-only agent with 200 after that agent was refused by POST …/tickets', async () => {
-    const refused = await createTicketAs('rosterless-agent');
-    expectPermissionsRefusal(refused);
-
-    const res = await request(server)
-      .patch('/api/agents/rosterless-agent/update-roles')
-      .set(auth('gadmin'))
-      .send({ roles: ['DEVELOPER'] })
-      .expect(200);
-
-    expect(data<AgentProfile>(res).roles.map((role) => role.role)).toEqual(['DEVELOPER']);
-    await expect(
-      db.agentRoleEntry.findMany({ where: { agentId: (await db.agent.findUniqueOrThrow({ where: { slug: 'rosterless-agent' } })).id } }),
-    ).resolves.toEqual([expect.objectContaining({ role: 'DEVELOPER' })]);
-  }, TIMEOUT);
-
-  it('AC-12: updating legacy roles grants no key on the next ticket create', async () => {
-    await createAgent('cache-agent', { roster: 'p1' });
-
-    const refused = await createTicketAs('cache-agent');
-    expectPermissionsRefusal(refused);
-
-    await request(server)
-      .patch('/api/agents/cache-agent/update-roles')
-      .set(auth('gadmin'))
-      .send({ roles: ['DEVELOPER'] })
-      .expect(200);
-
-    expectPermissionsRefusal(await createTicketAs('cache-agent'));
-  }, TIMEOUT);
-
   // -------------------------------------------------------------------------
   // AC-14 .. AC-20 — pickup is authorized by the target agent's project keys
   // -------------------------------------------------------------------------
@@ -467,8 +429,9 @@ describeIntegration('agent route keys (US-009)', () => {
   // B2 (whole-branch review) — removing a bound agent ends its pickup at once
   // -------------------------------------------------------------------------
 
-  it('B2: a warmed-up rostered agent is refused its own pickup right after a binding roster removal', async () => {
-    // Warm the binding-based decision, then remove through the roster route.
+  it('B2: a warmed-up rostered agent is refused its own pickup right after its binding is revoked', async () => {
+    // Warm the binding-based decision, then revoke the binding through the route (Permissions P1 US-003
+    // deleted the roster DELETE; removing an agent is deleting its bindings).
     const agent = await createAgent('b2-removed-agent', { roster: 'p1', legacyRole: 'DEVELOPER' });
 
     await request(server)
@@ -477,12 +440,18 @@ describeIntegration('agent route keys (US-009)', () => {
       .set(agentAuth('b2-removed-agent'))
       .expect(200);
 
-    await request(server)
-      .delete(`/api/projects/${P1_SLUG}/agents/b2-removed-agent`)
-      .set(auth('padmin'))
-      .expect(204);
+    const bindings = await db.roleBinding.findMany({
+      where: { principalType: 'AGENT', principalId: agent.id, projectId: p1Id },
+      select: { id: true },
+    });
+    expect(bindings.length).toBeGreaterThan(0);
+    for (const binding of bindings) {
+      await request(server)
+        .delete(`/api/role-bindings/${binding.id}`)
+        .set(auth('padmin'))
+        .expect(204);
+    }
 
-    await expect(db.agentProject.count({ where: { agentId: agent.id, projectId: p1Id } })).resolves.toBe(0);
     await expect(
       db.roleBinding.count({ where: { principalType: 'AGENT', principalId: agent.id, projectId: p1Id } }),
     ).resolves.toBe(0);

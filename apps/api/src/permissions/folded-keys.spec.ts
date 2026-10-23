@@ -5,13 +5,11 @@
  * removes `project.agent.add`, `project.agent.remove`, `project.agent.update`, `member.role.update`
  * and `agent.roles.update`: they duplicate what `member.*`, `role.binding.manage` and `agent.update`
  * already express. This spec pins the fold — the catalog, the surviving keys' scopes, the seeded
- * project-admin role, the five route declarations that used the removed keys and the route texts
- * that name the surviving keys.
+ * project-admin role, the route declaration that survived Permissions P1 US-003 and the route texts
+ * that name the surviving key.
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { AgentsController } from '../agents/agents.controller';
-import { ProjectMembersController } from '../projects/members/project-members.controller';
 import { ProjectsController } from '../projects/projects.controller';
 import { findCatalogEntry, PERMISSION_CATALOG } from './catalog';
 import { expandEntries } from './entry-matcher';
@@ -41,25 +39,21 @@ interface SwaggerOperation {
 type SwaggerResponses = Record<string, { description?: string } | undefined>;
 
 /**
- * The five routes the fold rewires: the route, its handler and the surviving key its texts name.
+ * The routes the fold still rewires: the route, its handler and the surviving key its texts name.
+ *
+ * Permissions P1 US-003 deleted four of the five — the roster add and remove, the members PATCH and
+ * the agent roles PATCH. The roster PATCH survives, and it is the only route whose folded key can be
+ * asserted on a handler and in the committed spec.
  */
 const FOLDED_ROUTES: ReadonlyArray<readonly [route: string, handler: object, key: string]> = [
-  ['POST /projects/:slug/agents', ProjectsController.prototype.addProjectAgent, 'member.add'],
-  ['DELETE /projects/:slug/agents/:agentSlug', ProjectsController.prototype.removeProjectAgent, 'member.remove'],
   ['PATCH /projects/:slug/agents/:agentSlug', ProjectsController.prototype.updateProjectAgent, 'agent.update'],
-  ['PATCH /projects/:slug/members/:userId', ProjectMembersController.prototype.updateRole, 'role.binding.manage'],
-  ['PATCH /agents/:slug/update-roles', AgentsController.prototype.updateRoles, 'agent.update'],
 ];
 
 /**
- * The same five routes in the committed spec: the spec path, the method and the surviving key.
+ * The same routes in the committed spec: the spec path, the method and the surviving key.
  */
 const FOLDED_OPERATIONS: ReadonlyArray<readonly [path: string, method: string, key: string]> = [
-  ['/api/projects/{slug}/agents', 'post', 'member.add'],
-  ['/api/projects/{slug}/agents/{agentSlug}', 'delete', 'member.remove'],
   ['/api/projects/{slug}/agents/{agentSlug}', 'patch', 'agent.update'],
-  ['/api/projects/{slug}/members/{userId}', 'patch', 'role.binding.manage'],
-  ['/api/agents/{slug}/update-roles', 'patch', 'agent.update'],
 ];
 
 interface OpenApiSpec {
@@ -107,22 +101,8 @@ describe('the folded permission keys (US-001)', () => {
     expect(held.has('role.binding.manage')).toBe(true);
   });
 
-  it('AC-5: the five folded routes declare the surviving keys', () => {
-    const declared = {
-      addProjectAgent: declaredKeys(ProjectsController.prototype.addProjectAgent),
-      removeProjectAgent: declaredKeys(ProjectsController.prototype.removeProjectAgent),
-      updateProjectAgent: declaredKeys(ProjectsController.prototype.updateProjectAgent),
-      updateRole: declaredKeys(ProjectMembersController.prototype.updateRole),
-      updateRoles: declaredKeys(AgentsController.prototype.updateRoles),
-    };
-
-    expect(declared).toEqual({
-      addProjectAgent: ['member.add'],
-      removeProjectAgent: ['member.remove'],
-      updateProjectAgent: ['agent.update'],
-      updateRole: ['role.binding.manage'],
-      updateRoles: ['agent.update'],
-    });
+  it('AC-5: the folded route declares the surviving key', () => {
+    expect(declaredKeys(ProjectsController.prototype.updateProjectAgent)).toEqual(['agent.update']);
   });
 
   it('AC-6: every folded route names its surviving key in the operation and 403 texts', () => {

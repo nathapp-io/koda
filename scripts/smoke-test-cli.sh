@@ -164,7 +164,7 @@ fi
 AGENT=$(curl -s -X POST "$API_URL/api/agents" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $JWT" \
-  -d '{"name":"Smoke Agent","slug":"smoke-agent","roles":["DEVELOPER","REVIEWER","VERIFIER","TRIAGER"]}' 2>&1)
+  -d '{"name":"Smoke Agent","slug":"smoke-agent"}' 2>&1)
 RAW_KEY=$(echo "$AGENT" | python3 -c "import json,sys; d=json.load(sys.stdin); inner=d.get('data',d); print(inner.get('apiKey',inner.get('rawApiKey','')))" 2>/dev/null)
 if [[ -n "$RAW_KEY" ]]; then
   ok "Create agent (API key captured)"
@@ -172,23 +172,27 @@ else
   fail "Create agent: $AGENT"; exit 1
 fi
 
-# The roster route grants a viewer binding. Legacy AgentRoleEntry rows from
-# agent creation no longer grant keys, so grant the workflow roles separately.
-ROSTER=$(curl -s -X POST "$API_URL/api/projects/koda/agents" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $JWT" \
-  -d '{"agentSlug":"smoke-agent"}' 2>&1)
-if echo "$ROSTER" | grep -q '"slug"'; then
-  ok "Add agent to project roster"
-else
-  fail "Add agent to roster: $ROSTER"; exit 1
-fi
-
 PROJECT_ID=$(echo "$PROJECT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['id'])" 2>/dev/null)
 AGENT_ID=$(echo "$AGENT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['agent']['id'])" 2>/dev/null)
 if [[ -z "$PROJECT_ID" || -z "$AGENT_ID" ]]; then
   fail "Missing project or agent id for role bindings"; exit 1
 fi
+
+# The roster route is gone (Permissions P1 US-003): an agent joins a project by
+# holding a binding in it, so the viewer grant below is what puts it on the
+# roster. Agent creation writes no role rows either (Permissions P1l US-005:
+# `roles` is no longer a request field), so every workflow role the agent acts
+# with is a binding granted here.
+VIEWER_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API_URL/api/role-bindings" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $JWT" \
+  -d "{\"principalType\":\"AGENT\",\"principalId\":\"$AGENT_ID\",\"roleKey\":\"viewer\",\"projectId\":\"$PROJECT_ID\"}" 2>&1)
+if [[ "$VIEWER_CODE" == "201" ]]; then
+  ok "Grant agent viewer binding (agent roster)"
+else
+  fail "Grant agent viewer binding — expected HTTP 201, got $VIEWER_CODE"; exit 1
+fi
+
 for ROLE_KEY in developer reviewer verifier triager; do
   BINDING_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API_URL/api/role-bindings" \
     -H "Content-Type: application/json" \

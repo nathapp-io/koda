@@ -49,7 +49,6 @@ function sentence(module: 'invites' | 'permissions', path: string, code: number)
 interface InviteBody {
   id: string;
   email: string;
-  role: string | null;
   roleKey: string | null;
   roleName: string | null;
 }
@@ -145,7 +144,7 @@ describeIntegration('invite role keys (US-005)', () => {
     await request(server)
       .post('/api/projects/team/members')
       .set(auth('owner'))
-      .send({ email: 'padmin@koda.test', role: 'ADMIN' })
+      .send({ email: 'padmin@koda.test', roleKey: 'project-admin' })
       .expect(201);
   }, BOOT_TIMEOUT_MS);
 
@@ -157,7 +156,7 @@ describeIntegration('invite role keys (US-005)', () => {
     await app.close();
   });
 
-  it('AC-1: a Project Admin invites a new address with roleKey triager; roleId is stored, role is null, the DTO names the role', async () => {
+  it('AC-1: a Project Admin invites a new address with roleKey triager; roleId is stored, the DTO names the role and carries no legacy role', async () => {
     const res = await invite('padmin').send({ email: 'ac1@koda.test', roleKey: 'triager' });
 
     expect(res.status).toBe(201);
@@ -169,7 +168,8 @@ describeIntegration('invite role keys (US-005)', () => {
     expect(stored?.role).toBeNull();
     expect(body.invite?.roleKey).toBe('triager');
     expect(body.invite?.roleName).toBe(triager.name);
-    expect(body.invite?.role).toBeNull();
+    // US-007 removed `InviteDto.role`: the key and the name are how the client words the role.
+    expect(body.invite).not.toHaveProperty('role');
   }, TIMEOUT);
 
   it('AC-2: a caller holding a custom role without the developer keys is refused 403 permissions.escalation and no invite is created', async () => {
@@ -181,29 +181,38 @@ describeIntegration('invite role keys (US-005)', () => {
     expect(await invitesFor('ac2@koda.test')).toEqual([]);
   }, TIMEOUT);
 
-  it('AC-3: neither role nor roleKey is 400 invites.roleRequired; both is 400 invites.roleAndRoleKey', async () => {
+  it('AC-3: no roleKey is 400 invites.roleRequired; a legacy role beside the key is stripped and the key decides', async () => {
     const neither = await invite('padmin').send({ email: 'ac3@koda.test' });
     expect(neither.status).toBe(400);
     expect(neither.body.ret).toBe(CODE.validation);
     expect(neither.body.message).toBe(sentence('invites', 'roleRequired', CODE.validation));
 
-    const both = await invite('padmin').send({ email: 'ac3@koda.test', role: 'VIEWER', roleKey: 'viewer' });
-    expect(both.status).toBe(400);
-    expect(both.body.ret).toBe(CODE.validation);
-    expect(both.body.message).toBe(sentence('invites', 'roleAndRoleKey', CODE.validation));
-    expect(await invitesFor('ac3@koda.test')).toEqual([]);
+    // US-004 (P1l): the legacy `role` field is gone — the pipe strips it, so a create carrying only that
+    // field is the same as a create with neither, and one carrying both grants the key's role.
+    const legacyOnly = await invite('padmin').send({ email: 'ac3legacy@koda.test', role: 'VIEWER' });
+    expect(legacyOnly.status).toBe(400);
+    expect(legacyOnly.body.message).toBe(sentence('invites', 'roleRequired', CODE.validation));
+
+    const both = await invite('padmin').send({ email: 'ac3@koda.test', role: 'ADMIN', roleKey: 'viewer' });
+    expect(both.status).toBe(201);
+    expect(data<CreateBody>(both).invite?.roleKey).toBe('viewer');
+    expect((await invitesFor('ac3@koda.test')).map((row) => row.role)).toEqual(['VIEWER']);
+    expect(await invitesFor('ac3legacy@koda.test')).toEqual([]);
   }, TIMEOUT);
 
-  it('AC-3: an explicit null roleKey or role is a 400 validation error, not a 500, and creates no invite', async () => {
+  it('AC-3: an explicit null roleKey is a 400 validation error, and an explicit null role is only stripped', async () => {
     for (const body of [
       { email: 'ac3null@koda.test', roleKey: null },
-      { email: 'ac3null@koda.test', role: null },
-      { email: 'ac3null@koda.test', role: null, roleKey: 'viewer' },
+      { email: 'ac3null@koda.test', role: null, roleKey: null },
     ]) {
       const res = await invite('padmin').send(body);
       expect(res.status).toBe(400);
       expect(res.body.ret).toBe(CODE.validation);
     }
+    // A null legacy role is not a declared property any more, so it neither validates nor counts as a key.
+    const nullRole = await invite('padmin').send({ email: 'ac3null@koda.test', role: null });
+    expect(nullRole.status).toBe(400);
+    expect(nullRole.body.message).toBe(sentence('invites', 'roleRequired', CODE.validation));
     expect(await invitesFor('ac3null@koda.test')).toEqual([]);
   }, TIMEOUT);
 
@@ -323,18 +332,19 @@ describeIntegration('invite role keys (US-005)', () => {
     expect(after?.roleId).toBeNull();
   }, TIMEOUT);
 
-  it('AC-9: the preview answers exactly eight fields with roleKey triager', async () => {
+  it('AC-9: the preview answers exactly seven fields with roleKey triager', async () => {
     const created = data<CreateBody>(await invite('padmin').send({ email: 'ac9@koda.test', roleKey: 'triager' }).expect(201));
 
     const res = await request(server).get(`/api/invites/${tokenFrom(created.invitePath)}`);
 
     expect(res.status).toBe(200);
     const body = data<Record<string, unknown>>(res);
+    // US-007: `InvitePreviewDto.role` is gone, which leaves the seven fields the doc names.
     expect(Object.keys(body).sort()).toEqual(
-      ['email', 'expiresAt', 'inviterName', 'projectName', 'projectSlug', 'role', 'roleKey', 'roleName'].sort(),
+      ['email', 'expiresAt', 'inviterName', 'projectName', 'projectSlug', 'roleKey', 'roleName'].sort(),
     );
     expect(body.roleKey).toBe('triager');
-    expect(body.role).toBeNull();
+    expect(body).not.toHaveProperty('role');
   }, TIMEOUT);
 
   it('AC-11: inviting the caller own email is 403 permissions.selfBinding and leaves the bindings unchanged', async () => {

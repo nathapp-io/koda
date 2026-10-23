@@ -259,7 +259,7 @@ export class PrismaTicketsRepository implements ITicketRepository {
     return agentHasProjectAccess(this.db, agentId, projectId);
   }
 
-  /** S4c US-004: the same lock `AgentsService.removeFromProject` holds. */
+  /** S4c US-004: the same lock an agent-binding removal takes (`MembershipService.removeBinding`). */
   async lockProjectAgents(projectId: string): Promise<void> {
     await lockProjectAgents(this.db, projectId);
   }

@@ -176,13 +176,19 @@ export async function principalIdsWithAccess(
  * One entry per principal of `type` with a **local** source in the project, ordered by `since`
  * ascending and then `principalId` ascending. The role is the strongest of its sources, so a binding
  * is mapped to the display role vocabulary.
+ *
+ * Exhaustive, like `accessibleProjectIds`: the project's bindings are read in `MEMBERSHIP_READ_CAP`-sized
+ * keyset pages, so a project with more binding rows than one page does not lose the members past it.
+ * The members listing is what clients page through to find one member — `koda member remove` reads it
+ * until it sees the member, and a truncated read would report a real member as absent and leave it
+ * impossible to remove (Permissions P1l F1).
  */
 export async function listProjectMemberships(
   db: PrismaClient,
   projectId: string,
   type: PrincipalType,
 ): Promise<ProjectMembership[]> {
-  const bindings = await projectBindingMembershipSources(db, projectId, type, 'listProjectMemberships');
+  const bindings = await readProjectBindingSources(db, projectId, type, 'listProjectMemberships', MAX_READ_PAGES);
   return mergeMemberships(bindings);
 }
 
@@ -262,17 +268,41 @@ async function bindingPrincipalIds(
   return rows.map((row) => row.principalId);
 }
 
-/** The project bindings in the project, as `ProjectMembership` inputs. */
-async function projectBindingMembershipSources(
+/**
+ * The project bindings of `type` in the project, as `ProjectMembership` inputs.
+ *
+ * Pages by `(createdAt, id)` — a total order — so a page that ends on a timestamp boundary loses and
+ * repeats nothing, and reaching `maxPages` while pages are still full is a defect: the read fails
+ * loudly instead of answering a partial member listing.
+ *
+ * Exported as the paging seam the unit spec drives: the production bound cannot be reached with real
+ * rows (thousands of full pages), so the spec passes it a small `maxPages`. Production callers always
+ * pass `MAX_READ_PAGES`.
+ */
+export async function readProjectBindingSources(
   db: PrismaClient,
   projectId: string,
   type: PrincipalType,
   fnName: string,
+  maxPages: number,
 ): Promise<MembershipSource[]> {
-  const rows = cap(
-    await db.roleBinding.findMany({
-      where: { principalType: type, projectId, role: { scope: PROJECT_SCOPE } },
+  const where = { principalType: type, projectId, role: { scope: PROJECT_SCOPE } };
+  const sources: MembershipSource[] = [];
+  let cursor: { createdAt: Date; id: string } | undefined;
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const rows = await db.roleBinding.findMany({
+      where: cursor === undefined
+        ? where
+        : {
+          ...where,
+          OR: [
+            { createdAt: { gt: cursor.createdAt } },
+            { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+          ],
+        },
       select: {
+        id: true,
         principalId: true,
         createdAt: true,
         grantedByType: true,
@@ -281,16 +311,25 @@ async function projectBindingMembershipSources(
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: MEMBERSHIP_READ_CAP,
-    }),
-    fnName,
-    projectId,
-  );
-  return rows.map((row) => ({
-    principalId: row.principalId,
-    role: legacyRoleForRoleKey(row.role.key),
-    since: row.createdAt,
-    addedByUserId: row.grantedByType === 'USER' ? row.grantedById : null,
-  }));
+    });
+    sources.push(...rows.map((row) => ({
+      principalId: row.principalId,
+      role: legacyRoleForRoleKey(row.role.key),
+      since: row.createdAt,
+      addedByUserId: row.grantedByType === 'USER' ? row.grantedById : null,
+    })));
+    if (rows.length < MEMBERSHIP_READ_CAP) return sources;
+
+    const last = rows[rows.length - 1] as (typeof rows)[number];
+    cursor = { createdAt: last.createdAt, id: last.id };
+    if (page === maxPages) {
+      logger.error(
+        `${fnName} reached its ${maxPages}-page bound for ${type} in project ${projectId} after ${sources.length} bindings; refusing to answer a partial member listing`,
+      );
+      throw new InternalAppException({ count: sources.length }, 'permissions');
+    }
+  }
+  return sources;
 }
 
 /**

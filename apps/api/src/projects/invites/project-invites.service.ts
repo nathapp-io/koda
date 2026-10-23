@@ -231,7 +231,6 @@ export class ProjectInvitesService {
     return {
       id: record.id,
       email: record.email,
-      role: record.role,
       roleKey: record.roleKey,
       roleName: record.roleName,
       status: effectiveStatus(record, now),
@@ -243,16 +242,12 @@ export class ProjectInvitesService {
 }
 
 /**
- * US-005: exactly one of `roleKey` and the legacy `role` names the role; the key wins its own field and a
- * legacy role maps to its key. Sending both, or neither, is a client bug.
+ * US-005: `roleKey` names the role to grant. US-004 (P1l): it is the only way — the legacy `role` field is
+ * gone, so an invite that omits the key is a client bug and answers 400 `invites.roleRequired`.
  */
 function effectiveRoleKey(dto: CreateInviteDto): string {
-  if (dto.role !== undefined && dto.roleKey !== undefined) {
-    throw new ValidationAppException({}, 'invites.roleAndRoleKey');
-  }
-  if (dto.roleKey !== undefined) return dto.roleKey;
-  if (dto.role !== undefined) return ROLE_KEY_FOR_LEGACY_ROLE[dto.role];
-  throw new ValidationAppException({}, 'invites.roleRequired');
+  if (dto.roleKey === undefined) throw new ValidationAppException({}, 'invites.roleRequired');
+  return dto.roleKey;
 }
 
 /** The legacy enum stored beside `roleId`: only the three keys that have a legacy name, null for any other. */

@@ -6,15 +6,14 @@ export type InviteStatus = 'PENDING' | 'ACCEPTED' | 'EXPIRED' | 'CANCELLED'
 /**
  * The public invite shape the API returns — never carries a raw token.
  *
- * Permissions P1 US-005 added the role-key fields: `role` is the legacy enum, `roleKey` the project
- * role the invite grants and `roleName` its label. All three are nullable because an invite stored
- * before the migration has no role row; an invite created since has all three unset or set together.
- * The panel renders `roleName`, never the raw key.
+ * Permissions P1 US-005 added the role-key fields, US-011 removed the legacy `role` enum:
+ * `roleKey` is the project role the invite grants and `roleName` its label. Both are nullable
+ * because an invite stored before the migration has no role row. The panel renders `roleName`,
+ * never the raw key.
  */
 export interface InviteDto {
   id: string
   email: string
-  role: string | null
   roleKey: string | null
   roleName: string | null
   status: InviteStatus

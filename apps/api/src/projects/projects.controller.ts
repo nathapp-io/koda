@@ -29,8 +29,7 @@ import { Principal } from '@nathapp/nestjs-auth';
 import { KodaPrincipal, isAgentPrincipal } from '../auth/principal/koda-principal.types';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { AgentsService } from '../agents/agents.service';
-import { AddProjectAgentDto } from '../agents/dto/add-project-agent.dto';
-import { ProjectAgentDto, ProjectAgentListDto } from '../agents/dto/project-agent.dto';
+import { ProjectAgentListDto } from '../agents/dto/project-agent.dto';
 import { UpdateAgentDto } from '../agents/dto/update-agent.dto';
 import { PermissionService } from '../permissions/permission.service';
 import { RequiresGuard } from '../permissions/requires.guard';
@@ -185,43 +184,6 @@ export class ProjectsController {
   async getProjectAgents(@Param('slug') slug: string) {
     const data = await this.agentsService.listProjectRoster(slug);
     return JsonResponse.Ok(data);
-  }
-
-  @Post(':slug/agents')
-  @HttpCode(201)
-  @UseGuards(ProjectMembershipGuard, RequiresGuard)
-  @Requires('member.add')
-  @ApiOperation({ summary: 'Add an agent to the project roster (member.add)' })
-  @ApiResponse({ status: 201, type: ProjectAgentDto, description: 'Agent added to the roster' })
-  @ApiResponse({ status: 400, description: 'Invalid request data' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Not a project member, or member.add is missing' })
-  @ApiResponse({ status: 404, description: 'Project or agent not found' })
-  @ApiResponse({ status: 409, description: 'Agent is already on the roster, or is OFFLINE' })
-  async addProjectAgent(
-    @Param('slug') slug: string,
-    @Body() addAgentDto: AddProjectAgentDto,
-    @Principal() principal: KodaPrincipal,
-  ) {
-    const data = await this.agentsService.addToProject(slug, addAgentDto.agentSlug, principal.id);
-    return JsonResponse.Ok(data);
-  }
-
-  @Delete(':slug/agents/:agentSlug')
-  @HttpCode(204)
-  @UseGuards(ProjectMembershipGuard, RequiresGuard)
-  @Requires('member.remove')
-  @ApiOperation({ summary: 'Remove an agent from the project roster (member.remove)' })
-  @ApiResponse({ status: 204, description: 'Agent removed from the roster' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Not a project member, or member.remove is missing' })
-  @ApiResponse({ status: 404, description: 'Project, agent or roster entry not found' })
-  @ApiResponse({ status: 409, description: 'The agent still holds open tickets in this project' })
-  async removeProjectAgent(
-    @Param('slug') slug: string,
-    @Param('agentSlug') agentSlug: string,
-  ): Promise<void> {
-    await this.agentsService.removeFromProject(slug, agentSlug);
   }
 
   @Patch(':slug/agents/:agentSlug')

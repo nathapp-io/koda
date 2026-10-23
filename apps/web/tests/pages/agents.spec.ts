@@ -9,23 +9,27 @@ import { globalPermissionsStub } from '../helpers/permission-nav'
 
 const page = webFile('pages', '[project]', 'agents.vue')
 
+/**
+ * Permissions P1 US-011: the roster response is `{ items }` — no `scoping` flag and no per-agent
+ * `roles` (an agent's roles are its bindings, which this page never showed). A payload that still
+ * carries them is a legacy shape the page must ignore, which AC-3 pins.
+ */
+interface RosterItem {
+  name: string
+  slug: string
+  status: 'ACTIVE' | 'PAUSED' | 'OFFLINE'
+  capabilities: string[]
+  openTicketCount: number
+  openTicketRefs: string[]
+  addedAt?: string
+  addedBy?: { id: string; name: string | null } | null
+}
+
 interface RosterResponse {
-  scoping: boolean
-  items: Array<{
-    name: string
-    slug: string
-    status: 'ACTIVE' | 'PAUSED' | 'OFFLINE'
-    roles: string[]
-    capabilities: string[]
-    openTicketCount: number
-    openTicketRefs: string[]
-    addedAt?: string
-    addedBy?: { id: string; name: string | null } | null
-  }>
+  items: RosterItem[]
 }
 
 const makeRoster = (over: Partial<RosterResponse> = {}): RosterResponse => ({
-  scoping: true,
   items: [],
   ...over,
 })
@@ -34,7 +38,6 @@ const item: ProjectAgent = {
   slug: 'builder',
   name: 'Build Agent',
   status: 'ACTIVE',
-  roles: ['CODER'],
   capabilities: ['code.write'],
   openTicketCount: 0,
   openTicketRefs: [],
@@ -50,6 +53,8 @@ interface MountOptions {
   agentsResponse?: Array<{ slug: string; name: string; status: string }>
   role?: 'ADMIN' | 'MEMBER'
   globalAdmin?: boolean
+  /** The global key set `useGlobalPermissions` answers; the status select needs `agent.update`. */
+  globalKeys?: string[]
   rejectAdd?: Error
   rejectDelete?: Error
   rejectPatch?: Error
@@ -181,7 +186,7 @@ function mountPage(options: MountOptions = {}): PageHandle {
         refresh: async () => undefined,
       }),
       // Permissions P1 US-007: the per-agent status menu is gated by the GLOBAL `agent.update` key.
-      useGlobalPermissions: () => globalPermissionsStub(['agent.update']),
+      useGlobalPermissions: () => globalPermissionsStub(options.globalKeys ?? ['agent.update']),
       useRoute: () => ({ params: { project: 'acme' }, path: '/acme/agents' }),
       definePageMeta: () => undefined,
     },
@@ -245,10 +250,10 @@ afterEach(() => {
 })
 
 describe('US-006 project agent roster page', () => {
-  test('AC1: GET /projects/:slug/agents populates one row per item with name, slug, roles, capabilities, status, and open-ticket count', async () => {
+  test('AC1: GET /projects/:slug/agents populates one row per item with name, slug, capabilities, status, and open-ticket count', async () => {
     const richItem: ProjectAgent = {
       slug: 'builder', name: 'Build Agent', status: 'ACTIVE',
-      roles: ['CODER', 'REVIEWER'], capabilities: ['code.write', 'lint.run'],
+      capabilities: ['code.write', 'lint.run'],
       openTicketCount: 2, openTicketRefs: ['KODA-11', 'KODA-12'],
       addedAt: '2026-01-01T00:00:00.000Z', addedBy: null,
     }
@@ -261,12 +266,46 @@ describe('US-006 project agent roster page', () => {
     const rowText = m.app.textOf(rows[0])
     expect(rowText).toContain('Build Agent')
     expect(rowText).toContain('builder')
-    expect(rowText).toContain('CODER')
-    expect(rowText).toContain('REVIEWER')
     expect(rowText).toContain('code.write')
     expect(rowText).toContain('lint.run')
     expect(rowText).toContain('ACTIVE')
     expect(rowText).toContain('2')
+  })
+
+  /** The header cells the table renders without the retired Roles column (Permissions P1 US-011). */
+  const headers = (m: PageHandle): string[] =>
+    m.app.find('[data-stub="th"]').map(cell => m.app.textOf(cell))
+  const columns = (): string[] => ['name', 'slug', 'capabilities', 'status', 'openTickets'].map(key => enI18n().t(`agents.columns.${key}`))
+
+  test('AC-3: the scoping-off note is not rendered', async () => {
+    const m = mountPage({ rosterResponse: makeRoster({ items: [item] }) })
+    await m.settle()
+
+    expect(m.rows()).toHaveLength(1)
+    expect(m.app.find('[data-testid="project-agents-scoping-off"]')).toHaveLength(0)
+  })
+
+  test('AC-3: a payload still carrying the retired scoping flag is ignored, not rendered', async () => {
+    // `scoping` is gone from the contract; an API or proxy that still sends `false` must not bring
+    // the note back, because nothing on this page reads that field any more.
+    const legacy = { scoping: false, ...makeRoster({ items: [item] }) }
+    const m = mountPage({ rosterResponse: legacy })
+    await m.settle()
+
+    expect(m.rows()).toHaveLength(1)
+    expect(m.app.find('[data-testid="project-agents-scoping-off"]')).toHaveLength(0)
+  })
+
+  test('AC-4: the header cells are name, slug, capabilities, status and open tickets, plus actions with agent.update', async () => {
+    const withKey = mountPage({ rosterResponse: makeRoster({ items: [item] }), globalKeys: ['agent.update'] })
+    await withKey.settle()
+    expect(headers(withKey)).toEqual([...columns(), enI18n().t('agents.columns.actions')])
+
+    const withoutKey = mountPage({ rosterResponse: makeRoster({ items: [item] }), globalKeys: [] })
+    await withoutKey.settle()
+    expect(headers(withoutKey)).toEqual(columns())
+    // A row with no action cell follows the same gate.
+    expect(withoutKey.app.find('select')).toHaveLength(0)
   })
 
   test('AC10: an empty roster renders the "No agents on this project yet." empty state', async () => {
@@ -275,13 +314,6 @@ describe('US-006 project agent roster page', () => {
     const emptyState = m.app.find('[data-stub="empty-state"]')
     expect(emptyState).toHaveLength(1)
     expect(emptyState[0].props.message).toBe('No agents on this project yet.')
-  })
-
-  test('AC9: a roster response with scoping: false renders the scoping-off note', async () => {
-    const m = mountPage({ rosterResponse: makeRoster({ scoping: false, items: [item] }) })
-    await m.settle()
-    const note = m.app.find('[data-testid="project-agents-scoping-off"]')
-    expect(note).toHaveLength(1)
   })
 
   test('AC3: admin roster has no add/remove controls or added-by/added-at columns', async () => {

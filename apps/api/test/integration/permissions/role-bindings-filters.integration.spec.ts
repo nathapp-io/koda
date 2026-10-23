@@ -76,12 +76,15 @@ describeIntegration('role binding list filters (US-002)', () => {
   const bindings = (query: Record<string, string>) =>
     request(server).get('/api/role-bindings').query(query).set(auth(ownerToken));
 
-  /** Creates a user through the admin route: the baseline `member` binding comes from production code. */
-  const createUser = async (email: string, role: 'MEMBER' | 'ADMIN'): Promise<string> => {
+  /**
+   * Creates a user through the admin route: the baseline `member` binding comes from production code.
+   * Permissions P1l (US-005) removed the request's role field, so this only ever creates members.
+   */
+  const createUser = async (email: string): Promise<string> => {
     const created = await request(server)
       .post('/api/admin/users')
       .set(auth(ownerToken))
-      .send({ email, name: email.split('@')[0], password: TEST_PASSWORD, role })
+      .send({ email, name: email.split('@')[0], password: TEST_PASSWORD })
       .expect(201);
     resetThrottle(app);
     return data<{ id: string }>(created).id;
@@ -118,11 +121,11 @@ describeIntegration('role binding list filters (US-002)', () => {
     // AC-6's three principals: two agents and one user, each with a global binding.
     agentAId = await createAgent('filter-agent-a');
     agentBId = await createAgent('filter-agent-b');
-    plainUserId = await createUser(MEMBER_EMAIL, 'MEMBER');
+    plainUserId = await createUser(MEMBER_EMAIL);
 
     // AC-7's principal: one global `admin` binding and one `developer` binding in p. The member
     // baseline production writes on create is removed so "one global binding" is literal.
-    scopedUserId = await createUser(SCOPED_EMAIL, 'MEMBER');
+    scopedUserId = await createUser(SCOPED_EMAIL);
     await grantRole(db, { type: 'USER', id: scopedUserId }, 'admin');
     await grantRole(db, { type: 'USER', id: scopedUserId }, 'developer', projectId);
     await db.roleBinding.deleteMany({
