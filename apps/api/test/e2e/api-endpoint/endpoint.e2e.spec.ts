@@ -5156,6 +5156,46 @@ describeIntegration('API Integration Tests', () => {
 
       refusal(res, 'permissions.bindingNotFound.404');
     });
+
+    /**
+     * Permissions P1 US-001: a project must keep one active Project Admin. The caller here is a custom
+     * co-admin — a PROJECT role holding every entry, which is `role.binding.manage` inside that project
+     * and no global key — so the refusal is decided by `role.binding.global`, not by the route keys.
+     */
+    it('DELETE /api/role-bindings/{id} — 409 members.lastAdmin for the last enabled Project Admin', async () => {
+      // A project of its own: the lifecycle's project already has an admin, and the guard counts them.
+      const project = await db().project.create({
+        data: { name: 'E2E last admin', slug: 'e2e-last-admin', key: 'ELA' },
+      });
+      const coAdminRole = await db().role.create({
+        data: {
+          key: 'e2e-co-admin',
+          name: 'E2E co-admin',
+          description: '',
+          scope: 'PROJECT',
+          system: false,
+          locked: false,
+          permissions: ['*'],
+        },
+      });
+      await grantRole(db(), { type: 'USER', id: memberUserId }, coAdminRole.key, project.id);
+      const target = await db().user.create({
+        data: {
+          email: 'e2e-last-admin@koda.test',
+          name: 'E2E last admin',
+          passwordHash: 'not-a-real-hash',
+        },
+      });
+      await grantBaseline(db(), { type: 'USER', id: target.id });
+      const binding = await grantRole(db(), { type: 'USER', id: target.id }, 'project-admin', project.id);
+      // Every grant above is written under the permission cache, which is dropped explicitly.
+      await app.get(MembershipService).invalidatePermissions();
+
+      const res = await deleteBinding(nonAdminUserAccessToken, binding.id).expect(409);
+
+      refusal(res, 'members.lastAdmin.409');
+      expect(await db().roleBinding.findUnique({ where: { id: binding.id } })).not.toBeNull();
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────

@@ -5,8 +5,10 @@ import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-com
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { userAuthStateCacheKey, userTokenVersionCacheTag } from '../auth/token-version.cache';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { isForeignKeyViolation, isUniqueViolation } from '../common/utils/prisma-errors';
 import { AfterCommitService } from './after-commit.service';
+import { ROLE_KEY_FOR_LEGACY_ROLE } from './legacy-project-roles';
 import { PermissionCache } from './permission-cache';
 import { ROLE_BINDING_REPOSITORY, ROLE_REPOSITORY } from './permissions.tokens';
 import type {
@@ -34,6 +36,12 @@ interface WriteOutcome<T> {
   revokedUserIds: string[];
 }
 
+/** What a binding removal accepts from its caller. */
+export interface RemoveBindingOptions {
+  /** The caller may remove a project's last active Project Admin (it holds role.binding.global). */
+  lastProjectAdminOverride?: boolean;
+}
+
 /**
  * Permissions P1a: every read and write of `RoleBinding`.
  *
@@ -49,6 +57,10 @@ interface WriteOutcome<T> {
  * single `removeBinding` takes the `owner` Role row only when the binding it removes is an owner one,
  * and `removeAllBindings` takes both locks before it reads anything — the snapshot it deletes and
  * mirrors cannot be decided by an unlocked read.
+ *
+ * A project's admins are serialized by the project's advisory lock instead (`lockProjectMembers`),
+ * which a removal of a USER `project-admin` binding takes *before* the row locks: the last-admin count
+ * must not see a concurrent removal of the project's other admin as still present.
  */
 @Injectable()
 export class MembershipService {
@@ -190,16 +202,34 @@ export class MembershipService {
     return { ...result, records: result.records.map((row) => toView(row.binding, row.roleKey)) };
   }
 
-  async removeBinding(id: string): Promise<void> {
+  /**
+   * `DELETE /role-bindings/:id`: every check and the delete, in one transaction under the locks that
+   * make the reads it decides on trustworthy.
+   *
+   * A USER `project-admin` binding in a project takes the project's membership advisory lock first,
+   * because the last-Project-Admin refusal counts the project's admins and another removal there must
+   * not count this one as still present (US-001). `options.lastProjectAdminOverride` is the caller's
+   * `role.binding.global`, which `RoleAdminService` computes from the stored row; the guards of
+   * `removeProjectBindings`/`removeAllBindings`/`setGlobalAdmin` do not read it.
+   */
+  async removeBinding(id: string, options: RemoveBindingOptions = {}): Promise<void> {
     const outcome = await this.txManager.run(async (): Promise<WriteOutcome<void>> => {
       const first = await this.bindings.findViewById(id);
       if (!first) throw new NotFoundAppException({}, 'permissions.bindingNotFound');
+
+      // The project lock precedes the row locks, as every membership write takes them: a count of the
+      // project's admins must run serialized with the removals and roster changes of that project.
+      const projectId = projectAdminScope(first);
+      if (projectId !== null) await this.bindings.lockProjectMembers(projectId);
+
       const ownerRoleId = first.roleKey === OWNER_ROLE_KEY ? await this.bindings.lockOwnerRole() : null;
       await this.lockUserPrincipal(principalOfBinding(first.binding));
 
-      // Re-read under the lock: a concurrent removal may have deleted it while this call waited.
-      const current = ownerRoleId ? await this.bindings.findViewById(id) : first;
+      // Re-read under the locks: a concurrent removal may have deleted it while this call waited.
+      const relocked = projectId !== null || ownerRoleId !== null;
+      const current = relocked ? await this.bindings.findViewById(id) : first;
       if (!current) throw new NotFoundAppException({}, 'permissions.bindingNotFound');
+      await this.assertKeepsAProjectAdmin(current, options);
       if (ownerRoleId) await this.assertOwnerRemains(ownerRoleId, [current.binding.id]);
 
       // The delete itself decides: a concurrent removal that won reports zero affected rows, and the
@@ -303,6 +333,28 @@ export class MembershipService {
     };
   }
 
+  /**
+   * US-001: refuses a removal that would leave the project without an active Project Admin.
+   *
+   * Only a USER `project-admin` binding inside a project is guarded, and only while the user it names
+   * is enabled: a binding whose `principalId` has no user row (the column has no foreign key) is not an
+   * active admin, so removing it cannot lock the project out. `options.lastProjectAdminOverride` is the
+   * caller's `role.binding.global` — the seeded Owner and Admin roles hold it — and it decides nothing
+   * else: the caller's other keys are checked before this method runs.
+   */
+  private async assertKeepsAProjectAdmin(
+    binding: BindingWithRole,
+    options: RemoveBindingOptions,
+  ): Promise<void> {
+    if (options.lastProjectAdminOverride === true) return;
+    const projectId = projectAdminScope(binding);
+    if (projectId === null) return;
+    const user = await this.bindings.findUserState(binding.binding.principalId);
+    if (user === null || user.disabled) return;
+    if ((await this.bindings.countActiveProjectAdmins(projectId)) > 1) return;
+    throw new ConflictAppException({}, 'members.lastAdmin');
+  }
+
   /** Refuses the removal when it would leave no enabled user holding an `owner` binding. */
   private async assertOwnerRemains(ownerRoleId: string, removedIds: readonly string[]): Promise<void> {
     if ((await this.bindings.countEnabledOwnerBindings(ownerRoleId, removedIds)) < 1) {
@@ -383,6 +435,21 @@ export class MembershipService {
 /** The principal a stored binding names, as the permission layer spells it. */
 function principalOfBinding(binding: BindingWithRole['binding']): PrincipalRef {
   return { type: binding.principalType, id: binding.principalId };
+}
+
+/**
+ * The project a USER `project-admin` binding is scoped to, or `null` for every other binding: a global
+ * one, another role, or an agent's.
+ *
+ * It is the one predicate behind both US-001 steps that care — the project lock the removal takes and
+ * the last-active-admin refusal — so a removal can never take the lock without running the guard, nor
+ * run the guard without the lock that makes its count meaningful.
+ */
+function projectAdminScope(binding: BindingWithRole): string | null {
+  const projectId = binding.binding.projectId;
+  if (projectId === null) return null;
+  if (binding.binding.principalType !== 'USER') return null;
+  return binding.roleKey === ROLE_KEY_FOR_LEGACY_ROLE.ADMIN ? projectId : null;
 }
 
 function toView(binding: BindingWithRole['binding'], roleKey: string): RoleBindingView {

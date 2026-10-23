@@ -37,6 +37,11 @@ export class InMemoryPermissionStore {
   beforeInsert: (() => void) | null = null;
   /** When true, `delete` refuses like Postgres does when a binding appeared after the in-use check. */
   raceBindingOnDelete = false;
+  /**
+   * The error the next `countActiveProjectAdmins` throws instead of answering — the database failure
+   * the removal's transaction must roll back on (US-001). `null` counts normally.
+   */
+  activeAdminCountFailure: Error | null = null;
   private counter = 0;
 
   addUser(id: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER', disabled = false): void {
@@ -223,6 +228,28 @@ export class InMemoryPermissionStore {
       },
       lockUser: async (userId: string) => {
         this.calls.push(`lock-user:${userId}`);
+      },
+      /** US-001: the project's membership advisory lock is a no-op here, recorded like every call. */
+      lockProjectMembers: async (projectId: string) => {
+        this.calls.push(`lock-project-members:${projectId}`);
+      },
+      /**
+       * US-001: distinct enabled users holding `project-admin` in the project, the way
+       * `countActiveProjectAdmins` answers it. A binding whose user row is missing is not counted, and
+       * `activeAdminCountFailure` makes the call fail like a database error would.
+       */
+      countActiveProjectAdmins: async (projectId: string) => {
+        this.calls.push(`count-active-project-admins:${projectId}`);
+        if (this.activeAdminCountFailure) throw this.activeAdminCountFailure;
+        const adminRoleId = this.roleByKey('project-admin').id;
+        const adminIds = new Set(
+          this.bindings
+            .filter(
+              (b) => b.principalType === 'USER' && b.roleId === adminRoleId && b.projectId === projectId,
+            )
+            .map((b) => b.principalId),
+        );
+        return [...adminIds].filter((id) => this.users.get(id)?.disabled === false).length;
       },
       countEnabledOwnerBindings: async (ownerRoleId: string, excludeIds: readonly string[]) =>
         this.bindings.filter(

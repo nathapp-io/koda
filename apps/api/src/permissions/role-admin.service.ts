@@ -11,6 +11,7 @@ import { ConflictAppException } from '../common/exceptions/conflict-app.exceptio
 import { isForeignKeyViolation, isRecordNotFound, isUniqueViolation } from '../common/utils/prisma-errors';
 import { findCatalogEntry } from './catalog';
 import { expandEntries, ScopeMismatchEntryError, UnknownPermissionEntryError } from './entry-matcher';
+import { ROLE_KEY_FOR_LEGACY_ROLE } from './legacy-project-roles';
 import { MembershipService } from './membership.service';
 import { PermissionCache } from './permission-cache';
 import { PermissionService, PermissionScope } from './permission.service';
@@ -288,6 +289,11 @@ export class RoleAdminService {
   /**
    * `DELETE /role-bindings/:id`. The route's keys come from the stored binding, never from the
    * request: a caller cannot pick the scope it is checked against.
+   *
+   * `lastProjectAdminOverride` is decided from the caller's `role.binding.global`, the key that marks
+   * the seeded Owner and Admin roles, and only for the one binding `MembershipService`'s
+   * last-Project-Admin guard applies to (US-001). Every other removal tells the guard nothing it could
+   * act on, so it is not asked for a key.
    */
   async removeBinding(principal: KodaPrincipal, id: string): Promise<void> {
     const binding = await this.membership.findBinding(id);
@@ -306,7 +312,24 @@ export class RoleAdminService {
       scopeOf(binding.projectId),
     );
 
-    await this.membership.removeBinding(id);
+    await this.membership.removeBinding(id, {
+      lastProjectAdminOverride: await this.isLastProjectAdminOverride(principal, binding),
+    });
+  }
+
+  /**
+   * Whether the caller may take the project's last active Project Admin away: true only when the
+   * removal is the guarded one — a USER `project-admin` binding inside a project — and the caller holds
+   * `role.binding.global`. A project-scoped `*` role does not confer it, because the key is global.
+   */
+  private async isLastProjectAdminOverride(
+    principal: KodaPrincipal,
+    binding: RoleBindingView,
+  ): Promise<boolean> {
+    if (binding.projectId === null) return false;
+    if (binding.principalType !== 'USER') return false;
+    if (binding.roleKey !== ROLE_KEY_FOR_LEGACY_ROLE.ADMIN) return false;
+    return (await this.permissions.can(principal, 'role.binding.global')).allowed;
   }
 
   /** The binding routes' own keys: the scope's key, plus the owner key for an `owner` binding. */

@@ -10,7 +10,12 @@ import { Paginate } from '@nathapp/nestjs-prisma';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient, Role as RoleModel, RoleBinding as RoleBindingModel } from '../generated/prisma/client';
-import { accessibleProjectIds, MEMBERSHIP_READ_CAP } from './membership.queries';
+import { lockProjectMembers } from '../common/utils/advisory-lock';
+import {
+  accessibleProjectIds,
+  countActiveProjectAdmins as countActiveProjectAdminsQuery,
+  MEMBERSHIP_READ_CAP,
+} from './membership.queries';
 import type {
   BindingFilter,
   BindingWithRole,
@@ -260,6 +265,24 @@ export class PrismaRoleBindingRepository
    */
   async lockUser(userId: string): Promise<void> {
     await this.db.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+  }
+
+  /**
+   * Takes the project's membership advisory lock, the one the deleted member and roster routes took,
+   * so a removal that counts a project's admins cannot interleave with another removal there. Call
+   * inside `txManager.run` only, and before `lockUser` — the order every membership write uses.
+   */
+  async lockProjectMembers(projectId: string): Promise<void> {
+    await lockProjectMembers(this.db, projectId);
+  }
+
+  /**
+   * The number of distinct enabled users holding a `project-admin` binding in the project — the count
+   * the last-admin guard reads. Call inside the transaction that holds `lockProjectMembers`, so the
+   * number cannot change between the count and the delete it decides.
+   */
+  async countActiveProjectAdmins(projectId: string): Promise<number> {
+    return countActiveProjectAdminsQuery(this.db, projectId);
   }
 
   /** Owner bindings of enabled users, leaving out `excludeIds` (the bindings about to be removed). */
