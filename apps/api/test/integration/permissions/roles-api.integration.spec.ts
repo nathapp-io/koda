@@ -552,6 +552,28 @@ describeIntegration('roles API (US-005)', () => {
     operation('/api/roles/{id}', 'delete');
   });
 
+  it('US-007 AC-9..11: the booted app OpenAPI document excludes retired paths, operations, and role fields', () => {
+    const nestApp = app.getNestApp<INestApplication>();
+    const config = new DocumentBuilder()
+      .setTitle('Koda API')
+      .setDescription('Dev ticket tracker API')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(nestApp, config);
+
+    expect(document.paths).not.toHaveProperty('/api/agents/{slug}/update-roles');
+    expect(document.paths['/api/projects/{slug}/members/{userId}']?.patch).toBeUndefined();
+    expect(document.paths['/api/projects/{slug}/members/{userId}']?.delete).toBeUndefined();
+    expect(document.paths['/api/projects/{slug}/agents']?.post).toBeUndefined();
+
+    for (const schemaName of ['ProjectMemberDto', 'InviteDto', 'InvitePreviewDto', 'UserAdminDto']) {
+      const schema = document.components?.schemas?.[schemaName] as { properties?: Record<string, unknown> } | undefined;
+      expect(schema, `missing OpenAPI schema ${schemaName}`).toBeDefined();
+      expect(schema?.properties).not.toHaveProperty('role');
+    }
+  });
+
   it('AC-23: the first registration can read roles through its owner binding', async () => {
     const res = await getRoles(ownerToken);
 
