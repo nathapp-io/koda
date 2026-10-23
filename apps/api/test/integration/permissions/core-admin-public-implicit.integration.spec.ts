@@ -79,14 +79,14 @@ describeIntegration('admin, auth, home, notification and public invite route key
    * member. `'ADMIN'` now means "create it, then bind the global `admin` role to it" — the binding is
    * what makes it a global admin (and it mirrors `User.role = 'ADMIN'`, as the route used to).
    */
-  const createUser = async (who: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<void> => {
+  const createUser = async (who: string, admin = false): Promise<void> => {
     const created = await request(server)
       .post('/api/admin/users')
       .set(auth('root'))
       .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD })
       .expect(201);
     userIds[who] = data<{ id: string }>(created).id;
-    if (role === 'ADMIN') await grantRole(db, { type: 'USER', id: userIds[who] as string }, 'admin');
+    if (admin) await grantRole(db, { type: 'USER', id: userIds[who] as string }, 'admin');
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
     resetThrottle(app);
@@ -115,7 +115,7 @@ describeIntegration('admin, auth, home, notification and public invite route key
     // `member` holds nothing but the baseline; `gadmin` is the installation's other global admin;
     // `target` is what a refused PATCH must leave alone.
     for (const who of ['member', 'plain', 'target']) await createUser(who);
-    await createUser('gadmin', 'ADMIN');
+    await createUser('gadmin', true);
 
     // AC-13, AC-14 and AC-17's caller holds *no* binding row at all: the baseline `member` binding
     // the admin route writes is removed here, so the 200s cannot come from a role.

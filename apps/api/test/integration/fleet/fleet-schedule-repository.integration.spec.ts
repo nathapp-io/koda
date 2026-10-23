@@ -126,10 +126,10 @@ describeIntegration('schedule repository (PG)', () => {
 
   it('findOwnerAccess reports a missing user and a disabled user, and reads no project role (US-005)', async () => {
     expect(await repo.findOwnerAccess(base.projectId, { type: 'USER', id: 'no-such-user' })).toEqual({ exists: false, disabled: false });
-    const off = await prisma.user.create({ data: { email: 'off@koda.test', passwordHash: 'x', role: 'MEMBER', disabled: true } });
+    const off = await prisma.user.create({ data: { email: 'off@koda.test', passwordHash: 'x', disabled: true } });
     await grantBaseline(prisma, { type: 'USER', id: off.id });
     expect(await repo.findOwnerAccess(base.projectId, { type: 'USER', id: off.id })).toEqual({ exists: true, disabled: true });
-    const dev = await prisma.user.create({ data: { email: 'dev-access@koda.test', passwordHash: 'x', role: 'MEMBER' } });
+    const dev = await prisma.user.create({ data: { email: 'dev-access@koda.test', passwordHash: 'x' } });
     await grantBaseline(prisma, { type: 'USER', id: dev.id });
     await grantRole(prisma, { type: 'USER', id: dev.id }, 'developer', base.projectId);
     // The permission is the owner's effective keys now, so a project role is not part of this answer.

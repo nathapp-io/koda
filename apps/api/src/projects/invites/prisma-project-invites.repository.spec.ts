@@ -17,7 +17,6 @@ const row = (over: Record<string, unknown> = {}) => ({
   id: 'i1',
   projectId: 'p1',
   email: 'new@x.io',
-  role: 'DEVELOPER',
   roleId: null,
   tokenHash: TOKEN_HASH,
   status: 'PENDING',
@@ -43,7 +42,6 @@ const RECORD_KEYS = [
   'invitedById',
   'inviterName',
   'projectId',
-  'role',
   'roleId',
   'roleKey',
   'roleName',
@@ -92,11 +90,9 @@ describe('PrismaProjectInvitesRepository.list (S4b US-004)', () => {
       id: 'i1',
       projectId: 'p1',
       email: 'new@x.io',
-      role: 'DEVELOPER',
       roleId: null,
-      // No roleId: the legacy role names the role, and its name is read from the role table.
-      roleKey: 'developer',
-      roleName: 'Developer',
+      roleKey: null,
+      roleName: null,
       status: 'PENDING',
       invitedById: 'admin',
       // The inviter may have been deleted since the invite was sent; the name is display-only.
@@ -112,46 +108,35 @@ describe('PrismaProjectInvitesRepository.list (S4b US-004)', () => {
 });
 
 describe('PrismaProjectInvitesRepository role fields (permissions P1 web US-005)', () => {
-  it('reads roleKey and roleName from the related role, and the legacy role stays null for a custom key', async () => {
+  it('reads roleKey and roleName from the related role, for a custom key', async () => {
     const { repo, findMany, findRoles } = setup();
     findMany.mockResolvedValueOnce([
-      row({ role: null, roleId: 'r1', assignedRole: { key: 'triager', name: 'Triager' } }),
+      row({ roleId: 'r1', assignedRole: { key: 'triager', name: 'Triager' } }),
     ]);
 
     const [record] = await repo.list('p1');
 
-    expect(record).toMatchObject({ role: null, roleId: 'r1', roleKey: 'triager', roleName: 'Triager' });
+    expect(record).toMatchObject({ roleId: 'r1', roleKey: 'triager', roleName: 'Triager' });
     // Every row names its role through the relation: no legacy lookup is needed.
     expect(findRoles).not.toHaveBeenCalled();
   });
 
-  it('answers null roleKey and roleName for a row whose roleId and role are both null', async () => {
+  it('answers null roleKey and roleName for a row whose roleId is null', async () => {
     const { repo, findMany, findRoles } = setup();
-    findMany.mockResolvedValueOnce([row({ role: null, roleId: null })]);
+    findMany.mockResolvedValueOnce([row({ roleId: null })]);
 
     const [record] = await repo.list('p1');
 
-    expect(record).toMatchObject({ role: null, roleId: null, roleKey: null, roleName: null });
+    expect(record).toMatchObject({ roleId: null, roleKey: null, roleName: null });
     expect(findRoles).not.toHaveBeenCalled();
   });
 
-  it('reads the legacy role names of a page in one bounded query', async () => {
+  it('never recovers a role from stale legacy values when roleId is null', async () => {
     const { repo, findMany, findRoles } = setup();
-    findRoles.mockResolvedValueOnce([
-      { key: 'viewer', name: 'Viewer' },
-      { key: 'developer', name: 'Developer' },
-    ]);
-    findMany.mockResolvedValueOnce([row({ role: 'VIEWER' }), row({ id: 'i2', role: 'DEVELOPER' }), row({ id: 'i3', role: 'VIEWER' })]);
-
+    findMany.mockResolvedValueOnce([row({ role: 'VIEWER' }), row({ role: 'DEVELOPER' })]);
     const records = await repo.list('p1');
-
-    expect(findRoles).toHaveBeenCalledTimes(1);
-    expect(findRoles).toHaveBeenCalledWith({
-      where: { key: { in: ['viewer', 'developer'] } },
-      select: { key: true, name: true },
-      take: 2,
-    });
-    expect(records.map((record) => record.roleName)).toEqual(['Viewer', 'Developer', 'Viewer']);
+    expect(records.map(record => [record.roleKey, record.roleName])).toEqual([[null, null], [null, null]]);
+    expect(findRoles).not.toHaveBeenCalled();
   });
 });
 
@@ -175,7 +160,6 @@ describe('PrismaProjectInvitesRepository writes (S4b US-004)', () => {
     const created = await repo.create({
       projectId: 'p1',
       email: 'new@x.io',
-      role: 'DEVELOPER',
       roleId: 'id-developer',
       tokenHash: TOKEN_HASH,
       invitedById: 'admin',
@@ -187,7 +171,6 @@ describe('PrismaProjectInvitesRepository writes (S4b US-004)', () => {
       data: {
         projectId: 'p1',
         email: 'new@x.io',
-        role: 'DEVELOPER',
         roleId: 'id-developer',
         tokenHash: TOKEN_HASH,
         invitedById: 'admin',
@@ -214,7 +197,6 @@ describe('PrismaProjectInvitesRepository writes (S4b US-004)', () => {
     const created = await repo.create({
       projectId: 'p1',
       email: 'new@x.io',
-      role: 'VIEWER',
       roleId: 'id-viewer',
       tokenHash: TOKEN_HASH,
       invitedById: null,

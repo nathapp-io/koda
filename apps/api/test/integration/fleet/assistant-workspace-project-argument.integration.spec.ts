@@ -53,7 +53,7 @@ describeIntegration('AssistantToolExecutor project argument in WORKSPACE threads
     bId = b.id;
     await prisma.project.create({ data: { name: 'c', slug: 'c', key: 'C' } });
     const gone = await prisma.project.create({ data: { name: 'gone', slug: 'gone', key: 'GONE', deletedAt: new Date() } });
-    const creator = await prisma.user.create({ data: { email: 'ws-creator@koda.test', passwordHash: 'x', role: 'MEMBER' } });
+    const creator = await prisma.user.create({ data: { email: 'ws-creator@koda.test', passwordHash: 'x' } });
     creatorId = creator.id;
     await grantBaseline(prisma, { type: 'USER', id: creatorId });
     await grantRole(prisma, { type: 'USER', id: creatorId }, 'developer', bId);
@@ -117,7 +117,7 @@ describeIntegration('AssistantToolExecutor project argument in WORKSPACE threads
   });
 
   it('AC-13: after the creator is removed from b, the same call answers not_found: project', async () => {
-    const extra = await prisma.user.create({ data: { email: 'ws-removed@koda.test', passwordHash: 'x', role: 'MEMBER' } });
+    const extra = await prisma.user.create({ data: { email: 'ws-removed@koda.test', passwordHash: 'x' } });
     await grantBaseline(prisma, { type: 'USER', id: extra.id });
     const jobId = await workspaceJob({ repoId: sharedRepoId }, extra.id);
     await grantRole(prisma, { type: 'USER', id: extra.id }, 'developer', bId);

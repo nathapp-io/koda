@@ -252,7 +252,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
   it('US-005 AC-4: no membership is written when acceptance is rejected', async () => {
     const { token, row } = await freshInvite();
     await prisma.client.user.create({
-      data: { email: row.email, name: 'Taken', passwordHash: 'x', role: 'MEMBER' },
+      data: { email: row.email, name: 'Taken', passwordHash: 'x' },
     });
 
     expect((await accept(token)).status).toBe(409);

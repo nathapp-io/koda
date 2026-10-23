@@ -141,7 +141,7 @@ export interface ITicketRepository {
    * S4c US-004: the assignee's account state, not just its existence — a
    * disabled account can never be assigned a ticket.
    */
-  findUserById(id: string): Promise<{ id: string; role: string; disabled: boolean } | null>;
+  findUserById(id: string): Promise<{ id: string; disabled: boolean } | null>;
   /**
    * S4c US-004: the agent's id plus its lifecycle status; an OFFLINE agent
    * cannot be assigned a ticket.

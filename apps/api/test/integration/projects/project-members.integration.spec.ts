@@ -102,7 +102,7 @@ describeIntegration('/projects/:slug/members (PG)', () => {
     });
     // A co-admin holds every project key but not `role.binding.global`, so only the last-admin count
     // can refuse it; the count says pa is the project's only active admin.
-    const coAdminId = (await db.user.create({ data: { email: 'co-admin@koda.test', passwordHash, role: 'MEMBER' } })).id;
+    const coAdminId = (await db.user.create({ data: { email: 'co-admin@koda.test', passwordHash } })).id;
     const coAdminRole = await db.role.create({
       data: {
         key: 'team-co-admin', name: 'Team Co Admin', description: '', scope: 'PROJECT',

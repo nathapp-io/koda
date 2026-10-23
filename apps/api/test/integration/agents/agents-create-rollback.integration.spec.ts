@@ -77,7 +77,7 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
         email: adminUser.email,
         name: adminUser.name,
         passwordHash: 'not-used-by-the-injected-principal',
-        role: 'ADMIN',
+
       },
     });
     await grantRole(prisma.client, { type: 'USER', id: adminUser.id }, 'admin');

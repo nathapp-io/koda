@@ -27,10 +27,10 @@ describeIntegration('MembershipService (PG)', () => {
   let counter = 0;
 
   const SYSTEM = { type: 'SYSTEM' as const, id: 'test' };
-  const newUser = async (role: 'MEMBER' | 'ADMIN' = 'MEMBER') => {
+  const newUser = async () => {
     counter += 1;
     return prisma.user.create({
-      data: { email: `m${counter}@koda.test`, name: `M${counter}`, passwordHash: 'x', role },
+      data: { email: `m${counter}@koda.test`, name: `M${counter}`, passwordHash: 'x' },
     });
   };
   const bindGlobal = (userId: string, roleKey: string) =>
@@ -109,7 +109,7 @@ describeIntegration('MembershipService (PG)', () => {
       expect(await ownerCount()).toBe(1);
       expect((await userRow(owner.id)).tokenVersion).toBe(1);
 
-      const legacy = await newUser('ADMIN');
+      const legacy = await newUser();
       await membership.setGlobalAdmin(legacy.id, false, SYSTEM);
       expect((await userRow(legacy.id)).tokenVersion).toBe(0);
     });

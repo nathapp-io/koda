@@ -5,7 +5,7 @@ import type { IPageResult } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient, User } from '../generated/prisma/client';
 import { GlobalLock, lockGlobal } from '../common/utils/advisory-lock';
 import { MEMBERSHIP_READ_CAP } from '../permissions/membership.queries';
-import { GlobalRole, UserAdminRecord, UserAdminWrite, UserListFilters } from './domain/user-admin.domain';
+import { UserAdminRecord, UserAdminWrite, UserListFilters } from './domain/user-admin.domain';
 
 @Injectable()
 export class PrismaUsersRepository {
@@ -18,7 +18,7 @@ export class PrismaUsersRepository {
 
   private toRecord(m: User): UserAdminRecord {
     return {
-      id: m.id, email: m.email, name: m.name, role: m.role,
+      id: m.id, email: m.email, name: m.name,
       disabled: m.disabled, createdAt: m.createdAt, updatedAt: m.updatedAt,
     };
   }
@@ -45,7 +45,7 @@ export class PrismaUsersRepository {
     return m;
   }
 
-  async createUser(data: { email: string; name: string; passwordHash: string; role: GlobalRole }): Promise<UserAdminRecord> {
+  async createUser(data: { email: string; name: string; passwordHash: string }): Promise<UserAdminRecord> {
     return this.toRecord(await this.db.user.create({ data }));
   }
 
@@ -67,7 +67,6 @@ export class PrismaUsersRepository {
     const m = await this.db.user.update({
       where: { id },
       data: {
-        ...(write.role !== undefined && { role: write.role }),
         ...(write.disabled !== undefined && { disabled: write.disabled }),
         ...(write.bumpTokenVersion && { tokenVersion: { increment: 1 } }),
       },

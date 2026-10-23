@@ -46,8 +46,8 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     const root = await db.user.findUniqueOrThrow({ where: { email: 'root@bindings.test' } });
     rootId = root.id;
     passwordHash = root.passwordHash;
-    adminId = (await db.user.create({ data: { email: 'admin@bindings.test', passwordHash: root.passwordHash, role: 'MEMBER' } })).id;
-    targetId = (await db.user.create({ data: { email: 'target@bindings.test', passwordHash: root.passwordHash, role: 'MEMBER' } })).id;
+    adminId = (await db.user.create({ data: { email: 'admin@bindings.test', passwordHash: root.passwordHash } })).id;
+    targetId = (await db.user.create({ data: { email: 'target@bindings.test', passwordHash: root.passwordHash } })).id;
     adminToken = await loginToken(server, 'admin@bindings.test');
     targetToken = await loginToken(server, 'target@bindings.test');
   });
@@ -125,7 +125,7 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     // confers): the custom co-admin role carries `*` in the project, so only the last-admin count can
     // refuse the delete.
     const coAdminId = (await db.user.create({
-      data: { email: 'co-admin@bindings.test', passwordHash, role: 'MEMBER' },
+      data: { email: 'co-admin@bindings.test', passwordHash },
     })).id;
     const coAdminRole = await db.role.create({
       data: {

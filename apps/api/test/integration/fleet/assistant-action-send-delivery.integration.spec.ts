@@ -52,7 +52,7 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
 
   /** An admin, a project with a GitHub repo, and an online runner the thread sessions are pinned to. */
   async function seedWorld(): Promise<void> {
-    userId = (await prisma.user.create({ data: { email: `${uid('handoff')}@koda.test`, passwordHash: 'x', role: 'ADMIN' } })).id;
+    userId = (await prisma.user.create({ data: { email: `${uid('handoff')}@koda.test`, passwordHash: 'x' } })).id;
     const slug = uid('handoff');
     projectId = (await prisma.project.create({ data: { name: slug, slug, key: slug.slice(0, 12).toUpperCase() } })).id;
     repoId = (await prisma.fleetRepo.create({

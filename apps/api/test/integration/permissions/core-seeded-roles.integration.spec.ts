@@ -34,7 +34,7 @@ describeIntegration('seeded project roles and the secret and invitation reads (P
   const newUser = async () => {
     counter += 1;
     const user = await prisma.user.create({
-      data: { email: `u${counter}@koda.test`, name: `U${counter}`, passwordHash: 'x', role: 'MEMBER' },
+      data: { email: `u${counter}@koda.test`, name: `U${counter}`, passwordHash: 'x' },
     });
     // The baseline binding production writes on a user create, so the fixture holds no legacy grant.
     await grantBaseline(prisma, { type: 'USER', id: user.id });

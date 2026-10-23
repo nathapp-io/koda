@@ -103,8 +103,8 @@ integration('assistant action actors (PG)', () => {
     expect(await calls.findUserActor(user.id)).toEqual({ id: user.id, email: user.email, role: 'MEMBER', disabled: user.disabled });
     expect(await calls.findUserActor('missing-user')).toBeNull();
   });
-  it('role claim AC-14: stored ADMIN without global bindings is MEMBER', async () => {
-    const user = await db.user.create({ data: { email: 'actor-legacy@claim.test', name: 'Legacy', passwordHash: 'h', role: 'ADMIN' } });
+  it('role claim AC-14: user without global bindings is MEMBER', async () => {
+    const user = await db.user.create({ data: { email: 'actor-legacy@claim.test', name: 'Legacy', passwordHash: 'h' } });
     await grantBaseline(db, { type: 'USER', id: user.id });
     expect(await calls.findUserActor(user.id)).toMatchObject({ role: 'MEMBER' });
   });
@@ -112,7 +112,7 @@ integration('assistant action actors (PG)', () => {
     const user = await db.user.create({ data: { email: 'actor-admin@claim.test', name: 'Admin', passwordHash: 'h' } });
     await grantBaseline(db, { type: 'USER', id: user.id });
     await grantRole(db, { type: 'USER', id: user.id }, 'admin');
-    await db.user.update({ where: { id: user.id }, data: { role: 'MEMBER' } });
+
     expect(await calls.findUserActor(user.id)).toMatchObject({ role: 'ADMIN' });
   });
   it('AC-15: actor status reads are scoped by actor type, id and project', async () => {

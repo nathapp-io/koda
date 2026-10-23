@@ -175,6 +175,5 @@ describeIntegration('member adds and invites take role keys only (US-004)', () =
     const [stored] = await db.projectInvite.findMany({ where: { projectId, email: 'ac7@koda.test' } });
     const developer = await db.role.findUniqueOrThrow({ where: { key: 'developer' } });
     expect(stored?.roleId).toBe(developer.id);
-    expect(stored?.role).toBe('DEVELOPER');
   }, TIMEOUT);
 });

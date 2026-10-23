@@ -53,7 +53,6 @@ export class UsersAdminService {
             email,
             name: dto.name,
             passwordHash,
-            role: 'MEMBER',
           });
           // Permissions P1a (US-004): every user starts at the member baseline, and stays there.
           await this.membership.bindBaseline({ type: 'USER', id: created.id });

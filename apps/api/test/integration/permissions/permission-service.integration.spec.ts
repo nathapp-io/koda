@@ -26,10 +26,10 @@ describeIntegration('PermissionService (PG)', () => {
     ({ actorType: 'user', id, role: 'MEMBER', email: `${id}@koda.test` }) as KodaPrincipal;
   const agentPrincipal = (id: string): KodaPrincipal => ({ actorType: 'agent', id }) as unknown as KodaPrincipal;
 
-  const newUser = async (role: 'MEMBER' | 'ADMIN' = 'MEMBER') => {
+  const newUser = async () => {
     counter += 1;
     return prisma.user.create({
-      data: { email: `u${counter}@koda.test`, name: `U${counter}`, passwordHash: 'x', role },
+      data: { email: `u${counter}@koda.test`, name: `U${counter}`, passwordHash: 'x' },
     });
   };
   const newAgent = async () => {
@@ -107,8 +107,8 @@ describeIntegration('PermissionService (PG)', () => {
     expect((await permissions.can(userPrincipal(user.id), 'role.binding.owner')).allowed).toBe(false);
   });
 
-  it('AC-7: legacy User.role ADMIN with no bindings grants nothing', async () => {
-    const user = await newUser('ADMIN');
+  it('AC-7: user with no bindings grants nothing', async () => {
+    const user = await newUser();
     expect(await permissions.can(userPrincipal(user.id), 'user.create')).toEqual({ allowed: false, reason: 'not-granted' });
   });
 

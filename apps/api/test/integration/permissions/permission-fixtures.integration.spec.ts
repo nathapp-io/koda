@@ -24,9 +24,9 @@ describeIntegration('permission fixture bindings (PG)', () => {
   let permissions: PermissionService;
   let counter = 0;
 
-  const user = async (role = 'MEMBER') => {
+  const user = async () => {
     counter += 1;
-    return db.user.create({ data: { email: `fixture-${counter}@koda.test`, name: 'Fixture', passwordHash: 'x', role } });
+    return db.user.create({ data: { email: `fixture-${counter}@koda.test`, name: 'Fixture', passwordHash: 'x' } });
   };
   const project = async () => {
     counter += 1;
@@ -128,21 +128,24 @@ describeIntegration('permission fixture bindings (PG)', () => {
     expect(results[0]?.id).toBe(results[1]?.id);
     expect(await db.roleBinding.count({ where: { principalId: u.id, projectId: p.id } })).toBe(1);
   });
-  it('F3: failed admin grant rolls back a new binding; an existing grant stays idempotent', async () => {
-    await expect(grantRole(db, ref('missing-user'), 'admin')).rejects.toThrow();
-    expect(await db.roleBinding.count({ where: { principalId: 'missing-user' } })).toBe(0);
-
+  it('F3: an existing admin grant stays idempotent without updating a user', async () => {
     const u = await user();
-    const adminRole = await db.role.findUniqueOrThrow({ where: { key: 'admin' } });
-    await db.roleBinding.create({ data: { principalType: 'USER', principalId: u.id, roleId: adminRole.id, grantedByType: 'SYSTEM', grantedById: 'test' } });
-    await db.user.update({ where: { id: u.id }, data: { role: 'MEMBER' } });
-    await grantRole(db, ref(u.id), 'admin');
+    const first = await grantRole(db, ref(u.id), 'admin');
+    expect(await grantRole(db, ref(u.id), 'admin')).toEqual(first);
     expect(await db.roleBinding.count({ where: { principalType: 'USER', principalId: u.id } })).toBe(1);
   });
   it('AC-6: unknown role rejects without creating a binding', async () => {
     const u = await user(); const p = await project();
     await expect(grantRole(db, ref(u.id), 'no-such-role', p.id)).rejects.toThrow('no role no-such-role');
     expect(await db.roleBinding.count({ where: { principalId: u.id } })).toBe(0);
+  });
+  it('P1m AC-13/14: fixture admin binding is unique and never revokes tokens', async () => {
+    const u = await user();
+    await db.user.update({ where: { id: u.id }, data: { tokenVersion: 17 } });
+    await grantRole(db, ref(u.id), 'admin');
+    await grantRole(db, ref(u.id), 'admin');
+    expect(await db.roleBinding.count({ where: { principalType: 'USER', principalId: u.id, projectId: null, role: { key: 'admin' } } })).toBe(1);
+    expect((await db.user.findUniqueOrThrow({ where: { id: u.id } })).tokenVersion).toBe(17);
   });
   it('AC-7: grants global admin and project developer bindings', async () => {
     const admin = await user(); const developer = await user(); const p = await project();
@@ -171,9 +174,9 @@ describeIntegration('permission fixture bindings (PG)', () => {
     expect(await revokeProjectRoles(db, ref(u.id), p.id)).toBe(0);
   });
   it('AC-10/11/16: reports legacy state and treats missing principals as empty', async () => {
-    const u = await user('ADMIN'); const p = await project();
+    const u = await user(); const p = await project();
     await db.projectMember.create({ data: { userId: u.id, projectId: p.id, role: 'VIEWER' } });
-    expect(await fixtureGrantReport(db, ref(u.id))).toMatchObject({ legacyMemberships: 2, agentRoleEntries: 0, hasGlobalBinding: false, globalProjectRoleBindings: 0 });
+    expect(await fixtureGrantReport(db, ref(u.id))).toMatchObject({ legacyMemberships: 1, agentRoleEntries: 0, hasGlobalBinding: false, globalProjectRoleBindings: 0 });
     await grantRole(db, ref(u.id), 'admin');
     await db.projectMember.deleteMany({ where: { userId: u.id } });
     expect((await fixtureGrantReport(db, ref(u.id))).legacyMemberships).toBe(0);

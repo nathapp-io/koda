@@ -178,10 +178,10 @@ describeIntegration('role bindings API (US-006)', () => {
 
   const userRow = (id: string) => db.user.findUniqueOrThrow({ where: { id } });
 
-  const principalOf = (user: { id: string; role: string; email: string }): KodaPrincipal => ({
+  const principalOf = (user: { id: string; email: string }): KodaPrincipal => ({
     actorType: 'user',
     id: user.id,
-    role: user.role as 'MEMBER' | 'ADMIN',
+    role: 'MEMBER',
     email: user.email,
   });
 

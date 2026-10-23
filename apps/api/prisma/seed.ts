@@ -25,14 +25,13 @@ async function main() {
   const outcome = await seedAdminUser(prisma, { email, name, password });
 
   if (!outcome.created) {
-    const existingUser = await prisma.user.findUniqueOrThrow({ where: { email } });
-    console.log(`ℹ️  User "${email}" already exists (role: ${existingUser.role}). Skipping.`);
+    console.log(`ℹ️  User "${email}" already exists. Skipping.`);
   } else {
     const user = await prisma.user.findUniqueOrThrow({ where: { id: outcome.userId } });
     console.log(`✅ Admin user created:`);
     console.log(`   Email:    ${user.email}`);
     console.log(`   Password: ${password}`);
-    console.log(`   Role:     ${user.role}`);
+    console.log(`   Role:     ${outcome.roleKey}`);
     console.log(`   ID:       ${user.id}`);
   }
 

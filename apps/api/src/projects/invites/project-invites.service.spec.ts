@@ -45,14 +45,13 @@ function setup(opts: SetupOptions = {}) {
       return count;
     }),
     create: vi.fn(async (input: {
-      projectId: string; email: string; role: 'ADMIN' | 'DEVELOPER' | 'VIEWER' | null; roleId: string;
+      projectId: string; email: string; roleId: string;
       tokenHash: string; invitedById: string | null; invitedByAgentId: string | null; expiresAt: Date;
     }): Promise<ProjectInviteRecord> => {
       const record: ProjectInviteRecord = {
         id: `i${store.length + 1}`,
         projectId: input.projectId,
         email: input.email,
-        role: input.role,
         roleId: input.roleId,
         roleKey: ROLE_KEY_BY_ID[input.roleId] ?? null,
         roleName: ROLE_KEY_BY_ID[input.roleId] ? `Name of ${ROLE_KEY_BY_ID[input.roleId]}` : null,
@@ -144,7 +143,6 @@ function setup(opts: SetupOptions = {}) {
       id: 'i-seed',
       projectId: 'p1',
       email: 'new@x.io',
-      role: 'DEVELOPER',
       roleId: 'id-developer',
       roleKey: 'developer',
       roleName: 'Developer',
@@ -171,6 +169,30 @@ describe('ProjectInvitesService.create (S4b US-004)', () => {
   });
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('P1m AC-10/11: developer invite stores only roleId and mails its display name', async () => {
+    const { service, invites, mailer, roles } = setup();
+    roles.assertMayGrant.mockResolvedValueOnce({ id: 'id-developer', key: 'developer', name: 'Developer' });
+    // The persisted role name, not a legacy enum, supplies the email display text.
+    invites.create.mockImplementationOnce(async () => ({
+      id: 'i1', projectId: 'p1', email: 'new@x.io', roleId: 'id-developer',
+      roleKey: 'developer', roleName: 'Developer', status: 'PENDING', invitedById: 'admin',
+      inviterName: 'Ada', acceptedByUserId: null, acceptedAt: null, expiresAt: plusDays(NOW, 7), createdAt: NOW,
+    }));
+    await service.create('p', { email: 'new@x.io', roleKey: 'developer' }, admin, 'en');
+    expect(invites.create.mock.calls[0][0]).toMatchObject({ roleId: 'id-developer' });
+    expect(invites.create.mock.calls[0][0]).not.toHaveProperty('role');
+    expect(mailer.sendInvite).toHaveBeenCalledWith(expect.objectContaining({ role: 'Developer' }));
+  });
+
+  it('P1m AC-12: a missing role name mails an empty display role', async () => {
+    const { service, invites, mailer, seed } = setup();
+    const record = seed({ roleName: null });
+    invites.findByIdForProject.mockResolvedValue(record);
+    invites.rotate.mockResolvedValue(record);
+    await service.resend('p', record.id, admin, 'en');
+    expect(mailer.sendInvite).toHaveBeenCalledWith(expect.objectContaining({ role: '' }));
   });
 
   it('US-008 AC-2: create no longer consults a legacy admin gate — the route key refuses non-admins', async () => {
@@ -358,7 +380,7 @@ describe('ProjectInvitesService.create role keys (permissions P1 web US-005)', (
     vi.useRealTimers();
   });
 
-  it('asks assertMayGrant for the roleKey with a null principal id for a new address, and stores roleId with a null legacy role', async () => {
+  it('asks assertMayGrant for the roleKey with a null principal id for a new address, and stores roleId only', async () => {
     const { service, invites, roles } = setup({ existingUser: null });
 
     await service.create('p', { email: 'new@x.io', roleKey: 'triager' }, admin, 'en');
@@ -369,7 +391,7 @@ describe('ProjectInvitesService.create role keys (permissions P1 web US-005)', (
       principalType: 'USER',
       principalId: null,
     });
-    expect(invites.create).toHaveBeenCalledWith(expect.objectContaining({ role: null, roleId: 'id-triager' }));
+    expect(invites.create).toHaveBeenCalledWith(expect.objectContaining({ roleId: 'id-triager' }));
   });
 
   it('US-004 (P1l): a legacy role beside the key is ignored — the key names the granted role', async () => {
@@ -378,15 +400,15 @@ describe('ProjectInvitesService.create role keys (permissions P1 web US-005)', (
     await service.create('p', { email: 'new@x.io', roleKey: 'project-admin', role: 'VIEWER' } as never, admin, 'en');
 
     expect(roles.assertMayGrant).toHaveBeenCalledWith(admin, expect.objectContaining({ roleKey: 'project-admin' }));
-    expect(invites.create).toHaveBeenCalledWith(expect.objectContaining({ role: 'ADMIN', roleId: 'id-project-admin' }));
+    expect(invites.create).toHaveBeenCalledWith(expect.objectContaining({ roleId: 'id-project-admin' }));
   });
 
-  it('stores the legacy enum for a roleKey that names a legacy role', async () => {
+  it('stores only roleId for a built-in role key', async () => {
     const { service, invites } = setup({ existingUser: null });
 
     await service.create('p', { email: 'new@x.io', roleKey: 'viewer' }, admin, 'en');
 
-    expect(invites.create).toHaveBeenCalledWith(expect.objectContaining({ role: 'VIEWER', roleId: 'id-viewer' }));
+    expect(invites.create).toHaveBeenCalledWith(expect.objectContaining({ roleId: 'id-viewer' }));
   });
 
   it('asks assertMayGrant with the existing user id and binds the granted role key', async () => {
@@ -449,7 +471,7 @@ describe('ProjectInvitesService.list (S4b US-004)', () => {
 
   it('AC-8: an invite DTO exposes exactly the public fields and no token material', async () => {
     const { service, seed } = setup({ existingUser: null });
-    seed({ id: 'i1', email: 'new@x.io', role: 'DEVELOPER', status: 'PENDING' });
+    seed({ id: 'i1', email: 'new@x.io', status: 'PENDING' });
 
     const rows = await service.list('p', admin);
 

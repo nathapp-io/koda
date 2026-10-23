@@ -80,14 +80,14 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
    * `'ADMIN'` means "create it, then bind the global `admin` role" — the binding mirrors
    * `User.role = 'ADMIN'` and revokes the token minted before it, so the login comes last.
    */
-  const createUser = async (who: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<void> => {
+  const createUser = async (who: string, admin = false): Promise<void> => {
     const created = await asRoot('post', '/api/admin/users', {
       email: `${who}@koda.test`,
       name: who,
       password: TEST_PASSWORD,
     }).expect(201);
     userIds[who] = data<{ id: string }>(created).id;
-    if (role === 'ADMIN') await bindGlobal(who, 'admin');
+    if (admin) await bindGlobal(who, 'admin');
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
   };
@@ -144,7 +144,7 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
 
     for (const who of ['developer', 'viewer', 'padmin']) await createUser(who);
     // AC-2's caller: a global admin, and a source in no project at all.
-    await createUser('gadmin', 'ADMIN');
+    await createUser('gadmin', true);
     // US-001 AC-8's caller: a global admin through a global `admin` binding. A global binding is
     // not a project access source, so it also holds a `viewer` binding in p1 — the project route
     // is only reachable with a source in the project.

@@ -36,7 +36,7 @@ describeIntegration('schedule ticker (PG)', () => {
   });
   /** A fresh owner with the given project role (null = not a member). */
   const owner = async (role: string | null, over: Partial<Prisma.UserUncheckedCreateInput> = {}): Promise<string> => {
-    const user = await prisma.user.create({ data: { email: `owner${++n}@koda.test`, passwordHash: 'x', role: 'MEMBER', ...over } });
+    const user = await prisma.user.create({ data: { email: `owner${++n}@koda.test`, passwordHash: 'x',  ...over } });
     await grantBaseline(prisma, { type: 'USER', id: user.id });
     if (role) await grantRole(prisma, { type: 'USER', id: user.id }, ROLE_KEY_FOR_LEGACY_ROLE[role as LegacyProjectRole], world.projectId);
     return user.id;

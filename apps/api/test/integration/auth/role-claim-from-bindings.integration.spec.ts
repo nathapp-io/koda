@@ -24,13 +24,19 @@ integration('binding-derived role claims (PG)', () => {
     .post('/api/auth/register').send({ email, name: 'Claim', password: TEST_PASSWORD }).expect(201));
   const login = async (email: string) => data<Session>(await request(app.getHttpServer())
     .post('/api/auth/login').send({ email, password: TEST_PASSWORD }).expect(200));
-  async function user(storedRole = 'MEMBER') {
-    const row = await db.user.create({ data: { email: 'user@claim.test', name: 'User', role: storedRole, passwordHash: await bcrypt.hash(TEST_PASSWORD, 4) } });
+  async function user() {
+    const row = await db.user.create({ data: { email: 'user@claim.test', name: 'User',  passwordHash: await bcrypt.hash(TEST_PASSWORD, 4) } });
     await grantBaseline(db, { type: 'USER', id: row.id });
     return row;
   }
   const project = () => db.project.create({ data: { name: 'Claims', slug: 'claims', key: 'CLM' } });
 
+  it('P1m AC-5/6: Owner creates an account which logs in with MEMBER claim', async () => {
+    const owner = await register();
+    await request(app.getHttpServer()).post('/api/admin/users').auth(owner.accessToken, { type: 'bearer' })
+      .send({ email: 'created@claim.test', name: 'Created', password: TEST_PASSWORD }).expect(201);
+    expect(claim((await login('created@claim.test')).accessToken)).toBe('MEMBER');
+  });
   it('AC-1: first registration displays ADMIN', async () => { expect((await register()).user.role).toBe('ADMIN'); });
   it('AC-2: first registration access token works immediately', async () => {
     const session = await register();
@@ -40,15 +46,13 @@ integration('binding-derived role claims (PG)', () => {
     await register();
     expect(claim((await register('second@claim.test')).accessToken)).toBe('MEMBER');
   });
-  it('AC-4: stored ADMIN without a global binding yields MEMBER', async () => {
-    const row = await user('ADMIN');
+  it('AC-4: user without a global binding yields MEMBER', async () => {
+    const row = await user();
     expect(claim((await login(row.email)).accessToken)).toBe('MEMBER');
   });
   it('AC-5: me displays ADMIN from a global admin binding', async () => {
     const row = await user();
     await grantRole(db, { type: 'USER', id: row.id }, 'admin');
-    // Make the column disagree with the binding so the mapper cannot accidentally trust it.
-    await db.user.update({ where: { id: row.id }, data: { role: 'MEMBER' } });
     const session = await login(row.email);
     const response = await request(app.getHttpServer()).get('/api/auth/me').auth(session.accessToken, { type: 'bearer' }).expect(200);
     expect(data<{ role: string }>(response).role).toBe('ADMIN');

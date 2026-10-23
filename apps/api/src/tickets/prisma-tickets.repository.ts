@@ -240,8 +240,8 @@ export class PrismaTicketsRepository implements ITicketRepository {
     return this.toDomain(row);
   }
 
-  async findUserById(id: string): Promise<{ id: string; role: string; disabled: boolean } | null> {
-    return this.db.user.findUnique({ where: { id }, select: { id: true, role: true, disabled: true } });
+  async findUserById(id: string): Promise<{ id: string; disabled: boolean } | null> {
+    return this.db.user.findUnique({ where: { id }, select: { id: true, disabled: true } });
   }
 
   async findAgentById(id: string): Promise<{ id: string; status: string } | null> {

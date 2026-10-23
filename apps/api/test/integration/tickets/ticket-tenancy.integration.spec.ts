@@ -119,7 +119,7 @@ describeIntegration('H5 ticket tenancy', () => {
     projectBId = projectB.id;
 
     const principalUser = await prisma.client.user.create({
-      data: { email: 'tenancy@example.com', name: 'Tenancy Tester', passwordHash: 'x', role: 'MEMBER' },
+      data: { email: 'tenancy@example.com', name: 'Tenancy Tester', passwordHash: 'x' },
     });
     principalId = principalUser.id;
     (principal as { id: string }).id = principalId;

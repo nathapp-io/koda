@@ -90,14 +90,14 @@ describeIntegration('agent route keys (US-009)', () => {
    * `'ADMIN'` means "create it, then bind the global `admin` role" — the binding mirrors
    * `User.role = 'ADMIN'` and revokes the token minted before it, so the login comes last.
    */
-  const createUser = async (who: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<void> => {
+  const createUser = async (who: string, admin = false): Promise<void> => {
     const created = await request(server)
       .post('/api/admin/users')
       .set(auth('root'))
       .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD })
       .expect(201);
     userIds[who] = data<{ id: string }>(created).id;
-    if (role === 'ADMIN') await bindGlobal(who, 'admin');
+    if (admin) await bindGlobal(who, 'admin');
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
   };
@@ -175,7 +175,7 @@ describeIntegration('agent route keys (US-009)', () => {
 
     // `plain` holds no binding at all; `gadmin` is the installation's other global admin.
     for (const who of ['developer', 'padmin', 'plain']) await createUser(who);
-    await createUser('gadmin', 'ADMIN');
+    await createUser('gadmin', true);
 
     const projectRes = await request(server)
       .post('/api/projects')

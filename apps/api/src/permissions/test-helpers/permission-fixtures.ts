@@ -50,12 +50,10 @@ export async function grantRole(
   if (!role) throw new Error(`no role ${roleKey}`);
 
   const where = { principalType: principal.type, principalId: principal.id, roleId: role.id, projectId: scopeId };
-  const mirrorsAdmin = principal.type === 'USER' && scopeId === null && (roleKey === 'owner' || roleKey === 'admin');
   try {
     const write = async (tx: Prisma.TransactionClient) => {
       const existing = await tx.roleBinding.findFirst({ where, select: { id: true } });
       if (existing) {
-        if (mirrorsAdmin) await tx.user.update({ where: { id: principal.id }, data: { role: 'ADMIN' } });
         return { id: existing.id };
       }
 
@@ -67,15 +65,13 @@ export async function grantRole(
         },
         select: { id: true },
       });
-      if (mirrorsAdmin) await tx.user.update({ where: { id: principal.id }, data: { role: 'ADMIN' } });
       return binding;
     };
     return '$transaction' in db ? await db.$transaction(write) : await write(db);
   } catch (error) {
     // A caller-owned transaction must roll back on failure; it cannot re-read an aborted transaction.
     if (!('$transaction' in db) || !isUniqueViolation(error, 'principalId')) throw error;
-    // A concurrent transaction inserted the same binding after our lookup. Its transaction also
-    // commits the admin mirror; re-read outside our failed transaction to return its binding.
+    // A concurrent transaction inserted the same binding after our lookup. Re-read outside our failed transaction to return its binding.
     const existing = await db.roleBinding.findFirst({ where, select: { id: true } });
     if (!existing) throw error;
     return { id: existing.id };
@@ -104,15 +100,14 @@ export interface FixtureGrantReport {
 export async function fixtureGrantReport(db: FixtureDb, principal: PrincipalRef): Promise<FixtureGrantReport> {
   const base: FixtureGrantReport = { legacyMemberships: 0, agentRoleEntries: 0, hasGlobalBinding: false, globalProjectRoleBindings: 0 };
   if (principal.type === 'USER') {
-    const user = await db.user.findUnique({ where: { id: principal.id }, select: { role: true } });
+    const user = await db.user.findUnique({ where: { id: principal.id }, select: { id: true } });
     if (!user) return base;
-    const [memberships, bindings, adminBinding] = await Promise.all([
+    const [memberships, bindings] = await Promise.all([
       db.projectMember.count({ where: { userId: principal.id } }),
       db.roleBinding.findMany({ where: { principalType: 'USER', principalId: principal.id }, include: { role: { select: { scope: true } } } }),
-      db.roleBinding.count({ where: { principalType: 'USER', principalId: principal.id, projectId: null, role: { key: { in: ['owner', 'admin'] } } } }),
     ]);
     return {
-      legacyMemberships: memberships + (user.role === 'ADMIN' && adminBinding === 0 ? 1 : 0),
+      legacyMemberships: memberships,
       agentRoleEntries: 0,
       hasGlobalBinding: bindings.some(({ projectId }) => projectId === null),
       globalProjectRoleBindings: bindings.filter(({ projectId, role }) => projectId === null && role.scope === 'PROJECT').length,

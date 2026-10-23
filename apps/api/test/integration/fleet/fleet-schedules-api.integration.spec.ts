@@ -139,7 +139,7 @@ describeIntegration('fleet schedules API (PG)', () => {
   });
 
   it('enable is refused with 409 when the owner can no longer dispatch, and enabling a healthy schedule still works (plan D211, US-005)', async () => {
-    const lost = await prisma.user.create({ data: { email: 'lost@koda.test', passwordHash: 'x', role: 'MEMBER' } });
+    const lost = await prisma.user.create({ data: { email: 'lost@koda.test', passwordHash: 'x' } });
     await grantBaseline(prisma, { type: 'USER', id: lost.id });
     const off = await prisma.jobSchedule.create({
       data: {

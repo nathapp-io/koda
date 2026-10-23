@@ -37,13 +37,12 @@ describeIntegration('binding-only membership queries (PG)', () => {
   const userPrincipal = (user: {
     id: string;
     name: string;
-    role: string;
     email: string;
   }): KodaPrincipal => ({
     actorType: 'user',
     id: user.id,
     name: user.name,
-    role: user.role as 'MEMBER' | 'ADMIN',
+    role: 'MEMBER',
     email: user.email,
     authorities: [],
     blacklisted: false,

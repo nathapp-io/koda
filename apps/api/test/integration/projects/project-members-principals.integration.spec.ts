@@ -445,7 +445,7 @@ describeIntegration('project roles and the unified members list (US-003)', () =>
 
       await db.user.createMany({
         data: Array.from({ length: PRINCIPALS }, (_, index) => ({
-          email: `chip-user-${index}@koda.test`, name: `chip user ${index}`, passwordHash: 'not-a-real-hash', role: 'MEMBER',
+          email: `chip-user-${index}@koda.test`, name: `chip user ${index}`, passwordHash: 'not-a-real-hash',
         })),
       });
       await db.agent.createMany({

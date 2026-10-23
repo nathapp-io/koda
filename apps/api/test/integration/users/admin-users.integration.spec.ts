@@ -42,12 +42,12 @@ describeIntegration('/admin/users (PG)', () => {
    * member, then bind the global `admin` role" — the binding is the admin, and it mirrors
    * `User.role = 'ADMIN'` as the route used to.
    */
-  const createUser = async (email: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<UserRow> => {
+  const createUser = async (email: string, admin = false): Promise<UserRow> => {
     const created = data<UserRow>(
       await request(server).post('/api/admin/users').set(auth(rootToken))
         .send({ email, name: email.split('@')[0], password: TEST_PASSWORD }).expect(201),
     );
-    if (role === 'ADMIN') await grantRole(prisma.client, { type: 'USER', id: created.id }, 'admin');
+    if (admin) await grantRole(prisma.client, { type: 'USER', id: created.id }, 'admin');
     return created;
   };
 
@@ -144,7 +144,7 @@ describeIntegration('/admin/users (PG)', () => {
    * patch. The demotion is what revokes the target's token, so the old token stops working at once.
    */
   it('demoting an admin revokes their ADMIN token immediately', async () => {
-    const dave = await createUser('dave@koda.test', 'ADMIN');
+    const dave = await createUser('dave@koda.test', true);
     const daveToken = await loginToken(server, 'dave@koda.test');
     const me = data<{ role: string }>(await request(server).get('/api/auth/me').set(auth(daveToken)).expect(200));
     expect(me.role).toBe('ADMIN');
@@ -175,7 +175,7 @@ describeIntegration('/admin/users (PG)', () => {
   };
 
   it('two admins disabling each other at once refuse exactly one with users.lastAdmin', async () => {
-    const eve = await createUser('eve@koda.test', 'ADMIN');
+    const eve = await createUser('eve@koda.test', true);
     const eveToken = await loginToken(server, 'eve@koda.test');
     // Root and Eve are the only active admins (Dave was demoted above).
     expect(await enabledAdminCount()).toBe(2);

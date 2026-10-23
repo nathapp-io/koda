@@ -68,7 +68,7 @@ describeIntegration('notification, mention and email consumers read bindings (US
    */
   const makeUser = async (who: string, admin = false): Promise<string> => {
     const user = await prisma.user.create({
-      data: { email: `${who}-${randomUUID()}@koda.test`, name: who, passwordHash: 'x', role: 'MEMBER' },
+      data: { email: `${who}-${randomUUID()}@koda.test`, name: who, passwordHash: 'x' },
     });
     await grantBaseline(prisma, { type: 'USER', id: user.id });
     if (admin) await grantRole(prisma, { type: 'USER', id: user.id }, 'admin', null);

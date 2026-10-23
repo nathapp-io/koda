@@ -58,13 +58,13 @@ describeIntegration('retired CASL factory and IN_PROGRESS -> VERIFIED (US-005)',
    * Permissions P1l (US-005): the create route takes no role. `'ADMIN'` means "create it, then bind
    * the global `admin` role" — the binding is the admin, and it mirrors `User.role = 'ADMIN'`.
    */
-  const createUser = async (who: string, role: 'MEMBER' | 'ADMIN'): Promise<void> => {
+  const createUser = async (who: string, admin = false): Promise<void> => {
     await asRoot('post', '/api/admin/users', {
       email: `${who}@koda.test`,
       name: who,
       password: TEST_PASSWORD,
     }).expect(201);
-    if (role === 'ADMIN') {
+    if (admin) {
       const user = await db.user.findUniqueOrThrow({ where: { email: `${who}@koda.test` }, select: { id: true } });
       await grantRole(db, { type: 'USER', id: user.id }, 'admin');
     }
@@ -101,7 +101,7 @@ describeIntegration('retired CASL factory and IN_PROGRESS -> VERIFIED (US-005)',
     tokens.root = data<{ accessToken: string }>(root).accessToken;
 
     // A global admin: the `admin` binding, which mirrors the legacy user-row role ADMIN.
-    await createUser('gadmin', 'ADMIN');
+    await createUser('gadmin', true);
     await asRoot('post', '/api/projects', { name: 'P1', slug: P1_SLUG, key: P1_KEY }).expect(201);
   }, BOOT_TIMEOUT);
 

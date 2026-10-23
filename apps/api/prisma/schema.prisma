@@ -27,7 +27,6 @@ model User {
   email        String   @unique
   name         String?
   passwordHash String
-  role         String   @default("MEMBER") // MEMBER | ADMIN
   tokenVersion Int      @default(0)
   disabled     Boolean  @default(false)
   createdAt    DateTime @default(now())
@@ -215,8 +214,6 @@ model ProjectInvite {
   id               String    @id @default(cuid())
   projectId        String
   email            String // lowercased, trimmed
-  /// Legacy enum (ADMIN | DEVELOPER | VIEWER); null for an invite whose role key has no legacy name.
-  role             String?
   /// The role the invite binds on acceptance; SetNull when a custom role is deleted before it is accepted.
   roleId           String?
   tokenHash        String    @unique

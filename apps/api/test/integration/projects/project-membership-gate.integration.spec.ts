@@ -120,12 +120,12 @@ describeIntegration('US-002 project membership gate (PG)', () => {
    * member, then bind the global `admin` role" — the binding IS the admin, and it mirrors
    * `User.role = 'ADMIN'` as the route used to.
    */
-  const createUser = async (who: string, role: 'MEMBER' | 'ADMIN'): Promise<string> => {
+  const createUser = async (who: string, admin = false): Promise<string> => {
     const created = await request(server).post('/api/admin/users').set(auth('root'))
       .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD }).expect(201);
     const id = data<{ id: string }>(created).id;
     ids[who] = id;
-    if (role === 'ADMIN') await grantRole(prisma, { type: 'USER', id }, 'admin');
+    if (admin) await grantRole(prisma, { type: 'USER', id }, 'admin');
     tokens[who] = await loginToken(server, `${who}@koda.test`);
     // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
     // baseline production writes for every user it creates.
@@ -190,8 +190,8 @@ describeIntegration('US-002 project membership gate (PG)', () => {
 
     // dev/outside/author/multi are plain users; adminMember holds the global `admin` binding the
     // project Ticket/Label writes need.
-    for (const who of ['dev', 'outside', 'author', 'multi']) await createUser(who, 'MEMBER');
-    await createUser('adminMember', 'ADMIN');
+    for (const who of ['dev', 'outside', 'author', 'multi']) await createUser(who);
+    await createUser('adminMember', true);
 
     for (const [slug, key] of [['team', 'TEAM'], ['other', 'OTH'], ['third', 'THD'], ['softdel', 'SFT']]) {
       await request(server).post('/api/projects').set(auth('root'))
