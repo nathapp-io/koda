@@ -78,14 +78,14 @@ describeIntegration('webhook route permission keys (US-005)', () => {
    * member, then bind the global `admin` role" — binding before the login, because the grant
    * promotes `User.role` and revokes older tokens.
    */
-  const createUser = async (who: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<void> => {
+  const createUser = async (who: string, admin = false): Promise<void> => {
     const created = await asRoot('post', '/api/admin/users', {
       email: `${who}@webhook-permissions.test`,
       name: who,
       password: TEST_PASSWORD,
     }).expect(201);
     userIds[who] = data<{ id: string }>(created).id;
-    if (role === 'ADMIN') await grantRole(db, { type: 'USER', id: userIds[who] as string }, 'admin');
+    if (admin) await grantRole(db, { type: 'USER', id: userIds[who] as string }, 'admin');
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@webhook-permissions.test`);
   };
@@ -103,7 +103,7 @@ describeIntegration('webhook route permission keys (US-005)', () => {
       .expect(201);
     tokens.root = data<{ accessToken: string }>(rootRes).accessToken;
     for (const who of ['padmin', 'developer', 'viewer', 'outsider']) await createUser(who);
-    await createUser('global-admin', 'ADMIN');
+    await createUser('global-admin', true);
 
     for (const [slug, name, key] of [[P1_SLUG, 'P1', 'PONE'], [P2_SLUG, 'P2', 'PTWO']] as const) {
       const res = await asRoot('post', '/api/projects', { name, slug, key }).expect(201);

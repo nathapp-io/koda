@@ -41,7 +41,7 @@ describeIntegration('delivering outcome notes on a new-turn assign (PG, 2aw US-0
 
   /** A user, a project and a GitHub repo: what a thread needs to exist. */
   async function seedWorld(): Promise<void> {
-    userId = (await prisma.user.create({ data: { email: `${uid('delivery')}@koda.test`, passwordHash: 'x', role: 'ADMIN' } })).id;
+    userId = (await prisma.user.create({ data: { email: `${uid('delivery')}@koda.test`, passwordHash: 'x' } })).id;
     const slug = uid('delivery');
     projectId = (await prisma.project.create({ data: { name: slug, slug, key: slug.slice(0, 12).toUpperCase() } })).id;
     repoId = (await prisma.fleetRepo.create({

@@ -7,7 +7,7 @@ import { ConflictAppException } from '../common/exceptions/conflict-app.exceptio
 import type { UserAdminRecord } from './domain/user-admin.domain';
 
 const user = (over: Partial<UserAdminRecord> = {}): UserAdminRecord => ({
-  id: 'u2', email: 'u2@koda.test', name: 'U2', role: 'MEMBER', disabled: false,
+  id: 'u2', email: 'u2@koda.test', name: 'U2', disabled: false,
   createdAt: new Date(0), updatedAt: new Date(0), ...over,
 });
 
@@ -83,15 +83,15 @@ describe('UsersAdminService', () => {
 
     /**
      * US-005: the request has no role any more, so every created account is the least-privileged
-     * member — the row says MEMBER and the only binding is the baseline. A global admin is a
+     * member — the only binding is the baseline. A global admin is a
      * `POST /role-bindings` grant afterwards, so `create` never promotes.
      */
-    it('AC-1 and AC-2: writes MEMBER, binds the member baseline and grants no admin binding', async () => {
-      repo.createUser.mockResolvedValue(user({ id: 'new-member', role: 'MEMBER' }));
+    it('AC-1 and AC-2: writes no role, binds the member baseline and grants no admin binding', async () => {
+      repo.createUser.mockResolvedValue(user({ id: 'new-member' }));
 
       const created = await service.create({ email: 'm@k.t', name: 'M', password: 'Admin1234!Aa' });
 
-      expect(repo.createUser).toHaveBeenCalledWith(expect.objectContaining({ role: 'MEMBER' }));
+      expect(repo.createUser.mock.calls[0][0]).not.toHaveProperty('role');
       expect(membership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'new-member' });
       expect(membership.setGlobalAdmin).not.toHaveBeenCalled();
       expect(created).not.toHaveProperty('role');
@@ -138,7 +138,7 @@ describe('UsersAdminService', () => {
     });
 
     it('refuses to disable the last active admin, under the lock', async () => {
-      stored = user({ role: 'ADMIN' });
+      stored = user();
       membership.isGlobalAdmin.mockResolvedValue(true);
       repo.countActiveAdmins.mockResolvedValue(1);
 
@@ -151,7 +151,7 @@ describe('UsersAdminService', () => {
     });
 
     it('disables an admin when another active admin remains, bumping tokenVersion', async () => {
-      stored = user({ role: 'ADMIN' });
+      stored = user();
       membership.isGlobalAdmin.mockResolvedValue(true);
       repo.countActiveAdmins.mockResolvedValue(2);
 
@@ -176,10 +176,10 @@ describe('UsersAdminService', () => {
 
     /**
      * US-005: `update` never calls `setGlobalAdmin`, so no patch can promote or demote. The row it
-     * returns is what it read back — a legacy `role: 'ADMIN'` on the row is not a promotion.
+     * returns is what it read back; privilege is always binding-derived.
      */
     it('never touches a binding, whatever the stored row says', async () => {
-      stored = user({ role: 'ADMIN' });
+      stored = user();
       membership.isGlobalAdmin.mockResolvedValue(true);
       repo.countActiveAdmins.mockResolvedValue(2);
 
@@ -190,8 +190,8 @@ describe('UsersAdminService', () => {
       expect(updated).not.toHaveProperty('role');
     });
 
-    it('does not count admins when isGlobalAdmin is false, even for legacy ADMIN', async () => {
-      stored = user({ role: 'ADMIN' });
+    it('does not count admins when isGlobalAdmin is false', async () => {
+      stored = user();
       membership.isGlobalAdmin.mockResolvedValue(false);
       await service.update('u1', 'u2', { disabled: true });
       expect(repo.countActiveAdmins).not.toHaveBeenCalled();

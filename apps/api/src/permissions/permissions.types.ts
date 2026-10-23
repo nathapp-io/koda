@@ -136,8 +136,7 @@ export interface BindingFilter {
   projectId?: string | null;
 }
 
-/** Login-relevant state of a user: the legacy global role and whether the account is disabled. */
-export interface UserLegacyState {
-  role: 'MEMBER' | 'ADMIN';
+/** Login-relevant state of a user: whether the account is disabled. */
+export interface UserAccountState {
   disabled: boolean;
 }

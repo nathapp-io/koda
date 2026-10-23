@@ -51,11 +51,10 @@ describeIntegration('VCS permission keys over HTTP (binding-only principals)', (
         .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
       tokens[who] = await loginToken(server, `${who}@koda.test`);
       const user = await prisma.user.findUniqueOrThrow({ where: { email: `${who}@koda.test` } });
-      expect(user.role).toBe('MEMBER');
       // User creation also grants the global member role; remove it so this
       // fixture exercises only the explicit project binding (or no binding).
       await prisma.roleBinding.deleteMany({ where: { principalType: 'USER', principalId: user.id } });
-      expect(await prisma.projectMember.count({ where: { userId: user.id } })).toBe(0);
+
       if (roleKey) {
         const role = await prisma.role.findUniqueOrThrow({ where: { key: roleKey } });
         await prisma.roleBinding.create({ data: {
@@ -72,8 +71,7 @@ describeIntegration('VCS permission keys over HTTP (binding-only principals)', (
       tokens[who] = data<{ apiKey: string }>(response).apiKey;
       const agent = await prisma.agent.findUniqueOrThrow({ where: { slug: who } });
       await prisma.roleBinding.deleteMany({ where: { principalType: 'AGENT', principalId: agent.id } });
-      expect(await prisma.agentProject.count({ where: { agentId: agent.id } })).toBe(0);
-      expect(await prisma.agentRoleEntry.count({ where: { agentId: agent.id } })).toBe(0);
+
       const role = await prisma.role.findUniqueOrThrow({ where: { key: roleKey } });
       await prisma.roleBinding.create({ data: {
         principalType: 'AGENT', principalId: agent.id, roleId: role.id, projectId,

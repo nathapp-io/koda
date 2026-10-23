@@ -20,7 +20,6 @@ const inviteRow = (over: Partial<ProjectInvitePreview> = {}): ProjectInvitePrevi
   id: 'i1',
   projectId: 'p1',
   email: 'new@x.io',
-  role: 'DEVELOPER',
   roleId: 'id-developer',
   roleKey: 'developer',
   roleName: 'Developer',
@@ -40,7 +39,6 @@ const userDomain = (over: Partial<UserDomain> = {}): UserDomain => ({
   id: 'u1',
   email: 'new@x.io',
   name: 'New User',
-  role: 'MEMBER',
   passwordHash: 'hash',
   tokenVersion: 0,
   disabled: false,
@@ -79,10 +77,6 @@ function setup(opts: SetupOptions = {}) {
       if (opts.createFails) throw opts.createFails;
       return userDomain({ name: input.name, passwordHash: input.passwordHash });
     }),
-    createMember: vi.fn(async (_projectId: string, userId: string, role: string) => {
-      calls.push('createMember');
-      return { userId, email: 'new@x.io', name: 'New User', role, disabled: false, joinedAt: NOW };
-    }),
   };
 
   let inTransaction = false;
@@ -100,9 +94,9 @@ function setup(opts: SetupOptions = {}) {
   };
 
   const auth = {
-    issueSession: vi.fn((user: UserDomain) => {
+    issueSession: vi.fn(async (user: UserDomain) => {
       calls.push('session');
-      return { accessToken: 'a', refreshToken: 'r', user: { id: user.id, email: user.email, role: user.role } };
+      return { accessToken: 'a', refreshToken: 'r', user: { id: user.id, email: user.email, role: 'MEMBER' } };
     }),
   };
 
@@ -158,7 +152,7 @@ describe('InviteAcceptanceService.preview (S4b US-005)', () => {
   });
 
   it('US-005: a custom role key shows with a null legacy role', async () => {
-    const { service } = setup({ row: inviteRow({ role: null, roleId: 'id-triager', roleKey: 'triager', roleName: 'Triager' }) });
+    const { service } = setup({ row: inviteRow({ roleId: 'id-triager', roleKey: 'triager', roleName: 'Triager' }) });
 
     await expect(service.preview(RAW)).resolves.toMatchObject({ roleKey: 'triager', roleName: 'Triager' });
   });
@@ -202,14 +196,13 @@ describe('InviteAcceptanceService.accept (S4b US-005)', () => {
       { type: 'SYSTEM', id: 'invite' },
     );
     expect(membership.bindBaseline).toHaveBeenCalledWith({ type: 'USER', id: 'u1' });
-    expect(members.createMember).not.toHaveBeenCalled();
     expect(invites.setAcceptedBy).toHaveBeenCalledWith('i1', 'u1', NOW);
     expect(session.user).toMatchObject({ id: 'u1', email: 'new@x.io', role: 'MEMBER' });
   });
 
   it('US-005: binds the role row the invite persisted, by id rather than by its key', async () => {
     const { service, membership } = setup({
-      row: inviteRow({ role: null, roleId: 'id-triager', roleKey: 'triager', roleName: 'Triager' }),
+      row: inviteRow({ roleId: 'id-triager', roleKey: 'triager', roleName: 'Triager' }),
     });
 
     await service.accept(RAW, validBody);
@@ -222,17 +215,13 @@ describe('InviteAcceptanceService.accept (S4b US-005)', () => {
     expect(membership.createBinding).not.toHaveBeenCalled();
   });
 
-  it('US-005 AC-7: a pre-migration invite without a roleId binds the role its legacy value maps to', async () => {
-    const { service, membership } = setup({
-      row: inviteRow({ role: 'VIEWER', roleId: null, roleKey: 'viewer', roleName: 'Viewer' }),
+  it('P1m: a null roleId names no role and refuses without a user or binding', async () => {
+    const { service, membership, members } = setup({
+      row: inviteRow({ roleId: null, roleKey: null, roleName: null }),
     });
-
-    await service.accept(RAW, validBody);
-
-    expect(membership.createBinding).toHaveBeenCalledWith(
-      { principal: { type: 'USER', id: 'u1' }, projectId: 'p1', roleKey: 'viewer' },
-      { type: 'SYSTEM', id: 'invite' },
-    );
+    await expect(service.accept(RAW, validBody)).rejects.toMatchObject({ prefix: 'invites.roleGone', httpStatus: 409 });
+    expect(members.createInvitedUser).not.toHaveBeenCalled();
+    expect(membership.createBinding).not.toHaveBeenCalled();
     expect(membership.createBindingForRole).not.toHaveBeenCalled();
   });
 
@@ -240,7 +229,7 @@ describe('InviteAcceptanceService.accept (S4b US-005)', () => {
     // The invite still carries the deleted role's id: resolving its key would have granted whichever
     // role now owns that key, which is exactly what must not happen.
     const { service, invites, membership, auth } = setup({
-      row: inviteRow({ role: null, roleId: 'id-gone', roleKey: 'triager', roleName: 'Triager' }),
+      row: inviteRow({ roleId: 'id-gone', roleKey: 'triager', roleName: 'Triager' }),
       roleVanished: true,
     });
 
@@ -258,7 +247,7 @@ describe('InviteAcceptanceService.accept (S4b US-005)', () => {
 
   it('US-005: an invite with no role at all is a 409 invites.roleGone before the claim, creating nothing', async () => {
     const { service, invites, members, membership } = setup({
-      row: inviteRow({ role: null, roleId: null, roleKey: null, roleName: null }),
+      row: inviteRow({ roleId: null, roleKey: null, roleName: null }),
     });
 
     await expect(service.accept(RAW, validBody)).rejects.toMatchObject({ prefix: 'invites.roleGone', httpStatus: 409 });

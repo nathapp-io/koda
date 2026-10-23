@@ -140,7 +140,6 @@ describeIntegration('MCP tools/list lists only the tools whose key the agent hol
       where: { principalType: 'AGENT', principalId: agentIds['viewer-agent'], projectId: { not: null } },
       select: { projectId: true, role: { select: { key: true } } },
     })).toEqual([{ projectId: p1Id, role: { key: 'viewer' } }]);
-    expect(await prisma.agentProject.count({ where: { agentId: agentIds['viewer-agent'] } })).toBe(0);
 
     const listed = await listedTools('viewer-agent');
 
@@ -167,8 +166,6 @@ describeIntegration('MCP tools/list lists only the tools whose key the agent hol
 
   it('AC-3: an agent with no binding, no roster row and no global role lists exactly the workspace and implicit-key tools', async () => {
     expect(await prisma.roleBinding.count({ where: { principalType: 'AGENT', principalId: agentIds['bare-agent'] } })).toBe(0);
-    expect(await prisma.agentProject.count({ where: { agentId: agentIds['bare-agent'] } })).toBe(0);
-    expect(await prisma.agentRoleEntry.count({ where: { agentId: agentIds['bare-agent'] } })).toBe(0);
 
     const listed = await listedTools('bare-agent');
 

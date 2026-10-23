@@ -107,8 +107,7 @@ describeIntegration('EmailScheduleService (PG) (S4b US-001)', () => {
     // setup-versus-single-test rule keeps out of the setup sentinel; what the sentinel can check
     // here is that the fixture left no legacy grant row behind.
     await expectBindingOnlyFixtures(prisma, []);
-    expect(await prisma.projectMember.count()).toBe(0);
-    expect(await prisma.agentRoleEntry.count()).toBe(0);
+
   });
 
   it('US-001 AC1: two concurrent claimDue(now, 20) calls over 30 due rows never return a shared id', async () => {

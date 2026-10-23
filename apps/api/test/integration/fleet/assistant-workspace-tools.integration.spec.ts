@@ -50,7 +50,7 @@ describeIntegration('koda_my_projects and workspace-scoped tools (PG, US-003)', 
     prisma.project.create({ data: { name, slug, key: slug.toUpperCase() } });
 
   const createUser = async (email: string) => {
-    const user = await prisma.user.create({ data: { email, passwordHash: 'x', role: 'MEMBER' } });
+    const user = await prisma.user.create({ data: { email, passwordHash: 'x' } });
     await grantBaseline(prisma, { type: 'USER', id: user.id });
     createdUserIds.push(user.id);
     return user;

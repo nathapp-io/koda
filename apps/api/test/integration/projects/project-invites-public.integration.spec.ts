@@ -216,7 +216,6 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
       where: { email: { equals: row.email, mode: 'insensitive' } },
     });
     expect(users).toHaveLength(1);
-    expect(users[0].role).toBe('MEMBER');
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     expect(await require('bcrypt').compare(TEST_PASSWORD, users[0].passwordHash)).toBe(true);
   });
@@ -247,20 +246,17 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
       expect.objectContaining({ projectId: null, role: expect.objectContaining({ key: 'member' }) }),
     ]));
     expect(bindings).toHaveLength(2);
-    expect(await prisma.client.projectMember.count({ where: { projectId: row.projectId, userId } })).toBe(0);
+
   });
 
   it('US-005 AC-4: no membership is written when acceptance is rejected', async () => {
     const { token, row } = await freshInvite();
     await prisma.client.user.create({
-      data: { email: row.email, name: 'Taken', passwordHash: 'x', role: 'MEMBER' },
+      data: { email: row.email, name: 'Taken', passwordHash: 'x' },
     });
 
     expect((await accept(token)).status).toBe(409);
     expect(await prisma.client.roleBinding.count()).toBe(bindingCount);
-    expect(await prisma.client.projectMember.count({
-      where: { projectId: row.projectId, user: { email: { equals: row.email, mode: 'insensitive' } } },
-    })).toBe(0);
   });
 
   // ── US-005 AC-5 ───────────────────────────────────────────────────────────
@@ -301,9 +297,6 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     expect((await inviteRow(expired.row.id)).status).toBe('PENDING');
     // Scoped to the invited address: the earlier accepts in this file already put members in this
     // project, so a project-wide count says nothing about the expired token having written a row.
-    expect(await prisma.client.projectMember.count({
-      where: { projectId: expired.row.projectId, user: { email: expired.row.email } },
-    })).toBe(0);
   });
 
   // ── US-005 AC-7 ───────────────────────────────────────────────────────────
@@ -320,7 +313,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
       where: { email: { equals: row.email, mode: 'insensitive' } },
     });
     expect(users).toHaveLength(1);
-    expect(await prisma.client.projectMember.count({ where: { projectId: row.projectId, userId: users[0].id } })).toBe(0);
+
     expect(await prisma.client.roleBinding.count({ where: { projectId: row.projectId, principalId: users[0].id, role: { key: 'developer' } } })).toBe(1);
     expect((await inviteRow(row.id)).status).toBe('ACCEPTED');
   });
@@ -351,7 +344,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     expect((await accept(token)).status).toBe(409);
     expect(await prisma.client.roleBinding.count()).toBe(bindingCount);
     expect(await prisma.client.user.count({ where: { email: { equals: row.email, mode: 'insensitive' } } })).toBe(1);
-    expect(await prisma.client.projectMember.count({ where: { projectId: row.projectId, userId: newUserId } })).toBe(0);
+    expect(await prisma.client.roleBinding.count({ where: { principalType: 'USER', principalId: newUserId, projectId: row.projectId } })).toBe(0);
     expect((await inviteRow(row.id)).status).toBe('PENDING');
   });
 

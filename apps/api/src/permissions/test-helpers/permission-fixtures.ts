@@ -50,12 +50,10 @@ export async function grantRole(
   if (!role) throw new Error(`no role ${roleKey}`);
 
   const where = { principalType: principal.type, principalId: principal.id, roleId: role.id, projectId: scopeId };
-  const mirrorsAdmin = principal.type === 'USER' && scopeId === null && (roleKey === 'owner' || roleKey === 'admin');
   try {
     const write = async (tx: Prisma.TransactionClient) => {
       const existing = await tx.roleBinding.findFirst({ where, select: { id: true } });
       if (existing) {
-        if (mirrorsAdmin) await tx.user.update({ where: { id: principal.id }, data: { role: 'ADMIN' } });
         return { id: existing.id };
       }
 
@@ -67,15 +65,13 @@ export async function grantRole(
         },
         select: { id: true },
       });
-      if (mirrorsAdmin) await tx.user.update({ where: { id: principal.id }, data: { role: 'ADMIN' } });
       return binding;
     };
     return '$transaction' in db ? await db.$transaction(write) : await write(db);
   } catch (error) {
     // A caller-owned transaction must roll back on failure; it cannot re-read an aborted transaction.
     if (!('$transaction' in db) || !isUniqueViolation(error, 'principalId')) throw error;
-    // A concurrent transaction inserted the same binding after our lookup. Its transaction also
-    // commits the admin mirror; re-read outside our failed transaction to return its binding.
+    // A concurrent transaction inserted the same binding after our lookup. Re-read outside our failed transaction to return its binding.
     const existing = await db.roleBinding.findFirst({ where, select: { id: true } });
     if (!existing) throw error;
     return { id: existing.id };
@@ -94,40 +90,22 @@ export async function revokeProjectRoles(db: FixtureDb, principal: PrincipalRef,
 }
 
 export interface FixtureGrantReport {
-  legacyMemberships: number;
-  agentRoleEntries: number;
   hasGlobalBinding: boolean;
   globalProjectRoleBindings: number;
 }
 
-/** Reports legacy grants and whether bindings meet the fixture baseline invariants. */
+/** Reports whether bindings meet the fixture baseline invariants. */
 export async function fixtureGrantReport(db: FixtureDb, principal: PrincipalRef): Promise<FixtureGrantReport> {
-  const base: FixtureGrantReport = { legacyMemberships: 0, agentRoleEntries: 0, hasGlobalBinding: false, globalProjectRoleBindings: 0 };
-  if (principal.type === 'USER') {
-    const user = await db.user.findUnique({ where: { id: principal.id }, select: { role: true } });
-    if (!user) return base;
-    const [memberships, bindings, adminBinding] = await Promise.all([
-      db.projectMember.count({ where: { userId: principal.id } }),
-      db.roleBinding.findMany({ where: { principalType: 'USER', principalId: principal.id }, include: { role: { select: { scope: true } } } }),
-      db.roleBinding.count({ where: { principalType: 'USER', principalId: principal.id, projectId: null, role: { key: { in: ['owner', 'admin'] } } } }),
-    ]);
-    return {
-      legacyMemberships: memberships + (user.role === 'ADMIN' && adminBinding === 0 ? 1 : 0),
-      agentRoleEntries: 0,
-      hasGlobalBinding: bindings.some(({ projectId }) => projectId === null),
-      globalProjectRoleBindings: bindings.filter(({ projectId, role }) => projectId === null && role.scope === 'PROJECT').length,
-    };
-  }
-  const agent = await db.agent.findUnique({ where: { id: principal.id }, select: { id: true } });
-  if (!agent) return base;
-  const [memberships, agentRoleEntries, bindings] = await Promise.all([
-    db.agentProject.count({ where: { agentId: principal.id } }),
-    db.agentRoleEntry.count({ where: { agentId: principal.id } }),
-    db.roleBinding.findMany({ where: { principalType: 'AGENT', principalId: principal.id }, include: { role: { select: { scope: true } } } }),
-  ]);
+  const base: FixtureGrantReport = { hasGlobalBinding: false, globalProjectRoleBindings: 0 };
+  const account = principal.type === 'USER'
+    ? await db.user.findUnique({ where: { id: principal.id }, select: { id: true } })
+    : await db.agent.findUnique({ where: { id: principal.id }, select: { id: true } });
+  if (!account) return base;
+  const bindings = await db.roleBinding.findMany({
+    where: { principalType: principal.type, principalId: principal.id },
+    include: { role: { select: { scope: true } } },
+  });
   return {
-    legacyMemberships: memberships,
-    agentRoleEntries,
     hasGlobalBinding: bindings.some(({ projectId }) => projectId === null),
     globalProjectRoleBindings: bindings.filter(({ projectId, role }) => projectId === null && role.scope === 'PROJECT').length,
   };
@@ -136,7 +114,6 @@ export async function fixtureGrantReport(db: FixtureDb, principal: PrincipalRef)
 export interface FixtureExemptions {
   noBaseline?: readonly PrincipalRef[];
   globalProjectRoles?: readonly PrincipalRef[];
-  agentRoleEntries?: readonly PrincipalRef[];
 }
 
 /** Ensures every fixture principal is binding-only, except for explicitly pinned invariants. */
@@ -151,8 +128,6 @@ export async function expectBindingOnlyFixtures(
     const report = await fixtureGrantReport(db, principal);
     const exemptFor = (list: readonly PrincipalRef[] | undefined) => list?.some((item) => samePrincipal(item, principal)) ?? false;
     const fields: string[] = [];
-    if (report.legacyMemberships !== 0) fields.push('legacyMemberships');
-    if (report.agentRoleEntries !== 0 && !exemptFor(exempt.agentRoleEntries)) fields.push('agentRoleEntries');
     if (!report.hasGlobalBinding && !exemptFor(exempt.noBaseline)) fields.push('hasGlobalBinding');
     if (report.globalProjectRoleBindings !== 0 && !exemptFor(exempt.globalProjectRoles)) fields.push('globalProjectRoleBindings');
     if (fields.length) failures.push(`${principal.id}: ${fields.join(', ')}`);

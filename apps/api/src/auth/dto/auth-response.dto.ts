@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import type { KodaUserRole } from '../principal/koda-principal.types';
 import type { UserDomain } from '../domain/auth.domain';
 
 export class UserResponseDto {
@@ -27,12 +28,12 @@ export class UserResponseDto {
    * Explicit field list: a spread would serialize every extra property the
    * domain row carries (tokenVersion, and historically passwordHash).
    */
-  static from(user: UserDomain): UserResponseDto {
+  static from(user: UserDomain, role: KodaUserRole): UserResponseDto {
     return {
       id: user.id,
       email: user.email,
       name: user.name,
-      role: user.role,
+      role,
       disabled: user.disabled,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,

@@ -4,7 +4,6 @@ export interface UserDomain {
   id: string;
   email: string;
   name: string;
-  role: string;
   passwordHash: string;
   tokenVersion: number;
   disabled: boolean;

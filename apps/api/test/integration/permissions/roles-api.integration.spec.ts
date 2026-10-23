@@ -112,13 +112,13 @@ describeIntegration('roles API (US-005)', () => {
    * Permissions P1l (US-005): the route takes no role, so `'ADMIN'` means "create it, then bind the
    * global `admin` role" — the binding mirrors `User.role = 'ADMIN'`, which some cases read back.
    */
-  const createUser = async (email: string, role: 'MEMBER' | 'ADMIN'): Promise<string> => {
+  const createUser = async (email: string, admin = false): Promise<string> => {
     const created = await request(server)
       .post('/api/admin/users')
       .set(auth(ownerToken))
       .send({ email, name: email.split('@')[0], password: TEST_PASSWORD })
       .expect(201);
-    if (role === 'ADMIN') await grantRole(db, { type: 'USER', id: data<{ id: string }>(created).id }, 'admin');
+    if (admin) await grantRole(db, { type: 'USER', id: data<{ id: string }>(created).id }, 'admin');
     return loginToken(server, email);
   };
 
@@ -137,8 +137,8 @@ describeIntegration('roles API (US-005)', () => {
       .expect(201);
     ownerToken = data<{ accessToken: string }>(registered).accessToken;
 
-    adminToken = await createUser(ADMIN_EMAIL, 'ADMIN');
-    memberToken = await createUser(MEMBER_EMAIL, 'MEMBER');
+    adminToken = await createUser(ADMIN_EMAIL, true);
+    memberToken = await createUser(MEMBER_EMAIL);
   }, BOOT_TIMEOUT_MS);
 
   beforeEach(() => {
@@ -490,7 +490,7 @@ describeIntegration('roles API (US-005)', () => {
     const principal: KodaPrincipal = {
       actorType: 'user',
       id: user.id,
-      role: user.role as 'MEMBER' | 'ADMIN',
+      role: 'MEMBER',
       email: user.email,
     };
     const created = await postRole(ownerToken, {
@@ -658,7 +658,7 @@ describeIntegration('roles API (US-005)', () => {
    * escalation check therefore compares the whole conferred set, not just the entries it is handed.
    */
   const restrictedRoleGranter = async (email: string): Promise<string> => {
-    const token = await createUser(email, 'MEMBER');
+    const token = await createUser(email);
     const granter = await userByEmail(email);
     const role =
       (await db.role.findUnique({ where: { key: 'restricted-role-granter' } })) ??

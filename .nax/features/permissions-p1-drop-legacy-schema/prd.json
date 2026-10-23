@@ -1,0 +1,780 @@
+{
+  "project": "koda",
+  "feature": "permissions-p1-drop-legacy-schema",
+  "branchName": "feat/permissions-p1-drop-legacy-schema",
+  "createdAt": "2026-10-23T00:00:00.000Z",
+  "updatedAt": "2026-10-23T13:44:57.850Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "The session role claim comes from bindings",
+      "description": "**Goal** — Derive session, profile and assistant user roles from bindings instead of User.role while preserving response contracts.\n\n**Motivation** — The JWT `role` claim, `UserPrincipal.role` and `UserResponseDto.role` (login, register, refresh, invite acceptance, `GET /auth/me`) are read from the `User.role` column, so they are only as right as the mirror.\n\n**Approach** — `AuthService` gains two methods and changes one:\n\n- `roleClaim(userId: string): Promise<KodaUserRole>` answers `'ADMIN'` when `MembershipService.isGlobalAdmin(userId)` resolves `true`, else `'MEMBER'`.\n- `userResponse(user: UserDomain): Promise<UserResponseDto>` answers `UserResponseDto.from(user, await this.roleClaim(user.id))`.\n- `issueSession(user: UserDomain)` becomes `async` and answers `Promise<AuthResponseDto>`: it signs the access token with `roleClaim(user.id)` and returns `user: await this.userResponse(user)`.\n\n`AuthController.me` maps the validated user through `authService.userResponse(validatedUser)` instead of `UserResponseDto.from(validatedUser)`. `InviteAcceptanceService.accept` awaits `this.auth.issueSession(user)`.\n\n**Registration re-reads the user.** `AuthService.register` issues the session from `authRepo.findUserById(created.id)` read after the registration transaction committed, not from the row `findAnyUserAndCreate` returned. Once the first-user write stops storing `role: 'ADMIN'`, the Owner binding `bindOwnerIfFirst` writes is a flip (ruling 2) and bumps `tokenVersion` inside the transaction, so a token signed with the pre-bump `tokenVersion` would be revoked on its first use.\n\n`PrismaAuthRepository` stops reading and writing the column: `toDomain` has no `role`, `createUser` takes no `role`, and `findAnyUserAndCreate` writes `data` as given for the first user too. `PrismaProjectInvitesMembersRepository.createInvitedUser` writes and returns no `role`.\n\nThe assistant's user principal (`userPrincipal` in `assistant-tool.executor.ts`) keeps reading `creator.role`; `PrismaAssistantToolCallRepository.findUserActor` derives that `role` with ruling 1, reading the user's global `owner`/`admin` binding count from `roleBinding` in the same repository (as `PrismaUsersRepository.countActiveAdmins` already reads `roleBinding`), and stops selecting the `role` column.\n\nThe derived role: A user's role claim is `'ADMIN'` when the user holds at least one binding with `principalType` `USER`, `projectId` null and role key `owner` or `admin`; otherwise it is `'MEMBER'`. A `project-admin` binding, in one project or in all projects (`projectId` null with a PROJECT-scope role), does not make it `'ADMIN'`. The claim decides nothing (`.nax/rules/api-auth.md`, \"No Decisions on Role Claims\"); it is display and compatibility data.\n\nFailure handling: `MembershipService.isGlobalAdmin` rejects while a session is issued (login, register, refresh, invite accept): the error propagates; no token is signed. Resolve the claim lookup and userResponse successfully before signing either token, so even a rejection from userResponse's role lookup cannot occur after a token was already signed.\n\n**Scope** — In: UserDomain role removal, DTO mapping signature, async session consumers, auth/invite-account repository cleanup, assistant actor derivation, and the specs this first breaks. Out: replacing MembershipService's mirror/revocation algorithm (US-002), remaining user/invite column writes and physical drops (US-003), legacy tables (US-004), CLI/web display changes (US-005/006); do not remove compatibility claims or regenerate contracts.\n\n**Interface** — `AuthService.issueSession(user: UserDomain): Promise<AuthResponseDto>`; `AuthService.roleClaim(userId: string): Promise<KodaUserRole>`; `AuthService.userResponse(user: UserDomain): Promise<UserResponseDto>`; `UserResponseDto.from(user: UserDomain, role: KodaUserRole)`; `PrismaAuthRepository.createUser(data: { email: string; name: string; passwordHash: string })`; `UserToolCallCreator.role: KodaUserRole`. `UserDomain` has no `role` field.\n\n**Verification** — Use strict three-session TDD. Create test/integration/auth/role-claim-from-bindings.integration.spec.ts; update auth.service.spec.ts with isGlobalAdmin, awaited session behavior and post-commit findUserById; controller me stubs userResponse; repository tests expect only given create data and no returned domain role; invite acceptance uses an async issueSession double and no account role; assistant-action-actor.integration.spec.ts proves derived MEMBER/ADMIN. Initially ACs 4/13 deliberately seed stored ADMIN to demonstrate that it grants no claim; US-003 later removes those column writes but preserves their MEMBER assertions. Run API scoped unit/integration tests with seeded system roles and a real test Postgres; keep existing refusal cases unchanged.",
+      "acceptanceCriteria": [
+        "[integration] When POST /auth/register runs on an empty users table, data.user.role is 'ADMIN'.",
+        "[integration] When GET /auth/me uses the access token from that first registration response, it answers 200.",
+        "[integration] With registration enabled through bootHttpApp({ registrationEnabled: true }), a second POST /auth/register answers an access token whose decoded role claim is 'MEMBER'.",
+        "[integration] POST /auth/login of a user whose stored User.role is 'ADMIN' and who holds no global owner or admin binding answers a decoded role claim of 'MEMBER'.",
+        "[integration] GET /auth/me for a user holding a global admin binding granted with grantRole answers data.role 'ADMIN'.",
+        "[integration] POST /auth/login of a user whose only non-baseline binding is project-admin in one project answers a decoded role claim of 'MEMBER'.",
+        "[integration] After a user's global admin binding row is deleted directly with Prisma without changing tokenVersion, POST /auth/refresh with that user's refresh token answers a decoded role claim of 'MEMBER'.",
+        "[integration] POST /invites/:token/accept for a new address answers data.user.role 'MEMBER'.",
+        "[unit] AuthService.roleClaim('u1') returns 'ADMIN' when MembershipService.isGlobalAdmin resolves true.",
+        "[unit] AuthService.roleClaim('u1') returns 'MEMBER' when MembershipService.isGlobalAdmin resolves false.",
+        "[unit] AuthService.login rejects with the same error that MembershipService.isGlobalAdmin rejects with.",
+        "[unit] When MembershipService.isGlobalAdmin rejects during AuthService.login, the access-token strategy's sign is not called.",
+        "[unit] PrismaAuthRepository.findAnyUserAndCreate on an empty table calls user.create with data equal to the given { email, name, passwordHash }.",
+        "[integration] PrismaAssistantToolCallRepository.findUserActor(userId) returns role 'MEMBER' for a user whose stored User.role is 'ADMIN' and who holds no global owner or admin binding.",
+        "[integration] PrismaAssistantToolCallRepository.findUserActor(userId) returns role 'ADMIN' for a user holding a global admin binding."
+      ],
+      "tags": [
+        "permissions-p1-drop-legacy-schema",
+        "api",
+        "security",
+        "authentication",
+        "sessions"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module session and assistant identity changes touch token issuance and bootstrap transaction state; the security override requires isolated three-session TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/auth/auth.service.ts",
+        "apps/api/src/auth/auth.controller.ts",
+        "apps/api/src/auth/prisma-auth.repository.ts",
+        "apps/api/src/fleet/assistant/prisma-assistant-tool-call.repository.ts",
+        "apps/api/src/permissions/membership.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/auth/role-claim-from-bindings.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "AuthService.roleClaim returns 'MEMBER' for a user whose only non-baseline binding is project-admin with projectId null.",
+        "PrismaAssistantToolCallRepository.findUserActor returns null when the user row does not exist."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/auth/auth.service.spec.ts",
+          "reason": "the session cases build AuthService with a MembershipService double that has no isGlobalAdmin, read the role claim from the user row (mockUser role ADMIN for the first user, generateAccessToken called with mockUser.role) and treat issueSession as synchronous. The replacing invariant: the double gains isGlobalAdmin, the claim and the response role follow it, issueSession is awaited, and register asserts the session comes from findUserById after the transaction; the other cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/auth/auth.controller.spec.ts",
+          "reason": "the me cases expect UserResponseDto.from(validatedUser) of a row that carries role. The replacing invariant: me answers authService.userResponse(validatedUser), stubbed on the AuthService double; the other cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/auth/prisma-auth.repository.spec.ts",
+          "reason": "'the first user is created as ADMIN' asserts user.create got role ADMIN and result.user.role is ADMIN, and the later cases read result.user.role. The replacing invariant: the first and later users are created with the given email, name and passwordHash only, and the returned UserDomain has no role; firstUser keeps telling them apart."
+        },
+        {
+          "path": "apps/api/src/projects/invites/invite-acceptance.service.spec.ts",
+          "reason": "the AuthService double's issueSession is synchronous and builds the session user from UserDomain role, and the createInvitedUser double returns role MEMBER; the session expectation pins role MEMBER. The replacing invariant: issueSession is an async double answering role MEMBER for the new account, createInvitedUser returns no role, and the accept flow awaits it; every refusal case is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-action-actor.integration.spec.ts",
+          "reason": "the findUserActor case expects role equal to the stored user.role. The replacing invariant: findUserActor answers id, email, disabled and role MEMBER for a user with no global owner or admin binding, and role ADMIN after a global admin binding is granted with grantRole."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ef5e5b667ef05079472a8f6079eadc2a27731412"
+    },
+    {
+      "id": "US-002",
+      "title": "Token revocation follows global-admin bindings",
+      "description": "**Goal** — Replace the User.role mirror with token-version bumps exactly on binding-derived ADMIN/MEMBER flips.\n\n**Motivation** — Nothing decides on the legacy tables, but they still exist and are still written: `PrismaAuthRepository.findAnyUserAndCreate` stores `role: 'ADMIN'` for the first user, `UsersAdminService.create` and `PrismaProjectInvitesMembersRepository.createInvitedUser` store `role: 'MEMBER'`, `ProjectInvitesService.inviteNewAddress` stores the legacy enum in `ProjectInvite.role`, and `MembershipService` mirrors every global `owner`/`admin` binding into `User.role` through `PrismaRoleBindingRepository.setUserRole`.\n\n**Approach** — `PrismaRoleBindingRepository.setUserRole(userId, role)` is replaced by `bumpTokenVersion(userId: string): Promise<boolean>`: one `user.updateMany({ where: { id: userId }, data: { tokenVersion: { increment: 1 } } })`, answering `count > 0`.\n\nIn `MembershipService`:\n\n- `insertBinding`, for a `USER` principal, `projectId` null and a role key in `GLOBAL_ADMIN_ROLE_KEYS`, reads `countGlobalAdminBindings(userId)` after the locks and the `findExisting` check and before `createBinding`; when it was `0`, it calls `bumpTokenVersion(userId)` and lists the user in `revokedUserIds` when that answers `true`. An existing identical binding (the `findExisting` early return) bumps nothing.\n- `afterRemoval` keeps its candidate set (users whose removed bindings include a global `owner`/`admin` one); `syncLegacyRole` becomes `revokeIfNoGlobalAdmin(userId)`: when `countGlobalAdminBindings(userId)` is `0` it calls `bumpTokenVersion(userId)` and answers its result, else `false`.\n- `setGlobalAdmin(userId, false, by)` (no production caller; kept) revokes only when it deleted the user's global `admin` binding (`existing !== null`) and `countGlobalAdminBindings(userId)` is then `0`; when it deleted nothing it bumps nothing, as today's `setUserRole` changed nothing for a plain member.\n- `afterWrite` is unchanged: it invalidates the two cache entries of each `revokedUserIds` user after commit.\n\n`PrismaRoleBindingRepository.findUserState` selects only `disabled` and answers `UserAccountState` (`{ disabled: boolean }`), which replaces `UserLegacyState` in `permissions.types.ts`. `InMemoryPermissionStore` follows: users are `{ disabled, tokenVersion }`, `addUser(id, disabled = false)`, and `bumpTokenVersion` increments `tokenVersion` and pushes `tokens:<userId>` onto `store.calls`; a `bumpTokenVersionFailure: Error | null` field makes the next call reject, like `openAgentTicketsFailure`.\n\nRevocation follows the flip. A binding write revokes a user's tokens (bumps `tokenVersion`, then drops `userTokenVersionCacheTag(userId)` and `userAuthStateCacheKey(userId)` after commit) exactly when it changes that user's derived role: an insert of a global `owner`/`admin` binding for a user who held none, and a removal that leaves a user with none. This replaces \"every change of `User.role` bumps `tokenVersion`\" in the design doc's notes; the lock order of `MembershipService` (the `owner` Role row, then the user row) is unchanged. Only USER/null/owner-or-admin bindings affect the derived role; PROJECT-scope roles never promote the claim even with projectId null.\n\nFailure handling: `bumpTokenVersion` rejects inside a binding write: the error propagates and the binding write's transaction rolls back. `bumpTokenVersion` finds no user row: answers `false`; the user is not listed in `revokedUserIds`.\n\n**Scope** — In: production mirror replacement, account-state type, in-memory store and failure injection, all existing specs first broken by those interfaces, and EVERY assertion on stored User.role, including assertions fixture mirrors or defaults would keep green. Out: physical column drops and remaining account/invite writes (US-003), fixture grant mirror removal (US-003), removeProjectBindings/deleteProjectBindings deletion and table/report cleanup (US-004), session producers (US-001), CLI/web changes (US-005/006). US-002 only: a test that races two concurrent global `owner`/`admin` grants of one user is out of scope; the user-row lock `insertBinding` takes before the count serializes them, and the existing B2 case exercises that lock.\n\n**Interface** — `PrismaRoleBindingRepository.bumpTokenVersion(userId: string): Promise<boolean>`; `PrismaRoleBindingRepository.findUserState(userId: string): Promise<UserAccountState | null>`; `UserAccountState = { disabled: boolean }`; `InMemoryPermissionStore.addUser(id: string, disabled = false)`; `bumpTokenVersionFailure: Error | null`. `setUserRole` and `UserLegacyState` are removed.\n\n**Verification** — Strict three-session TDD: create src/permissions/membership.service.token-revocation.spec.ts for service/double/repository cases and test/integration/permissions/global-admin-token-revocation.integration.spec.ts for grants/removals through /role-bindings and old-token /auth/me probes. Preserve B2 lock coverage, owner protections and after-commit invalidation. Update membership.service, removal-guards, role-matrix, role-admin and permission.service unit specs for addUser and binding-backed admins. Replace integration mirror assertions with exact tokenVersion deltas in membership-service/role-bindings-api; replace registration/admin-user role counts with enabled binding-holder counts; remove redundant stored-role assertions across notification, seed, fixture, project, fleet and VCS cases without weakening their binding/recipient assertions. A legacy-admin-with-no-binding setGlobalAdmin(false) case now proves no bump. Keep newUser(role) DB helpers and all role writes until US-003. Keep removeProjectBindings tests until US-004, but remove their stored-role assertions now. Run bun run --cwd apps/api type-check and bun run --cwd apps/api lint as removal verification, plus real DB scoped tests; these commands are not ACs.",
+      "acceptanceCriteria": [
+        "[unit] Over InMemoryPermissionStore, MembershipService.createBinding of a global admin binding for a user holding no global owner or admin binding records tokens:<userId> exactly once in store.calls.",
+        "[unit] The same createBinding call for a user already holding a global owner binding records no tokens:<userId>.",
+        "[unit] MembershipService.createBinding of a project-admin binding in a project records no tokens:<userId>.",
+        "[unit] MembershipService.createBinding that finds an identical existing global admin binding records no tokens:<userId>.",
+        "[unit] MembershipService.removeBinding(id) of a user's only global owner/admin binding records tokens:<userId> exactly once.",
+        "[unit] MembershipService.removeBinding(id) of a user's global admin binding while it keeps a global owner binding records no tokens:<userId>.",
+        "[unit] MembershipService.removeAllBindings of a user holding a global admin binding records tokens:<userId> exactly once.",
+        "[unit] After a createBinding that recorded tokens:<userId>, CacheManager.invalidate is called with userAuthStateCacheKey(userId).",
+        "[integration] After POST /role-bindings grants a global admin binding to a member, GET /auth/me with the member's access token issued before the grant answers 401.",
+        "[integration] After DELETE /role-bindings/:id removes a user's last global admin binding, GET /auth/me with that user's access token issued before the removal answers 401.",
+        "[integration] After POST /role-bindings grants a developer binding in a project to a member, GET /auth/me with the member's access token issued before the grant answers 200.",
+        "[unit] With store.bumpTokenVersionFailure set to an error, createBinding of a global admin binding for a user holding none rejects with that error.",
+        "[unit] PrismaRoleBindingRepository.bumpTokenVersion('u1') calls user.updateMany with { where: { id: 'u1' }, data: { tokenVersion: { increment: 1 } } }.",
+        "[unit] PrismaRoleBindingRepository.bumpTokenVersion('u1') returns false when user.updateMany resolves { count: 0 }.",
+        "[unit] Over InMemoryPermissionStore, MembershipService.setGlobalAdmin('u1', false, granter) for a user holding no global admin binding records no tokens:u1 in store.calls."
+      ],
+      "tags": [
+        "permissions-p1-drop-legacy-schema",
+        "api",
+        "security",
+        "tokens",
+        "permissions"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Revocation semantics cross locked transactions, JWT validity, after-commit caches and a shared test double; this is security-critical regardless of code size.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/membership.service.ts",
+        "apps/api/src/permissions/prisma-role-binding.repository.ts",
+        "apps/api/src/permissions/test-helpers/in-memory-permissions.ts",
+        "apps/api/src/permissions/permissions.types.ts",
+        "apps/api/src/auth/token-version.cache.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/permissions/membership.service.token-revocation.spec.ts",
+        "apps/api/test/integration/permissions/global-admin-token-revocation.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a caller-owned binding-write transaction rolls back after a scheduled revocation, neither userTokenVersionCacheTag(userId) nor userAuthStateCacheKey(userId) is invalidated.",
+        "When setGlobalAdmin(userId, false, by) removes an admin binding but a global owner binding remains, the user's tokenVersion is unchanged."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/test-helpers/in-memory-permissions.ts",
+          "reason": "bindingRepo() has setUserRole and a findUserState answering role, and users carry role. The replacing invariant: users are disabled plus tokenVersion, addUser(id, disabled = false), findUserState answers disabled only or null, and bumpTokenVersion increments tokenVersion, pushes tokens:userId onto store.calls, answers false for an unknown user, and rejects once with bumpTokenVersionFailure when that is set."
+        },
+        {
+          "path": "apps/api/src/permissions/membership.service.spec.ts",
+          "reason": "the AC-18/19, B2 and removal cases assert store.users role ADMIN or MEMBER and call addUser(id, 'ADMIN'). The replacing invariant: each case asserts the tokenVersion and tokens:userId calls ruling 2 gives (a bump only on a flip), and admin users are made with a global admin binding; the setGlobalAdmin cases (a removal that deletes the admin binding bumps once, false for a member without a binding writes nothing and keeps tokenVersion 0, the legacy admin who held no binding) assert tokenVersion and tokens:userId only, the legacy-admin case expecting no bump; in the removeProjectBindings block the case that leaves a global admin alone keeps only its tokenVersion 1 and cache assertions, and the other removeProjectBindings cases are unchanged here (US-004 deletes the block)."
+        },
+        {
+          "path": "apps/api/src/permissions/membership.service.removal-guards.spec.ts",
+          "reason": "store.addUser('off', 'MEMBER', true) passes the removed role argument. The replacing invariant: store.addUser('off', true); the cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/permissions/role-matrix.spec.ts",
+          "reason": "store.addUser(id, 'MEMBER') passes the removed role argument. The replacing invariant: store.addUser(id); the matrix is unchanged."
+        },
+        {
+          "path": "apps/api/src/permissions/role-admin.service.spec.ts",
+          "reason": "the case at store.addUser('target-1', 'ADMIN') asserts the target's stored role becomes MEMBER. The replacing invariant: the target holds a global admin binding, and the case asserts its tokenVersion was bumped once after the removal."
+        },
+        {
+          "path": "apps/api/src/permissions/permission.service.spec.ts",
+          "reason": "store.addUser('legacy', 'ADMIN') proves a stored ADMIN role grants nothing. The replacing invariant: the case and the legacy user go; a user with no binding holds no key is pinned by the other cases."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-service.integration.spec.ts",
+          "reason": "the mirror cases assert userRow(...).role ADMIN or MEMBER and objectContaining role ADMIN with tokenVersion 1. The replacing invariant: each asserts the stored tokenVersion ruling 2 gives (grant to a user with no global admin binding bumps it, a second global admin binding or a project binding does not, the last removal bumps it); the legacy-admin setGlobalAdmin case (a user with no binding) asserts tokenVersion unchanged instead of role MEMBER; the newUser(role) helper's role argument is unchanged here (US-003 removes it)."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/role-bindings-api.integration.spec.ts",
+          "reason": "the cases at userRow(adminTargetBId).role ADMIN then MEMBER, and userRow(target.id).role MEMBER, pin the mirror. The replacing invariant: the same requests assert the target's stored tokenVersion rose by one on the grant and again on the last removal."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-notification-consumers.integration.spec.ts",
+          "reason": "the case asserting the admin's stored role is ADMIN pins the mirror. The replacing invariant: that assertion goes; the recipient assertions are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/auth/registration.integration.spec.ts",
+          "reason": "users[0].role toBe ADMIN reads the mirror, and the open-registration case counts users with role ADMIN (expects 1). The replacing invariant: the first user holds a global owner binding, asserted on roleBinding, and the open-registration case counts users holding a global owner binding on roleBinding (exactly one)."
+        },
+        {
+          "path": "apps/api/test/integration/seed/seed-admin.integration.spec.ts",
+          "reason": "user.role toBe ADMIN reads the stored role the fixture mirror wrote. The replacing invariant: the created admin holds the owner (or admin) binding, already asserted on roleBinding; the stored-role assertions go."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-fixtures.integration.spec.ts",
+          "reason": "the grantRole cases assert the user row's role is ADMIN or MEMBER after a grant. The replacing invariant: those assertions go; the binding assertions stay (US-003 removes the mirror itself and US-004 the legacy report fields)."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-admin-public-implicit.integration.spec.ts",
+          "reason": "roleOf reads the stored role (AC-3 before and after, AC-5 gadmin ADMIN). The replacing invariant: roleOf goes; AC-3 asserts the target holds no global admin binding before and after, and AC-5 asserts gadmin still holds its global admin binding."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/user-agent-no-legacy-roles.integration.spec.ts",
+          "reason": "stored.role toBe MEMBER reads the column. The replacing invariant: the user holds only the global member binding, asserted on roleBinding."
+        },
+        {
+          "path": "apps/api/test/integration/projects/member-role-keys.integration.spec.ts",
+          "reason": "stored.role toBe MEMBER reads the column. The replacing invariant: that assertion goes; the binding assertions stay."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-invites-public.integration.spec.ts",
+          "reason": "users[0].role toBe MEMBER reads the column. The replacing invariant: that assertion goes; the accepted user's bindings are asserted as before."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/project-read-recipients.integration.spec.ts",
+          "reason": "roleAdminWithoutBinding.role toBe ADMIN reads the column. The replacing invariant: that assertion goes; the eligibility assertion is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-permissions.integration.spec.ts",
+          "reason": "user.role toBe MEMBER reads the column. The replacing invariant: that assertion goes."
+        },
+        {
+          "path": "apps/api/test/integration/users/admin-users.integration.spec.ts",
+          "reason": "two cases count users with role ADMIN and disabled false (expect 2, then 1), which the mirror and the column fed. The replacing invariant: both count the enabled users holding a global owner or admin binding, read from roleBinding as PrismaUsersRepository.countActiveAdmins reads it, with the same expected values 2 and 1."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-fixtures-bindings.integration.spec.ts",
+          "reason": "the admin's stored role toBe ADMIN reads the fixture mirror. The replacing invariant: the admin holds a global admin binding, asserted on roleBinding."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "c80e29b1b4c2be7567f42df6efb32b0736befb74"
+    },
+    {
+      "id": "US-003",
+      "title": "Drop User.role and ProjectInvite.role",
+      "description": "**Goal** — Physically drop the two legacy role columns and remove remaining column-dependent API, fixture, seed and spec code.\n\n**Motivation** — About 80 DB-backed specs still write `role` on user rows, assert the stored `User.role`, or seed and count legacy rows.\n\n**Approach** — Migration `20261102090000_drop_legacy_role_columns`:\n\n```sql\n-- Permissions P1m US-003: the role claim is derived from role bindings, and an invite names its role by roleId.\nALTER TABLE \"User\" DROP COLUMN \"role\";\nALTER TABLE \"ProjectInvite\" DROP COLUMN \"role\";\n```\n\n`schema.prisma` loses `User.role` and `ProjectInvite.role`. Then, per file:\n\n| File | Change |\n|:--|:--|\n| `src/users/domain/user-admin.domain.ts` | `GLOBAL_ROLES`, `GlobalRole`, `UserAdminRecord.role` and `UserAdminWrite.role` go |\n| `src/users/prisma-users.repository.ts` | `toRecord` has no `role`; `createUser(data: { email; name; passwordHash })`; `updateUser` writes no `role` |\n| `src/users/users-admin.service.ts` | `create` passes no `role` |\n| `src/projects/invites/domain/project-invite.domain.ts` | `ProjectInviteRecord.role` goes; `roleKey` / `roleName` come from `roleId` only |\n| `src/projects/invites/prisma-project-invites.repository.ts` | `CreateProjectInviteInput.role` goes and `create` writes no `role`; `legacyRoleNames` goes; `toRecord` answers `roleKey: row.assignedRole?.key ?? null` and `roleName: row.assignedRole?.name ?? null` |\n| `src/projects/invites/project-invites.service.ts` | `legacyNameOf` goes; the invite mail `role` is `invite.roleName ?? ''` |\n| `src/tickets/prisma-tickets.repository.ts`, `src/tickets/domain/ticket.domain.ts` | `findUserById` selects and answers `{ id, disabled }` |\n| `src/permissions/test-helpers/permission-fixtures.ts` | `grantRole` writes only the binding (the `mirrorsAdmin` user update goes); `fixtureGrantReport` reads no `role` (`legacyMemberships` counts `ProjectMember` rows only) |\n| `prisma/seed.ts` | prints `outcome.roleKey` for a created admin, and no role for an existing email |\n\nAn invite whose `roleId` is null (its custom role was deleted) names no role: it lists with `roleKey` and `roleName` null and its acceptance answers 409 `invites.roleGone`, as `InviteAcceptanceService.invitedRole` already does for a row with neither.\n\nOne migration per legacy object group. US-003 drops the two columns (`User.role`, `ProjectInvite.role`) in `20261102090000_drop_legacy_role_columns`; US-004 drops the three tables in `20261102090100_drop_legacy_membership_tables`. No data is copied (design decision 2). Each migration ships with a scratch-schema test in the pattern of `test/integration/fleet/pending-action-drop-legacy-columns-migration.integration.spec.ts` (`scratchSchemaBefore`, `applyMigration` from `test/helpers/migration-schema.ts`).\n\nFailure handling: an invite whose roleId is null answers 409 invites.roleGone and creates no user and no binding; legacy columns and their values are dropped while every other row is kept. No API contract change. `UserResponseDto` keeps `role`; no route, DTO or response field changes, so `openapi.json` and `apps/cli/src/generated/` are not regenerated.\n\n**Scope** — In: this exact column migration, Prisma schema/client regeneration, column-dependent domain/repository/service/fixture/seed removal, and all user/invite role writes in specs. Out: dropping ProjectMember/AgentProject/AgentRoleEntry and report table fields (US-004), changing the completed session/revocation algorithms (US-001/002), CLI/web changes (US-005/006). Keep legacy-project-roles.ts and its display vocabulary; keep compatibility claims and mail's display role; do not backfill legacy data or regenerate contracts.\n\n**Interface** — `PrismaUsersRepository.createUser(data: { email: string; name: string; passwordHash: string }): Promise<UserAdminRecord>`; `TicketsRepository.findUserById(id: string): Promise<{ id: string; disabled: boolean } | null>`; `ProjectInviteRecord` has no `role` field.\n\n**Verification** — Strict three-session TDD. Author drop-legacy-role-columns-migration.integration.spec.ts using scratchSchemaBefore(baseUrl, schema, target), raw SQL to seed prior-schema User/ProjectInvite rows, applyMigration and schema-scoped information_schema queries; the helper starts BEFORE target. Assert preserved id/email/tokenVersion/disabled and roleId/status/tokenHash. Update unit expectations in users-admin.service, project-invites.service, prisma-project-invites.repository and project-invite.domain; remove stale typed UserAdminRecord.role fixtures wherever the removed domain field breaks them. Replace fallback-invite acceptance tests with null-roleId 409 behavior, retaining existing roleId/roleKey assertions. Sweep DB user/invite role writes across the specified auth, agents, fleet, permissions, projects and tickets suites, including the upstream role-claim-from-bindings file. Remove role parameters from newUser/createUser helpers and grant actual admin bindings when access is needed. roles-api/membership-queries principals and the thread-creator-type expected actor role use literal MEMBER; preserve older scratch-schema raw INSERTs. grantRole regression must keep tokenVersion unchanged, unlike production grants; ticket assignment regression must keep the assigned enabled developer's id. Do not remove legacy-table setups/counts until US-004, and do not edit mock-only legacy delegate proofs. Run bun run --cwd apps/api db:generate, then bun run --cwd apps/api type-check and bun run --cwd apps/api lint; run affected DB specs through test:scoped with real Postgres.",
+      "acceptanceCriteria": [
+        "[integration] Given a scratch schema containing all migrations before 20261102090000_drop_legacy_role_columns and a User row whose role is 'ADMIN', applying that migration leaves no role column for User in information_schema.columns.",
+        "[integration] Applying 20261102090000_drop_legacy_role_columns to that scratch schema leaves no role column for ProjectInvite in information_schema.columns.",
+        "[integration] After that migration, the preexisting User row retains its id, email, tokenVersion and disabled values.",
+        "[integration] After that migration, the preexisting ProjectInvite row retains its roleId, status and tokenHash values.",
+        "[integration] POST /admin/users as an Owner answers 201.",
+        "[integration] POST /auth/login of the user created by that Owner through POST /admin/users answers a decoded role claim of 'MEMBER'.",
+        "[integration] GET /projects/:slug/invites lists an invite whose roleId is null with roleKey null and roleName null.",
+        "[integration] POST /invites/:token/accept for an invite whose roleId is null answers 409 invites.roleGone.",
+        "[integration] POST /invites/:token/accept for an invite whose roleId is null creates no user.",
+        "[unit] When ProjectInvitesService invites a new address with roleKey 'developer', the repository's create receives the developer role's roleId and an input with no role property.",
+        "[unit] InviteMailer.sendInvite receives role 'Developer', the invited role's name, for that developer invite.",
+        "[unit] InviteMailer.sendInvite receives role '' for an invite record whose roleName is null.",
+        "[integration] Regression pin (passes before the change too): grantRole(db, user, 'admin') creates one global admin binding.",
+        "[integration] Regression pin (passes before the change too): grantRole(db, user, 'admin') leaves the user's stored tokenVersion unchanged.",
+        "[integration] Regression pin (passes before the change too): POST /projects/:slug/tickets/:ref/assign with the userId of an enabled user holding a developer binding in the project answers the ticket with assignedToUserId equal to that user's id."
+      ],
+      "tags": [
+        "permissions-p1-drop-legacy-schema",
+        "api",
+        "security",
+        "prisma",
+        "migration"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Destructive schema evolution spans users, invites, auth fixtures, tickets and many DB suites; authentication/access-control implications require the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/projects/invites/prisma-project-invites.repository.ts",
+        "apps/api/src/projects/invites/project-invites.service.ts",
+        "apps/api/src/users/prisma-users.repository.ts",
+        "apps/api/test/integration/fleet/pending-action-drop-legacy-columns-migration.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261102090000_drop_legacy_role_columns/migration.sql",
+        "apps/api/test/integration/permissions/drop-legacy-role-columns-migration.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/integration/auth/role-claim-from-bindings.integration.spec.ts",
+          "reason": "US-001 AC-4 and AC-13 create a user row with role ADMIN to prove the claim ignores it, which the dropped column refuses. The replacing invariant: those users are created without role, and the cases still assert the claim MEMBER for a user with no global owner or admin binding."
+        },
+        {
+          "path": "apps/api/src/users/users-admin.service.spec.ts",
+          "reason": "'create' expects repo.createUser called with role MEMBER. The replacing invariant: createUser is called with email, name and passwordHash only."
+        },
+        {
+          "path": "apps/api/src/projects/invites/project-invites.service.spec.ts",
+          "reason": "the invite-create case expects invites.create with role ADMIN and roleId, and doubles carry role. The replacing invariant: invites.create gets roleId and no role; the mail data role is the role name, or empty when roleName is null."
+        },
+        {
+          "path": "apps/api/src/projects/invites/prisma-project-invites.repository.spec.ts",
+          "reason": "the row fixture carries role DEVELOPER, the create case lists role among the written fields, the no-roleId case expects roleKey and roleName from the legacy role, and the role-fields case expects role null in the record. The replacing invariant: rows and records carry no role, create writes none, and a row without an assigned role answers roleKey and roleName null."
+        },
+        {
+          "path": "apps/api/src/projects/invites/domain/project-invite.domain.spec.ts",
+          "reason": "the record fixture carries role DEVELOPER. The replacing invariant: the fixture has no role."
+        },
+        {
+          "path": "apps/api/test/integration/projects/invite-role-keys.integration.spec.ts",
+          "reason": "AC-6 accepts an invite with roleId null and role VIEWER, and AC-7 creates one with role null; both write the dropped column. The replacing invariant: AC-6 goes (no legacy role can stand in), AC-7 creates the invite with roleId null and no role and still answers 409 invites.roleGone, and the stored-role reads (stored role toBeNull, and the invite rows mapped to role equal VIEWER) go while their roleId and roleKey assertions stay."
+        },
+        {
+          "path": "apps/api/test/integration/agents/agents-create-rollback.integration.spec.ts",
+          "reason": "its user fixture is created with role ADMIN. The replacing invariant: the user is created without role and given a global admin binding with grantRole."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-action-delivery.integration.spec.ts",
+          "reason": "prisma.user.create sends role ADMIN. The replacing invariant: the user is created without role; any access it needs comes from grantRole."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-action-send-delivery.integration.spec.ts",
+          "reason": "prisma.user.create sends role ADMIN. The replacing invariant: the user is created without role; any access it needs comes from grantRole."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-tool-executor.integration.spec.ts",
+          "reason": "prisma.user.create sends role MEMBER. The replacing invariant: the user is created without role."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-workspace-project-argument.integration.spec.ts",
+          "reason": "prisma.user.create sends role MEMBER. The replacing invariant: the users are created without role."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-workspace-tools.integration.spec.ts",
+          "reason": "prisma.user.create sends role MEMBER. The replacing invariant: the user is created without role."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-ingest-schema.integration.spec.ts",
+          "reason": "prisma.user.create sends role ADMIN. The replacing invariant: the user is created without role."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-job-logs-schema.integration.spec.ts",
+          "reason": "prisma.user.create sends role ADMIN. The replacing invariant: the user is created without role."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-job-repository.integration.spec.ts",
+          "reason": "prisma.user.create sends role ADMIN. The replacing invariant: the user is created without role."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-jobs-schema.integration.spec.ts",
+          "reason": "prisma.user.create sends role ADMIN. The replacing invariant: the user is created without role."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-project-code-repository.integration.spec.ts",
+          "reason": "prisma.user.create sends role ADMIN. The replacing invariant: the user is created without role."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-schedule-repository.integration.spec.ts",
+          "reason": "prisma.user.create sends role MEMBER. The replacing invariant: the users are created without role."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-schedule-ticker.integration.spec.ts",
+          "reason": "the user helper's prisma.user.create sends role MEMBER. The replacing invariant: the helper creates users without role."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-schedules-api.integration.spec.ts",
+          "reason": "prisma.user.create sends role MEMBER. The replacing invariant: the user is created without role."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-tickets-repository.integration.spec.ts",
+          "reason": "prisma.user.create sends role ADMIN. The replacing invariant: the user is created without role."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-tickets-schema.integration.spec.ts",
+          "reason": "prisma.user.create sends role ADMIN. The replacing invariant: the user is created without role."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/bindings-only-permissions.integration.spec.ts",
+          "reason": "the user helper's create sends role. The replacing invariant: users are created without role; the legacy-row cases are unchanged here (US-004 removes them)."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/bootstrap-baselines.integration.spec.ts",
+          "reason": "the createUser helper writes role MEMBER or ADMIN on the row. The replacing invariant: the helper takes no role; an admin is given a global admin binding with grantRole."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-seeded-roles.integration.spec.ts",
+          "reason": "the user helper's create sends role MEMBER. The replacing invariant: users are created without role."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/enforce-fleet-foundations.integration.spec.ts",
+          "reason": "the user helper's create sends role MEMBER. The replacing invariant: users are created without role."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/enforce-fleet-requesters.integration.spec.ts",
+          "reason": "prisma.user.create sends role MEMBER. The replacing invariant: the user is created without role."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-notification-consumers.integration.spec.ts",
+          "reason": "the user helper's create sends role MEMBER. The replacing invariant: users are created without role."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-service.integration.spec.ts",
+          "reason": "newUser(role) writes role on the row. The replacing invariant: newUser takes no role; admins are given a global admin binding."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-fixtures.integration.spec.ts",
+          "reason": "the user helper's create sends role, and a case updates the user row to role MEMBER. The replacing invariant: users are created without role and the role update goes; the grantRole cases assert the user's tokenVersion is unchanged by a grant."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-service.integration.spec.ts",
+          "reason": "newUser(role) writes role on the row. The replacing invariant: newUser takes no role; a case that relied on a stored ADMIN role granting nothing goes."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/project-read-recipients.integration.spec.ts",
+          "reason": "newUser(role, disabled) writes role on the row. The replacing invariant: newUser(disabled) creates users without role."
+        },
+        {
+          "path": "apps/api/test/integration/projects/member-bindings.integration.spec.ts",
+          "reason": "db.user.create sends role MEMBER for three users. The replacing invariant: the users are created without role."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-invites-public.integration.spec.ts",
+          "reason": "the taken-email user is created with role MEMBER. The replacing invariant: it is created without role."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-members-principals.integration.spec.ts",
+          "reason": "the chip users are created with role MEMBER. The replacing invariant: they are created without role."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-members.integration.spec.ts",
+          "reason": "the co-admin is created with role MEMBER. The replacing invariant: it is created without role."
+        },
+        {
+          "path": "apps/api/test/integration/tickets/ticket-tenancy.integration.spec.ts",
+          "reason": "the user is created with role MEMBER. The replacing invariant: it is created without role."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/thread-creator-type.integration.spec.ts",
+          "reason": "the findCallContext case expects creator role equal to the stored user.role, a column that is gone. The replacing invariant: the expected creator role is the literal MEMBER (the dev user holds no global owner or admin binding); the raw INSERT on the older scratch schema is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/roles-api.integration.spec.ts",
+          "reason": "a principal is built with role from the Prisma user row, a column that is gone. The replacing invariant: the principal role is the literal MEMBER."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-queries.integration.spec.ts",
+          "reason": "a principal is built with role from the Prisma user row, a column that is gone. The replacing invariant: the principal role is the literal MEMBER; the legacy-row cases are unchanged here (US-004 removes them)."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/member-invite-role-keys-only.integration.spec.ts",
+          "reason": "it expects the stored invite role DEVELOPER, a column that is gone. The replacing invariant: that assertion goes; the roleId assertion stays."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "79caf75491c37dba82cf71a40a5e34ea3c625fcb"
+    },
+    {
+      "id": "US-004",
+      "title": "Drop ProjectMember, AgentProject and AgentRoleEntry",
+      "description": "**Goal** — Drop the remaining legacy membership tables and remove their unused CRUD/membership methods, legacy fixture-report fields and DB-spec dependencies, retaining the assignee repository's search interface.\n\n**Motivation** — `PrismaProjectAssigneesRepository` is still built on the `ProjectMember` model, `PrismaProjectInvitesMembersRepository.createMember` still writes a `ProjectMember` row (no caller), and `MembershipService.removeProjectBindings` has had no production caller since PR #322.\n\n**Approach** — Migration `20261102090100_drop_legacy_membership_tables`:\n\n```sql\n-- Permissions P1m US-004: memberships, agent rosters and agent roles are role bindings.\nDROP TABLE \"ProjectMember\";\nDROP TABLE \"AgentProject\";\nDROP TABLE \"AgentRoleEntry\";\n```\n\n`schema.prisma` loses the three models and the relation fields that name them: `User.projectMemberships`, `User.addedAgentProjects`, `Agent.roles`, `Agent.projects`, `Project.members`, `Project.agents`. Then:\n\n- `PrismaProjectAssigneesRepository` stops extending `AbstractPrismaRepository<ProjectMembershipDomain, ProjectMember, string>`: it is a plain `@Injectable()` class with the constructor's `PrismaService` and its one method `search` (unchanged). `IProjectAssigneesRepository` no longer extends `IRepository<ProjectMembershipDomain, string>`, and `ProjectMembershipDomain` goes. The CRUD half had no caller; `ProjectAssigneesService` calls only `search`. The `PROJECT_ASSIGNEES_REPOSITORY` token and its module wiring stay.\n- `PrismaProjectInvitesMembersRepository.createMember` goes.\n- `MembershipService.removeProjectBindings`, `PrismaRoleBindingRepository.deleteProjectBindings`, the in-memory double's `deleteProjectBindings` and the `GlobalStubsModule` stub `removeProjectBindings` go (ruling 2026-10-23).\n- `fixtureGrantReport` answers `FixtureGrantReport` with `hasGlobalBinding` and `globalProjectRoleBindings` only; `legacyMemberships` and `agentRoleEntries` go.\n- `seedE2e`'s `wipe` drops the `agentRoleEntry.deleteMany()` line.\n\nOne migration per legacy object group. US-003 drops the two columns (`User.role`, `ProjectInvite.role`) in `20261102090000_drop_legacy_role_columns`; US-004 drops the three tables in `20261102090100_drop_legacy_membership_tables`. No data is copied (design decision 2). Each migration ships with a scratch-schema test in the pattern of `test/integration/fleet/pending-action-drop-legacy-columns-migration.integration.spec.ts` (`scratchSchemaBefore`, `applyMigration` from `test/helpers/migration-schema.ts`).\n\nFailure handling: when a migration runs on a database that holds legacy rows, the legacy tables and their rows are dropped; every other row is kept. Keep the exact migration order after US-003 and do not perform a backfill.\n\n**Scope** — In: the exact table migration and schema relations, unused CRUD/membership methods and stubs, fixture report and its consumers, e2e seed wipe, and specs seeding/counting the removed tables. Out: changing assignee search behavior or token/module wiring, changing completed column/session/revocation work (US-001/002/003), CLI/web changes (US-005/006). Keep legacy-project-roles.ts display vocabulary, ProjectMemberRole/AgentRoleNames/KodaAgentRole types and comments mentioning historical tables. Mock-only delegate specs are excluded, and old migration/scratch-schema SQL retains legacy names.\n\n**Interface** — `IProjectAssigneesRepository` — Target: `{ search(projectId, q, limit, ids): Promise<AssigneeDomain[]> }`, not an `IRepository`. `FixtureGrantReport` — Target: `{ hasGlobalBinding: boolean; globalProjectRoleBindings: number }`. `PrismaProjectAssigneesRepository` receives only PrismaService; `ProjectMembershipDomain`, `createMember`, `removeProjectBindings` and `deleteProjectBindings` are removed.\n\n**Verification** — Strict three-session TDD. Create drop-legacy-membership-tables-migration.integration.spec.ts with scratchSchemaBefore, seed one legacy row per table plus referenced User/Agent/Project and a RoleBinding through raw SQL, applyMigration, and inspect schema-scoped table absence and preserved records. US-003 already removed User.role in this scratch schema. Update the assignee repository unit constructor without altering search cases; preserve DB-free module-token coverage. Delete membership.service.spec.ts's removeProjectBindings block, matching in-memory/global-stub members and project-members service doubles/assertions; remove createMember from invite acceptance doubles. Adjust expectBindingOnlyFixtures and stale report exemptions to consume only the two surviving report invariants. Sweep endpoint.e2e.spec.ts and DB integration suites in agents, email, fleet, memory, permissions, projects, rag, skills and vcs: remove obsolete legacy zero-count assertions, helpers and legacy-only cases, retaining or replacing meaningful behavior assertions with RoleBindings. In permissions retain binding query/access/roster/ticket/recipient cases; in endpoint e2e assert actual agent/member bindings or keep response assertions. permission-fixtures stops deleting legacy delegates and expects only the two report fields. Verify unchanged assignee ordering and two seedE2e runs. Preserve fixtureGrantReport's missing-user negative path, returning exactly the surviving two-field base report { hasGlobalBinding: false, globalProjectRoleBindings: 0 }. Run bun run --cwd apps/api db:generate, then bun run --cwd apps/api type-check and bun run --cwd apps/api lint, plus affected real-Postgres scoped tests. Do not edit generated OpenAPI/client code or mock-only legacy delegate specs.",
+      "acceptanceCriteria": [
+        "[integration] Given a scratch schema containing all migrations before 20261102090100_drop_legacy_membership_tables and one row each in ProjectMember, AgentProject and AgentRoleEntry, applying that migration leaves no ProjectMember table in information_schema.tables.",
+        "[integration] The same migration leaves no AgentProject table in information_schema.tables.",
+        "[integration] The same migration leaves no AgentRoleEntry table in information_schema.tables.",
+        "[integration] After that migration, a RoleBinding row inserted beforehand retains its principalId, roleId and projectId unchanged.",
+        "[integration] After that migration, the User, Agent and Project rows referenced by the legacy rows are still present.",
+        "[integration] Regression pin (passes before the change too): GET /projects/:slug/assignees?q= answers a user holding a developer binding in the project and an ACTIVE agent holding a developer binding there, users first.",
+        "[integration] fixtureGrantReport(db, user) for a user holding only the global member binding returns exactly { hasGlobalBinding: true, globalProjectRoleBindings: 0 }.",
+        "[integration] Regression pin (passes before the change too): seedE2e(db) run twice in a row leaves exactly one user with email admin@koda-e2e.test.",
+        "[integration] Regression negative path: fixtureGrantReport(db, { type: 'USER', id: 'missing-user' }) returns exactly { hasGlobalBinding: false, globalProjectRoleBindings: 0 } when that user does not exist."
+      ],
+      "tags": [
+        "permissions-p1-drop-legacy-schema",
+        "api",
+        "security",
+        "prisma",
+        "migration"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three destructive table drops propagate through membership interfaces, DI, fixtures, seeds and DB regressions; permissions involvement requires strict isolated TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/projects/assignees/prisma-project-assignees.repository.ts",
+        "apps/api/src/projects/assignees/domain/project-assignee.domain.ts",
+        "apps/api/src/permissions/test-helpers/permission-fixtures.ts",
+        "apps/api/src/permissions/membership.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261102090100_drop_legacy_membership_tables/migration.sql",
+        "apps/api/test/integration/permissions/drop-legacy-membership-tables-migration.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/membership.service.spec.ts",
+          "reason": "the removeProjectBindings describe block tests the deleted method. The replacing invariant: the block goes; the other cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/in-memory-permissions.ts",
+          "reason": "bindingRepo() keeps deleteProjectBindings for the deleted method. The replacing invariant: deleteProjectBindings goes."
+        },
+        {
+          "path": "apps/api/src/common/test-helpers/global-stubs.module.ts",
+          "reason": "the MembershipService stub has removeProjectBindings, and mockPrismaService stubs a projectMember delegate. The replacing invariant: both go."
+        },
+        {
+          "path": "apps/api/src/projects/members/project-members.service.spec.ts",
+          "reason": "a double or assertion names removeProjectBindings. The replacing invariant: it goes; the add and list cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/projects/invites/invite-acceptance.service.spec.ts",
+          "reason": "the members repository double has createMember. The replacing invariant: createMember goes from the double."
+        },
+        {
+          "path": "apps/api/src/projects/assignees/prisma-project-assignees.repository.spec.ts",
+          "reason": "it constructs PrismaProjectAssigneesRepository with a transaction manager first, the AbstractPrismaRepository constructor argument that goes. The replacing invariant: it constructs the repository with the PrismaService double only; the search cases are unchanged."
+        },
+        {
+          "path": "apps/api/prisma/seed-e2e-data.ts",
+          "reason": "wipe calls agentRoleEntry.deleteMany on the dropped table. The replacing invariant: that line goes; the wipe order is otherwise unchanged."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the agent cases count agentRoleEntry and agentProject rows and read a projectMember row. The replacing invariant: those reads go; the cases assert the agent's and member's role bindings instead, or keep only their response assertions."
+        },
+        {
+          "path": "apps/api/test/integration/agents/agents-create-rollback.integration.spec.ts",
+          "reason": "the rollback cases expect agentRoleEntry.count 0. The replacing invariant: those assertions go; the agent and binding counts stay."
+        },
+        {
+          "path": "apps/api/test/integration/email/email-schedule.integration.spec.ts",
+          "reason": "it expects projectMember.count and agentRoleEntry.count 0. The replacing invariant: those assertions go."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-fixtures-bindings.integration.spec.ts",
+          "reason": "it expects agentRoleEntry.count 0 for a created agent. The replacing invariant: that assertion goes."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/permissions-assistant-tools.integration.spec.ts",
+          "reason": "it expects projectMember.count 0. The replacing invariant: that assertion goes."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/permissions-mcp-tools.integration.spec.ts",
+          "reason": "it expects agentProject and agentRoleEntry counts 0. The replacing invariant: those assertions go."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/permissions-project-threads.integration.spec.ts",
+          "reason": "it expects projectMember.count 0. The replacing invariant: that assertion goes."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/permissions-workspace-threads.integration.spec.ts",
+          "reason": "it expects projectMember.count 0 twice. The replacing invariant: those assertions go."
+        },
+        {
+          "path": "apps/api/test/integration/memory/permissions-memory-routes.integration.spec.ts",
+          "reason": "it expects projectMember.count 0. The replacing invariant: that assertion goes."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/bindings-only-permissions.integration.spec.ts",
+          "reason": "the cases create projectMember, agentProject and agentRoleEntry rows to prove they grant nothing. The replacing invariant: those cases go; the binding cases stay."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-agent-routes.integration.spec.ts",
+          "reason": "it creates agentRoleEntry rows and counts agentProject rows. The replacing invariant: the legacy rows and counts go; the route assertions on bindings stay."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/core-members-invites.integration.spec.ts",
+          "reason": "it reads projectMember rows and creates an agentProject row. The replacing invariant: membership is read from roleBinding and the agentProject setup goes."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/enforce-fleet-global.integration.spec.ts",
+          "reason": "it expects projectMember and agentRoleEntry counts 0. The replacing invariant: those assertions go."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/enforce-fleet-schedules.integration.spec.ts",
+          "reason": "it expects projectMember.count 0 twice. The replacing invariant: those assertions go."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/me-permissions.integration.spec.ts",
+          "reason": "it counts projectMember and agentProject rows. The replacing invariant: those counts go."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-agent-roster.integration.spec.ts",
+          "reason": "the legacy helper creates and updates agentProject rows and a case counts them. The replacing invariant: the legacy helper and its cases go; the binding roster cases stay."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-fleet-consumers.integration.spec.ts",
+          "reason": "it expects projectMember.count 0. The replacing invariant: that assertion goes."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-notification-consumers.integration.spec.ts",
+          "reason": "it expects projectMember.count 0 twice. The replacing invariant: those assertions go."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-project-access.integration.spec.ts",
+          "reason": "it creates projectMember rows and counts them. The replacing invariant: the legacy setups and counts go; the binding access cases stay."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-queries.integration.spec.ts",
+          "reason": "its helpers create projectMember and agentProject rows, a case deletes them, and a case calls removeProjectBindings. The replacing invariant: the legacy helpers, their cases and the removeProjectBindings case go; the binding query cases stay."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-ticket-consumers.integration.spec.ts",
+          "reason": "it creates projectMember rows and counts them. The replacing invariant: the legacy setups and counts go; the binding cases stay."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/permission-fixtures.integration.spec.ts",
+          "reason": "it deletes agentRoleEntry, projectMember and agentProject rows and asserts legacyMemberships and agentRoleEntries. The replacing invariant: those deletes and fields go; fixtureGrantReport is asserted on hasGlobalBinding and globalProjectRoleBindings."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/project-read-assignees.integration.spec.ts",
+          "reason": "it creates projectMember and agentProject rows to prove they are not assignees. The replacing invariant: those cases go; the binding cases stay."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/project-read-recipients.integration.spec.ts",
+          "reason": "it creates projectMember rows to prove they are not recipients. The replacing invariant: those cases go."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/user-agent-no-legacy-roles.integration.spec.ts",
+          "reason": "it expects agentRoleEntry.count 0. The replacing invariant: that assertion goes."
+        },
+        {
+          "path": "apps/api/test/integration/projects/member-bindings.integration.spec.ts",
+          "reason": "legacyCount and the cases that create projectMember rows read the dropped table. The replacing invariant: legacyCount and those cases go; the binding assertions stay."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-invites-admin.integration.spec.ts",
+          "reason": "it expects projectMember.count 0. The replacing invariant: that assertion goes."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-invites-public.integration.spec.ts",
+          "reason": "it expects projectMember.count values. The replacing invariant: those assertions go; the binding assertions stay."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-members-principals.integration.spec.ts",
+          "reason": "it creates a projectMember row. The replacing invariant: that setup and the case built on it go."
+        },
+        {
+          "path": "apps/api/test/integration/projects/project-membership-gate.integration.spec.ts",
+          "reason": "it expects projectMember.count 0 twice. The replacing invariant: those assertions go."
+        },
+        {
+          "path": "apps/api/test/integration/rag/permissions-kb-routes.integration.spec.ts",
+          "reason": "it expects projectMember.count 0. The replacing invariant: that assertion goes."
+        },
+        {
+          "path": "apps/api/test/integration/skills/project-skills-routes.integration.spec.ts",
+          "reason": "it expects projectMember.count 0. The replacing invariant: that assertion goes."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-permissions.integration.spec.ts",
+          "reason": "it expects projectMember, agentProject and agentRoleEntry counts 0. The replacing invariant: those assertions go."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-webhook-secret.integration.spec.ts",
+          "reason": "it expects agentProject and agentRoleEntry counts 0. The replacing invariant: those assertions go."
+        }
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "37ebb0ba7502b44737791c5920adee86c978802f"
+    },
+    {
+      "id": "US-005",
+      "title": "koda auth me drops the Role row",
+      "description": "**Goal** — Remove the Role row from human-readable koda auth me output without changing machine-readable output.\n\n**Motivation** — The user's rulings for this feature (2026-10-23): the `role` claim and `UserResponseDto.role` stay and are derived from bindings; a global `owner`/`admin` grant or revoke that flips the derived role still revokes the user's tokens; `removeProjectBindings` is deleted; `legacy-project-roles.ts` stays (it names display text, see Out of Scope); the web drops `AuthUser.role` and the CLI drops the `Role` row of `koda auth me`.\n\n**Approach** — `koda auth me` prints the rows `ID`, `Email` and `Name`; `--json` keeps printing the API's `data` unchanged (which still carries `role`). The web's `AuthUser` interface in `apps/web/composables/useAuth.ts` loses `role?: string`; nothing in `apps/web` reads it.\n\nThe preceding paragraph is the shared CLI/web design: this story implements its CLI sentence only; its web sentence belongs exclusively to US-006.\n\n**Scope** — In: the me action in apps/cli/src/commands/auth.ts, exact table/JSON cases and the existing unauthorized-error regression in auth.spec.ts. Out: web AuthUser cleanup (US-006), API sessions/revocation/storage (US-001 through US-004), generated client or OpenAPI regeneration. Preserve all existing API calls, context handling, JSON envelope unwrapping, exit/error behavior and register/logout commands.\n\n**Interface** — `table(['Field', 'Value'], [['ID', 'u-1'], ['Email', 'user@example.com'], ['Name', 'Alice']])`; JSON output remains `JSON.stringify(data, null, 2)`.\n\n**Verification** — Use isolated three-session TDD at the generated API client and output helper boundaries. Add cases to the existing apps/cli/src/commands/auth.spec.ts; no new file. Existing me tests assert only API calls, exit and JSON, so the new table assertion must pin exactly the three requested rows even when role arrives in API data. Run the focused Jest spec and CLI checks without network access.",
+      "acceptanceCriteria": [
+        "[unit] koda auth me without --json calls table with headers ['Field', 'Value'] and rows [['ID', 'u-1'], ['Email', 'user@example.com'], ['Name', 'Alice']] when the API answers a user that also carries role.",
+        "[unit] koda auth me --json prints JSON.stringify(data, null, 2) of the API's data, role included.",
+        "[unit] Regression negative path: when authControllerMe rejects with { ret: 40000, message: 'Unauthorized' }, koda auth me calls process.exit(2), preserving the existing auth-error exit code."
+      ],
+      "tags": [
+        "permissions-p1-drop-legacy-schema",
+        "cli",
+        "authentication",
+        "output"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A small auth-command presentation change with two existing files; use the required authentication security override despite its simple scope.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/auth.ts",
+        "apps/cli/src/commands/auth.spec.ts"
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated",
+      "modifiedFiles": [],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f24618b088b629254eaf0117f2777e53922e2969"
+    },
+    {
+      "id": "US-006",
+      "title": "The web AuthUser drops role",
+      "description": "**Goal** — Delete the unused optional role declaration from the web AuthUser interface only.\n\n**Motivation** — The user's rulings for this feature (2026-10-23): the `role` claim and `UserResponseDto.role` stay and are derived from bindings; a global `owner`/`admin` grant or revoke that flips the derived role still revokes the user's tokens; `removeProjectBindings` is deleted; `legacy-project-roles.ts` stays (it names display text, see Out of Scope); the web drops `AuthUser.role` and the CLI drops the `Role` row of `koda auth me`.\n\n**Approach** — `koda auth me` prints the rows `ID`, `Email` and `Name`; `--json` keeps printing the API's `data` unchanged (which still carries `role`). The web's `AuthUser` interface in `apps/web/composables/useAuth.ts` loses `role?: string`; nothing in `apps/web` reads it.\n\nThe preceding paragraph is the shared CLI/web design: this story implements its web sentence only; its CLI sentence belongs exclusively to US-005.\n\n**Scope** — In: deletion of the explicit optional role property in AuthUser in apps/web/composables/useAuth.ts. Out: CLI output changes (US-005), API role derivation/revocation/schema changes (US-001 through US-004), response filtering or token/session/runtime auth changes. Do not modify layout, navigation, i18n or the API compatibility role field.\n\n**Interface** — Delete `role?: string` from `AuthUser`; keep every other declaration, including `[key: string]: unknown`, unchanged.\n\n**Verification** — The spec's deletion-only ruling (2026-10-23) supplies no behavioral acceptance criteria. The later refine request to include a negative assertion in every story is satisfied only by reviewing that the explicit role declaration is absent; do not invent a runtime failure case or new test file. No runtime behavior or authentication algorithm changes. Verify the removal with bun run --cwd apps/web type-check and bun run --cwd apps/web lint. Do not strip role from responses at runtime.",
+      "acceptanceCriteria": [
+        "[review] After the deletion, the AuthUser interface declaration in apps/web/composables/useAuth.ts contains no explicit role property."
+      ],
+      "tags": [
+        "permissions-p1-drop-legacy-schema",
+        "web",
+        "types",
+        "cleanup"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "no-test",
+        "reasoning": "Single-file type-only structural deletion with zero behavioral change; no security-critical function is modified.",
+        "noTestJustification": "Deletes one unused, erased TypeScript interface property only; no runtime authentication, authorization, session or response behavior changes. The deletion-only ruling requires no behavioral tests; the refine-pass negative assertion is a source-review check only. Verify the removal with web type-check and lint.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/composables/useAuth.ts"
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated",
+      "modifiedFiles": [],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a9de4ecbc1cc497a628fa3e7eebd9f872996f14e"
+    }
+  ],
+  "analysis": "Goal and completion: finish P1 by removing legacy permission storage, not by redesigning authorization. Preserve KodaUserRole, UserPrincipal.role, the JWT role claim and UserResponseDto.role as display/compatibility data derived exclusively from USER bindings with projectId null and role key owner/admin. No routes, DTO fields or generated contracts change. Complete the API chain US-001 -> US-002 -> US-003 -> US-004; CLI US-005 and web US-006 are independent. Exactly six stories are required.\n\nDiscovery and actual architecture: codebase-memory MCP is unavailable in this tool session, so findings use direct reads and literal/regex searches at the supplied execution root. The auto-detected Express/Next.js labels in the prompt are inaccurate: the repository guidance identifies NestJS 12 with Fastify and Prisma 7 for API, Commander.js/generated API client for CLI, and Nuxt 3 SSR for web (.nax/mono/apps/api/context.md:17, .nax/mono/apps/cli/context.md:20, .nax/mono/apps/web/context.md:20). API runtime dependencies confirm @nestjs/platform-fastify and @nathapp platform packages (apps/api/package.json:41-73). Prefer existing Nathapp transaction/repository/envelope patterns; read the nathapp-nestjs-patterns skill before implementation of NestJS changes. API owns all authorization. Every decision still goes through permission keys, never principal.role (.nax/rules/api-auth.md:10-28). No runner changes or new dependencies are required.\n\nUS-001 current code and impact: AuthService.register wraps user creation and owner/baseline grants in membership.afterCommit plus txManager.run, but signs from the original created row (apps/api/src/auth/auth.service.ts:81-107). issueSession is synchronous, signs user.role, and calls UserResponseDto.from(user) (same file:156-161). Login/refresh also converge on issueSession (same file:113-149), so making this seam asynchronous reaches all session producers. Add roleClaim and userResponse, keep token signing behind successful role lookup, and re-read registration's user after commit so first-owner tokenVersion changes cannot invalidate the just-issued token. PrismaAuthRepository.toDomain reads m.role, createUser accepts optional role, and findAnyUserAndCreate specially writes ADMIN for the first user (apps/api/src/auth/prisma-auth.repository.ts:20-68); retain the bootstrap advisory lock, firstUser flag and registration policy while removing those role accesses. UserResponseDto.from currently serializes an explicit safe list including user.role (apps/api/src/auth/dto/auth-response.dto.ts:30-39); supply role separately without leaking passwordHash/tokenVersion. AuthController.me is the direct DTO caller (apps/api/src/auth/auth.controller.ts:110). InviteAcceptanceService returns auth.issueSession after its committed transaction (apps/api/src/projects/invites/invite-acceptance.service.ts:75-111); await the asynchronous seam. Its account repository still writes and returns MEMBER (apps/api/src/projects/invites/prisma-project-invites-members.repository.ts:84-99). Assistant findUserActor directly selects User.role (apps/api/src/fleet/assistant/prisma-assistant-tool-call.repository.ts:79-82), and requester/findCallContext reuse it (same file:90-118). Derive UserToolCallCreator.role in that repository with a global USER owner/admin binding count, keeping executor userPrincipal's creator.role consumption unchanged (apps/api/src/fleet/assistant/assistant-tool.executor.ts:511). Existing affected tests are auth.service.spec.ts, auth.controller.spec.ts, prisma-auth.repository.spec.ts, invite-acceptance.service.spec.ts and fleet/assistant-action-actor.integration.spec.ts. Existing service doubles omit isGlobalAdmin and assume row roles; replace them with async binding-derived behavior and post-commit registration re-read assertions (apps/api/src/auth/auth.service.spec.ts:109-110,180-196,439-465). New role-claim-from-bindings integration coverage spans HTTP register/login/refresh/me/invite accept. US-001 ACs that deliberately seed stored ADMIN remain until US-003, then retain the no-binding MEMBER assertion without that column.\n\nUS-002 current algorithm and consumers: MembershipService.isGlobalAdmin already counts bindings, not the mirror (apps/api/src/permissions/membership.service.ts:107-110). setGlobalAdmin(false) currently calls syncLegacyRole even without an admin deletion (same file:123-140). insertBinding locks, early-returns an identical binding, creates, then calls setUserRole (same file:338-372); read the global-admin count before creating and bump only for zero-to-one. afterRemoval already deduplicates affected USER global owner/admin principals, but syncLegacyRole demotes via stored role (same file:423-448); replace it with a survivor-count-based bump. Keep lock order and all last-owner, last-project-admin and agent-open-ticket guards. afterWrite already evicts the token-version tag and the direct auth-state key after commit (same file:476-497); leave it unchanged. The direct key is essential because MEMORY cache tag invalidation alone does not evict USER-AUTH-STATE (apps/api/src/auth/auth.service.ts:174-177). PrismaRoleBindingRepository.countGlobalAdminBindings already has the required USER/null/key filters, while findUserState selects role and disabled and setUserRole conditionally writes role plus tokenVersion (apps/api/src/permissions/prisma-role-binding.repository.ts:343-372). Replace only this repository's setUserRole with boolean bumpTokenVersion using updateMany, distinct from PrismaAuthRepository.bumpTokenVersion used by logout, which returns a number (apps/api/src/auth/prisma-auth.repository.ts:85-92). UserLegacyState is defined in permissions.types.ts:140 and is imported by the real repository and in-memory store. The double stores role plus disabled/tokenVersion, exposes addUser(id, role, disabled), and records role writes (apps/api/src/permissions/test-helpers/in-memory-permissions.ts:32-54,299-310); remove role, record tokens:userId and provide one-shot failure injection. Its tx doubles cannot alone prove a real database rollback; keep integration tests for transaction/revocation behavior. Existing B2 lock-order/barrier cases must remain, but their role assertions become tokenVersion/call assertions (apps/api/src/permissions/membership.service.spec.ts:259-282,585-617).\n\nUS-002 test sweep is deliberately earlier than the physical drop: remove EVERY stored User.role assertion, including assertions still satisfied by fixture mirroring/defaults. Update membership.service.spec.ts, membership.service.removal-guards.spec.ts, role-matrix.spec.ts, role-admin.service.spec.ts and permission.service.spec.ts for addUser's new signature and binding-backed admin setup. Remove the stored-role-only permission proof; a principal with no binding already has no keys. Integration mirror assertions become exact version-flip assertions in permissions/membership-service and role-bindings-api; registration and admin-user counts become counts of enabled global owner/admin holders through roleBinding. Remove redundant stored-role assertions in membership-notification-consumers, seed-admin, permission-fixtures, core-admin-public-implicit, user-agent-no-legacy-roles, member-role-keys, project-invites-public, project-read-recipients, vcs-permissions and fleet-fixtures-bindings, preserving existing binding/recipient/route assertions. Leave role writes and legacy table cases for their designated schema story. The removeProjectBindings tests stay in US-002 except for their stored-role assertions; US-004 removes the method and block.\n\nUS-003 storage and dependents: schema.prisma still defines User.role with MEMBER default (apps/api/prisma/schema.prisma:25-34) and nullable ProjectInvite.role alongside roleId/assignedRole (same file:214-239). Add only migration 20261102090000_drop_legacy_role_columns, two ALTER TABLE DROP COLUMN statements, without copying data. PrismaUsersRepository reads role in toRecord, takes GlobalRole on create and writes optional role on update, although countActiveAdmins is already binding-based (apps/api/src/users/prisma-users.repository.ts:19-23,48-74). Remove GLOBAL_ROLES/GlobalRole and domain record/write role, remove UsersAdminService.create's MEMBER input (apps/api/src/users/users-admin.service.ts:52-56), and retain unrelated disabled-account revocation/last-admin behavior. Ticket lookup currently selects and promises role (apps/api/src/tickets/prisma-tickets.repository.ts:243-244); change both repository and domain contract to { id, disabled }. Invite persistence writes the enum and falls back through legacyRoleNames when assignedRole is absent (apps/api/src/projects/invites/prisma-project-invites.repository.ts:60-65,94-105,213-289). Remove its row/input/domain role and fallback; use only assignedRole key/name or null. ProjectInvitesService writes legacyNameOf(role.key) and falls back to invite.role for mail (apps/api/src/projects/invites/project-invites.service.ts:185-199,219-227,260-264); delete just that storage adapter, retaining the separate legacy display vocabulary used elsewhere. Acceptance already checks invitedRole before claiming/creating and answers invites.roleGone when no identity remains (apps/api/src/projects/invites/invite-acceptance.service.ts:80-87). A deleted custom role must list null/null and reject 409 without user or binding writes.\n\nFixture boundary matters: grantRole currently mirrors ADMIN in both existing/new binding paths without bumping tokenVersion (apps/api/src/permissions/test-helpers/permission-fixtures.ts:52-79); US-003 removes the mirror but preserves idempotent bindings and unchanged tokenVersion, unlike production MembershipService. fixtureGrantReport currently reads User.role and counts legacy delegates (same file:104-136); US-003 removes the role read and counts actual legacy memberships only, leaving table-based report fields until US-004. seed.ts prints existingUser.role/user.role (apps/api/prisma/seed.ts:29-35); print outcome.roleKey for a newly created admin and no role for an existing address. Update invite service/repository/domain and user-admin unit fixtures to the removed types; remove typed UserAdminRecord.role fixtures even where a loosely typed mock would continue to pass. Across DB-backed auth, agents, fleet, permissions, projects and tickets specs remove user/invite role writes in this story, not earlier. Admin fixtures requiring access get grantRole; helpers newUser(role), createUser(role) and newUser(role, disabled) lose role, with disabled arguments repositioned. This includes the new US-001 integration file, bootstrap-baselines, permission-service, membership-service, permission-fixtures, project-read-recipients, bindings-only-permissions, core-seeded-roles, enforce-fleet-foundations/requesters, membership-notification-consumers, member-bindings, project-members/principals/invites-public, ticket-tenancy and all listed fleet schema/repository/assistant/schedule helpers. roles-api and membership-queries principal literals become MEMBER; thread-creator-type expects literal MEMBER but its older-scratch-schema raw INSERT remains unchanged. invite-role-keys drops the legacy fallback acceptance case, retains roleGone, roleId and roleKey assertions; member-invite-role-keys-only loses only the stored enum assertion. Do not remove valid role fields from JWTs, principals, message rows, Role relations or mail inputs.\n\nUS-004 storage and dependents: legacy models and references are AgentProject (schema.prisma:68-80), AgentRoleEntry (:128-136), ProjectMember (:200-211), User.projectMemberships/addedAgentProjects (:39-44), Agent.roles/projects (:57-59), Project.members/agents (:177-192). Add migration 20261102090100_drop_legacy_membership_tables with the three exact DROP TABLE statements; no CASCADE or backfill. The current FK directions are from legacy tables to User/Agent/Project, so dropping the tables should preserve referenced accounts/projects and all RoleBindings. The assignee search itself already accepts permission-layer candidate ids and queries enabled users plus ACTIVE/PAUSED agents, users first with a combined bound (apps/api/src/projects/assignees/prisma-project-assignees.repository.ts:60-116); only its unused AbstractPrismaRepository<ProjectMembershipDomain, ProjectMember, string> CRUD scaffold/transaction constructor is legacy (:19-55). Remove that scaffold and the IRepository extension/domain, keep search unchanged and keep PROJECT_ASSIGNEES_REPOSITORY wiring (apps/api/src/projects/assignees/project-assignees.module.ts:20). Existing module spec pins token identity and module privacy (:52-55); keep it DB-free. The unused createMember writes a ProjectMember row (apps/api/src/projects/invites/prisma-project-invites-members.repository.ts:75-78); remove it and its doubles. MembershipService.removeProjectBindings is explicitly documented as having no production caller (apps/api/src/permissions/membership.service.ts:269-306); remove it, the repository deleteProjectBindings (apps/api/src/permissions/prisma-role-binding.repository.ts:232-249), in-memory equivalent and GlobalStubsModule stubs, retaining removeAllBindings/setGlobalAdmin.\n\nUS-004 fixture report must shrink to exactly hasGlobalBinding/globalProjectRoleBindings (permission-fixtures.ts:96-138). A discovered downstream dependency is expectBindingOnlyFixtures, which currently consumes report.legacyMemberships/report.agentRoleEntries and exposes agentRoleEntries exemptions (same file:140-159); adjust those references with the report change so no removed delegate/field remains and the two surviving invariants still work. seedE2e wipe currently calls agentRoleEntry.deleteMany (apps/api/prisma/seed-e2e-data.ts:24-35); delete that line, retaining other wipe order and two-run idempotence. Unit changes include membership.service's whole removeProjectBindings block, project-members service doubles/assertions, assignee repository constructor, invite acceptance createMember double and global stubs. DB legacy-row assertions/setup span endpoint.e2e.spec.ts and integration agents, email, fleet, memory, permissions, projects, rag, skills and vcs. Remove obsolete legacy-only proofs, not binding equivalents: keep binding query/access/roster/recipient/rollback/route cases, replace meaningful e2e memberships with RoleBinding assertions. In particular remove legacy setup/helpers/cases from bindings-only-permissions, membership-agent-roster, membership-project-access, membership-queries, membership-ticket-consumers, project-read-assignees/recipients, member-bindings and project-members-principals. Remove obsolete zero-count assertions elsewhere, including permission-fixtures report fields. Mock-only delegates explicitly excluded by the spec stay, even if textual searches still find their names; historical migrations/scratch-schema SQL also necessarily retain old names.\n\nMigration verification path: copy the scratch-schema pattern from apps/api/test/integration/fleet/pending-action-drop-legacy-columns-migration.integration.spec.ts:1-22, not its domain-specific data-copy behavior. scratchSchemaBefore applies every migration sorting BEFORE target, not the target itself (apps/api/test/helpers/migration-schema.ts:24-28,43-53); seed legacy rows with raw SQL against that prior schema, then applyMigration(target), inspect information_schema restricted to current_schema(), compare preserved values, and drop scratch in afterAll. The main integration schema comes from db push and does not run migration SQL (same file:1-5), so ordinary ORM tests cannot replace either dedicated migration test. US-004's prior scratch schema includes US-003, so its User fixture must not include role. Both drops are intentionally destructive for legacy data; no automatic restoration/backfill or deployment reset is promised. Do not apply table drops before the column/mirror cleanup. After each schema change regenerate the ignored Prisma client with bun run --cwd apps/api db:generate, then type-check/lint; do not regenerate OpenAPI or CLI code.\n\nUS-005/006: CLI auth me unwraps generated authControllerMe, prints JSON unchanged or four table rows (apps/cli/src/commands/auth.ts:17-38). Delete only Role from the human table; retain context resolution, generated operation, envelope handling, errors and exit code. Existing auth.spec.ts:60-84 asserts API/exit and JSON but not table rows, so add exact table-call coverage and pin role-preserving JSON. No new file or generated edit is needed. Web AuthUser declares optional role and an unknown-valued index signature (apps/web/composables/useAuth.ts:12-20), with auth flows storing response users unchanged and SSR/httpOnly handling below (:23-118). Remove only the explicit optional role declaration: this does NOT strip role from responses or change authentication. Search found no runtime AuthUser.role readers; existing permission-nav tests explicitly reject role-driven navigation (apps/web/tests/layouts/default-permission-nav.spec.ts:17). No layout, navigation, token handling or locale change belongs here. US-006 has no runtime AC in the spec and is verified by web type-check/lint; this refine pass adds only a negative source-review check for the removed declaration, with no new behavioral test.\n\nTests and risk management: API uses Vitest vi.* and SWC decorator metadata, CLI uses Jest. New test files are attached to implementation stories, never separate test stories. US-001/002 are high-risk session/revocation seams; US-003/004 are cross-module destructive-schema removals, so use isolated three-session TDD for all API stories. CLI auth output also uses the security override. Web's deletion is an erased-type-only structural change, suitable for no-test with justification. Unit specs live beside source and DB specs under test/integration. Every DB AC seeds ensureSystemRoles or boots the app, and raw-created principals receive grantBaseline plus grantRole as needed; special no-admin tests must not accidentally grant an admin fixture. API test:scoped enables DB mode for integration/e2e targets; tests otherwise skip without KODA_DB_TESTS=1 (apps/api/package.json:11-25 and .nax/mono/apps/api/context.md:186-198). Provision compose Postgres on 5433 before implementation integration runs in the sandbox; DB mode force-resets a test database, so never run two such suites against one DB concurrently. Module/DI coverage remains unit-level. Acceptance files generated under app .nax/features must not be edited or copied. Quality commands are verification instructions, not behavioral ACs. Failure handling is fail-closed: role lookup errors propagate before signing, token-version errors abort binding transactions, missing user updates return false without auth-cache eviction, role-gone invites create nothing, and migrations preserve every nonlegacy row. Preserve unchanged API errors/i18n/envelopes and all out-of-scope boundaries below.\n\nRefine-pass adversarial audit: all 51 numbered spec ACs remain in their original stories. Traceability below uses one-based acceptanceCriteria array positions after this revision. US-001: spec 1 first registration response ADMIN -> 1; 2 first access token accepted by /auth/me -> 2; 3 enabled second registration claim MEMBER -> 3; 4 stored ADMIN without admin binding logs in as MEMBER -> 4; 5 /auth/me with grantRole admin binding -> 5; 6 project-admin-only login MEMBER -> 6; 7 direct binding deletion without tokenVersion change followed by refresh MEMBER -> 7; 8 invite acceptance response MEMBER -> 8; 9 roleClaim true -> ADMIN -> 9; 10 roleClaim false -> MEMBER -> 10; 11 lookup error rejection plus no access sign -> 11/12; 12 first-user exact create data -> 13; 13 assistant actor stored ADMIN/no binding -> MEMBER -> 14; 14 assistant global-admin actor -> ADMIN -> 15. US-002 spec 1-15 map directly to acceptance 1-15: first-admin bump; existing-owner no bump; project-admin no bump; identical-admin no bump; last-admin removal bump; retained-owner no bump; bulk-removal bump; auth-state cache invalidation; pre-grant token 401; pre-last-removal token 401; pre-project-grant token 200; injected bump failure rejection; exact updateMany input; zero-row false; setGlobalAdmin(false) with no admin binding no bump. US-003: spec 1/2 absent User/ProjectInvite columns -> 1/2; 3 preserved user values -> 3; 4 preserved invite values -> 4; 5 Owner user-create 201 and created-user login MEMBER -> 5/6; 6 null-roleId list null/null -> 7; 7 null-roleId accept 409 roleGone and no user -> 8/9; 8 developer roleId/no enum create input -> 10; 9 named-role mail Developer -> 11; 10 null-name mail empty -> 12; 11 fixture admin binding plus unchanged tokenVersion -> 13/14; 12 enabled developer assignment -> 15. US-004 spec 1-8 map directly to acceptance 1-8: absence of each of the three tables; unchanged binding identity; retained referenced User/Agent/Project; users-first binding-derived assignees; exact two-field fixture report; twice-run seedE2e retaining exactly one admin email. US-005 spec 1 exact three human table rows -> 1; spec 2 unchanged JSON including role -> 2. US-006 supplies no numbered spec AC. In response to the later refine request for a negative assertion in every story, its acceptance 1 is only a source-review absence check for the explicitly declared role property, not a runtime behavior or a new test requirement. Keep no-test type-only routing.\n\nRegression qualifiers were checked individually: US-001 direct deletion still explicitly has no tokenVersion change; US-002 old-token timing and identical-existing binding clauses remain; US-003 retained values, invited-role name, no-role property, and both passes-before-change regression pins remain; US-004 binding values remain unchanged, users remain first, and both passes-before-change regression pins remain; US-005 JSON still includes role. Removed procedural US-003 follow-up instructions from US-001's AC text only; the original stored-ADMIN assertions remain intact and the required later fixture rewrite remains in both story descriptions.\n\nFailure-table audit: session lookup errors propagate and neither strategy signs (US-001 acceptance 16/17); bump failures reject and restore DB bindings/version (US-002 acceptance 12,16,17); zero-row bump returns false and produces no user-auth cache invalidation (US-002 acceptance 14,18). This replaces an unobservable private revokedUserIds criterion: public createBinding returns RoleBindingView, not WriteOutcome. The zero-row service test starts with a target that passes principal validation, then a repository double returns false for the bump, so it reaches the intended branch instead of failing early on a nonexistent principal. Null-roleId acceptance returns 409 and creates neither user nor binding (US-003 acceptance 8/9/16). Populated-scratch-schema migration preservation is pinned with observable row identities/values (US-003 acceptance 17; US-004 acceptance 9). Added an existing missing-user fixture-report negative-path regression in US-004 acceptance 10, supported by permission-fixtures.ts:107-110, and an unchanged unauthorized CLI exit-code regression in US-005 acceptance 3, supported by auth.spec.ts:80-84 and utils/error.ts:43-46,96-110. No new production capability is required for either negative case. US-006 has no runtime failure path: its added negative source-review assertion confirms the unwanted declaration is absent, without changing its deletion-only scope or introducing runtime tests.\n\nAll contextFiles lists exactly retain the spec's recommended paths (5/5/5/5/2/1 respectively); no output file is listed as input. All expectedFiles are the exact new spec outputs. All six workdirs and dependency arrays remain exactly as bound by the spec, including the two migration-sized API stories. Complexity stays complex for the four cross-module API stories, simple for CLI presentation and web type deletion; API and CLI retain the security-required three-session strategy, while the web erases only a type property and needs no behavioral tests. No dependency, helper, route or new test file was invented during this audit. Reconfirmed scratchSchemaBefore excludes the target migration (test/helpers/migration-schema.ts:24-28,43-53); legacy rows are seeded before applyMigration, not after the columns/tables are gone. Clarified US-001 to finish all asynchronous role reads before signing, avoiding a late userResponse rejection after token signing.\n\nOut-of-scope inventory is preserved verbatim as ten top-level entries: legacy display vocabulary; compatibility claim/types; legacy enum types and comment cleanup; copying legacy data; mock-only legacy delegate specs; US-002 concurrent-grant race test; legacy admin-user request-body role; OpenAPI/client generation; manual koda-wk reset/redeploy; approval/audit/ActionContext. Their original qualifications, examples and story-local US-002 restriction remain unchanged. CLI/web descriptions retain the verbatim shared design paragraph but explicitly assign each half to its own story; neither story modifies the other's workdir. US-004 removes internal CRUD/membership methods, not routes or the surviving assignee repository.",
+  "outOfScope": [
+    "Deleting `apps/api/src/permissions/legacy-project-roles.ts` and the display vocabulary it feeds (`userProjectRole`, `localProjectRole`, `findMembershipRole`, the member-added email's `{{role}}`, the invite \"already a member\" check) is out of scope (ruling 2026-10-23: display text, a later feature).",
+    "Removing `KodaUserRole`, `UserPrincipal.role`, the JWT `role` claim or `UserResponseDto.role` is out of scope (ruling 2026-10-23: they stay, derived from bindings).",
+    "Removing the `ProjectMemberRole`, `AgentRoleNames` and `KodaAgentRole` types from `src/common/enums.ts` and `koda-principal.types.ts`, and rewording comments that still mention the dropped tables, is out of scope.",
+    "Copying legacy rows into bindings before the drop is out of scope (design decision 2: no data migration).",
+    "Specs that stub a `projectMember`, `agentProject` or `agentRoleEntry` delegate on a mocked Prisma client (for example `membership.queries.spec.ts`, `agents-create.routes.spec.ts`, `prisma-agent.repository.spec.ts`, `prisma-project.repository.membership-reads.spec.ts`, `email-content.builder.spec.ts` and the RAG retrieval integration specs) are out of scope; they keep passing against their mocks.",
+    "US-002 only: a test that races two concurrent global `owner`/`admin` grants of one user is out of scope; the user-row lock `insertBinding` takes before the count serializes them, and the existing B2 case exercises that lock.",
+    "Request bodies in specs and helpers that still send `role` to `POST /api/admin/users` are out of scope; the global validation pipe strips the field.",
+    "Regenerating `openapi.json` and `apps/cli/src/generated/` is out of scope; no contract changes.",
+    "Resetting and redeploying koda-wk is out of scope for the run; it is a manual step after P1 (design decision 2).",
+    "Approval policies, the audit log and `ActionContext` are out of scope (P3, P2)."
+  ],
+  "routingProfile": "native-codex"
+}

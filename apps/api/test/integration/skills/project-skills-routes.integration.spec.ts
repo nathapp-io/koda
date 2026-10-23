@@ -370,7 +370,6 @@ describeIntegration('US-005 project skill enablement routes (PG)', () => {
 
     await enableSkill('other', byName.psi.id, tokens.root).expect(200);
 
-    expect(await prisma.projectMember.count({ where: { projectId: otherId, userId: ids.root } })).toBe(0);
   });
 
   // ── AC9 — DEVELOPER member cannot enable ─────────────────────────

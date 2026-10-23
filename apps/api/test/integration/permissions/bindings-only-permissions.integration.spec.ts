@@ -24,9 +24,9 @@ describeIntegration('bindings-only permission reads (PG)', () => {
   let users: PrismaUsersRepository;
   let passwordHash: string;
   let sequence = 0;
-  const newUser = async (role = 'MEMBER', disabled = false) => {
+  const newUser = async (disabled = false) => {
     const n = ++sequence;
-    return db.user.create({ data: { email: `bindings-${n}@koda.test`, name: `U${n}`, passwordHash, role, disabled } });
+    return db.user.create({ data: { email: `bindings-${n}@koda.test`, name: `U${n}`, passwordHash, disabled } });
   };
   const newProject = () => {
     const n = ++sequence;
@@ -53,27 +53,24 @@ describeIntegration('bindings-only permission reads (PG)', () => {
     resetThrottle(app);
   });
 
-  it('AC-1: a legacy project ADMIN row grants no project.read', async () => {
+  it('AC-1: a baseline-only user has no project.read', async () => {
     const u = await newUser();
     const p = await newProject();
     await grantBaseline(db, { type: 'USER', id: u.id });
-    await db.projectMember.create({ data: { userId: u.id, projectId: p.id, role: 'ADMIN' } });
     await membership.invalidatePermissions();
     expect(await permissions.can(principal(u.id), 'project.read', { projectId: p.id })).toEqual({ allowed: false, reason: 'not-granted' });
   });
 
-  it.each([[2, 'ticket.create'], [3, 'project.read']] as const)('AC-%i: legacy agent roles grant no %s', async (_ac, key) => {
+  it.each([[2, 'ticket.create'], [3, 'project.read']] as const)('AC-%i: a baseline-only agent has no %s', async (_ac, key) => {
     const a = await newAgent();
     const p = await newProject();
     await grantBaseline(db, { type: 'AGENT', id: a.id });
-    await db.agentProject.create({ data: { agentId: a.id, projectId: p.id } });
-    await db.agentRoleEntry.create({ data: { agentId: a.id, role: 'DEVELOPER' } });
     await membership.invalidatePermissions();
     expect((await permissions.effectiveKeys({ type: 'AGENT', id: a.id }, { projectId: p.id })).has(key)).toBe(false);
   });
 
-  it.each([4, 5])('AC-%i: User.role ADMIN grants no global or project keys', async (ac) => {
-    const u = await newUser('ADMIN');
+  it.each([4, 5])('AC-%i: an unbound user has no global or project keys', async (ac) => {
+    const u = await newUser();
     const p = await newProject();
     await grantBaseline(db, { type: 'USER', id: u.id });
     await membership.invalidatePermissions();
@@ -92,7 +89,7 @@ describeIntegration('bindings-only permission reads (PG)', () => {
     expect((await permissions.can(principal(u.id), 'ticket.create', { projectId: p.id })).allowed).toBe(true);
   });
   it('AC-9: the legacy admin mirror does not make a global admin', async () => {
-    const u = await newUser('ADMIN');
+    const u = await newUser();
     await grantBaseline(db, { type: 'USER', id: u.id });
     expect(await membership.isGlobalAdmin(u.id)).toBe(false);
   });
@@ -112,8 +109,8 @@ describeIntegration('bindings-only permission reads (PG)', () => {
   };
   it('AC-11: PATCH cannot disable the only bound admin despite a legacy ADMIN decoy', async () => {
     const token = await updateActor();
-    const u1 = await newUser('ADMIN');
-    const u2 = await newUser('ADMIN');
+    const u1 = await newUser();
+    const u2 = await newUser();
     await grantRole(db, { type: 'USER', id: u1.id }, 'admin');
     await grantBaseline(db, { type: 'USER', id: u2.id });
     await membership.invalidatePermissions();
@@ -125,7 +122,7 @@ describeIntegration('bindings-only permission reads (PG)', () => {
   });
   it('AC-12: PATCH may disable an unbound legacy ADMIN when no bound admins exist', async () => {
     const token = await updateActor();
-    const u2 = await newUser('ADMIN');
+    const u2 = await newUser();
     await grantBaseline(db, { type: 'USER', id: u2.id });
     await membership.invalidatePermissions();
     await request(app.getHttpServer()).patch(`/api/admin/users/${u2.id}`).auth(token, { type: 'bearer' }).send({ disabled: true }).expect(200);
@@ -133,8 +130,8 @@ describeIntegration('bindings-only permission reads (PG)', () => {
   });
   it('AC-13: active admin count uses distinct enabled bound users only', async () => {
     const enabled = await newUser();
-    const disabled = await newUser('MEMBER', true);
-    await newUser('ADMIN');
+    const disabled = await newUser(true);
+    await newUser();
     await grantRole(db, { type: 'USER', id: enabled.id }, 'admin');
     await grantRole(db, { type: 'USER', id: enabled.id }, 'owner');
     await grantRole(db, { type: 'USER', id: disabled.id }, 'owner');

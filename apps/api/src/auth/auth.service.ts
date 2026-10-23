@@ -9,6 +9,7 @@ import { LoginDto } from './dto/login.dto';
 import type { IPrincipal } from './types';
 import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
 import { PrismaAuthRepository } from './prisma-auth.repository';
+import type { KodaUserRole } from './principal/koda-principal.types';
 import { UserDomain } from './domain/auth.domain';
 import { userAuthStateCacheKey, userTokenVersionCacheTag } from './token-version.cache';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
@@ -92,9 +93,8 @@ export class AuthService {
           });
         if (!outcome) return null;
 
-        // The first user gets the installation's Owner binding (the repository already stores role ADMIN
-        // for them); everyone else starts at the member baseline. The hooks run before the session is
-        // issued, so the response always describes the user as the bindings left them.
+        // The first user gets the installation's Owner binding; everyone else starts at the member
+        // baseline. The hooks run before the session is issued.
         await this.membership.bindOwnerIfFirst(outcome.user.id, outcome.firstUser);
         await this.membership.bindBaseline({ type: 'USER', id: outcome.user.id });
         return outcome.user;
@@ -104,7 +104,10 @@ export class AuthService {
       throw new ForbiddenAppException({}, 'registration');
     }
 
-    return this.issueSession(created);
+    // Owner binding creation can bump tokenVersion inside the transaction.
+    const user = await this.authRepo.findUserById(created.id);
+    if (!user || user.disabled) throw new AuthException({}, 'auth');
+    return this.issueSession(user);
   }
 
   async registrationStatus(): Promise<{ open: boolean }> {
@@ -149,15 +152,24 @@ export class AuthService {
     return this.issueSession(user);
   }
 
-  /**
-   * The one session shape every entry point issues (register, login, refresh and
-   * invite acceptance). The caller owns the user row; this only signs tokens.
-   */
-  issueSession(user: UserDomain): AuthResponseDto {
+  /** Display/compatibility claim only; authorization uses permission keys. */
+  async roleClaim(userId: string): Promise<KodaUserRole> {
+    return (await this.membership.isGlobalAdmin(userId)) ? 'ADMIN' : 'MEMBER';
+  }
+
+  async userResponse(user: UserDomain): Promise<UserResponseDto> {
+    return UserResponseDto.from(user, await this.roleClaim(user.id));
+  }
+
+  /** The session shape shared by register, login, refresh and invite acceptance. */
+  async issueSession(user: UserDomain): Promise<AuthResponseDto> {
+    // Derive once so the JWT and response describe the same binding snapshot.
+    const role = await this.roleClaim(user.id);
+    const response = UserResponseDto.from(user, role);
     return {
-      accessToken: this.generateAccessToken(user.id, user.email, user.role, user.tokenVersion),
+      accessToken: this.generateAccessToken(user.id, user.email, role, user.tokenVersion),
       refreshToken: this.generateRefreshToken(user.id, user.tokenVersion),
-      user: UserResponseDto.from(user),
+      user: response,
     };
   }
 

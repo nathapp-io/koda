@@ -24,9 +24,9 @@ describeIntegration('project.read notification recipients (PG)', () => {
   let projectId: string;
   let p2Id: string;
   let sequence = 0;
-  const newUser = async (role: 'MEMBER' | 'ADMIN' = 'MEMBER', disabled = false) => {
+  const newUser = async (disabled = false) => {
     const n = ++sequence;
-    const user = await db.user.create({ data: { email: `recipient-${n}-${randomUUID()}@koda.test`, name: `u${n}`, passwordHash: 'x', role, disabled } });
+    const user = await db.user.create({ data: { email: `recipient-${n}-${randomUUID()}@koda.test`, name: `u${n}`, passwordHash: 'x', disabled } });
     await grantBaseline(db, { type: 'USER', id: user.id });
     return user;
   };
@@ -63,8 +63,8 @@ describeIntegration('project.read notification recipients (PG)', () => {
     await grantRole(db, { type: 'USER', id: user.id }, role.key);
     expect(await eligibility.filter([draft(user.id)])).toHaveLength(1);
   });
-  it('AC-2: User.role ADMIN and only global member binding is not eligible', async () => {
-    const user = await newUser('ADMIN');
+  it('AC-2: Only global member binding is not eligible', async () => {
+    const user = await newUser();
     expect(await eligibility.filter([draft(user.id)])).toEqual([]);
   });
   it('AC-3: custom PROJECT role without project.read is not eligible', async () => {
@@ -79,14 +79,14 @@ describeIntegration('project.read notification recipients (PG)', () => {
   });
   it('AC-6: global admin recipients are enabled binding holders in user creation order', async () => {
     const first = await newUser();
-    const disabled = await newUser('MEMBER', true);
-    const roleAdminWithoutBinding = await newUser('ADMIN');
+    const disabled = await newUser(true);
+    const roleAdminWithoutBinding = await newUser();
     const second = await newUser();
     await grantRole(db, { type: 'USER', id: first.id }, 'owner');
     await grantRole(db, { type: 'USER', id: disabled.id }, 'admin');
     await grantRole(db, { type: 'USER', id: second.id }, 'admin');
     expect(await eligibility.findGlobalAdminIds()).toEqual([first.id, second.id]);
-    expect(roleAdminWithoutBinding.role).toBe('ADMIN');
+    expect(await eligibility.findGlobalAdminIds()).not.toContain(roleAdminWithoutBinding.id);
   });
   it('AC-7: a project binding in P2 does not grant eligibility in P', async () => {
     const user = await newUser();
@@ -95,21 +95,19 @@ describeIntegration('project.read notification recipients (PG)', () => {
   });
   it('AC-10: mentions retain only project.read holders in token order', async () => {
     const viewer = await newUser();
-    const legacyAdmin = await newUser('ADMIN');
+    const legacyAdmin = await newUser();
     const globalAdmin = await newUser();
     await grantRole(db, { type: 'USER', id: viewer.id }, 'viewer', projectId);
     await grantRole(db, { type: 'USER', id: globalAdmin.id }, 'admin');
     expect(await mentions.mentionedUserIds(projectId, `${mention(viewer.id)} ${mention(legacyAdmin.id)} ${mention(globalAdmin.id)}`))
       .toEqual([viewer.id, globalAdmin.id]);
   });
-  it('AC-11: global member binding and legacy ProjectMember do not admit a recipient', async () => {
+  it('AC-11: a global member binding alone does not admit a recipient', async () => {
     const user = await newUser();
-    await db.projectMember.create({ data: { userId: user.id, projectId, role: 'DEVELOPER' } });
     expect(await eligibility.filter([draft(user.id)])).toEqual([]);
   });
-  it('AC-12: global member binding and legacy ProjectMember do not admit a mention', async () => {
+  it('AC-12: a global member binding alone does not admit a mention', async () => {
     const user = await newUser();
-    await db.projectMember.create({ data: { userId: user.id, projectId, role: 'DEVELOPER' } });
     expect(await mentions.mentionedUserIds(projectId, mention(user.id))).toEqual([]);
   });
 });

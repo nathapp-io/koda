@@ -234,8 +234,6 @@ describeIntegration('workspace thread keys and hosting (US-003)', () => {
   // -------------------------------------------------------------------------
 
   it('AC-1: a user whose only source in p1 is a developer binding creates a workspace thread there (201)', async () => {
-    expect(await prisma.projectMember.count({ where: { userId: ids.devBind } })).toBe(0);
-
     const res = await as('devBind', 'post', '/api/threads', createBody(P1_SLUG)).expect(201);
 
     const thread = data<ThreadBody>(res);
@@ -246,7 +244,6 @@ describeIntegration('workspace thread keys and hosting (US-003)', () => {
   }, TIMEOUT);
 
   it('AC-2: a user whose only source in p1 is a viewer binding is refused the create (403 permissions), and no thread is created', async () => {
-    expect(await prisma.projectMember.count({ where: { userId: ids.viewerBind } })).toBe(0);
     const before = await prisma.chatThread.count();
 
     expectPermissionsRefusal(await as('viewerBind', 'post', '/api/threads', createBody(P1_SLUG)));

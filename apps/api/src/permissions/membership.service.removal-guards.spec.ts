@@ -101,7 +101,7 @@ describe('MembershipService.removeBinding removal guards (US-001)', () => {
     });
 
     it('removes the only project-admin binding when its user is disabled', async () => {
-      store.addUser('off', 'MEMBER', true);
+      store.addUser('off', true);
       const binding = await create('off', 'project-admin', 'p1');
 
       await expect(service.removeBinding(binding.id)).resolves.toBeUndefined();

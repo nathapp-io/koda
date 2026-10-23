@@ -29,7 +29,7 @@ const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
 const SYSTEM_GRANTER: Granter = { type: 'SYSTEM', id: 'system' };
 
-/** What a transaction decided: the binding, and the users whose `User.role` it changed. */
+/** What a transaction decided: the binding, and the users whose derived role it changed. */
 interface WriteOutcome<T> {
   value: T;
   changed: boolean;
@@ -46,17 +46,16 @@ export interface RemoveBindingOptions {
  * Permissions P1a: every read and write of `RoleBinding`.
  *
  * Owner bindings are serialised by a `SELECT … FOR UPDATE` on the `owner` Role row, which also
- * protects the last-owner rule. For USER principals a global `owner` or `admin` binding is mirrored
- * into the legacy `User.role` in the same transaction; a change of `User.role` revokes the user's
- * tokens, and the cache entries that hold their auth state are dropped once the write's transaction
- * committed (see `afterCommit`).
+ * protects the last-owner rule. For USER principals, the first global `owner`/`admin` grant and
+ * the removal of the last such binding revoke tokens in the same transaction. Auth-state cache
+ * entries are dropped only after commit (see `afterCommit`).
  *
- * Two locks serialize the legacy-role mirror, always in the same order — the `owner` Role row, then the
+ * Two locks serialize the derived-role flip, always in the same order — the `owner` Role row, then the
  * user's row: the survivor count of a removal must see every concurrent owner/admin change of that
  * user, or two transactions each count the other's binding as still present and nobody demotes. A
  * single `removeBinding` takes the `owner` Role row only when the binding it removes is an owner one,
  * and `removeAllBindings` takes both locks before it reads anything — the snapshot it deletes and
- * mirrors cannot be decided by an unlocked read.
+ * revokes cannot be decided by an unlocked read.
  *
  * A project's admins are serialized by the project's advisory lock instead (`lockProjectMembers`),
  * which a removal of a USER `project-admin` binding takes *before* the row locks: the last-admin count
@@ -100,7 +99,7 @@ export class MembershipService {
     await this.permissionCache.invalidate();
   }
 
-  /** A global `owner`/`admin` binding, independent of the legacy role mirror. */
+  /** A global `owner`/`admin` binding determines the compatibility role claim. */
   async isGlobalAdmin(userId: string): Promise<boolean> {
     return (await this.bindings.countGlobalAdminBindings(userId)) > 0;
   }
@@ -128,7 +127,7 @@ export class MembershipService {
         ? await this.bindings.findExisting({ type: 'USER', id: userId }, adminRole.id, null)
         : null;
       if (existing) await this.bindings.deleteById(existing.id);
-      const demoted = await this.syncLegacyRole(userId);
+      const demoted = existing !== null && await this.revokeIfNoGlobalAdmin(userId);
       return { value: undefined, changed: existing !== null || demoted, revokedUserIds: demoted ? [userId] : [] };
     });
     await this.afterWrite(outcome);
@@ -213,7 +212,7 @@ export class MembershipService {
    * because the last-Project-Admin refusal counts the project's admins and another removal there must
    * not count this one as still present (US-001). `options.lastProjectAdminOverride` is the caller's
    * `role.binding.global`, which `RoleAdminService` computes from the stored row; the guards of
-   * `removeProjectBindings`/`removeAllBindings`/`setGlobalAdmin` do not read it.
+   * `removeAllBindings`/`setGlobalAdmin` do not read it.
    *
    * An AGENT binding in a project takes that project's agent-roster lock instead (US-002), the lock
    * `TicketsService` takes before it assigns: the open-ticket refusal counts the agent's tickets, and an
@@ -254,50 +253,13 @@ export class MembershipService {
     await this.afterWrite(outcome);
   }
 
-  /**
-   * Removes the principal's bindings in one project, restricted to the roles named by `roleKeys` when
-   * given, and answers how many rows went away.
-   *
-   * Permissions P1 US-003 deleted the two membership routes that called this (`ProjectMembersService`
-   * `updateRole`/`remove`) and the roster removal that called it (`AgentsService.removeFromProject`),
-   * so it keeps no production caller: a member or an agent leaves a project by deleting its bindings
-   * one at a time on `/role-bindings`. It stays for the legacy-schema story to decide.
-   *
-   * It never touches a legacy `ProjectMember`/`AgentProject` row or a `projectId`-null binding, and it
-   * never changes `User.role`: only global `owner`/`admin` bindings are mirrored. It takes the same
-   * user row lock as every other binding write of this principal, so a concurrent global
-   * `owner`/`admin` change and this removal are decided one at a time. Nested inside a caller's
-   * `txManager.run`, the delete joins that transaction; the permission cache is invalidated after it
-   * commits (through `afterCommit` when the caller owns the transaction).
-   *
-   * The cache is invalidated even when no binding was removed. A caller may follow this delete with
-   * the legacy row the union also reads, and a principal whose only source in the project was that
-   * legacy row (a pre-bindings member, or a rostered agent with no binding) removes zero bindings
-   * here. Skipping the invalidation would leave its warmed effective keys alive for the full cache
-   * TTL, so a removed user kept its project keys. The deferred invalidation runs after the caller's
-   * transaction — legacy row included — has committed.
-   */
-  async removeProjectBindings(
-    principal: PrincipalRef,
-    projectId: string,
-    roleKeys?: readonly string[],
-  ): Promise<number> {
-    const outcome = await this.txManager.run(async (): Promise<WriteOutcome<number>> => {
-      await this.lockUserPrincipal(principal);
-      const removed = await this.bindings.deleteProjectBindings(principal, projectId, roleKeys);
-      return { value: removed, changed: true, revokedUserIds: [] };
-    });
-    await this.afterWrite(outcome);
-    return outcome.value;
-  }
-
   async removeAllBindings(principal: PrincipalRef): Promise<void> {
     const outcome = await this.txManager.run(async (): Promise<WriteOutcome<void>> => {
       // Both locks come before the snapshot, in the order every other binding write takes them: the
       // `owner` Role row, then the principal's user row. A snapshot read before the locks is stale, and
-      // it is the snapshot this method deletes and mirrors: a concurrent global `owner`/`admin` grant of
+      // it is the snapshot this method deletes: a concurrent global `owner`/`admin` grant of
       // this user that commits while this call waits for the lock would be deleted without ever reaching
-      // `afterRemoval`, leaving zero bindings and a legacy `User.role = 'ADMIN'` behind. The owner-role
+      // `afterRemoval`, leaving tokens unrevoked after a role flip. The owner-role
       // lock is taken unconditionally, because the locks must precede the read that decides whether an
       // owner binding is in play; it also keeps the last-owner count serialized with `removeBinding`.
       const ownerRoleId = await this.bindings.lockOwnerRole();
@@ -327,6 +289,10 @@ export class MembershipService {
     const existing = await this.bindings.findExisting(input.principal, role.id, input.projectId);
     if (existing) return { value: toView(existing, role.key), changed: false, revokedUserIds: [] };
 
+    const promotes = input.principal.type === 'USER' && input.projectId === null &&
+      GLOBAL_ADMIN_ROLE_KEYS.includes(role.key) &&
+      (await this.bindings.countGlobalAdminBindings(input.principal.id)) === 0;
+
     const created = await this.bindings.createBinding({
       principalType: input.principal.type,
       principalId: input.principal.id,
@@ -337,8 +303,8 @@ export class MembershipService {
     });
 
     const promoted =
-      input.principal.type === 'USER' && input.projectId === null && GLOBAL_ADMIN_ROLE_KEYS.includes(role.key)
-        ? await this.bindings.setUserRole(input.principal.id, 'ADMIN')
+      promotes
+        ? await this.bindings.bumpTokenVersion(input.principal.id)
         : false;
     return {
       value: toView(created, role.key),
@@ -399,7 +365,7 @@ export class MembershipService {
     }
   }
 
-  /** The legacy-role mirror after bindings were deleted: demote each user left without a global admin binding. */
+  /** The derived-role flip after bindings were deleted: demote each user left without a global admin binding. */
   private async afterRemoval(removed: BindingWithRole[]): Promise<WriteOutcome<void>> {
     const candidates = new Set(
       removed
@@ -413,19 +379,19 @@ export class MembershipService {
     );
     const revokedUserIds: string[] = [];
     for (const userId of candidates) {
-      if (await this.syncLegacyRole(userId)) revokedUserIds.push(userId);
+      if (await this.revokeIfNoGlobalAdmin(userId)) revokedUserIds.push(userId);
     }
     return { value: undefined, changed: removed.length > 0, revokedUserIds };
   }
 
-  /** Sets `User.role = 'MEMBER'` (and revokes tokens) when no global `owner`/`admin` binding remains. */
-  private async syncLegacyRole(userId: string): Promise<boolean> {
+  /** Revokes tokens when no global `owner`/`admin` binding remains. */
+  private async revokeIfNoGlobalAdmin(userId: string): Promise<boolean> {
     if ((await this.bindings.countGlobalAdminBindings(userId)) > 0) return false;
-    return this.bindings.setUserRole(userId, 'MEMBER');
+    return this.bindings.bumpTokenVersion(userId);
   }
 
   /**
-   * The row lock that serializes this user's legacy-role mirror. Taken after the `owner` Role row
+   * The row lock that serializes this user's derived-role flip. Taken after the `owner` Role row
    * (when the write takes that one too) and before any binding is read, changed or counted, so the
    * survivor count always runs against the state a concurrent owner/admin change committed.
    */

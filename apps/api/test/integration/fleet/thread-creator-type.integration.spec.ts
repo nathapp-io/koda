@@ -118,7 +118,7 @@ describeIntegration('thread creator and requester type (PG, US-001)', () => {
     const job = await threadJob(thread.id);
     const user = await prisma.user.findUniqueOrThrow({ where: { id: world.ids.dev } });
     expect((await calls.findCallContext(job.id))?.creator).toEqual({
-      type: 'USER', id: user.id, email: user.email, role: user.role, disabled: user.disabled,
+      type: 'USER', id: user.id, email: user.email, role: 'MEMBER', disabled: user.disabled,
     });
   });
 

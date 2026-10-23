@@ -25,10 +25,16 @@ jest.mock('../config', () => ({
   clearApiKey: jest.fn(),
 }));
 
+jest.mock('../utils/output', () => ({
+  table: jest.fn(),
+  error: jest.fn(),
+}));
+
 import { Command } from 'commander';
 import { authCommand } from './auth';
 import { authControllerMe, authControllerRegister, authControllerLogout } from '../generated';
 import { resolveContext, clearApiKey } from '../config';
+import { table } from '../utils/output';
 
 const mockResolveContext = resolveContext as jest.Mock;
 const mockMe = authControllerMe as jest.Mock;
@@ -65,6 +71,11 @@ describe('authCommand', () => {
       await program.parseAsync(['node', 'koda', 'auth', 'me']);
 
       expect(mockMe).toHaveBeenCalled();
+      expect(table).toHaveBeenCalledWith(['Field', 'Value'], [
+        ['ID', 'u-1'],
+        ['Email', 'user@example.com'],
+        ['Name', 'Alice'],
+      ]);
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 

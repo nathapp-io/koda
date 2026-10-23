@@ -33,7 +33,6 @@ export function authCommand(program: Command): void {
             ['ID', String(data['id'] ?? '')],
             ['Email', String(data['email'] ?? '')],
             ['Name', String(data['name'] ?? '')],
-            ['Role', String(data['role'] ?? '')],
           ];
           table(['Field', 'Value'], rows);
         }

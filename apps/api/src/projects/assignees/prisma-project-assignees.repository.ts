@@ -1,58 +1,14 @@
-import { Inject, Injectable } from '@nestjs/common';
-import {
-  AbstractPrismaRepository,
-  PrismaClientLike,
-  PrismaModelDelegate,
-  PrismaService,
-} from '@nathapp/nestjs-prisma';
-import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { PrismaClient, ProjectMember } from '../../generated/prisma/client';
-import {
-  AssigneeDomain,
-  IProjectAssigneesRepository,
-  ProjectMembershipDomain,
-} from './domain/project-assignee.domain';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '../../generated/prisma/client';
+import { AssigneeDomain, IProjectAssigneesRepository } from './domain/project-assignee.domain';
 
 /** S4c US-004 §3.3: only an agent that could actually work a ticket is offered. */
 const ASSIGNABLE_AGENT_STATUSES = ['ACTIVE', 'PAUSED'] as const;
 
 @Injectable()
-export class PrismaProjectAssigneesRepository
-  extends AbstractPrismaRepository<ProjectMembershipDomain, ProjectMember, string>
-  implements IProjectAssigneesRepository
-{
-  constructor(
-    @Inject(TRANSACTION_MANAGER) tx: ITransactionManager,
-    private readonly prisma: PrismaService<PrismaClient>,
-  ) {
-    super(tx);
-  }
-
-  protected modelDelegate(client: PrismaClientLike): PrismaModelDelegate<ProjectMember, string> {
-    return (client as unknown as PrismaClient).projectMember as unknown as PrismaModelDelegate<ProjectMember, string>;
-  }
-
-  protected toDomain(m: ProjectMember): ProjectMembershipDomain {
-    return {
-      id: m.id,
-      projectId: m.projectId,
-      userId: m.userId,
-      role: m.role,
-      joinedAt: m.joinedAt,
-    };
-  }
-
-  protected toPersistenceCreate(d: ProjectMembershipDomain) {
-    return { projectId: d.projectId, userId: d.userId, role: d.role };
-  }
-
-  protected toPersistenceUpdate(patch: Partial<ProjectMembershipDomain>) {
-    const data: { projectId?: string; userId?: string; role?: string } = {};
-    if (patch.projectId !== undefined) data.projectId = patch.projectId;
-    if (patch.userId !== undefined) data.userId = patch.userId;
-    if (patch.role !== undefined) data.role = patch.role;
-    return data;
-  }
+export class PrismaProjectAssigneesRepository implements IProjectAssigneesRepository {
+  constructor(private readonly prisma: PrismaService<PrismaClient>) {}
 
   /**
    * Bounded account reads over the supplied project.read holders. Enabled/status filters,

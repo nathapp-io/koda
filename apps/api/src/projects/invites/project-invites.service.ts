@@ -6,12 +6,11 @@ import { EmailScheduleService } from '../../email/schedule/email-schedule.servic
 import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { MembershipService } from '../../permissions/membership.service';
-import { LegacyProjectRole, legacyRoleForRoleKey, ROLE_KEY_FOR_LEGACY_ROLE } from '../../permissions/legacy-project-roles';
 import { RoleDomain } from '../../permissions/permissions.types';
 import { RoleAdminService } from '../../permissions/role-admin.service';
 import { ProjectAccessService } from '../project-access.service';
 import { ProjectMemberDto } from '../members/dto/project-member.dto';
-import { ProjectMemberRecord, ProjectMemberRole } from '../members/domain/project-member.domain';
+import { ProjectMemberRecord } from '../members/domain/project-member.domain';
 import { InviteMailer } from './invite-mailer';
 import { generateInviteToken } from './invite-token';
 import { PrismaProjectInvitesRepository, ProjectInviteWithContext } from './prisma-project-invites.repository';
@@ -187,7 +186,6 @@ export class ProjectInvitesService {
       return this.invites.create({
         projectId,
         email,
-        role: legacyNameOf(role.key),
         roleId: role.id,
         tokenHash: hash,
         invitedById: inviter.invitedById,
@@ -218,7 +216,7 @@ export class ProjectInvitesService {
         rawToken,
         projectName: invite.projectName,
         inviterName: invite.inviterName ?? '',
-        role: invite.roleName ?? invite.role ?? '',
+        role: invite.roleName ?? '',
         expiresAt: invite.expiresAt,
       });
     } catch (error) {
@@ -248,12 +246,6 @@ export class ProjectInvitesService {
 function effectiveRoleKey(dto: CreateInviteDto): string {
   if (dto.roleKey === undefined) throw new ValidationAppException({}, 'invites.roleRequired');
   return dto.roleKey;
-}
-
-/** The legacy enum stored beside `roleId`: only the three keys that have a legacy name, null for any other. */
-function legacyNameOf(roleKey: string): LegacyProjectRole | null {
-  const legacy = legacyRoleForRoleKey(roleKey);
-  return ROLE_KEY_FOR_LEGACY_ROLE[legacy] === roleKey ? legacy : null;
 }
 
 /**

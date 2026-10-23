@@ -167,9 +167,6 @@ describeIntegration('project roles and the unified members list (US-003)', () =>
     // The order the route must answer the chips in: developer (older) then triager (newer).
     bindingIds.dev = [developerBinding, triagerBinding];
     // AC-8: the legacy row is `legacydev`'s only source in p1.
-    await db.projectMember.create({
-      data: { projectId: p1Id, userId: userIds.legacydev, role: 'DEVELOPER' },
-    });
     // AC-11: a PROJECT role that grants project access (`project.read`) but not `member.read`.
     await db.role.create({
       data: {
@@ -445,7 +442,7 @@ describeIntegration('project roles and the unified members list (US-003)', () =>
 
       await db.user.createMany({
         data: Array.from({ length: PRINCIPALS }, (_, index) => ({
-          email: `chip-user-${index}@koda.test`, name: `chip user ${index}`, passwordHash: 'not-a-real-hash', role: 'MEMBER',
+          email: `chip-user-${index}@koda.test`, name: `chip user ${index}`, passwordHash: 'not-a-real-hash',
         })),
       });
       await db.agent.createMany({

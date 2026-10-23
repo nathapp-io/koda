@@ -57,7 +57,7 @@ describeIntegration('AssistantToolExecutor audit and replay (PG, US-002)', () =>
     const base = await seedFleetBase(prisma);
     adminId = base.adminId;
     jobId = await seedThreadJob(base, base.adminId);
-    const outsider = await prisma.user.create({ data: { email: 'outsider@koda.test', passwordHash: 'x', role: 'MEMBER' } });
+    const outsider = await prisma.user.create({ data: { email: 'outsider@koda.test', passwordHash: 'x' } });
     outsiderId = outsider.id;
     await grantBaseline(prisma, { type: 'USER', id: outsider.id });
     outsiderJobId = await seedThreadJob(base, outsider.id);

@@ -268,8 +268,10 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      const data = body<{ email: string }>(res);
+      const data = body<{ email: string; role: string }>(res);
       expect(data.email).toBe('admin@koda.test');
+      expect(data.role).toBe('ADMIN');
+      expect(data).not.toHaveProperty('passwordHash');
     });
 
     it('GET /api/auth/me — 401 without token', async () => {
@@ -351,8 +353,8 @@ describeIntegration('API Integration Tests', () => {
       expect(data.apiKey).toBeTruthy();
       // Permissions P1l (US-005): the create carries capabilities, and writes no legacy role row —
       // the agent's project roles are bindings granted below by `rosterAgentIn`.
-      const roles = await prismaClient().agentRoleEntry.count({ where: { agentId: data.agent.id } });
-      expect(roles).toBe(0);
+      const roles = await prismaClient().roleBinding.count({ where: { principalType: 'AGENT', principalId: data.agent.id, projectId: null, role: { key: 'agent' } } });
+      expect(roles).toBe(1);
 
       agentApiKey = data.apiKey;
       agentSlug = data.agent.slug;
@@ -2909,7 +2911,7 @@ describeIntegration('API Integration Tests', () => {
       const rosterEntry = await viewerBinding(rosterAgentId, project.id);
       expect(rosterEntry?.grantedById).toBe(admin.id);
       expect(rosterEntry?.grantedByType).toBe('USER');
-      expect(await prisma.client.agentProject.count({ where: { agentId: rosterAgentId, projectId: project.id } })).toBe(0);
+
     });
 
     it('AC2: a global ADMIN who is not a project member can grant the roster binding', async () => {
@@ -3124,8 +3126,8 @@ describeIntegration('API Integration Tests', () => {
 
       refusal(res, 'members.userDisabled.409');
 
-      const membership = await prisma.client.projectMember.findUnique({
-        where: { projectId_userId: { projectId: project.id, userId: disabledUser.id } },
+      const membership = await prisma.client.roleBinding.findFirst({
+        where: { projectId: project.id, principalType: 'USER', principalId: disabledUser.id },
       });
       expect(membership).toBeNull();
     });

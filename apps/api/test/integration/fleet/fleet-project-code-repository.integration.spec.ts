@@ -41,7 +41,7 @@ describeIntegration('PrismaFleetJobRepository project-code projections (PG, S5b 
 
   beforeAll(async () => {
     await resetDb();
-    const user = await prisma.user.create({ data: { email: 'project-code@koda.test', passwordHash: 'x', role: 'ADMIN' } });
+    const user = await prisma.user.create({ data: { email: 'project-code@koda.test', passwordHash: 'x' } });
     creatorId = user.id;
   });
   afterAll(async () => {

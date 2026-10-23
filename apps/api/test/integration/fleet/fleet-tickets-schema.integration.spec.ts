@@ -26,7 +26,7 @@ describeIntegration('fleet tickets schema (PG)', () => {
 
   beforeAll(async () => {
     await resetDb();
-    const user = await prisma.user.create({ data: { email: 'u@koda.test', passwordHash: 'x', role: 'ADMIN' } });
+    const user = await prisma.user.create({ data: { email: 'u@koda.test', passwordHash: 'x' } });
     const project = await prisma.project.create({ data: { name: 'P', slug: 'p', key: 'P' } });
     const repo = await prisma.fleetRepo.create({
       data: { projectId: project.id, provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', createdById: user.id },

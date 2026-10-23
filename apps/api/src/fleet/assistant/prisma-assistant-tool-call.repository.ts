@@ -77,9 +77,17 @@ export class PrismaAssistantToolCallRepository
   }
 
   async findUserActor(userId: string): Promise<UserToolCallCreator | null> {
-    return this.prisma.client.user.findUnique({
-      where: { id: userId }, select: { id: true, email: true, role: true, disabled: true },
+    const user = await this.prisma.client.user.findUnique({
+      where: { id: userId }, select: { id: true, email: true, disabled: true },
     });
+    if (!user) return null;
+    const bindings = await this.prisma.client.roleBinding.count({
+      where: {
+        principalType: 'USER', principalId: userId, projectId: null,
+        role: { key: { in: ['owner', 'admin'] } },
+      },
+    });
+    return { ...user, role: bindings > 0 ? 'ADMIN' : 'MEMBER' };
   }
 
   /**

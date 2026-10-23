@@ -120,12 +120,12 @@ describeIntegration('US-002 project membership gate (PG)', () => {
    * member, then bind the global `admin` role" — the binding IS the admin, and it mirrors
    * `User.role = 'ADMIN'` as the route used to.
    */
-  const createUser = async (who: string, role: 'MEMBER' | 'ADMIN'): Promise<string> => {
+  const createUser = async (who: string, admin = false): Promise<string> => {
     const created = await request(server).post('/api/admin/users').set(auth('root'))
       .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD }).expect(201);
     const id = data<{ id: string }>(created).id;
     ids[who] = id;
-    if (role === 'ADMIN') await grantRole(prisma, { type: 'USER', id }, 'admin');
+    if (admin) await grantRole(prisma, { type: 'USER', id }, 'admin');
     tokens[who] = await loginToken(server, `${who}@koda.test`);
     // Permissions P1 US-004: the fixture principal is granted through bindings only — the member
     // baseline production writes for every user it creates.
@@ -190,8 +190,8 @@ describeIntegration('US-002 project membership gate (PG)', () => {
 
     // dev/outside/author/multi are plain users; adminMember holds the global `admin` binding the
     // project Ticket/Label writes need.
-    for (const who of ['dev', 'outside', 'author', 'multi']) await createUser(who, 'MEMBER');
-    await createUser('adminMember', 'ADMIN');
+    for (const who of ['dev', 'outside', 'author', 'multi']) await createUser(who);
+    await createUser('adminMember', true);
 
     for (const [slug, key] of [['team', 'TEAM'], ['other', 'OTH'], ['third', 'THD'], ['softdel', 'SFT']]) {
       await request(server).post('/api/projects').set(auth('root'))
@@ -396,9 +396,6 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     expect(updated.body).toBe('agent edit');
     const row = await prisma.comment.findUnique({ where: { id: agentCommentId } });
     expect(row?.body).toBe('agent edit');
-    // Agents are cross-project: there is no ProjectMember row that could have
-    // admitted the agent.
-    expect(await prisma.projectMember.count({ where: { userId: agent.id } })).toBe(0);
   }, TEST_TIMEOUT_MS);
 
   // -------------------------------------------------------------------------
@@ -436,9 +433,6 @@ describeIntegration('US-002 project membership gate (PG)', () => {
   }, TEST_TIMEOUT_MS);
 
   it('AC5: DELETE /api/comments/:id returns 204 for a global ADMIN who is not a member', async () => {
-    // `root` is a global ADMIN with no ProjectMember row anywhere.
-    expect(await prisma.projectMember.count({ where: { userId: rootUserId } })).toBe(0);
-
     const res = await send('delete', `/api/comments/${adminTargetCommentId}`, 'root');
 
     expect(res.status).toBe(204);

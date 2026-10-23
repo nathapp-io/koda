@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
@@ -99,8 +100,20 @@ integration('assistant action actors (PG)', () => {
   });
   it('AC-14: finds user identity including disabled, or null', async () => {
     const user = await db.user.findUniqueOrThrow({ where: { id: world.ids.dev } });
-    expect(await calls.findUserActor(user.id)).toEqual({ id: user.id, email: user.email, role: user.role, disabled: user.disabled });
+    expect(await calls.findUserActor(user.id)).toEqual({ id: user.id, email: user.email, role: 'MEMBER', disabled: user.disabled });
     expect(await calls.findUserActor('missing-user')).toBeNull();
+  });
+  it('role claim AC-14: user without global bindings is MEMBER', async () => {
+    const user = await db.user.create({ data: { email: 'actor-legacy@claim.test', name: 'Legacy', passwordHash: 'h' } });
+    await grantBaseline(db, { type: 'USER', id: user.id });
+    expect(await calls.findUserActor(user.id)).toMatchObject({ role: 'MEMBER' });
+  });
+  it('role claim AC-15: global admin binding is ADMIN', async () => {
+    const user = await db.user.create({ data: { email: 'actor-admin@claim.test', name: 'Admin', passwordHash: 'h' } });
+    await grantBaseline(db, { type: 'USER', id: user.id });
+    await grantRole(db, { type: 'USER', id: user.id }, 'admin');
+
+    expect(await calls.findUserActor(user.id)).toMatchObject({ role: 'ADMIN' });
   });
   it('AC-15: actor status reads are scoped by actor type, id and project', async () => {
     const row = await direct();

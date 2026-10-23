@@ -1,5 +1,3 @@
-import type { IRepository } from '@nathapp/nestjs-data';
-
 /**
  * S4c US-004: module-private DI token. `ProjectAssigneesModule` provides the
  * repository behind it and never exports it — the service is the module's only
@@ -19,19 +17,7 @@ export interface AssigneeDomain {
   status?: string;
 }
 
-/**
- * The project-membership row the repository's CRUD half speaks — a plain
- * interface owned here, never a Prisma-generated type.
- */
-export interface ProjectMembershipDomain {
-  id: string;
-  projectId: string;
-  userId: string;
-  role: string;
-  joinedAt: Date;
-}
-
-export interface IProjectAssigneesRepository extends IRepository<ProjectMembershipDomain, string> {
+export interface IProjectAssigneesRepository {
   /**
    * The combined assignee list: non-disabled users first, then ACTIVE/PAUSED agents
    * from the supplied project.read holders, each group ordered by name.

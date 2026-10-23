@@ -27,7 +27,6 @@ model User {
   email        String   @unique
   name         String?
   passwordHash String
-  role         String   @default("MEMBER") // MEMBER | ADMIN
   tokenVersion Int      @default(0)
   disabled     Boolean  @default(false)
   createdAt    DateTime @default(now())
@@ -36,12 +35,10 @@ model User {
   createdTickets                  Ticket[]                         @relation("TicketCreatedByUser")
   assignedTickets                 Ticket[]                         @relation("TicketAssignedToUser")
   comments                        Comment[]                        @relation("CommentByUser")
-  projectMemberships              ProjectMember[]
   notifications                   Notification[]
   ticketWatches                   TicketWatcher[]
   notificationCategoryPreferences NotificationCategoryPreference[]
   sentProjectInvites              ProjectInvite[]                  @relation("ProjectInviteInvitedBy")
-  addedAgentProjects              AgentProject[]                   @relation("AgentProjectAddedBy")
 }
 
 model Agent {
@@ -54,29 +51,10 @@ model Agent {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  roles           AgentRoleEntry[]
   capabilities    AgentCapabilityEntry[]
-  projects        AgentProject[]
   createdTickets  Ticket[]               @relation("TicketCreatedByAgent")
   assignedTickets Ticket[]               @relation("TicketAssignedToAgent")
   comments        Comment[]              @relation("CommentByAgent")
-}
-
-/// S4c US-001: an agent's explicit project roster. A row grants project reach
-/// only — an agent's permissions inside the project still come from its global
-/// AgentRoleEntry roles (D529).
-model AgentProject {
-  agentId   String
-  projectId String
-  addedById String?
-  createdAt DateTime @default(now())
-
-  agent   Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  addedBy User?   @relation("AgentProjectAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
-
-  @@id([agentId, projectId])
-  @@index([projectId])
 }
 
 /// Skill catalog: a GitHub directory of skills pinned to a resolved commit (admin Update re-resolves).
@@ -125,16 +103,6 @@ model ProjectSkill {
   @@index([skillId])
 }
 
-model AgentRoleEntry {
-  id      String @id @default(cuid())
-  agentId String
-  role    String // VERIFIER | DEVELOPER | REVIEWER
-
-  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@unique([agentId, role])
-}
-
 model AgentCapabilityEntry {
   id         String @id @default(cuid())
   agentId    String
@@ -174,7 +142,6 @@ model Project {
   ticketEvents       TicketEvent[]
   agentEvents        AgentEvent[]
   decisionEvents     DecisionEvent[]
-  members            ProjectMember[]
   graphNodes         GraphNode[]
   graphLinks         GraphLink[]
   memoryItems        MemoryItem[]
@@ -189,7 +156,6 @@ model Project {
   chatThreads        ChatThread[]
   notifications      Notification[]
   invites            ProjectInvite[]
-  agents             AgentProject[]
   skills             ProjectSkill[]
   knowledgePatterns  KnowledgeProjectPatterns?
   roleBindings       RoleBinding[]
@@ -197,26 +163,11 @@ model Project {
   @@index([deletedAt])
 }
 
-model ProjectMember {
-  id        String   @id @default(cuid())
-  projectId String
-  userId    String
-  role      String // ADMIN | DEVELOPER | AGENT | VIEWER
-  joinedAt  DateTime @default(now())
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([projectId, userId])
-}
-
 /// Fleet S4b US-004: one pending invitation per project/email. Only the sha256 hash of the raw token is stored.
 model ProjectInvite {
   id               String    @id @default(cuid())
   projectId        String
   email            String // lowercased, trimmed
-  /// Legacy enum (ADMIN | DEVELOPER | VIEWER); null for an invite whose role key has no legacy name.
-  role             String?
   /// The role the invite binds on acceptance; SetNull when a custom role is deleted before it is accepted.
   roleId           String?
   tokenHash        String    @unique

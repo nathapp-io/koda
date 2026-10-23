@@ -70,14 +70,14 @@ describeIntegration('GET /me/permissions (US-001)', () => {
    * Permissions P1l (US-005): the create route takes no role. `'ADMIN'` means "create it, then bind
    * the global `admin` role" — the binding is the admin, and it mirrors `User.role = 'ADMIN'`.
    */
-  const createUser = async (who: string, role: 'MEMBER' | 'ADMIN'): Promise<void> => {
+  const createUser = async (who: string, admin = false): Promise<void> => {
     const created = await request(server)
       .post('/api/admin/users')
       .set(auth('root'))
       .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD })
       .expect(201);
     ids[who] = data<{ id: string }>(created).id;
-    if (role === 'ADMIN') await grantRole(db, { type: 'USER', id: ids[who] as string }, 'admin');
+    if (admin) await grantRole(db, { type: 'USER', id: ids[who] as string }, 'admin');
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
   };
@@ -98,8 +98,8 @@ describeIntegration('GET /me/permissions (US-001)', () => {
 
     // `plain` holds the baseline `member` binding and nothing else; `dev` adds a developer binding in
     // one project; `gadmin` is a global admin binding with no binding in any project.
-    for (const who of ['dev', 'plain']) await createUser(who, 'MEMBER');
-    await createUser('gadmin', 'ADMIN');
+    for (const who of ['dev', 'plain']) await createUser(who);
+    await createUser('gadmin', true);
 
     const project = await request(server)
       .post('/api/projects')
@@ -139,9 +139,6 @@ describeIntegration('GET /me/permissions (US-001)', () => {
     expect(
       await db.roleBinding.count({ where: { principalType: 'USER', principalId: ids.plain } }),
     ).toBe(1);
-    expect(
-      await db.projectMember.count({ where: { userId: ids.plain } }),
-    ).toBe(0);
 
     const res = await mePermissions('plain').expect(200);
 
@@ -191,7 +188,6 @@ describeIntegration('GET /me/permissions (US-001)', () => {
     expect(
       await db.roleBinding.count({ where: { principalType: 'AGENT', principalId: ids.agent, projectId } }),
     ).toBe(1);
-    expect(await db.agentProject.count({ where: { agentId: ids.agent } })).toBe(0);
 
     const res = await mePermissions('agent', `?project=${PROJECT_SLUG}`).expect(200);
 

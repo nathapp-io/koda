@@ -79,14 +79,14 @@ describeIntegration('admin, auth, home, notification and public invite route key
    * member. `'ADMIN'` now means "create it, then bind the global `admin` role to it" — the binding is
    * what makes it a global admin (and it mirrors `User.role = 'ADMIN'`, as the route used to).
    */
-  const createUser = async (who: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<void> => {
+  const createUser = async (who: string, admin = false): Promise<void> => {
     const created = await request(server)
       .post('/api/admin/users')
       .set(auth('root'))
       .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD })
       .expect(201);
     userIds[who] = data<{ id: string }>(created).id;
-    if (role === 'ADMIN') await grantRole(db, { type: 'USER', id: userIds[who] as string }, 'admin');
+    if (admin) await grantRole(db, { type: 'USER', id: userIds[who] as string }, 'admin');
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
     resetThrottle(app);
@@ -95,8 +95,8 @@ describeIntegration('admin, auth, home, notification and public invite route key
   const bindingsOf = (who: string) =>
     db.roleBinding.count({ where: { principalType: 'USER', principalId: userIds[who] } });
 
-  const roleOf = async (who: string): Promise<string> =>
-    (await db.user.findUniqueOrThrow({ where: { id: userIds[who] }, select: { role: true } })).role;
+  const roleOf = async (who: string): Promise<string[]> =>
+    (await db.roleBinding.findMany({ where: { principalType: 'USER', principalId: userIds[who], projectId: null }, include: { role: true } })).map(row => row.role.key).sort();
 
   beforeAll(async () => {
     await resetDb();
@@ -115,7 +115,7 @@ describeIntegration('admin, auth, home, notification and public invite route key
     // `member` holds nothing but the baseline; `gadmin` is the installation's other global admin;
     // `target` is what a refused PATCH must leave alone.
     for (const who of ['member', 'plain', 'target']) await createUser(who);
-    await createUser('gadmin', 'ADMIN');
+    await createUser('gadmin', true);
 
     // AC-13, AC-14 and AC-17's caller holds *no* binding row at all: the baseline `member` binding
     // the admin route writes is removed here, so the 200s cannot come from a role.
@@ -184,8 +184,8 @@ describeIntegration('admin, auth, home, notification and public invite route key
       .send({ role: 'ADMIN' });
 
     expectPermissionsRefusal(res);
-    await expect(roleOf('target')).resolves.toBe(before);
-    expect(before).toBe('MEMBER');
+    await expect(roleOf('target')).resolves.toEqual(before);
+    expect(before).toEqual(['member']);
   }, TIMEOUT);
 
   it('AC-4: a global admin gets 200 from GET /admin/users', async () => {
@@ -206,7 +206,7 @@ describeIntegration('admin, auth, home, notification and public invite route key
     expect(res.body.ret).toBe(40003);
     expect(res.body.message).toBe(USERS_SELF_REFUSED);
     // US-005: `disabled` is the only patchable field, so the self rule refuses a self-disable.
-    await expect(roleOf('gadmin')).resolves.toBe('ADMIN');
+    await expect(roleOf('gadmin')).resolves.toEqual(['admin', 'member']);
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------

@@ -90,14 +90,14 @@ describeIntegration('agent route keys (US-009)', () => {
    * `'ADMIN'` means "create it, then bind the global `admin` role" — the binding mirrors
    * `User.role = 'ADMIN'` and revokes the token minted before it, so the login comes last.
    */
-  const createUser = async (who: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<void> => {
+  const createUser = async (who: string, admin = false): Promise<void> => {
     const created = await request(server)
       .post('/api/admin/users')
       .set(auth('root'))
       .send({ email: `${who}@koda.test`, name: who, password: TEST_PASSWORD })
       .expect(201);
     userIds[who] = data<{ id: string }>(created).id;
-    if (role === 'ADMIN') await bindGlobal(who, 'admin');
+    if (admin) await bindGlobal(who, 'admin');
     resetThrottle(app);
     tokens[who] = await loginToken(server, `${who}@koda.test`);
   };
@@ -139,9 +139,6 @@ describeIntegration('agent route keys (US-009)', () => {
       await grantRole(db, { type: 'AGENT', id: fixture.id }, 'viewer', p1Id);
       if (legacy.legacyRole) await grantRole(db, { type: 'AGENT', id: fixture.id }, 'developer', p1Id);
     }
-    if (legacy.legacyRole) {
-      await db.agentRoleEntry.create({ data: { agentId: fixture.id, role: legacy.legacyRole } });
-    }
     await membership.invalidatePermissions();
     resetThrottle(app);
     return fixture;
@@ -175,7 +172,7 @@ describeIntegration('agent route keys (US-009)', () => {
 
     // `plain` holds no binding at all; `gadmin` is the installation's other global admin.
     for (const who of ['developer', 'padmin', 'plain']) await createUser(who);
-    await createUser('gadmin', 'ADMIN');
+    await createUser('gadmin', true);
 
     const projectRes = await request(server)
       .post('/api/projects')
@@ -353,7 +350,7 @@ describeIntegration('agent route keys (US-009)', () => {
     expectPermissionsRefusal(res);
   }, TIMEOUT);
 
-  it('AC-15: an agent with a roster row and an AgentRoleEntry DEVELOPER gets 200 from its own pickup', async () => {
+  it('AC-15: a developer-bound agent gets 200 from its own pickup', async () => {
     const res = await request(server)
       .get('/api/agents/roster-dev-agent/pickup')
       .query({ project: P1_SLUG })
@@ -364,7 +361,7 @@ describeIntegration('agent route keys (US-009)', () => {
     expect(res.body).toHaveProperty('data');
   }, TIMEOUT);
 
-  it('AC-16: an agent with an AgentRoleEntry DEVELOPER and no source in p2 is refused with 403 permissions', async () => {
+  it('AC-16: an agent with no binding in p2 is refused with 403 permissions', async () => {
     const res = await request(server)
       .get('/api/agents/dev-only-agent/pickup')
       .query({ project: P2_SLUG })
@@ -372,9 +369,6 @@ describeIntegration('agent route keys (US-009)', () => {
 
     expectPermissionsRefusal(res);
     await expect(db.project.count({ where: { id: p2Id, deletedAt: null } })).resolves.toBe(1);
-    await expect(
-      db.agentProject.count({ where: { agentId: (await db.agent.findUniqueOrThrow({ where: { slug: 'dev-only-agent' } })).id } }),
-    ).resolves.toBe(0);
   }, TIMEOUT);
 
   it('AC-17: a user whose only source in p1 is a developer binding is refused pickup with 403 agents', async () => {

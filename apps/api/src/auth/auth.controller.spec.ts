@@ -32,6 +32,7 @@ const mockUser = {
     login: vi.fn(),
     refresh: vi.fn(),
     validateUser: vi.fn(),
+    userResponse: vi.fn(async () => mockUser),
     generateAccessToken: vi.fn(),
     generateRefreshToken: vi.fn(),
     logout: vi.fn(),
@@ -248,6 +249,7 @@ const mockUser = {
       expect(result).toBeInstanceOf(JsonResponse);
       expect(result.data).toEqual(mockUser);
       expect(authService.validateUser).toHaveBeenCalledWith(user);
+      expect(authService.userResponse).toHaveBeenCalledWith(mockUser);
     });
 
     it('should return 401 when token is missing', async () => {
@@ -256,55 +258,6 @@ const mockUser = {
       // Controller should not allow null user for protected route
       // This is handled by JWT guard
       expect(user).toBeNull();
-    });
-
-    it('should include all user fields in response', async () => {
-      const user = {
-        id: mockUser.id,
-        name: mockUser.email,
-        blacklisted: false,
-        revoked: false,
-        authorities: ['MEMBER'],
-      };
-
-      mockAuthService.validateUser.mockResolvedValue(mockUser);
-
-      const result = await controller.me(user);
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = result.data as any;
-      expect(data.id).toBe(mockUser.id);
-      expect(data.email).toBe(mockUser.email);
-      expect(data.name).toBe(mockUser.name);
-      expect(data.role).toBe(mockUser.role);
-    });
-
-    // Final-review Finding D: validateUser returns the full user row including
-    // passwordHash — /auth/me must map through UserResponseDto so the hash is
-    // never serialized.
-    it('should never serialize passwordHash in the /auth/me response', async () => {
-      const user = {
-        id: mockUser.id,
-        name: mockUser.email,
-        blacklisted: false,
-        revoked: false,
-        authorities: ['MEMBER'],
-      };
-
-      mockAuthService.validateUser.mockResolvedValue({
-        ...mockUser,
-        passwordHash: '$2b$10$supersecret-hash',
-      });
-
-      const result = await controller.me(user);
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = result.data as any;
-      expect(data).not.toHaveProperty('passwordHash');
-      expect(JSON.stringify(result)).not.toContain('supersecret-hash');
-      // Legitimate fields are still present
-      expect(data.email).toBe(mockUser.email);
-      expect(data.name).toBe(mockUser.name);
     });
   });
 

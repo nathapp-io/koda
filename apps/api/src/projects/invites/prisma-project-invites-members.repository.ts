@@ -5,7 +5,7 @@ import { PrismaClient } from '../../generated/prisma/client';
 import { lockProjectMembers } from '../../common/utils/advisory-lock';
 import { localProjectRole } from '../../permissions/membership.queries';
 import { UserDomain } from '../../auth/domain/auth.domain';
-import { ProjectMemberRecord, ProjectMemberRole } from '../members/domain/project-member.domain';
+import { ProjectMemberRecord } from '../members/domain/project-member.domain';
 import { readMemberRecord } from '../members/project-member.queries';
 
 export interface InviteUserState {
@@ -73,24 +73,18 @@ export class PrismaProjectInvitesMembersRepository {
     return record;
   }
 
-  async createMember(projectId: string, userId: string, role: ProjectMemberRole): Promise<ProjectMemberRecord> {
-    await this.db.projectMember.create({ data: { projectId, userId, role } });
-    return this.findRequiredMember(projectId, userId);
-  }
-
   /**
-   * US-005: the account an accepted invite creates. The role is always the global MEMBER role —
-   * project authority comes from the membership row, never from the user row.
+   * The account an accepted invite creates. Its session role comes from bindings,
+   * never from the user row.
    */
   async createInvitedUser(input: CreateInvitedUserInput): Promise<UserDomain> {
     const m = await this.db.user.create({
-      data: { email: input.email, name: input.name, passwordHash: input.passwordHash, role: 'MEMBER' },
+      data: { email: input.email, name: input.name, passwordHash: input.passwordHash },
     });
     return {
       id: m.id,
       email: m.email,
       name: m.name ?? input.name,
-      role: m.role,
       passwordHash: m.passwordHash,
       tokenVersion: m.tokenVersion,
       disabled: m.disabled,

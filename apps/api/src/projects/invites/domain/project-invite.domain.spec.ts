@@ -7,7 +7,6 @@ const record = (over: Partial<ProjectInviteRecord> = {}): ProjectInviteRecord =>
   id: 'i1',
   projectId: 'p1',
   email: 'new@x.io',
-  role: 'DEVELOPER',
   roleId: 'id-developer',
   roleKey: 'developer',
   roleName: 'Developer',

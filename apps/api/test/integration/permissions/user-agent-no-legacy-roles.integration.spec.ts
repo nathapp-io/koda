@@ -136,8 +136,6 @@ describeIntegration('user and agent creation carry no legacy roles (US-005)', ()
     // US-007: the response carries no legacy role any more — the stripped field changed nothing in the
     // DTO. What the whitelist kept is what the row holds: the least-privileged role.
     expect(created).not.toHaveProperty('role');
-    const stored = await db.user.findUniqueOrThrow({ where: { id: created.id }, select: { role: true } });
-    expect(stored.role).toBe('MEMBER');
     expect(await globalRoleKeys(created.id)).toEqual(['member']);
   }, TIMEOUT);
 
@@ -215,7 +213,6 @@ describeIntegration('user and agent creation carry no legacy roles (US-005)', ()
     const body = data<{ agent: { id: string; slug: string }; apiKey: string }>(res);
     expect(body.agent.slug).toBe('legacy-roles-agent');
 
-    await expect(db.agentRoleEntry.count({ where: { agentId: body.agent.id } })).resolves.toBe(0);
     const capabilities = await db.agentCapabilityEntry.findMany({
       where: { agentId: body.agent.id },
       select: { capability: true },

@@ -19,13 +19,13 @@ import bcrypt from 'bcrypt';
 describe('AuthService', () => {
   let service: AuthService;
   let authRepo: PrismaAuthRepository;
+  let moduleRef: TestingModule;
 
   const mockUser = {
     id: 'user-123',
     email: 'test@example.com',
     name: 'Test User',
     passwordHash: 'hashed-password',
-    role: 'MEMBER',
     tokenVersion: 0,
     disabled: false,
     createdAt: new Date(),
@@ -51,6 +51,7 @@ describe('AuthService', () => {
   };
 
   const mockMembership = {
+    isGlobalAdmin: vi.fn(),
     bindOwnerIfFirst: vi.fn(),
     bindBaseline: vi.fn(),
     // B3/B4: the registration transaction is handed to MembershipService, which flushes its deferred
@@ -85,7 +86,7 @@ describe('AuthService', () => {
     mockCacheManager.invalidate.mockReset();
     Object.values(mockMembership).forEach((m) => m.mockReset());
 
-    const module: TestingModule = await Test.createTestingModule({
+    const module: TestingModule = moduleRef = await Test.createTestingModule({
       providers: [
         AuthService,
         { provide: PrismaAuthRepository, useValue: mockAuthRepository },
@@ -105,16 +106,71 @@ describe('AuthService', () => {
     // Default mock values
     mockJwtStrategyProvider.sign.mockReturnValue('mock-token');
     mockJwtRefreshStrategyProvider.sign.mockReturnValue('mock-token');
+    mockMembership.isGlobalAdmin.mockResolvedValue(false);
+    mockAuthRepository.findUserById.mockResolvedValue(mockUser);
     mockAuthRepository.findAnyUser.mockResolvedValue(null);
-    mockAuthRepository.findAnyUserAndCreate.mockImplementation(async (data) => ({ user: { ...mockUser, ...data, role: 'ADMIN' }, firstUser: true }));
+    mockAuthRepository.findAnyUserAndCreate.mockImplementation(async (data) => ({ user: { ...mockUser, ...data }, firstUser: true }));
     mockMembership.bindOwnerIfFirst.mockResolvedValue(undefined);
     mockMembership.bindBaseline.mockResolvedValue(undefined);
     mockAuthConfig.registrationEnabled = false;
     mockAuthConfig.ownerEmail = undefined;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await moduleRef.close();
     vi.clearAllMocks();
+  });
+
+  describe('binding-derived sessions', () => {
+    it.each([[true, 'ADMIN'], [false, 'MEMBER']] as const)('AC-9/10: global admin %s yields %s', async (admin, role) => {
+      mockMembership.isGlobalAdmin.mockResolvedValue(admin);
+      expect(await service.roleClaim('u1')).toBe(role);
+      expect(mockMembership.isGlobalAdmin).toHaveBeenCalledWith('u1');
+    });
+
+    it('AC-11/12: lookup failure propagates before either token is signed', async () => {
+      const error = new Error('binding lookup unavailable');
+      mockMembership.isGlobalAdmin.mockRejectedValueOnce(error);
+      mockAuthRepository.findUserByEmail.mockResolvedValue({ ...mockUser, passwordHash: await bcrypt.hash('Password123!', 4) });
+      await expect(service.login({ email: mockUser.email, password: 'Password123!' })).rejects.toBe(error);
+      expect(mockJwtStrategyProvider.sign).not.toHaveBeenCalled();
+      expect(mockJwtRefreshStrategyProvider.sign).not.toHaveBeenCalled();
+    });
+
+    it.each([true, false])('uses one role lookup for the response and claim (admin=%s)', async (admin) => {
+      mockMembership.isGlobalAdmin.mockResolvedValueOnce(admin).mockResolvedValue(!admin);
+      const response = await service.issueSession(mockUser);
+      const role = admin ? 'ADMIN' : 'MEMBER';
+      expect(response.user.role).toBe(role);
+      expect(mockJwtStrategyProvider.sign).toHaveBeenCalledWith(expect.objectContaining({ role }));
+      expect(mockMembership.isGlobalAdmin).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([true, false])('userResponse exposes only public fields (admin=%s)', async (admin) => {
+      mockMembership.isGlobalAdmin.mockResolvedValue(admin);
+      const response = await service.userResponse(mockUser);
+      expect(response).toEqual({
+        id: mockUser.id, email: mockUser.email, name: mockUser.name,
+        role: admin ? 'ADMIN' : 'MEMBER', disabled: mockUser.disabled,
+        createdAt: mockUser.createdAt, updatedAt: mockUser.updatedAt,
+      });
+      expect(response).not.toHaveProperty('passwordHash');
+      expect(response).not.toHaveProperty('tokenVersion');
+      expect(JSON.stringify(response)).not.toContain(mockUser.passwordHash);
+    });
+
+    it('re-reads the committed registration tokenVersion', async () => {
+      let committed = false;
+      mockMembership.afterCommit.mockImplementationOnce(async fn => { const user = await fn(); committed = true; return user; });
+      mockAuthRepository.findUserById.mockImplementationOnce(async id => {
+        expect(committed).toBe(true);
+        expect(id).toBe(mockUser.id);
+        return { ...mockUser, tokenVersion: 7 };
+      });
+      await service.register({ email: mockUser.email, password: 'Password123!' });
+      expect(mockAuthRepository.findUserById).toHaveBeenCalledWith(mockUser.id);
+      expect(mockJwtStrategyProvider.sign).toHaveBeenCalledWith(expect.objectContaining({ tokenVersion: 7 }));
+    });
   });
 
   describe('register', () => {
@@ -177,7 +233,7 @@ describe('AuthService', () => {
       };
 
       mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({
-        user: { ...mockUser, role: 'ADMIN' },
+        user: { ...mockUser },
         firstUser: true,
       });
 
@@ -193,7 +249,7 @@ describe('AuthService', () => {
 
     it('binds the first user as Owner and every new user to the baseline', async () => {
       mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({
-        user: { ...mockUser, id: 'first-user', role: 'ADMIN' },
+        user: { ...mockUser, id: 'first-user' },
         firstUser: true,
       });
 
@@ -220,7 +276,7 @@ describe('AuthService', () => {
       mockAuthConfig.registrationEnabled = true;
       mockAuthRepository.findUserByEmail.mockResolvedValueOnce(null);
       mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({
-        user: { ...mockUser, id: 'first-user', role: 'ADMIN' },
+        user: { ...mockUser, id: 'first-user' },
         firstUser: true,
       });
       mockMembership.bindOwnerIfFirst.mockRejectedValueOnce(
@@ -259,7 +315,7 @@ describe('AuthService', () => {
       mockAuthConfig.ownerEmail = 'owner@koda.test';
       mockAuthRepository.findAnyUser.mockResolvedValue(null);
       mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({
-        user: { ...mockUser, id: 'owner-user', email: 'owner@koda.test', role: 'ADMIN' },
+        user: { ...mockUser, id: 'owner-user', email: 'owner@koda.test' },
         firstUser: true,
       });
 
@@ -293,7 +349,7 @@ describe('AuthService', () => {
       mockAuthConfig.ownerEmail = undefined;
       mockAuthRepository.findAnyUser.mockResolvedValue(null);
       mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({
-        user: { ...mockUser, id: 'first-user', role: 'ADMIN' },
+        user: { ...mockUser, id: 'first-user' },
         firstUser: true,
       });
 
@@ -462,7 +518,7 @@ describe('AuthService', () => {
     });
 
     it('still refreshes for a non-revoked principal', async () => {
-      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', role: 'MEMBER', tokenVersion: 3, passwordHash: 'h' });
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', tokenVersion: 3, passwordHash: 'h' });
       const principal = {
         id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
       } as unknown as IPrincipal;
@@ -520,13 +576,13 @@ describe('AuthService', () => {
 
   describe('JWT token generation', () => {
     it('should generate access token with correct payload', () => {
-      const token = service.generateAccessToken(mockUser.id, mockUser.email, mockUser.role, mockUser.tokenVersion);
+      const token = service.generateAccessToken(mockUser.id, mockUser.email, 'MEMBER', mockUser.tokenVersion);
 
       expect(token).toBe('mock-token');
       expect(mockJwtStrategyProvider.sign).toHaveBeenCalledWith({
         sub: mockUser.id,
         email: mockUser.email,
-        role: mockUser.role,
+        role: 'MEMBER',
         tokenVersion: mockUser.tokenVersion,
       });
     });

@@ -1,6 +1,6 @@
 /**
  * Permissions P1a US-003 — MembershipService against real Postgres (AC-16 .. AC-25): concurrent
- * idempotent creates, legacy User.role mirroring with token revocation, and the owner-row lock.
+ * idempotent creates, binding-derived token revocation, and the owner-row lock.
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/permissions/membership-service.integration.spec.ts
  */
@@ -27,10 +27,10 @@ describeIntegration('MembershipService (PG)', () => {
   let counter = 0;
 
   const SYSTEM = { type: 'SYSTEM' as const, id: 'test' };
-  const newUser = async (role: 'MEMBER' | 'ADMIN' = 'MEMBER') => {
+  const newUser = async () => {
     counter += 1;
     return prisma.user.create({
-      data: { email: `m${counter}@koda.test`, name: `M${counter}`, passwordHash: 'x', role },
+      data: { email: `m${counter}@koda.test`, name: `M${counter}`, passwordHash: 'x' },
     });
   };
   const bindGlobal = (userId: string, roleKey: string) =>
@@ -79,16 +79,15 @@ describeIntegration('MembershipService (PG)', () => {
       const user = await newUser();
       const [a, b] = await Promise.all([bindGlobal(user.id, 'admin'), bindGlobal(user.id, 'admin')]);
       expect(a.id).toBe(b.id);
-      expect((await userRow(user.id)).role).toBe('ADMIN');
+      expect((await userRow(user.id)).tokenVersion).toBe(1);
     });
   });
 
-  describe('legacy admin mirroring', () => {
-    it('AC-18/19: a global admin binding sets User.role ADMIN, bumps tokenVersion and makes isGlobalAdmin true', async () => {
+  describe('binding-derived token revocation', () => {
+    it('AC-18/19: a global admin binding promotes the derived role, bumps tokenVersion and makes isGlobalAdmin true', async () => {
       const user = await newUser();
       await bindGlobal(user.id, 'admin');
       const row = await userRow(user.id);
-      expect(row.role).toBe('ADMIN');
       expect(row.tokenVersion).toBe(1);
       expect(await membership.isGlobalAdmin(user.id)).toBe(true);
     });
@@ -98,22 +97,21 @@ describeIntegration('MembershipService (PG)', () => {
       const binding = await bindGlobal(user.id, 'admin');
       await membership.removeBinding(binding.id);
       const row = await userRow(user.id);
-      expect(row.role).toBe('MEMBER');
       expect(row.tokenVersion).toBe(2);
       expect(await membership.isGlobalAdmin(user.id)).toBe(false);
     });
 
-    it('setGlobalAdmin(false) never removes an owner binding and demotes a binding-less legacy admin', async () => {
+    it('setGlobalAdmin(false) never removes an owner binding and does not revoke a binding-less legacy admin', async () => {
       const owner = await newUser();
       await bindGlobal(owner.id, 'owner');
       await bindGlobal(owner.id, 'admin');
       await membership.setGlobalAdmin(owner.id, false, SYSTEM);
       expect(await ownerCount()).toBe(1);
-      expect((await userRow(owner.id)).role).toBe('ADMIN');
+      expect((await userRow(owner.id)).tokenVersion).toBe(1);
 
-      const legacy = await newUser('ADMIN');
+      const legacy = await newUser();
       await membership.setGlobalAdmin(legacy.id, false, SYSTEM);
-      expect((await userRow(legacy.id)).role).toBe('MEMBER');
+      expect((await userRow(legacy.id)).tokenVersion).toBe(0);
     });
   });
 
@@ -142,13 +140,13 @@ describeIntegration('MembershipService (PG)', () => {
     });
   });
 
-  describe('concurrent legacy-role mirroring (B2)', () => {
+  describe('concurrent token revocation (B2)', () => {
     it('removing one user\'s owner and admin bindings concurrently leaves MEMBER', async () => {
       const user = await newUser();
       const [owner, admin] = [await bindGlobal(user.id, 'owner'), await bindGlobal(user.id, 'admin')];
       // A second owner keeps the last-owner rule out of the way: this test is about the user's mirror.
       await bindGlobal((await newUser()).id, 'owner');
-      expect((await userRow(user.id)).role).toBe('ADMIN');
+      expect(await membership.isGlobalAdmin(user.id)).toBe(true);
 
       const results = await Promise.allSettled([
         membership.removeBinding(owner.id),
@@ -158,7 +156,6 @@ describeIntegration('MembershipService (PG)', () => {
       expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
       expect(await prisma.roleBinding.count({ where: { principalId: user.id } })).toBe(0);
       const row = await userRow(user.id);
-      expect(row.role).toBe('MEMBER');
       // One bump for the promotion the two bindings caused, one for the demotion they now leave behind:
       // the second removal must not count the first's uncommitted delete as a surviving binding.
       expect(row.tokenVersion).toBe(2);
@@ -180,7 +177,9 @@ describeIntegration('MembershipService (PG)', () => {
       // The admin binding is there when the dust settles, so the demotion the removal may have made must
       // not outlive it: the two transactions serialize on the user's row.
       expect(await prisma.roleBinding.count({ where: { principalId: user.id, role: { key: 'admin' } } })).toBe(1);
-      expect((await userRow(user.id)).role).toBe('ADMIN');
+      expect(await membership.isGlobalAdmin(user.id)).toBe(true);
+      // Grant before removal keeps ADMIN throughout; removal first causes two additional flips.
+      expect([1, 3]).toContain((await userRow(user.id)).tokenVersion);
     });
 
     it('a global admin grant committed before the bulk-removal lock is deleted and demotes the user', async () => {
@@ -228,7 +227,7 @@ describeIntegration('MembershipService (PG)', () => {
         // This independent client cannot see uncommitted changes from either service transaction.
         expect(await observer.roleBinding.findUnique({ where: { id: grant.id } })).not.toBeNull();
         expect(await observer.user.findUniqueOrThrow({ where: { id: user.id } })).toEqual(
-          expect.objectContaining({ role: 'ADMIN', tokenVersion: 1 }),
+          expect.objectContaining({ tokenVersion: 1 }),
         );
         release();
         await removal;
@@ -243,7 +242,6 @@ describeIntegration('MembershipService (PG)', () => {
       expect(await prisma.roleBinding.count({ where: { principalId: user.id } })).toBe(0);
       const row = await userRow(user.id);
       // One bump for the grant, one for the demotion it must not survive.
-      expect(row.role).toBe('MEMBER');
       expect(row.tokenVersion).toBe(2);
       expect(await membership.isGlobalAdmin(user.id)).toBe(false);
     });
@@ -293,7 +291,7 @@ describeIntegration('MembershipService (PG)', () => {
           }),
         );
 
-        expect((await userRow(user.id)).role).toBe('MEMBER');
+        expect((await userRow(user.id)).tokenVersion).toBe(2);
         expect((await reader.service.effectiveKeys(principal, 'global')).has('user.create')).toBe(false);
       } finally {
         await reader.close();

@@ -124,7 +124,7 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
 
   /** The ACs' premise: no legacy `ProjectMember` row, and the only project binding is the one named. */
   const expectOnlyProjectBinding = async (userId: string, projectId: string, roleKey: string): Promise<void> => {
-    expect(await prisma.projectMember.count({ where: { userId } })).toBe(0);
+
     expect(await projectBindingsOf(userId)).toEqual([{ projectId, role: { key: roleKey } }]);
   };
 

@@ -54,6 +54,18 @@ describeIntegration('project.read assignees (PG + HTTP)', () => {
     resetThrottle(app);
   });
 
+  it('P1m AC-6: HTTP offers developer-bound users before ACTIVE developer-bound agents', async () => {
+    const u = await newUser(); const a = await newAgent(); const p = await newProject();
+    await grantRole(db, { type: 'USER', id: u.id }, 'developer', p.id);
+    await grantRole(db, { type: 'AGENT', id: a.id }, 'developer', p.id);
+    await membership.invalidatePermissions();
+    const token = await loginToken(app.getHttpServer(), u.email);
+    const res = await request(app.getHttpServer()).get(`/api/projects/${p.slug}/assignees`).query({ q: '' }).auth(token, { type: 'bearer' }).expect(200);
+    expect(data<{ items: { id: string; type: string }[] }>(res).items.map(({ id, type }) => ({ id, type }))).toEqual([
+      { id: u.id, type: 'user' }, { id: a.id, type: 'agent' },
+    ]);
+  });
+
   it.each([[1, 'developer'], [2, 'admin']] as const)('AC-%i: includes a %s-bound user', async (_ac, key) => {
     const u = await newUser();
     const p = await newProject();
@@ -74,10 +86,9 @@ describeIntegration('project.read assignees (PG + HTTP)', () => {
     await grantRole(db, { type: 'USER', id: u.id }, role.key, p.id);
     expect(await permissions.principalIdsWithKey('USER', p.id, 'project.read')).toEqual([]);
   });
-  it('AC-5: omits a legacy ProjectMember-only user', async () => {
+  it('AC-5: omits a baseline-only user', async () => {
     const u = await newUser();
     const p = await newProject();
-    await db.projectMember.create({ data: { userId: u.id, projectId: p.id, role: 'DEVELOPER' } });
     expect(await permissions.principalIdsWithKey('USER', p.id, 'project.read')).toEqual([]);
   });
   it('AC-6: an invalid GLOBAL entry does not discard the valid developer', async () => {
@@ -95,10 +106,9 @@ describeIntegration('project.read assignees (PG + HTTP)', () => {
     await grantRole(db, { type: 'AGENT', id: a.id }, 'viewer', p.id);
     expect(await permissions.principalIdsWithKey('AGENT', p.id, 'project.read')).toEqual([a.id]);
   });
-  it('AC-8: omits a legacy AgentProject-only agent', async () => {
+  it('AC-8: omits a baseline-only agent', async () => {
     const a = await newAgent();
     const p = await newProject();
-    await db.agentProject.create({ data: { agentId: a.id, projectId: p.id } });
     expect(await permissions.principalIdsWithKey('AGENT', p.id, 'project.read')).toEqual([]);
   });
   it('AC-9: sorts and deduplicates local and all-project holders', async () => {
@@ -124,7 +134,7 @@ describeIntegration('project.read assignees (PG + HTTP)', () => {
     expect(await permissions.principalIdsWithKey('USER', p.id, 'project.read')).toEqual([]);
   });
 
-  it.each([13, 14, 18])('AC-%i: HTTP consumes key holders, not access sources or legacy rows', async (ac) => {
+  it.each([13, 14, 18])('AC-%i: HTTP consumes key holders, omitting baseline-only principals', async (ac) => {
     const caller = await newUser();
     const p = await newProject();
     await grantRole(db, { type: 'USER', id: caller.id }, 'developer', p.id);
@@ -137,9 +147,6 @@ describeIntegration('project.read assignees (PG + HTTP)', () => {
     } else if (ac === 14) {
       const role = await customRole('PROJECT', ['ticket.create']);
       await grantRole(db, { type: 'USER', id: target.id }, role.key, p.id);
-    } else {
-      await db.projectMember.create({ data: { userId: target.id, projectId: p.id, role: 'DEVELOPER' } });
-      await db.agentProject.create({ data: { agentId: agent.id, projectId: p.id } });
     }
     await membership.invalidatePermissions();
     const token = await loginToken(app.getHttpServer(), caller.email);

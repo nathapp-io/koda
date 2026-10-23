@@ -42,12 +42,12 @@ describeIntegration('/admin/users (PG)', () => {
    * member, then bind the global `admin` role" — the binding is the admin, and it mirrors
    * `User.role = 'ADMIN'` as the route used to.
    */
-  const createUser = async (email: string, role: 'MEMBER' | 'ADMIN' = 'MEMBER'): Promise<UserRow> => {
+  const createUser = async (email: string, admin = false): Promise<UserRow> => {
     const created = data<UserRow>(
       await request(server).post('/api/admin/users').set(auth(rootToken))
         .send({ email, name: email.split('@')[0], password: TEST_PASSWORD }).expect(201),
     );
-    if (role === 'ADMIN') await grantRole(prisma.client, { type: 'USER', id: created.id }, 'admin');
+    if (admin) await grantRole(prisma.client, { type: 'USER', id: created.id }, 'admin');
     return created;
   };
 
@@ -144,7 +144,7 @@ describeIntegration('/admin/users (PG)', () => {
    * patch. The demotion is what revokes the target's token, so the old token stops working at once.
    */
   it('demoting an admin revokes their ADMIN token immediately', async () => {
-    const dave = await createUser('dave@koda.test', 'ADMIN');
+    const dave = await createUser('dave@koda.test', true);
     const daveToken = await loginToken(server, 'dave@koda.test');
     const me = data<{ role: string }>(await request(server).get('/api/auth/me').set(auth(daveToken)).expect(200));
     expect(me.role).toBe('ADMIN');
@@ -166,11 +166,19 @@ describeIntegration('/admin/users (PG)', () => {
     await request(server).patch(`/api/admin/users/${rootId}`).set(auth(rootToken)).send({ role: 'MEMBER' }).expect(200);
   });
 
+  const enabledAdminCount = async () => {
+    const bindings = await prisma.client.roleBinding.findMany({
+      where: { principalType: 'USER', projectId: null, role: { key: { in: ['owner', 'admin'] } } },
+      select: { principalId: true },
+    });
+    return prisma.client.user.count({ where: { disabled: false, id: { in: bindings.map(row => row.principalId) } } });
+  };
+
   it('two admins disabling each other at once refuse exactly one with users.lastAdmin', async () => {
-    const eve = await createUser('eve@koda.test', 'ADMIN');
+    const eve = await createUser('eve@koda.test', true);
     const eveToken = await loginToken(server, 'eve@koda.test');
     // Root and Eve are the only active admins (Dave was demoted above).
-    expect(await prisma.client.user.count({ where: { role: 'ADMIN', disabled: false } })).toBe(2);
+    expect(await enabledAdminCount()).toBe(2);
 
     const [a, b] = await Promise.all([
       request(server).patch(`/api/admin/users/${eve.id}`).set(auth(rootToken)).send({ disabled: true }),
@@ -181,6 +189,6 @@ describeIntegration('/admin/users (PG)', () => {
     expect([a.status, b.status].sort()).toEqual([200, 409]);
     expect([a.body.ret, b.body.ret].filter((code) => code === 409)).toHaveLength(1);
     expect([a.body.message, b.body.message]).toContain(LAST_ADMIN_REFUSED);
-    expect(await prisma.client.user.count({ where: { role: 'ADMIN', disabled: false } })).toBe(1);
+    expect(await enabledAdminCount()).toBe(1);
   });
 });

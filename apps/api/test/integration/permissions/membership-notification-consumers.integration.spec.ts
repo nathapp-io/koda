@@ -68,7 +68,7 @@ describeIntegration('notification, mention and email consumers read bindings (US
    */
   const makeUser = async (who: string, admin = false): Promise<string> => {
     const user = await prisma.user.create({
-      data: { email: `${who}-${randomUUID()}@koda.test`, name: who, passwordHash: 'x', role: 'MEMBER' },
+      data: { email: `${who}-${randomUUID()}@koda.test`, name: who, passwordHash: 'x' },
     });
     await grantBaseline(prisma, { type: 'USER', id: user.id });
     if (admin) await grantRole(prisma, { type: 'USER', id: user.id }, 'admin', null);
@@ -93,7 +93,7 @@ describeIntegration('notification, mention and email consumers read bindings (US
     projectId: string | null,
     roleKey: string,
   ): Promise<void> => {
-    expect(await prisma.projectMember.count({ where: { userId } })).toBe(0);
+
     expect(await projectBindingsOf(userId)).toEqual([{ projectId, role: { key: roleKey } }]);
   };
 
@@ -101,7 +101,7 @@ describeIntegration('notification, mention and email consumers read bindings (US
   const expectNoSource = async (userId: string): Promise<void> => {
     expect((await prisma.user.findUniqueOrThrow({ where: { id: userId } })).disabled).toBe(false);
     expect(await projectBindingsOf(userId)).toEqual([]);
-    expect(await prisma.projectMember.count({ where: { userId } })).toBe(0);
+
   };
 
   const draft = (userId: string, over: Partial<NotificationDraft> = {}): NotificationDraft => ({
@@ -208,7 +208,6 @@ describeIntegration('notification, mention and email consumers read bindings (US
 
   it('AC-2: deliver inserts nothing for an enabled non-admin with no source, and one for an enabled global ADMIN', async () => {
     await expectNoSource(ids.outsider as string);
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: ids.admin } })).role).toBe('ADMIN');
     await expectNoSource(ids.admin as string);
 
     const inserted = await writer.deliver([draft(ids.outsider as string), draft(ids.admin as string)]);

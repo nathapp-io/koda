@@ -178,10 +178,10 @@ describeIntegration('role bindings API (US-006)', () => {
 
   const userRow = (id: string) => db.user.findUniqueOrThrow({ where: { id } });
 
-  const principalOf = (user: { id: string; role: string; email: string }): KodaPrincipal => ({
+  const principalOf = (user: { id: string; email: string }): KodaPrincipal => ({
     actorType: 'user',
     id: user.id,
-    role: user.role as 'MEMBER' | 'ADMIN',
+    role: 'MEMBER',
     email: user.email,
   });
 
@@ -493,15 +493,15 @@ describeIntegration('role bindings API (US-006)', () => {
     expect(await db.roleBinding.findUnique({ where: { id: binding.id } })).toBeNull();
   });
 
-  it('AC-14: removing the only global admin binding of a target stores User.role MEMBER', async () => {
+  it('AC-14: removing the only global admin binding of a target revokes tokens on the derived-role flip', async () => {
     const binding = await db.roleBinding.findFirstOrThrow({
       where: { principalId: adminTargetBId, projectId: null },
     });
-    expect((await userRow(adminTargetBId)).role).toBe('ADMIN');
+    const before = (await userRow(adminTargetBId)).tokenVersion;
 
     await deleteBinding(ownerToken, binding.id).expect(204);
 
-    expect((await userRow(adminTargetBId)).role).toBe('MEMBER');
+    expect((await userRow(adminTargetBId)).tokenVersion).toBe(before + 1);
     expect(await bindingCount({ principalId: adminTargetBId, role: { key: 'owner' } })).toBe(0);
   });
 
@@ -741,8 +741,8 @@ describeIntegration('role bindings API (US-006)', () => {
 
       expectRefusal(res, { status: 403, code: CODE.forbidden, key: 'escalation' });
       expect(await bindingCount({ principalId: target.id })).toBe(0);
-      // The mirror never ran either: the target keeps the MEMBER role it was created with.
-      expect((await userRow(target.id)).role).toBe('MEMBER');
+      // No token revocation ran either.
+      expect((await userRow(target.id)).tokenVersion).toBe(0);
     } finally {
       await db.role.update({
         where: { key: 'admin' },

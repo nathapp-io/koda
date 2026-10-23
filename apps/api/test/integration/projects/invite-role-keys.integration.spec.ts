@@ -165,7 +165,6 @@ describeIntegration('invite role keys (US-005)', () => {
     const triager = await db.role.findUniqueOrThrow({ where: { key: 'triager' } });
     const [stored] = await invitesFor('ac1@koda.test');
     expect(stored?.roleId).toBe(triager.id);
-    expect(stored?.role).toBeNull();
     expect(body.invite?.roleKey).toBe('triager');
     expect(body.invite?.roleName).toBe(triager.name);
     // US-007 removed `InviteDto.role`: the key and the name are how the client words the role.
@@ -196,7 +195,7 @@ describeIntegration('invite role keys (US-005)', () => {
     const both = await invite('padmin').send({ email: 'ac3@koda.test', role: 'ADMIN', roleKey: 'viewer' });
     expect(both.status).toBe(201);
     expect(data<CreateBody>(both).invite?.roleKey).toBe('viewer');
-    expect((await invitesFor('ac3@koda.test')).map((row) => row.role)).toEqual(['VIEWER']);
+    expect((await invitesFor('ac3@koda.test')).map((row) => row.roleId)).toEqual([(await db.role.findUniqueOrThrow({ where: { key: 'viewer' } })).id]);
     expect(await invitesFor('ac3legacy@koda.test')).toEqual([]);
   }, TIMEOUT);
 
@@ -241,32 +240,27 @@ describeIntegration('invite role keys (US-005)', () => {
     expect(bindings.map((binding) => binding.role.key)).toEqual(['triager']);
   }, TIMEOUT);
 
-  it('AC-6: accepting an invite with roleId null and role VIEWER creates the user with a viewer binding', async () => {
-    await db.projectInvite.create({
-      data: {
-        projectId,
-        email: 'ac6@koda.test',
-        role: 'VIEWER',
-        roleId: null,
-        tokenHash: hashInviteToken('ac6-raw-token'),
-        expiresAt: new Date(Date.now() + 86_400_000),
-      },
-    });
-
+  it('P1m AC-7/8/9: a null roleId lists no role and refuses acceptance without creating an account or binding', async () => {
+    const bindingsBefore = await db.roleBinding.count();
+    const row = await db.projectInvite.create({ data: {
+      projectId, email: 'ac6@koda.test', roleId: null,
+      tokenHash: hashInviteToken('ac6-raw-token'), expiresAt: new Date(Date.now() + 86_400_000),
+    } });
+    const listed = await request(server).get(base).set(auth('owner')).expect(200);
+    expect(data<InviteBody[]>(listed).find(invite => invite.id === row.id)).toMatchObject({ roleKey: null, roleName: null });
     const res = await accept('ac6-raw-token');
-
-    expect(res.status).toBe(201);
-    const user = await db.user.findFirstOrThrow({ where: { email: 'ac6@koda.test' } });
-    expect((await bindingsInTeam(user.id)).map((binding) => binding.role.key)).toEqual(['viewer']);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toBe(sentence('invites', 'roleGone', CODE.conflict));
+    expect(await db.user.count({ where: { email: 'ac6@koda.test' } })).toBe(0);
+    expect(await db.roleBinding.count()).toBe(bindingsBefore);
   }, TIMEOUT);
 
-  it('AC-7: accepting an invite with roleId and role both null is 409 invites.roleGone and leaves no user and no binding', async () => {
+  it('AC-7: accepting an invite with null roleId is 409 invites.roleGone and leaves no user and no binding', async () => {
     const bindingsBefore = await db.roleBinding.count();
     await db.projectInvite.create({
       data: {
         projectId,
         email: 'ac7@koda.test',
-        role: null,
         roleId: null,
         tokenHash: hashInviteToken('ac7-raw-token'),
         expiresAt: new Date(Date.now() + 86_400_000),

@@ -292,8 +292,6 @@ describeIntegration('global fleet route keys and the key-filtered activity feed 
   }, TIMEOUT);
 
   it('AC-15: a user whose only source in p1 is a project-admin binding is refused by PATCH /fleet/runners/<id>', async () => {
-    expect(await prisma.projectMember.count({ where: { userId: ids.projectAdmin } })).toBe(0);
-
     expectPermissionsRefusal(await as('projectAdmin', 'patch', `/api/fleet/runners/${runnerId}`, { enabled: false }));
 
     expect(await prisma.runner.findUniqueOrThrow({ where: { id: runnerId } })).toEqual(expect.objectContaining({ enabled: true }));
@@ -346,7 +344,6 @@ describeIntegration('global fleet route keys and the key-filtered activity feed 
   // -------------------------------------------------------------------------
 
   it('AC-16: a developer-binding-only user in p1 sees p1\'s rows and neither p2\'s nor the project-less rows', async () => {
-    expect(await prisma.projectMember.count({ where: { userId: ids.devBind } })).toBe(0);
     expect(await prisma.roleBinding.count({ where: { principalId: ids.devBind, projectId: p2Id } })).toBe(0);
     const inP1 = await activityRow(p1Id, 'job.dispatched');
     const inP2 = await activityRow(p2Id, 'job.dispatched');
@@ -384,7 +381,6 @@ describeIntegration('global fleet route keys and the key-filtered activity feed 
   }, TIMEOUT);
 
   it('AC-19: that roster-only agent\'s feed lists only p1\'s rows', async () => {
-    expect(await prisma.agentRoleEntry.count({ where: { agentId: ids.rosterAgent } })).toBe(0);
     const inP1 = await activityRow(p1Id, 'job.dispatched');
     const inP2 = await activityRow(p2Id, 'job.dispatched');
     const projectLess = await activityRow(null, 'repo.checked');

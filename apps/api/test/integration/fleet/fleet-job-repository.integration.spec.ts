@@ -21,7 +21,7 @@ describeIntegration('PrismaFleetJobRepository (PG)', () => {
 
   beforeAll(async () => {
     await resetDb();
-    const user = await prisma.user.create({ data: { email: 'u@koda.test', passwordHash: 'x', role: 'ADMIN' } });
+    const user = await prisma.user.create({ data: { email: 'u@koda.test', passwordHash: 'x' } });
     const project = await prisma.project.create({ data: { name: 'P', slug: 'p', key: 'P' } });
     const fleetRepo = await prisma.fleetRepo.create({
       data: { projectId: project.id, provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'main', githubInstallationId: BigInt(7), createdById: user.id },

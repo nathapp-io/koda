@@ -27,7 +27,7 @@ import type {
   RoleBindingDomain,
   RoleBindingRepository,
   RoleScope,
-  UserLegacyState,
+  UserAccountState,
 } from './permissions.types';
 
 type BindingWithRoleModel = RoleBindingModel & { role: RoleModel };
@@ -228,26 +228,6 @@ export class PrismaRoleBindingRepository
   }
 
   /**
-   * Deletes the principal's bindings in one project and answers how many rows went away. Restricted to
-   * the roles named by `roleKeys` when given. A `projectId`-null binding is a different projectId and
-   * is never matched; a legacy `ProjectMember` row is a different table and is never touched.
-   */
-  async deleteProjectBindings(
-    principal: PrincipalRef,
-    projectId: string,
-    roleKeys?: readonly string[],
-  ): Promise<number> {
-    const result = await this.db.roleBinding.deleteMany({
-      where: {
-        ...this.principalWhere(principal),
-        projectId,
-        ...(roleKeys === undefined ? {} : { role: { key: { in: [...roleKeys] } } }),
-      },
-    });
-    return result.count;
-  }
-
-  /**
    * Takes the `owner` Role row lock (`SELECT … FOR UPDATE`) and returns its id, or null when the role
    * is not seeded. Call inside `txManager.run` only: the lock lives until the transaction ends.
    */
@@ -258,9 +238,9 @@ export class PrismaRoleBindingRepository
   }
 
   /**
-   * Takes the user's row lock (`SELECT … FOR UPDATE`) so the legacy `User.role` mirror of concurrent
-   * global `owner`/`admin` binding writes of that user is decided one transaction at a time: without
-   * it, two removals each count the other's uncommitted binding as still present and neither demotes.
+   * Takes the user's row lock (`SELECT … FOR UPDATE`) so concurrent global `owner`/`admin` binding
+   * writes decide derived-role flips and token revocation one transaction at a time: without it,
+   * two removals each count the other's uncommitted binding as present and neither revokes tokens.
    * Call inside `txManager.run` only, after `lockOwnerRole` when the same write takes that one too —
    * never in the opposite order, or two transactions deadlock.
    */
@@ -351,22 +331,19 @@ export class PrismaRoleBindingRepository
     });
   }
 
-  async findUserState(userId: string): Promise<UserLegacyState | null> {
+  async findUserState(userId: string): Promise<UserAccountState | null> {
     const user = await this.db.user.findUnique({
       where: { id: userId },
-      select: { role: true, disabled: true },
+      select: { disabled: true },
     });
-    return user ? { role: user.role as UserLegacyState['role'], disabled: user.disabled } : null;
+    return user ? { disabled: user.disabled } : null;
   }
 
-  /**
-   * Sets the legacy `User.role` and, in the same statement, bumps `tokenVersion` so the user's tokens
-   * stop working. Returns false (and writes nothing) when the role is already `role`.
-   */
-  async setUserRole(userId: string, role: UserLegacyState['role']): Promise<boolean> {
+  /** Revokes tokens in the binding transaction; false when the user no longer exists. */
+  async bumpTokenVersion(userId: string): Promise<boolean> {
     const result = await this.db.user.updateMany({
-      where: { id: userId, role: { not: role } },
-      data: { role, tokenVersion: { increment: 1 } },
+      where: { id: userId },
+      data: { tokenVersion: { increment: 1 } },
     });
     return result.count > 0;
   }

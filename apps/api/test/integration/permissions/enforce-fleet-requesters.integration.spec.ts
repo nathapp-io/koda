@@ -108,7 +108,7 @@ describeIntegration('enforce-fleet requesters (PG)', () => {
     key = `P${counter}`;
     const project = await prisma.project.create({ data: { name: slug, slug, key } });
     projectId = project.id;
-    const user = await prisma.user.create({ data: { email: `u${counter}@koda.test`, name: 'U', passwordHash: 'x', role: 'MEMBER' } });
+    const user = await prisma.user.create({ data: { email: `u${counter}@koda.test`, name: 'U', passwordHash: 'x' } });
     userId = user.id;
     // The admin is an admin through bindings only: the baseline plus the global admin binding, whose
     // mirror keeps `User.role` at `ADMIN`.
