@@ -3,7 +3,7 @@
   "feature": "permissions-p1-drop-legacy-schema",
   "branchName": "feat/permissions-p1-drop-legacy-schema",
   "createdAt": "2026-10-23T00:00:00.000Z",
-  "updatedAt": "2026-10-23T13:29:55.745Z",
+  "updatedAt": "2026-10-23T13:34:03.785Z",
   "userStories": [
     {
       "id": "US-001",
@@ -700,14 +700,17 @@
         "output"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "three-session-tdd",
-        "reasoning": "A small auth-command presentation change with two existing files; use the required authentication security override despite its simple scope."
+        "reasoning": "A small auth-command presentation change with two existing files; use the required authentication security override despite its simple scope.",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/cli/src/commands/auth.ts",
@@ -718,7 +721,8 @@
       "modifiedFiles": [],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f24618b088b629254eaf0117f2777e53922e2969"
     },
     {
       "id": "US-006",
