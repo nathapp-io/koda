@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsService } from './tickets.service';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { Prisma } from '../generated/prisma/client';
 import { TICKET_REPOSITORY } from './domain/ticket.domain';
@@ -133,6 +134,7 @@ describe('TicketsService', () => {
 
   const mockTicketEventService = { create: vi.fn().mockResolvedValue({ id: 'evt-mock' }) };
   const mockOutbox = { record: vi.fn().mockResolvedValue(undefined) };
+  const mockAudit = { record: vi.fn().mockResolvedValue(undefined) };
 
   const mockTransitionsService = {
     executeTransitionPublic: vi.fn(),
@@ -173,6 +175,7 @@ describe('TicketsService', () => {
         { provide: NathappOutboxService, useValue: mockOutbox },
         { provide: TicketTransitionsService, useValue: mockTransitionsService },
         { provide: PermissionService, useValue: mockPermissions },
+        { provide: AuditRecorder, useValue: mockAudit },
       ],
     }).compile();
 
@@ -184,6 +187,19 @@ describe('TicketsService', () => {
   });
 
   describe('create', () => {
+    it('records the created ticket after the successful ticket event', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findLastTicketInProject.mockResolvedValue(null);
+      mockTicketRepo.createTicket.mockResolvedValue(mockTicket);
+
+      await service.create('koda', { type: 'BUG', title: 'Fix login bug' }, mockUserPrincipal);
+
+      expect(mockAudit.record).toHaveBeenCalledWith({
+        key: 'ticket.create', resourceType: 'ticket', resourceId: mockTicket.id,
+        projectId: mockProject.id, summary: 'created KODA-1',
+      });
+    });
+
     it('should create a new ticket with auto-incremented number', async () => {
       const createDto: CreateTicketDto = {
         type: 'BUG',

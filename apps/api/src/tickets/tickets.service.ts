@@ -25,6 +25,8 @@ import { allowedActions, TICKET_ACTIONS } from './state-machine/allowed-actions'
 import type { TicketAction } from './state-machine/allowed-actions';
 import { TICKET_ACTION_KEYS } from './state-machine/transition-keys';
 import { TicketDetailResponseDto } from './dto/ticket-detail-response.dto';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { fieldsSummary } from '../audit/audit-summary';
 
 /**
  * The list filters of `findAll`. `titleContains` is not on the REST `ListTicketsQuery` (S5b US-003): only the
@@ -51,6 +53,7 @@ export class TicketsService {
     // Permissions P1 (US-004): the one decision point for the detail view's `allowedActions`. Required:
     // a route that cannot name the caller's keys must not answer an empty or guessed action list.
     private readonly permissions: PermissionService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /**
@@ -135,6 +138,10 @@ export class TicketsService {
       await this.recordTicketEvent(created.id, project.id, 'TICKET_CREATED', principal, {
         type: created.type,
         title: created.title,
+      });
+      await this.audit.record({
+        key: 'ticket.create', resourceType: 'ticket', resourceId: created.id,
+        projectId: project.id, summary: `created ${project.key}-${created.number}`,
       });
       return created;
     });
@@ -363,6 +370,13 @@ export class TicketsService {
           ? { ...updateData, previousDescription: ticket.description ?? null }
           : { ...updateData };
         await this.recordTicketEvent(ticket.id, project.id, 'TICKET_UPDATED', principal, eventData);
+        const summary = fieldsSummary(updateData);
+        if (summary !== undefined) {
+          await this.audit.record({
+            key: 'ticket.update', resourceType: 'ticket', resourceId: ticket.id,
+            projectId: project.id, summary,
+          });
+        }
       }
       return row;
     });
@@ -394,6 +408,10 @@ export class TicketsService {
       const row = await this.ticketRepo.softDeleteTicket(ticket.id);
       if (project?.id) {
         await this.recordTicketEvent(ticket.id, project.id, 'TICKET_DELETED', principal);
+        await this.audit.record({
+          key: 'ticket.delete', resourceType: 'ticket', resourceId: ticket.id,
+          projectId: project.id, summary: `deleted ${project.key}-${ticket.number}`,
+        });
       }
       return row;
     });
@@ -489,6 +507,15 @@ export class TicketsService {
           assigneeType: assignInput.userId ? 'user' : assignInput.agentId ? 'agent' : null,
         });
       }
+      const assigneeSummary = assignInput.userId
+        ? `assignee: USER ${assignInput.userId}`
+        : assignInput.agentId
+          ? `assignee: AGENT ${assignInput.agentId}`
+          : 'assignee: none';
+      await this.audit.record({
+        key: 'ticket.assign', resourceType: 'ticket', resourceId: ticket.id,
+        projectId: project.id, summary: assigneeSummary,
+      });
       return row;
     });
 

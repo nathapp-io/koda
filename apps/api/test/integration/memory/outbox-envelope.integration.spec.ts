@@ -163,6 +163,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
         can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }),
         effectiveKeys: vi.fn().mockResolvedValue(new Set<string>(['project.read'])),
       } as never,
+      { record: vi.fn().mockResolvedValue(undefined) } as never,
     );
 
     // Seed: project, ADMIN user (assignee), and two tickets.
