@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-core",
   "branchName": "feat/permissions-p2-audit-core",
   "createdAt": "2026-10-24T00:00:00.000Z",
-  "updatedAt": "2026-10-24T14:33:08.103Z",
+  "updatedAt": "2026-10-24T14:50:29.952Z",
   "userStories": [
     {
       "id": "US-001",
@@ -425,14 +425,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Standard wrappers across two services with post-commit cache constraints; CI webhook credential privacy and permission-gated project deletion trigger the security override."
+        "reasoning": "Standard wrappers across two services with post-commit cache constraints; CI webhook credential privacy and permission-gated project deletion trigger the security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/labels/labels.service.ts",
@@ -477,7 +480,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ed2d2695dce0fea9d18c340d53ee8bba34ed1e92"
     },
     {
       "id": "US-006",
