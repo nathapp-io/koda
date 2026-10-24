@@ -9,7 +9,7 @@ import { CacheModule, CacheStrategy } from '@nathapp/nestjs-cache';
 import { LoggingModule } from '@nathapp/nestjs-logging';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ThrottlerModule, DefaultThrottlerGuard } from '@nathapp/nestjs-throttler';
-import { PrismaClient } from './generated/prisma/client';
+import { KodaPrismaClient } from './prisma/koda-prisma-client';
 import { createPgAdapter } from './prisma/pg-adapter';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -87,7 +87,8 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
       isGlobal: true,
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        client: PrismaClient,
+        // Permissions P2 US-002: the API's client carries the context-less write guard.
+        client: KodaPrismaClient,
         clientOptions: { adapter: createPgAdapter(config.getOrThrow<IDatabaseConfig>(DATABASE_CFG).url) },
         transaction: true,
       }),
