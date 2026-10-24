@@ -91,6 +91,17 @@ describe('ProjectsService', () => {
       updatedAt: new Date(),
     };
 
+    it('records an update entry without a summary for an empty patch', async () => {
+      mockProjectRepo.findBySlug.mockResolvedValue(mockProject);
+      mockProjectRepo.updateBySlug.mockResolvedValue(mockProject);
+
+      await service.update('test-project', {});
+
+      expect(recordedEntries).toEqual([{
+        key: 'project.update', resourceType: 'project', resourceId: 'project-1', projectId: 'project-1', summary: undefined,
+      }]);
+    });
+
     it('records sorted field names without project values', async () => {
       mockProjectRepo.findBySlug.mockResolvedValue(mockProject);
       mockProjectRepo.updateBySlug.mockResolvedValue({ ...mockProject, name: 'Renamed', description: 'd' });
