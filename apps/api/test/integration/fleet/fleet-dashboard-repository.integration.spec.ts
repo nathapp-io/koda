@@ -3,12 +3,12 @@
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-dashboard-repository.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
 import { PrismaDashboardRepository } from '../../../src/fleet/dashboard/prisma-dashboard.repository';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -34,7 +34,7 @@ describeIntegration('fleet dashboard repository (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     repo = app.get(PrismaDashboardRepository);
     web = await seedFleetBase(prisma);
     ops = await seedFleetBase(prisma);
@@ -45,6 +45,10 @@ describeIntegration('fleet dashboard repository (PG)', () => {
   });
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('lists runners by name with their raw capabilities', async () => {

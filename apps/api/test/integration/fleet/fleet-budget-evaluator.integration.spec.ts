@@ -4,13 +4,13 @@
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 import { JobReportProcessor } from '../../../src/fleet/sync/job-report.processor';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -43,12 +43,14 @@ describeIntegration('budget evaluator (PG)', () => {
   const incidents = (policyId: string, kind: string) => prisma.budgetIncident.count({ where: { policyId, kind } });
   const hooks = (event: string) => prisma.outboxEvent.count({ where: { type: 'webhook_delivery', payload: { contains: `"event":"${event}"` } } });
   const reload = (id: string) => prisma.fleetJob.findUniqueOrThrow({ where: { id } });
+  /** One evaluation as the budget sweeper runs it: the wrapped entry production reaches `evaluate` from. */
+  const evaluate = (policyId: string) => withTestActor({ type: 'SYSTEM', id: 'budget' }, () => evaluator.evaluate(policyId));
 
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     evaluator = app.get(BudgetEvaluator);
     reports = app.get(JobReportProcessor);
@@ -67,11 +69,15 @@ describeIntegration('budget evaluator (PG)', () => {
     await prisma.fleetActivity.deleteMany();
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('warns once per window and amount, with one webhook and one activity row', async () => {
     const policy = await projectPolicy();
     await job({ costSpentUsd: 6 });
-    expect(await evaluator.evaluate(policy.id)).toEqual({ warned: true, stopped: false });
-    expect(await evaluator.evaluate(policy.id)).toEqual({ warned: false, stopped: false });
+    expect(await evaluate(policy.id)).toEqual({ warned: true, stopped: false });
+    expect(await evaluate(policy.id)).toEqual({ warned: false, stopped: false });
     expect(await incidents(policy.id, 'warn')).toBe(1);
     expect(await hooks('fleet.budget.warn')).toBe(1);
     expect(await prisma.fleetActivity.count({ where: { entityType: 'budget', entityId: policy.id, action: 'budget.warn' } })).toBe(1);
@@ -83,7 +89,7 @@ describeIntegration('budget evaluator (PG)', () => {
     await job({ costSpentUsd: 10 });
     const queued = await job({ state: 'QUEUED', firstStartedAt: null });
     const running = await job({ state: 'RUNNING', runnerId: runner.id, leaseEpoch: 1 });
-    expect(await evaluator.evaluate(policy.id)).toEqual({ warned: true, stopped: true });
+    expect(await evaluate(policy.id)).toEqual({ warned: true, stopped: true });
     const after = await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } });
     expect(after.pausedAt).not.toBeNull();
     expect(after.pausedWindowStart).toEqual(monthStart(now()));
@@ -96,7 +102,7 @@ describeIntegration('budget evaluator (PG)', () => {
     expect(row).toEqual(expect.objectContaining({ actorType: 'SYSTEM', projectId: world.projectId, responsibleUserId: world.ids.dev }));
     expect(row.payload).toEqual(expect.objectContaining({ cancelledJobIds: [queued.id], cancelRequestedJobIds: [] }));
     // Already paused: no second stop.
-    expect(await evaluator.evaluate(policy.id)).toEqual({ warned: false, stopped: false });
+    expect(await evaluate(policy.id)).toEqual({ warned: false, stopped: false });
   });
 
   it('hard stop under cancel: the runner\'s CANCELLED report ends the job with the budget reason', async () => {
@@ -105,11 +111,12 @@ describeIntegration('budget evaluator (PG)', () => {
     const running = await job({ state: 'RUNNING', runnerId: runner.id, leaseEpoch: 1, costSpentUsd: 11 });
     // D495: the held half exempts config jobs too (a config job is the repo's only active 'nax-config').
     const heldConfig = await job({ state: 'RUNNING', runnerId: runner.id, leaseEpoch: 1, command: 'CONFIG_EDIT', feature: 'nax-config', maxCostUsd: new Prisma.Decimal(0) });
-    await evaluator.evaluate(policy.id);
+    await evaluate(policy.id);
     expect(await prisma.fleetCommand.count({ where: { jobId: running.id, type: 'CANCEL', ackedAt: null } })).toBe(1);
     expect(await reload(heldConfig.id)).toEqual(expect.objectContaining({ state: 'RUNNING', cancelRequestedAt: null, cancelReason: null }));
     expect(await prisma.fleetCommand.count({ where: { jobId: heldConfig.id, type: 'CANCEL' } })).toBe(0);
-    await reports.process(runner.id, { jobId: running.id, leaseEpoch: 1, events: [{ seq: 1, type: 'state', payload: { to: 'CANCELLED', reason: null } }] }, new Date());
+    await withTestActor({ type: 'RUNNER', id: runner.id }, () =>
+      reports.process(runner.id, { jobId: running.id, leaseEpoch: 1, events: [{ seq: 1, type: 'state', payload: { to: 'CANCELLED', reason: null } }] }, new Date()));
     expect(await reload(running.id)).toEqual(expect.objectContaining({ state: 'CANCELLED', stateReason: `budget:${policy.id}` }));
   });
 
@@ -119,7 +126,7 @@ describeIntegration('budget evaluator (PG)', () => {
     await job({ costSpentUsd: 10 });
     const queuedRun = await job({ state: 'QUEUED', firstStartedAt: null });
     const queuedConfig = await job({ state: 'QUEUED', firstStartedAt: null, command: 'CONFIG_EDIT', feature: 'nax-config', maxCostUsd: new Prisma.Decimal(0) });
-    expect(await evaluator.evaluate(policy.id)).toEqual({ warned: true, stopped: true });
+    expect(await evaluate(policy.id)).toEqual({ warned: true, stopped: true });
     expect(await reload(queuedRun.id)).toEqual(expect.objectContaining({ state: 'CANCELLED', stateReason: `budget:${policy.id}` }));
     expect(await reload(queuedConfig.id)).toEqual(expect.objectContaining({ state: 'QUEUED', cancelRequestedAt: null, cancelReason: null }));
     expect(await prisma.fleetCommand.count({ where: { jobId: queuedConfig.id, type: 'CANCEL' } })).toBe(0);
@@ -145,10 +152,10 @@ describeIntegration('budget evaluator (PG)', () => {
   it('stops again in the same month after the amount was raised (incident per amount)', async () => {
     const policy = await projectPolicy({ warnPercent: null });
     await job({ costSpentUsd: 10 });
-    await evaluator.evaluate(policy.id);
+    await evaluate(policy.id);
     await prisma.budgetPolicy.update({ where: { id: policy.id }, data: { amountUsd: new Prisma.Decimal(15), pausedAt: null, pausedWindowStart: null } });
     await job({ costSpentUsd: 5 });
-    expect((await evaluator.evaluate(policy.id)).stopped).toBe(true);
+    expect((await evaluate(policy.id)).stopped).toBe(true);
     expect(await incidents(policy.id, 'hard_stop')).toBe(2);
     expect(await hooks('fleet.budget.hard_stop')).toBe(2);
   });
@@ -158,12 +165,12 @@ describeIntegration('budget evaluator (PG)', () => {
       data: { scopeType: 'global', scopeKey: 'global', windowKind: 'lifetime', amountUsd: new Prisma.Decimal(1), createdById: world.ids.root, updatedById: world.ids.root },
     });
     await job({ costSpentUsd: 2 });
-    expect((await evaluator.evaluate(global.id)).stopped).toBe(true);
+    expect((await evaluate(global.id)).stopped).toBe(true);
     expect(await hooks('fleet.budget.hard_stop')).toBe(0);
     const orphan = await prisma.budgetPolicy.create({
       data: { scopeType: 'runner', scopeId: 'gone', scopeKey: 'runner:gone', windowKind: 'lifetime', amountUsd: new Prisma.Decimal(0.0001), createdById: world.ids.root, updatedById: world.ids.root },
     });
-    expect(await evaluator.evaluate(orphan.id)).toEqual({ warned: false, stopped: false });
+    expect(await evaluate(orphan.id)).toEqual({ warned: false, stopped: false });
     expect((await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: orphan.id } })).pausedAt).toBeNull();
   });
 
@@ -176,7 +183,7 @@ describeIntegration('budget evaluator (PG)', () => {
       const policy = await projectPolicy();
       await job({ costSpentUsd: 10 });
       const queued = await job({ state: 'QUEUED', firstStartedAt: null });
-      const results = await Promise.all([evaluator.evaluate(policy.id), evaluator.evaluate(policy.id)]);
+      const results = await Promise.all([evaluate(policy.id), evaluate(policy.id)]);
       expect(results.filter((r) => r.stopped)).toHaveLength(1);
       expect(await incidents(policy.id, 'hard_stop')).toBe(1);
       expect(await hooks('fleet.budget.hard_stop')).toBe(1);
@@ -187,10 +194,10 @@ describeIntegration('budget evaluator (PG)', () => {
   it('warns again in the same window after the amount was raised (S1b §2.5)', async () => {
     const policy = await projectPolicy({ hardStop: false });
     await job({ costSpentUsd: 6 });
-    expect((await evaluator.evaluate(policy.id)).warned).toBe(true);
+    expect((await evaluate(policy.id)).warned).toBe(true);
     await prisma.budgetPolicy.update({ where: { id: policy.id }, data: { amountUsd: new Prisma.Decimal(20) } });
     await job({ costSpentUsd: 5 });
-    expect((await evaluator.evaluate(policy.id)).warned).toBe(true);
+    expect((await evaluate(policy.id)).warned).toBe(true);
     expect(await incidents(policy.id, 'warn')).toBe(2);
     expect(await hooks('fleet.budget.warn')).toBe(2);
   });
@@ -201,7 +208,8 @@ describeIntegration('budget evaluator (PG)', () => {
     const signal = vi.spyOn(evaluator, 'signal').mockImplementation(() => undefined);
     try {
       const snapshot = (seq: number, costSpentUsd: string) =>
-        reports.process(runner.id, { jobId: running.id, leaseEpoch: 1, events: [{ seq, type: 'snapshot', payload: { costSpentUsd } }] }, new Date());
+        withTestActor({ type: 'RUNNER', id: runner.id }, () =>
+          reports.process(runner.id, { jobId: running.id, leaseEpoch: 1, events: [{ seq, type: 'snapshot', payload: { costSpentUsd } }] }, new Date()));
       await snapshot(1, '0.5');
       expect(signal).toHaveBeenCalledWith(['global', `project:${world.projectId}`, `repo:${world.repoId}`, `runner:${runner.id}`]);
       signal.mockClear();

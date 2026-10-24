@@ -4,7 +4,6 @@
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
@@ -13,6 +12,7 @@ import { ApprovalsService } from '../../../src/fleet/approvals/approvals.service
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers/permission-fixtures';
 import enFleet from '../../../src/i18n/en/fleet.json';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -43,6 +43,8 @@ describeIntegration('fleet approvals API (PG)', () => {
     actorType: 'user' as const, id: world.ids.root, role: 'ADMIN' as const, email: 'root@koda.test',
     name: 'Root', blacklisted: false, revoked: false, authorities: [],
   });
+  /** One evaluation as the budget sweeper runs it: the wrapped entry production reaches `evaluate` from. */
+  const evaluate = (policyId: string) => withTestActor({ type: 'SYSTEM', id: 'budget' }, () => evaluator.evaluate(policyId));
   const PROJECT = '/api/projects/web/fleet/approvals';
   const ADMIN = '/api/fleet/approvals';
 
@@ -61,7 +63,7 @@ describeIntegration('fleet approvals API (PG)', () => {
     });
     await job({ costSpentUsd: 10 });
     const queued = await job({ state: 'QUEUED', firstStartedAt: null });
-    await evaluator.evaluate(policy.id);
+    await evaluate(policy.id);
     const approval = await prisma.fleetApproval.findFirstOrThrow({ where: { policyId: policy.id, status: 'pending' } });
     return { policy, queued, approvalId: approval.id };
   };
@@ -70,7 +72,7 @@ describeIntegration('fleet approvals API (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     agent = await seedFleetHttpAgent(server, world.tokens.root);
     // S4c US-001: the agent's project association is a role binding in the project.
@@ -105,6 +107,10 @@ describeIntegration('fleet approvals API (PG)', () => {
     await prisma.fleetCommand.deleteMany();
     await prisma.fleetJob.deleteMany();
     await prisma.outboxEvent.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('fixtures grant through bindings only', async () => {
@@ -257,8 +263,8 @@ describeIntegration('fleet approvals API (PG)', () => {
     await prisma.budgetPolicy.update({ where: { id: policy.id }, data: { pausedAt: null, pausedWindowStart: null } });
     const [res] = await Promise.all([
       request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send({ decision: 'raise_budget_and_resume', amountUsd: 40 }),
-      evaluator.evaluate(policy.id),
-      evaluator.evaluate(policy.id),
+      evaluate(policy.id),
+      evaluate(policy.id),
     ]);
     // The decide can never win this race to a 200: it holds the policy lock from its first query, so the
     // pause it needs is either already superseded (approval not pending) or the one the test just cleared
@@ -308,8 +314,10 @@ describeIntegration('fleet approvals API (PG)', () => {
     // Same D228 shape as the HTTP case above: clear the pause so `evaluate` reaches the approval row.
     await prisma.budgetPolicy.update({ where: { id: policy.id }, data: { pausedAt: null, pausedWindowStart: null } });
     const [decideResult, evaluateResult] = await Promise.allSettled([
-      approvals.decide({ id: world.ids.root, principal: rootPrincipal() }, { kind: 'admin' }, approvalId, { decision: 'raise_budget_and_resume', amountUsd: 40 }),
-      evaluator.evaluate(policy.id),
+      // The in-process `decide` stands in for the admin route, so it runs as the admin who decides.
+      withTestActor({ type: 'USER', id: world.ids.root }, () =>
+        approvals.decide({ id: world.ids.root, principal: rootPrincipal() }, { kind: 'admin' }, approvalId, { decision: 'raise_budget_and_resume', amountUsd: 40 })),
+      evaluate(policy.id),
     ]);
     // The only rejection allowed is the decided-conflict, which is the same 409 the HTTP case sees. With a
     // reversed nesting the loser blocks on lock 1 while the winner takes lock 2, the cycle is a deadlock,

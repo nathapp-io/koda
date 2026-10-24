@@ -4,12 +4,12 @@
  */
 import { NathApplication } from '@nathapp/nestjs-app';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -35,12 +35,14 @@ describeIntegration('cancelForBudget (PG)', () => {
     data: { runnerId, jobId, type: 'ASSIGN', leaseEpoch: 1, payload: {}, ...(acked ? { ackedAt: new Date(), ackResult: 'ok' } : {}) },
   });
   const reload = (id: string) => prisma.fleetJob.findUniqueOrThrow({ where: { id } });
-  const cancel = (ids: string[]) => tx.run(() => jobs.cancelForBudget(ids, { ...POLICY, responsibleUserId: base.adminId }));
+  // `cancelForBudget` is reached from the budget evaluator, which the sweeper runs as `SYSTEM/budget`.
+  const cancel = (ids: string[]) =>
+    withTestActor({ type: 'SYSTEM', id: 'budget' }, () => tx.run(() => jobs.cancelForBudget(ids, { ...POLICY, responsibleUserId: base.adminId })));
 
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     jobs = app.get(FleetJobsService);
     tx = app.get<ITransactionManager>(TRANSACTION_MANAGER);
     base = await seedFleetBase(prisma);
@@ -48,6 +50,10 @@ describeIntegration('cancelForBudget (PG)', () => {
   });
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('cancels a QUEUED job on the server with the budget reason', async () => {

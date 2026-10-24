@@ -4,12 +4,12 @@
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FLEET_CAPS, FleetHttpWorld, insertRunner, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -49,7 +49,7 @@ describeIntegration('fleet dashboard API (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     agentKey = (await seedFleetHttpAgent(server, world.tokens.root)).apiKey;
     const web = { projectId: world.projectId, repoId: world.repoId };
@@ -85,6 +85,10 @@ describeIntegration('fleet dashboard API (PG)', () => {
   });
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('refuses non-admins on the admin route, outsiders and agent keys on the project route', async () => {
@@ -124,7 +128,8 @@ describeIntegration('fleet dashboard API (PG)', () => {
   });
 
   it('the dry-run agrees with placeJob on the same job (spec §2.3)', async () => {
-    const outcome = await app.get(PlacementService).placeJob(ids.needsGpu);
+    // Placement is what the dispatch route runs for the job it just queued, as the user who asked for it.
+    const outcome = await withTestActor({ type: 'USER', id: world.ids.root }, () => app.get(PlacementService).placeJob(ids.needsGpu));
     expect(outcome.assigned).toBe(false);
     const fromPlacement = outcome.misfits.map((m) => `${m.name}:${m.reason}`).sort();
     const fromDashboard = (item(await admin(), `job_unplaceable:${ids.needsGpu}`)?.reasons ?? []).map((r) => `${r.runnerName}:${r.reason}`).sort();

@@ -4,11 +4,11 @@
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const ENV = ['FLEET_JOB_QUEUED_WARN_SEC'] as const;
@@ -33,7 +33,7 @@ describeIntegration('fleet dashboard counts held THREAD jobs as no runner load (
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
   });
   afterAll(async () => {
@@ -55,6 +55,10 @@ describeIntegration('fleet dashboard counts held THREAD jobs as no runner load (
       projectId: world.projectId, repoId: world.repoId, ref: 'main', command: 'RUN', profiles: [], maxCostUsd: new Prisma.Decimal(2),
       selectorLabels: [], requestedById: world.ids.root, feature: `f-${Math.random().toString(36).slice(2, 8)}`, ...over,
     },
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('US-007 AC7: a runner holding only a RUNNING THREAD job has activeJobs 0', async () => {

@@ -9,7 +9,6 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { Readable } from 'stream';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
@@ -20,6 +19,7 @@ import { FleetFenceException } from '../../../src/fleet/artifacts/bundle.excepti
 import { BundleIngestService } from '../../../src/fleet/ingest/bundle-ingest.service';
 import { INGEST_PARSER_VERSION } from '../../../src/fleet/ingest/domain/bundle-ingest.domain';
 import { ConflictAppException } from '../../../src/common/exceptions/conflict-app.exception';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const ENV = ['FLEET_ARTIFACT_DIR', 'FLEET_BUNDLE_MAX_BYTES'] as const;
@@ -54,7 +54,7 @@ describeIntegration('fleet bundles (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     runner = await enrollRunner(server, world.tokens.root, 'box-1');
   });
@@ -64,6 +64,10 @@ describeIntegration('fleet bundles (PG)', () => {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
     }
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('accepts a bundle while RUNNING, replaces it on re-upload, and serves it to members', async () => {
@@ -125,10 +129,11 @@ describeIntegration('fleet bundles (PG)', () => {
       await resumed;
       yield body.subarray(4);
     })());
-    const result = app.get(BundleService).upload({
+    // The upload route is the runner's own, so the service runs as the runner that streams the bundle.
+    const result = withTestActor({ type: 'RUNNER', id: runner.runnerId }, () => app.get(BundleService).upload({
       runnerId: runner.runnerId, jobId: j.id, leaseEpochRaw: '1', sha256Header: sha(body),
       contentType: 'application/gzip', contentLength: String(body.length), body: stream,
-    }).then(() => null, (error: unknown) => error);
+    })).then(() => null, (error: unknown) => error);
     await streaming;
     try {
       // Isolate a state-only race at the held epoch; normal terminal transitions also bump it.
@@ -157,7 +162,8 @@ describeIntegration('fleet bundles (PG)', () => {
     const second = await prisma.fleetBundleIngest.findMany({ where: { jobId: j.id } });
     expect(second.map((r) => r.id)).toEqual([first[0].id]);
     await prisma.fleetJob.update({ where: { id: j.id }, data: { state: 'COMPLETED', finishedAt: new Date() } });
-    await app.get(BundleIngestService).drain();
+    // The ingest drain runs as its own component: production chains it off the upload's kick.
+    await withTestActor({ type: 'SYSTEM', id: 'ingest' }, () => app.get(BundleIngestService).drain());
     expect(await prisma.fleetCostEvent.count({ where: { jobId: j.id } })).toBe(1);
   });
 });

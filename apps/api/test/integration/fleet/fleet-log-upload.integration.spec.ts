@@ -8,13 +8,13 @@ import { mkdtempSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { ProjectEventBus } from '../../../src/live/project-event-bus';
 import type { LiveEvent } from '../../../src/live/live-event';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const ENV = ['FLEET_ARTIFACT_DIR', 'FLEET_LOG_MAX_BYTES', 'FLEET_LOG_CHUNK_MAX_BYTES'] as const;
@@ -49,7 +49,7 @@ describeIntegration('fleet log upload (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     runner = await enrollRunner(server, world.tokens.root, 'box-logs');
     app.get(ProjectEventBus).subscribe(world.projectId, (e) => { events.push(e); });
@@ -60,6 +60,10 @@ describeIntegration('fleet log upload (PG)', () => {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
     }
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('appends, dedupes, completes and indexes a stream; publishes fleet_log', async () => {

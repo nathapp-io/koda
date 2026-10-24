@@ -4,13 +4,13 @@
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
 import { toDispatchDto } from '../../../src/fleet/schedules/schedule-template';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -30,11 +30,15 @@ describeIntegration('fleet jobs schedule link (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
   });
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('links the job to the schedule, notes it in the dispatch activity, and the list filters on it', async () => {
@@ -45,8 +49,12 @@ describeIntegration('fleet jobs schedule link (PG)', () => {
       },
     });
     const jobs = app.get(FleetJobsService);
-    const scheduled = await jobs.dispatch(world.ids.dev, world.projectId, template('linked'), { scheduleId: schedule.id });
-    const manual = await jobs.dispatch(world.ids.dev, world.projectId, template('manual'));
+    // The scheduled dispatch is the ticker's, which production runs as the schedule component;
+    // the manual one is the dispatch route, run by the developer who posts it.
+    const scheduled = await withTestActor({ type: 'SYSTEM', id: 'schedule' }, () =>
+      jobs.dispatch(world.ids.dev, world.projectId, template('linked'), { scheduleId: schedule.id }));
+    const manual = await withTestActor({ type: 'USER', id: world.ids.dev }, () =>
+      jobs.dispatch(world.ids.dev, world.projectId, template('manual')));
 
     expect(scheduled.job).toEqual(expect.objectContaining({ scheduleId: schedule.id, coalescedCount: 0 }));
     expect(manual.job.scheduleId).toBeNull();

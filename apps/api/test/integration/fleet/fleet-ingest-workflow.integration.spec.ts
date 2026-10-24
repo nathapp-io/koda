@@ -8,16 +8,16 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { Readable } from 'stream';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
-import { seedFleetBase } from '../../helpers/fleet-fixtures';
+import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
 import { tarGz } from '../../helpers/tar-gz';
 import { ARTIFACT_STORE, ArtifactStore } from '../../../src/fleet/artifacts/artifact-store';
 import { BundleIngestService } from '../../../src/fleet/ingest/bundle-ingest.service';
 import { BUNDLE_INGEST_REPOSITORY, IBundleIngestRepository } from '../../../src/fleet/ingest/domain/bundle-ingest.domain';
 import { ESCALATED_FROM_WORKFLOW } from '../../../src/fleet/ingest/ingest-corrections';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
@@ -41,6 +41,7 @@ describeIntegration('fleet workflow draft ingest (PG, US-005 AC-13/AC-14)', () =
   let ingest: BundleIngestService;
   let repo: IBundleIngestRepository;
   let artifactDir: string;
+  let runnerId: string;
   const savedDir = process.env.FLEET_ARTIFACT_DIR;
   const now = new Date('2026-10-06T10:00:00Z');
 
@@ -49,17 +50,22 @@ describeIntegration('fleet workflow draft ingest (PG, US-005 AC-13/AC-14)', () =
     process.env.FLEET_ARTIFACT_DIR = artifactDir;
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     store = app.get<ArtifactStore>(ARTIFACT_STORE);
     ingest = app.get(BundleIngestService);
     repo = app.get<IBundleIngestRepository>(BUNDLE_INGEST_REPOSITORY);
     base = await seedFleetBase(prisma);
+    runnerId = (await insertRunner(prisma)).id;
   });
   afterAll(async () => {
     await app.close();
     rmSync(artifactDir, { recursive: true, force: true });
     if (savedDir === undefined) delete process.env.FLEET_ARTIFACT_DIR;
     else process.env.FLEET_ARTIFACT_DIR = savedDir;
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-13/AC-14 ingests a draft workflow bundle: job ESCALATED with PR url, ticket holds the fleet pr link, activity source workflow', async () => {
@@ -89,9 +95,10 @@ describeIntegration('fleet workflow draft ingest (PG, US-005 AC-13/AC-14)', () =
       create: { jobId: job.id, leaseEpoch: 1, kind: 'bundle', storageKey: key, sizeBytes: BigInt(gz.length), sha256: sha(gz) },
       update: { storageKey: key, sizeBytes: BigInt(gz.length), sha256: sha(gz) },
     });
-    await repo.enqueue(artifact.id, job.id, 1, 2);
+    // The row is enqueued inside the runner's upload transaction, and the drain runs as its own component.
+    await withTestActor({ type: 'RUNNER', id: runnerId }, () => repo.enqueue(artifact.id, job.id, 1, 2));
 
-    expect(await ingest.drain(now)).toBe(1);
+    expect(await withTestActor({ type: 'SYSTEM', id: 'ingest' }, () => ingest.drain(now))).toBe(1);
 
     const after = await prisma.fleetJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(after).toMatchObject({ state: 'ESCALATED', stateReason: ESCALATED_FROM_WORKFLOW, resultPrUrl: 'https://github.com/o/r/pull/4' });

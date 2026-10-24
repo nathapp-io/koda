@@ -4,12 +4,12 @@
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -49,7 +49,7 @@ describeIntegration('fleet budgets API (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     // A project ADMIN of web who is not a global admin (fourth login: within the 5/min throttle).
     await request(server).post('/api/admin/users').set(tok('root')).send({ email: 'padmin@koda.test', name: 'padmin', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
@@ -63,6 +63,10 @@ describeIntegration('fleet budgets API (PG)', () => {
   beforeEach(async () => {
     await prisma.budgetPolicy.deleteMany();
     await prisma.fleetJob.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('admin creates a global policy with the defaults; a duplicate is 409; null warnPercent means no warn', async () => {
@@ -156,7 +160,8 @@ describeIntegration('fleet budgets API (PG)', () => {
     expect(await prisma.fleetActivity.count({ where: { entityId: policy.id, action: 'budget.resumed' } })).toBe(1);
     await request(server).post(`${PROJECT}/${policy.id}/resume`).set(as(padmin)).send({}).expect(409);
     await spend(4);
-    expect((await app.get(BudgetEvaluator).evaluate(policy.id)).stopped).toBe(true);
+    // The evaluator runs as the budget component that the sweeper and the sync signal it from.
+    expect((await withTestActor({ type: 'SYSTEM', id: 'budget' }, () => app.get(BudgetEvaluator).evaluate(policy.id))).stopped).toBe(true);
     expect(await prisma.budgetIncident.count({ where: { policyId: policy.id, kind: 'hard_stop' } })).toBe(2);
   });
 

@@ -6,13 +6,13 @@
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import type { ApprovalRequestEventPayload, SyncRequest, SyncResponse } from '@nathapp/fleet-protocol';
 import { ApprovalExpirySweeper } from '../../../src/fleet/approvals/approval-expiry-sweeper';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
 import { resetDb } from '../../helpers/reset-db';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -68,7 +68,7 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     runner = await enrollRunner(server, world.tokens.root, 'relay-1');
     await prisma.webhook.create({
@@ -79,6 +79,10 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     await app.close();
     if (saved === undefined) delete process.env.FLEET_SYNC_WAIT_MS;
     else process.env.FLEET_SYNC_WAIT_MS = saved;
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('a runner without the relay: a pinned escalate dispatch is 422, an unpinned one waits QUEUED (D270)', async () => {
