@@ -37,13 +37,13 @@ describe('AuditRecorder refusals and fallback', () => {
   });
 
   it('AC-5/6: refuses unknown catalog keys before storage', async () => {
-    await expect(recorder.record({ ...input, key: 'no.such.key' })).rejects.toThrow('unknown audit key: no.such.key');
+    await expect(recorder.record({ ...input, key: 'no.such.key' })).rejects.toHaveProperty('message', 'unknown audit key: no.such.key');
     expect(record).not.toHaveBeenCalled();
   });
 
   it('AC-7/8: refuses calls outside a transaction before storage', async () => {
     txManager.isInTransaction.mockReturnValue(false);
-    await expect(recorder.record(input)).rejects.toThrow('AuditRecorder.record must run inside a transaction');
+    await expect(recorder.record(input)).rejects.toHaveProperty('message', 'AuditRecorder.record must run inside a transaction');
     expect(record).not.toHaveBeenCalled();
   });
 
