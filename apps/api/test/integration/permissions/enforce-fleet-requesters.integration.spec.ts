@@ -29,6 +29,7 @@ import { SchedulesService } from '../../../src/fleet/schedules/schedules.service
 import type { DispatchFleetJobDto } from '../../../src/fleet/jobs/dto/dispatch-fleet-job.dto';
 import type { CreateScheduleDto } from '../../../src/fleet/schedules/dto/create-schedule.dto';
 import { FakeForge, startFakeForge } from '../../helpers/fake-forge';
+import { insertRunner } from '../../helpers/fleet-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
@@ -59,6 +60,7 @@ describeIntegration('enforce-fleet requesters (PG)', () => {
   let repoId: string;
   let userId: string;
   let agentId: string;
+  let runnerId: string;
   let counter = 0;
 
   const dispatchDto = (feature: string): DispatchFleetJobDto => ({
@@ -122,6 +124,8 @@ describeIntegration('enforce-fleet requesters (PG)', () => {
       data: { projectId, provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'trunk', githubInstallationId: BigInt(77), createdById: userId },
     });
     repoId = repo.id;
+    // Terminal-job fixtures retain their runner without making it available for new dispatches.
+    runnerId = (await insertRunner(prisma, { createdById: userId, enabled: false })).id;
   });
 
   afterAll(async () => {
@@ -201,20 +205,20 @@ describeIntegration('enforce-fleet requesters (PG)', () => {
   });
 
   it('AC-5: onTerminal writes no FLEET_JOB_OUTCOME outbox row for a FAILED job an agent requested', async () => {
-    const job = await newJob({ state: 'FAILED', requestedById: agentId, requestedByType: 'AGENT' });
+    const job = await newJob({ state: 'FAILED', requestedById: agentId, requestedByType: 'AGENT', runnerId });
 
     const record = await jobRepo.findById(job.id);
-    // The recorder is the job transition's effect: here the server-side `job` component reports it.
-    await withTestActor({ type: 'SYSTEM', id: 'job' }, () => outcomes.onTerminal(record as never));
+    // The runner holding the job reports its terminal transition.
+    await withTestActor({ type: 'RUNNER', id: runnerId }, () => outcomes.onTerminal(record as never));
 
     expect(await prisma.outboxEvent.count({ where: { type: 'fleet_job_outcome', eventId: `${job.id}:${job.leaseEpoch}` } })).toBe(0);
   });
 
   it('AC-6: onTerminal writes one FLEET_JOB_OUTCOME outbox row for the same FAILED job requested by a user', async () => {
-    const job = await newJob({ state: 'FAILED', requestedByType: 'USER' });
+    const job = await newJob({ state: 'FAILED', requestedByType: 'USER', runnerId });
 
     const record = await jobRepo.findById(job.id);
-    await withTestActor({ type: 'SYSTEM', id: 'job' }, () => outcomes.onTerminal(record as never));
+    await withTestActor({ type: 'RUNNER', id: runnerId }, () => outcomes.onTerminal(record as never));
 
     expect(await prisma.outboxEvent.count({ where: { type: 'fleet_job_outcome', eventId: `${job.id}:${job.leaseEpoch}` } })).toBe(1);
   });
@@ -232,12 +236,12 @@ describeIntegration('enforce-fleet requesters (PG)', () => {
   });
 
   it('AC-14: onTerminal records the failure comment of an AGENT-requested job as the agent', async () => {
-    const job = await newJob({ state: 'FAILED', requestedById: agentId, requestedByType: 'AGENT', feature: 'effects-agent' });
+    const job = await newJob({ state: 'FAILED', requestedById: agentId, requestedByType: 'AGENT', feature: 'effects-agent', runnerId });
     const ticket = await newTicket();
     await prisma.fleetJobTicket.create({ data: { jobId: job.id, ticketId: ticket.id } });
 
-    // The ticket effects run inside that same server-side job transition.
-    await withTestActor({ type: 'SYSTEM', id: 'job' }, () => effects.onTerminal([job.id]));
+    // The ticket effects carry the same runner actor as the terminal transition.
+    await withTestActor({ type: 'RUNNER', id: runnerId }, () => effects.onTerminal([job.id]));
 
     const comment = await prisma.comment.findFirstOrThrow({ where: { ticketId: ticket.id } });
     expect(comment.body).toContain('FAILED');
