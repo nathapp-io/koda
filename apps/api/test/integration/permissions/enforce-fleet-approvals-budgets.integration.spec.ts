@@ -15,12 +15,12 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -114,10 +114,10 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
 
   /** The binding that is the caller's only source in the project. */
   const bind = (who: string, roleKey: string, projectId = p1Id): Promise<unknown> =>
-    membership.createBinding(
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
       { principal: { type: 'USER', id: ids[who] }, roleKey, projectId },
       { type: 'SYSTEM', id: 'test' },
-    );
+    ));
 
   /**
    * A rostered agent: its only key source in `p1` is the `viewer` binding plus the role bindings
@@ -219,7 +219,7 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    prisma = fixtureDb(app);
     membership = app.get(MembershipService);
 
     const root = await request(server).post('/api/auth/register')
@@ -277,6 +277,10 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
     await prisma.budgetPolicy.deleteMany();
     await prisma.outboxEvent.deleteMany();
     await prisma.fleetActivity.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   // -------------------------------------------------------------------------

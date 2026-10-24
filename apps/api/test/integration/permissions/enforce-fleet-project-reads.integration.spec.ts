@@ -17,12 +17,12 @@ import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -87,10 +87,10 @@ describeIntegration('fleet project read keys (US-004)', () => {
 
   /** The binding that is the caller's only source in p1. */
   const bind = (who: string, roleKey: string): Promise<unknown> =>
-    membership.createBinding(
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
       { principal: { type: 'USER', id: userIds[who] }, roleKey, projectId: p1Id },
       { type: 'SYSTEM', id: 'test' },
-    );
+    ));
 
   /** A rostered agent with no agent role: its only key source in p1 is the `viewer` binding. */
   const createRosterAgent = async (slug: string): Promise<string> => {
@@ -152,7 +152,7 @@ describeIntegration('fleet project read keys (US-004)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    db = fixtureDb(app);
     membership = app.get(MembershipService);
 
     const root = await request(server)
@@ -193,6 +193,10 @@ describeIntegration('fleet project read keys (US-004)', () => {
     if (savedArtifactDir === undefined) delete process.env.FLEET_ARTIFACT_DIR;
     else process.env.FLEET_ARTIFACT_DIR = savedArtifactDir;
     if (artifactDir !== '') rmSync(artifactDir, { recursive: true, force: true });
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   // -------------------------------------------------------------------------

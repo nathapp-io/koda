@@ -16,11 +16,11 @@
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -87,16 +87,16 @@ describeIntegration('member, roster and agent responses carry no legacy fields (
     principalId: string,
     roleKey: string,
     projectIdOfBinding: string | null,
-  ) => membership.createBinding(
+  ) => withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
     { principal: { type: principalType, id: principalId }, roleKey, projectId: projectIdOfBinding },
     { type: 'SYSTEM', id: 'test' },
-  );
+  ));
 
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    db = fixtureDb(app);
     membership = app.get(MembershipService);
 
     const root = await request(server)
@@ -142,6 +142,10 @@ describeIntegration('member, roster and agent responses carry no legacy fields (
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   // -------------------------------------------------------------------------

@@ -20,7 +20,6 @@
 import { randomUUID } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { AppModule } from '../../../src/app.module';
 import { EmailContentBuilder } from '../../../src/email/email-content.builder';
 import type { EmailScheduleRow } from '../../../src/email/schedule/email-schedule.types';
@@ -32,6 +31,7 @@ import type { PrincipalRef } from '../../../src/permissions/permissions.types';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -60,7 +60,8 @@ describeIntegration('notification, mention and email consumers read bindings (US
 
   const userPrincipal = (who: string): PrincipalRef => ({ type: 'USER', id: ids[who] as string });
   const bind = (principal: PrincipalRef, roleKey: string, projectId: string | null) =>
-    membership.createBinding({ principal, roleKey, projectId }, { type: 'USER', id: ids.granter as string });
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+      membership.createBinding({ principal, roleKey, projectId }, { type: 'USER', id: ids.granter as string }));
 
   /**
    * A user of the fixture: the member baseline every principal production creates carries, plus the
@@ -141,7 +142,7 @@ describeIntegration('notification, mention and email consumers read bindings (US
     nest = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = nest.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService).client as PrismaClient;
+    prisma = fixtureDb(app);
     writer = app.get(NotificationWriter);
     mentions = app.get(TicketMentionResolver);
     builder = app.get(EmailContentBuilder);
@@ -164,6 +165,10 @@ describeIntegration('notification, mention and email consumers read bindings (US
     await app?.close();
     if (previousWebPublicUrl === undefined) delete process.env['WEB_PUBLIC_URL'];
     else process.env['WEB_PUBLIC_URL'] = previousWebPublicUrl;
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   // -------------------------------------------------------------------------
@@ -198,7 +203,9 @@ describeIntegration('notification, mention and email consumers read bindings (US
   it('AC-1: deliver inserts a notification for a user whose only source in p1 is a developer binding', async () => {
     await expectOnlyProjectBinding(ids.devBind as string, p1Id, 'developer');
 
-    const inserted = await writer.deliver([draft(ids.devBind as string)]);
+    // The writer is reached by the outbox fan-out handlers, the `outbox` system component.
+    const inserted = await withTestActor({ type: 'SYSTEM', id: 'outbox' }, () =>
+      writer.deliver([draft(ids.devBind as string)]));
 
     expect(inserted).toBe(1);
     const rows = await prisma.notification.findMany({ where: { userId: ids.devBind, projectId: p1Id } });
@@ -210,7 +217,8 @@ describeIntegration('notification, mention and email consumers read bindings (US
     await expectNoSource(ids.outsider as string);
     await expectNoSource(ids.admin as string);
 
-    const inserted = await writer.deliver([draft(ids.outsider as string), draft(ids.admin as string)]);
+    const inserted = await withTestActor({ type: 'SYSTEM', id: 'outbox' }, () =>
+      writer.deliver([draft(ids.outsider as string), draft(ids.admin as string)]));
 
     expect(inserted).toBe(1);
     expect(await prisma.notification.count({ where: { userId: ids.outsider, projectId: p1Id } })).toBe(0);
@@ -220,7 +228,8 @@ describeIntegration('notification, mention and email consumers read bindings (US
   it('AC-3: deliver inserts a notification for a user whose only source is a projectId-null viewer binding', async () => {
     await expectOnlyProjectBinding(ids.globalBind as string, null, 'viewer');
 
-    const inserted = await writer.deliver([draft(ids.globalBind as string)]);
+    const inserted = await withTestActor({ type: 'SYSTEM', id: 'outbox' }, () =>
+      writer.deliver([draft(ids.globalBind as string)]));
 
     expect(inserted).toBe(1);
     expect(await prisma.notification.count({ where: { userId: ids.globalBind, projectId: p1Id } })).toBe(1);

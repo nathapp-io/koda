@@ -14,12 +14,12 @@ import { join } from 'path';
 import request from 'supertest';
 import * as bcrypt from 'bcrypt';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -109,7 +109,7 @@ describeIntegration('the last Project Admin guard on binding removal (US-001)', 
     passwordHash = await bcrypt.hash(TEST_PASSWORD, 4);
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    db = fixtureDb(app);
     membership = app.get(MembershipService);
     // The seeder ran on bootstrap, so the system roles below are the ones every grant resolves.
     await db.role.create({
@@ -131,6 +131,10 @@ describeIntegration('the last Project Admin guard on binding removal (US-001)', 
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: the custom co-admin\'s DELETE of the only Project Admin\'s binding answers 409 members.lastAdmin', async () => {

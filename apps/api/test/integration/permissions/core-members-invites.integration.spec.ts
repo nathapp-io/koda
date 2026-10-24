@@ -15,11 +15,11 @@ import { join } from 'path';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 import { PermissionService } from '../../../src/permissions/permission.service';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 
@@ -84,10 +84,10 @@ describeIntegration('member and invite route keys (US-008)', () => {
 
   /** The binding that is the caller's only source in p1. */
   const bind = (who: string, roleKey: RoleKey): Promise<unknown> =>
-    membership.createBinding(
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
       { principal: { type: 'USER', id: userIds[who] }, roleKey, projectId: p1Id },
       { type: 'SYSTEM', id: 'test' },
-    );
+    ));
 
   /** The bindings the user holds in p1 — what "no binding created" and "unchanged" are measured against. */
   const bindingsFor = (who: string) =>
@@ -124,7 +124,7 @@ describeIntegration('member and invite route keys (US-008)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    db = fixtureDb(app);
     membership = app.get(MembershipService);
 
     const root = await request(server)
@@ -167,6 +167,10 @@ describeIntegration('member and invite route keys (US-008)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   // -------------------------------------------------------------------------
@@ -338,10 +342,10 @@ describeIntegration('member and invite route keys (US-008)', () => {
   // -------------------------------------------------------------------------
 
   it('B4: an agent with a project-admin binding invites an unknown address with 201, and is named as the inviter', async () => {
-    await membership.createBinding(
+    await withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
       { principal: { type: 'AGENT', id: agent.id }, roleKey: 'project-admin', projectId: p1Id },
       { type: 'SYSTEM', id: 'test' },
-    );
+    ));
 
     const created = await request(server)
       .post(invitesUrl)

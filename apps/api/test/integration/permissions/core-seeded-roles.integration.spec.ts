@@ -9,7 +9,6 @@
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/permissions/core-seeded-roles.integration.spec.ts
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { AppModule } from '../../../src/app.module';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
@@ -17,6 +16,7 @@ import { MembershipService } from '../../../src/permissions/membership.service';
 import { PermissionService } from '../../../src/permissions/permission.service';
 import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -50,7 +50,8 @@ describeIntegration('seeded project roles and the secret and invitation reads (P
     roleKey: string,
   ): Promise<{ principal: KodaPrincipal; projectId: string }> => {
     const [user, project] = [await newUser(), await newProject()];
-    await membership.createBinding({ principal: { type: 'USER', id: user.id }, roleKey, projectId: project.id }, SYSTEM);
+    await withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+      membership.createBinding({ principal: { type: 'USER', id: user.id }, roleKey, projectId: project.id }, SYSTEM));
     return { principal: userPrincipal(user.id), projectId: project.id };
   };
 
@@ -62,7 +63,7 @@ describeIntegration('seeded project roles and the secret and invitation reads (P
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     // Runs SystemRoleSeeder.onApplicationBootstrap on the reset database.
     await moduleRef.init();
-    prisma = moduleRef.get(PrismaService<PrismaClient>, { strict: false }).client as PrismaClient;
+    prisma = fixtureDb(moduleRef);
     permissions = moduleRef.get(PermissionService);
     membership = moduleRef.get(MembershipService);
   });
@@ -76,6 +77,10 @@ describeIntegration('seeded project roles and the secret and invitation reads (P
     await prisma.agent.deleteMany({});
     await prisma.user.deleteMany({});
     await prisma.project.deleteMany({});
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(moduleRef)).resolves.toBeUndefined();
   });
 
   it('fixtures grant through bindings only', async () => {

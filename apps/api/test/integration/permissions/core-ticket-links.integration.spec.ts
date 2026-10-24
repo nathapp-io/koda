@@ -17,13 +17,13 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { TicketLinksService } from '../../../src/ticket-links/ticket-links.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -89,10 +89,10 @@ describeIntegration('ticket link creators and route keys (US-006)', () => {
 
   /** The binding that is the caller's only source in p1. */
   const bind = (who: string, roleKey: RoleKey): Promise<unknown> =>
-    membership.createBinding(
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
       { principal: { type: 'USER', id: userIds[who] }, roleKey, projectId: p1Id },
       { type: 'SYSTEM', id: 'test' },
-    );
+    ));
 
   /** A ticket built by the Owner. */
   const createTicket = async (): Promise<string> => {
@@ -133,7 +133,9 @@ describeIntegration('ticket link creators and route keys (US-006)', () => {
 
   /** The creatorless path: no principal, exactly how the assistant link tool calls the service. */
   const linkWithoutCreator = async (ref: string): Promise<string> => {
-    const result = await linksService.create(P1_SLUG, ref, { url: newUrl() });
+    // The assistant is the actor of its own tool calls (`assistant-tool.executor.ts`).
+    const result = await withTestActor({ type: 'SYSTEM', id: 'assistant' }, () =>
+      linksService.create(P1_SLUG, ref, { url: newUrl() }));
     expect(result.status).toBe(201);
     return result.link.id;
   };
@@ -156,7 +158,7 @@ describeIntegration('ticket link creators and route keys (US-006)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    db = fixtureDb(app);
     membership = app.get(MembershipService);
     linksService = app.get(TicketLinksService);
 
@@ -190,6 +192,10 @@ describeIntegration('ticket link creators and route keys (US-006)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   // -------------------------------------------------------------------------

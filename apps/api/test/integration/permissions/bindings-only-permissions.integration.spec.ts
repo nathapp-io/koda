@@ -3,7 +3,6 @@ import * as bcrypt from 'bcrypt';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { PermissionService } from '../../../src/permissions/permission.service';
@@ -12,6 +11,7 @@ import { PrismaUsersRepository } from '../../../src/users/prisma-users.repositor
 import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const principal = (id: string): KodaPrincipal => ({ actorType: 'user', id, role: 'MEMBER', email: `${id}@koda.test` }) as KodaPrincipal;
@@ -40,7 +40,7 @@ describeIntegration('bindings-only permission reads (PG)', () => {
     await resetDb();
     passwordHash = await bcrypt.hash(TEST_PASSWORD, 4);
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    db = fixtureDb(app);
     permissions = app.get(PermissionService);
     membership = app.get(MembershipService);
     users = app.get(PrismaUsersRepository);
@@ -51,6 +51,10 @@ describeIntegration('bindings-only permission reads (PG)', () => {
     await db.user.deleteMany({});
     await membership.invalidatePermissions();
     resetThrottle(app);
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: a baseline-only user has no project.read', async () => {

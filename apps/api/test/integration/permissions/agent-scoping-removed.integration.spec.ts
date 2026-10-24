@@ -1,12 +1,12 @@
 import request from 'supertest';
 import type { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { ProjectAccessService } from '../../../src/projects/project-access.service';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const dbDescribe = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -30,7 +30,7 @@ dbDescribe('agent access ignores the retired off flag', () => {
       if (previous === undefined) delete process.env.AGENT_PROJECT_SCOPING;
       else process.env.AGENT_PROJECT_SCOPING = previous;
     }
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    db = fixtureDb(app);
     const server = app.getHttpServer();
     const root = await request(server).post('/api/auth/register')
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
@@ -58,6 +58,10 @@ dbDescribe('agent access ignores the retired off flag', () => {
   });
 
   afterAll(async () => { await app?.close(); });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('AC-3: baseline-only agent gets 403 projects with off at boot', async () => {
     const gate = vi.spyOn(app.get(ProjectAccessService), 'resolveMembership');

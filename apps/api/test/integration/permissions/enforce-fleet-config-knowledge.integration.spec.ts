@@ -18,7 +18,6 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { KnowledgeIndexQueue } from '../../../src/fleet/knowledge/knowledge-index.queue';
@@ -27,6 +26,7 @@ import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -111,10 +111,10 @@ describeIntegration('repo config and fleet knowledge route keys (US-007)', () =>
 
   /** The binding that is the caller's only source in p1. */
   const bind = (who: string, roleKey: string): Promise<unknown> =>
-    membership.createBinding(
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
       { principal: { type: 'USER', id: userIds[who] }, roleKey, projectId: p1Id },
       { type: 'SYSTEM', id: 'test' },
-    );
+    ));
 
   /** A rostered agent whose only key source is the `viewer` binding plus the role binding given. */
   const createAgent = async (slug: string, agentRole?: 'DEVELOPER'): Promise<string> => {
@@ -164,7 +164,7 @@ describeIntegration('repo config and fleet knowledge route keys (US-007)', () =>
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    db = fixtureDb(app);
     membership = app.get(MembershipService);
 
     // The forge is not what these cases decide, so the app's own reader answers locally.
@@ -228,6 +228,10 @@ describeIntegration('repo config and fleet knowledge route keys (US-007)', () =>
     enqueueSpy?.mockRestore();
     vi.restoreAllMocks();
     if (enabledBefore !== undefined) fleetConfig().knowledgeIndexEnabled = enabledBefore;
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   // -------------------------------------------------------------------------
