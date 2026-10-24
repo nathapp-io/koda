@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { runAsSystem } from '../../../action-context/action-context';
 import { ThreadIngestor } from './thread-ingestor';
 import { THREAD_UNFOLDED_STREAM_SOURCE, type UnfoldedStream, type UnfoldedStreamSource } from './domain/thread-ingest.domain';
 
@@ -15,7 +16,15 @@ export class ThreadIngestBootstrap implements OnApplicationBootstrap {
     private readonly ingestor: ThreadIngestor,
   ) {}
 
+  /**
+   * Permissions P2 US-005: the boot hook is the background entry, so the catch-up folds as `thread`. A fold
+   * triggered by a runner's log upload keeps that upload's `RUNNER` context (`ThreadIngestHook` is not wrapped).
+   */
   async onApplicationBootstrap(): Promise<void> {
+    await runAsSystem('thread', () => this.catchUpUnfoldedStreams());
+  }
+
+  private async catchUpUnfoldedStreams(): Promise<void> {
     let candidates: UnfoldedStream[];
     try {
       candidates = await this.source.findUnfolded();

@@ -1,4 +1,5 @@
 import { FleetHealthDetector } from './fleet-health.detector';
+import { currentContext, type ActionContext } from '../../action-context/action-context';
 
 const T0 = new Date('2026-10-09T12:00:00.000Z').getTime();
 const CFG = { sweepEnabled: false, runnerOfflineSec: 90, credentialExpiryWarnDays: 7 };
@@ -63,5 +64,25 @@ describe('FleetHealthDetector (S4a §2.4, D507, D515)', () => {
     detector.onModuleInit();
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  /** Permissions P2 US-005: the interval callback is the background entry; the detect runs as `health`. */
+  it('AC-7: the interval callback reads the runners as SYSTEM/health', async () => {
+    const swept = new FleetHealthDetector(repo as never, outbox as never, tx as never, { ...CFG, sweepEnabled: true } as never);
+    const seen: Array<ActionContext | undefined> = [];
+    repo.findRunners.mockImplementationOnce(async () => {
+      seen.push(currentContext());
+      return [];
+    });
+
+    swept.onModuleInit();
+    try {
+      await vi.advanceTimersByTimeAsync(60_000);
+    } finally {
+      swept.onModuleDestroy();
+    }
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'health' });
   });
 });

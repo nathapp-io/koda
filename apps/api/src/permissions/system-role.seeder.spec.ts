@@ -1,4 +1,5 @@
 import type { IPageResult } from '@nathapp/nestjs-data';
+import { currentContext, type ActionContext } from '../action-context/action-context';
 import { UnknownPermissionEntryError } from './entry-matcher';
 import type { RoleDomain, RoleRepository, RoleSeed } from './permissions.types';
 import { SystemRoleSeeder } from './system-role.seeder';
@@ -226,6 +227,23 @@ describe('US-002 SystemRoleSeeder.onApplicationBootstrap', () => {
       await new SystemRoleSeeder(SYSTEM_ROLES, repo).onApplicationBootstrap();
 
       expect(del).not.toHaveBeenCalled();
+    });
+
+    /** Permissions P2 US-005: the boot hook is the background entry; the seed writes as `seed`. */
+    it('AC-11: a role created at boot is created as SYSTEM/seed', async () => {
+      const { repo } = fakeRepo();
+      const seen: Array<ActionContext | undefined> = [];
+      const createRole = vi.spyOn(repo, 'createRole').mockImplementation(async (input) => {
+        seen.push(currentContext());
+        return { ...input, id: `new-${input.key}` } as RoleDomain;
+      });
+
+      // A single seed keeps the assertion to one recorded creation.
+      await new SystemRoleSeeder([findSeed('developer')], repo).onApplicationBootstrap();
+
+      expect(createRole).toHaveBeenCalledTimes(1);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'seed' });
     });
   });
 

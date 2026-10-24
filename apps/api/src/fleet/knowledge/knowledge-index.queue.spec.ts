@@ -6,6 +6,7 @@
  * fire-and-forget: `enqueue` never returns a promise and never throws).
  */
 import { Logger } from '@nestjs/common';
+import { currentContext, runWithActionContext, type ActionContext } from '../../action-context/action-context';
 import type { IFleetConfig } from '../../config/fleet.config';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 import type { IndexPassResult, OutcomePassResult } from './knowledge-repo-indexer';
@@ -326,5 +327,51 @@ describe('KnowledgeIndexQueue trigger events', () => {
 
     expect(indexer.indexRepo).not.toHaveBeenCalled();
     expect(indexer.indexOutcomes).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Permissions P2 US-004: a drain always runs as the `knowledge` component, whoever enqueued it, and takes a
+ * correlation id of its own — the first enqueuer's request must not leak into later passes.
+ */
+describe('KnowledgeIndexQueue system context (US-004)', () => {
+  /** Builds an enabled queue whose indexer records the context the pass ran in, then runs `trigger`. */
+  const passContextFor = async (trigger: (queue: KnowledgeIndexQueue) => void): Promise<ActionContext> => {
+    const { queue, indexer } = harness(true);
+    const seen: Array<ActionContext | undefined> = [];
+    indexer.indexRepo.mockImplementation(async () => {
+      seen.push(currentContext());
+      return { status: 'indexed' };
+    });
+
+    trigger(queue);
+
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    return seen[0] as ActionContext;
+  };
+
+  it('AC-12: a repo-merged trigger outside any context indexes as SYSTEM/knowledge', async () => {
+    const context = await passContextFor((queue) => queue.onRepoMerged({ repoId: 'r9' }));
+
+    expect(context.actor).toEqual({ type: 'SYSTEM', id: 'knowledge' });
+  });
+
+  it('AC-13: an enqueue inside a USER/u1 context indexes as SYSTEM/knowledge, not as the enqueuer', async () => {
+    const context = await runWithActionContext(
+      { actor: { type: 'USER', id: 'u1' }, origin: 'rest', correlationId: 'c-request' },
+      () => passContextFor((queue) => queue.enqueue('r9', 'admin')),
+    );
+
+    expect(context.actor).toEqual({ type: 'SYSTEM', id: 'knowledge' });
+  });
+
+  it('a drain takes a correlation id of its own instead of the first enqueuer\'s', async () => {
+    const context = await runWithActionContext(
+      { actor: { type: 'USER', id: 'u1' }, origin: 'rest', correlationId: 'c-request' },
+      () => passContextFor((queue) => queue.enqueue('r9', 'admin')),
+    );
+
+    expect(context.correlationId).not.toBe('c-request');
+    expect(context.correlationId).toMatch(/^[0-9a-f-]{36}$/);
   });
 });

@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { currentContext, runWithActionContext, type ActionContext } from '../action-context/action-context';
 import { CiWebhookService } from './ci-webhook.service';
 import { PrismaCiWebhookRepository } from './prisma-ci-webhook.repository';
 import { CiWebhookPayloadDto } from './ci-webhook.dto';
@@ -232,6 +233,27 @@ describe('CiWebhookService', () => {
       expect(description).toContain('12345');
       expect(description).toContain('abc123def456');
       expect(description).toContain('AuthService.validateToken');
+    });
+
+    /**
+     * Permissions P2 US-005: the route is public, so the request enters as `SYSTEM/anonymous` (US-002).
+     * Creating the ticket is the system's own write, so `processCiWebhook` overrides it with `SYSTEM/ci`.
+     */
+    it('AC-5: the ticket is created as SYSTEM/ci even when the request entered as SYSTEM/anonymous', async () => {
+      mockRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      const seen: Array<ActionContext | undefined> = [];
+      mockRepo.createTicket.mockImplementation(async () => {
+        seen.push(currentContext());
+        return mockTicket;
+      });
+
+      await runWithActionContext(
+        { actor: { type: 'SYSTEM', id: 'anonymous' }, origin: 'rest' },
+        () => service.processCiWebhook('koda', validPayload),
+      );
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'ci' });
     });
   });
 });

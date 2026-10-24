@@ -1,4 +1,5 @@
 import type { Mock } from 'vitest';
+import { currentContext, type ActionContext } from '../../action-context/action-context';
 import { KNOWLEDGE_REPO_MERGED } from '../common/knowledge-events';
 import { FleetPrStateRefresher } from './fleet-pr-state.refresher';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
@@ -165,5 +166,33 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
     await refresher.refresh();
 
     expect(events.emit).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Permissions P2 US-004: the refresh interval is the background entry, so a pass — and every write it
+   * makes — runs inside the `ticket-link` component's context.
+   */
+  it('AC-7: the interval callback closes a deleted PR as SYSTEM/ticket-link', async () => {
+    vi.useFakeTimers();
+    const seen: Array<ActionContext | undefined> = [];
+    repo.findRefreshableFleetLinks.mockResolvedValue([link('a', 1)]);
+    github.getPullRequest.mockResolvedValue(null);
+    vcsRepo.updateTicketLinkWithPrState.mockImplementationOnce(async () => {
+      seen.push(currentContext());
+      return 'updated';
+    });
+    const on = new FleetPrStateRefresher(
+      repo as never, github as never, gitlab as never, gitlabTokens as never, vcsRepo as never, prSync as never,
+      testFleetConfig({ sweepEnabled: true }), events as never,
+    );
+
+    on.onModuleInit();
+    await vi.advanceTimersByTimeAsync(600_000);
+    on.onModuleDestroy();
+    vi.useRealTimers();
+
+    expect(vcsRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('a', 'closed');
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'ticket-link' });
   });
 });

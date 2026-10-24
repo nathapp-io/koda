@@ -4,6 +4,7 @@ import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
 import { MemoryGovernanceProcessor } from './memory-governance.processor';
 import { MemoryGovernanceService } from './memory-governance.service';
 import { ProjectsService } from '../projects/projects.service';
+import { currentContext, type ActionContext } from '../action-context/action-context';
 
 const createMockGovernanceService = () => ({
   runCleanup: vi.fn(),
@@ -117,6 +118,21 @@ describe('MemoryGovernanceProcessor', () => {
       const elapsed = Date.now() - start;
 
       expect(elapsed).toBeLessThan(30000);
+    });
+
+    /** Permissions P2 US-005: the cron method is the background entry; the cleanup runs as `memory`. */
+    it('AC-2: the per-project cleanup runs as SYSTEM/memory', async () => {
+      mockProjectsService.findAllProjectIds.mockResolvedValue([{ id: 'proj-1' }]);
+      const seen: Array<ActionContext | undefined> = [];
+      mockGovernanceService.runCleanup.mockImplementation(async () => {
+        seen.push(currentContext());
+        return { expiredCount: 0, downrankedCount: 0, deduplicatedCount: 0, supersessionCount: 0 };
+      });
+
+      await processor.scheduledCleanup();
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'memory' });
     });
   });
 });

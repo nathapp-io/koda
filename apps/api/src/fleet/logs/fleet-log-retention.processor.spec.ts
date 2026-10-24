@@ -1,4 +1,5 @@
 import { Reflector } from '@nestjs/core';
+import { currentContext, type ActionContext } from '../../action-context/action-context';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 import { FleetLogRetentionProcessor, RETENTION_BATCH } from './fleet-log-retention.processor';
 
@@ -71,5 +72,19 @@ describe('FleetLogRetentionProcessor (S2a §5)', () => {
   it('swallows a failed run (the next night is the retry)', async () => {
     repo.findCandidates.mockRejectedValueOnce(new Error('db down'));
     await expect(make().scheduledPurge()).resolves.toBeUndefined();
+  });
+
+  /** Permissions P2 US-004: the cron method is the background entry; the purge runs as `log`. */
+  it('AC-11: the nightly purge selects its candidates as SYSTEM/log', async () => {
+    const seen: Array<ActionContext | undefined> = [];
+    repo.findCandidates.mockImplementationOnce(async () => {
+      seen.push(currentContext());
+      return [];
+    });
+
+    await make(30).scheduledPurge();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'log' });
   });
 });

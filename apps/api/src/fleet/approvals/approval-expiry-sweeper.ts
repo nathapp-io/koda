@@ -2,6 +2,7 @@ import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { LiveFleetApprovalEvent } from '../../live/live-event';
+import { runAsSystemWriter } from '../../action-context/action-context';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { ApprovalCloser } from './approval-closer';
@@ -41,7 +42,15 @@ export class ApprovalExpirySweeper implements OnModuleInit, OnModuleDestroy {
     this.timer = null;
   }
 
-  async tick(now = new Date()): Promise<ApprovalExpiryResult> {
+  /**
+   * Permissions P2 US-004: the interval callback is the background entry, so the sweep runs inside the
+   * `approval` component's context.
+   */
+  tick(now = new Date()): Promise<ApprovalExpiryResult> {
+    return runAsSystemWriter(this, () => this.expireDue(now));
+  }
+
+  private async expireDue(now: Date): Promise<ApprovalExpiryResult> {
     const result: ApprovalExpiryResult = { expired: 0, failed: 0 };
     for (const due of await this.repo.findExpiredPending(now, MAX_PER_TICK)) {
       try {

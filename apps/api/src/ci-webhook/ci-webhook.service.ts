@@ -5,6 +5,7 @@ import { TicketType, Priority } from '../common/enums';
 import { buildGitUrl } from '../common/utils/git-url.util';
 import { CiWebhookPayloadDto, CiFailureDto } from './ci-webhook.dto';
 import { PrismaCiWebhookRepository } from './prisma-ci-webhook.repository';
+import { runAsSystemWriter } from '../action-context/action-context';
 
 @Injectable()
 @SystemWriter('system.ci.ticket-create')
@@ -28,7 +29,15 @@ export class CiWebhookService {
     return { projectId: project.id, secret: project.ciWebhookToken };
   }
 
-  async processCiWebhook(projectSlug: string, payload: CiWebhookPayloadDto) {
+  /**
+   * Permissions P2 US-005: the route is public, so the request enters as `SYSTEM/anonymous`; creating the ticket
+   * is the system's own write, so the whole intake runs as `SYSTEM/ci` and overrides that context.
+   */
+  processCiWebhook(projectSlug: string, payload: CiWebhookPayloadDto) {
+    return runAsSystemWriter(this, () => this.intake(projectSlug, payload));
+  }
+
+  private async intake(projectSlug: string, payload: CiWebhookPayloadDto) {
     const project = await this.repo.findProjectBySlug(projectSlug);
 
     if (!project || project.deletedAt) {

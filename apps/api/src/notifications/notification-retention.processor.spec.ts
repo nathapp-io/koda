@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { currentContext, type ActionContext } from '../action-context/action-context';
 import { NotificationRetentionProcessor } from './notification-retention.processor';
 import type { INotificationsConfig } from '../config/notifications.config';
 
@@ -52,5 +53,34 @@ describe('NotificationRetentionProcessor (S4a D511)', () => {
     repo.purgeRead.mockRejectedValueOnce(new Error('db down'));
     await processor.purge(new Date('2026-10-09T04:30:00.000Z'));
     expect(healthAlerts.purgeClosed).toHaveBeenCalled();
+  });
+
+  /** Permissions P2 US-005: the cron method is the background entry; the purge runs as `notification`. */
+  it('AC-9: the nightly purge deletes read rows as SYSTEM/notification', async () => {
+    const { processor, repo } = setup({ retentionDays: 90 });
+    const seen: Array<ActionContext | undefined> = [];
+    repo.purgeRead.mockImplementation(async () => {
+      seen.push(currentContext());
+      return 0;
+    });
+
+    await processor.scheduledPurge();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'notification' });
+  });
+
+  /** AC-13: `retentionDays: 0` is the documented off switch, not a zero-day window. */
+  it('AC-13: retentionDays 0 keeps the disable switch — purgeRead is never called', async () => {
+    vi.useFakeTimers().setSystemTime(new Date('2026-10-09T04:30:00Z'));
+    try {
+      const { processor, repo } = setup({ retentionDays: 0 });
+
+      await processor.scheduledPurge();
+
+      expect(repo.purgeRead).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

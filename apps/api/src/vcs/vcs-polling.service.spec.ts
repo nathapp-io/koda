@@ -2,6 +2,7 @@ import type { Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { VcsPollingService } from './vcs-polling.service';
+import { currentContext, type ActionContext } from '../action-context/action-context';
 import { VCS_CFG } from '../config/vcs.config';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VcsSyncService } from './vcs-sync.service';
@@ -178,6 +179,23 @@ describe('VcsPollingService', () => {
       service.schedulePolling(conn);
 
       expect(mockSchedulerRegistry.deleteInterval).toHaveBeenCalledWith(`vcs-polling-${conn.id}`);
+    });
+
+    /** Permissions P2 US-005: the interval callback is the background entry; the tick runs as `vcs`. */
+    it('AC-3: the interval callback reads its connection as SYSTEM/vcs', async () => {
+      vi.useFakeTimers();
+      const seen: Array<ActionContext | undefined> = [];
+      mockRepo.findVcsConnectionById.mockImplementation(async () => {
+        seen.push(currentContext());
+        return null;
+      });
+      const conn = makeConnection();
+
+      service.schedulePolling(conn);
+      await vi.advanceTimersByTimeAsync(conn.pollingIntervalMs);
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'vcs' });
     });
   });
 

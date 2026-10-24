@@ -1,4 +1,5 @@
 import { Readable } from 'stream';
+import { currentContext, runWithActionContext, type ActionContext } from '../../action-context/action-context';
 import { BundleIngestService } from './bundle-ingest.service';
 
 const now = new Date('2026-10-05T10:00:00Z');
@@ -50,5 +51,50 @@ describe('BundleIngestService failure handling (spec §2.5)', () => {
     const { svc, repo } = make(0);
     repo.claimNext.mockReset().mockResolvedValue(null);
     await expect(svc.ingestOne(now)).resolves.toBe(false);
+  });
+});
+
+/**
+ * Permissions P2 US-004: `kick` starts a drain from a request (a runner's upload, an admin rerun), so the
+ * drain — not the request — is the background entry: it runs as the `ingest` component with an id of its own.
+ * A direct `drain` call keeps whatever context it was given.
+ */
+describe('BundleIngestService background context (US-004)', () => {
+  /** A service whose `claimNext` records the context the drain reached it in, and finds nothing to ingest. */
+  const recordingDrain = () => {
+    const made = make(0);
+    const seen: Array<ActionContext | undefined> = [];
+    made.repo.claimNext.mockReset().mockImplementation(async () => {
+      seen.push(currentContext());
+      return null;
+    });
+    return { ...made, seen };
+  };
+
+  it('AC-6: a drain chained by kick runs as SYSTEM/ingest, not as the runner that kicked it', async () => {
+    const { svc, seen } = recordingDrain();
+
+    await runWithActionContext({ actor: { type: 'RUNNER', id: 'r1' }, origin: 'runner' }, () => {
+      svc.kick();
+      return svc.idle();
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'ingest' });
+  });
+
+  it('the kick-started drain takes a correlation id of its own instead of the kicking request\'s', async () => {
+    const { svc, seen } = recordingDrain();
+
+    await runWithActionContext(
+      { actor: { type: 'RUNNER', id: 'r1' }, origin: 'runner', correlationId: 'c-runner' },
+      () => {
+        svc.kick();
+        return svc.idle();
+      },
+    );
+
+    expect(seen[0]?.correlationId).not.toBe('c-runner');
+    expect(seen[0]?.correlationId).toMatch(/^[0-9a-f-]{36}$/);
   });
 });

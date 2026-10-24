@@ -5,6 +5,7 @@
  * test/integration/fleet/assistant-actions-expiry.integration.spec.ts.
  */
 import { Logger } from '@nestjs/common';
+import { currentContext, type ActionContext } from '../../../action-context/action-context';
 import { testFleetConfig } from '../../../common/test-helpers/fleet-config';
 import type { FleetApprovalRecord } from '../../approvals/domain/approval.domain';
 import { MAX_PER_TICK, PendingActionExpirySweeper } from './pending-action-expiry.sweeper';
@@ -179,6 +180,27 @@ describe('PendingActionExpirySweeper.tick batch cap', () => {
 });
 
 describe('PendingActionExpirySweeper timer (2a-D10)', () => {
+  it('AC-4: the interval callback scans for due actions as SYSTEM/assistant-action (permissions P2 US-004)', async () => {
+    vi.useFakeTimers();
+    try {
+      const on = build({ sweepEnabled: true });
+      const seen: Array<ActionContext | undefined> = [];
+      on.actions.findDue.mockImplementation(async () => {
+        seen.push(currentContext());
+        return [];
+      });
+
+      on.sweeper.onModuleInit();
+      await vi.advanceTimersByTimeAsync(15_000);
+      on.sweeper.onModuleDestroy();
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'assistant-action' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('AC-9: starts no timer when sweepEnabled is off', () => {
     vi.useFakeTimers();
     try {

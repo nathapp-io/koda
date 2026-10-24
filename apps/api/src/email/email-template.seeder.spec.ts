@@ -1,3 +1,4 @@
+import { currentContext, type ActionContext } from '../action-context/action-context';
 import { EmailTemplateSeeder } from './email-template.seeder';
 import { EMAIL_TEMPLATE_CODES } from './templates/template-codes';
 
@@ -49,5 +50,20 @@ describe('EmailTemplateSeeder (S4b §1, R3)', () => {
     const { seeder, service } = setup();
     service.create.mockRejectedValueOnce(new Error('connection refused'));
     await expect(seeder.seed()).rejects.toThrow('connection refused');
+  });
+
+  /** Permissions P2 US-005: the boot hook is the background entry; the seed writes as `seed`. */
+  it('AC-12: a template created at boot is created as SYSTEM/seed', async () => {
+    const { seeder, service } = setup();
+    const seen: Array<ActionContext | undefined> = [];
+    service.create.mockImplementation(async (input: unknown) => {
+      seen.push(currentContext());
+      return input;
+    });
+
+    await seeder.onApplicationBootstrap();
+
+    expect(seen.length).toBe(EMAIL_TEMPLATE_CODES.length * 2);
+    expect(seen.every((context) => context?.actor.type === 'SYSTEM' && context.actor.id === 'seed')).toBe(true);
   });
 });

@@ -1,0 +1,514 @@
+{
+  "project": "koda",
+  "feature": "permissions-p2-context",
+  "branchName": "feat/permissions-p2-context",
+  "createdAt": "2026-11-05T00:00:00.000Z",
+  "updatedAt": "2026-10-23T18:44:28.544Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "The full action context",
+      "description": "**Goal** — Expand the existing module-level AsyncLocalStorage action context into the full actor, on-behalf-of, origin, approval and correlation model while preserving the principal attribution helpers.\n\n**Motivation** — A runner request and a public request run outside any context (`ActionContextInterceptor` returns early).\n\n**Approach** — `src/action-context/action-context.ts` keeps its module-level `AsyncLocalStorage` and every existing export; it gains the full shape:\n\n**Interface** —\n```typescript\nimport type { ApprovalMode } from '../permissions/catalog';\nimport type { FleetActorType } from '../common/enums';\n\nexport type ActorType = 'USER' | 'AGENT';                 // unchanged: the principal types actorTypeFor answers\nexport type ActionActorType = FleetActorType;            // 'USER' | 'AGENT' | 'RUNNER' | 'SYSTEM'\nexport interface ActionActor { type: ActionActorType; id: string }\nexport type ActionOrigin = 'rest' | 'mcp' | 'thread' | 'runner' | 'system';\nexport interface ActionApproval {\n  requiredMode: ApprovalMode;\n  satisfiedBy: ApprovalMode;\n  approverType?: ActorType;\n  approverId?: string;\n  requestId?: string;\n}\nexport interface ActionContext {\n  actor: ActionActor;\n  onBehalfOf?: { type: ActorType; id: string };\n  origin: ActionOrigin;\n  approval: ActionApproval;\n  correlationId: string;\n}\nexport type ActionContextInput = Omit<ActionContext, 'approval' | 'correlationId'> & Partial<Pick<ActionContext, 'approval' | 'correlationId'>>;\n\nexport const NO_APPROVAL: ActionApproval;                        // { requiredMode: 'none', satisfiedBy: 'none' }\nexport const SYSTEM_ACTOR_IDS: ReadonlySet<string>;              // derived, see below\nexport function runWithActionContext<T>(input: ActionContextInput, fn: () => T): T;  // named apart from nestjs-logging's runWithContext\nexport function currentContext(): ActionContext | undefined;\nexport function runAsSystem<T>(component: string, fn: () => T, opts?: { onBehalfOf?: ActionContext['onBehalfOf']; correlationId?: string }): T;\nexport function runAsSystemWriter<T>(writer: object, fn: () => T): T;\n// kept:\nexport function runWithActor<T>(actor: { type: ActorType; id: string }, fn: () => T): T;\nexport function currentActor(): ActionActor | undefined;\nexport function actorTypeFor(actorId: string): ActorType;\n```\n\n- `runWithActionContext` fills `approval` with `NO_APPROVAL`. It fills `correlationId`, when the input has none, from the enclosing action context's `correlationId`, else `LoggerContext.current().requestId` from `@nathapp/nestjs-logging`, else a new `randomUUID()`, so one tick or request keeps one id through nested runs. A nested run replaces the context for its extent.\n- `SYSTEM_ACTOR_IDS` is derived, never hand-copied: the second segment of every `PERMISSION_CATALOG` key whose access is `system`, plus `assistant`, `outbox`, `anonymous`, `seed` and `unknown`.\n- `runAsSystem(component, fn, opts)` runs `fn` with actor `{ type: 'SYSTEM', id: component }`, origin `system` and the optional `onBehalfOf`. It throws `Error('unknown system actor id: <component>')` when `component` is not in `SYSTEM_ACTOR_IDS`.\n- `runAsSystemWriter(writer, fn)` reads `SYSTEM_WRITER_METADATA` from `writer.constructor` and calls `runAsSystem(<second segment of the key>, fn)`. It throws `Error('runAsSystemWriter needs a @SystemWriter class, got <ClassName>')` when the class carries no key.\n- `runWithActor(actor, fn)` is `runWithActionContext({ actor, origin: 'rest' }, fn)`.\n- `actorTypeFor(actorId)`: the actor's type when the actor is a `USER` or `AGENT` with that id; else the on-behalf-of type when the on-behalf-of id matches; else `'USER'`.\n\nDesigner’s calls:\n- **`schedule`, not the design's `scheduler`.** Design §5 lists `scheduler`; the key-family rule gives `schedule` (`system.schedule.dispatch`), and the rule wins so every id is derivable.\n- **System component ids** are the second segment of the writer's `@SystemWriter` key (`system.schedule.dispatch` → `schedule`), so each `system.*` key family has one id (design §5: \"one id per `system.*` key family\"). Three ids have no key family: `assistant` (thread tool calls, design §4), `anonymous` (a public HTTP request before any principal exists) and `seed` (boot-time seeders). `outbox` is also the family of `system.outbox.dispatch` and `system.outbox.retention`. `unknown` is reserved for the context-guard feature's production fallback.\n- **The correlation id comes from `LoggerContext`** of `@nathapp/nestjs-logging` (already imported by `app.module.ts`); `.nax/rules/api-logging.md` restricts that package's `Logger`, not `LoggerContext`.\n\nFailure handling: With no enclosing context and no logging request id, `correlationId` is a new `randomUUID()`. When `fn` rejects inside any run, the rejection propagates unchanged; the context ends with `fn`. Invalid component ids and absent writer metadata throw before running `fn`.\n\nExtend `apps/api/src/action-context/action-context.spec.ts`; its existing `runWithActor`/`currentActor`/`actorTypeFor` cases, including the nested-run restore case, keep their expectations. Read-only inputs are the catalog, SystemWriter metadata, FleetActorType and LoggerContext.\n\n**Scope** — In: the full context model, generic context helpers, derived ids and compatibility helpers in the existing module and tests. Out: HTTP mapping (US-002), assistant entry wrapping (US-003), fleet/system/seed entry wrapping (US-004/US-005), fan-out/envelopes (US-006); do not introduce the context-less write guard, AuditEntry, or domain-column changes.",
+      "acceptanceCriteria": [
+        "[unit] runWithActionContext({ actor: { type: 'AGENT', id: 'a1' }, origin: 'rest' }, fn) makes currentContext().actor inside fn equal { type: 'AGENT', id: 'a1' }.",
+        "[unit] When runWithActionContext starts a context without an approval field, currentContext().approval equals NO_APPROVAL ({ requiredMode: 'none', satisfiedBy: 'none' }).",
+        "[unit] Inside runWithContext({ requestId: 'req-1' }, …) from @nathapp/nestjs-logging, runWithActionContext without a correlationId gives the context correlationId 'req-1'.",
+        "[unit] With no enclosing context and no logging request id, two runWithActionContext calls without a correlationId give two different correlationId strings.",
+        "[unit] runAsSystem('outbox', fn) called inside a context whose correlationId is 'c-1' gives the inner context correlationId 'c-1'.",
+        "[unit] runAsSystem('schedule', fn) makes currentContext().actor inside fn equal { type: 'SYSTEM', id: 'schedule' }.",
+        "[unit] runAsSystem('schedule', fn, { onBehalfOf: { type: 'AGENT', id: 'a1' } }) makes currentContext().onBehalfOf inside fn equal { type: 'AGENT', id: 'a1' }.",
+        "[unit] runAsSystem('no-such-component', fn) throws Error with message 'unknown system actor id: no-such-component' before running fn.",
+        "[unit] SYSTEM_ACTOR_IDS equals the set of second segments of every PERMISSION_CATALOG key whose access is 'system', together with 'assistant', 'outbox', 'anonymous', 'seed' and 'unknown'.",
+        "[unit] runAsSystemWriter(instance, fn) on an instance of a class decorated @SystemWriter('system.budget.window-reset') makes currentContext() inside fn return actor { type: 'SYSTEM', id: 'budget' }.",
+        "[unit] runAsSystemWriter(instance, fn) on an instance of an undecorated class Plain throws Error with message 'runAsSystemWriter needs a @SystemWriter class, got Plain' before running fn.",
+        "[unit] When fn passed to runWithActionContext rejects with error E, the returned promise rejects with the same E.",
+        "[unit] Inside runAsSystem('assistant', fn, { onBehalfOf: { type: 'AGENT', id: 'a1' } }), actorTypeFor('a1') returns 'AGENT'.",
+        "[unit] Inside runWithActor({ type: 'USER', id: 'u1' }, fn), currentContext().origin is 'rest'."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "action-context",
+        "security",
+        "async-local-storage"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One existing production module gains specified fields and thin helpers over its existing AsyncLocalStorage, catalog and metadata APIs; principal attribution and approval provenance still require the strict security TDD override.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-sol",
+          "confidence": 0.019999999999999574,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T17:09:43.149Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/action-context/action-context.ts",
+        "apps/api/src/action-context/action-context.spec.ts",
+        "apps/api/src/permissions/system-writer.decorator.ts",
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/common/enums.ts"
+      ],
+      "suggestedCriteria": [
+        "When runWithActionContext receives an explicit correlationId inside a different action context and logging request context, currentContext().correlationId equals the explicit value.",
+        "When a SYSTEM or RUNNER actor has id 'a1' and no matching onBehalfOf principal, actorTypeFor('a1') returns 'USER'.",
+        "When nested runWithActionContext omits approval inside a human-approved context, its approval equals NO_APPROVAL.",
+        "When two asynchronous contexts overlap, each callback observes only its own actor, onBehalfOf and approval after await."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/action-context/action-context.spec.ts",
+          "reason": "gains the cases for the full shape, `runAsSystem`, `runAsSystemWriter` and on-behalf-of in `actorTypeFor`; its existing `runWithActor`/`currentActor`/`actorTypeFor` cases, including the nested-run restore case, keep their expectations."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "9ad1983be40ab29acec0f74e88a9595881d0e6d3"
+    },
+    {
+      "id": "US-002",
+      "title": "Every HTTP request runs in a context",
+      "description": "**Goal** — Make the existing global interceptor establish the full action context for users, agents, runners and public requests.\n\n**Motivation** — A runner request and a public request run outside any context (`ActionContextInterceptor` returns early).\n\n**Approach** — `ActionContextInterceptor.intercept` stops returning early. It runs the handler inside:\n\n| Request | Context |\n|:--|:--|\n| user principal | actor `USER/<id>`, origin `rest` |\n| agent principal | actor `AGENT/<id>`, origin `rest` |\n| runner principal | actor `RUNNER/<id>`, origin `runner` |\n| no principal (`@Public()` route) | actor `SYSTEM/anonymous`, origin `rest` |\n\nThe approval block is `NO_APPROVAL`; the correlation id is the request id of `@nathapp/nestjs-logging` when the logging middleware set one.\n\nThe runner is an actor of its own: `{ type: 'RUNNER', id: <runner id> }`, not a system component. Preserve the existing Observable subscription boundary: the handler body runs on subscription, so wrapping only `next.handle()` does not establish its context. Reuse the existing globally registered ActionContextModule and existing principal type guards; authentication/authorization rules do not change. Use the US-001 defaulting algorithm for approval and correlation.\n\n**Interface** — Existing interceptor entry consumes the US-001 helpers:\n```typescript\nexport function runWithActionContext<T>(input: ActionContextInput, fn: () => T): T;\nexport function currentContext(): ActionContext | undefined;\n```\n\nModify `apps/api/src/action-context/action-context.interceptor.ts` and extend `action-context.interceptor.spec.ts`. The case asserting that a runner request runs with no context becomes \"runs with actor `{ type: 'RUNNER', id: <the runner principal's id> }`, origin `runner`\"; the case asserting that a request with no principal runs with no context becomes \"runs with actor `{ type: 'SYSTEM', id: 'anonymous' }`, origin `rest`\". User and agent requests receive the full shape. Test the handler's subscription with a stub recording currentContext; retain context cleanup assertions. For the two integration assertions, drive actual HTTP through the booted app and record context inside spies on TicketsService.create and AuthService.login, using existing HTTP fixtures/suites.\n\n**Scope** — In: full-context HTTP mapping and handler subscription propagation. Out: context helper implementation (US-001), assistant/MCP overrides (US-003), system/webhook/seed overrides (US-004/US-005), outbox propagation (US-006); public login/refresh/register/invite/enroll identity promotion is deferred to audit-core and must not be added here.",
+      "acceptanceCriteria": [
+        "[unit] ActionContextInterceptor.intercept for a request whose user is a user principal u1 runs the handler with currentContext().actor { type: 'USER', id: 'u1' }.",
+        "[unit] For a request whose user is a user principal, the handler's currentContext().origin is 'rest'.",
+        "[unit] For a request whose user is an agent principal a1, the handler's currentContext().actor is { type: 'AGENT', id: 'a1' }.",
+        "[unit] For a request whose user is a runner principal r1, the handler's currentContext().actor is { type: 'RUNNER', id: 'r1' }.",
+        "[unit] For a request whose user is a runner principal, the handler's currentContext().origin is 'runner'.",
+        "[unit] For a request with no user, the handler's currentContext().actor is { type: 'SYSTEM', id: 'anonymous' }.",
+        "[unit] For a request with no user, the handler's currentContext().origin is 'rest'.",
+        "[unit] For any request, the handler's currentContext().approval equals NO_APPROVAL.",
+        "[unit] When intercept runs inside runWithContext({ requestId: 'req-9' }, …) from @nathapp/nestjs-logging, the handler's currentContext().correlationId is 'req-9'.",
+        "[integration] POST /api/projects/:slug/tickets called with an agent API key runs TicketsService.create with currentContext().actor { type: 'AGENT', id: <that agent's id> } (a spy on TicketsService.create records currentContext()).",
+        "[integration] POST /api/auth/login (a public route) runs AuthService.login with currentContext().actor { type: 'SYSTEM', id: 'anonymous' } (a spy on AuthService.login records currentContext()).",
+        "[unit] When the subscribed next.handle() Observable errors with error E, the Observable returned by ActionContextInterceptor.intercept emits the same E on its error channel, preserving the handler's failure rather than replacing or swallowing it.",
+        "[unit] When an agent request handler completes with no enclosing action context, currentContext() in the subscribing caller after completion is undefined, preserving the existing interceptor context-cleanup behavior."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "http",
+        "security",
+        "action-context"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A well-specified principal mapping extends the existing single-interceptor Observable wrapper and existing tests; authenticated-principal and public-route attribution require strict security TDD.",
+        "agentProfileId": "native-luna",
+        "agent": "native",
+        "profileModelTier": "fast",
+        "initialAgent": "native",
+        "initialProfileId": "native-luna",
+        "initialModelTier": "fast",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.7599999999999998,
+          "plannedProfileId": "native-luna",
+          "applied": false,
+          "decidedAt": "2026-10-23T17:16:13.238Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/action-context/action-context.interceptor.ts",
+        "apps/api/src/action-context/action-context.interceptor.spec.ts",
+        "apps/api/src/auth/principal/koda-principal.types.ts",
+        "apps/api/src/action-context/action-context.ts",
+        "apps/api/test/integration/permissions/core-ticket-routes.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a runner or public request handler finishes, currentContext() in its caller is restored to the enclosing context or undefined when no enclosing context existed.",
+        "When a handler awaits asynchronous work before reading currentContext(), it observes the same request actor and correlationId established at subscription."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/action-context/action-context.interceptor.spec.ts",
+          "reason": "the case asserting that a runner request runs with no context becomes \"runs with actor `{ type: 'RUNNER', id: <the runner principal's id> }`, origin `runner`\"; the case asserting that a request with no principal runs with no context becomes \"runs with actor `{ type: 'SYSTEM', id: 'anonymous' }`, origin `rest`\"."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b7ddcadc4d56b4996cb89d36e265623e99bead2f"
+    },
+    {
+      "id": "US-003",
+      "title": "Assistant tool calls run as the assistant",
+      "description": "**Goal** — Attribute thread and approved tool executions to SYSTEM/assistant on behalf of their requester, while MCP executions explicitly retain their caller and mcp origin.\n\n**Motivation** — A thread tool call runs as the thread's creator, so the audit trail cannot tell \"the user did it\" from \"the assistant did it for the user\".\n\n**Approach** — In `src/fleet/assistant/assistant-tool.executor.ts`:\n- `executeUnstored` (a thread tool call, arriving on the runner route) runs the tool inside actor `SYSTEM/assistant`, `onBehalfOf` = the thread creator (`AGENT` when `isAgentCreator(creator)`, else `USER`), origin `thread`.\n- `executeAction` (an approved action) runs the tool inside actor `SYSTEM/assistant`, `onBehalfOf` = `USER/<scope.actor.id>`, origin `thread`, approval `{ requiredMode: action.approvalMode, satisfiedBy: <approver tier>, approverType, approverId, requestId: action.id }`. `approverType` maps `'user'` → `'USER'` and `'agent'` → `'AGENT'`.\n- `executeFor` with `caller.origin.kind === 'mcp'` runs the tool inside a context whose actor is `caller.principal` (`AGENT/<id>` or `USER/<id>`) and whose origin is `mcp`, whether or not a context is already current. A caller with any other origin runs unchanged.\n\nBecause `actorTypeFor` reads `onBehalfOf`, every service the tool calls keeps recording the creator's type (`requestedByType`, `createdByType`, `authorType`) exactly as today.\n\n- **Approval before P3.** A direct action has `requiredMode: 'none'`, `satisfiedBy: 'none'`. An approved assistant action carries the `PendingAction`'s mode, and `satisfiedBy` is the approver's tier (`USER` approver → `human`, `AGENT` approver → `agent`, no approver → `none`).\n\nWhen an approved action's `approverType` is `null`, `satisfiedBy` is `none`, no approver fields. requestId remains action.id. Preserve actionScope's enabled-user, membership and key checks; the authorization principal and ToolContext.actor remain the requester, never SYSTEM/assistant or the approver. Do not relax the current rejection of an agent requester on executeAction. Preserve the replay lock, stored-result behavior, masking, caps, permission rechecks and existing tool failure outcomes. A SYSTEM action context changes attribution, not authority.\n\n**Interface** — US-001 context seam used around existing executor methods:\n```typescript\nexport function runWithActionContext<T>(input: ActionContextInput, fn: () => T): T;\nexport function currentContext(): ActionContext | undefined;\nexport function actorTypeFor(actorId: string): ActorType;\n```\n\nUse runWithActionContext to set origin thread explicitly (runAsSystem alone sets origin system). Modify `assistant-tool.executor.agent-caller.spec.ts`: AC-11's two cases assert `currentActor()` equals the creator (`{ type: 'AGENT', id: 'a1' }`, `{ type: 'USER', id: 'u1' }`); they become: `currentActor()` is `{ type: 'SYSTEM', id: 'assistant' }` and `currentContext().onBehalfOf` is the creator. Expand `assistant-tool.executor.actor.spec.ts` for approved contexts, approver tiers and null fields, and the existing executor harness for MCP overrides with and without an enclosing context. Every context assertion must trigger an executor method and record currentContext from the stub tool. Existing thread-creator-type.integration.spec.ts and enforce-fleet-requesters.integration.spec.ts pin principal-domain compatibility.\n\n**Scope** — In: thread, approved action and MCP execution contexts in the existing executor. Out: full helper internals (US-001), HTTP context selection (US-002), scheduler/other background wrappers (US-004/US-005), outbox metadata (US-006); PendingAction actors, domain actor columns, approval policies and P3 ApprovalRequest are not changed.",
+      "acceptanceCriteria": [
+        "[unit] AssistantToolExecutor.execute for a thread call of a read tool whose job's creator is user u1, with membership defined and the tool's key allowed (the assistant-tool.executor.agent-caller.spec.ts harness), runs the tool with currentContext().actor equal { type: 'SYSTEM', id: 'assistant' }.",
+        "[unit] For that call, the tool observes currentContext().onBehalfOf equal { type: 'USER', id: 'u1' }.",
+        "[unit] For that call, the tool observes currentContext().origin equal 'thread'.",
+        "[unit] For a thread tool call whose job's creator is agent a1, the tool observes currentContext().onBehalfOf equal { type: 'AGENT', id: 'a1' }.",
+        "[unit] AssistantToolExecutor.executeAction for a PendingActionRecord with id 'pa1', actorType 'user', actorId 'u1', approvalMode 'human', approverType 'user', approverId 'u2', with findUserActor returning enabled user u1, membership defined and the tool's key allowed (the assistant-tool.executor.actor.spec.ts harness), runs the tool with currentContext().actor equal { type: 'SYSTEM', id: 'assistant' }.",
+        "[unit] For that action, the tool observes currentContext().onBehalfOf equal { type: 'USER', id: 'u1' }.",
+        "[unit] For that action, the tool observes currentContext().approval equal { requiredMode: 'human', satisfiedBy: 'human', approverType: 'USER', approverId: 'u2', requestId: 'pa1' }.",
+        "[unit] For an action with approverType 'agent' and approverId 'a9', the tool observes approval.satisfiedBy 'agent' and approval.approverType 'AGENT'.",
+        "[unit] For an action with approvalMode 'none' and approverType null, the tool observes approval equal { requiredMode: 'none', satisfiedBy: 'none', requestId: <the action id> }.",
+        "[unit] AssistantToolExecutor.executeFor with a caller whose origin.kind is 'mcp' and whose principal is agent a1, called inside a SYSTEM/anonymous context, runs the tool with currentContext().origin 'mcp'.",
+        "[unit] For that MCP call, the tool observes currentContext().actor equal { type: 'AGENT', id: 'a1' }.",
+        "[unit] AssistantToolExecutor.executeFor with an MCP caller whose principal is user u1, called with no context current, runs the tool with currentContext().actor equal { type: 'USER', id: 'u1' }.",
+        "[unit] Given a registered tool and a user-requested PendingActionRecord whose findUserActor result is disabled, when AssistantToolExecutor.executeAction runs, it does not invoke tool.execute, preserving the existing enabled-requester gate."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "assistant",
+        "mcp",
+        "security",
+        "approval"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One existing executor and its established harnesses need three explicitly specified context wrappers without new authorization abstractions; requester checks and approver identity require strict security TDD despite the localized implementation.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.05999999999999961,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T17:21:44.375Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.types.ts",
+        "apps/api/src/fleet/assistant/actions/pending-action.domain.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.executor.agent-caller.spec.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.executor.actor.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When executeAction runs an approved tool, the tool observes currentContext().origin 'thread'.",
+        "When executeFor receives a non-MCP caller, the tool observes the enclosing action context unchanged.",
+        "When executeAction receives approvalMode 'human' with approverType null, the tool observes approval equal { requiredMode: 'human', satisfiedBy: 'none', requestId: <the action id> } without approver fields.",
+        "When an agent-created thread tool calls actorTypeFor with its creator id, the result is 'AGENT' while currentActor() remains SYSTEM/assistant."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.agent-caller.spec.ts",
+          "reason": "AC-11's two cases assert `currentActor()` equals the creator (`{ type: 'AGENT', id: 'a1' }`, `{ type: 'USER', id: 'u1' }`); they become: `currentActor()` is `{ type: 'SYSTEM', id: 'assistant' }` and `currentContext().onBehalfOf` is the creator."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "abd8c258a7981c368e60d8ef8a04038e27e4fd3a"
+    },
+    {
+      "id": "US-004",
+      "title": "Fleet system writers run as system components",
+      "description": "**Goal** — Establish component-owned contexts at the ten fleet background entries, including independent drain correlations and scheduler-on-behalf-of dispatch.\n\n**Motivation** — A scheduled fire runs as the schedule's owner, not as the scheduler on the owner's behalf.\n\n**Approach** — Each background entry wraps its body in `runAsSystemWriter(this, …)`, or `runAsSystem('<id>', …)` for a class with no `@SystemWriter` key:\n\n| Story | Class (file under `apps/api/src/`) | Entry wrapped | Component |\n|:--|:--|:--|:--|\n| US-004 | `PendingActionExpirySweeper` (`fleet/assistant/actions/pending-action-expiry.sweeper.ts`) | `tick` | `assistant-action` |\n| US-004 | `ApprovalExpirySweeper` (`fleet/approvals/approval-expiry-sweeper.ts`) | `tick` | `approval` |\n| US-004 | `BundleIngestService` (`fleet/ingest/bundle-ingest.service.ts`) | the `drain()` call chained by `kick` | `ingest` (`runAsSystem`) |\n| US-004 | `ScheduleTicker` (`fleet/schedules/schedule-ticker.ts`) | `runOnce` | `schedule` |\n| US-004 | `FleetPrStateRefresher` (`fleet/tickets/fleet-pr-state.refresher.ts`) | `refresh` | `ticket-link` |\n| US-004 | `BudgetSweeper` (`fleet/budgets/budget-sweeper.ts`) | `tick` | `budget` |\n| US-004 | `EnrollmentRetentionProcessor` (`fleet/runners/enrollment-retention.processor.ts`) | `scheduledPurge` | `enrollment` |\n| US-004 | `FleetSweeper` (`fleet/sync/fleet-sweeper.ts`) | `sweep` | `job` |\n| US-004 | `FleetLogRetentionProcessor` (`fleet/logs/fleet-log-retention.processor.ts`) | `scheduledPurge` | `log` |\n| US-004 | `KnowledgeIndexQueue` (`fleet/knowledge/knowledge-index.queue.ts`) | `drain` | `knowledge` |\n\n**Scheduled dispatch (decision 7).** `ScheduleTicker.dispatchFresh` already checks the owner's access and keys at fire time and disables the schedule with `owner_lost_access` (P1 US-005); that stays. Its `runWithActor(owner, …)` around `FleetJobsService.dispatch` becomes `runAsSystem('schedule', …, { onBehalfOf: owner })`, so the dispatch runs as the scheduler on the owner's behalf and `actorTypeFor(s.createdById)` still answers the owner's type.\n\n- **`schedule`, not the design's `scheduler`.** Design §5 lists `scheduler`; the key-family rule gives `schedule` (`system.schedule.dispatch`), and the rule wins so every id is derivable.\n- **An entry that is also reachable from a request keeps the request's context.** Only the background entry (the interval callback, the cron method, the boot hook) opens a system context. For example `VcsPrSyncService.syncPrStatus` called from `vcs.controller.ts` runs as the calling user.\n- **A queue drain always runs as its component**, whoever enqueued: `KnowledgeIndexQueue` keeps one drain loop alive for every enqueuer and `BundleIngestService.kick` chains drains, so the context of the first enqueuer would otherwise leak into later passes. `KnowledgeIndexQueue.drain` runs as `knowledge`; the drain `BundleIngestService.kick` starts runs as `ingest`. A drain also takes a fresh `correlationId` (it passes `{ correlationId: randomUUID() }`), so it never carries the first enqueuer's id. `KnowledgePoller` and `BundleIngestSweeper` only enqueue and kick, so they are not wrapped.\n\nThe two `@OnEvent` listeners only enqueue, so the drain they start carries the context. For the drain requiring an explicit correlationId, use runAsSystem with that option rather than losing it through the two-argument runAsSystemWriter helper. Keep single-drain serialization, FIFO/deduplication/caps, sweep enable flags, catch/continue behavior, transaction boundaries, owner permission checks and post-commit events unchanged. ScheduleTicker.runOnce is the background wrapper; tick is not the wrapped entry. Only the drain chained by BundleIngestService.kick is wrapped, leaving reusable direct drain behavior intact.\n\n**Interface** —\n```typescript\nexport function currentContext(): ActionContext | undefined;\nexport function runAsSystem<T>(component: string, fn: () => T, opts?: { onBehalfOf?: ActionContext['onBehalfOf']; correlationId?: string }): T;\nexport function runAsSystemWriter<T>(writer: object, fn: () => T): T;\n```\n\nModify `apps/api/src/fleet/schedules/schedule-ticker.spec.ts`: the dispatch-actor case asserts `currentActor()` inside `dispatch` is the owner; it becomes: actor `{ type: 'SYSTEM', id: 'schedule' }` with `onBehalfOf` the owner. The case asserting no actor remains after `tick()` keeps its expectation (`tick` is not the wrapped entry). Each interval case builds the class with `sweepEnabled: true` (or the class's own enable flag) and fake timers, calls `onModuleInit`, and advances the clock past one interval; the named collaborator is a stub that records `currentContext()`. Exercise knowledge through enqueue/onRepoMerged and bundle ingest through kick/idle, not helper-only tests. Extend existing colocated specs; no new files are required.\n\n**Scope** — In: these ten fleet background entries and scheduler dispatch on behalf of the owner. Out: context helper internals (US-001), HTTP/assistant mapping (US-002/US-003), the eleven other entries including thread boot catch-up (US-005), fan-out/envelopes (US-006); do not change FleetActivity actors/responsibleUserId, fleet SYSTEM_ACTOR/TransitionActorRef, domain actor columns, the runner upload hook, RAG strategies or the future write guard.\n\n**Also read** (the system-writer table entries beyond the 5 context files): `apps/api/src/fleet/assistant/actions/pending-action-expiry.sweeper.ts`, `apps/api/src/fleet/approvals/approval-expiry-sweeper.ts`, `apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts`, `apps/api/src/fleet/runners/enrollment-retention.processor.ts`, `apps/api/src/fleet/logs/fleet-log-retention.processor.ts`.",
+      "acceptanceCriteria": [
+        "[unit] With sweepEnabled: true and one due schedule, the ScheduleTicker interval callback calls the schedule repository's findDue with currentContext().actor equal { type: 'SYSTEM', id: 'schedule' }.",
+        "[unit] ScheduleTicker.tick for a due schedule created by agent a1, whose owner holds fleet.job.dispatch and whose claimFire succeeds with no active job, calls FleetJobsService.dispatch with currentContext().actor equal { type: 'SYSTEM', id: 'schedule' }.",
+        "[unit] In that dispatch, currentContext().onBehalfOf equals { type: 'AGENT', id: 'a1' }.",
+        "[unit] With sweepEnabled: true, the PendingActionExpirySweeper interval callback calls the pending-action repository's findDue with currentContext().actor equal { type: 'SYSTEM', id: 'assistant-action' }.",
+        "[unit] With sweepEnabled: true, the ApprovalExpirySweeper interval callback calls the approval repository's findExpiredPending with currentContext().actor equal { type: 'SYSTEM', id: 'approval' }.",
+        "[unit] BundleIngestService.kick() called inside a context with actor { type: 'RUNNER', id: 'r1' }, then awaited through idle(), calls the ingest repository's claimNext with currentContext().actor equal { type: 'SYSTEM', id: 'ingest' }.",
+        "[unit] With sweepEnabled: true and one link with prState 'open' on a GitHub repo with an installation id, whose getPullRequest resolves null, the FleetPrStateRefresher interval callback calls vcsRepo.updateTicketLinkWithPrState(link.id, 'closed') with currentContext().actor equal { type: 'SYSTEM', id: 'ticket-link' }.",
+        "[unit] With sweepEnabled: true, the BudgetSweeper interval callback calls the budget repository's findAll with currentContext().actor equal { type: 'SYSTEM', id: 'budget' }.",
+        "[unit] With an enrollment retention day count above 0, EnrollmentRetentionProcessor.scheduledPurge calls deleteSpentEnrollmentsBefore with currentContext().actor equal { type: 'SYSTEM', id: 'enrollment' }.",
+        "[unit] With sweepEnabled: true, the FleetSweeper interval callback calls the job repository's findSilentHeldIds with currentContext().actor equal { type: 'SYSTEM', id: 'job' }.",
+        "[unit] With a log retention day count above 0, FleetLogRetentionProcessor.scheduledPurge calls its retention repository's findCandidates with currentContext().actor equal { type: 'SYSTEM', id: 'log' }.",
+        "[unit] With knowledgeIndexEnabled: true, KnowledgeIndexQueue.onRepoMerged called with no context runs KnowledgeRepoIndexer.indexRepo with currentContext().actor equal { type: 'SYSTEM', id: 'knowledge' }.",
+        "[unit] With knowledgeIndexEnabled: true, KnowledgeIndexQueue.enqueue called inside a context with actor { type: 'USER', id: 'u1' } runs KnowledgeRepoIndexer.indexRepo with currentContext().actor equal { type: 'SYSTEM', id: 'knowledge' }.",
+        "[unit] Given a due schedule whose fire is claimed, with no active job and an owner who no longer has dispatch access, when ScheduleTicker.tick runs, it does not call FleetJobsService.dispatch, preserving the existing fire-time owner authorization gate.",
+        "[unit] When ScheduleTicker.tick resolves with no enclosing action context, currentActor() in its caller is undefined, preserving the existing schedule-ticker.spec.ts cleanup expectation (tick is not the wrapped entry)."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "fleet",
+        "background",
+        "security",
+        "concurrency"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Ten fleet entry points span timers, queued drains and scheduler ownership; async context isolation and existing owner-access checks make this cross-module, security-sensitive integration work.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.09999999999999964,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T17:39:02.411Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/schedules/schedule-ticker.ts",
+        "apps/api/src/fleet/budgets/budget-sweeper.ts",
+        "apps/api/src/fleet/knowledge/knowledge-index.queue.ts",
+        "apps/api/src/fleet/ingest/bundle-ingest.service.ts",
+        "apps/api/src/fleet/sync/fleet-sweeper.ts"
+      ],
+      "suggestedCriteria": [
+        "When BundleIngestService.kick starts a drain from an enclosing context with correlationId 'enqueue-1', claimNext observes a correlationId different from 'enqueue-1'.",
+        "When KnowledgeIndexQueue.enqueue starts a drain from an enclosing context with correlationId 'enqueue-2', indexRepo observes a correlationId different from 'enqueue-2'.",
+        "When another user enqueues a repository while a knowledge drain is active, the later pass still observes SYSTEM/knowledge rather than either enqueuer's actor.",
+        "When a due schedule owner loses dispatch access, ScheduleTicker disables the schedule with 'owner_lost_access' without calling FleetJobsService.dispatch.",
+        "When a scheduled agent-owned dispatch calls actorTypeFor with its owner's id, the result is 'AGENT'."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/schedules/schedule-ticker.spec.ts",
+          "reason": "the dispatch-actor case asserts `currentActor()` inside `dispatch` is the owner; it becomes: actor `{ type: 'SYSTEM', id: 'schedule' }` with `onBehalfOf` the owner. The case asserting no actor remains after `tick()` keeps its expectation (`tick` is not the wrapped entry)."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "1c22daf55d08ba409d170255d9de50f848fd0267"
+    },
+    {
+      "id": "US-005",
+      "title": "Other system writers and boot seeders run as system components",
+      "description": "**Goal** — Establish system-component contexts at the eleven remaining retention, polling, webhook, notification, email and boot-seeding entry points.\n\n**Motivation** — The 35 `@SystemWriter` classes, the boot seeders and the outbox fan-out run outside any context, so their writes have no recorded actor.\n\n**Approach** — Each background entry wraps its body in `runAsSystemWriter(this, …)`, or `runAsSystem('<id>', …)` for a class with no `@SystemWriter` key:\n\n| Story | Class (file under `apps/api/src/`) | Entry wrapped | Component |\n|:--|:--|:--|:--|\n| US-005 | `OutboxRetentionProcessor` (`outbox/outbox-retention.processor.ts`) | `scheduledPurge` | `outbox` |\n| US-005 | `MemoryGovernanceProcessor` (`memory/memory-governance.processor.ts`) | `scheduledCleanup` | `memory` |\n| US-005 | `VcsPollingService` (`vcs/vcs-polling.service.ts`) | `tick` | `vcs` |\n| US-005 | `VcsWebhookService` (`vcs/vcs-webhook.service.ts`) | `handleWebhook` | `vcs` |\n| US-005 | `CiWebhookService` (`ci-webhook/ci-webhook.service.ts`) | `processCiWebhook` | `ci` |\n| US-005 | `FleetHealthDetector` (`notifications/fleet/fleet-health.detector.ts`) | `detect` | `health` |\n| US-005 | `EmailDispatcher` (`email/email-dispatcher.ts`) | `runScheduledTick` | `email` |\n| US-005 | `NotificationRetentionProcessor` (`notifications/notification-retention.processor.ts`) | `scheduledPurge` | `notification` |\n| US-005 | `ThreadIngestBootstrap` (`fleet/threads/ingest/thread-ingest.bootstrap.ts`) | `onApplicationBootstrap` | `thread` (`runAsSystem`) |\n| US-005 | `SystemRoleSeeder` (`permissions/system-role.seeder.ts`) | `onApplicationBootstrap` | `seed` (`runAsSystem`) |\n| US-005 | `EmailTemplateSeeder` (`email/email-template.seeder.ts`) | `onApplicationBootstrap` | `seed` (`runAsSystem`) |\n\n- **An entry that is also reachable from a request keeps the request's context.** Only the background entry (the interval callback, the cron method, the boot hook) opens a system context. For example `VcsPrSyncService.syncPrStatus` called from `vcs.controller.ts` runs as the calling user.\n- **The two webhook intake services override `SYSTEM/anonymous`** with their own component (`vcs`, `ci`): their requests are public, and the intake is the system's own write.\n- **`ThreadIngestHook` (`system.thread.ingest`) is not wrapped**: its hook runs inside the runner's log-upload request (`fleet/logs/log-upload.service.ts:106`, awaited), so thread folds record the uploading runner (`RUNNER`). Only `ThreadIngestBootstrap`'s boot catch-up runs as `thread`.\n- **The three RAG optimize strategies are not wrapped**: they write only to LanceDB, never to Postgres.\n\n**Interface** —\n```typescript\nexport function currentContext(): ActionContext | undefined;\nexport function runAsSystem<T>(component: string, fn: () => T, opts?: { onBehalfOf?: ActionContext['onBehalfOf']; correlationId?: string }): T;\nexport function runAsSystemWriter<T>(writer: object, fn: () => T): T;\n```\n\nUse the existing decorated keys for runAsSystemWriter and explicit thread/seed for the three undecorated boot classes. Keep bootstrap ordering, role validation-before-write and locked/unlocked role restoration, template seeding idempotence, polling schedule changes, notification retention, email overlap protection, catches and return values unchanged. Wrap EmailDispatcher.runScheduledTick rather than tick or sendOne; preserve caller context in shared inner methods. Wrapping an entry body leaves every existing assertion on these classes unchanged. Add collaborator-observed context assertions to their existing colocated specs; no new files are required. For timers, enable the class's flag and advance fake timers through the real callback. For CI integration, send a valid signed pipeline_failed request with one failure and spy on repository.createTicket while preserving the actual HTTP security path; existing endpoint.e2e.spec.ts has a signed CI harness.\n\n**Scope** — In: these eleven entry-point wrappers and webhook intake override behavior. Out: context helper internals (US-001), HTTP default selection (US-002), assistant attribution (US-003), the ten fleet entries (US-004), outbox handler/envelope changes (US-006); CI replay-guard writes remain anonymous, public auth identity promotion is deferred, runner log-upload thread hooks and RAG strategies are not wrapped, and the future context-less write guard is not added.\n\n**Also read** (the system-writer table entries beyond the 5 context files): `apps/api/src/outbox/outbox-retention.processor.ts`, `apps/api/src/memory/memory-governance.processor.ts`, `apps/api/src/notifications/fleet/fleet-health.detector.ts`, `apps/api/src/notifications/notification-retention.processor.ts`, `apps/api/src/fleet/threads/ingest/thread-ingest.bootstrap.ts`, `apps/api/src/email/email-template.seeder.ts`.",
+      "acceptanceCriteria": [
+        "[unit] With an outbox retention day count above 0, OutboxRetentionProcessor.scheduledPurge calls deleteTerminalBefore with currentContext().actor equal { type: 'SYSTEM', id: 'outbox' }.",
+        "[unit] With findAllProjectIds returning one project id, MemoryGovernanceProcessor.scheduledCleanup calls MemoryGovernanceService.runCleanup with currentContext().actor equal { type: 'SYSTEM', id: 'memory' }.",
+        "[unit] With polling scheduled for one connection and fake timers, the VcsPollingService interval callback calls vcsRepo.findVcsConnectionById with currentContext().actor equal { type: 'SYSTEM', id: 'vcs' }.",
+        "[unit] VcsWebhookService.handleWebhook for a pull_request event with action opened that matches a ticket link, called inside a SYSTEM/anonymous context, calls vcsRepo.updateTicketLinkWithPrState with currentContext().actor equal { type: 'SYSTEM', id: 'vcs' }.",
+        "[unit] CiWebhookService.processCiWebhook for a pipeline_failed payload with one failure, called inside a SYSTEM/anonymous context, calls the CI webhook repository's createTicket with currentContext().actor equal { type: 'SYSTEM', id: 'ci' }.",
+        "[integration] POST /api/projects/:slug/ci-webhook with a valid signature and a pipeline_failed payload with one failure creates its ticket while currentContext().actor is { type: 'SYSTEM', id: 'ci' } (a spy on the CI webhook repository's createTicket records currentContext()).",
+        "[unit] With sweepEnabled: true and fake timers, the FleetHealthDetector interval callback calls its repository's findRunners with currentContext().actor equal { type: 'SYSTEM', id: 'health' }.",
+        "[unit] EmailDispatcher.runScheduledTick calls the email schedule's claimDue with currentContext().actor equal { type: 'SYSTEM', id: 'email' }.",
+        "[unit] With a notification retention day count above 0, NotificationRetentionProcessor.scheduledPurge calls purgeRead with currentContext().actor equal { type: 'SYSTEM', id: 'notification' }.",
+        "[unit] With findUnfolded returning one stream, ThreadIngestBootstrap.onApplicationBootstrap calls ThreadIngestor.catchUp with currentContext().actor equal { type: 'SYSTEM', id: 'thread' }.",
+        "[unit] With the role repository's findOne returning null for a seed, SystemRoleSeeder.onApplicationBootstrap calls createRole with currentContext().actor equal { type: 'SYSTEM', id: 'seed' }.",
+        "[unit] With findTemplate returning null for a template, EmailTemplateSeeder.onApplicationBootstrap calls the template service's create with currentContext().actor equal { type: 'SYSTEM', id: 'seed' }.",
+        "[unit] Given notification retentionDays equal to 0, when NotificationRetentionProcessor.scheduledPurge runs, it does not call NotificationsRepository.purgeRead, preserving the existing read-notification retention disable switch."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "background",
+        "webhook",
+        "seeding",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Eleven entry wrappers cross webhook intake, polling, retention and bootstrap lifecycle modules; signed webhook and system-role seeding paths involve security-sensitive boundaries despite retaining existing policy behavior.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.3799999999999999,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T18:05:04.775Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-webhook.service.ts",
+        "apps/api/src/ci-webhook/ci-webhook.service.ts",
+        "apps/api/src/permissions/system-role.seeder.ts",
+        "apps/api/src/email/email-dispatcher.ts",
+        "apps/api/src/vcs/vcs-polling.service.ts"
+      ],
+      "suggestedCriteria": [
+        "When VcsWebhookService.handleWebhook or CiWebhookService.processCiWebhook finishes inside an anonymous context, its caller again observes SYSTEM/anonymous.",
+        "When EmailDispatcher.tick is called directly inside a user context, its schedule collaborators observe that user context rather than SYSTEM/email.",
+        "When VcsPrSyncService.syncPrStatus is called through a user request, its writes retain that user's action context."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2fa5f009b7ffed97caac79f23559a99fdaf3840a"
+    },
+    {
+      "id": "US-006",
+      "title": "Outbox fan-out runs as the outbox and envelopes carry approval",
+      "description": "**Goal** — Attribute every fan-out handler to SYSTEM/outbox and attach the current approval block to ticket and agent event envelopes.\n\n**Motivation** — The 35 `@SystemWriter` classes, the boot seeders and the outbox fan-out run outside any context, so their writes have no recorded actor.\n\n**Approach** —\n- `FanOutPublisher.publish(record)` invokes each handler inside `runAsSystem('outbox', () => handler(record.payload))`. Failure collection, `recordLastError` and the thrown `OutboxFanOutError` are unchanged.\n- `buildTicketEventOutboxPayload` and `buildAgentEventOutboxPayload` add `approval: currentContext().approval` to the envelope when a context is current, and omit the key when none is.\n\n- **Every outbox handler runs as `SYSTEM/outbox`**, whichever subscriber registered it. The writer's own key is what `AuditEntry` will name later, so a per-subscriber id adds nothing and would change `FanOutPublisher.register` for 16 registrants.\n\nWhen an outbox handler throws inside `SYSTEM/outbox`, it is collected as today; `recordLastError` and `OutboxFanOutError` are unchanged (pinned by the existing `fan-out-publisher.spec.ts` cases). When an envelope is built with no context current, the `approval` key is omitted. Use the full current approval object, including approved-action provenance when present; do not reconstruct it from the domain actor or confuse it with fan-out's new default approval context. Handler execution starts with origin system and US-001's direct-action NO_APPROVAL, inheriting the enclosing correlation id when available. Preserve all existing canonical envelope fields, timestamp conversion, registration order, handler arguments, deduplication, failure continuation, truncation, lastError write-failure behavior and concurrent publish isolation.\n\n**Interface** —\n```typescript\nexport function currentContext(): ActionContext | undefined;\nexport function runAsSystem<T>(component: string, fn: () => T, opts?: { onBehalfOf?: ActionContext['onBehalfOf']; correlationId?: string }): T;\n```\nExisting envelope builder signatures remain:\n```typescript\nexport function buildTicketEventOutboxPayload(input: TicketEventOutboxEnvelopeInput): Record<string, unknown>;\nexport function buildAgentEventOutboxPayload(input: AgentEventOutboxEnvelopeInput): Record<string, unknown>;\n```\n\nModify `apps/api/src/outbox/fan-out-publisher.ts`, its existing spec, and `apps/api/src/events/outbox-envelope.util.ts`. Create `apps/api/src/events/outbox-envelope.util.spec.ts` for envelope approval behavior. `fan-out-publisher.spec.ts` gains the case asserting each handler observes `{ type: 'SYSTEM', id: 'outbox' }`; its existing failure-collection cases keep their expectations. Trigger publish and record currentContext in registered handlers. Exercise actual HTTP ticket creation for the persisted ticket_event approval assertion, extending an existing HTTP ticket suite; direct-service envelope tests are not a replacement for that integration criterion. Existing user HTTP mapping already calls runWithActor, whose US-001 compatibility implementation supplies NO_APPROVAL, so this story has no dependency on US-002.\n\n**Scope** — In: fan-out handler contexts, optional ticket/agent envelope approval and the specified new utility unit spec. Out: context helper implementation (US-001), HTTP/assistant/fleet/other background entry wrapping (US-002 through US-005); per-subscriber component ids, relay markPublished/markRetry/markDead contexts, audit storage, new approval policies and changes to event domain actors are excluded.",
+      "acceptanceCriteria": [
+        "[unit] FanOutPublisher.publish invokes a registered handler with currentContext().actor { type: 'SYSTEM', id: 'outbox' }.",
+        "[unit] FanOutPublisher.publish invokes a registered handler with currentContext().origin 'system'.",
+        "[unit] buildTicketEventOutboxPayload called inside a context whose approval is { requiredMode: 'human', satisfiedBy: 'human', approverType: 'USER', approverId: 'u2', requestId: 'pa1' } returns an envelope whose approval equals that object.",
+        "[unit] buildTicketEventOutboxPayload called inside a context with NO_APPROVAL returns an envelope whose approval equals { requiredMode: 'none', satisfiedBy: 'none' }.",
+        "[unit] buildTicketEventOutboxPayload called outside any context returns an envelope with no approval key.",
+        "[unit] buildAgentEventOutboxPayload called inside a context with NO_APPROVAL returns an envelope whose approval equals { requiredMode: 'none', satisfiedBy: 'none' }.",
+        "[unit] buildAgentEventOutboxPayload called outside any context returns an envelope with no approval key.",
+        "[integration] POST /api/projects/:slug/tickets by a user enqueues a ticket_event outbox row whose payload approval is { requiredMode: 'none', satisfiedBy: 'none' }.",
+        "[unit] When a handler throws inside SYSTEM/outbox, FanOutPublisher.publish still invokes the remaining handlers, preserving the existing failure-collection behavior pinned by fan-out-publisher.spec.ts.",
+        "[unit] When a handler for ticket_event on record row-2 throws Error('handler exploded') inside SYSTEM/outbox, FanOutPublisher.publish calls recordLastError('row-2', '1 fan-out handler(s) failed for ticket_event: handler exploded'), unchanged from the existing fan-out-publisher.spec.ts case.",
+        "[unit] When a handler throws Error('boom') inside SYSTEM/outbox, FanOutPublisher.publish rejects with OutboxFanOutError whose message is '1 fan-out handler(s) failed for ticket_event: boom', unchanged from the existing fan-out-publisher.spec.ts case."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "outbox",
+        "events",
+        "action-context"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Two existing production files use the completed context helpers for mechanical handler wrapping and additive envelope metadata, with established failure and HTTP fixtures; no authorization or approval-policy decision changes.",
+        "agentProfileId": "native-deepseek",
+        "agent": "native",
+        "profileModelTier": "balanced",
+        "initialAgent": "native",
+        "initialProfileId": "native-deepseek",
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "routerDecision": {
+          "mode": "shadow",
+          "router": "decision-proxy:nax-routing",
+          "outcome": "picked",
+          "profileId": "native-deepseek",
+          "confidence": 0.4800000000000004,
+          "plannedProfileId": "native-deepseek",
+          "applied": false,
+          "decidedAt": "2026-10-23T18:20:56.450Z"
+        }
+      },
+      "contextFiles": [
+        "apps/api/src/outbox/fan-out-publisher.ts",
+        "apps/api/src/outbox/fan-out-publisher.spec.ts",
+        "apps/api/src/events/outbox-envelope.util.ts",
+        "apps/api/src/action-context/action-context.ts",
+        "apps/api/test/e2e/tickets.e2e.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/events/outbox-envelope.util.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When buildAgentEventOutboxPayload runs inside a context with an approved action's approval block, the envelope approval equals that complete block.",
+        "When a registered handler awaits asynchronous work, currentContext().actor remains { type: 'SYSTEM', id: 'outbox' } after the await.",
+        "When publish runs inside a context with correlationId 'c-1', each handler observes correlationId 'c-1'.",
+        "When an outbox handler completes or throws, the publishing caller again observes its enclosing action context."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/outbox/fan-out-publisher.spec.ts",
+          "reason": "gains the case asserting each handler observes `{ type: 'SYSTEM', id: 'outbox' }`; its existing failure-collection cases keep their expectations."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f86a1c3d9c3bfc4ab53bef7aca4f67488a151003"
+    }
+  ],
+  "analysis": "FEATURE AND DELIVERY: This is an enhancement of the existing API, not greenfield work. Deliver exactly US-001 through US-006, all scoped to apps/api; US-001 has no dependencies and each other story depends only on US-001. This is P2a, the first of seven ordered features: context, context-guard, audit-entry, audit-core, audit-fleet, audit-integrations, web. Done means the full AsyncLocalStorage ActionContext is available at every in-scope HTTP, assistant, system-writer, bootstrap, drain and fan-out entry, envelopes carry its approval, and existing domain attribution remains unchanged. No schema/data migration, new endpoint, client generation or audit storage is required. The supplied framework detection is inaccurate: the API is NestJS 12 with Fastify, not an Express application; apps/api/package.json:60 and apps/api/package.json:64 declare the Nest/Fastify packages, and .nax/mono/apps/api/context.md:21 identifies Fastify and the Nathapp platform conventions. Work stays entirely in the API. Codebase-memory MCP tools were unavailable, so navigation used direct reads and searches. The nathapp-nestjs-patterns skill was not found in repository files; implementation agents must read it if their host exposes it before authoring NestJS code. No implementation or runtime validation was performed while drafting this PRD.\n\nUS-001 FOUNDATION: apps/api/src/action-context/action-context.ts:1 imports node AsyncLocalStorage; :13 defines the binary ActorType, :15 the currently binary ActionActor, :20 the actor-only ActionContext, :24 the single module-level store, :27 runWithActor, :32 currentActor and :37 actorTypeFor. Modify this file in place; retain every existing export, the single module-level store, binary principal ActorType, synchronous/generic return behavior, async propagation and nested extent restoration. Extend apps/api/src/action-context/action-context.spec.ts:9, whose existing cases cover an actor across await, no residual actor, nested restore and default USER. Add the full context helpers and defaulting algorithm rather than a new injectable context service. Read-only integration points are apps/api/src/permissions/system-writer.decorator.ts:4 (SYSTEM_WRITER_METADATA) and :11 (decorator validates system catalog access), apps/api/src/permissions/catalog.ts:16 (ApprovalMode), :366 (classifies system keys), :429 (PERMISSION_CATALOG), :435 (findCatalogEntry), and apps/api/src/common/enums.ts:127 (FleetActorType). Derive component ids dynamically from catalog access=system and second key segments; do not maintain a duplicate list or modify the catalog/decorator/enums. Read metadata from writer.constructor using the existing reflection pattern. Use LoggerContext, not the logging package's Logger; LoggingModule is already imported/registered in apps/api/src/app.module.ts:9 and :85. Correlation precedence is explicit input, enclosing action context, LoggerContext.current().requestId, randomUUID. Approval defaults to NO_APPROVAL, not an inherited approved action. runAsSystem replaces identity/origin/approval for its extent, inherits correlation unless explicitly overridden, and never implicitly copies onBehalfOf. Invalid system ids and missing writer metadata fail before the callback. SYSTEM_ACTOR_IDS includes unknown solely for the later guard feature, not a new fallback here.\n\nDEPENDENTS AND COMPATIBILITY: The widened currentActor return must not leak RUNNER/SYSTEM into principal-only persisted columns. actorTypeFor must first match a USER/AGENT actor by id, then a matching onBehalfOf principal, then default USER. Existing consumers include apps/api/src/fleet/jobs/fleet-jobs.service.ts:14 and :96 (requestedByType), apps/api/src/fleet/schedules/schedules.service.ts:5, apps/api/src/fleet/repo-config/config-jobs.service.ts:6, apps/api/src/fleet/activity/fleet-activity.service.ts:4 and :52, apps/api/src/fleet/tickets/fleet-ticket-event.recorder.ts:5, and apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:10. These consumers should retain their behavior without reworking their schemas or principal arguments. The ToolContext.actor and PendingAction actor are still the requesting principal, not the new SYSTEM action actor. Regression anchors are apps/api/test/integration/fleet/thread-creator-type.integration.spec.ts:1 and :62, and apps/api/test/integration/permissions/enforce-fleet-requesters.integration.spec.ts:155, :169, :176 and :228. Some tests intentionally call services without context and expect USER (thread-creator-type.integration.spec.ts:74); do not wrap the integration suite wholesale or introduce the next feature's context-less-write guard.\n\nUS-002 HTTP: apps/api/src/action-context/action-context.interceptor.ts:21 currently returns next.handle() early for runners/public requests at :23 and wraps subscription in runWithActor at :30. Preserve the Observable subscription wrapper: next.handle() alone is not the async execution boundary. Replace the early return with full context selection for all four principal cases. Principal interfaces/type guards already exist in apps/api/src/auth/principal/koda-principal.types.ts:8, :16, :26, :39 and :42. ActionContextModule already provides APP_INTERCEPTOR globally (apps/api/src/action-context/action-context.module.ts:12) and AppModule imports it (apps/api/src/app.module.ts:45 and :120), so no new global registration is needed. Extend apps/api/src/action-context/action-context.interceptor.spec.ts:21 to record currentContext at subscribe time; change the runner/public undefined expectations at :50 and :54, retain cleanup behavior at :39. The module wiring test apps/api/src/action-context/action-context.module.spec.ts already verifies global registration and must remain database-free. For real HTTP tests, apps/api/test/helpers/http-app.ts:27 boots AppFactory with real CombinedAuthGuard, prefix/pipes/filters and initialization. apps/api/test/integration/permissions/core-ticket-routes.integration.spec.ts:56 provides a full app plus user/agent fixtures; apps/api/test/integration/permissions/core-admin-public-implicit.integration.spec.ts:266 already exercises public login. Extend appropriate existing HTTP suites with spies recording currentContext inside TicketsService.create and AuthService.login. Do not fake service invocation or move the spy outside the subscription.\n\nUS-003 ASSISTANT: apps/api/src/fleet/assistant/assistant-tool.executor.ts:96 executeAction resolves the requester through actionScope before its existing runWithActor at :103; :123 actionScope still rejects non-user requesters and checks enabled user, membership and the tool's key. Preserve those gates and all replay, secret masking, error-to-result and cap behavior. executeUnstored at :169 resolves the job requester via context.creator and establishes a creator context at :190; replace that with SYSTEM/assistant plus onBehalfOf, origin thread and default approval. executeFor at :194 currently delegates directly to runAndStore; only MCP calls must establish a fresh principal/mcp context even if an anonymous context exists. Non-MCP callers retain their current context. apps/api/src/fleet/assistant/assistant-tool.types.ts:5, :9 and :16 distinguish ToolOrigin, caller principal and domain ToolContext; do not replace the authorization principal with a SYSTEM identity. apps/api/src/fleet/assistant/actions/pending-action.domain.ts:19 defines PendingActionRecord, with approvalMode/approverType/approverId at :37-39; map user to USER/human, agent to AGENT/agent, and null to none with absent approver keys. requestId is action.id, not approvalId. Extend apps/api/src/fleet/assistant/assistant-tool.executor.agent-caller.spec.ts:129 and :137, replacing creator currentActor expectations with assistant actor plus creator onBehalfOf. apps/api/src/fleet/assistant/assistant-tool.executor.actor.spec.ts:36 supplies the requester/permission harness and :75 the action fixture; expand it for approved contexts and null/agent approvers. Existing refusal and requester-not-approver assertions stay.\n\nUS-004 FLEET BACKGROUND: Modify the ten source files in this story's entry table. Entry locations confirmed by search are pending-action-expiry.sweeper.ts:55 tick, approval-expiry-sweeper.ts:44 tick, fleet-pr-state.refresher.ts:65 refresh, budget-sweeper.ts:58 tick, enrollment-retention.processor.ts:25 scheduledPurge, fleet-sweeper.ts:50 sweep and fleet-log-retention.processor.ts:34 scheduledPurge (all under apps/api/src/fleet/ in their specified directories). Use their existing @SystemWriter keys, not new decorators/permission families. apps/api/src/fleet/schedules/schedule-ticker.ts:69 starts the interval through runOnce at :83, whereas tick at :93 is a reusable inner method; wrap runOnce, not tick. dispatchFresh at :133 still checks owner access/effective keys before dispatch at :152; replace only that runWithActor with schedule/onBehalfOf and keep compare-and-set, coalescing, no-open-transaction dispatch, error handling and domain activity records. apps/api/src/fleet/schedules/schedule-ticker.spec.ts:36 records the dispatch actor and :143 asserts no actor remains after tick; update the former and retain the latter. apps/api/src/fleet/ingest/bundle-ingest.service.ts:46 chains drains from kick, :52 exposes idle, and :56 has a reusable public drain; wrap the drain call chained by kick in runAsSystem('ingest', ..., { correlationId: randomUUID() }), not every direct drain call. apps/api/src/fleet/knowledge/knowledge-index.queue.ts:56 and :62 are the two enqueue-only @OnEvent listeners, :73 adds work, :86 starts the drain, and :93 is the single drain loop. Its live loop must run as knowledge with a new correlation id independent of enqueuers. Preserve FIFO, deduplication, kill switch, cap, one drain at a time and failure continuation. BundleIngestSweeper and KnowledgePoller only kick/enqueue and need no wrapper. Existing unit harnesses include schedule-ticker.spec.ts, the colocated sweeper/retention specs, fleet/knowledge/knowledge-index.queue.spec.ts and fleet/ingest/bundle-ingest.service.spec.ts plus outcomes/pr-links/workflow specs. Drive interval entries with enable flags and fake timers, and observe currentContext from repository/indexer doubles, not by calling a context helper in isolation.\n\nUS-005 OTHER ENTRIES: Modify the eleven source files in this story's table. Existing keys/entry locations include apps/api/src/outbox/outbox-retention.processor.ts:19/:30, apps/api/src/memory/memory-governance.processor.ts:8/:18, apps/api/src/notifications/fleet/fleet-health.detector.ts:22/:48 and apps/api/src/notifications/notification-retention.processor.ts:19/:30. apps/api/src/vcs/vcs-polling.service.ts:80 schedules private tick at :112; wrap that tick, not shared refreshConnectionSchedule (:99), poll consumers or VcsPrSyncService.syncPrStatus. apps/api/src/vcs/vcs-webhook.service.ts:170 dispatches webhook event handling and must replace inherited anonymous identity with vcs. apps/api/src/ci-webhook/ci-webhook.service.ts:31 performs intake and :75 invokes repository.createTicket; wrap intake as ci without changing inbound target lookup, signatures, validation, payload or response rules. apps/api/src/ci-webhook/ci-webhook.controller.ts:25 marks the route public, :55 and :61 make replay-guard writes outside the intake service, and :58 invokes processCiWebhook; replay writes deliberately stay anonymous. The signed CI HTTP harness already exists in apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts:2433; extend it with an intake-repository context spy rather than inventing an unsigned service-only substitute for the integration AC. apps/api/src/email/email-dispatcher.ts:64 is runScheduledTick with overlap/error protection; keep tick (:76) and sendOne (:101) reusable under the calling context. apps/api/src/fleet/threads/ingest/thread-ingest.bootstrap.ts:18 is the boot catch-up boundary; wrap with thread but leave the log-upload hook untouched. The hook is registered in apps/api/src/fleet/threads/ingest/thread-ingest.module.ts:20 and is awaited on the runner upload path per the spec, so it should inherit RUNNER. apps/api/src/permissions/system-role.seeder.ts:30 validates all seeds before writes and seeds missing roles at :43; wrap bootstrap as seed without altering validation/locked/unlocked role restoration. apps/api/src/email/email-template.seeder.ts:22 bootstraps through seed (:28), creating missing templates at :47; wrap only bootstrap as seed and retain idempotence/concurrent boot handling. Extend existing colocated tests, including email-dispatcher.spec.ts, email-template.seeder.spec.ts, ci-webhook.service.spec.ts and existing processor/seeder/webhook tests; existing business assertions remain unchanged.\n\nUS-006 OUTBOX: apps/api/src/outbox/fan-out-publisher.ts:64 loops through registered handlers and awaits each at :68, collects failures at :70-73, persists bounded lastError at :80 and throws aggregate error at :84. Wrap each handler invocation with runAsSystem('outbox'), regardless of subscriber key; do not change register's interface, subscriber identities individually, retry/idempotency semantics or error bookkeeping. Existing apps/api/src/outbox/fan-out-publisher.spec.ts:14 verifies registration order, :41 continuation/aggregation, :53 lastError, :63 truncation, :74 lastError write failure and :84 concurrent success/failure isolation; retain those regression anchors while adding handler context assertions. apps/api/src/events/outbox-envelope.util.ts:31 and :53 build Record<string, unknown> ticket/agent envelopes. Add approval only when currentContext exists; do not serialize approval: undefined or synthesize a no-context block. New file apps/api/src/events/outbox-envelope.util.spec.ts is the sole required new file. Utility callers include apps/api/src/tickets/tickets.service.ts:81, apps/api/src/tickets/state-machine/ticket-transitions.service.ts:132 and :158, apps/api/src/comments/comments.service.ts:119, apps/api/src/koda-domain-writer/koda-domain-writer.service.ts:86 and :115, and apps/api/src/fleet/tickets/fleet-ticket-event.recorder.ts:31, so one utility change propagates to all relevant producers without changing their domain actor fields. Existing apps/api/test/integration/memory/outbox-envelope.integration.spec.ts:1 covers canonical envelopes and downstream extraction, but uses direct service calls; the new HTTP acceptance assertion must exercise a real POST with a user, then inspect the persisted ticket_event payload. Existing apps/api/test/e2e/tickets.e2e.spec.ts can be extended for that route assertion without creating a test file. US-006 need not depend on US-002: the existing user interceptor's retained runWithActor already gains default approval from US-001. Do not touch relay markPublished/markRetry/markDead behavior.\n\nTEST AND ROLLOUT PLAN: Implement US-001 first, retaining runWithActor as the compatibility adapter; then apply each independently dependent entry-point story. All source/DTO/controller contracts outside this internal context stay stable. Security-sensitive identity, requester/approver, roles/seeding and authorization-adjacent paths use strict three-session-tdd; the outbox metadata-only story uses tdd-simple. Unit specs belong beside source, use Vitest vi globals and asynchronous TS imports, and exercise real entry methods over stub collaborators. Unit/module wiring tests must not depend on Postgres. apps/api/vitest.config.ts:7 uses SWC decorator metadata; :16 selects DB mode from KODA_DB_TESTS and :42 uses fileParallelism false in DB mode. apps/api/package.json:13, :19, :20 and :21 define unit, scoped, integration and compose DB commands. Use bun run test:scoped <existing affected files> for targeted tests; integration/e2e require KODA_DB_TESTS=1 and a real test Postgres (compose localhost:5433 via bun run test:db:up, or the supported explicit test URL/Testcontainers outside the sandbox). Do not accept describe.skip as a DB test pass or run two reset-based DB suites concurrently. Follow .nax/mono/apps/api/context.md for the feature's generated acceptance file/config and do not edit generated acceptance tests. No full-suite direct-call context wrapping belongs here. Principal attribution, no-context fallback, background enable flags, job fencing, transaction boundaries, post-commit publications, exception handling and outbox envelope consumers are regression risks; keep their existing behavior and scope wrappers to the exact entries. Audit storage/guard rollout follows only in subsequent features.\n\nREFINE SELF-AUDIT: Re-read the checked-in spec, its context-file lists, failure table, exclusions and all acceptance assertions. Preservation inventory: US-001 spec AC-1 through AC-14 map in order to acceptanceCriteria[0..13]; US-002 AC-1 through AC-11 to [0..10]; US-003 AC-1 through AC-12 to [0..11]; US-004 AC-1 through AC-13 to [0..12]; US-005 AC-1 through AC-12 to [0..11]; US-006 AC-1 through AC-8 to [0..7]. Thus all 70 original criteria remain in their declared stories, including every harness/spy/precondition qualifier. No deprecated content-check tags occur. Failure-table coverage remains: US-001 unknown component, undecorated writer, missing correlation source and rejected callback; US-003 absent approver; US-006 handler failures and absent envelope context. All 12 feature-level exclusion items remain verbatim. Binding IDs, workdirs and dependencies remain unchanged. Added only explicit negative-path/regression acceptance checks requested by this audit: compatibility restore/fallback for US-001, HTTP error propagation/cleanup for US-002, disabled requester refusal for US-003, owner-access refusal and tick cleanup for US-004, and disabled read-notification retention for US-005. Source checks confirm executeAction rejects a disabled requester before tool execution (apps/api/src/fleet/assistant/assistant-tool.executor.ts:130-132), and read-notification retentionDays <= 0 skips purgeRead without disabling the separate closed-health-alert purge (apps/api/src/notifications/notification-retention.processor.ts:35-37 and :51-54). These regression ACs preserve behavior; they do not expand authority or wrap additional writers. US-001 and US-003 complexity is medium because each changes one existing production module using explicit helper contracts; their strict security TDD strategy remains. US-004 and US-005 remain complex because their fixed scopes span ten and eleven production entry points respectively. Context-file selections now prioritize spec-listed production inputs: US-004 includes budget-sweeper rather than its schedule test, and US-005 includes the polling service; their existing tests and boot-hook files remain implementation scope via the descriptions. Every story now has an observable negative case and a compatibility assertion or direct replacement-of-old-behavior criterion. No description contradicts its acceptance criteria, and no new helper, dependency, endpoint or file beyond the specified envelope unit spec is introduced.",
+  "outOfScope": [
+    "The context-less write guard (dev and test throw, production `SYSTEM/unknown`) and wrapping direct service calls in the integration suite are out of scope (feature `permissions-p2-context-guard`).",
+    "The `AuditEntry` table, its storage and `GET /audit` are out of scope (feature `permissions-p2-audit-entry`).",
+    "Domain columns keep their current values: `PendingAction.actorType`/`actorId` (a thread action's requester), `FleetJob.requestedByType`, `JobSchedule.createdByType`, `ChatThread.createdByType`, comment and message author types, and `FleetActivity` actors are out of scope (P3 replaces `PendingAction`; `AuditEntry` carries the context).",
+    "Replacing `FleetActivity.responsibleUserId` with on-behalf-of is out of scope (feature `permissions-p2-audit-fleet`).",
+    "Giving outbox handlers per-subscriber component ids is out of scope (designer's call: all run as `SYSTEM/outbox`).",
+    "Wrapping the three RAG optimize strategies is out of scope (they write only to LanceDB).",
+    "Wrapping the `@nathapp/nestjs-outbox` relay's own bookkeeping writes (`markPublished`, `markRetry`, `markDead`) is out of scope (feature `permissions-p2-context-guard` decides how the guard treats them).",
+    "Setting the authenticated user as the actor of the public auth and invite routes (login, refresh, register, invite accept, runner enroll) is out of scope; they run as `SYSTEM/anonymous` here (feature `permissions-p2-audit-core`).",
+    "Changing the fleet `SYSTEM_ACTOR` constant (`src/fleet/common/system-actor.ts`) or `TransitionActorRef` is out of scope; they name the system in fleet domain rows, not in the action context.",
+    "The webhook replay-guard writes in `ci-webhook.controller.ts` (`WebhookReplayGuard.assertFresh`, `forget`) run as `SYSTEM/anonymous`, outside the intake services; giving them the `ci` id is out of scope (feature `permissions-p2-audit-integrations`).",
+    "Approval policies, `ApprovalRequest` and the unified inbox are out of scope (P3).",
+    "Regenerating `openapi.json` and `apps/cli/src/generated/` is out of scope; no contract changes."
+  ],
+  "routingProfile": "cross-agent"
+}

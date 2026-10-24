@@ -3,6 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { OutboxStatus } from '@nathapp/nestjs-outbox';
+import { runAsSystemWriter } from '../action-context/action-context';
 import { PrismaOutboxRepository } from './prisma-outbox.repository';
 import { IOutboxConfig, OUTBOX_CFG } from '../config/outbox.config';
 
@@ -26,8 +27,13 @@ export class OutboxRetentionProcessor {
     private readonly config: ConfigService,
   ) {}
 
+  /** Permissions P2 US-005: the cron method is the background entry; the purge runs as `outbox`. */
   @Cron('0 4 * * *')
-  async scheduledPurge(): Promise<void> {
+  scheduledPurge(): Promise<void> {
+    return runAsSystemWriter(this, () => this.purgeTerminalEvents());
+  }
+
+  private async purgeTerminalEvents(): Promise<void> {
     const outbox = this.config.get<IOutboxConfig>(OUTBOX_CFG);
     const days = outbox?.retention.days;
     if (days === null || days === undefined || days <= 0) {

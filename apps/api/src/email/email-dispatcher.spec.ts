@@ -1,5 +1,6 @@
 import type { Mock } from 'vitest';
 import { NotifyException, NotifyExceptionCode } from '@nathapp/nestjs-notify';
+import { currentContext, type ActionContext } from '../action-context/action-context';
 import { EmailDispatcher } from './email-dispatcher';
 import { PermanentNotificationError } from './permanent-notification.error';
 import type { EmailScheduleRow } from './schedule/email-schedule.types';
@@ -195,5 +196,20 @@ describe('EmailDispatcher scheduled ticks (S4b US-002)', () => {
     const { dispatcher, schedule } = setup();
     schedule.closeAbandonedInvites.mockRejectedValueOnce(new Error('db down'));
     await expect(dispatcher.runScheduledTick(NOW)).resolves.toBeUndefined();
+  });
+
+  /** Permissions P2 US-005: `runScheduledTick` is the background entry; the tick runs as `email`. */
+  it('AC-8: a scheduled tick claims its due rows as SYSTEM/email', async () => {
+    const { dispatcher, schedule } = setup();
+    const seen: Array<ActionContext | undefined> = [];
+    schedule.claimDue.mockImplementation(async () => {
+      seen.push(currentContext());
+      return [];
+    });
+
+    await dispatcher.runScheduledTick(NOW);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'email' });
   });
 });

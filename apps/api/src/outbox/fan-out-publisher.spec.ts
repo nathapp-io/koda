@@ -1,6 +1,7 @@
 import type { Mock } from 'vitest';
 import { FanOutPublisher, OutboxFanOutError, OUTBOX_LAST_ERROR_MAX_LENGTH } from './fan-out-publisher';
 import { outboxRecord } from '../../test/helpers/outbox-record';
+import { currentContext, runWithActionContext, type ActionContext } from '../action-context/action-context';
 
 describe('FanOutPublisher', () => {
   let recordLastError: Mock;
@@ -25,6 +26,40 @@ describe('FanOutPublisher', () => {
     expect(recordLastError).not.toHaveBeenCalled();
   });
 
+  it('AC-1: invokes every handler inside a SYSTEM/outbox context', async () => {
+    const observed: (ActionContext | undefined)[] = [];
+    const first = () => observed.push(currentContext());
+    const second = () => observed.push(currentContext());
+    publisher.register('ticket_event', first);
+    publisher.register('ticket_event', second);
+
+    await publisher.publish(outboxRecord('ticket_event', { id: 'e1' }));
+
+    expect(observed).toHaveLength(2);
+    for (const context of observed) {
+      expect(context?.actor).toEqual({ type: 'SYSTEM', id: 'outbox' });
+      // A fan-out run is a direct action before P3: no approval is claimed for it.
+      expect(context?.approval).toEqual({ requiredMode: 'none', satisfiedBy: 'none' });
+      // Each handler gets its own run, and nothing is left behind afterwards.
+      expect(currentContext()).toBeUndefined();
+    }
+  });
+
+  it('AC-2: invokes a handler with origin system, inside the enclosing correlation id', async () => {
+    let observed: ActionContext | undefined;
+    publisher.register('ticket_event', () => {
+      observed = currentContext();
+    });
+
+    await runWithActionContext(
+      { actor: { type: 'USER', id: 'u1' }, origin: 'rest', correlationId: 'c-1' },
+      () => publisher.publish(outboxRecord('ticket_event', {})),
+    );
+
+    expect(observed?.origin).toBe('system');
+    expect(observed?.correlationId).toBe('c-1');
+  });
+
   it('ignores handlers registered for other types', async () => {
     const other = vi.fn();
     publisher.register('agent_event', other);
@@ -38,8 +73,12 @@ describe('FanOutPublisher', () => {
     await expect(publisher.publish(outboxRecord('unknown_type', {}))).resolves.toBeUndefined();
   });
 
-  it('runs the remaining handlers after one fails, then rejects with one aggregate error', async () => {
-    const failing = vi.fn().mockRejectedValue(new Error('boom'));
+  it('AC-9 / AC-11: runs the remaining handlers after one fails, then rejects with one aggregate error', async () => {
+    let failingContext: ActionContext | undefined;
+    const failing = vi.fn(() => {
+      failingContext = currentContext();
+      throw new Error('boom');
+    });
     const after = vi.fn();
     publisher.register('ticket_event', failing);
     publisher.register('ticket_event', after);
@@ -48,16 +87,22 @@ describe('FanOutPublisher', () => {
 
     await expect(result).rejects.toBeInstanceOf(OutboxFanOutError);
     await expect(result).rejects.toThrow('1 fan-out handler(s) failed for ticket_event: boom');
+    // AC-9: the failure happens inside SYSTEM/outbox, and the remaining handler still runs.
+    expect(failingContext?.actor).toEqual({ type: 'SYSTEM', id: 'outbox' });
     expect(after).toHaveBeenCalledTimes(1);
   });
 
-  it('records lastError for the failed record before rejecting', async () => {
+  it('AC-10: records lastError for the failed record before rejecting', async () => {
+    let failingContext: ActionContext | undefined;
     publisher.register('ticket_event', () => {
+      failingContext = currentContext();
       throw new Error('handler exploded');
     });
 
     await expect(publisher.publish(outboxRecord('ticket_event', {}, { id: 'row-2' }))).rejects.toThrow();
 
+    // AC-10: unchanged aggregation, thrown from inside SYSTEM/outbox.
+    expect(failingContext?.actor).toEqual({ type: 'SYSTEM', id: 'outbox' });
     expect(recordLastError).toHaveBeenCalledWith('row-2', '1 fan-out handler(s) failed for ticket_event: handler exploded');
   });
 

@@ -3,6 +3,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nest
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import type { LiveFleetApprovalEvent } from '../../live/live-event';
+import { runAsSystemWriter } from '../../action-context/action-context';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { ApprovalCloser, systemActor } from '../approvals/approval-closer';
 import { ApprovalLivePublisher } from '../approvals/approval-live.publisher';
@@ -54,8 +55,13 @@ export class BudgetSweeper implements OnModuleInit, OnModuleDestroy {
     this.timer = null;
   }
 
+  /** Permissions P2 US-004: the interval callback is the background entry; the sweep runs as `budget`. */
+  tick(now = new Date()): Promise<BudgetSweepResult> {
+    return runAsSystemWriter(this, () => this.sweepPolicies(now));
+  }
+
   /** One failing policy is logged and skipped; the rest still run. */
-  async tick(now = new Date()): Promise<BudgetSweepResult> {
+  private async sweepPolicies(now: Date): Promise<BudgetSweepResult> {
     const result: BudgetSweepResult = { deleted: 0, reset: 0, evaluated: 0, failed: 0 };
     for (const policy of await this.repo.findAll()) {
       try {

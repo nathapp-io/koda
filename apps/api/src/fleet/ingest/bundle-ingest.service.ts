@@ -1,6 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { randomUUID } from 'node:crypto';
+import { runAsSystem } from '../../action-context/action-context';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { responsibleUserOf } from '../common/responsible-user';
 import { ARTIFACT_STORE, ArtifactStore } from '../artifacts/artifact-store';
@@ -42,11 +44,19 @@ export class BundleIngestService {
     private readonly events: EventEmitter2,
   ) {}
 
-  /** D369: off the request path; never throws. */
+  /**
+   * D369: off the request path; never throws.
+   *
+   * Permissions P2 US-004: the drain this chains is the background entry, not the request that kicked it, so
+   * it runs as the `ingest` component with a correlation id of its own. A direct `drain` call is unaffected.
+   */
   kick(): void {
-    this.queue = this.queue.then(() => this.drain().then(() => undefined)).catch((error: unknown) => {
-      this.logger.warn(`bundle ingest drain failed: ${trimError(error)}`);
-    });
+    this.queue = this.queue
+      .then(() => runAsSystem('ingest', () => this.drain(), { correlationId: randomUUID() }))
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        this.logger.warn(`bundle ingest drain failed: ${trimError(error)}`);
+      });
   }
 
   idle(): Promise<void> {

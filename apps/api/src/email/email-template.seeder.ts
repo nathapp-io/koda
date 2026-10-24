@@ -3,6 +3,7 @@ import {
   ITemplateRepository, ITemplateService, NotificationChannel, TEMPLATE_REPOSITORY, TEMPLATE_SERVICE,
 } from '@nathapp/nestjs-notify';
 import { KODA_TENANT_ID } from './koda-tenant';
+import { runAsSystem } from '../action-context/action-context';
 import { EMAIL_LOCALES, EMAIL_TEMPLATE_CODES, EmailLocale, EmailTemplateCode, EmailTemplateText } from './templates/template-codes';
 import { EN_TEMPLATES } from './templates/en';
 import { ZH_TEMPLATES } from './templates/zh';
@@ -19,7 +20,12 @@ export class EmailTemplateSeeder implements OnApplicationBootstrap {
     @Inject(TEMPLATE_SERVICE) private readonly templates: ITemplateService,
   ) {}
 
+  /** Permissions P2 US-005: the boot hook is the background entry, so the seed writes as `seed`. */
   async onApplicationBootstrap(): Promise<void> {
+    await runAsSystem('seed', () => this.seedOnBoot());
+  }
+
+  private async seedOnBoot(): Promise<void> {
     const changed = await this.seed();
     if (changed > 0) this.logger.log(`Seeded ${changed} email template(s)`);
   }

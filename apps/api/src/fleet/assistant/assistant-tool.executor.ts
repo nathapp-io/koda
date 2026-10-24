@@ -2,9 +2,10 @@ import { createHash, randomBytes } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { isAgentPrincipal, type AgentPrincipal, type KodaAgentStatus, type UserPrincipal } from '../../auth/principal/koda-principal.types';
-import { runWithActor } from '../../action-context/action-context';
+import { runWithActionContext, type ActionActor, type ActionApproval } from '../../action-context/action-context';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { KeyedMutex } from '../../common/utils/keyed-mutex';
+import type { ApprovalMode } from '../../permissions/catalog';
 import { PermissionService } from '../../permissions/permission.service';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import { stableStringify } from '../sync/stable-json';
@@ -95,10 +96,20 @@ export class AssistantToolExecutor {
     const scope = await this.actionScope(action);
     if (!scope) return { ok: false, text: `error: ${action.tool} failed` };
     try {
-      // Permissions P1 US-001: the approve path also runs the tool inside the requester's action context, so a service
-      // the tool calls attributes its writes to that principal. `actionScope` admits users only, so the type is USER.
-      const text = await runWithActor({ type: 'USER', id: scope.actor.id }, () =>
-        scope.tool.execute(this.actionContext(action, scope.actor), scope.tool.parse(action.input)));
+      // Permissions P1 US-001 / P2 US-003: the approve path runs the tool inside the assistant's action context on
+      // behalf of the requester, carrying the action's own approval block, so a service the tool calls attributes its
+      // writes to that principal (`actorTypeFor` reads `onBehalfOf`) and an audit row can name the approval.
+      // `actionScope` admits users only, so the requester's type is USER; authority stays the requester's — the actor
+      // here changes attribution only.
+      const text = await runWithActionContext(
+        {
+          actor: ASSISTANT_ACTOR,
+          onBehalfOf: { type: 'USER', id: scope.actor.id },
+          origin: 'thread',
+          approval: approvalFor(action),
+        },
+        () => scope.tool.execute(this.actionContext(action, scope.actor), scope.tool.parse(action.input)),
+      );
       return { ok: true, text: capText(maskSecrets(text), RESULT_CAP_BYTES) };
     } catch (error) {
       if (error instanceof NotFoundAppException) return { ok: false, text: 'not_found' };
@@ -184,17 +195,32 @@ export class AssistantToolExecutor {
       disabled: agent ? false : creator.disabled,
       origin: { kind: 'thread', threadId: context.threadId, jobId: call.jobId, threadKind: context.kind ?? 'REPO', homeProject: context.project },
     };
-    // Thread tool calls arrive on the runner route, which the action-context interceptor leaves outside any context, so
-    // the requester's context is established here: every service a tool calls (`FleetJobsService.dispatch` included)
-    // then attributes its writes with `actorTypeFor` to the requester.
-    return runWithActor({ type: agent ? 'AGENT' : 'USER', id: creator.id }, () => this.runAndStore(caller, call, tool, inputHash, started));
+    // Permissions P2 US-003: a thread tool call is the assistant acting for the requester, so the run is attributed
+    // to `SYSTEM/assistant` with the requester as `onBehalfOf` — `actorTypeFor` then keeps every service the tool
+    // calls (`FleetJobsService.dispatch` included) recording the requester's own type. The origin is the thread, so a
+    // write is traceable to the call that came in rather than to a REST request.
+    return runWithActionContext(
+      { actor: ASSISTANT_ACTOR, onBehalfOf: { type: agent ? 'AGENT' : 'USER', id: creator.id }, origin: 'thread' },
+      () => this.runAndStore(caller, call, tool, inputHash, started),
+    );
   }
 
-  /** Non-thread callers have no replay key; every invocation gets its own audit row. */
+  /**
+   * Non-thread callers have no replay key; every invocation gets its own audit row. An MCP call is the key holder's
+   * own action, so it runs in a context whose actor is that principal and whose origin is `mcp` — even when the MCP
+   * request already sits inside one (permissions P2 US-003). A thread-shaped caller runs in whatever context it
+   * arrived with.
+   */
   async executeFor(caller: ToolCaller, call: { name: string; input: unknown }): Promise<ToolResult> {
     const tool = this.registry.get(call.name);
     if (!tool) throw new NotFoundAppException({}, 'fleet.assistantTool');
-    return this.runAndStore(caller, { ...call, jobId: null, toolCallId: null }, tool, sha256(stableStringify(call.input)), Date.now());
+    const run = (): Promise<ToolResult> =>
+      this.runAndStore(caller, { ...call, jobId: null, toolCallId: null }, tool, sha256(stableStringify(call.input)), Date.now());
+    if (caller.origin.kind !== 'mcp') return run();
+    return runWithActionContext(
+      { actor: { type: isAgentPrincipal(caller.principal) ? 'AGENT' : 'USER', id: caller.principal.id }, origin: 'mcp' },
+      run,
+    );
   }
 
   private async runAndStore(caller: ToolCaller, call: RunCall, tool: AssistantTool, inputHash: string, started: number): Promise<ToolResult> {
@@ -448,7 +474,40 @@ export class AssistantToolExecutor {
 
 type RunCall = { name: string; input: unknown; jobId: string | null; toolCallId: string | null };
 
+/**
+ * Permissions P2 US-003: a thread tool call, an approved action and an MCP call are all the assistant acting for
+ * someone, so the run is attributed to this actor and the requester rides along as `onBehalfOf`. It is the
+ * keyless `assistant` system id of `SYSTEM_ACTOR_IDS`.
+ */
+const ASSISTANT_ACTOR: ActionActor = Object.freeze({ type: 'SYSTEM', id: 'assistant' });
+
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
+
+/**
+ * Permissions P2 US-003: the approval block an approved action carries — what policy demanded, how it was satisfied,
+ * and who approved it. Before P3 sets a floor the only approval an assistant action carries is the approving human or
+ * agent (`approvalMode`), and an action with no approver type records `satisfiedBy: 'none'` with no approver fields at
+ * all: `approverType` and `approverId` are independently nullable, and an id without a type names nobody.
+ */
+function approvalFor(action: PendingActionRecord): ActionApproval {
+  const approval: ActionApproval = {
+    requiredMode: action.approvalMode,
+    satisfiedBy: approverTier(action.approverType),
+    requestId: action.id,
+  };
+  if (action.approverType !== null) {
+    approval.approverType = action.approverType === 'user' ? 'USER' : 'AGENT';
+    if (action.approverId !== null) approval.approverId = action.approverId;
+  }
+  return approval;
+}
+
+/** A USER approver is a human decision, an AGENT approver an agent one; no approver met no floor. */
+function approverTier(approverType: 'user' | 'agent' | null): ApprovalMode {
+  if (approverType === 'user') return 'human';
+  if (approverType === 'agent') return 'agent';
+  return 'none';
+}
 
 /** B1: the audit's replay key as a mutex key. The `/` separator keeps `('j1', 'c/1')` apart from `('j1/c', '1')`. */
 const replayKey = (jobId: string, toolCallId: string): string => `${jobId}/${toolCallId}`;

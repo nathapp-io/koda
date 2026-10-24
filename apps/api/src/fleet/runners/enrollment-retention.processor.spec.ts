@@ -1,4 +1,5 @@
 import { Reflector } from '@nestjs/core';
+import { currentContext, type ActionContext } from '../../action-context/action-context';
 import { EnrollmentRetentionProcessor } from './enrollment-retention.processor';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 
@@ -29,5 +30,19 @@ describe('EnrollmentRetentionProcessor', () => {
   it('swallows a failed purge (the next night is the retry)', async () => {
     repo.deleteSpentEnrollmentsBefore.mockRejectedValue(new Error('db down'));
     await expect(new EnrollmentRetentionProcessor(repo as never, testFleetConfig({ enrollmentRetentionDays: 30 })).scheduledPurge()).resolves.toBeUndefined();
+  });
+
+  /** Permissions P2 US-004: the cron method is the background entry; the purge runs as `enrollment`. */
+  it('AC-9: the nightly purge deletes as SYSTEM/enrollment', async () => {
+    const seen: Array<ActionContext | undefined> = [];
+    repo.deleteSpentEnrollmentsBefore.mockImplementationOnce(async () => {
+      seen.push(currentContext());
+      return 0;
+    });
+
+    await new EnrollmentRetentionProcessor(repo as never, testFleetConfig({ enrollmentRetentionDays: 30 })).scheduledPurge();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'enrollment' });
   });
 });

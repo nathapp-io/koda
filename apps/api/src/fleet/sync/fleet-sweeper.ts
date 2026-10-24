@@ -1,6 +1,7 @@
 import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { runAsSystemWriter } from '../../action-context/action-context';
 import { FleetJobState } from '../../common/enums';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { ApprovalLivePublisher } from '../approvals/approval-live.publisher';
@@ -47,7 +48,12 @@ export class FleetSweeper implements OnModuleInit, OnModuleDestroy {
     this.timer = null;
   }
 
-  async sweep(now = new Date()): Promise<number> {
+  /** Permissions P2 US-004: the interval callback is the background entry; the scan runs as `job`. */
+  sweep(now = new Date()): Promise<number> {
+    return runAsSystemWriter(this, () => this.crashSilent(now));
+  }
+
+  private async crashSilent(now: Date): Promise<number> {
     const cutoff = new Date(now.getTime() - this.fleetConfig.jobCrashSec * 1000);
     let crashed = 0;
     for (const id of await this.repo.findSilentHeldIds(cutoff)) {

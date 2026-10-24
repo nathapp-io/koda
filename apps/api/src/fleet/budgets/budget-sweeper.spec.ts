@@ -1,3 +1,4 @@
+import { currentContext, type ActionContext } from '../../action-context/action-context';
 import { BudgetSweeper } from './budget-sweeper';
 import type { BudgetPolicyRecord } from './domain/budget.domain';
 
@@ -23,5 +24,29 @@ describe('BudgetSweeper', () => {
     sweeper.onModuleInit();
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  it('AC-8: the interval callback lists the policies as SYSTEM/budget (permissions P2 US-004)', async () => {
+    vi.useFakeTimers();
+    const seen: Array<ActionContext | undefined> = [];
+    const repo = {
+      findAll: vi.fn(async () => {
+        seen.push(currentContext());
+        return [];
+      }),
+      scopeExists: vi.fn(async () => true),
+    };
+    const sweeper = new BudgetSweeper(
+      repo as never, { evaluate: vi.fn() } as never, { record: vi.fn() } as never,
+      { run: vi.fn((fn: () => unknown) => fn()) } as never, { sweepEnabled: true }, {} as never, {} as never,
+    );
+
+    sweeper.onModuleInit();
+    await vi.advanceTimersByTimeAsync(60_000);
+    sweeper.onModuleDestroy();
+    vi.useRealTimers();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'budget' });
   });
 });

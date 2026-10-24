@@ -1,6 +1,7 @@
 import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { runAsSystemWriter } from '../../action-context/action-context';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { IVcsRepository, VCS_REPOSITORY } from '../../vcs/domain/vcs.repository';
 import { mapPrState } from '../../vcs/pr-state';
@@ -62,7 +63,12 @@ export class FleetPrStateRefresher implements OnModuleInit, OnModuleDestroy {
     this.timer = null;
   }
 
-  async refresh(): Promise<RefreshSummary> {
+  /** Permissions P2 US-004: the refresh interval is the background entry; one pass runs as `ticket-link`. */
+  refresh(): Promise<RefreshSummary> {
+    return runAsSystemWriter(this, () => this.pass());
+  }
+
+  private async pass(): Promise<RefreshSummary> {
     if (this.running) return { skipped: true, checked: 0, changed: 0, failedRepos: 0 };
     this.running = true;
     const summary: RefreshSummary = { skipped: false, checked: 0, changed: 0, failedRepos: 0 };

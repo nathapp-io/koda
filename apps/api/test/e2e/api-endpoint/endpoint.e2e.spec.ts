@@ -43,6 +43,8 @@ import { KnowledgeSearchService, type KnowledgeHit } from '../../../src/fleet/kn
 import { KnowledgeStoreUnavailableError } from '../../../src/fleet/knowledge/knowledge-chunk-store';
 import { KnowledgeIndexQueue } from '../../../src/fleet/knowledge/knowledge-index.queue';
 import { DEFAULT_KNOWLEDGE_PATTERNS } from '../../../src/fleet/knowledge/knowledge-patterns';
+import { PrismaCiWebhookRepository } from '../../../src/ci-webhook/prisma-ci-webhook.repository';
+import { currentContext, type ActionContext } from '../../../src/action-context/action-context';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -2546,6 +2548,46 @@ describeIntegration('API Integration Tests', () => {
 
       expect(unknownSlug.body).toEqual(badSignature.body);
       expect(unsigned.body).toEqual(badSignature.body);
+    });
+
+    /**
+     * Permissions P2 US-005: the CI intake is public, so the request enters as `SYSTEM/anonymous`; creating
+     * the ticket is the system's own write and must override that with `SYSTEM/ci`. The spy wraps the real
+     * repository method, so the security path (signature, replay guard, validation) still runs end to end.
+     */
+    it('POST /api/projects/:slug/ci-webhook — creates its ticket as SYSTEM/ci (P2 US-005)', async () => {
+      const ciRepo = app.get<PrismaCiWebhookRepository>(PrismaCiWebhookRepository);
+      const original = ciRepo.createTicket.bind(ciRepo);
+      const seen: Array<ActionContext | undefined> = [];
+      const spy = vi.spyOn(ciRepo, 'createTicket').mockImplementation(async (...args) => {
+        seen.push(currentContext());
+        return original(...args);
+      });
+      const payload = {
+        event: 'pipeline_failed',
+        pipeline: { id: '12348', url: 'https://github.com/org/repo/actions/runs/12348' },
+        commit: { sha: 'abc123def459', message: 'feat: context test' },
+        failures: [{ test: 'ContextService.whoWrites', file: 'apps/api/src/context.ts', line: 12 }],
+      };
+      const signature = `sha256=${createHmac('sha256', ciWebhookSecret).update(JSON.stringify(payload)).digest('hex')}`;
+
+      try {
+        const res = await request(httpServer)
+          .post(`/api/projects/${projectSlug}/ci-webhook`)
+          .set('x-ci-signature', signature)
+          .set('x-ci-delivery', 'e2e-ci-delivery-context')
+          .send(payload)
+          .expect(200);
+
+        const data = body<{ success: boolean; ticketRef: string }>(res);
+        expect(data.success).toBe(true);
+        expect(data.ticketRef).toMatch(/^KT-\d+$/);
+      } finally {
+        spy.mockRestore();
+      }
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'ci' });
     });
   });
 

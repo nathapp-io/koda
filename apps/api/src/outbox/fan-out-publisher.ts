@@ -1,3 +1,4 @@
+import { runAsSystem } from '../action-context/action-context';
 import { SystemWriter } from '../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { IOutboxPublisher, OutboxRecord } from '@nathapp/nestjs-outbox';
@@ -25,6 +26,11 @@ const errorMessage = (err: unknown): string => (err instanceof Error ? err.messa
  * record's type; if any fail it records lastError and throws one aggregate
  * error, so the relay retries the event (all handlers run again: consumers
  * must be idempotent).
+ *
+ * Permissions P2 US-006: every handler runs inside `runAsSystem('outbox')`, so the writes it makes
+ * are attributed to the outbox (the writer's own key, not the registrant's — see the design note in
+ * `docs/superpowers/specs/2026-10-18-permission-approval-redesign-design.md` §5). Failure collection
+ * is unchanged: a throw inside that context is collected like any other.
  */
 @Injectable()
 @SystemWriter('system.outbox.dispatch')
@@ -66,7 +72,7 @@ export class FanOutPublisher implements IOutboxPublisher, OnApplicationBootstrap
     const failures: string[] = [];
     for (const handler of this.getHandlers(record.type)) {
       try {
-        await handler(record.payload);
+        await runAsSystem('outbox', () => handler(record.payload));
       } catch (err) {
         const message = errorMessage(err);
         this.logger.error(`Handler for ${record.type} failed on outbox event ${record.id}: ${message}`);

@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
 import { OutboxStatus } from '@nathapp/nestjs-outbox';
+import { currentContext, type ActionContext } from '../action-context/action-context';
 import { OutboxRetentionProcessor } from './outbox-retention.processor';
 import { PrismaOutboxRepository } from './prisma-outbox.repository';
 import { IOutboxConfig } from '../config/outbox.config';
@@ -95,5 +96,19 @@ describe('OutboxRetentionProcessor', () => {
     mockRepository.deleteTerminalBefore.mockRejectedValue(new Error('deadlock detected'));
 
     await expect(processor.scheduledPurge()).resolves.toBeUndefined();
+  });
+
+  /** Permissions P2 US-005: the cron method is the background entry; the purge runs as `outbox`. */
+  it('AC-1: the purge deletes terminal rows as SYSTEM/outbox', async () => {
+    const seen: Array<ActionContext | undefined> = [];
+    mockRepository.deleteTerminalBefore.mockImplementation(async () => {
+      seen.push(currentContext());
+      return 0;
+    });
+
+    await processor.scheduledPurge();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'outbox' });
   });
 });

@@ -2,6 +2,7 @@ import { SystemWriter } from '../../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { randomUUID } from 'crypto';
+import { runAsSystemWriter } from '../../../action-context/action-context';
 import { FLEET_CFG, IFleetConfig } from '../../../config/fleet.config';
 import { ThreadEventBus } from '../../../live/thread-event-bus';
 import { ApprovalLivePublisher } from '../../approvals/approval-live.publisher';
@@ -51,8 +52,17 @@ export class PendingActionExpirySweeper implements OnModuleInit, OnModuleDestroy
     this.timer = null;
   }
 
-  /** One transaction and one lock scope per action: one failing Action never costs the rest of the batch (2a-D10). */
-  async tick(now = new Date()): Promise<PendingActionExpiryResult> {
+  /**
+   * One transaction and one lock scope per action: one failing Action never costs the rest of the batch (2a-D10).
+   *
+   * Permissions P2 US-004: the interval callback is the background entry, so the whole sweep runs inside the
+   * `assistant-action` component's context.
+   */
+  tick(now = new Date()): Promise<PendingActionExpiryResult> {
+    return runAsSystemWriter(this, () => this.expireDue(now));
+  }
+
+  private async expireDue(now: Date): Promise<PendingActionExpiryResult> {
     const result: PendingActionExpiryResult = { expired: 0, failed: 0 };
     for (const due of await this.actions.findDue(now, MAX_PER_TICK)) {
       try {
