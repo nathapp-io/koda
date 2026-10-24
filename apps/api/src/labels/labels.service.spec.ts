@@ -88,7 +88,14 @@ describe('LabelsService', () => {
     name: 'Test Agent',
   };
 
-  const mockAudit = { record: vi.fn(async () => undefined) };
+  const mockAudit = {
+    record: vi.fn(async () => undefined),
+    audited: vi.fn(async (fn: () => Promise<unknown>, entriesOf: (result: unknown) => unknown) => {
+      const result = await fn();
+      entriesOf(result);
+      return result;
+    }),
+  };
 
   const mockLabelRepo = {
     findProjectBySlug: vi.fn(),

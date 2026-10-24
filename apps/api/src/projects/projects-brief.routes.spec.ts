@@ -20,6 +20,7 @@ import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify
 import { PrismaService, createMockPrismaService } from '@nathapp/nestjs-prisma';
 import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import { PrismaProjectRepository } from './prisma-project.repository';
 import { ProjectAccessService } from './project-access.service';
 import { PermissionService } from '../permissions/permission.service';
@@ -105,6 +106,7 @@ describe('PATCH /api/projects/:slug — the project brief (US-001)', () => {
       controllers: [ProjectsController],
       providers: [
         ProjectsService,
+        { provide: AuditRecorder, useValue: { audited: vi.fn(async (fn: () => Promise<unknown>) => fn()) } },
         PrismaProjectRepository,
         ProjectAccessService,
         { provide: PrismaService, useValue: prisma },

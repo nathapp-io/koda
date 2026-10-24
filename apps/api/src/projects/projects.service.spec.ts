@@ -11,6 +11,7 @@ import {
 } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { IProjectRepository } from './domain/project.domain';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 
 /** The rejection of `promise`, or undefined when it resolved. */
 async function rejectionOf(promise: Promise<unknown>): Promise<HttpException | undefined> {
@@ -29,6 +30,13 @@ describe('ProjectsService', () => {
   let mockProjectRepo: any;
   let can: Mock;
   let permissions: PermissionService;
+  const mockAudit = {
+    audited: vi.fn(async (fn: () => Promise<unknown>, entriesOf: (result: unknown) => unknown) => {
+      const result = await fn();
+      entriesOf(result);
+      return result;
+    }),
+  };
 
   beforeEach(() => {
     mockProjectRepo = {
@@ -54,7 +62,8 @@ describe('ProjectsService', () => {
       mockProjectRepo as any,
       ragService,
       undefined,
-      new ProjectAccessService(mockProjectRepo as any, permissions)
+      new ProjectAccessService(mockProjectRepo as any, permissions),
+      mockAudit as unknown as AuditRecorder,
     );
   });
 
@@ -198,6 +207,32 @@ describe('ProjectsService', () => {
       const [, data] = mockProjectRepo.updateBySlug.mock.calls[0];
       expect(data.brief).toBeUndefined();
       expect(result.brief).toBe('kept');
+    });
+  });
+
+  describe('softDelete audit timing', () => {
+    it('clears project caches only after audited resolves', async () => {
+      const project = { id: 'project-1', slug: 'test-project', key: 'TP', deletedAt: null };
+      const deleted = { ...project, deletedAt: new Date() };
+      mockProjectRepo.findBySlug.mockResolvedValue(project);
+      mockProjectRepo.updateBySlug.mockResolvedValue(deleted);
+      const clear = vi.fn();
+      ragService.clearProjectCaches = clear as unknown as typeof ragService.clearProjectCaches;
+      let auditResolved = false;
+      mockAudit.audited.mockImplementation(async (fn, entriesOf) => {
+        const result = await fn();
+        entriesOf(result);
+        auditResolved = true;
+        return result;
+      });
+      clear.mockImplementation(() => {
+        expect(auditResolved).toBe(true);
+      });
+
+      await service.softDelete('test-project');
+
+      expect(mockAudit.audited).toHaveBeenCalledTimes(1);
+      expect(clear).toHaveBeenCalledWith('project-1');
     });
   });
 

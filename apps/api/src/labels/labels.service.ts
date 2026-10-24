@@ -8,6 +8,7 @@ import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { LABEL_REPOSITORY, ILabelRepository } from './domain/label.domain';
 import { AuditRecorder } from '../audit/audit-recorder.service';
+import { fieldsSummary } from '../audit/audit-summary';
 
 @Injectable()
 export class LabelsService {
@@ -33,12 +34,14 @@ export class LabelsService {
       throw new NotFoundAppException({}, 'labels');
     }
 
-    const label = await this.repo.createLabel({
-      projectId: project.id,
-      name: createLabelDto.name,
-      color: createLabelDto.color ?? null,
-    });
-    return LabelResponseDto.from(label);
+    return this.audit.audited(
+      async () => LabelResponseDto.from(await this.repo.createLabel({
+        projectId: project.id,
+        name: createLabelDto.name,
+        color: createLabelDto.color ?? null,
+      })),
+      (label) => ({ key: 'label.create', resourceType: 'label', resourceId: label.id, projectId: project.id, summary: 'created' }),
+    );
   }
 
   async findByProject(projectSlug: string) {
@@ -70,7 +73,10 @@ export class LabelsService {
       throw new NotFoundAppException({}, 'labels');
     }
 
-    await this.repo.deleteLabel(labelId);
+    await this.audit.audited(
+      async () => this.repo.deleteLabel(labelId),
+      () => ({ key: 'label.delete', resourceType: 'label', resourceId: labelId, projectId: project.id, summary: 'deleted' }),
+    );
   }
 
   async update(
@@ -85,11 +91,12 @@ export class LabelsService {
     const label = await this.repo.findLabelById(labelId);
     if (!label || label.projectId !== project.id) throw new NotFoundAppException();
 
-    return LabelResponseDto.from(
-      await this.repo.updateLabel(labelId, {
+    return this.audit.audited(
+      async () => LabelResponseDto.from(await this.repo.updateLabel(labelId, {
         ...(updateLabelDto.name !== undefined ? { name: updateLabelDto.name } : {}),
         ...(updateLabelDto.color !== undefined ? { color: updateLabelDto.color } : {}),
-      }),
+      })),
+      (updated) => ({ key: 'label.update', resourceType: 'label', resourceId: updated.id, projectId: project.id, summary: fieldsSummary(updateLabelDto) }),
     );
   }
 
