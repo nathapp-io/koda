@@ -1,3 +1,4 @@
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { AfterCommitService } from './after-commit.service';
 import { MembershipService } from './membership.service';
@@ -60,6 +61,7 @@ describe('RoleAdminService.removeBinding last-Project-Admin override (US-001)', 
       permissions,
       permissionCache,
       membership,
+      mockAuditRecorder,
     );
 
     store.projects.add(PROJECT);
@@ -86,7 +88,7 @@ describe('RoleAdminService.removeBinding last-Project-Admin override (US-001)', 
 
     await service.removeBinding(principal('global-admin'), binding.id);
 
-    expect(removeBinding).toHaveBeenCalledExactlyOnceWith(binding.id, { lastProjectAdminOverride: true });
+    expect(removeBinding).toHaveBeenCalledExactlyOnceWith(binding.id, { lastProjectAdminOverride: true, onWritten: expect.any(Function) });
   });
 
   it('AC-10: a caller holding only P\'s custom co-admin role passes lastProjectAdminOverride false', async () => {
@@ -94,7 +96,7 @@ describe('RoleAdminService.removeBinding last-Project-Admin override (US-001)', 
 
     await service.removeBinding(principal('co-admin'), binding.id);
 
-    expect(removeBinding).toHaveBeenCalledExactlyOnceWith(binding.id, { lastProjectAdminOverride: false });
+    expect(removeBinding).toHaveBeenCalledExactlyOnceWith(binding.id, { lastProjectAdminOverride: false, onWritten: expect.any(Function) });
   });
 
   it('never claims the override for a binding that is not a project admin\'s', async () => {
@@ -102,7 +104,7 @@ describe('RoleAdminService.removeBinding last-Project-Admin override (US-001)', 
 
     await service.removeBinding(principal('global-admin'), binding.id);
 
-    expect(removeBinding).toHaveBeenCalledExactlyOnceWith(binding.id, { lastProjectAdminOverride: false });
+    expect(removeBinding).toHaveBeenCalledExactlyOnceWith(binding.id, { lastProjectAdminOverride: false, onWritten: expect.any(Function) });
   });
 
   it('never claims the override for a project-admin binding outside a project', async () => {
@@ -110,7 +112,7 @@ describe('RoleAdminService.removeBinding last-Project-Admin override (US-001)', 
 
     await service.removeBinding(principal('global-admin'), binding.id);
 
-    expect(removeBinding).toHaveBeenCalledExactlyOnceWith(binding.id, { lastProjectAdminOverride: false });
+    expect(removeBinding).toHaveBeenCalledExactlyOnceWith(binding.id, { lastProjectAdminOverride: false, onWritten: expect.any(Function) });
   });
 
   it('never claims the override for an agent\'s project-admin binding', async () => {
@@ -119,6 +121,6 @@ describe('RoleAdminService.removeBinding last-Project-Admin override (US-001)', 
 
     await service.removeBinding(principal('global-admin'), binding.id);
 
-    expect(removeBinding).toHaveBeenCalledExactlyOnceWith(binding.id, { lastProjectAdminOverride: false });
+    expect(removeBinding).toHaveBeenCalledExactlyOnceWith(binding.id, { lastProjectAdminOverride: false, onWritten: expect.any(Function) });
   });
 });

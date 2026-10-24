@@ -6,6 +6,8 @@ import {
   ValidationAppException,
 } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { fieldsSummary } from '../audit/audit-summary';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { isForeignKeyViolation, isRecordNotFound, isUniqueViolation } from '../common/utils/prisma-errors';
@@ -95,6 +97,7 @@ export class RoleAdminService {
     private readonly permissions: PermissionService,
     private readonly permissionCache: PermissionCache,
     private readonly membership: MembershipService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /** The routes' own check: `ForbiddenAppException({}, 'permissions')` when `can` denies. */
@@ -134,7 +137,7 @@ export class RoleAdminService {
     await this.assertNoEscalation(principal, this.confer(input, expanded, true));
 
     try {
-      const created = await this.roles.createRole({
+      const created = await this.audit.audited(() => this.roles.createRole({
         key: input.key,
         name: input.name,
         description: input.description ?? '',
@@ -142,7 +145,10 @@ export class RoleAdminService {
         system: false,
         locked: false,
         permissions: [...input.permissions],
-      });
+      }), role => ({
+        key: 'role.manage', resourceType: 'role', resourceId: role.id, projectId: null,
+        summary: `created ${role.key}`,
+      }));
       await this.permissionCache.invalidate();
       return created;
     } catch (error) {
@@ -176,7 +182,13 @@ export class RoleAdminService {
     if (patch.permissions !== undefined) data.permissions = [...patch.permissions];
     if (Object.keys(data).length === 0) return role;
 
-    const updated = await this.roles.update(id, data);
+    const updated = await this.audit.audited(
+      () => this.roles.update(id, data),
+      role => ({
+        key: 'role.manage', resourceType: 'role', resourceId: role.id, projectId: null,
+        summary: fieldsSummary(patch),
+      }),
+    );
     await this.permissionCache.invalidate();
     return updated;
   }
@@ -192,7 +204,13 @@ export class RoleAdminService {
     if ((await this.bindings.countByRole(id)) > 0) throw new ConflictAppException({}, 'permissions.roleInUse');
 
     try {
-      await this.roles.delete(id);
+      await this.audit.audited(
+        () => this.roles.delete(id),
+        () => ({
+          key: 'role.manage', resourceType: 'role', resourceId: id, projectId: null,
+          summary: `deleted ${role.key}`,
+        }),
+      );
     } catch (error) {
       // A binding inserted between the count above and this statement: the relation is RESTRICT.
       if (isForeignKeyViolation(error, 'roleId')) throw new ConflictAppException({}, 'permissions.roleInUse');
@@ -283,6 +301,7 @@ export class RoleAdminService {
     return this.membership.createBinding(
       { principal: target, roleKey: input.roleKey, projectId },
       principalRef(principal),
+      binding => this.recordBinding(binding, 'to'),
     );
   }
 
@@ -314,6 +333,18 @@ export class RoleAdminService {
 
     await this.membership.removeBinding(id, {
       lastProjectAdminOverride: await this.isLastProjectAdminOverride(principal, binding),
+      onWritten: written => this.recordBinding(written, 'from'),
+    });
+  }
+
+  private async recordBinding(binding: RoleBindingView, direction: 'to' | 'from'): Promise<void> {
+    await this.audit.record({
+      key: binding.roleKey === OWNER_ROLE_KEY ? 'role.binding.owner'
+        : binding.projectId === null ? 'role.binding.global' : 'role.binding.manage',
+      resourceType: 'role-binding',
+      resourceId: binding.id,
+      projectId: binding.projectId,
+      summary: `${binding.roleKey} ${direction} ${binding.principalType} ${binding.principalId}`,
     });
   }
 
