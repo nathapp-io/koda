@@ -44,10 +44,13 @@ describeDb('AuditEntry repository (PG)', () => {
   });
   it('filters inclusive date bounds and sorts createdAt then id descending', async () => {
     const d1 = new Date('2026-01-02T00:00:00Z'); const d2 = new Date('2026-01-03T00:00:00Z');
-    const inputs = [row({ createdAt: new Date(d1.getTime() - 1) }), row({ createdAt: d1 }), row({ createdAt: new Date('2026-01-02T12:00:00Z') }), row({ createdAt: d2 }), row({ createdAt: new Date(d2.getTime() + 1) })];
-    await Promise.all(inputs.map((input) => create(input)));
+    const midday = new Date('2026-01-02T12:00:00Z');
+    const inputs = [row({ createdAt: new Date(d1.getTime() - 1) }), row({ createdAt: d1 }), row({ createdAt: midday }), row({ createdAt: d2 }), row({ createdAt: d2 }), row({ createdAt: new Date(d2.getTime() + 1) })];
+    const created = await Promise.all(inputs.map((input) => create(input)));
     const page = await withTestActor({ type: 'USER', id: 'u1' }, () => repo.findPage({ from: d1, to: d2 }, { current: 1, size: 20 }));
-    expect(page.records).toHaveLength(3);
-    expect(page.records.map((x) => x.createdAt.getTime())).toEqual([d2.getTime(), new Date('2026-01-02T12:00:00Z').getTime(), d1.getTime()]);
+    expect(page.records).toHaveLength(4);
+    expect(page.records.map((x) => x.createdAt.getTime())).toEqual([d2.getTime(), d2.getTime(), midday.getTime(), d1.getTime()]);
+    const equalTimeIds = created.filter((item) => item.createdAt.getTime() === d2.getTime()).map((item) => item.id).filter((id): id is string => id !== undefined).sort().reverse();
+    expect(page.records.slice(0, 2).map((item) => item.id)).toEqual(equalTimeIds);
   });
 });

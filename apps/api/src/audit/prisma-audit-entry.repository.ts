@@ -11,7 +11,7 @@ export class PrismaAuditEntryRepository extends AbstractPrismaRepository<AuditEn
   constructor(@Inject(TRANSACTION_MANAGER) tx: ITransactionManager, private readonly prisma: PrismaService<PrismaClient>) { super(tx); }
 
   protected modelDelegate(client: PrismaClientLike): PrismaModelDelegate<AuditEntryModel, string> {
-    return (client as unknown as PrismaClient).auditEntry as unknown as PrismaModelDelegate<AuditEntryModel, string>;
+    return (client as unknown as Record<string, unknown>).auditEntry as PrismaModelDelegate<AuditEntryModel, string>;
   }
   protected toDomain(m: AuditEntryModel): AuditEntryRecord {
     return { ...m } as AuditEntryRecord;
