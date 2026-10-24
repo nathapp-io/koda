@@ -3,7 +3,7 @@
   "feature": "permissions-p2-context-guard",
   "branchName": "feat/permissions-p2-context-guard",
   "createdAt": "2026-10-24T00:00:00.000Z",
-  "updatedAt": "2026-10-24T05:43:49.083Z",
+  "updatedAt": "2026-10-24T06:10:21.706Z",
   "userStories": [
     {
       "id": "US-001",
@@ -840,14 +840,17 @@
         "US-003",
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Broad access-control regression migration includes a changed negative dispatch contract and token/admin boundaries; security override requires strict test isolation."
+        "reasoning": "Broad access-control regression migration includes a changed negative dispatch contract and token/admin boundaries; security override requires strict test isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/test/helpers/action-context.ts",
@@ -981,7 +984,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "61c64d39464f299dae313d08bc533caef615967d"
     },
     {
       "id": "US-009",
