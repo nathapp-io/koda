@@ -9,7 +9,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor } from '../../helpers/thread-fixtures';
-import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const integration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -132,7 +132,12 @@ integration('assistant action actors (PG)', () => {
     const row = await direct();
     expect(await actions.findById(row.id)).toBeNull();
     expect(await actions.lockById(row.id)).toBeNull();
-    await expect(actions.resolve(row.id, { status: 'FAILED', decidedAt: new Date() })).rejects.toThrow();
+    // A direct action's origin is not `thread`: the repository's own `origin: 'thread'` filter is what makes the
+    // update match nothing, so the rejection must be Prisma's record-not-found, not any error the write path throws.
+    // `resolve` is written from the decide request (`AssistantActionDecisions.decide` -> `settle`), so it runs as
+    // the user deciding — the same `dev` whose `decide` helper posts the approve/reject route above.
+    await expect(withTestActor({ type: 'USER', id: world.ids.dev }, () =>
+      actions.resolve(row.id, { status: 'FAILED', decidedAt: new Date() }))).rejects.toMatchObject({ code: 'P2025' });
     expect((await db.pendingAction.findUniqueOrThrow({ where: { id: row.id } })).status).toBe('EXECUTED');
     await db.pendingAction.update({ where: { id: row.id }, data: { status: 'PENDING', expiresAt: new Date(0) } });
     expect((await actions.findDue(new Date(), 100)).map((a) => a.id)).not.toContain(row.id);
