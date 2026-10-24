@@ -3,7 +3,7 @@
   "feature": "permissions-p2-context-guard",
   "branchName": "feat/permissions-p2-context-guard",
   "createdAt": "2026-10-24T00:00:00.000Z",
-  "updatedAt": "2026-10-24T06:10:21.706Z",
+  "updatedAt": "2026-10-24T06:49:30.580Z",
   "userStories": [
     {
       "id": "US-001",
@@ -1007,14 +1007,17 @@
         "US-003",
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Twenty-three specs exercise role binding races, token revocation and project access boundaries; migration must preserve security behavior with isolated tests."
+        "reasoning": "Twenty-three specs exercise role binding races, token revocation and project access boundaries; migration must preserve security behavior with isolated tests.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/test/helpers/action-context.ts",
@@ -1121,7 +1124,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e41295cd44e3eed0c5e6e0caa8fb301db7211624"
     },
     {
       "id": "US-010",
