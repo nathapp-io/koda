@@ -4,6 +4,7 @@ import { NotFoundAppException, ValidationAppException, ForbiddenAppException } f
 import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
 import { validateTransition } from './ticket-transitions';
 import { transitionKeyFor } from './transition-keys';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { PermissionService } from '../../permissions/permission.service';
 import { RagService } from '../../rag/rag.service';
 import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
@@ -92,6 +93,7 @@ export class TicketTransitionsService {
     // Permissions P1 (US-003): the edge check's one decision point. Required: no transition route is
     // authorized without it, and an optional dependency here would silently skip the check.
     private readonly permissions: PermissionService,
+    private readonly audit: AuditRecorder,
     @Optional() private readonly ragService?: RagService,
     @Optional() private readonly webhookDispatcher?: WebhookDispatcherService,
     @Optional() private readonly vcsConnectionService?: VcsConnectionService,
@@ -517,6 +519,10 @@ export class TicketTransitionsService {
 
       await this.recordStatusChangeWebhooks(project.id, project.key, updatedTicket as unknown as TicketDomain, ticket.status, TicketStatus.CLOSED);
       await this.recordStatusChangedEvent(project.id, ticket.id, ticket.status, TicketStatus.CLOSED, principal);
+      await this.audit.record({
+        key: 'ticket.transition.close', resourceType: 'ticket', resourceId: ticket.id,
+        projectId: project.id, summary: `status: ${ticket.status} -> ${TicketStatus.CLOSED}`,
+      });
       await this.recordCommentAddedEvent(project.id, ticket.id, comment.id, principal);
 
       return {
@@ -704,6 +710,12 @@ export class TicketTransitionsService {
 
       await this.recordStatusChangeWebhooks(project.id, project.key, updatedTicket as unknown as TicketDomain, ticket.status, toStatus);
       await this.recordStatusChangedEvent(project.id, ticket.id, ticket.status, toStatus, principal);
+      const key = transitionKeyFor(ticket.status as TicketStatus, toStatus);
+      if (key === undefined) throw new Error('Validated transition has no audit edge key');
+      await this.audit.record({
+        key, resourceType: 'ticket', resourceId: ticket.id,
+        projectId: project.id, summary: `status: ${ticket.status} -> ${toStatus}`,
+      });
 
       if (comment) {
         return {

@@ -1,3 +1,4 @@
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * H13: outbox event envelope end-to-end integration test.
@@ -140,6 +141,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
       // Permissions P1 (US-003): the required edge-check dependency; the envelope assertions below are
       // about what a successful transition records.
       { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
+      mockAuditRecorder as never,
       undefined,
       undefined,
       undefined,

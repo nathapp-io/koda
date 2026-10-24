@@ -314,6 +314,13 @@ export class TicketsService {
     const updateData = TicketsService.toUpdateData(rest);
     return async ({ ticketId, projectId, previous }) => {
       const row = await this.ticketRepo.updateTicket(ticketId, updateData);
+      const summary = fieldsSummary(updateData);
+      if (summary !== undefined) {
+        await this.audit.record({
+          key: 'ticket.update', resourceType: 'ticket', resourceId: ticketId,
+          projectId, summary,
+        });
+      }
       const previousDescription = (previous as { description?: string | null }).description ?? null;
       await this.recordTicketEvent(
         ticketId,
