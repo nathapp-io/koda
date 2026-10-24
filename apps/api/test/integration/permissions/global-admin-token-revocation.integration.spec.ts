@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -6,7 +7,8 @@ import { ensureSystemRoles } from '../../../src/permissions/test-helpers/permiss
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const integration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const integration = canRunDbTests() ? describe : describe.skip;
 interface Session { accessToken: string; user: { id: string } }
 integration('global admin token revocation (PG)', () => {
   let app: NathApplication;

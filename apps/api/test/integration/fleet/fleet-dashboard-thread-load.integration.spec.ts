@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5a US-007 — the dashboard does not count held THREAD jobs as runner load (PG).
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/fleet-dashboard-thread-load.integration.spec.ts
@@ -10,7 +11,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const ENV = ['FLEET_JOB_QUEUED_WARN_SEC'] as const;
 
 interface Item { key: string; kind: string; subjectId: string; verdict?: string }

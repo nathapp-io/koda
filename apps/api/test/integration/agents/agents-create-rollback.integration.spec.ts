@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * US-003 — AC7: when PrismaAgentRepository.createCapabilities rejects during POST /api/agents, no
  * agent row with the requested slug exists afterwards. The unit test in
@@ -22,7 +23,8 @@ import { KodaPrincipal, UserPrincipal } from '../../../src/auth/principal/koda-p
 import { resetDb } from '../../helpers/reset-db';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
 
 const adminUser: UserPrincipal = {

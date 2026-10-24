@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b 2a US-007 — the action expiry sweep against PG: a due action the requester never decided becomes
  * EXPIRED with its approval expired, its thread note, and a not-yet-due action untouched; and a job that ends while
@@ -23,7 +24,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
 
 const TOOL = 'koda_add_comment';

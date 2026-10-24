@@ -1,3 +1,4 @@
+import { isNaxSandboxed } from '../helpers/test-environment';
 // apps/runner/test/unit/workspace-auth.spec.ts
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -38,7 +39,8 @@ async function world() {
   };
 }
 
-describe('network git through the job helper (D85, D86, D89)', () => {
+// The nax sandbox withholds real TCP/Unix socket binding.
+describe.skipIf(isNaxSandboxed())('network git through the job helper (D85, D86, D89)', () => {
   test('clone authenticates through the helper and leaves the helper list ["", helper] in the clone', async () => {
     const w = await world();
     try {

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1 slice 1 — repo registration end to end, GitHub and GitLab faked locally (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-repos.integration.spec.ts
@@ -15,7 +16,8 @@ import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http
 import { FakeForge, startFakeForge } from '../../helpers/fake-forge';
 import { encryptToken } from '../../../src/common/utils/encryption.util';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const ENC_KEY = 'b'.repeat(64);
 const ENV_KEYS = ['GITHUB_API_URL', 'VCS_GITLAB_API_URL', 'GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY_FILE', 'GITHUB_APP_SLUG', 'VCS_ENCRYPTION_KEY'] as const;
 

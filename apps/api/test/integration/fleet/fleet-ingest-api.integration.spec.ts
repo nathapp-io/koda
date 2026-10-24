@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S2b slice 1a — admin ingest routes (PG), spec §2.6, D370.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-ingest-api.integration.spec.ts
@@ -11,7 +12,8 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { BundleIngestService } from '../../../src/fleet/ingest/bundle-ingest.service';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('fleet ingest admin API (PG)', () => {
   let app: NathApplication;

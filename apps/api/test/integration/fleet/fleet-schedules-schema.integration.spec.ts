@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1b slice 3a — JobSchedule and the FleetJob schedule link (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-schedules-schema.integration.spec.ts
@@ -7,7 +8,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('fleet schedules schema (PG)', () => {
   const prisma = createTestPrismaClient();

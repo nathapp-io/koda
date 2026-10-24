@@ -1,10 +1,12 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import * as bcrypt from 'bcrypt';
 import { seedAdminUser } from '../../../prisma/seed-admin-data';
 import { ensureSystemRoles, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 import { resetDb } from '../../helpers/reset-db';
 
-const dbDescribe = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const dbDescribe = canRunDbTests() ? describe : describe.skip;
 
 dbDescribe('production admin seed bindings', () => {
   const db = createTestPrismaClient();

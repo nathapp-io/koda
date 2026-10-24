@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S4a — notifications over real HTTP + outbox relay on Postgres (spec success criteria 1, 2, 7, 8).
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/notifications/notifications-api.integration.spec.ts
@@ -14,7 +15,8 @@ import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http
 import { openSse, SseConnection } from '../../helpers/sse-client';
 import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 interface Note { id: string; kind: string; category: string; link: string; title: string; readAt: string | null }
 interface NotePage { total: number; records: Note[] }

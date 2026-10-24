@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1 US-003 — the ten workspace thread routes decide with catalog keys while the
  * caller-owned workspace fence and the home-project hosting check stay (`AC-1 .. AC-9`, `AC-11`,
@@ -27,7 +28,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { FLEET_CAPS } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const P1_SLUG = 'p1';
 const P2_SLUG = 'p2';

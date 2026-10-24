@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../helpers/test-environment';
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -8,7 +9,8 @@ import { waitFor } from '../helpers/wait';
 import { createWorld, type EventView, type TestRunner, type World } from './harness';
 
 setDefaultTimeout(120_000);
-const enabled = process.env['KODA_DB_TESTS'] === '1';
+// The nax sandbox withholds host Postgres/Docker.
+const enabled = canRunDbTests();
 
 const runnerStates = (events: EventView[]) => events.filter((e) => e.type === 'state').map((e) => (e.payload as { to: string }).to);
 const inOrder = (all: string[], wanted: string[]) => wanted.every((s, i) => all.indexOf(s) >= 0 && (i === 0 || all.indexOf(s) > all.indexOf(wanted[i - 1])));

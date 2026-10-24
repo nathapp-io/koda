@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S3 D479 — analytics job panels ignore config jobs (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-analytics-config-jobs.integration.spec.ts
@@ -10,7 +11,8 @@ import { insertAnalyticsJob } from '../../helpers/fleet-analytics-fixtures';
 import { PrismaAnalyticsRepository } from '../../../src/fleet/analytics/prisma-analytics.repository';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('fleet analytics excludes config jobs (PG)', () => {
   const prisma = createTestPrismaClient();

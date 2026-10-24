@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Track 3 Slice 4 (M12): the conditional prState write on real Postgres.
  * `merged` never changes; NULL and non-terminal states still update.
@@ -12,7 +13,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('PrismaVcsRepository.updateTicketLinkWithPrState (M12)', () => {
   vi.setConfig({ testTimeout: 20000 });

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Slice 5 — comment create records COMMENT_ADDED (TicketEvent + outbox row) atomically, on real Postgres.
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/comments/comment-event
@@ -10,7 +11,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, TEST_PASSWORD } from '../../helpers/http-app';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('comment create → COMMENT_ADDED (PG)', () => {
   let app: NathApplication;

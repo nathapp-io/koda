@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /* eslint-disable @typescript-eslint/no-non-null-assertion -- the brief's test code asserts presence with toBeDefined and then uses ! */
 /**
  * Fleet S1 slice 2 — sync lifecycle: acks, cancel races, reboot readopt, long-poll wake-up (PG).
@@ -12,7 +13,8 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
 import type { SyncRequest, SyncResponse } from '../../../src/fleet/common/protocol';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 20_000 }); // several syncs here return idle and wait the full FLEET_SYNC_WAIT_MS
 

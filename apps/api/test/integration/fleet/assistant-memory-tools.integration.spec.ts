@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b US-004 — the memory search tool through the real registry and executor against PG, and once through the
  * runner tool route (AC-13, SEAM-3).
@@ -19,7 +20,8 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, enrollRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { ThreadJobSeed, seedThreadJobFor } from '../../helpers/thread-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 20_000 });
 
 /** A `ctx.data(...)` opening line. */

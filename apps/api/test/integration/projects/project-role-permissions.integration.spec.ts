@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Track 3 Slice 3 (#144): project-role write permissions, replayed over real
  * HTTP + Postgres as project ADMIN, DEVELOPER and VIEWER (all global MEMBER).
@@ -13,7 +14,8 @@ import { JwtStrategyProvider } from '@nathapp/nestjs-auth';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const TIMEOUT = 30_000;
 
 type Role = 'ADMIN' | 'DEVELOPER' | 'VIEWER';

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1.5 slice 1a — approvals over HTTP: both prefixes, permissions, decide, re-queue, counts, webhooks (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-approvals-api.integration.spec.ts
@@ -14,7 +15,8 @@ import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers/permission-fixtures';
 import enFleet from '../../../src/i18n/en/fleet.json';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 30_000 });
 

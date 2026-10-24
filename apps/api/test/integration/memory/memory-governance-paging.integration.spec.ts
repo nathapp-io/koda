@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * M21: governance jobs must not skip rows while they move rows out of 'active',
  * and dedup must see duplicates that sit more than one page apart.
@@ -12,7 +13,8 @@ import { MemoryKind } from '../../../src/common/enums';
 import { resetDb } from '../../helpers/reset-db';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('MemoryGovernanceService paging (M21)', () => {
   let prismaService: PrismaService<PrismaClient>;

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import type { Mock } from 'vitest';
 /**
  * US-003 — admin skill source create + list routes (PG).
@@ -15,7 +16,8 @@ import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http
 import { SKILL_RESOLVER, SkillResolveError, SkillResolver } from '../../../src/skills/skill-resolver';
 import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('US-003 admin skill sources (PG)', () => {
   let app: NathApplication;

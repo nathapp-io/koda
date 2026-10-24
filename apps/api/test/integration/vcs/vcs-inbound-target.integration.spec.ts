@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Track 3 Slice 2b: the inbound VCS webhook resolves its connection by project
  * slug in one query. Unknown slugs, soft-deleted projects and projects without a
@@ -14,7 +15,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('PrismaVcsRepository.findVcsConnectionByProjectSlug (Slice 2b)', () => {
   vi.setConfig({ testTimeout: 20000 });

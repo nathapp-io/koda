@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b US-003 — creating PROJECT threads (PG): the deterministic anchor lookup of
  * `IFleetRepoRepository.findAnchor`, `POST /api/projects/:slug/threads` with `kind: 'PROJECT'` (201, a row with no
@@ -17,7 +18,8 @@ import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/t
 import { PrismaFleetRepoRepository } from '../../../src/fleet/repos/prisma-fleet-repo.repository';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 20_000 });
 
 describeIntegration('fleet project threads (PG, US-003)', () => {

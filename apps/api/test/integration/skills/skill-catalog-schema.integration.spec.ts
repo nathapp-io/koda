@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Skill catalog schema (PG) — SkillSource, Skill and ProjectSkill unique indexes.
  * Run: cd apps/api && bun run test:scoped test/integration/skills/skill-catalog-schema.integration.spec.ts
@@ -5,7 +6,8 @@
 import { resetDb } from '../../helpers/reset-db';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('skill catalog schema (PG)', () => {
   const prisma = createTestPrismaClient();

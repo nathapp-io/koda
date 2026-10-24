@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -13,7 +14,8 @@ import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
 
-const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeDb = canRunDbTests() ? describe : describe.skip;
 describeDb('thread scope isolation', () => {
   let app: NathApplication;
   let prisma: PrismaClient;

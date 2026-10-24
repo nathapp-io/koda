@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1 slice 2 — dispatch, reads, permissions and live events over HTTP (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-jobs.integration.spec.ts
@@ -12,7 +13,8 @@ import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/
 import { ProjectEventBus } from '../../../src/live/project-event-bus';
 import type { LiveEvent } from '../../../src/live/live-event';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('fleet jobs (PG)', () => {
   let app: NathApplication;

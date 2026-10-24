@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1d US-001 — the catalog and seed changes and `projectIdsWithKey`, against real
  * Postgres (AC-15 .. AC-22).
@@ -18,7 +19,8 @@ import { PermissionService } from '../../../src/permissions/permission.service';
 import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('enforce-fleet foundations (PG)', () => {
   let moduleRef: TestingModule;

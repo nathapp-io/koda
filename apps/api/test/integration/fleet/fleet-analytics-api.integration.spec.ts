@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S2b slice 1b — project analytics routes (PG), spec §4.1-4.2.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-analytics-api.integration.spec.ts
@@ -14,7 +15,8 @@ import {
 } from '../../helpers/fleet-analytics-fixtures';
 import { ESCALATED_FROM_AUDIT } from '../../../src/fleet/ingest/ingest-corrections';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const BASE = '/api/projects/web/fleet';
 const WINDOW = 'from=2026-09-28T00:00:00Z&to=2026-10-05T00:00:00Z';

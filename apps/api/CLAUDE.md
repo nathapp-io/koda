@@ -194,18 +194,18 @@ Rationale: `bun run test` runs without a database, so DI/module-registration bre
 
 ### Which test Postgres a DB-mode run uses
 
-- integration and e2e specs only run under `KODA_DB_TESTS=1`; without it they are `describe.skip` and pass as zero tests
+- DB-backed specs use `canRunDbTests()` from `test/helpers/test-environment.ts` (shared implementation at repo-root `test/helpers/test-environment.ts`): they run only with `KODA_DB_TESTS=1` outside `NAX_SANDBOXED=1`. Inside a nax sandbox they report skipped; pure tests still execute and globalSetup does not provision Postgres
 - nax's scoped test command (`bun run test:scoped <files>`) sets `KODA_DB_TESTS=1` whenever a targeted path matches `integration` or `e2e`, and the acceptance command always sets it
 - the Vitest globalSetup (`test/vitest-global-setup.ts`) picks the database in this order (`test/helpers/test-database.ts`): `KODA_TEST_DATABASE_URL` when set (CI); else the compose test database named in `.env.test` (localhost:5433) when it answers; else a throwaway Postgres 16 started with Testcontainers (needs Docker) and stopped after the run. An inherited `DATABASE_URL` is never used
-- nax's agent shell is sandboxed without Docker access, so agent-run DB tests need the compose database: run `bun run test:db:up` before a nax run that touches `apps/api`. nax's own quality and acceptance commands run outside the sandbox and fall back to Testcontainers
-- a story that writes a `test/integration/**` spec must see it run and pass under `test:scoped`, not just compile
+- nax's agent shell may withhold host Postgres/Docker. Do not weaken assertions to make it pass: keep the shared DB gate and verify DB behavior in host quality/acceptance runs. Without the sandbox marker, unavailable Postgres still fails loudly
+- a story that writes a `test/integration/**` spec must see it run and pass under `test:scoped` outside the sandbox, not just compile or skip
 - every DB-mode run force-resets the test database (only a local `*_test` database is accepted), so do not run two DB-mode test runs against the same database at once. A second checkout (worktree, clone) sets `KODA_TEST_DB_CONTAINER=1` to skip the compose database and use a private container
 
 ### nax acceptance tests
 
 - One generated file per feature, `apps/api/.nax/features/<feature>/.nax-acceptance.test.ts`, holds every story's ACs as `it('AC-<n>: ...')`. The default vitest config (`include` `**/*.spec.ts`) does not pick it up.
 - Run it from `apps/api` with the compose test Postgres up (`bun run test:db:up`): `KODA_DB_TESTS=1 npx vitest run --config vitest.nax.config.ts .nax/features/<feature>/.nax-acceptance.test.ts -t "AC-<a>:|AC-<b>:"`, filtered to your story's AC ids (listed per `storyId` in the repo-root `.nax/features/<feature>/acceptance-refined.json`). Keep the trailing colon so `AC-1` does not also match `AC-10`.
-- This is the same config nax's acceptance stage runs (`.nax/mono/apps/api/config.json` `acceptance.command`). `KODA_DB_TESTS=1` is required: without it the PG-backed ACs get no database.
+- This is the same config nax's acceptance stage runs (`.nax/mono/apps/api/config.json` `acceptance.command`). `KODA_DB_TESTS=1` is required: without it the PG-backed ACs get no database. Run PG-backed acceptance outside the sandbox; generated tests must use the shared DB gate for their host-dependent blocks.
 - Never copy the file into `src/` or `test/`, never edit it, and never override `--testRegex`/`--testPathIgnorePatterns` to run it.
 
 Useful scripts (run from `apps/api`):

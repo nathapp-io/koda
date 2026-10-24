@@ -1,3 +1,4 @@
+import { isNaxSandboxed } from '../helpers/test-environment';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
@@ -64,7 +65,8 @@ async function world(command: 'RUN' | 'PLAN' = 'RUN') {
   return { base, origin, http, tokens, broker, row, ex, grant, repoDir: join(workspaceRoot, 'acme', 'app'), sock: socketPathFor(socketDir, 'r1', row.jobId, 1) };
 }
 
-describe('HostExecutor with the credential broker (design §3.1)', () => {
+// The nax sandbox withholds real sockets or process inspection.
+describe.skipIf(isNaxSandboxed())('HostExecutor with the credential broker (design §3.1)', () => {
   test('RUN end to end over authenticated HTTP: clone through the helper, nax with shims first and no token, finish push and gh through the broker', async () => {
     const w = await world();
     try {

@@ -167,7 +167,7 @@ Repository rules:
 - do not create `us-XXX` folders under app `test/` directories
 - nax acceptance material belongs under `.nax/features/<feature>/`
 - each package's generated acceptance file is `apps/<app>/.nax/features/<feature>/.nax-acceptance.test.ts`; how to run it for one story (api: vitest with `vitest.nax.config.ts`, web: `bun test`) is in that app's `.nax/mono/apps/<app>/context.md`
-- nax runs that touch `apps/api` need the compose test Postgres up (`bun run test:db:up` in `apps/api`): the agent shell has no Docker access, so its integration/e2e and PG-backed acceptance runs fail loudly without it instead of skipping. Outside the sandbox, DB-mode vitest falls back to a Testcontainers Postgres
+- `test/helpers/test-environment.ts` recognizes only `NAX_SANDBOXED=1`. Host-dependent suites (Postgres/Docker, real sockets and process inspection) skip explicitly inside a nax session sandbox; pure and injected tests still run. Skips are not verification: run DB and host checks outside the sandbox before merging. Outside the sandbox, missing test Postgres still fails loudly and DB-mode Vitest can use Testcontainers. A second checkout uses a private test container or separate test database
 - app-specific test guidance belongs in `.nax/mono/apps/<app>/context.md`
 
 ## i18n

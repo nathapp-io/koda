@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S4b US-001: the EmailSchedule store claim/state behavior on Postgres.
  * AC1-AC7 — exclusive claim under concurrency, no future/INVITE claims, lock recovery, abandonment,
@@ -15,7 +16,8 @@ import { EmailScheduleService } from '../../../src/email/schedule/email-schedule
 import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
 
 const T0 = new Date('2026-10-10T10:00:00Z');

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S4b US-002: a notification written for a project member is scheduled, then delivered once by the
  * dispatcher (unless the member reads it first). AC28-AC30.
@@ -18,7 +19,8 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
 
 const DELAY_MS = 300_000;

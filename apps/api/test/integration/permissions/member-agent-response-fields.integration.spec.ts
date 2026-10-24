@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1l US-006 — member, roster and agent responses lose their legacy fields (AC-1 .. AC-10).
  *
@@ -22,7 +23,8 @@ import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const PROJECT = { slug: 'fields', key: 'FLD', name: 'Fields' } as const;
 /** Boot runs the system-role seeder, so the first hook needs a generous budget. */

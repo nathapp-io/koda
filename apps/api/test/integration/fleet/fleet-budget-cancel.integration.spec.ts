@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1b slice 2a — cancelForBudget: QUEUED and never-acked ASSIGNED end on the server, held jobs get one CANCEL (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-budget-cancel.integration.spec.ts
@@ -11,7 +12,8 @@ import { bootHttpApp } from '../../helpers/http-app';
 import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('cancelForBudget (PG)', () => {
   let app: NathApplication;

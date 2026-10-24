@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * PrismaOutboxStore on real Postgres (Track 1 slice 2).
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- prisma-outbox-store
@@ -13,7 +14,8 @@ import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { resetDb } from '../../helpers/reset-db';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
 
 describeIntegration('PrismaOutboxStore', () => {

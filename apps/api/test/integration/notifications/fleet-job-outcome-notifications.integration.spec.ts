@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S4a §2.4 — fleet_job_outcome end to end on PG: enqueue in the transition transaction, no duplicate on
  * redelivery, a new lease notifies again, CANCELLED never notifies.
@@ -15,7 +16,8 @@ import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { JobTransitionsService } from '../../../src/fleet/jobs/job-transitions.service';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../../../src/fleet/jobs/domain/fleet-job.domain';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 20_000 });
 

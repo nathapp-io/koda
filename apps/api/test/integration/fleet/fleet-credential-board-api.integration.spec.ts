@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S3 §4.4 — credential board route (PG): global admin only, derived from stored capabilities.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-credential-board-api.integration.spec.ts
@@ -11,7 +12,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FLEET_CAPS, FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 interface Board {
   warnDays: number;

@@ -1,3 +1,4 @@
+import { isNaxSandboxed } from '../../test/helpers/test-environment';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { JobRow } from '../journal/types';
 import fixtures from '../../test/fixtures/nax-asks/v0.83.2.json' with { type: 'json' };
@@ -40,7 +41,8 @@ async function send(endpoint: { url: string; secret: string }, body: object): Pr
 const answerCommand = (choice: string, naxAskId = 'ask-1f2e3d4c') =>
   ({ commandId: 'c1', type: 'APPROVAL_ANSWER', jobId: 'j1', leaseEpoch: 1, payload: { approvalId: 'a1', naxAskId, choice } }) as never;
 
-describe('ApprovalRelay (spec §4)', () => {
+// The nax sandbox withholds real TCP/Unix socket binding.
+describe.skipIf(isNaxSandboxed())('ApprovalRelay (spec §4)', () => {
   test('open journals the port and secret and returns the /ask url; open again is the same endpoint', async () => {
     const endpoint = await relay.open(job());
     expect(endpoint.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/ask$/);

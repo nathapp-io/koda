@@ -1,8 +1,10 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const TIMEOUT = 60_000;
 
 describeIntegration('remaining permission route outcomes (US-003)', () => {

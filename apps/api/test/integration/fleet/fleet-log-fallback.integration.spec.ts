@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S2a slice 1a — bundle fallback after a bundle upload (PG), spec §2.5.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-log-fallback.integration.spec.ts
@@ -16,7 +17,8 @@ import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/
 import { tarGz } from '../../helpers/tar-gz';
 import { LogFallbackService } from '../../../src/fleet/logs/log-fallback.service';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 
 describeIntegration('fleet log fallback (PG)', () => {

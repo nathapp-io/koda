@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * US-003: Context project routes enforce project access before route permission keys.
  * Run with the compose Postgres up: bun run test:scoped test/integration/context/context-permissions.integration.spec.ts
@@ -18,7 +19,8 @@ const refusalMessage = (namespace: string): string => {
   return messages['40003'] ?? `${namespace}.40003`;
 };
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const PROJECT_SLUG = 'context-permissions-p1';
 const QUERY = { query: 'auth' };

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1 slice 2 — job repository on PG: CAS assignment, the active-job error,
  * event sequencing, command lifecycle, row locks.
@@ -10,7 +11,8 @@ import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-j
 import { DuplicateActiveJobError, NewFleetJob } from '../../../src/fleet/jobs/domain/fleet-job.domain';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const bind = (client: unknown) => new PrismaFleetJobRepository({ client } as unknown as PrismaService<PrismaClient>);
 
 describeIntegration('PrismaFleetJobRepository (PG)', () => {

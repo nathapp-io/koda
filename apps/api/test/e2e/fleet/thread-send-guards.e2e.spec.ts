@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
@@ -9,7 +10,8 @@ import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { resetDb } from '../../helpers/reset-db';
 import { seedFleetHttpWorld, FleetHttpWorld } from '../../helpers/fleet-fixtures';
 
-const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeDb = canRunDbTests() ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
 
 describe('US-005 thread send guards', () => {

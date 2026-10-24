@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1 US-001 — the seeded project roles keep the project's secret and invitation reads
  * admin-only, against real Postgres (AC-15 .. AC-21).
@@ -18,7 +19,8 @@ import { PermissionService } from '../../../src/permissions/permission.service';
 import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('seeded project roles and the secret and invitation reads (PG)', () => {
   let moduleRef: TestingModule;

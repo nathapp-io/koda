@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
@@ -9,7 +10,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { rosterFleetAgent, seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 describeIntegration('MCP caller project isolation (PG)', () => {
   let app: NathApplication;
   let prisma: PrismaClient;

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /** Content-carrying thread SSE events (PG). */
 import type { AddressInfo } from 'net';
 import { NathApplication } from '@nathapp/nestjs-app';
@@ -10,7 +11,8 @@ import { putThreadLines, seedThreadJobFor, ThreadJobSeed } from '../../helpers/t
 import { openSse, SseConnection, SseMessage } from '../../helpers/sse-client';
 import { LiveStreamRegistry } from '../../../src/live/live-stream-registry';
 
-const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeDb = canRunDbTests() ? describe : describe.skip;
 type LivePayload = Record<string, unknown>;
 const payload = (m: SseMessage): LivePayload => JSON.parse(m.data) as LivePayload;
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));

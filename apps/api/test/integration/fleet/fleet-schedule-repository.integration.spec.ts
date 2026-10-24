@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1b slice 3a — PrismaScheduleRepository on PG: CAS claim, atomic coalesce, counted claim, owner access.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-schedule-repository.integration.spec.ts
@@ -12,7 +13,8 @@ import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../sr
 import type { NewSchedule } from '../../../src/fleet/schedules/domain/schedule.domain';
 import { PrismaScheduleRepository } from '../../../src/fleet/schedules/prisma-schedule.repository';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 20_000 });
 

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1 slice 2 — job tables, the active (repoId, feature) index and the migration (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-jobs-schema.integration.spec.ts
@@ -7,7 +8,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { applyMigration, scratchSchemaBefore, ScratchSchema } from '../../helpers/migration-schema';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const MIGRATION = '20260930090000_fleet_jobs';
 
 describeIntegration('fleet job schema (PG)', () => {

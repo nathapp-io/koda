@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b US-002 — the koda tool executor's audit and replay against PG.
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/assistant-tool-executor.integration.spec.ts
@@ -15,7 +16,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('AssistantToolExecutor audit and replay (PG, US-002)', () => {
   let app: NathApplication;

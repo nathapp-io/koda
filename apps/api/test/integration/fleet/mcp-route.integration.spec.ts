@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b US-007 — `POST|GET|DELETE /api/mcp` end to end (PG): the real guard chain authenticates the agent key,
  * the real executor runs the tool, and the rows the write tools leave are read back through Prisma.
@@ -23,7 +24,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { rosterFleetAgent, seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 20_000 });
 const ACCEPT = 'application/json, text/event-stream';
 

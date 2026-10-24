@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -8,7 +9,8 @@ import { grantRole } from '../../../src/permissions/test-helpers/permission-fixt
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 
-const dbDescribe = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const dbDescribe = canRunDbTests() ? describe : describe.skip;
 
 dbDescribe('agent access ignores the retired off flag', () => {
   let app: NathApplication;

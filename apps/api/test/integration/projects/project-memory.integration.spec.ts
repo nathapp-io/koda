@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * HTTP-level integration tests for GET /projects/:slug/memory.
  *
@@ -22,7 +23,8 @@ import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/t
 import { resetDb } from '../../helpers/reset-db';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const decisionCount = 20;
 const factCount = 35;

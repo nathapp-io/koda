@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S3 §4 — .nax reads through the forge, config job submission, permissions (PG + fake GitHub).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-repo-config-api.integration.spec.ts
@@ -15,7 +16,8 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { FakeForge, startFakeForge } from '../../helpers/fake-forge';
 import { FLEET_CAPS, FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const ENV_KEYS = ['GITHUB_API_URL', 'GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY_FILE', 'GITHUB_APP_SLUG'] as const;
 const HEAD = 'c'.repeat(40);
 const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');

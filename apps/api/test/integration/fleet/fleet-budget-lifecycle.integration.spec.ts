@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /* eslint-disable @typescript-eslint/no-non-null-assertion -- commands are asserted present before use */
 /**
  * Fleet S1b slice 2a — budget-related job fields through the real sync path (PG).
@@ -12,7 +13,8 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
 import type { SyncRequest, SyncResponse } from '../../../src/fleet/common/protocol';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 20_000 });
 

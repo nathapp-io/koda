@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * H13: outbox event envelope end-to-end integration test.
  *
@@ -48,7 +49,8 @@ import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../sr
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('H13: outbox ticket_event envelope drives memory extraction (real DB)', () => {
   vi.setConfig({ testTimeout: 30000 });

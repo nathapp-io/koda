@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * US-005 — public invite preview, accept, resend and cancel over real Postgres.
  *
@@ -16,7 +17,8 @@ import { IS_PUBLIC_KEY } from '@nathapp/nestjs-auth';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 interface InviteDto {
   id: string;

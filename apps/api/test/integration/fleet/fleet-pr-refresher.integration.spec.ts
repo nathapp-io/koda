@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import type { MockInstance } from 'vitest';
 /**
  * Fleet C9 slice 1b — fleet PR-state refresher (PG), spec §3.4, §3.5, §6.
@@ -16,7 +17,8 @@ import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import type { TicketLinkData } from '../../../src/vcs/domain/vcs.repository';
 import type { VcsPrStatus } from '../../../src/vcs/types';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('fleet PR-state refresher (PG)', () => {
   let app: NathApplication;

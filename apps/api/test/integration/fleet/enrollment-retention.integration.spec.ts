@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * #162 — spent enrollment rows are purged by the two date columns (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/enrollment-retention.integration.spec.ts
@@ -8,7 +9,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { PrismaRunnerRepository } from '../../../src/fleet/runners/prisma-runner.repository';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('enrollment retention (PG)', () => {
   const prisma = createTestPrismaClient();

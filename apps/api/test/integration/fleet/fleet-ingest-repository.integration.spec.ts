@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S2b slice 1a — ingest repository (PG), spec §2.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-ingest-repository.integration.spec.ts
@@ -9,7 +10,8 @@ import { seedFleetBase } from '../../helpers/fleet-fixtures';
 import { PrismaBundleIngestRepository } from '../../../src/fleet/ingest/prisma-bundle-ingest.repository';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('bundle ingest repository (PG)', () => {
   const prisma = createTestPrismaClient();

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b 3 (US-004) — the direct action record over PG: one `recordDirect` writes exactly one terminal
  * `PendingAction` with no thread, no requester, no approver and no approval, and the expiry sweeper leaves it alone.
@@ -19,7 +20,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { rosterFleetAgent, seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
 
 /** AC-10's clock: a direct action's `expiresAt` is its `now`, so the sweep runs a day past it. */

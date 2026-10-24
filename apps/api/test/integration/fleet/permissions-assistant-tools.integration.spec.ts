@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1 US-004 — every assistant and MCP tool checks its catalog key in the project it acts in, and an
  * approved action re-checks it (AC-2 .. AC-6, AC-9 .. AC-14, over real HTTP and real Postgres).
@@ -25,7 +26,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { enrollRunner } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const P1_SLUG = 'p1';
 /** `CreateProjectDto.key` is `^[A-Z]{2,6}$` — letters only. */

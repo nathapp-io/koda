@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * US-005 — outbound webhook route keys with real RoleBinding evaluation over HTTP + Postgres.
  * Each non-global principal has only one project RoleBinding in p1 (no ProjectMember row).
@@ -11,7 +12,8 @@ import { grantRole } from '../../../src/permissions/test-helpers/permission-fixt
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const P1_SLUG = 'p1';
 const P2_SLUG = 'p2';
 const WEBHOOK_URL = 'https://93.184.215.14/hook';

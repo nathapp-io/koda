@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1b US-002 — project access, project lists and home read bindings (AC-1 .. AC-14), over
  * real HTTP on Postgres.
@@ -24,7 +25,8 @@ import type { PrincipalRef } from '../../../src/permissions/permissions.types';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 /** Booting `AppModule` runs the system-role seeder, so the first hook needs a generous budget. */
 const BOOT_TIMEOUT_MS = 30_000;

@@ -1,3 +1,4 @@
+import { isNaxSandboxed } from '../../test/helpers/test-environment';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { callbackUrlFor, postToNax, signNax, verifyNax } from './nax-callback';
 
@@ -31,7 +32,8 @@ describe('callbackUrlFor (plan D274)', () => {
   });
 });
 
-describe('postToNax (spec §4.4)', () => {
+// The nax sandbox withholds real sockets or process inspection.
+describe.skipIf(isNaxSandboxed())('postToNax (spec §4.4)', () => {
   let server: ReturnType<typeof Bun.serve> | null = null;
   afterEach(() => { server?.stop(true); server = null; });
 

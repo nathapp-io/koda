@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1 US-001 — `GET /me/permissions` answers the caller's effective keys, over real HTTP
  * and Postgres (AC-1 .. AC-8).
@@ -23,7 +24,8 @@ import { grantRole } from '../../../src/permissions/test-helpers/permission-fixt
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const PROJECT_SLUG = 'p';
 const PROJECT_KEY = 'PONE';

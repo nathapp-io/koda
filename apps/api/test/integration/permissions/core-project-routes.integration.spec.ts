@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1 US-007 — the project, roster and assignee routes check catalog keys instead of the
  * legacy project role, `@RequiredPermission('ADMIN')` and the handler's membership/admin assertions
@@ -22,7 +23,8 @@ import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const P1_SLUG = 'p1';
 const P1_KEY = 'PONE';

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S2b slice 1b — analytics read repository (PG), spec §4.1-4.2.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-analytics-repository.integration.spec.ts
@@ -14,7 +15,8 @@ import { NONE_KEY } from '../../../src/fleet/analytics/domain/analytics.domain';
 import { PrismaAnalyticsRepository } from '../../../src/fleet/analytics/prisma-analytics.repository';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('analytics read repository (PG)', () => {
   const prisma = createTestPrismaClient();

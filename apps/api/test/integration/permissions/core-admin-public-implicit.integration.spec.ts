@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1 US-010 — the admin users, outbox and SLO routes check their global catalog keys,
  * and the auth, home, `/me` notification and public invite routes declare theirs (public keys with no
@@ -24,7 +25,8 @@ import { grantRole } from '../../../src/permissions/test-helpers/permission-fixt
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const P1_SLUG = 'p1';
 const P1_KEY = 'PONE';

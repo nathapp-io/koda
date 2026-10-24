@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b 1c-b — the PROJECT code notice on a live session, folded from a real `session_started` line over HTTP and
  * read back over HTTP (PG): a PROJECT thread hosted by a runner whose capabilities lack `projectCode` stores
@@ -23,7 +24,8 @@ import { enrollRunner, FLEET_CAPS, FleetHttpWorld, seedFleetHttpWorld } from '..
 import { putThreadLines } from '../../helpers/thread-fixtures';
 import type { RunnerCapabilities } from '../../../src/fleet/common/protocol';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const ENV = ['FLEET_ARTIFACT_DIR', 'FLEET_THREADS_ENABLED', 'FLEET_SYNC_WAIT_MS'] as const;
 
 /** A v4 thread runner that has koda tools, so `kodaToolsUnavailableOn` can never mask the notice under test. */

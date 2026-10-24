@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../helpers/test-environment';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
@@ -9,7 +10,8 @@ import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 import { expectBindingOnlyFixtures, grantRole } from '../../src/permissions/test-helpers/permission-fixtures';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 function body<T = unknown>(res: request.Response): T {
   expect(res.body).toHaveProperty('ret', 0);

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S4a §1 — FleetHealthAlert and its repository (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/notifications/fleet-health-alerts-schema.integration.spec.ts
@@ -7,7 +8,8 @@ import { insertRunner } from '../../helpers/fleet-fixtures';
 import { FleetHealthAlertsRepository } from '../../../src/notifications/fleet/fleet-health-alerts.repository';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('FleetHealthAlert (PG)', () => {
   const prisma = createTestPrismaClient();

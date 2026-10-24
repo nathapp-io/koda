@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1 slice 4a: the admin runner view (bootId, bootedAt, online; #158, D116, D117, D131)
  * and the project-member runner summaries (D118).
@@ -11,7 +12,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 interface AdminRunner { id: string; bootId: string; bootedAt: string | null; online: boolean; enabled: boolean }
 

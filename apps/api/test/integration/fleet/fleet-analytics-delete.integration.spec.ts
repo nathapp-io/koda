@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S2b slice 1b — analytics delete-on-demand (PG), spec §4.3, D384.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-analytics-delete.integration.spec.ts
@@ -12,7 +13,8 @@ import {
 import { PrismaAnalyticsRepository } from '../../../src/fleet/analytics/prisma-analytics.repository';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('analytics delete-on-demand (PG)', () => {
   const prisma = createTestPrismaClient();

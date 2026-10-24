@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1 US-008 — the memory and timeline routes decide with catalog keys, a memory write may
  * only supersede an item the caller may replace, and every principal-driven write records its owner's
@@ -28,7 +29,8 @@ import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-it
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const P1_SLUG = 'p1';
 /** `CreateProjectDto.key` is `^[A-Z]{2,6}$` — letters only. */

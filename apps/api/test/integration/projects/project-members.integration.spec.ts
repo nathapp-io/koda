@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Slice 4 — /projects/:slug/members on real Postgres over HTTP.
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/projects/project-members
@@ -10,7 +11,8 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 interface Member { userId: string; email: string; bindings: { id: string; roleKey: string }[] }
 interface Page<T> { total: number; records: T[] }

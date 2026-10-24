@@ -1,3 +1,4 @@
+import { isNaxSandboxed } from '../helpers/test-environment';
 // apps/runner/test/unit/git-credential.spec.ts
 import { afterAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
@@ -84,7 +85,8 @@ describe('runGitCred (D80)', () => {
 });
 
 describe('requestCredential', () => {
-  test('talks to a real CredentialServer', async () => {
+  // The nax sandbox withholds real TCP/Unix socket binding or ps.
+  test.skipIf(isNaxSandboxed())('talks to a real CredentialServer', async () => {
     const path = join(await tmp.make('gc'), 'c.sock');
     const server = await CredentialServer.listen(path, async () => REPLY);
     try {
@@ -96,7 +98,8 @@ describe('requestCredential', () => {
   test('a missing socket is `unavailable`', async () => {
     expect(await requestCredential(join(await tmp.make('gc'), 'none.sock'))).toEqual({ ok: false, reason: 'unavailable' });
   });
-  test('a server that never answers is `timeout`', async () => {
+  // The nax sandbox withholds real TCP/Unix socket binding or ps.
+  test.skipIf(isNaxSandboxed())('a server that never answers is `timeout`', async () => {
     const path = join(await tmp.make('gc'), 'c.sock');
     const server = await CredentialServer.listen(path, () => new Promise<CredentialReply>(() => undefined));
     try {
@@ -105,7 +108,8 @@ describe('requestCredential', () => {
       await server.close();
     }
   });
-  test('a reply over 16 KiB is `reply too large`', async () => {
+  // The nax sandbox withholds real TCP/Unix socket binding or ps.
+  test.skipIf(isNaxSandboxed())('a reply over 16 KiB is `reply too large`', async () => {
     const path = join(await tmp.make('gc'), 'c.sock');
     const server = await CredentialServer.listen(path, async () => ({ ...REPLY, token: 'x'.repeat(20_000) }));
     try {

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S2b slice 1a — ingest end to end over the real store and DB (PG), spec §2-§3.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-ingest.integration.spec.ts
@@ -20,7 +21,8 @@ import { BundleIngestService } from '../../../src/fleet/ingest/bundle-ingest.ser
 import { BUNDLE_INGEST_REPOSITORY, IBundleIngestRepository } from '../../../src/fleet/ingest/domain/bundle-ingest.domain';
 import { ESCALATED_FROM_AUDIT, NOTHING_PUSHED } from '../../../src/fleet/ingest/ingest-corrections';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 
 const costLine = (callId: string, costUsd: number, stage = 'run') => JSON.stringify({

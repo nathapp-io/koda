@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../helpers/test-environment';
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -6,7 +7,8 @@ import { waitFor } from '../helpers/wait';
 import { createWorld, type TestRunner, type World } from './harness';
 
 setDefaultTimeout(120_000);
-const enabled = process.env['KODA_DB_TESTS'] === '1';
+// The nax sandbox withholds host Postgres/Docker.
+const enabled = canRunDbTests();
 
 describe.skipIf(!enabled)('runner 3a against the real API: recovery', () => {
   let world: World;

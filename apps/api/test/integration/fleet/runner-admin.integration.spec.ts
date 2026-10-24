@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1 slice 1 — runner admin routes (list, get, enable/disable, delete) over HTTP on PG.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/runner-admin.integration.spec.ts
@@ -8,7 +9,8 @@ import { DefaultThrottlerGuard } from '@nathapp/nestjs-throttler';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const capabilities = {
   nax: { version: '0.83.0', protocols: ['native'] },

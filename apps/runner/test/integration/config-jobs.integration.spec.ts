@@ -1,9 +1,11 @@
+import { canRunDbTests } from '../helpers/test-environment';
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { git as sh, pushCommit } from '../helpers/git-fixture';
 import { createWorld, type EventView, type TestRunner, type World } from './harness';
 
 setDefaultTimeout(120_000);
-const enabled = process.env['KODA_DB_TESTS'] === '1';
+// The nax sandbox withholds host Postgres/Docker.
+const enabled = canRunDbTests();
 const runnerStates = (events: EventView[]) => events.filter((e) => e.type === 'state').map((e) => (e.payload as { to: string }).to);
 const terminal = (state: string) => ['COMPLETED', 'FAILED', 'CANCELLED', 'CRASHED'].includes(state);
 const onOrigin = (world: World, branch: string) => sh(world.origin.dir, 'rev-parse', '--verify', branch).then(() => true, () => false);

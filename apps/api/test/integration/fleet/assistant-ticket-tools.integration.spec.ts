@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b US-003 — the ticket read tools through the real registry and executor against PG.
  *
@@ -18,7 +19,8 @@ import { bootHttpApp } from '../../helpers/http-app';
 import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 20_000 });
 
 /** Every line of a list result: `<REF> <STATUS> <PRIORITY> <TYPE> /<slug>/tickets/<ref>`. */

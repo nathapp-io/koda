@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S4a §2.4 — budget incidents and approval asks on PG: enqueued inside evaluate's transaction (rolled back
  * with it), a global policy enqueues without a project (D512), admins only, stale asks skipped (D514).
@@ -14,7 +15,8 @@ import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 20_000 });
 

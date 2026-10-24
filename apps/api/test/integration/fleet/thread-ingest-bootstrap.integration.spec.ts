@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5a US-007 — startup catch-up of unfolded thread streams (PG).
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/thread-ingest-bootstrap.integration.spec.ts
@@ -15,7 +16,8 @@ import { LogStore, LOG_STORE, logKey } from '../../../src/fleet/logs/log-store';
 import { ThreadIngestor } from '../../../src/fleet/threads/ingest/thread-ingestor';
 import { ThreadIngestBootstrap } from '../../../src/fleet/threads/ingest/thread-ingest.bootstrap';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const ENV = ['FLEET_ARTIFACT_DIR'] as const;
 
 describeIntegration('fleet thread ingest startup catch-up (PG, US-007)', () => {

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1 US-006 — a ticket link records who created it, and the links routes check
  * `ticket.link.add`, `ticket.link.read` and `ticket.link.remove` (with the row's creator, so
@@ -25,7 +26,8 @@ import { TicketLinksService } from '../../../src/ticket-links/ticket-links.servi
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const P1_SLUG = 'p1';
 const P1_KEY = 'PONE';

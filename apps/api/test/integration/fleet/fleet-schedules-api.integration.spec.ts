@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1b slice 3a — schedule management over HTTP: permissions, validation, enable/disable, delete (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-schedules-api.integration.spec.ts
@@ -14,7 +15,8 @@ import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 30_000 });
 

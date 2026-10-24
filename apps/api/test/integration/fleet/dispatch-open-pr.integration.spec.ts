@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * #231 — classic vs fleet PR coordination (PG). The two repository queries behind
  * the dispatch guard (`findOpenVcsPrLinks`) and the classic auto-PR yield
@@ -14,7 +15,8 @@ import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures
 import { PrismaFleetTicketsRepository } from '../../../src/fleet/tickets/prisma-fleet-tickets.repository';
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('fleet vs classic PR coordination (#231, PG)', () => {
   let app: NathApplication;

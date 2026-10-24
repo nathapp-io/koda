@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1 US-008 — the member and invite routes check catalog keys instead of the
  * `resolveMembership`/`assertProjectAdmin` assertions inside `ProjectMembersService` and
@@ -23,7 +24,8 @@ import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../
 import { PermissionService } from '../../../src/permissions/permission.service';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const P1_SLUG = 'p1';
 const P1_KEY = 'PONE';

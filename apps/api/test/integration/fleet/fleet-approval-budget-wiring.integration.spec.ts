@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1.5 slice 1a — budgets open and close approvals: hard stop, manual resume, rollover, delete, orphan (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-approval-budget-wiring.integration.spec.ts
@@ -14,7 +15,8 @@ import { BudgetSweeper } from '../../../src/fleet/budgets/budget-sweeper';
 import { ProjectEventBus } from '../../../src/live/project-event-bus';
 import type { LiveEvent } from '../../../src/live/live-event';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 20_000 });
 

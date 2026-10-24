@@ -1,8 +1,10 @@
+import { canRunDbTests } from '../helpers/test-environment';
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { createWorld, assertPartialIndex, type World } from './harness';
 
 setDefaultTimeout(120_000);
-const enabled = process.env['KODA_DB_TESTS'] === '1';
+// The nax sandbox withholds host Postgres/Docker.
+const enabled = canRunDbTests();
 
 describe.skipIf(!enabled)('integration harness', () => {
   let world: World;

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1 US-007 — the seven KB/retrieval routes decide with catalog keys, and the two write
  * routes enforce own-vs-any row ownership (AC-1 .. AC-15, over real HTTP, real Postgres and the real
@@ -28,7 +29,8 @@ import { RagService } from '../../../src/rag/rag.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const P1_SLUG = 'p1';
 /** `CreateProjectDto.key` is `^[A-Z]{2,6}$` — letters only. */

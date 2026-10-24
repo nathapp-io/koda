@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1b slice 2a — BudgetSweeper on PG: rollover (B8), orphans, backstop evaluation.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-budget-sweeper.integration.spec.ts
@@ -11,7 +12,8 @@ import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
 import { BudgetSweeper } from '../../../src/fleet/budgets/budget-sweeper';
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('budget sweeper (PG)', () => {
   let app: NathApplication;

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1b slice 2a — budget repository on PG: spend, incidents, scope rows, job sets.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-budget-repository.integration.spec.ts
@@ -11,7 +12,8 @@ import { bootHttpApp } from '../../helpers/http-app';
 import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
 import { BUDGET_REPOSITORY, DuplicateBudgetPolicyError, IBudgetRepository, NewBudgetPolicy } from '../../../src/fleet/budgets/domain/budget.domain';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('budget repository (PG)', () => {
   let app: NathApplication;

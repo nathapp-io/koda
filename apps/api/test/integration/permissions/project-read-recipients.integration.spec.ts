@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import { randomUUID } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -11,7 +12,8 @@ import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const mention = (id: string) => `@[user](user:${id})`;
 
 describeIntegration('project.read notification recipients (PG)', () => {

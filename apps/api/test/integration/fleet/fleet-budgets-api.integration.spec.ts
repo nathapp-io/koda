@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1b slice 2a — budget management over HTTP: both prefixes, B3 permissions, resume (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-budgets-api.integration.spec.ts
@@ -11,7 +12,8 @@ import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http
 import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 30_000 });
 

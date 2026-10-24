@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../helpers/test-environment';
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -19,7 +20,8 @@ import { createWorld, HARNESS_ADMIN, type TestRunner, type World } from '../inte
  * `KODA_LOG_LIVE_KEEP=1` keeps the world up at the end and prints how to open the web viewer on it.
  */
 setDefaultTimeout(600_000);
-const enabled = process.env['KODA_DB_TESTS'] === '1' && process.env['KODA_LOG_LIVE'] === '1';
+// The nax sandbox withholds host Postgres/Docker.
+const enabled = canRunDbTests() && process.env['KODA_LOG_LIVE'] === '1';
 const MAIN = join(import.meta.dir, '..', '..', 'src', 'main.ts');
 const MiB = 1024 * 1024;
 const RUN_BYTES = 50 * MiB;

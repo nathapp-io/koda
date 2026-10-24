@@ -1,3 +1,4 @@
+import { isNaxSandboxed } from '../helpers/test-environment';
 import { describe, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
@@ -11,7 +12,8 @@ import { systemNow } from '../../src/time';
  * D107, slice 3 design §4 "3b merge gate": the probe against the installed, released nax, read-only (no nax run,
  * no nax plan, no trust add). Run it on each runner machine: `KODA_NAX_LIVE=1 bun run test:live`. Never in CI.
  */
-const enabled = process.env['KODA_NAX_LIVE'] === '1';
+// The nax sandbox withholds host configuration and capability probes.
+const enabled = process.env['KODA_NAX_LIVE'] === '1' && !isNaxSandboxed();
 // The validator's core, not `capabilities.ts`: it throws a plain Error and imports nothing from NestJS, so proving a
 // real report is accepted does not depend on the API app's dependency graph. A dynamic import keeps the API's source
 // out of the runner's type-check; bun resolves it at run time.

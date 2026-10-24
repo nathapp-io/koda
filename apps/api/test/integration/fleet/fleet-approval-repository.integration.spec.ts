@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1.5 slice 1a — PrismaApprovalRepository on PG: create, lock, resolve, page, counts, re-queue candidates.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-approval-repository.integration.spec.ts
@@ -12,7 +13,8 @@ import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures
 import { PrismaApprovalRepository } from '../../../src/fleet/approvals/prisma-approval.repository';
 import type { ApprovalResolution, NewFleetApproval } from '../../../src/fleet/approvals/domain/approval.domain';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 20_000 });
 

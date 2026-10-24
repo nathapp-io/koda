@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S4a §1: Notification unique key, read-all cutoff and purge, and watcher semantics on Postgres.
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/notifications/notifications-repository.integration.spec.ts
@@ -8,7 +9,8 @@ import { TicketWatchersRepository } from '../../../src/notifications/ticket-watc
 import type { NotificationDraft } from '../../../src/notifications/notification.types';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('notifications repositories (PG)', () => {
   const prisma = createTestPrismaClient();

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * isUniqueViolation must recognise a real P2002 raised through the Prisma 7 pg adapter,
  * which reports the violated index name instead of meta.target.
@@ -7,7 +8,8 @@
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 import { isUniqueViolation } from '../../../src/common/utils/prisma-errors';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('isUniqueViolation against a real P2002 (pg adapter)', () => {
   const email = 'unique-violation@koda.test';

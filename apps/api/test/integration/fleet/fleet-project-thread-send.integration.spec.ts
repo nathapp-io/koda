@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b US-004 — the PROJECT thread session job on the anchor repo (PG): a PROJECT send creates a THREAD job on the
  * project's oldest fleet repo (S5b-R13) with project-only instructions, the anchor's id drives the budget gate and the
@@ -17,7 +18,8 @@ import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/
 import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { putThreadLines } from '../../helpers/thread-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 20_000 });
 
 const monthStart = (now: Date): Date => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));

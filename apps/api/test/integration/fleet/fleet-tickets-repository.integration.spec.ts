@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet C9 slice 1a — PrismaFleetTicketsRepository (PG), spec §1-§3.2.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-tickets-repository.integration.spec.ts
@@ -7,7 +8,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { PrismaFleetTicketsRepository } from '../../../src/fleet/tickets/prisma-fleet-tickets.repository';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('fleet tickets repository (PG)', () => {
   const prisma = createTestPrismaClient();

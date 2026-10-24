@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Skill catalog migration (PG) — 20261012090000_skill_catalog creates the three tables
  * and the (owner, repo, ref, path) unique index on a scratch schema.
@@ -5,7 +6,8 @@
  */
 import { applyMigration, scratchSchemaBefore, ScratchSchema } from '../../helpers/migration-schema';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const MIGRATION = '20261012090000_skill_catalog';
 
 describeIntegration('skill catalog migration (PG)', () => {

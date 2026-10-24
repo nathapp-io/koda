@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S4a §2.4 — health episodes on PG: one alert and one notification per episode, closed on recovery,
  * a second outage is a new episode; expiring credentials; closed alerts purged after 30 days.
@@ -13,7 +14,8 @@ import { outboxRecord } from '../../helpers/outbox-record';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { FleetHealthDetector } from '../../../src/notifications/fleet/fleet-health.detector';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 20_000 });
 

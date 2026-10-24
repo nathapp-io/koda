@@ -1,3 +1,4 @@
+import { isNaxSandboxed } from '../helpers/test-environment';
 // apps/runner/test/unit/broker.spec.ts
 import { afterAll, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
@@ -43,7 +44,8 @@ describe('CredentialBroker (design §3.1, D78-D83, D90)', () => {
     expect(await w.broker.acquire(row, { wait: true })).toEqual({ ok: true, credentials: { helper: null, binDir: null } });
     expect(w.tokens.requests(Date.now())).toEqual([]);
   });
-  test('prepare waits for the first token, then gets the helper value and the shims; the socket answers for the clone host', async () => {
+  // The nax sandbox withholds real Unix socket binding.
+  test.skipIf(isNaxSandboxed())('prepare waits for the first token, then gets the helper value and the shims; the socket answers for the clone host', async () => {
     const w = await world();
     const row = w.job();
     setTimeout(() => w.grant(row), 30);
@@ -53,30 +55,35 @@ describe('CredentialBroker (design §3.1, D78-D83, D90)', () => {
     expect(await requestCredential(w.sock(row))).toMatchObject({ ok: true, token: 'ghs_b', username: 'x-access-token', protocol: 'https', host: 'github.com' });
     await w.broker.closeAll();
   });
-  test('D82: a token error while waiting fails with `git token: <reason>`', async () => {
+  // The nax sandbox withholds real Unix socket binding.
+  test.skipIf(isNaxSandboxed())('D82: a token error while waiting fails with `git token: <reason>`', async () => {
     const w = await world();
     const row = w.job();
     setTimeout(() => w.tokens.apply([{ jobId: 'j1', leaseEpoch: 1 }], [], [{ jobId: 'j1', reason: 'app_not_installed' }], Date.now()), 30);
     expect(await w.broker.acquire(row, { wait: true })).toEqual({ ok: false, reason: 'git token: app_not_installed' });
     await w.broker.closeAll();
   });
-  test('D82: no token within the wait is `git token: timeout`', async () => {
+  // The nax sandbox withholds real Unix socket binding.
+  test.skipIf(isNaxSandboxed())('D82: no token within the wait is `git token: timeout`', async () => {
     const w = await world({ ...FAST, waitMs: 50 });
     expect(await w.broker.acquire(w.job(), { wait: true })).toEqual({ ok: false, reason: 'git token: timeout' });
     await w.broker.closeAll();
   });
-  test('a cancel while waiting ends the wait as cancelled', async () => {
+  // The nax sandbox withholds real Unix socket binding.
+  test.skipIf(isNaxSandboxed())('a cancel while waiting ends the wait as cancelled', async () => {
     const w = await world();
     expect(await w.broker.acquire(w.job(), { wait: true, isCancelled: () => true })).toEqual({ ok: false, reason: 'cancelled', cancelled: true });
     await w.broker.closeAll();
   });
-  test('closeAll ends a prepare that is still waiting for its first token (daemon stop)', async () => {
+  // The nax sandbox withholds real Unix socket binding.
+  test.skipIf(isNaxSandboxed())('closeAll ends a prepare that is still waiting for its first token (daemon stop)', async () => {
     const w = await world({ ...FAST, waitMs: 60_000 });
     const waiting = w.broker.acquire(w.job(), { wait: true });
     setTimeout(() => { void w.broker.closeAll(); }, 30);
     expect(await waiting).toEqual({ ok: false, reason: 'cancelled', cancelled: true });
   });
-  test('D79: without waiting, a socket request made before the token exists is answered once it arrives', async () => {
+  // The nax sandbox withholds real Unix socket binding.
+  test.skipIf(isNaxSandboxed())('D79: without waiting, a socket request made before the token exists is answered once it arrives', async () => {
     const w = await world();
     const row = w.job('http://127.0.0.1:8080/acme/app.git');
     expect((await w.broker.acquire(row, { wait: false })).ok).toBe(true);
@@ -85,14 +92,16 @@ describe('CredentialBroker (design §3.1, D78-D83, D90)', () => {
     expect(await pending).toMatchObject({ ok: true, token: 'ghs_late', protocol: 'http', host: '127.0.0.1:8080' });
     await w.broker.closeAll();
   });
-  test('D79: a request that waits past serveWaitMs is `no token`', async () => {
+  // The nax sandbox withholds real Unix socket binding.
+  test.skipIf(isNaxSandboxed())('D79: a request that waits past serveWaitMs is `no token`', async () => {
     const w = await world({ ...FAST, serveWaitMs: 40 });
     const row = w.job();
     await w.broker.acquire(row, { wait: false });
     expect(await requestCredential(w.sock(row))).toEqual({ ok: false, reason: 'no token' });
     await w.broker.closeAll();
   });
-  test('release closes the socket, forgets the token and removes the shims', async () => {
+  // The nax sandbox withholds real Unix socket binding.
+  test.skipIf(isNaxSandboxed())('release closes the socket, forgets the token and removes the shims', async () => {
     const w = await world();
     const row = w.job();
     w.tokens.want('j1', 1);
@@ -103,7 +112,8 @@ describe('CredentialBroker (design §3.1, D78-D83, D90)', () => {
     expect(w.tokens.wanted('j1', 1)).toBe(false);
     await expect(stat(join(row.jobDir, 'bin'))).rejects.toThrow();
   });
-  test('D79: a job that no longer wants a token is answered `job ended` while its socket still lives', async () => {
+  // The nax sandbox withholds real Unix socket binding.
+  test.skipIf(isNaxSandboxed())('D79: a job that no longer wants a token is answered `job ended` while its socket still lives', async () => {
     const w = await world();
     const row = w.job();
     w.tokens.want('j1', 1);
@@ -113,7 +123,8 @@ describe('CredentialBroker (design §3.1, D78-D83, D90)', () => {
     expect(await requestCredential(w.sock(row))).toEqual({ ok: false, reason: 'job ended' });
     await w.broker.closeAll();
   });
-  test('Review focus 3: a stale socket file left by a dead daemon is replaced', async () => {
+  // The nax sandbox withholds real Unix socket binding.
+  test.skipIf(isNaxSandboxed())('Review focus 3: a stale socket file left by a dead daemon is replaced', async () => {
     const w = await world();
     const row = w.job();
     await writeFile(w.sock(row), 'stale');
@@ -123,7 +134,8 @@ describe('CredentialBroker (design §3.1, D78-D83, D90)', () => {
     expect(await requestCredential(w.sock(row))).toMatchObject({ ok: true });
     await w.broker.closeAll();
   });
-  test('acquire twice is the same socket and does not fail', async () => {
+  // The nax sandbox withholds real Unix socket binding.
+  test.skipIf(isNaxSandboxed())('acquire twice is the same socket and does not fail', async () => {
     const w = await world();
     const row = w.job();
     w.tokens.want('j1', 1);
@@ -133,7 +145,8 @@ describe('CredentialBroker (design §3.1, D78-D83, D90)', () => {
     expect(await requestCredential(w.sock(row))).toMatchObject({ ok: true });
     await w.broker.closeAll();
   });
-  test('D90: two epochs have two sockets; releasing the older leaves the newer serving, shims included', async () => {
+  // The nax sandbox withholds real Unix socket binding.
+  test.skipIf(isNaxSandboxed())('D90: two epochs have two sockets; releasing the older leaves the newer serving, shims included', async () => {
     const w = await world();
     const one = w.job(undefined, 1);
     const two = w.job(undefined, 2);
@@ -149,7 +162,8 @@ describe('CredentialBroker (design §3.1, D78-D83, D90)', () => {
     await expect(stat(join(two.jobDir, 'bin', 'gh'))).resolves.toBeDefined();   // the shared shims stay for epoch 2
     await w.broker.closeAll();
   });
-  test('D109: the socket directory is checked again before every listen; opened up after start, it fails the job', async () => {
+  // The nax sandbox withholds real Unix socket binding.
+  test.skipIf(isNaxSandboxed())('D109: the socket directory is checked again before every listen; opened up after start, it fails the job', async () => {
     const w = await world();
     await chmod(w.socketDir, 0o755);
     const row = w.job();
@@ -158,7 +172,8 @@ describe('CredentialBroker (design §3.1, D78-D83, D90)', () => {
     expect((await w.broker.acquire(row, { wait: false })).ok).toBe(true);
     await w.broker.closeAll();
   });
-  test('D90: closeAll closes every socket but keeps the tokens wanted (a restarted daemon readopts)', async () => {
+  // The nax sandbox withholds real Unix socket binding.
+  test.skipIf(isNaxSandboxed())('D90: closeAll closes every socket but keeps the tokens wanted (a restarted daemon readopts)', async () => {
     const w = await world();
     const row = w.job();
     w.tokens.want('j1', 1);
@@ -203,7 +218,9 @@ async function repoWorld() {
   return { ...w, broker, row, acquire, grant };
 }
 
-test('project code AC-11: repository helper serves the repository token without shims', async () => {
+// The nax sandbox withholds real Unix socket binding.
+
+test.skipIf(isNaxSandboxed())('project code AC-11: repository helper serves the repository token without shims', async () => {
   const w = await repoWorld();
   try {
     const pending = w.acquire('r1');
@@ -218,7 +235,9 @@ test('project code AC-11: repository helper serves the repository token without 
   } finally { await w.broker.closeAll(); }
 });
 
-test('project code AC-12: repository helper refuses other hosts and protocols', async () => {
+// The nax sandbox withholds real Unix socket binding.
+
+test.skipIf(isNaxSandboxed())('project code AC-12: repository helper refuses other hosts and protocols', async () => {
   const w = await repoWorld();
   try {
     w.tokens.want('j1', 1, 'r1'); w.grant('r1');
@@ -229,7 +248,9 @@ test('project code AC-12: repository helper refuses other hosts and protocols', 
   } finally { await w.broker.closeAll(); }
 });
 
-test('project code AC-13: releaseRepo closes only its socket; release drops all repositories', async () => {
+// The nax sandbox withholds real Unix socket binding.
+
+test.skipIf(isNaxSandboxed())('project code AC-13: releaseRepo closes only its socket; release drops all repositories', async () => {
   const w = await repoWorld();
   try {
     const helpers: string[] = [];

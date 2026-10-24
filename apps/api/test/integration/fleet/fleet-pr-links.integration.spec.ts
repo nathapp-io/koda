@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet C9 slice 1b — fleet PR links on linked tickets (PG), spec §3.3, D455.
  * Run: cd apps/api && KODA_DB_TESTS=1 bun run test:scoped test/integration/fleet/fleet-pr-links.integration.spec.ts
@@ -12,7 +13,8 @@ import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures
 import { FleetJobTicketEffects } from '../../../src/fleet/tickets/fleet-job-ticket.effects';
 import { PrismaFleetTicketsRepository } from '../../../src/fleet/tickets/prisma-fleet-tickets.repository';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('fleet PR links (PG)', () => {
   let app: NathApplication;

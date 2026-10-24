@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { NathApplication } from '@nathapp/nestjs-app';
@@ -11,7 +12,8 @@ import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor } from '../../helpers/thread-fixtures';
 
-const integration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const integration = canRunDbTests() ? describe : describe.skip;
 
 integration('assistant action actors (PG)', () => {
   let app: NathApplication;

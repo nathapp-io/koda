@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b US-002 — thread kind and the REPO-only guard (PG): the `kind` column defaults to REPO, a PROJECT row
  * needs no repo fields at all, the 20261017090000_chat_thread_kind migration backfills rows written before it,
@@ -18,7 +19,8 @@ import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures
 import { applyMigration, scratchSchemaBefore, ScratchSchema } from '../../helpers/migration-schema';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 // The migration block replays every committed migration before the target, as the sibling schema specs do.
 vi.setConfig({ testTimeout: 20_000 });
 const MIGRATION = '20261017090000_chat_thread_kind';

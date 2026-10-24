@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * M6 — concurrent ticket creation must yield distinct, gapless numbers on
  * Postgres through every allocator (tickets service path, CI webhook, VCS import).
@@ -16,7 +17,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const N = 10;
 
 describeIntegration('M6 ticket-number allocation under concurrency', () => {

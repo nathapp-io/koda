@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1 slice 1 — enrollment and runner route isolation over HTTP on PG.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/runner-enrollment.integration.spec.ts
@@ -10,7 +11,8 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const capabilities = {
   nax: { version: '0.83.0', protocols: ['native'] },

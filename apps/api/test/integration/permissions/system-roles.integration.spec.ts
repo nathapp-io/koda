@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1a US-002 — the Role and RoleBinding tables, their constraints, and the system-role
  * seeder against real Postgres.
@@ -20,7 +21,8 @@ import { isUniqueViolation } from '../../../src/common/utils/prisma-errors';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 import { resetDb } from '../../helpers/reset-db';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 /** The eleven system roles of the design: key, display name and scope, in Postgres key order. */
 const EXPECTED_ROLES: ReadonlyArray<{ key: string; name: string; scope: string }> = [

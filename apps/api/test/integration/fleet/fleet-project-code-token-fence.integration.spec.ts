@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b 1c-b — the repository read-only token fence end to end (PG + HTTP + the fake forge): a `repoId` token
  * request on a RUNNING PROJECT-session THREAD job mints a read-only token for a repository the ASSIGN would have
@@ -24,7 +25,8 @@ import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld, syncBody } from '../.
 import { FakeForge, startFakeForge } from '../../helpers/fake-forge';
 import type { SyncRequest, SyncResponse } from '../../../src/fleet/common/protocol';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const ENV_KEYS = ['GITHUB_API_URL', 'GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY_FILE', 'GITHUB_APP_SLUG', 'FLEET_SYNC_WAIT_MS'] as const;
 
 describeIntegration('fleet project-code token fence (PG + HTTP, S5b 1c-b)', () => {

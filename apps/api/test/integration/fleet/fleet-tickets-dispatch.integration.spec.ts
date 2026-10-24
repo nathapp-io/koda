@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet C9 slice 1a — dispatch with ticketRefs, job detail tickets (PG), spec §2.1-§2.2.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-tickets-dispatch.integration.spec.ts
@@ -10,7 +11,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('fleet dispatch with tickets (PG)', () => {
   let app: NathApplication;

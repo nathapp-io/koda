@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1b slice 3a — dispatch with a scheduleId, and the job list filter (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-jobs-schedule-link.integration.spec.ts
@@ -12,7 +13,8 @@ import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
 import { toDispatchDto } from '../../../src/fleet/schedules/schedule-template';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 30_000 });
 

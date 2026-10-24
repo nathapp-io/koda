@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../helpers/test-environment';
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -8,7 +9,8 @@ import { waitFor } from '../helpers/wait';
 import { createWorld, type TestRunner, type World } from './harness';
 
 setDefaultTimeout(180_000);
-const enabled = process.env['KODA_DB_TESTS'] === '1';
+// The nax sandbox withholds host Postgres/Docker.
+const enabled = canRunDbTests();
 const sha = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex');
 
 describe.skipIf(!enabled)('S2a 1b: the runner streams complete logs to the real API', () => {
