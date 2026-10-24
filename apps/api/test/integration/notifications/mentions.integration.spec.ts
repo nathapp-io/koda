@@ -5,10 +5,10 @@
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { OutboxRelay } from '@nathapp/nestjs-outbox';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const mention = (label: string, userId: string): string => `@[${label}](user:${userId})`;
@@ -40,7 +40,7 @@ describeIntegration('@mention notifications (PG)', () => {
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
     relay = app.get(OutboxRelay);
-    prisma = app.get(PrismaService).client as PrismaClient;
+    prisma = fixtureDb(app);
 
     const root = await request(server).post('/api/auth/register')
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
@@ -62,6 +62,10 @@ describeIntegration('@mention notifications (PG)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('a comment mention notifies the member once, makes them a MENTIONED watcher, and ignores a non-member', async () => {
