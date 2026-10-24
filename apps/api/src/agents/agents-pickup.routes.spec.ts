@@ -1,3 +1,5 @@
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import type { Mock } from 'vitest';
 /**
  * US-003 — GET /api/agents/:slug/pickup authorization, over a real Fastify HTTP
@@ -134,6 +136,7 @@ describe('GET /api/agents/:slug/pickup (US-003)', () => {
       controllers: [AgentsController],
       providers: [
         AgentsService,
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         { provide: PrismaAgentRepository, useValue: agentRepo },
         {
           provide: AUTH_CFG,

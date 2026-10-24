@@ -1,3 +1,5 @@
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import type { Mock } from 'vitest';
 /**
  * US-003 — the AgentsService create path (POST /api/agents).
@@ -106,6 +108,7 @@ describe('AgentsService create path (US-003)', () => {
     testingModule = await Test.createTestingModule({
       providers: [
         AgentsService,
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         { provide: PrismaAgentRepository, useValue: agentRepo },
         { provide: AUTH_CFG, useValue: authConfig },
         { provide: TRANSACTION_MANAGER, useValue: txManager },

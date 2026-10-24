@@ -1,3 +1,5 @@
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import type { Mock } from 'vitest';
 /**
  * US-003 — POST /api/agents over a real Fastify HTTP server.
@@ -225,6 +227,7 @@ describe('POST /api/agents (US-003)', () => {
       controllers: [AgentsController],
       providers: [
         AgentsService,
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         PrismaAgentRepository,
         { provide: PrismaService, useValue: prisma },
         { provide: TRANSACTION_MANAGER, useValue: txManager },

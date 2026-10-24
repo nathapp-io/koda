@@ -1,3 +1,5 @@
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsService } from './agents.service';
@@ -114,6 +116,7 @@ describe('AgentsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AgentsService,
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         { provide: PrismaAgentRepository, useValue: mockAgentRepo },
         { provide: AUTH_CFG, useValue: mockAuthConfig },
         { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
@@ -239,6 +242,7 @@ describe('AgentsService', () => {
         const moduleWithoutSecret: TestingModule = await Test.createTestingModule({
           providers: [
             AgentsService,
+            { provide: AuditRecorder, useValue: mockAuditRecorder },
             { provide: PrismaAgentRepository, useValue: mockAgentRepo },
             { provide: AUTH_CFG, useValue: { ...mockAuthConfig, apiKeySecret: undefined } },
             { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
