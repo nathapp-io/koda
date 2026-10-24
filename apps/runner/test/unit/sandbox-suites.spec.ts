@@ -5,6 +5,7 @@ test('sandbox-marked host suites skip while pure tests in mixed files still exec
   const child = Bun.spawn([
     process.execPath, 'test',
     'src/approvals/nax-callback.spec.ts',
+    'src/approvals/approval-relay.spec.ts',
     'test/unit/cred-server.spec.ts',
     'test/integration/process-info.integration.spec.ts',
   ], {
@@ -20,6 +21,9 @@ test('sandbox-marked host suites skip while pure tests in mixed files still exec
   expect(code, output).toBe(0);
   expect(output).toMatch(/\(skip\) readProcessCommand/);
   expect(output).toMatch(/\(skip\) CredentialServer/);
+  expect(output).toMatch(/\(pass\) ApprovalRelay journal.*an unknown ask/);
+  expect(output).toMatch(/\(pass\) ApprovalRelay journal.*a malformed answer/);
+  expect(output).toMatch(/\(pass\) ApprovalRelay journal.*sweepOrphans/);
   expect(output).toMatch(/\(pass\) signing/);
   expect(output).toMatch(/\(pass\) socket directory/);
   expect(output).toMatch(/\(pass\) reapNaxPids.*no registry file/);

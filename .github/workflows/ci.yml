@@ -9,6 +9,7 @@ on:
       - "packages/**"
       - "prisma/**"
       - "scripts/**"
+      - "test/**"
       - "bun.lock"
       - "package.json"
       - "tsconfig*.json"
@@ -57,7 +58,7 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          CODE_PATHS='^(apps/|packages/|prisma/|scripts/|\.github/workflows/|\.nax/)|^(bun\.lock|package\.json|openapi\.json|turbo\.json)$|^tsconfig[^/]*\.json$'
+          CODE_PATHS='^(apps/|packages/|prisma/|scripts/|test/|\.github/workflows/|\.nax/)|^(bun\.lock|package\.json|openapi\.json|turbo\.json)$|^tsconfig[^/]*\.json$'
           changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
           printf 'Changed files:\n%s\n' "$changed"
           if printf '%s\n' "$changed" | grep -qE "$CODE_PATHS"; then

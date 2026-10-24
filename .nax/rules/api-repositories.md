@@ -67,4 +67,3 @@ async findByTicketId(ticketId: string): Promise<CommentDomain[]> {
   return (models as Comment[]).map((m) => this.toDomain(m));
 }
 ```
-

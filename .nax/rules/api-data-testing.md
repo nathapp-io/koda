@@ -30,4 +30,3 @@ const mockTxManager = {
 // In beforeEach providers:
 { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
 ```
-
