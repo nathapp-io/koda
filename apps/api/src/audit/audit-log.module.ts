@@ -4,6 +4,7 @@ import { AUDIT_ENTRY_REPOSITORY } from './domain/audit-entry.domain';
 import { PrismaAuditEntryRepository } from './prisma-audit-entry.repository';
 import { PrismaAuditStorage } from './prisma-audit.storage';
 import { AuditRecorder } from './audit-recorder.service';
+import { AuditLogService } from './audit-log.service';
 
 @Module({
   providers: [
@@ -12,7 +13,8 @@ import { AuditRecorder } from './audit-recorder.service';
     PrismaAuditStorage,
     { provide: AUDIT_STORAGE, useExisting: PrismaAuditStorage },
     AuditRecorder,
+    AuditLogService,
   ],
-  exports: [AuditRecorder],
+  exports: [AuditRecorder, AuditLogService],
 })
 export class AuditLogModule {}
