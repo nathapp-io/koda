@@ -30,15 +30,17 @@ describe('ProjectsService', () => {
   let mockProjectRepo: any;
   let can: Mock;
   let permissions: PermissionService;
+  const recordedEntries: unknown[] = [];
   const mockAudit = {
     audited: vi.fn(async (fn: () => Promise<unknown>, entriesOf: (result: unknown) => unknown) => {
       const result = await fn();
-      entriesOf(result);
+      recordedEntries.push(entriesOf(result));
       return result;
     }),
   };
 
   beforeEach(() => {
+    recordedEntries.length = 0;
     mockProjectRepo = {
       findBySlug: vi.fn(),
       findByKey: vi.fn(),
@@ -88,6 +90,30 @@ describe('ProjectsService', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
+
+    it('records sorted field names without project values', async () => {
+      mockProjectRepo.findBySlug.mockResolvedValue(mockProject);
+      mockProjectRepo.updateBySlug.mockResolvedValue({ ...mockProject, name: 'Renamed', description: 'd' });
+
+      await service.update('test-project', { name: 'Renamed', description: 'd' });
+
+      expect(recordedEntries).toEqual([{
+        key: 'project.update', resourceType: 'project', resourceId: 'project-1', projectId: 'project-1', summary: 'fields: description, name',
+      }]);
+      expect(JSON.stringify(recordedEntries)).not.toContain('Renamed');
+    });
+
+    it('summarizes CI token patches by field name only', async () => {
+      mockProjectRepo.findBySlug.mockResolvedValue(mockProject);
+      mockProjectRepo.updateBySlug.mockResolvedValue({ ...mockProject, ciWebhookToken: 'random-secret-token' });
+
+      await service.update('test-project', { ciWebhookToken: 'random-secret-token' });
+
+      expect(recordedEntries[0]).toMatchObject({
+        key: 'project.update', resourceType: 'project', resourceId: 'project-1', projectId: 'project-1', summary: 'fields: ciWebhookToken',
+      });
+      expect(JSON.stringify(recordedEntries)).not.toContain('random-secret-token');
+    });
 
     it('should call deleteAllBySourceType when graphifyEnabled changes from true to false', async () => {
       mockProjectRepo.findBySlug.mockResolvedValueOnce(mockProject);
