@@ -23,7 +23,11 @@ export class AuditRecorder {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
-  /** Runs a write and its resulting audit entries in one transaction. */
+  /**
+   * Runs `fn` in one transaction and records the entries its result describes, in that transaction.
+   * For a write that owns no transaction of its own; a method that already runs `txManager.run`
+   * calls `record` inside that callback instead.
+   */
   async audited<T>(fn: () => Promise<T>, entriesOf: AuditEntriesOf<T>): Promise<T> {
     return this.txManager.run(async () => {
       const result = await fn();

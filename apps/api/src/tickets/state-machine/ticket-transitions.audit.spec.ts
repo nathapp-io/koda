@@ -20,6 +20,7 @@ describe('transition audit transaction seam', () => {
   };
   it.each([
     [TicketStatus.CREATED, TicketStatus.VERIFIED, CommentType.VERIFICATION, 'verify'],
+    [TicketStatus.CREATED, TicketStatus.IN_PROGRESS, undefined, 'start'],
     [TicketStatus.VERIFIED, TicketStatus.IN_PROGRESS, undefined, 'start'],
     [TicketStatus.IN_PROGRESS, TicketStatus.VERIFY_FIX, CommentType.FIX_REPORT, 'fix'],
     [TicketStatus.VERIFY_FIX, TicketStatus.CLOSED, CommentType.REVIEW, 'verify-fix.approve'],

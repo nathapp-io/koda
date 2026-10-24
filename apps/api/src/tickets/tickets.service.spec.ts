@@ -164,6 +164,7 @@ describe('TicketsService', () => {
     // Permissions P1 (US-002): an assignee holds `project.read` in the project unless a test says
     // otherwise, which is the eligibility the assign cases below are about.
     mockPermissions.effectiveKeys.mockReset().mockResolvedValue(new Set<string>(['project.read']));
+    mockAudit.record.mockReset().mockResolvedValue(undefined);
     inTx = false;
 
     const module: TestingModule = await Test.createTestingModule({
@@ -184,6 +185,20 @@ describe('TicketsService', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  it.each(['update', 'softDelete'] as const)('refuses %s before writing when the project disappears after ticket resolution', async (method) => {
+    const lookup = vi.spyOn(service, 'findByRef').mockResolvedValueOnce(mockTicket as never);
+    mockTicketRepo.findProjectBySlug.mockResolvedValueOnce(null);
+    try {
+      const action = method === 'update'
+        ? service.update('koda', 'KODA-1', { title: 'changed' }, mockUserPrincipal)
+        : service.softDelete('koda', 'KODA-1', mockUserPrincipal);
+      await expect(action).rejects.toBeInstanceOf(NotFoundAppException);
+      expect(mockTicketRepo.updateTicket).not.toHaveBeenCalled();
+      expect(mockTicketRepo.softDeleteTicket).not.toHaveBeenCalled();
+      expect(mockAudit.record).not.toHaveBeenCalled();
+    } finally { lookup.mockRestore(); }
   });
 
   describe('create', () => {

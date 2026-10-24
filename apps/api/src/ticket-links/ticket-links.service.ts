@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { CreateTicketLinkDto } from './dto/create-ticket-link.dto';
 import { TicketLinkResponseDto } from './dto/ticket-link-response.dto';

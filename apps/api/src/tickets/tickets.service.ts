@@ -368,22 +368,23 @@ export class TicketsService {
 
     const updateData = TicketsService.toUpdateData(updateTicketDto);
     const project = await this.ticketRepo.findProjectBySlug(projectSlug);
+    if (!project || project.deletedAt) {
+      throw new NotFoundAppException({}, 'tickets');
+    }
 
     const updated = await this.txManager.run(async () => {
       const row = await this.ticketRepo.updateTicket(ticket.id, updateData);
-      if (project?.id) {
-        // S4a §2.2: mention notifications diff the new description against the previous one.
-        const eventData = updateData.description !== undefined
-          ? { ...updateData, previousDescription: ticket.description ?? null }
-          : { ...updateData };
-        await this.recordTicketEvent(ticket.id, project.id, 'TICKET_UPDATED', principal, eventData);
-        const summary = fieldsSummary(updateData);
-        if (summary !== undefined) {
-          await this.audit.record({
-            key: 'ticket.update', resourceType: 'ticket', resourceId: ticket.id,
-            projectId: project.id, summary,
-          });
-        }
+      // S4a §2.2: mention notifications diff the new description against the previous one.
+      const eventData = updateData.description !== undefined
+        ? { ...updateData, previousDescription: ticket.description ?? null }
+        : { ...updateData };
+      await this.recordTicketEvent(ticket.id, project.id, 'TICKET_UPDATED', principal, eventData);
+      const summary = fieldsSummary(updateData);
+      if (summary !== undefined) {
+        await this.audit.record({
+          key: 'ticket.update', resourceType: 'ticket', resourceId: ticket.id,
+          projectId: project.id, summary,
+        });
       }
       return row;
     });
@@ -410,16 +411,17 @@ export class TicketsService {
     }
 
     const project = await this.ticketRepo.findProjectBySlug(projectSlug);
+    if (!project || project.deletedAt) {
+      throw new NotFoundAppException({}, 'tickets');
+    }
 
     const updated = await this.txManager.run(async () => {
       const row = await this.ticketRepo.softDeleteTicket(ticket.id);
-      if (project?.id) {
-        await this.recordTicketEvent(ticket.id, project.id, 'TICKET_DELETED', principal);
-        await this.audit.record({
-          key: 'ticket.delete', resourceType: 'ticket', resourceId: ticket.id,
-          projectId: project.id, summary: `deleted ${project.key}-${ticket.number}`,
-        });
-      }
+      await this.recordTicketEvent(ticket.id, project.id, 'TICKET_DELETED', principal);
+      await this.audit.record({
+        key: 'ticket.delete', resourceType: 'ticket', resourceId: ticket.id,
+        projectId: project.id, summary: `deleted ${project.key}-${ticket.number}`,
+      });
       return row;
     });
 

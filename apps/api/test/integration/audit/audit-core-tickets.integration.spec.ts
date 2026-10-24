@@ -129,14 +129,22 @@ describeIntegration('US-002 audited ticket route writes', () => {
     const target = data<{ id: string; ref: string }>(createdResponse);
     const endpoint = `/api/projects/${slug}/tickets/${target.ref}/assign`;
 
-    await request(server).post(endpoint).set(auth()).send({ userId }).expect(200);
-    expect((await auditRows('ticket.assign', target.id)).at(-1)?.summary).toBe(`assignee: USER ${userId}`);
-
-    await request(server).post(endpoint).set(auth()).send({ agentId }).expect(200);
-    expect((await auditRows('ticket.assign', target.id)).at(-1)?.summary).toBe(`assignee: AGENT ${agentId}`);
-
-    await request(server).post(endpoint).set(auth()).send({}).expect(200);
-    expect((await auditRows('ticket.assign', target.id)).at(-1)?.summary).toBe('assignee: none');
+    const expected: unknown[] = [];
+    for (const [payload, summary] of [
+      [{ userId }, `assignee: USER ${userId}`],
+      [{ agentId }, `assignee: AGENT ${agentId}`],
+      [{}, 'assignee: none'],
+    ] as const) {
+      await request(server).post(endpoint).set(auth()).send(payload).expect(200);
+      expected.push(expect.objectContaining({
+        key: 'ticket.assign', resourceType: 'ticket', resourceId: target.id, projectId,
+        actorType: 'USER', actorId: userId, origin: 'rest', summary,
+      }));
+      const rows = await auditRows('ticket.assign', target.id);
+      expect(rows).toHaveLength(expected.length);
+      // No ordering assumption: createdAt ties cannot change the result.
+      expect(rows).toEqual(expect.arrayContaining(expected));
+    }
 
     const beforeInvalid = (await auditRows('ticket.assign', target.id)).length;
     await request(server).post(endpoint).set(auth()).send({ userId, agentId }).expect(400);

@@ -41,6 +41,11 @@ describe('ProjectsService', () => {
 
   beforeEach(() => {
     recordedEntries.length = 0;
+    mockAudit.audited.mockReset().mockImplementation(async (fn, entriesOf) => {
+      const result = await fn();
+      recordedEntries.push(entriesOf(result));
+      return result;
+    });
     mockProjectRepo = {
       findBySlug: vi.fn(),
       findByKey: vi.fn(),
@@ -54,6 +59,7 @@ describe('ProjectsService', () => {
 
     ragService = {
       deleteAllBySourceType: vi.fn(),
+      clearProjectCaches: vi.fn(),
     } as any;
 
     // US-001: project access is `project.read`; each case below answers it through this double.

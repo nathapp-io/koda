@@ -110,10 +110,15 @@ function setup(opts: SetupOptions = {}) {
   const mailer = { sendInvite: vi.fn(async (_input: unknown) => true) };
   const schedule = { scheduleMemberAdded: vi.fn(async () => undefined) };
   const email = { configured: opts.configured ?? true, config: () => ({ inviteTtlDays: 7 }) };
+  let inTransaction = false;
   const txManager = {
-    run: <T>(fn: () => Promise<T>) => fn(),
+    run: async <T>(fn: () => Promise<T>) => {
+      const previous = inTransaction;
+      inTransaction = true;
+      try { return await fn(); } finally { inTransaction = previous; }
+    },
     getClient: vi.fn(),
-    isInTransaction: vi.fn(() => false),
+    isInTransaction: vi.fn(() => inTransaction),
   };
 
   const membership = {
@@ -129,7 +134,7 @@ function setup(opts: SetupOptions = {}) {
   };
   const entriesOfCalled = vi.fn();
   const mockAuditRecorder = {
-    record: vi.fn(async (_input: unknown) => undefined),
+    record: vi.fn(async (_input: unknown) => { expect(inTransaction).toBe(true); }),
     audited: vi.fn(async <T>(fn: () => Promise<T>, entriesOf: AuditEntriesOf<T>) => {
       const result = await fn();
       entriesOfCalled(entriesOf(result));

@@ -100,17 +100,23 @@ describeIntegration('US-005 audited label definitions and project writes', () =>
   }, timeout);
 
   it("AC-8: project patch summarizes sorted fields", async () => {
-    await request(server).patch(`/api/projects/${slug}`).set(auth()).send({ name: 'Renamed', description: 'd' }).expect(200);
+    const created = await request(server).post('/api/projects').set(auth()).send({ name: 'AC8', slug: 'audit-ac8', key: 'ACET' }).expect(201);
+    const projectId = data<{ id: string }>(created).id;
+    await request(server).patch('/api/projects/audit-ac8').set(auth()).send({ name: 'Renamed', description: 'd' }).expect(200);
     const entries = await rows('project.update', projectId);
-    expect(entries.at(-1)).toMatchObject({ key: 'project.update', resourceType: 'project', resourceId: projectId, projectId, summary: 'fields: description, name' });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ key: 'project.update', resourceType: 'project', resourceId: projectId, projectId, summary: 'fields: description, name' });
   }, timeout);
 
   it('AC-9: CI webhook token patch never exposes token value', async () => {
+    const created = await request(server).post('/api/projects').set(auth()).send({ name: 'AC9', slug: 'audit-ac9', key: 'ACNI' }).expect(201);
+    const projectId = data<{ id: string }>(created).id;
     const token = 'us005-secret-token-value-that-is-long-enough';
-    await request(server).patch(`/api/projects/${slug}`).set(auth()).send({ ciWebhookToken: token }).expect(200);
+    await request(server).patch('/api/projects/audit-ac9').set(auth()).send({ ciWebhookToken: token }).expect(200);
     const entries = await rows('project.update', projectId);
-    expect(entries.at(-1)?.summary).toBe('fields: ciWebhookToken');
-    expect(entries.at(-1)?.summary).not.toContain(token);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ key: 'project.update', resourceType: 'project', resourceId: projectId, projectId, summary: 'fields: ciWebhookToken' });
+    expect(entries[0].summary).not.toContain(token);
   }, timeout);
 
   it("AC-10: project delete persists 'deleted <KEY>'", async () => {

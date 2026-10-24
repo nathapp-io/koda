@@ -13,6 +13,7 @@ describeIntegration('US-007 audited roles, bindings and members', () => {
   let http: FastifyInstance;
   let db: PrismaClient;
   let token: string;
+  let adminId: string;
   let projectId: string;
   let next = 0;
   // Inject through the real Fastify/Nest pipeline without opening a loopback socket. Environment
@@ -47,10 +48,11 @@ describeIntegration('US-007 audited roles, bindings and members', () => {
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null, adapter: 'fastify' });
     http = app.getHttpAdapter().getInstance<FastifyInstance>();
     db = fixtureDb(app);
-    const registered = await api<{ accessToken: string }>('POST', '/api/auth/register', 201, {
+    const registered = await api<{ accessToken: string; user: { id: string } }>('POST', '/api/auth/register', 201, {
       email: 'audit007-owner@koda.test', name: 'Owner', password: TEST_PASSWORD,
     }, '');
     token = registered.accessToken;
+    adminId = registered.user.id;
     const project = await api<{ id: string }>('POST', '/api/projects', 201, { name: 'Audit roles', slug: 'audit-roles', key: 'ARL' });
     projectId = project.id;
   }, 60_000);
@@ -58,17 +60,25 @@ describeIntegration('US-007 audited roles, bindings and members', () => {
 
   it('AC-1/2: owner role POST returns 201 and records the created key', async () => {
     const created = await role();
-    expect(await rows(created.id)).toEqual([expect.objectContaining({ key: 'role.manage', resourceType: 'role', resourceId: created.id, projectId: null, summary: `created ${created.key}` })]);
+    expect(await rows(created.id)).toEqual([expect.objectContaining({ actorType: 'USER', actorId: adminId, origin: 'rest', key: 'role.manage', resourceType: 'role', resourceId: created.id, projectId: null, summary: `created ${created.key}` })]);
   });
   it('AC-3: custom role PATCH records fields only', async () => {
     const created = await role();
     await api('PATCH', `/api/roles/${created.id}`, 200, { name: 'Renamed' });
-    expect((await rows(created.id)).filter(row => row.summary === 'fields: name')).toEqual([expect.objectContaining({ key: 'role.manage' })]);
+    expect(await rows(created.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ actorType: 'USER', actorId: adminId, origin: 'rest', key: 'role.manage', resourceType: 'role', resourceId: created.id, projectId: null, summary: `created ${created.key}` }),
+      expect.objectContaining({ actorType: 'USER', actorId: adminId, origin: 'rest', key: 'role.manage', resourceType: 'role', resourceId: created.id, projectId: null, summary: 'fields: name' }),
+    ]));
+    expect(await rows(created.id)).toHaveLength(2);
   });
   it('AC-4: unbound role DELETE records the deleted key', async () => {
     const created = await role();
     await api('DELETE', `/api/roles/${created.id}`, 204);
-    expect((await rows(created.id)).filter(row => row.summary === `deleted ${created.key}`)).toEqual([expect.objectContaining({ key: 'role.manage' })]);
+    expect(await rows(created.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ actorType: 'USER', actorId: adminId, origin: 'rest', key: 'role.manage', resourceType: 'role', resourceId: created.id, projectId: null, summary: `created ${created.key}` }),
+      expect.objectContaining({ actorType: 'USER', actorId: adminId, origin: 'rest', key: 'role.manage', resourceType: 'role', resourceId: created.id, projectId: null, summary: `deleted ${created.key}` }),
+    ]));
+    expect(await rows(created.id)).toHaveLength(2);
   });
   it.each([
     ['AC-5/18/19', 'viewer', true, 'role.binding.manage'],
@@ -80,13 +90,13 @@ describeIntegration('US-007 audited roles, bindings and members', () => {
     const binding = await api<{ id: string }>('POST', '/api/role-bindings', 201, body);
     const repeated = await api<{ id: string }>('POST', '/api/role-bindings', 201, body);
     expect(repeated.id).toBe(binding.id);
-    expect(await rows(binding.id)).toEqual([expect.objectContaining({ key, resourceType: 'role-binding', projectId: scoped ? projectId : null, summary: `${roleKey} to USER ${target.id}` })]);
+    expect(await rows(binding.id)).toEqual([expect.objectContaining({ actorType: 'USER', actorId: adminId, origin: 'rest', key, resourceType: 'role-binding', projectId: scoped ? projectId : null, summary: `${roleKey} to USER ${target.id}` })]);
   });
   it('AC-8: binding DELETE records from the stored binding', async () => {
     const target = await user();
     const binding = await grantRole(db, { type: 'USER', id: target.id }, 'viewer', projectId);
     await api('DELETE', `/api/role-bindings/${binding.id}`, 204);
-    expect(await rows(binding.id)).toEqual([expect.objectContaining({ key: 'role.binding.manage', summary: `viewer from USER ${target.id}` })]);
+    expect(await rows(binding.id)).toEqual([expect.objectContaining({ actorType: 'USER', actorId: adminId, origin: 'rest', key: 'role.binding.manage', summary: `viewer from USER ${target.id}` })]);
   });
   it('AC-9/10: last Project Admin refusal records nothing', async () => {
     const target = await user();
@@ -102,7 +112,7 @@ describeIntegration('US-007 audited roles, bindings and members', () => {
     const target = await user();
     await api('POST', '/api/projects/audit-roles/members', 201, { email: target.email, roleKey: 'viewer' });
     const binding = await db.roleBinding.findFirstOrThrow({ where: { principalId: target.id, projectId } });
-    expect(await rows(binding.id)).toEqual([expect.objectContaining({ key: 'member.add', resourceType: 'role-binding', resourceId: binding.id, projectId, summary: `viewer to USER ${target.id}` })]);
+    expect(await rows(binding.id)).toEqual([expect.objectContaining({ actorType: 'USER', actorId: adminId, origin: 'rest', key: 'member.add', resourceType: 'role-binding', resourceId: binding.id, projectId, summary: `viewer to USER ${target.id}` })]);
   });
   it('AC-23: empty role PATCH adds no entry', async () => {
     const created = await role();

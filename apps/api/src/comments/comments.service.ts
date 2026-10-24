@@ -155,7 +155,7 @@ export class CommentsService {
       await this.recordCommentAdded(ticket.id, project.id, created.id, principal);
       await this.audit.record({
         key: 'comment.create', resourceType: 'comment', resourceId: created.id,
-        projectId: project.id, summary: `on ${ticketRef}`,
+        projectId: project.id, summary: `on ${project.key}-${ticket.number}`,
       });
       return created;
     });

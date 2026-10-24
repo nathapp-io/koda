@@ -340,6 +340,18 @@ describe('CommentsService', () => {
   });
 
   describe('create', () => {
+    it('audits the canonical ref when the route uses a ticket CUID', async () => {
+      mockCommentRepo.findProjectBySlug.mockResolvedValueOnce(mockProject);
+      mockCommentRepo.findTicketScoped.mockResolvedValueOnce(mockTicket);
+      mockCommentRepo.create.mockResolvedValueOnce(mockComment);
+
+      await service.create('koda', mockTicket.id, { body: 'hello' }, mockUserPrincipal);
+
+      expect(mockAudit.record).toHaveBeenCalledExactlyOnceWith({
+        key: 'comment.create', resourceType: 'comment', resourceId: mockComment.id,
+        projectId: mockProject.id, summary: 'on KODA-1',
+      });
+    });
     it('should create a comment on a ticket by slug and ref', async () => {
       const createDto: CreateCommentDto = {
         body: 'This is a test comment',

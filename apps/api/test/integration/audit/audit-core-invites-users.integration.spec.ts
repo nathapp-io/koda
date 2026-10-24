@@ -113,7 +113,7 @@ describeIntegration('audited invites, public registration and admin users', () =
     const target = await user();
     await api('PATCH', `/api/admin/users/${target.id}`, 200, { disabled: true });
     expect((await rows(target.id)).filter(row => row.key === 'user.update')).toEqual([
-      expect.objectContaining({ actorType: 'USER', actorId: adminId, summary: 'fields: disabled' }),
+      expect.objectContaining({ key: 'user.update', resourceType: 'user', resourceId: target.id, projectId: null, actorType: 'USER', actorId: adminId, summary: 'fields: disabled' }),
     ]);
   });
   it('AC-19/20: refused user.create records nothing', async () => {
