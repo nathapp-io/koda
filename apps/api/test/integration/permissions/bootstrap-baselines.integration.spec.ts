@@ -16,7 +16,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { PrismaUsersRepository } from '../../../src/users/prisma-users.repository';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
-import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
+import { Prisma } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
