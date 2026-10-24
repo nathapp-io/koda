@@ -22,11 +22,10 @@ import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { resetDb } from '../helpers/reset-db';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 import { MembershipService } from '../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantRole } from '../../src/permissions/test-helpers/permission-fixtures';
+import { expectGuardActive, fixtureDb } from '../helpers/action-context';
 
 interface ContextApiResponse {
   projectId?: string;
@@ -80,13 +79,13 @@ describeIntegration('Context API E2E', () => {
       .send({ email: 'context-admin@koda.test', name: 'Context Admin', password: 'Admin1234!Aa' })
       .expect(201);
 
-    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-    const adminUser = await prisma.client.user.findUnique({ where: { email: 'context-admin@koda.test' } });
+    const prisma = fixtureDb(app);
+    const adminUser = await prisma.user.findUnique({ where: { email: 'context-admin@koda.test' } });
     expect(adminUser).toBeTruthy();
     adminUserId = (adminUser as NonNullable<typeof adminUser>).id;
     // Permissions P1 US-005: the admin's global access is a role binding, not `User { role: 'ADMIN' }`.
     // The grant is written under the permission cache, so the cache is dropped explicitly.
-    await grantRole(prisma.client, { type: 'USER', id: adminUserId }, 'admin', null);
+    await grantRole(prisma, { type: 'USER', id: adminUserId }, 'admin', null);
     await app.get(MembershipService).invalidatePermissions();
 
     const adminLoginRes = await request(httpServer)
@@ -102,7 +101,7 @@ describeIntegration('Context API E2E', () => {
       .expect(201);
 
     memberAccessToken = body<{ accessToken: string }>(memberRegisterRes).accessToken;
-    const memberUser = await prisma.client.user.findUniqueOrThrow({ where: { email: 'context-member@koda.test' } });
+    const memberUser = await prisma.user.findUniqueOrThrow({ where: { email: 'context-member@koda.test' } });
     memberUserId = memberUser.id;
 
     const projectRes = await request(httpServer)
@@ -119,15 +118,19 @@ describeIntegration('Context API E2E', () => {
     if (app) await app.close();
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   describe('GET /api/context/:slug', () => {
     it('fixtures grant through bindings only', async () => {
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      await expectBindingOnlyFixtures(prisma.client, [
+      const prisma = fixtureDb(app);
+      await expectBindingOnlyFixtures(prisma, [
         { type: 'USER', id: adminUserId },
         { type: 'USER', id: memberUserId },
       ]);
       // Permissions P1 US-005: the admin's global access is the `admin` binding, not `User.role`.
-      const adminBinding = await prisma.client.roleBinding.findFirst({
+      const adminBinding = await prisma.roleBinding.findFirst({
         where: { principalType: 'USER', principalId: adminUserId, projectId: null, role: { key: 'admin' } },
         select: { id: true },
       });

@@ -2,12 +2,11 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { resetDb } from '../../helpers/reset-db';
 import { seedFleetHttpWorld, FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -29,7 +28,7 @@ describe('US-005 thread send guards', () => {
 describeDb('US-005 thread send HTTP guards', () => {
   let app: NathApplication;
   let httpServer: ReturnType<INestApplication['getHttpServer']>;
-  let db: PrismaClient;
+  let db: ReturnType<typeof fixtureDb>;
   let world: FleetHttpWorld;
   let config: IFleetConfig;
 
@@ -41,7 +40,7 @@ describeDb('US-005 thread send HTTP guards', () => {
     app.useAppGlobalPrefix().useAppGlobalPipes().useAppGlobalFilters().useAppGlobalGuards();
     await app.init();
     httpServer = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    db = fixtureDb(app);
     world = await seedFleetHttpWorld(httpServer, db);
     config = app.get<IFleetConfig>(FLEET_CFG);
     config.threadsEnabled = true;
@@ -49,6 +48,10 @@ describeDb('US-005 thread send HTTP guards', () => {
 
   afterEach(async () => { await db.runner.deleteMany({ where: { name: { in: ['offline-send-guard', 'old-protocol-guard', 'closing-runner'] } } }); });
   afterAll(async () => { if (app) await app.close(); });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   const makeThread = (over: Record<string, unknown> = {}) => db.chatThread.create({ data: {
     projectId: world.projectId, repoId: world.repoId, baseRef: 'trunk', feature: `guard-${Math.random().toString(36).slice(2)}`,
