@@ -826,6 +826,37 @@ model KnowledgeProjectPatterns {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
+/// Permissions P2c: one row per audited write, written in the write's transaction. Append-only.
+/// No foreign keys: an audit row outlives the project, user, agent or resource it names.
+model AuditEntry {
+  id                String   @id @default(cuid())
+  key               String
+  resourceType      String
+  resourceId        String
+  projectId         String?
+  actorType         String
+  actorId           String
+  onBehalfOfType    String?
+  onBehalfOfId      String?
+  origin            String
+  requiredMode      String
+  satisfiedBy       String
+  approverType      String?
+  approverId        String?
+  approvalRequestId String?
+  correlationId     String
+  summary           String?
+  createdAt         DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([projectId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([actorType])
+  @@index([approverId])
+  @@index([key])
+  @@index([resourceType, resourceId])
+}
+
 model FleetActivity {
   id                String   @id @default(cuid())
   actorType         String // USER | RUNNER | SYSTEM

@@ -15,6 +15,7 @@ import * as path from 'path';
 const SPEC_PATH = path.resolve(__dirname, '../../../../..', 'openapi.json');
 
 const EXPECTED_ENDPOINTS = [
+  { path: '/api/audit', method: 'get' },
   // Auth
   { path: '/api/auth/register', method: 'post' },
   { path: '/api/auth/login', method: 'post' },

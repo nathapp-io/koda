@@ -62,7 +62,6 @@ export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'approval.decide',
   'approval.policy.read',
   'approval.policy.manage',
-  'audit.read',
   'fleet.approval.decide.assistant',
   'member.remove',
 ]);

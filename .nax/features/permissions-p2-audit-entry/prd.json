@@ -1,0 +1,461 @@
+{
+  "project": "koda",
+  "feature": "permissions-p2-audit-entry",
+  "branchName": "feat/permissions-p2-audit-entry",
+  "createdAt": "2026-11-03T09:00:00.000Z",
+  "updatedAt": "2026-10-24T11:57:05.653Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add the AuditEntry table and append-only repository",
+      "description": "**Goal** — Add the durable audit schema, migration, domain contracts and append-only Prisma repository.\n\n**Motivation** — The audit-core, audit-fleet and audit-integrations features need a recorder to call and a table to write to, and the web feature needs a route to read.\n\n**Approach** — `apps/api/prisma/schema.prisma` gains, with migration `prisma/migrations/20261103090000_audit_entry/migration.sql`:\n\n```prisma\n/// Permissions P2c: one row per audited write, written in the write's transaction. Append-only.\n/// No foreign keys: an audit row outlives the project, user, agent or resource it names.\nmodel AuditEntry {\n  id                String   @id @default(cuid())\n  key               String   // permission catalog key, e.g. ticket.create\n  resourceType      String\n  resourceId        String\n  projectId         String?\n  actorType         String   // USER | AGENT | RUNNER | SYSTEM\n  actorId           String\n  onBehalfOfType    String?  // USER | AGENT\n  onBehalfOfId      String?\n  origin            String   // rest | mcp | thread | runner | system\n  requiredMode      String   // none | self | agent | human\n  satisfiedBy       String   // none | self | agent | human\n  approverType      String?  // USER | AGENT\n  approverId        String?\n  approvalRequestId String?\n  correlationId     String\n  summary           String?\n  createdAt         DateTime @default(now())\n\n  @@index([createdAt])\n  @@index([projectId, createdAt])\n  @@index([actorId, createdAt])\n  @@index([actorType])\n  @@index([approverId])\n  @@index([key])\n  @@index([resourceType, resourceId])\n}\n```\n\n`src/audit/domain/audit-entry.domain.ts`:\n\n```typescript\nimport type { IPageOption } from '@nathapp/nestjs-common';\nimport type { IPageResult } from '@nathapp/nestjs-data';\nimport type { ActionApproval, ActionActorType, ActionOrigin, ActorType } from '../../action-context/action-context';\n\nexport const AUDIT_ENTRY_REPOSITORY = Symbol('AUDIT_ENTRY_REPOSITORY');\nexport const AUDIT_SUMMARY_MAX = 500;\n\nexport interface AuditEntryRecord {\n  id?: string;                     // absent on create; set by the database\n  key: string;\n  resourceType: string;\n  resourceId: string;\n  projectId: string | null;\n  actorType: ActionActorType;\n  actorId: string;\n  onBehalfOfType: ActorType | null;\n  onBehalfOfId: string | null;\n  origin: ActionOrigin;\n  requiredMode: ActionApproval['requiredMode'];\n  satisfiedBy: ActionApproval['satisfiedBy'];\n  approverType: ActorType | null;\n  approverId: string | null;\n  approvalRequestId: string | null;\n  correlationId: string;\n  summary: string | null;\n  createdAt: Date;\n}\n\nexport interface AuditEntryFilters {\n  key?: string;\n  actorType?: ActionActorType;\n  actorId?: string;\n  approverId?: string;\n  projectId?: string;\n  resourceType?: string;\n  resourceId?: string;\n  from?: Date;   // inclusive\n  to?: Date;     // inclusive\n}\n\n/** What AuditRecorder puts in the package entry's `metadata`, and PrismaAuditStorage reads back. */\nexport interface KodaAuditMetadata {\n  projectId: string | null;\n  onBehalfOf: { type: ActorType; id: string } | null;\n  origin: ActionOrigin;\n  approval: ActionApproval;\n  summary: string | null;\n}\n```\n\n`PrismaAuditEntryRepository` (`src/audit/prisma-audit-entry.repository.ts`):\n\n```typescript\n@Injectable()\nexport class PrismaAuditEntryRepository\n  extends AbstractPrismaRepository<AuditEntryRecord, AuditEntryModel, string> {\n  constructor(@Inject(TRANSACTION_MANAGER) tx: ITransactionManager, private readonly prisma: PrismaService) {\n    super(tx);\n  }\n  protected modelDelegate(client: unknown) { return (client as Record<string, unknown>).auditEntry; }\n  protected toDomain(m: AuditEntryModel): AuditEntryRecord;\n  protected toPersistenceCreate(d: AuditEntryRecord);     // every column except id\n  protected toPersistenceUpdate(): never;                 // throws Error('audit entries are append-only')\n  /** Escape hatch: filtered page, ordered createdAt desc then id desc. */\n  async findPage(filters: AuditEntryFilters, page: IPageOption): Promise<IPageResult<AuditEntryRecord>>;\n}\n```\n\n- `findPage` uses `Paginate` from `@nathapp/nestjs-prisma` over `this.prisma.client.auditEntry`, as `PrismaFleetActivityRepository.findPage` does, with `from` mapped to `createdAt: { gte }` and `to` to `createdAt: { lte }`.\n- The module binds `{ provide: AUDIT_ENTRY_REPOSITORY, useExisting: PrismaAuditEntryRepository }`. The storage depends on the token, and the service injects the concrete class for `findPage`. Neither is exported.\n\nThe module binding in that shared design is delivered by US-002, not this story.\n\n**Design notes** — **The repository is append-only.** `PrismaAuditEntryRepository` extends `AbstractPrismaRepository` as `.nax/rules/api-repositories.md` requires, and its `toPersistenceUpdate` throws `Error('audit entries are append-only')`, so the base `update` rejects. Nothing calls the base `delete`.\n\n**No foreign keys.** Like `FleetActivity`, the row stores `projectId`, actor and resource ids as plain strings. An audit row must outlive a deleted project, user or agent.\n\n**Scope** — In: only the new model, exact migration, domain interfaces and repository; run `bun run db:generate` after schema changes. Out: storage and module binding (US-002), recorder (US-003/004), list DTO/service (US-005), HTTP route (US-006); deletion, retention and base-class `findOne`/`count(criteria)` are not supported.\n\n**Interface** — The verbatim domain and repository declarations above define this story's contract.\n\n**Verification** — Repository cases boot `AppModule` and build the repository directly, since no module provides it until US-002: `new PrismaAuditEntryRepository(app.get(TRANSACTION_MANAGER, { strict: false }), app.get(PrismaService, { strict: false }))`. Every call runs inside `withTestActor({ type: 'USER', id: <a user id> }, …)`, since the context-guard rejects a write with no context. Use migration scratch-schema helpers for physical schema assertions, real DB repository tests for transaction-proxy-backed CRUD/filter behavior, and `canRunDbTests()` to gate host-dependent suites. Run the targeted integration specs outside the sandbox before merging.",
+      "acceptanceCriteria": [
+        "[integration] After applyMigration of '20261103090000_audit_entry' on a scratch schema from scratchSchemaBefore(…, '20261103090000_audit_entry'), the schema has a table AuditEntry with the eighteen columns of the model (id through createdAt).",
+        "[integration] On that scratch schema, the AuditEntry secondary indexes cover exactly (createdAt), (projectId, createdAt), (actorId, createdAt), (actorType), (approverId), (key) and (resourceType, resourceId).",
+        "[integration] PrismaAuditEntryRepository.create with every field except id set, followed by findById of the returned id, returns a record with a non-empty id whose other fields equal the input.",
+        "[integration] findPage({ key: 'ticket.create' }, { current: 1, size: 20 }) over rows with keys ticket.create and comment.create returns exactly the ticket.create row.",
+        "[integration] findPage({ actorType: 'AGENT', actorId: 'a1' }, …) over rows by AGENT/a1, USER/a1 and AGENT/a2 returns exactly the AGENT/a1 row.",
+        "[integration] findPage({ approverId: 'u2' }, …) over rows with approvers u2, u3 and none returns exactly the u2 row.",
+        "[integration] findPage({ projectId: 'p1' }, …) over rows with projectId p1, p2 and null returns exactly the p1 row.",
+        "[integration] findPage({ resourceType: 'ticket', resourceId: 't1' }, …) over rows naming ticket/t1, ticket/t2 and comment/t1 returns exactly the ticket/t1 row.",
+        "[integration] findPage({ from: D1, to: D2 }, …) over rows created 1 ms before D1, at D1, between, at D2 and 1 ms after D2 returns exactly the rows at D1, between and at D2.",
+        "[integration] findPage({}, …) over three rows, two with the same createdAt, returns them ordered by createdAt descending and, for the two equal timestamps, by id descending.",
+        "[integration] update(<id>, { summary: 'x' }) rejects with Error whose message is 'audit entries are append-only'."
+      ],
+      "tags": [
+        "permissions-p2-audit-entry",
+        "api",
+        "prisma",
+        "audit",
+        "migration"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The additive schema and repository follow existing AbstractPrismaRepository, Paginate and scratch-migration helpers with a fully specified mapping; no new transaction mechanism or authorization logic is needed.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/webhook/prisma-webhook.repository.ts",
+        "apps/api/src/fleet/activity/prisma-fleet-activity.repository.ts",
+        "apps/api/src/action-context/action-context.ts",
+        "apps/api/test/helpers/migration-schema.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261103090000_audit_entry/migration.sql",
+        "apps/api/src/audit/domain/audit-entry.domain.ts",
+        "apps/api/src/audit/prisma-audit-entry.repository.ts",
+        "apps/api/test/integration/audit/audit-entry.repository.integration.spec.ts",
+        "apps/api/test/integration/audit/audit-entry.migration.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "findPage({}, { current: 2, size: 1 }) over three entries returns the second entry in descending createdAt/id order and total 3.",
+        "findPage({ key: 'ticket.create', projectId: 'p1', approverId: 'u2' }, …) returns only entries satisfying all three filters.",
+        "An AuditEntry remains readable by findById after the project, user or agent it names has been deleted."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "gains the AuditEntry model with its seven indexes; no existing model changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "4922e17a4fc2d4654dedbfa672a6ff83cb07b4e1"
+    },
+    {
+      "id": "US-002",
+      "title": "Implement PrismaAuditStorage and private module bindings",
+      "description": "**Goal** — Adapt the installed audit package's record interface to the AuditEntry repository and register singleton aliases in AuditLogModule.\n\n**Motivation** — Nothing stores that context yet.\n\n**Approach** — `PrismaAuditStorage implements IAuditStorage` (`src/audit/prisma-audit.storage.ts`). `record(entry)` validates, then calls the repository's `create` with:\n\n| `AuditEntry` (package) | column |\n|:--|:--|\n| `action` | `key` |\n| `resource` | `resourceType` |\n| `resourceId` | `resourceId` |\n| `actor.type`, `actor.id` | `actorType`, `actorId` |\n| `correlationId` | `correlationId` |\n| `timestamp` | `createdAt` |\n| `metadata.projectId` | `projectId` |\n| `metadata.onBehalfOf` | `onBehalfOfType`, `onBehalfOfId` (both null when absent) |\n| `metadata.origin` | `origin` |\n| `metadata.approval` | `requiredMode`, `satisfiedBy`, `approverType`, `approverId`, `approvalRequestId` (from `requestId`); each optional approval field null when absent |\n| `metadata.summary` | `summary` |\n\nValidation checks, in this order: `actor`, `actor.type`, `resource`, `resourceId`, `correlationId`, `metadata`, `metadata.origin`, `metadata.approval`. The first one missing throws `Error('audit entry is not a koda audit entry: <field>')`, and `create` is not called. `AuditLogModule` provides the storage as `{ provide: AUDIT_STORAGE, useExisting: PrismaAuditStorage }`. It imports nothing: `PrismaModule` (with `TRANSACTION_MANAGER`) and the permissions providers are global.\n\n**Design notes** — **The package's `AuditModule` is not imported.** `AuditModule` (4.2.3) eagerly builds `AuditInterceptor`, which needs the `CLOCK` token, and `RequestContextService`, none of which koda uses. Koda imports only the package's types (`IAuditStorage`, `AuditEntry`) and its `AUDIT_STORAGE` token, and its own module provides the storage under that token.\n\n**The koda module is `AuditLogModule`** (`src/audit/audit-log.module.ts`). The name avoids clashing with the package's `AuditModule`. The package's `AuditEntry` interface is imported as `PackageAuditEntry` (`import type { AuditEntry as PackageAuditEntry } from '@nathapp/nestjs-audit'`), because the generated Prisma model has the same name.\n\n**Koda's extra fields travel in `AuditEntry.metadata`.** The package entry has `action`, `actor`, `resource`, `resourceId`, `correlationId`, `timestamp` and `metadata`. The recorder puts `projectId`, `onBehalfOf`, `origin`, `approval` and `summary` into `metadata` as a `KodaAuditMetadata`, and the storage maps them to columns. `action` holds the permission key, and `resource` holds the resource type.\n\n**The storage implements `record` only.** `query` is optional in the package. `GET /api/audit` needs pagination plus approver and project filters, which `AuditQueryFilter` lacks, so the route reads through `AuditLogService.list` → the repository's `findPage`.\n\nThe module binds `{ provide: AUDIT_ENTRY_REPOSITORY, useExisting: PrismaAuditEntryRepository }`. The storage depends on the token, and the service injects the concrete class for `findPage`. Neither is exported.\n\n**Scope** — In: adapter, module and token aliases, DB-free DI proofs. Out: AppModule import and recorder export (US-003), recorder refusal/rollback behavior (US-004), list service export (US-005), controller registration (US-006); do not import package AuditModule or implement IAuditStorage.query.\n\n**Interface** — `PrismaAuditStorage implements IAuditStorage`; `record(entry: PackageAuditEntry): Promise<void>`; inject the upstream repository via `AUDIT_ENTRY_REPOSITORY`. `AuditLogModule` keeps repository and storage bindings private and will export only services added by later stories.\n\n**Verification** — Build storage directly with a capturing stub repository. Base entry: action 'ticket.create', resource 'ticket', resourceId 't1', actor { id: 'u1', type: 'USER' }, correlationId 'c1', timestamp T, metadata { projectId: 'p1', onBehalfOf: null, origin: 'rest', approval: NO_APPROVAL, summary: null }. Compile AuditLogModule in a unit spec with mocked global PrismaService and TRANSACTION_MANAGER providers, and close its TestingModule. Extend those global mocks as later stories register services/controller; never move the DI proof to integration tests.",
+      "acceptanceCriteria": [
+        "[unit] PrismaAuditStorage.record(base) calls create with key 'ticket.create', resourceType 'ticket', resourceId 't1', actorType 'USER', actorId 'u1' and correlationId 'c1'.",
+        "[unit] record(base) calls create with createdAt equal to T and projectId 'p1'.",
+        "[unit] record with metadata.onBehalfOf { type: 'AGENT', id: 'a1' } calls create with onBehalfOfType 'AGENT' and onBehalfOfId 'a1'.",
+        "[unit] record with metadata.approval { requiredMode: 'human', satisfiedBy: 'human', approverType: 'USER', approverId: 'u2', requestId: 'pa1' } calls create with requiredMode 'human', satisfiedBy 'human', approverType 'USER', approverId 'u2' and approvalRequestId 'pa1'.",
+        "[unit] record(base) calls create with onBehalfOfType, onBehalfOfId, approverType, approverId, approvalRequestId and summary all null.",
+        "[unit] record with metadata.summary 'status OPEN -> CLOSED' calls create with summary 'status OPEN -> CLOSED'.",
+        "[unit] record of the base entry without actor rejects with Error whose message is 'audit entry is not a koda audit entry: actor'.",
+        "[unit] record of the base entry without correlationId rejects with Error whose message is 'audit entry is not a koda audit entry: correlationId'.",
+        "[unit] record of the base entry without metadata rejects with Error whose message is 'audit entry is not a koda audit entry: metadata'.",
+        "[unit] record of the base entry whose metadata lacks approval rejects with Error whose message is 'audit entry is not a koda audit entry: metadata.approval'.",
+        "[unit] record of the base entry whose actor is { id: 'u1' } (no type) rejects with Error whose message is 'audit entry is not a koda audit entry: actor.type'.",
+        "[unit] record of the base entry without actor and without correlationId rejects with Error whose message is 'audit entry is not a koda audit entry: actor' (the first missing field in the validation order).",
+        "[unit] After any of the six rejected record calls above, the stub's create has not been called.",
+        "[unit] Compiling AuditLogModule with PrismaService and TRANSACTION_MANAGER mocked resolves AUDIT_STORAGE to the module's PrismaAuditStorage instance.",
+        "[unit] In that compiled module, AUDIT_ENTRY_REPOSITORY resolves to the module's PrismaAuditEntryRepository instance."
+      ],
+      "tags": [
+        "permissions-p2-audit-entry",
+        "api",
+        "audit",
+        "storage",
+        "dependency-injection"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Four additive files implement a prescribed mapping and existing useExisting DI pattern; no permission decision or new dependency is introduced.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/audit/domain/audit-entry.domain.ts",
+        "apps/api/src/audit/prisma-audit-entry.repository.ts",
+        "apps/api/src/fleet/activity/fleet-activity.module.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/audit/prisma-audit.storage.ts",
+        "apps/api/src/audit/prisma-audit.storage.spec.ts",
+        "apps/api/src/audit/audit-log.module.ts",
+        "apps/api/src/audit/audit-log.module.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "cf6686d4c50436c9d785a32456e3aa193b2e7416"
+    },
+    {
+      "id": "US-003",
+      "title": "Record current ActionContext in the caller's transaction",
+      "description": "**Goal** — Provide AuditRecorder's normal context-to-storage path, export it and import AuditLogModule into AppModule. **Motivation** — P2 records who acted and who approved on every write (design principle 5, gaps A/ENH-1 and C/ENH-1). **Approach** — Shared recorder design (US-003, US-004), reproduced verbatim; this story establishes the current-context path and provisioning, while US-004 completes and proves refusal/fallback/rollback paths. `src/audit/audit-recorder.service.ts`:\n\n```typescript\nexport interface AuditRecordInput {\n  key: string;              // a PERMISSION_CATALOG key\n  resourceType: string;\n  resourceId: string;\n  projectId?: string | null;\n  summary?: string;\n}\n\n@Injectable()\nexport class AuditRecorder {\n  constructor(\n    @Inject(AUDIT_STORAGE) private readonly storage: IAuditStorage,\n    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,\n  ) {}\n\n  /** Call inside the domain write's txManager.run, so the entry commits or rolls back with it. */\n  async record(input: AuditRecordInput): Promise<void>;\n}\n```\n\nThe order inside `record`:\n1. When `findCatalogEntry(input.key)` is undefined, it throws `Error('unknown audit key: <key>')`. 2. When `txManager.isInTransaction()` is false, it throws `Error('AuditRecorder.record must run inside a transaction')`. 3. It reads `currentContext()`. With none, it uses actor `{ type: 'SYSTEM', id: 'unknown' }`, origin `system`, `NO_APPROVAL`, no on-behalf-of and a new `randomUUID()` correlation id. 4. It cuts `summary` to its first `AUDIT_SUMMARY_MAX` UTF-16 code units (`summary.slice(0, AUDIT_SUMMARY_MAX)`). 5. It calls `storage.record({ action: key, actor: { id, type }, resource: resourceType, resourceId, correlationId, timestamp: new Date(), metadata: KodaAuditMetadata })`. The storage's rejection propagates unchanged. Steps 1 and 2 run before anything is written, so a refused call writes nothing. `AuditLogModule` exports `AuditRecorder` (US-003) and `AuditLogService` (US-005): services only, per `.nax/rules/api-data.md`. `AppModule` imports `AuditLogModule` (US-003). **Design notes** — **The recorder refuses to run outside a transaction.** `record` throws when `txManager.isInTransaction()` is false. \"Same transaction\" is the design's guarantee, and an entry written outside a transaction could survive a write that rolled back. Callers (from audit-core on) wrap the write and the record in one `txManager.run`. **The key must be a catalog key.** `record` throws for a key `findCatalogEntry` does not know, so a typo cannot produce an entry nobody can filter for. **The summary is a plain string, capped at 500 characters.** A longer summary is cut to its first 500 characters. A string keeps secrets out more easily than a JSON diff. What goes into it, and redacting it, is each writer's job in the later features (see Out of Scope). **Scope** — In: recorder input/mapping, default-null input fields, context attribution, summary cap, timestamp, provider/export and sole AppModule import addition. Out: unknown-key/no-transaction refusals, missing-context fallback and transaction rollback proofs (US-004), read service/DTO (US-005), route (US-006). No domain service, tool or system writer calls the recorder yet, and no writer summary/redaction policy or generalized command layer is added. **Interface** — The verbatim AuditRecordInput and AuditRecorder declarations above are the service contract; package AuditEntry metadata carries projectId, onBehalfOf, origin, approval and summary, and action/resource hold key/resourceType. **Verification** — Unit cases build AuditRecorder with a stub IAuditStorage that captures its record argument and a TRANSACTION_MANAGER mock whose isInTransaction returns true. Input defaults to { key: 'ticket.create', resourceType: 'ticket', resourceId: 't1' }. Use runWithActor, runAsSystem and runWithActionContext to assert field attribution. The integration case boots AppModule and resolves app.get(AuditRecorder), calls inside withTestActor and txManager.run, and verifies the actual stored row through the real adapter; preserve the context guard and host DB gate. Update the module unit harness if new injected providers need stubs, without adding a DB dependency.",
+      "acceptanceCriteria": [
+        "[unit] Inside runWithActor({ type: 'USER', id: 'u1' }, …), AuditRecorder.record calls storage.record with action 'ticket.create', resource 'ticket' and resourceId 't1'.",
+        "[unit] Inside runWithActor({ type: 'USER', id: 'u1' }, …), record calls storage.record with actor { id: 'u1', type: 'USER' }.",
+        "[unit] Inside runWithActor({ type: 'USER', id: 'u1' }, …), record calls storage.record with metadata.origin 'rest' and metadata.onBehalfOf null.",
+        "[unit] Inside runAsSystem('assistant', …, { onBehalfOf: { type: 'AGENT', id: 'a1' } }), record calls storage.record with actor { id: 'assistant', type: 'SYSTEM' }.",
+        "[unit] Inside that runAsSystem call, record calls storage.record with metadata.onBehalfOf { type: 'AGENT', id: 'a1' }.",
+        "[unit] Inside runWithActionContext with approval { requiredMode: 'human', satisfiedBy: 'human', approverType: 'USER', approverId: 'u2', requestId: 'pa1' }, record calls storage.record with that object as metadata.approval.",
+        "[unit] Inside runWithActionContext with correlationId 'c-7', record calls storage.record with correlationId 'c-7'.",
+        "[unit] record with projectId 'p1' calls storage.record with metadata.projectId 'p1'.",
+        "[unit] record without projectId calls storage.record with metadata.projectId null.",
+        "[unit] record with summary 'status OPEN -> CLOSED' calls storage.record with metadata.summary 'status OPEN -> CLOSED'.",
+        "[unit] record without summary calls storage.record with metadata.summary null.",
+        "[unit] record with a 600-character summary calls storage.record with metadata.summary equal to the input's first 500 characters.",
+        "[unit] record with a summary of exactly 500 characters calls storage.record with metadata.summary equal to the input unchanged.",
+        "[unit] record calls storage.record with a timestamp that is a Date no earlier than the moment before the call and no later than the moment after it.",
+        "[integration] In a booted AppModule, inside withTestActor({ type: 'USER', id: <user id> }, …), a txManager.run that calls app.get(AuditRecorder).record({ key: 'ticket.create', resourceType: 'ticket', resourceId: 't1', projectId: <project id> }) leaves one AuditEntry row whose actorType is 'USER' and whose actorId is that user's id."
+      ],
+      "tags": [
+        "permissions-p2-audit-entry",
+        "api",
+        "audit",
+        "action-context",
+        "security",
+        "transactions"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "The recorder copies an existing AsyncLocalStorage context into a prescribed storage entry and registers services; it neither authenticates actors nor evaluates role grants, and existing transaction helpers supply the integration seam.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/audit/audit-log.module.ts",
+        "apps/api/src/audit/domain/audit-entry.domain.ts",
+        "apps/api/src/action-context/action-context.ts",
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/test/helpers/action-context.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/audit/audit-recorder.service.ts",
+        "apps/api/src/audit/audit-recorder.service.spec.ts",
+        "apps/api/test/integration/audit/audit-recorder.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Inside runWithActionContext with actor { type: 'RUNNER', id: 'r1' } and origin 'runner', record forwards that actor and origin unchanged.",
+        "Inside runWithActionContext with origin 'mcp' or 'thread', record forwards that origin unchanged.",
+        "record with a summary containing a supplementary Unicode character across the 500-code-unit boundary forwards exactly summary.slice(0, 500)."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/app.module.ts",
+          "reason": "imports AuditLogModule; no other import changes, and no existing assertion lists the AppModule imports."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0ec3fa63062e8898dce5a7715caed1acb8a55ad4"
+    },
+    {
+      "id": "US-004",
+      "title": "Enforce recorder refusals, fallback and rollback",
+      "description": "**Goal** — Complete AuditRecorder's refusal and missing-context semantics while preserving atomic rollback with domain writes. **Motivation** — Nothing stores that context yet. **Approach** — Shared recorder design (US-003, US-004), reproduced verbatim; extend the upstream recorder as needed for these failure and fallback behaviors, without replacing its established normal mapping. `src/audit/audit-recorder.service.ts`:\n\n```typescript\nexport interface AuditRecordInput {\n  key: string;              // a PERMISSION_CATALOG key\n  resourceType: string;\n  resourceId: string;\n  projectId?: string | null;\n  summary?: string;\n}\n\n@Injectable()\nexport class AuditRecorder {\n  constructor(\n    @Inject(AUDIT_STORAGE) private readonly storage: IAuditStorage,\n    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,\n  ) {}\n\n  /** Call inside the domain write's txManager.run, so the entry commits or rolls back with it. */\n  async record(input: AuditRecordInput): Promise<void>;\n}\n```\n\nThe order inside `record`:\n1. When `findCatalogEntry(input.key)` is undefined, it throws `Error('unknown audit key: <key>')`. 2. When `txManager.isInTransaction()` is false, it throws `Error('AuditRecorder.record must run inside a transaction')`. 3. It reads `currentContext()`. With none, it uses actor `{ type: 'SYSTEM', id: 'unknown' }`, origin `system`, `NO_APPROVAL`, no on-behalf-of and a new `randomUUID()` correlation id. 4. It cuts `summary` to its first `AUDIT_SUMMARY_MAX` UTF-16 code units (`summary.slice(0, AUDIT_SUMMARY_MAX)`). 5. It calls `storage.record({ action: key, actor: { id, type }, resource: resourceType, resourceId, correlationId, timestamp: new Date(), metadata: KodaAuditMetadata })`. The storage's rejection propagates unchanged. Steps 1 and 2 run before anything is written, so a refused call writes nothing. `AuditLogModule` exports `AuditRecorder` (US-003) and `AuditLogService` (US-005): services only, per `.nax/rules/api-data.md`. `AppModule` imports `AuditLogModule` (US-003). **Design notes** — **The recorder refuses to run outside a transaction.** `record` throws when `txManager.isInTransaction()` is false. \"Same transaction\" is the design's guarantee, and an entry written outside a transaction could survive a write that rolled back. Callers (from audit-core on) wrap the write and the record in one `txManager.run`. **An audit write that fails fails the domain write.** Both run in one transaction, so a storage error rolls the domain write back. The design's \"an audit gap never becomes an outage\" covers only the missing-context case (production records `SYSTEM/unknown`), not a failed insert. **The key must be a catalog key.** `record` throws for a key `findCatalogEntry` does not know, so a typo cannot produce an entry nobody can filter for. **No context means `SYSTEM/unknown`.** With no context current, the recorder writes actor `SYSTEM/unknown`, origin `system`, `NO_APPROVAL` and a new correlation id. In dev and test the context-guard's Prisma extension throws `ContextlessWriteError` on the `auditEntry.create` anyway. In production the row is written, matching the guard's `record` mode. **Scope** — In: refusal ordering, fresh fallback identity/correlation, unchanged storage rejection and audit/domain rollback behavior in the recorder. Out: changing normal mapping/provisioning from US-003, list service/DTO (US-005), route (US-006); never add a context-guard exemption, production caller, coverage guard or generalized command layer. This remains its own binding story even where behavior proofs are its principal changes. **Interface** — The verbatim AuditRecordInput and AuditRecorder declarations above remain unchanged from US-003; no new public API or transaction argument is introduced. **Verification** — Unit cases use the upstream capturing IAuditStorage harness and transaction mock. Clear ActionContext for fallback cases; do not confuse a mocked fallback with a permitted real dev/test write. Integration cases boot AppModule, use withTestActor for ordinary writes and fixtureDb(app) for the rollback label fixture inside the same txManager.run. The explicit context-less case runs with the real guard in throw mode. Assert that awaited failures propagate and queries after transaction completion find no row. For the storage-failure rollback case, keep the real PrismaAuditStorage mapping and reject the repository's create once through a scoped spy, restoring it afterward; the preceding label write must still use fixtureDb(app) inside the same txManager.run. Preserve canRunDbTests and execute the rollback integration spec outside the sandbox before merging.",
+      "acceptanceCriteria": [
+        "[unit] With no context current, AuditRecorder.record calls storage.record with actor { id: 'unknown', type: 'SYSTEM' }.",
+        "[unit] With no context current, record calls storage.record with metadata.origin 'system'.",
+        "[unit] With no context current, record calls storage.record with metadata.approval equal to NO_APPROVAL.",
+        "[unit] With no context current, two record calls pass two different non-empty correlationId strings.",
+        "[unit] record({ key: 'no.such.key', resourceType: 'ticket', resourceId: 't1' }) rejects with Error whose message is 'unknown audit key: no.such.key'.",
+        "[unit] After that unknown-key rejection, storage.record has not been called.",
+        "[unit] With isInTransaction returning false, record rejects with Error whose message is 'AuditRecorder.record must run inside a transaction'.",
+        "[unit] After that no-transaction rejection, storage.record has not been called.",
+        "[unit] When storage.record rejects with error E, record rejects with the same E.",
+        "[integration] In a booted AppModule, inside withTestActor, a txManager.run that calls record for resource ticket/rb-1 and then throws leaves no AuditEntry row with resourceId 'rb-1'.",
+        "[integration] Inside withTestActor, a txManager.run that creates a label through fixtureDb(app) and then calls record with key 'no.such.key' leaves no label with that label's name.",
+        "[integration] In a booted AppModule with the context-guard in throw mode, a txManager.run entered with no context that calls record rejects with ContextlessWriteError.",
+        "[integration] In a booted AppModule, inside withTestActor, when txManager.run creates a label named 'audit-storage-rb-1' through fixtureDb(app) and the subsequent AuditRecorder.record fails because its storage rejects, no label named 'audit-storage-rb-1' remains after the transaction rejects."
+      ],
+      "tags": [
+        "permissions-p2-audit-entry",
+        "api",
+        "audit",
+        "security",
+        "transactions",
+        "action-context"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Two prescribed refusal checks and a fallback extend the existing recorder, while rollback uses the already-established transaction proxy and context guard; this story does not introduce or modify an authentication or authorization guard.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/audit/audit-recorder.service.ts",
+        "apps/api/src/action-context/contextless-write.ts",
+        "apps/api/test/helpers/action-context.ts",
+        "apps/api/src/audit/prisma-audit-entry.repository.ts",
+        "apps/api/src/audit/audit-log.module.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/audit/audit-recorder.refusals.spec.ts",
+        "apps/api/test/integration/audit/audit-recorder.rollback.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When input.key is 'no.such.key' and isInTransaction returns false, record rejects with 'unknown audit key: no.such.key'.",
+        "With no context current, record forwards metadata.onBehalfOf null.",
+        "In production record mode, a context-less transaction recording ticket.create stores actorType SYSTEM, actorId unknown, origin system and requiredMode/satisfiedBy none."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "fb52f2bbd91fe0521d4d07da464c5d525422322f"
+    },
+    {
+      "id": "US-005",
+      "title": "Expose paginated audit reads through service and DTO",
+      "description": "**Goal** — Add AuditLogService.list, UTC-inclusive date-window conversion, AuditEntryDto mapping and localized invalid-window errors.\n\n**Motivation** — The audit-core, audit-fleet and audit-integrations features need a recorder to call and a table to write to, and the web feature needs a route to read.\n\n**Approach** — `AuditLogService` (`src/audit/audit-log.service.ts`):\n\n```typescript\nexport interface AuditListQuery {\n  key?: string; actorType?: ActionActorType; actorId?: string; approverId?: string;\n  projectId?: string; resourceType?: string; resourceId?: string;\n  from?: string;  // YYYY-MM-DD or a UTC instant ending in Z (validated by ListAuditQuery)\n  to?: string;\n}\n\n@Injectable()\nexport class AuditLogService {\n  constructor(private readonly repo: PrismaAuditEntryRepository) {}\n  async list(query: AuditListQuery, page: IPageOption): Promise<IPageResult<AuditEntryDto>>;\n}\n```\n\n- `list` turns `from` and `to` into `Date`s: a date-only `from` becomes `<date>T00:00:00.000Z`, a date-only `to` becomes `<date>T23:59:59.999Z`, and an instant is used as given.\n- When both are given and `from` is after `to`, it throws `new ValidationAppException({ reason: 'from must not be after to' }, 'audit.auditQuery')` without calling `findPage`.\n- Otherwise it returns `remapPage(await this.repo.findPage(filters, page), AuditEntryDto.from)`, passing the other filters through unchanged.\n\n`AuditEntryDto` (`src/audit/dto/audit-entry.dto.ts`), every field with `@ApiProperty()` or `@ApiPropertyOptional({ nullable: true, … })` as `FleetActivityDto` does:\n\n```typescript\nexport class AuditEntryDto {\n  id: string;\n  key: string;\n  resourceType: string;\n  resourceId: string;\n  projectId: string | null;\n  actor: { type: 'USER' | 'AGENT' | 'RUNNER' | 'SYSTEM'; id: string };\n  onBehalfOf: { type: 'USER' | 'AGENT'; id: string } | null;   // null when onBehalfOfType is null\n  origin: 'rest' | 'mcp' | 'thread' | 'runner' | 'system';\n  approval: { requiredMode: string; satisfiedBy: string; approverType: 'USER' | 'AGENT' | null; approverId: string | null; requestId: string | null };\n  correlationId: string;\n  summary: string | null;\n  createdAt: string; // ISO 8601, from Date.toISOString()\n  static from(r: AuditEntryRecord): AuditEntryDto;\n}\n```\n\nNew i18n key `auditQuery` → `{ \"-2\": \"Invalid audit query: {reason}\" }` in `src/i18n/en/audit.json`, and `{ \"-2\": \"无效的审计查询：{reason}\" }` in `src/i18n/zh/audit.json`.\n\n**Design notes** — **Dates are UTC and inclusive at both ends.** `from` and `to` accept a date (`YYYY-MM-DD`) or a UTC instant ending in `Z`; anything else (an offset, an offset-less date-time, a word) is a 400 error. A date-only `from` means `00:00:00.000Z` of that day, and a date-only `to` means `23:59:59.999Z` of that day, so `from=2026-10-24&to=2026-10-24` is the whole day. `from` after `to` is a 400 error.\n\nThe single-field date validation and HTTP responses in that shared note are US-006's query/controller responsibility; this service handles conversion and cross-field ordering. `AuditLogModule` exports `AuditRecorder` (US-003) and `AuditLogService` (US-005): services only, per `.nax/rules/api-data.md`. Register and export AuditLogService now without adding a dependency on the parallel recorder story; preserve any providers/exports already present when merging.\n\n**Scope** — In: service, response DTO, translations and extension of the upstream AuditLogModule. Out: recorder behavior (US-003/004), query validation/controller/authorization and OpenAPI regeneration (US-006); do not implement IAuditStorage.query or expose a repository publicly.\n\n**Interface** — The verbatim AuditListQuery, AuditLogService and AuditEntryDto declarations above define the service/read contract. Actor and approval fields are reconstructed from flat columns, absent onBehalfOf is null, and external approval.requestId comes from approvalRequestId.\n\n**Verification** — Build AuditLogService with a stub repository whose findPage captures filters and returns a one-record page. Verify normalized UTC dates, unchanged seven non-date filters, no repository call after an invalid window, and remapped page totals. DTO cases use a fully populated record and explicit null variants. These are unit tests without AppModule or a DB. Do not copy analytics' half-open window or range limits into audit's inclusive window.",
+      "acceptanceCriteria": [
+        "[unit] AuditLogService.list({ key: 'ticket.create', actorType: 'AGENT', actorId: 'a1', approverId: 'u2', projectId: 'p1', resourceType: 'ticket', resourceId: 't1' }, { current: 1, size: 20 }) calls findPage with those seven filters unchanged.",
+        "[unit] list({ from: '2026-10-24' }, …) calls findPage with from equal to new Date('2026-10-24T00:00:00.000Z').",
+        "[unit] list({ to: '2026-10-24' }, …) calls findPage with to equal to new Date('2026-10-24T23:59:59.999Z').",
+        "[unit] list({ from: '2026-10-24T10:15:00Z' }, …) calls findPage with from equal to new Date('2026-10-24T10:15:00Z').",
+        "[unit] list({ from: '2026-10-25', to: '2026-10-24' }, …) throws ValidationAppException whose i18n key is audit.auditQuery.",
+        "[unit] After that reversed-window throw, findPage has not been called.",
+        "[unit] list returns a page whose records are the repository records mapped through AuditEntryDto.from and whose total equals the repository page's total.",
+        "[unit] AuditEntryDto.from of a record with actorType 'AGENT' and actorId 'a1' returns actor { type: 'AGENT', id: 'a1' }.",
+        "[unit] AuditEntryDto.from of a record with onBehalfOfType null returns onBehalfOf null.",
+        "[unit] AuditEntryDto.from of a record with onBehalfOfType 'USER' and onBehalfOfId 'u1' returns onBehalfOf { type: 'USER', id: 'u1' }.",
+        "[unit] AuditEntryDto.from of a record with requiredMode 'none', satisfiedBy 'none' and null approver fields returns approval { requiredMode: 'none', satisfiedBy: 'none', approverType: null, approverId: null, requestId: null }.",
+        "[unit] AuditEntryDto.from of a record with requiredMode 'human', satisfiedBy 'human', approverType 'USER', approverId 'u2' and approvalRequestId 'pa1' returns approval { requiredMode: 'human', satisfiedBy: 'human', approverType: 'USER', approverId: 'u2', requestId: 'pa1' }.",
+        "[unit] AuditEntryDto.from of a record with createdAt new Date('2026-10-24T10:15:00.000Z') returns createdAt '2026-10-24T10:15:00.000Z'."
+      ],
+      "tags": [
+        "permissions-p2-audit-entry",
+        "api",
+        "audit",
+        "pagination",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Prescribed service/DTO transformations and UTC-bound validation follow existing pagination and i18n patterns; no access-control decision is added here.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/audit/audit-log.module.ts",
+        "apps/api/src/audit/prisma-audit-entry.repository.ts",
+        "apps/api/src/fleet/activity/dto/fleet-activity.dto.ts",
+        "apps/api/src/fleet/analytics/analytics-window.ts",
+        "apps/api/src/i18n/en/fleet.json"
+      ],
+      "expectedFiles": [
+        "apps/api/src/audit/audit-log.service.ts",
+        "apps/api/src/audit/audit-log.service.spec.ts",
+        "apps/api/src/audit/dto/audit-entry.dto.ts",
+        "apps/api/src/audit/dto/audit-entry.dto.spec.ts",
+        "apps/api/src/i18n/en/audit.json",
+        "apps/api/src/i18n/zh/audit.json"
+      ],
+      "suggestedCriteria": [
+        "list with identical from/to UTC instants calls findPage with equal inclusive Date bounds instead of rejecting the window.",
+        "list({ to: '2026-10-24T10:15:00Z' }, …) forwards to equal to new Date('2026-10-24T10:15:00Z').",
+        "list preserves current, size, hasNext and hasPrev from the repository page in its returned page.",
+        "AuditEntryDto.from preserves id, key, resourceType, resourceId, projectId, origin, correlationId and summary from the input record."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "a462e4eb48dcfc4b9952eab59c16ee811a1c0834"
+    },
+    {
+      "id": "US-006",
+      "title": "Serve GET /api/audit under global audit.read",
+      "description": "**Goal** — Add the globally guarded audit list endpoint, validated filters, permission-surface declaration and regenerated OpenAPI operation.\n\n**Motivation** — `audit.read` is in the catalog but sits in `PENDING_SURFACE_KEYS` because no route declares it.\n\n**Approach** — `AuditController` (`src/audit/audit.controller.ts`):\n\n```typescript\n@ApiTags('audit')\n@ApiBearerAuth()\n@Controller('audit')\nexport class AuditController {\n  constructor(private readonly audit: AuditLogService) {}\n\n  @Get()\n  @UseGuards(RequiresGuard)\n  @Requires('audit.read')\n  @ApiOperation({ summary: 'Audit entries, newest first; needs the global key audit.read' })\n  @ApiResponse({ status: 200, description: 'Page of AuditEntryDto' })\n  @ApiResponse({ status: 400, description: 'Invalid filter or date window' })\n  @ApiResponse({ status: 403, description: 'Caller does not hold audit.read' })\n  async list(@Query() rawQuery: ListAuditQuery) {\n    const { current, size, ...query } = parseQuery(ListAuditQuery, rawQuery);\n    return JsonResponse.Ok(toPageResult(await this.audit.list(query, { current, size })));\n  }\n}\n```\n\n- `ListAuditQuery extends KodaPageQuery` (`src/audit/dto/list-audit.query.ts`), every field `@ApiPropertyOptional()` and `@IsOptional()`:\n  - `actorType`: `@IsIn(['USER', 'AGENT', 'RUNNER', 'SYSTEM'])`.\n  - `key`, `actorId`, `approverId`, `projectId`, `resourceType`, `resourceId`: `@IsString() @MaxLength(128)`.\n  - `from`, `to`: `@IsISO8601({ strict: true }) @Matches(/^\\d{4}-\\d{2}-\\d{2}(T[0-9:.]+Z)?$/, { message: 'use a date (YYYY-MM-DD) or a UTC instant ending in Z' })`. This is the same pattern as the unexported `UTC_INSTANT` in `src/fleet/analytics/dto/analytics-query.dto.ts`, written out here rather than imported.\n- `audit.read` leaves `PENDING_SURFACE_KEYS` in `src/permissions/catalog.ts`, because a route now declares it.\n- `openapi.json` is regenerated with `bun run api:export-spec` (repo root) and gains the `GET /api/audit` operation. The `@ApiResponse` has no `type`, as on `FleetActivityController`, so no `AuditEntryDto` component schema is required. Unrelated drift in the regenerated file is allowed. The regeneration runs in US-006, after the controller exists, because `spec-integrity.integration.spec.ts` reads the committed file.\n\n**Design notes** — **`audit.read` is global only.** The catalog already gives it scope `global` (`NEW_KEY_SCOPES`), and the role matrix snapshot grants it to `owner` and `admin` only. `PermissionService.can` with no `projectId` ignores project-role bindings, so a project role cannot reach the route, and it needs no per-project filtering by key.\n\n**Dates are UTC and inclusive at both ends.** `from` and `to` accept a date (`YYYY-MM-DD`) or a UTC instant ending in `Z`; anything else (an offset, an offset-less date-time, a word) is a 400 error. A date-only `from` means `00:00:00.000Z` of that day, and a date-only `to` means `23:59:59.999Z` of that day, so `from=2026-10-24&to=2026-10-24` is the whole day. `from` after `to` is a 400 error.\n\n**Scope** — In: controller/query DTO, registration in upstream AuditLogModule, removing only the pending audit.read marker, preserving permission contract equality, endpoint lifecycle coverage, spec endpoint-list addition and root OpenAPI regeneration. Out: changing recorder (US-003/004) or list service/DTO semantics (US-005), project-role grants or per-project authorization, new onBehalfOfId/origin/correlationId filters, CLI client generation, AuditEntryDto OpenAPI component schema, and route-specific rate limiting beyond the global throttler. Workdir remains apps/api as bound by the spec; the sole root artifact is generated openapi.json.\n\n**Interface** — The verbatim controller declaration above exposes GET /api/audit through the existing global prefix. ListAuditQuery inherits 1-based current and bounded size defaults from KodaPageQuery and declares exactly the nine optional filters named above. Authorization is enforced by RequiresGuard, not delegated to a service or derived from projectId query input.\n\n**Existing files to modify** — src/permissions/catalog.ts removes 'audit.read' from PENDING_SURFACE_KEYS, with no other key changes. src/permissions/test-helpers/permission-contract.spec.ts drops that entry from expectedPending and keeps PENDING_SURFACE_KEYS equality. test/e2e/api-endpoint/endpoint.e2e.spec.ts gains GET /api/audit with the suite's admin token while existing blocks keep their expectations. test/integration/openapi-spec/spec-integrity.integration.spec.ts gains { path: '/api/audit', method: 'get' } in its expected-endpoint list with existing entries and decorator checks unchanged. Regenerate root openapi.json rather than editing it by hand.\n\n**Verification** — Integration cases record their entries through app.get(AuditRecorder) inside txManager.run and withTestActor, then call the route over HTTP. The admin is a user holding the seeded global admin role. Use distinct recorded timestamps at least 10 ms apart for order, compute D from the UTC date at fixture recording for whole-day filters, and isolate rows so exact filtered results are meaningful. Verify project-only project-admin and globally seeded agent denial and unauthenticated refusal through the actual auth/permission guards. Use the existing endpoint suite and permission/spec-integrity regressions. bun run api:export-spec runs at repo root after controller registration; DB-backed criteria use canRunDbTests and must run outside NAX_SANDBOXED=1 with KODA_DB_TESTS=1 before the PR. Do not count skips as verification.",
+      "acceptanceCriteria": [
+        "[integration] GET /api/audit as the admin returns 200 with a page containing the recorded entry, with its key, resourceType, resourceId and projectId.",
+        "[integration] Of two entries recorded at least 10 ms apart, GET /api/audit as the admin returns the later one first.",
+        "[integration] GET /api/audit?key=comment.create as the admin, over entries keyed ticket.create and comment.create, returns exactly the comment.create entries.",
+        "[integration] GET /api/audit?projectId=<p1>&from=<D>&to=<D>, where <D> is the UTC date (YYYY-MM-DD) computed when the entries are recorded, as the admin over entries in projects p1 and p2, returns exactly the p1 entries.",
+        "[integration] GET /api/audit?actorType=AGENT&actorId=<agent id> as the admin returns exactly the entries recorded inside withTestActor({ type: 'AGENT', id: <agent id> }, …).",
+        "[integration] GET /api/audit as a user whose only binding is project-admin in one project returns 403.",
+        "[integration] GET /api/audit as an agent holding the seeded global agent role returns 403.",
+        "[integration] GET /api/audit with no credentials returns 401.",
+        "[integration] GET /api/audit?from=2026-10-25&to=2026-10-24 as the admin returns 400 with the message 'Invalid audit query: from must not be after to'.",
+        "[integration] GET /api/audit?from=yesterday as the admin returns 400.",
+        "[integration] GET /api/audit?from=2026-10-24T10:00:00 (no zone) as the admin returns 400.",
+        "[integration] GET /api/audit?from=2026-10-24T10:00:00%2B08:00 (an offset) as the admin returns 400.",
+        "[integration] GET /api/audit?actorType=ROBOT as the admin returns 400.",
+        "[unit] PENDING_SURFACE_KEYS.has('audit.read') returns false.",
+        "[integration] In endpoint.e2e.spec.ts, GET /api/audit with the suite's admin token returns 200."
+      ],
+      "tags": [
+        "permissions-p2-audit-entry",
+        "api",
+        "audit",
+        "security",
+        "access-control",
+        "openapi"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Adds an authenticated global permission boundary across controller, catalog contracts and HTTP fixtures; access control requires strict three-session TDD regardless of complexity.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/activity/fleet-activity.controller.ts",
+        "apps/api/src/fleet/activity/dto/list-fleet-activity.query.ts",
+        "apps/api/src/audit/audit-log.service.ts",
+        "apps/api/src/audit/audit-log.module.ts",
+        "apps/api/src/audit/audit-recorder.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/audit/audit.controller.ts",
+        "apps/api/src/audit/dto/list-audit.query.ts",
+        "apps/api/test/integration/audit/audit-route.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "GET /api/audit?approverId=u2 as the admin returns only entries whose approval.approverId is u2.",
+        "GET /api/audit?resourceType=ticket&resourceId=t1 as the admin returns only entries naming ticket/t1.",
+        "GET /api/audit with a 129-character key, actorId, approverId, projectId, resourceType or resourceId as the admin returns 400.",
+        "GET /api/audit?current=2&size=1 as the admin returns the second newest entry with current 2 and size 1.",
+        "GET /api/audit?projectId=<p1> as a user whose only binding is project-admin in p1 returns 403.",
+        "GET /api/audit?from=2026-02-30 as the admin returns 400."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "removes 'audit.read' from PENDING_SURFACE_KEYS, because GET /api/audit now declares it; no other key changes."
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "its expectedPending set lists 'audit.read'; it drops that entry, and the assertion that PENDING_SURFACE_KEYS equals expectedPending is kept."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "gains a GET /api/audit block (200 with the suite's admin token), as the api-testing rule requires for a new endpoint; existing blocks keep their expectations."
+        },
+        {
+          "path": "apps/api/test/integration/openapi-spec/spec-integrity.integration.spec.ts",
+          "reason": "its expected-endpoint list gains the entry with path '/api/audit' and method 'get'; the existing entries and the decorator checks are unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated with bun run api:export-spec (repo root) so it gains the GET /api/audit operation; unrelated drift from the regeneration is allowed."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "21abcd092fbabc7980a222314a3acf743de1bc55"
+    }
+  ],
+  "analysis": "Goal and completion: deliver the durable AuditEntry store, the @nathapp/nestjs-audit IAuditStorage adapter, a transaction-bound AuditRecorder, and the globally permission-gated GET /api/audit. This is P2 feature three of seven, after context and context-guard and before audit-core, audit-fleet, audit-integrations and web. No production domain writer calls the recorder in this feature. Completion means all six binding stories' observable contracts are implemented, the new migration and generated OpenAPI operation are committed, and DB-backed behavior is actually verified outside the sandbox. Preserve story ids, workdirs and dependency edges exactly.\n\nNavigation and actual stack: codebase-memory MCP is unavailable in this session; findings use direct Read/Grep/Glob fallback. The supplied Express/Next.js labels are not authoritative: apps/api/src/main.ts:11 creates a Fastify app through AppFactory, and .nax/mono/apps/api/context.md:21 identifies NestJS 12, Prisma 7, Vitest and oxlint. Follow Nathapp repository/service/public patterns, not generic Express implementations. Read the nathapp-nestjs-patterns skill before writing NestJS code if available to the implementation host; no matching repository skill path was found during drafting. apps/api/package.json:46-61 confirms @nathapp/nestjs-audit and the other main Nathapp packages are already ~4.2.3, notify and notify-prisma ~1.3.0, tenant 1.3.0. Dependency upgrades and CLI generation are not implementation tasks. apps/api/src/audit does not exist at drafting time.\n\nExisting context contract: apps/api/src/action-context/action-context.ts:24-60 defines ActorType USER|AGENT, ActionActorType (FleetActorType, including RUNNER and SYSTEM), ActionOrigin rest|mcp|thread|runner|system, ActionApproval, ActionContext and NO_APPROVAL. currentContext at :101 returns undefined outside a run. runWithActionContext at :87 supplies approval and correlation defaults; runAsSystem at :125 validates system actor ids and preserves optional onBehalfOf; runWithActor at :155 gives rest origin. Reuse these unchanged. The full actor, on-behalf-of, origin, approval and correlation block must survive through recorder metadata, adapter columns and DTO reconstruction. Never infer identity from a resource owner or from authentication anew. The recorder must not install an ActionContext merely to make a context-less insert pass.\n\nExisting persistence seam: apps/api/src/app.module.ts:88-98 globally registers PrismaModule with KodaPrismaClient and transaction:true; apps/api/src/permissions/permissions.module.ts:35-58 globally provides PermissionService. AuditLogModule therefore needs no imports. apps/api/src/prisma/koda-prisma-client.ts:5-9 installs a top-level all-operations extension, and :17-29 ensures interactive transactions retain it. apps/api/src/action-context/contextless-write.ts:28-55 chooses throw outside production and logs/runs SYSTEM/unknown in production record mode. A context-less recorder call with a mocked storage may return its SYSTEM/unknown fallback, but the real dev/test insert must still fail ContextlessWriteError. Do not bypass or weaken that guard.\n\nRepository rules and library reality: .nax/rules/api-repositories.md:13-43 requires AbstractPrismaRepository plus a private repository symbol; .nax/rules/api-data.md:21-52 keeps repositories private and exports services only; :81-99 requires txManager.run, never manual transaction threading. apps/api/src/webhook/prisma-webhook.repository.ts:15-50 supplies the inheritance/injection/mapping precedent, but its legacy casts and special methods are not permission to copy anti-patterns. Installed apps/api/node_modules/@nathapp/nestjs-prisma/dist/repository/abstract-prisma.repository.d.ts:36-50 declares the current protected delegate signature; implement the spec contract with the installed library's compatible typing rather than introducing an unsafe custom client. The installed abstract implementation at abstract-prisma.repository.js:23-29 gets the active client from tx.getClient; :49-58 maps before create/update. Thus an append-only toPersistenceUpdate throws before issuing an update. Its findOne and count(criteria) also use this mapping (:31-34, :42-47) and are unsupported here; delete remains inherited but must never be exposed or called. Append-only is an application repository contract, not a promise of a database trigger.\n\nSchema and migration: apps/api/prisma/schema.prisma:829-847 shows the FleetActivity precedent storing unreferenced actor/project identifiers and timestamps. Add only the new AuditEntry model with all eighteen named columns and seven secondary indexes, no Prisma enums, relations, FKs, existing-model edits or backfill. Keep ids after principals/projects/resources disappear. Use exactly prisma/migrations/20261103090000_audit_entry/migration.sql, then bun run db:generate from apps/api because generated Prisma files are ignored and imports must come from src/generated/prisma/client. The main DB harness uses schema push, so migration correctness needs its own scratch-schema test: apps/api/test/helpers/migration-schema.ts:22-33 orders/applies committed SQL and :41-63 builds all predecessors and drops the scratch schema. Index checks should enumerate the seven secondary index field lists separately from the primary key. Repository integration cases initially instantiate the repository directly under booted AppModule, since module provisioning arrives only in US-002.\n\nRead path: apps/api/src/fleet/activity/prisma-fleet-activity.repository.ts:21-30 demonstrates Paginate with orderBy createdAt desc, id desc and page remapping. Reuse Paginate over this.prisma.client.auditEntry with bounded pagination and conjunctive optional filters for key, actorType, actorId, approverId, projectId, resourceType, resourceId and inclusive createdAt gte/lte. apps/api/src/common/dto/koda-page.query.ts:16-33 sets current=1, size=20, max=100; :59-69 transforms numbers/defaults and strips undeclared query keys; :72-77 preserves the public page envelope and maps records. Controller must parseQuery before passing page arguments and use JsonResponse.Ok(toPageResult(...)). AuditLogService is a justified concrete-repository injection for findPage, whereas storage uses AUDIT_ENTRY_REPOSITORY.\n\nAdapter design: installed apps/api/node_modules/@nathapp/nestjs-audit/dist/interface/audit-entry.interface.d.ts:1-14 makes actor.type and other fields optional, so explicit Koda validation is essential. audit-storage.interface.d.ts:2-5 makes query optional; do not implement it. Use type-only PackageAuditEntry alias to avoid collision with the generated model, and import only the AUDIT_STORAGE runtime token. The package's generic metadata is Record<string, unknown>; preserve the KodaAuditMetadata structure through explicit mapping compatible with that type rather than leaking Prisma models. Do not import AuditModule or instantiate AuditInterceptor, @Audit, RequestContextService or a CLOCK dependency. Koda binds AUDIT_STORAGE and AUDIT_ENTRY_REPOSITORY using useExisting so resolution returns the actual provider instances, not duplicate instances. Validate missing fields in the exact specified order before create; do not invent additional validation that changes the first-error behavior.\n\nRecorder and atomicity: validate a permission catalog key before checking isInTransaction, read currentContext only after both checks, slice summary to the first 500 UTF-16 code units (not code points or bytes), assign a new Date, and pass context fields unchanged in metadata. With no context use SYSTEM/unknown, system, NO_APPROVAL, no on-behalf-of and a fresh randomUUID per call. Never open a separate transaction, swallow a storage error, enqueue an asynchronous write or record after commit. Failure of the audit insert fails the domain write; the missing-context production fallback is the only availability exception. US-003 establishes normal mapping and application provisioning; US-004 remains a distinct, binding behavior-hardening story for refusals, fallback and rollback even though its strongest proofs are tests. Tests must prove both an audit insert disappears when the enclosing transaction throws and a domain label disappears when recorder refusal aborts the transaction.\n\nService and UTC semantics: AuditLogService expands date-only from to midnight UTC and date-only to to 23:59:59.999 UTC. Instants ending Z stay exact; equal bounds are allowed. This differs intentionally from the half-open analytics window in apps/api/src/fleet/analytics/analytics-window.ts:20-29; do not copy its exclusive to, minimum positive span, 30-day default or maximum-window rules. Reversed bounds throw ValidationAppException({ reason: 'from must not be after to' }, 'audit.auditQuery') before repository access. apps/api/src/fleet/activity/dto/fleet-activity.dto.ts:4-31 is the decorated response/ISO timestamp mapping precedent. AuditEntryDto groups actor, onBehalfOf and approval, preserves null fields and uses requestId externally for approvalRequestId. Add separate API English and Chinese audit.json catalogs with status key -2; never use web translations.\n\nAccess control and affected consumers: apps/api/src/permissions/catalog.ts:61-65 currently includes audit.read in PENDING_SURFACE_KEYS, :115-123 assigns it global scope, and :435 exposes findCatalogEntry. apps/api/src/permissions/requires.guard.ts:31-58 reads metadata and asks PermissionService.can using resolved project context only; apps/api/src/permissions/permission.service.ts:50-69 denies runner/non-role/unknown keys and chooses global scope when projectId is absent. AuditController must use @Requires('audit.read') with ordinary RequiresGuard enforcement, no service-enforced bypass and no project-membership guard or query-derived permission context. Filtering projectId affects results only, never grants access. Seeded global owner/admin are granted the key (role-matrix.json:222 and :445), project-admin and seeded global agent are not. Preserve existing role grants and key catalog membership; only remove the pending-surface marker. apps/api/src/permissions/test-helpers/permission-contract.spec.ts:11-21 pins the pending set and :48 asserts exact equality; remove only audit.read from expectedPending and keep the equality assertion. apps/api/test/integration/permissions/permission-contract.integration.spec.ts:55-62 walks the booted application; the new route must declare the known key and register its guard. Changes to the catalog also feed action-context system actor derivation and entry matching, so do not change unrelated keys.\n\nRoute and documentation integration: apps/api/src/fleet/activity/fleet-activity.controller.ts:20-45 is the route/envelope precedent, but its per-project projectIdsWithKey filtering is NOT appropriate for global audit.read. apps/api/src/fleet/activity/dto/list-fleet-activity.query.ts:5-18 is the validation/decorator precedent; use 128-character string filter caps for audit, not its 64. apps/api/src/fleet/analytics/dto/analytics-query.dto.ts:12-22 has the unexported UTC regex and strict ISO decorators to duplicate without exporting or importing its constant. Reject words, offsets, zone-less times and invalid actor types with 400. AppModule only gains AuditLogModule import (apps/api/src/app.module.ts:65-146). US-006 adds the controller to that module; exported providers are AuditRecorder and AuditLogService only.\n\nExisting contract and test updates: apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts:21-24 already uses AppModule, MembershipService and role-binding fixture helpers; :52-56 unwraps JsonResponse and :100 onward holds suite auth state. Add GET /api/audit with the existing admin token without changing other endpoint expectations; .nax/rules/api-testing.md:15-21 also calls for an endpoint error path. apps/api/test/integration/openapi-spec/spec-integrity.integration.spec.ts:15-17 reads committed root openapi.json and enumerates expected endpoints; add { path: '/api/audit', method: 'get' } keeping existing entries and decorator assertions. package.json:23 exports via the API build and export-spec.cjs: run bun run api:export-spec at repo root after the controller exists in US-006. Commit the regenerated openapi.json; unrelated generated drift is allowed. Do not run CLI generation or hand-edit generated clients. No AuditEntryDto component schema is required because @ApiResponse intentionally has no type.\n\nVerification approach and risks: preserve all 81 numbered source acceptance criteria in their original stories and enumerate failure-table behavior as well. Storage mapping/validation, recorder mapping/refusals and list/DTO logic use direct instantiated collaborators and vi mocks. AuditLogModule DI tests must remain DB-free src/audit/audit-log.module.spec.ts and mock globals with provider useValue (close compiled modules); as the module grows, supply newly needed global stubs without converting the test into a DB boot. Integration rows are recorded through the real adapter. apps/api/test/helpers/action-context.ts:20 warns Prisma promises are lazy; :74-85 awaits writes inside withTestActor, and :116-147 makes fixtureDb follow the active transactional delegate. Await the operation inside the context, not after returning a lazy Prisma promise. Seed role bindings via grantRole/grantBaseline helpers, never legacy User.role/ProjectMember rows. Isolate audit fixtures so exact-count filters do not pick up prior tests, use distinct ids for tie ordering and resource filters, and avoid date rollover in same-day route cases.\n\nDB gates are not successful verification: apps/api/test/helpers/test-environment.ts:1 reexports the root gate. .nax/mono/apps/api/context.md:172-179 requires KODA_DB_TESTS=1 outside NAX_SANDBOXED=1, takes an explicit test URL or compose localhost:5433 or Testcontainers, ignores inherited DATABASE_URL and force-resets the DB. Never run DB suites concurrently against one database; another checkout needs KODA_TEST_DB_CONTAINER=1. Run bun run test:scoped for changed integration specs outside the sandbox before the PR; unit suites continue in sandbox. Generated acceptance files are immutable and run only under vitest.nax.config.ts with explicit AC filters. apps/api/package.json:11-20 confirms default unit tests exclude integration/e2e and test:scoped is the targeted harness. Authentication and access-control work in US-006 requires three-session-tdd. The other stories use tdd-simple: their schema, mapping, refusal and transaction patterns are already established, and copying approval/actor metadata does not introduce an authentication or role-evaluation algorithm. Additive-schema rollout is migration, regenerated Prisma client, then deployment of the new module/route; there is no historical backfill, retention or domain-writer rollout in this feature. Primary regression risks are escaping the transaction proxy, accidentally exempting auditEntry from the context guard, exporting private repositories, broadening project-role access, changing inclusive date semantics, and publishing stale OpenAPI.\n\nRefine audit: enumerated all 81 numbered source criteria individually: US-001 source 1-11 remain PRD 1-11; US-002 source 1-15 remain PRD 1-15; US-003 source 1-15 remain PRD 1-15; US-004 source 1-12 remain PRD 1-12; US-005 source 1-13 remain PRD 1-13; US-006 source 1-15 remain PRD 1-15. Qualifiers preserved include same-timestamp id ordering, unchanged 500-character summaries and seven filters, first-missing-field error precedence, the six rejected adapter calls, UTC date computation at fixture recording, and existing suite admin-token use. All twelve failure-table rows are represented, including invalid to as well as from, and storage-failure rollback. Every assertion is observable in captured calls, exceptions, schema metadata, HTTP output or database state. Added an explicit storage-failure negative path to US-003 without moving US-004's exact-error or rollback assertions, and a normal-attribution regression assertion to US-004. Made the storage rollback assertion concrete with a named label. All sixteen feature exclusions remain verbatim, including the feature-level bullet qualified US-006 only; there are no source story-local exclusion blocks to hoist. Every spec-recommended context file is present, no created file is its own context, and all six binding dependencies/workdirs are unchanged. Reduced routine schema/recorder stories to medium/tdd-simple using the verified existing helpers; only the route's actual access-control work mandates strict three-session-tdd.",
+  "outOfScope": [
+    "Calling `AuditRecorder.record` from any domain write, service, tool or system writer is out of scope (features `permissions-p2-audit-core`, `permissions-p2-audit-fleet` and `permissions-p2-audit-integrations`).",
+    "Generalising `src/koda-domain-writer/` into the command layer that records audit entries is out of scope (feature `permissions-p2-audit-core`).",
+    "Choosing what each writer puts in `summary`, and redacting secrets from it, is out of scope; each writer feature (audit-core, audit-fleet, audit-integrations) owns its summaries, and the recorder only caps the length.",
+    "The runtime coverage guard (dev/test throw when a request, tool or system run commits a domain write with no `AuditEntry`) and the walker test over write surfaces are out of scope (feature `permissions-p2-audit-integrations`).",
+    "The web Audit log page is out of scope (feature `permissions-p2-web`).",
+    "Using the package's `AuditInterceptor`, `@Audit` decorator, `AuditModule`, `DefaultActorResolver` or `InMemoryAuditStorage` is out of scope (ruling: the command layer writes entries; designer's call: the module is not imported).",
+    "Implementing `IAuditStorage.query` is out of scope (optional in the package; `GET /api/audit` reads through the repository).",
+    "Retention or purging of `AuditEntry` rows is out of scope; rows are kept indefinitely until a later feature adds a retention policy.",
+    "Deleting an `AuditEntry` row is out of scope; no code path calls the repository's `delete`.",
+    "The base-class `findOne` and `count(criteria)` are unsupported on `PrismaAuditEntryRepository` (both route criteria through `toPersistenceUpdate`, which throws); reads go through `findById` and `findPage` only.",
+    "A CLI `koda audit` command and regenerating `apps/cli/src/generated/` are out of scope.",
+    "Granting `audit.read` to any project role, or scoping `GET /api/audit` per project by key, is out of scope (`audit.read` is a global key).",
+    "Bumping `@nathapp/nestjs-*` and adding `@nathapp/nestjs-audit` is out of scope for the stories; it is already committed on the branch.",
+    "Filtering by `onBehalfOfId`, `origin` or `correlationId` in `GET /api/audit` is out of scope (the design's filter list is actor, approver, key, project and date; resource is added for the web page's per-resource view).",
+    "An `AuditEntryDto` component schema in `openapi.json` is out of scope (the route's `@ApiResponse` carries no `type`, as on `FleetActivityController`).",
+    "US-006 only: rate limiting `GET /api/audit` beyond the app's global throttler is out of scope (a global-admin read route, same as `GET /api/fleet/activity`)."
+  ],
+  "routingProfile": "native-codex"
+}
