@@ -5,6 +5,8 @@ import { IOutboxStore, OutboxRecord, OutboxStatus } from '@nathapp/nestjs-outbox
 import { OutboxEvent as OutboxEventModel, Prisma, PrismaClient } from '../generated/prisma/client';
 import { FanOutPublisher } from './fan-out-publisher';
 import { GLOBAL_OUTBOX_TYPES } from './global-outbox-types';
+import { runAsSystemWriter } from '../action-context/action-context';
+import { SystemWriter } from '../permissions/system-writer.decorator';
 
 /**
  * IOutboxStore on Prisma/Postgres for @nathapp/nestjs-outbox.
@@ -17,6 +19,7 @@ import { GLOBAL_OUTBOX_TYPES } from './global-outbox-types';
  * a newer claim.
  */
 @Injectable()
+@SystemWriter('system.outbox.dispatch')
 export class PrismaOutboxStore implements IOutboxStore {
   private readonly logger = new Logger(PrismaOutboxStore.name);
 
@@ -74,23 +77,29 @@ export class PrismaOutboxStore implements IOutboxStore {
   }
 
   async markPublished(id: string, publishedAt: Date, owner: string): Promise<void> {
-    await this.prisma.client.outboxEvent.updateMany({
-      where: { id, owner, status: OutboxStatus.PROCESSING },
-      data: { status: OutboxStatus.PUBLISHED, publishedAt, owner: null, leaseUntil: null, lastError: null },
+    await runAsSystemWriter(this, async () => {
+      await this.prisma.client.outboxEvent.updateMany({
+        where: { id, owner, status: OutboxStatus.PROCESSING },
+        data: { status: OutboxStatus.PUBLISHED, publishedAt, owner: null, leaseUntil: null, lastError: null },
+      });
     });
   }
 
   async markRetry(id: string, attempts: number, nextAttemptAt: Date, owner: string): Promise<void> {
-    await this.prisma.client.outboxEvent.updateMany({
-      where: { id, owner, status: OutboxStatus.PROCESSING },
-      data: { status: OutboxStatus.PENDING, attempts, nextAttemptAt, owner: null, leaseUntil: null },
+    await runAsSystemWriter(this, async () => {
+      await this.prisma.client.outboxEvent.updateMany({
+        where: { id, owner, status: OutboxStatus.PROCESSING },
+        data: { status: OutboxStatus.PENDING, attempts, nextAttemptAt, owner: null, leaseUntil: null },
+      });
     });
   }
 
   async markDead(id: string, attempts: number, owner: string): Promise<void> {
-    await this.prisma.client.outboxEvent.updateMany({
-      where: { id, owner, status: OutboxStatus.PROCESSING },
-      data: { status: OutboxStatus.DEAD, attempts, owner: null, leaseUntil: null },
+    await runAsSystemWriter(this, async () => {
+      await this.prisma.client.outboxEvent.updateMany({
+        where: { id, owner, status: OutboxStatus.PROCESSING },
+        data: { status: OutboxStatus.DEAD, attempts, owner: null, leaseUntil: null },
+      });
     });
   }
 

@@ -83,7 +83,9 @@ export class FanOutPublisher implements IOutboxPublisher, OnApplicationBootstrap
 
     const error = new OutboxFanOutError(record.type, failures);
     try {
-      await this.lastErrors.recordLastError(record.id, error.message.slice(0, OUTBOX_LAST_ERROR_MAX_LENGTH));
+      await runAsSystem('outbox', async () => {
+        await this.lastErrors.recordLastError(record.id, error.message.slice(0, OUTBOX_LAST_ERROR_MAX_LENGTH));
+      });
     } catch (err) {
       this.logger.warn(`Could not record lastError for outbox event ${record.id}: ${errorMessage(err)}`);
     }

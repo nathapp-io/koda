@@ -117,13 +117,32 @@ describe('FanOutPublisher', () => {
     expect(message.length).toBe(OUTBOX_LAST_ERROR_MAX_LENGTH);
   });
 
-  it('still rejects with the handler failure when writing lastError fails', async () => {
+  it('AC-5: awaits recordLastError in SYSTEM/outbox context', async () => {
+    let observed: ActionContext | undefined;
+    recordLastError.mockImplementation(() => ({
+      then(resolve: (value: undefined) => unknown) {
+        observed = currentContext();
+        return Promise.resolve(resolve(undefined));
+      },
+    }));
+    publisher.register('ticket_event', () => {
+      throw new Error('boom');
+    });
+
+    await expect(publisher.publish(outboxRecord('ticket_event', {}))).rejects.toThrow('boom');
+    expect(observed?.actor).toEqual({ type: 'SYSTEM', id: 'outbox' });
+  });
+
+  it('AC-9: still rejects with the handler failure when writing lastError fails', async () => {
     recordLastError.mockRejectedValue(new Error('db down'));
     publisher.register('ticket_event', () => {
       throw new Error('handler failed');
     });
 
-    await expect(publisher.publish(outboxRecord('ticket_event', {}))).rejects.toThrow('handler failed');
+    await expect(publisher.publish(outboxRecord('ticket_event', {}))).rejects.toMatchObject({
+      name: 'OutboxFanOutError',
+      failures: ['handler failed'],
+    });
   });
 
   it('M4: a concurrent failing publish does not affect a succeeding one', async () => {
