@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Track 3 Slice 4 (M11): the backfill rewrites bare issue numbers to
  * owner/repo#N using the project's VCS connection.
@@ -5,7 +6,8 @@
  */
 import { applyMigration, scratchSchemaBefore, ScratchSchema } from '../../helpers/migration-schema';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const TARGET = '20260929090000_vcs_external_id_repo_qualified';
 
 describeIntegration('externalVcsId repo-qualify migration (M11)', () => {

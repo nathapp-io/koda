@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * M19: the graph (Prisma) and its vectors (LanceDB) cannot commit atomically,
  * so the write is retry-safe instead: a failure between the stores leaves
@@ -15,7 +16,8 @@ import type { GraphifyLinkDto, GraphifyNodeDto } from '../../../src/rag/dto/impo
 import { resetDb } from '../../helpers/reset-db';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const ragConfig = {
   lancedbPath: './lancedb-m19-test',

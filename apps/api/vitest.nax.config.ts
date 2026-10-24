@@ -4,7 +4,8 @@ import baseConfig from './vitest.config';
 // nax acceptance runs: the generated `.nax/features/<feature>/.nax-acceptance.test.ts`
 // files are outside the default spec globs. The acceptance command sets KODA_DB_TESTS=1,
 // so globalSetup pushes the schema to the test Postgres (compose on 5433, else
-// Testcontainers; test/helpers/test-database.ts) and PG-backed tests run instead of skipping.
+// Testcontainers; test/helpers/test-database.ts) on the host. Sandboxed PG-backed blocks
+// use the shared DB gate and skip; they must be verified outside the sandbox.
 // Spread rather than mergeConfig: mergeConfig concatenates include/exclude arrays.
 export default defineConfig({
   ...baseConfig,

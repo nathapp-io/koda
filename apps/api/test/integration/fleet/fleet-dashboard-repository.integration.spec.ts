@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S2b (c) slice 1 — dashboard repository reads (PG), spec §1.3.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-dashboard-repository.integration.spec.ts
@@ -10,7 +11,8 @@ import { bootHttpApp } from '../../helpers/http-app';
 import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
 import { PrismaDashboardRepository } from '../../../src/fleet/dashboard/prisma-dashboard.repository';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('fleet dashboard repository (PG)', () => {
   let app: NathApplication;

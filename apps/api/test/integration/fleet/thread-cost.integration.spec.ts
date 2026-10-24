@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -11,7 +12,8 @@ import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/
 import { putThreadLines, seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const ENV = ['FLEET_ARTIFACT_DIR', 'FLEET_THREADS_ENABLED'] as const;
 
 describeIntegration('fleet thread cost folding and spend (PG, US-005)', () => {

@@ -1,6 +1,7 @@
 import swc from 'unplugin-swc';
 import { defineConfig, type TestProjectConfiguration } from 'vitest/config';
 import { findSharedDbSpecs } from './test/vitest-db-projects';
+import { canRunDbTests } from './test/helpers/test-environment';
 
 // Nest DI reads `design:paramtypes`, which Vite's default transform does not emit,
 // so specs are compiled with SWC (legacy decorators + decorator metadata).
@@ -13,7 +14,8 @@ const swcPlugin = swc.vite({
   },
 });
 
-const DB_MODE = process.env.KODA_DB_TESTS === '1';
+// The nax sandbox withholds host Postgres/Docker; use ordinary isolated workers there.
+const DB_MODE = canRunDbTests();
 const SPEC_GLOBS = ['src/**/*.spec.ts', 'test/**/*.spec.ts'];
 const EXCLUDE = ['**/node_modules/**', '**/dist/**', '.nax/**'];
 

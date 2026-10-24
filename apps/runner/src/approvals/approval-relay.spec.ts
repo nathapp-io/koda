@@ -1,3 +1,4 @@
+import { isNaxSandboxed } from '../../test/helpers/test-environment';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { JobRow } from '../journal/types';
 import fixtures from '../../test/fixtures/nax-asks/v0.83.2.json' with { type: 'json' };
@@ -21,10 +22,7 @@ beforeEach(() => {
   journal.updateJob('j1', 1, { state: 'RUNNING' });
   relay = new ApprovalRelay({ journal, log: silent, now: () => NOW, randomSecret: () => 'f'.repeat(64) });
   answers = []; naxStatus = 200;
-  nax = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async (req) => {
-    answers.push({ path: new URL(req.url).pathname, body: await req.json(), sig: req.headers.get('x-nax-signature') });
-    return new Response('OK', { status: naxStatus });
-  } });
+  nax = null;
 });
 afterEach(() => { relay.stopAll(); nax?.stop(true); journal.close(); });
 
@@ -40,7 +38,15 @@ async function send(endpoint: { url: string; secret: string }, body: object): Pr
 const answerCommand = (choice: string, naxAskId = 'ask-1f2e3d4c') =>
   ({ commandId: 'c1', type: 'APPROVAL_ANSWER', jobId: 'j1', leaseEpoch: 1, payload: { approvalId: 'a1', naxAskId, choice } }) as never;
 
-describe('ApprovalRelay (spec §4)', () => {
+// The nax sandbox withholds real TCP/Unix socket binding.
+describe.skipIf(isNaxSandboxed())('ApprovalRelay (spec §4)', () => {
+  beforeEach(() => {
+    nax = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async (req) => {
+      answers.push({ path: new URL(req.url).pathname, body: await req.json(), sig: req.headers.get('x-nax-signature') });
+      return new Response('OK', { status: naxStatus });
+    } });
+  });
+
   test('open journals the port and secret and returns the /ask url; open again is the same endpoint', async () => {
     const endpoint = await relay.open(job());
     expect(endpoint.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/ask$/);
@@ -102,11 +108,6 @@ describe('ApprovalRelay (spec §4)', () => {
     expect(journal.getPendingAsk('j1', 1, 'ask-1f2e3d4c')).toBeNull();
   });
 
-  test('an unknown ask is rejected ask_not_pending', async () => {
-    await relay.open(job());
-    expect(await relay.answer(answerCommand('allow', 'ask-99999999'))).toEqual({ result: 'rejected', detail: 'ask_not_pending' });
-  });
-
   test('an answer after nax\'s deadline is refused ask_expired, never posted, and the ask is cleared (D302)', async () => {
     const endpoint = await relay.open(job());
     await send(endpoint, { ...naxAsk(), createdAt: NOW.getTime() - fixtures.a_simple.timeout });   // deadline == NOW
@@ -129,12 +130,6 @@ describe('ApprovalRelay (spec §4)', () => {
     naxStatus = 429;
     expect(await relay.answer(answerCommand('deny'))).toEqual({ result: 'rejected', detail: 'callback_failed:429' });
     expect(journal.getPendingAsk('j1', 1, 'ask-1f2e3d4c')).not.toBeNull();
-  });
-
-  test('a malformed answer payload is rejected, never posted', async () => {
-    await relay.open(job());
-    expect(await relay.answer({ ...(answerCommand('allow') as object), payload: { approvalId: 'a1', naxAskId: 'ask-1f2e3d4c', choice: 'yes' } } as never))
-      .toEqual({ result: 'rejected', detail: 'invalid payload' });
   });
 
   test('a journal failure answers 500 and records a lifecycle error, never silence (review ENH-1)', async () => {
@@ -169,9 +164,21 @@ describe('ApprovalRelay (spec §4)', () => {
       squatter.stop(true);
     }
   });
+});
+
+// Rejections and orphan cleanup use only the injected in-memory journal.
+describe('ApprovalRelay journal', () => {
+  test('an unknown ask is rejected ask_not_pending', async () => {
+    expect(await relay.answer(answerCommand('allow', 'ask-99999999'))).toEqual({ result: 'rejected', detail: 'ask_not_pending' });
+  });
+
+  test('a malformed answer payload is rejected, never posted', async () => {
+    expect(await relay.answer({ ...(answerCommand('allow') as object), payload: { approvalId: 'a1', naxAskId: 'ask-1f2e3d4c', choice: 'yes' } } as never))
+      .toEqual({ result: 'rejected', detail: 'invalid payload' });
+  });
 
   test('sweepOrphans deletes state of (job, epoch) pairs that are not active', async () => {
-    await relay.open(job());
+    journal.putApprovalReceiver({ jobId: 'j1', leaseEpoch: 1, port: 1, secret: 's' });
     journal.putApprovalReceiver({ jobId: 'old', leaseEpoch: 3, port: 1, secret: 's' });
     relay.sweepOrphans([job()]);
     expect(journal.approvalStateKeys()).toEqual([{ jobId: 'j1', leaseEpoch: 1 }]);

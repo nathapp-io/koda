@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1 US-002 — the permission catalog and the role keys it lets a client expand, over
  * real HTTP + Postgres (AC-1 .. AC-4).
@@ -24,7 +25,8 @@ import { expandEntries } from '../../../src/permissions/entry-matcher';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const OWNER_EMAIL = 'owner@koda.test';
 const MEMBER_EMAIL = 'member@koda.test';

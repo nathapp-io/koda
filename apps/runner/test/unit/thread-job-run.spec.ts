@@ -235,7 +235,12 @@ describe('ThreadJobRun preparation (US-003)', () => {
     const context = setup();
     const jobDir = join(workspaceRoot, '.jobs', jobId); await mkdir(jobDir, { recursive: true });
     const run = context.makeRun(); const starting = run.start('prepare');
-    await waitFor(() => context.journal.getJob(jobId, leaseEpoch)?.state === 'RUNNING'); run.halt(); await starting;
+    // RUNNING precedes async stream creation; wait for the event before stopping the run.
+    await waitFor(async () => {
+      const file = Bun.file(join(jobDir, 'thread-events.jsonl'));
+      return await file.exists() && (await file.text()).includes('"type":"turn_end"');
+    });
+    run.halt(); await starting;
     const lines = (await readFile(join(jobDir, 'thread-events.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { type: string; messageId?: string });
     const consumed = lines.findIndex((line) => line.type === 'input_consumed' && line.messageId === 'm1');
     const firstSessionEvent = lines.findIndex((line) => !['session_started', 'input_consumed'].includes(line.type));

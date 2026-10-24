@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Track 1 slice 2: the OutboxEvent reshape migration rewrites legacy rows.
  * Applies the init migration and the slice-2 migration to a scratch schema.
@@ -8,7 +9,8 @@ import { join } from 'path';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const MIGRATIONS_DIR = join(__dirname, '../../../prisma/migrations');
 const INIT = '20260925151610_init';

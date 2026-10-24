@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /** Binding-only membership queries and their HTTP consumers against real Postgres. */
 import type { NathApplication } from '@nathapp/nestjs-app';
 import request from 'supertest';
@@ -21,7 +22,8 @@ import type { Granter, PrincipalRef } from '../../../src/permissions/permissions
 import { grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('binding-only membership queries (PG)', () => {
   let moduleRef: NathApplication;

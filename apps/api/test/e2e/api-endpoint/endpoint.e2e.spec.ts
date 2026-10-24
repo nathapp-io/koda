@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * API E2E Tests — Full lifecycle via supertest + real Postgres DB
  *
@@ -47,7 +48,8 @@ import { PrismaCiWebhookRepository } from '../../../src/ci-webhook/prisma-ci-web
 import { currentContext, type ActionContext } from '../../../src/action-context/action-context';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 /** Unwrap JsonResponse { ret, data } → data */
 function body<T = unknown>(res: request.Response): T {

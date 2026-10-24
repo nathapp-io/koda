@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5a US-002 — ChatThread, ChatMessage, FleetThreadTurn, FleetJob.threadId and the
  * active (repoId, feature) partial unique index (PG).
@@ -9,7 +10,8 @@ import { seedFleetBase } from '../../helpers/fleet-fixtures';
 import { applyMigration, scratchSchemaBefore, ScratchSchema } from '../../helpers/migration-schema';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 // The migration block replays every committed migration before the target; see the sibling
 // fleet schema specs, which raise the hook timeout for the same reason.
 vi.setConfig({ testTimeout: 20_000 });

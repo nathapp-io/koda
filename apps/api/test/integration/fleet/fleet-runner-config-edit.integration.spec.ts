@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S3 §3 — the runner's lease-fenced edit-set fetch (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-runner-config-edit.integration.spec.ts
@@ -10,7 +11,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const CAPS = { ...FLEET_CAPS, configJobs: true as const };
 const EDITS = [{ path: '.nax/context.md', op: 'put', content: '# x', baseSha: null }];
 

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b US-005 — the runner tool route, the ASSIGN's koda tool descriptors and the tools notice (PG).
  *
@@ -31,7 +32,8 @@ import { FLEET_CAPS, FleetHttpWorld, enrollRunner, seedFleetHttpWorld, syncBody 
 import { ThreadJobSeed, putThreadLines, seedThreadJobFor } from '../../helpers/thread-fixtures';
 import type { AssignPayload, RunnerCapabilities, SyncRequest, SyncResponse } from '../../../src/fleet/common/protocol';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 20_000 });
 const ENV = ['FLEET_ARTIFACT_DIR', 'FLEET_THREADS_ENABLED', 'FLEET_SYNC_WAIT_MS'] as const;
 

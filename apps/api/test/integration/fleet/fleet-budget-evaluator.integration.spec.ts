@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1b slice 2a — BudgetEvaluator on PG: warn once, hard stop, cancel set, webhooks, concurrency, the sync signal.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-budget-evaluator.integration.spec.ts
@@ -12,7 +13,8 @@ import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 import { JobReportProcessor } from '../../../src/fleet/sync/job-report.processor';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 20_000 });
 

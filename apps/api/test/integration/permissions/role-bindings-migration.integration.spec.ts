@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1a US-002 — the role/binding migration itself.
  *
@@ -7,7 +8,8 @@
  */
 import { applyMigration, scratchSchemaBefore, type ScratchSchema } from '../../helpers/migration-schema';
 
-const integration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const integration = canRunDbTests() ? describe : describe.skip;
 const MIGRATION = '20261027090000_role_bindings';
 
 integration('role bindings migration (PG)', () => {

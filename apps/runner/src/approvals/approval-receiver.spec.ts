@@ -1,3 +1,4 @@
+import { isNaxSandboxed } from '../../test/helpers/test-environment';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { ApprovalReceiver } from './approval-receiver';
 import { signNax } from './nax-callback';
@@ -8,7 +9,8 @@ afterEach(() => { receiver?.stop(); receiver = null; });
 const post = (port: number, body: string, sig: string | null, path = '/ask') =>
   fetch(`http://127.0.0.1:${port}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...(sig ? { 'x-nax-signature': sig } : {}) }, body });
 
-describe('ApprovalReceiver (spec §4.2)', () => {
+// The nax sandbox withholds real TCP/Unix socket binding.
+describe.skipIf(isNaxSandboxed())('ApprovalReceiver (spec §4.2)', () => {
   test('binds 127.0.0.1 on a free port and hands a verified body to onRequest', async () => {
     const seen: unknown[] = [];
     receiver = ApprovalReceiver.start({ port: 0, secret: 's', onRequest: async (b) => { seen.push(b); return 200; } });

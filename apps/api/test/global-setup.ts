@@ -2,7 +2,7 @@
  * Jest globalSetup — runs ONCE before the whole test run.
  *
  * Pushes the Prisma schema to the Postgres test database once, when
- * `KODA_DB_TESTS=1`. Only `bun run test:integration` sets that flag; unit runs
+ * `KODA_DB_TESTS=1` outside the nax sandbox. Unit runs
  * (`bun run test`) never touch a database. Per-file isolation is handled
  * in-process by the fast `resetDb()` helper (test/helpers/reset-db.ts).
  *
@@ -22,13 +22,15 @@ import { assertSafeTestDatabaseUrl } from './helpers/test-database-url';
 import { rememberTestDatabase, resolveTestDatabase } from './helpers/test-database';
 import { PARTIAL_UNIQUE_INDEXES } from './helpers/partial-indexes';
 import { createTestPrismaClient } from './helpers/test-prisma';
+import { canRunDbTests } from './helpers/test-environment';
 
 const ENV_TEST_PATH = resolve(__dirname, '../.env.test');
 
 export default async function globalSetup(): Promise<void> {
   // Only `bun run test:integration` (and nax's test:scoped / acceptance) set
   // KODA_DB_TESTS=1. Unit runs (`bun run test`) must never need a database.
-  const dbMode = process.env.KODA_DB_TESTS === '1';
+  // The nax sandbox withholds host Postgres/Docker; skipped suites need no provisioning.
+  const dbMode = canRunDbTests();
   config({ path: ENV_TEST_PATH, quiet: true, override: dbMode });
   if (!dbMode) return;
 

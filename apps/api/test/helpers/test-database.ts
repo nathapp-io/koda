@@ -3,8 +3,8 @@
  *
  * 1. `KODA_TEST_DATABASE_URL`, when set (CI, or a database the developer manages).
  * 2. The compose test database from `.env.test` (`bun run test:db:up`, localhost:5433), when it
- *    answers. nax's agent shell is sandboxed without Docker access but can reach this port, so
- *    agent-side runs keep working while it is up. Skipped with `KODA_TEST_DB_CONTAINER=1`, so a
+ *    answers. Sandboxed DB suites skip before this resolver is called.
+ *    Skipped with `KODA_TEST_DB_CONTAINER=1`, so a
  *    second checkout (worktree, clone) never resets a database another checkout is using.
  * 3. A throwaway Postgres 16 started with Testcontainers, stopped by globalTeardown.
  *

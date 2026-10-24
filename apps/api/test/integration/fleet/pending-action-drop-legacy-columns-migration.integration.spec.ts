@@ -1,6 +1,8 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import { applyMigration, scratchSchemaBefore, type ScratchSchema } from '../../helpers/migration-schema';
 
-const integration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const integration = canRunDbTests() ? describe : describe.skip;
 const MIGRATION = '20261026090000_pending_action_drop_legacy_columns';
 
 integration('pending action legacy column drop migration', () => {

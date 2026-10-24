@@ -1,3 +1,4 @@
+import { isNaxSandboxed } from '../../test/helpers/test-environment';
 import { afterAll, describe, expect, test } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -90,7 +91,8 @@ describe('ServerClient', () => {
 });
 
 describe('uploadBundle', () => {
-  test('PUTs the file with Content-Length, gzip type, sha header and the epoch, and returns the status', async () => {
+  // The nax sandbox withholds real TCP/Unix socket binding or ps.
+  test.skipIf(isNaxSandboxed())('PUTs the file with Content-Length, gzip type, sha header and the epoch, and returns the status', async () => {
     const file = join(await tmp.make('up'), 'bundle.tar.gz');
     await writeFile(file, Buffer.alloc(4096, 1));
     let seen = null as { method: string; url: string; headers: Headers; bytes: number } | null;
@@ -138,7 +140,8 @@ describe('uploadBundle', () => {
 });
 
 describe('putLog (S2a §2.4, plan D322)', () => {
-  test('PUTs the bytes with octet-stream type, their sha256, the bearer key, en, and the epoch/offset/final query', async () => {
+  // The nax sandbox withholds real TCP/Unix socket binding or ps.
+  test.skipIf(isNaxSandboxed())('PUTs the bytes with octet-stream type, their sha256, the bearer key, en, and the epoch/offset/final query', async () => {
     let seen = null as { method: string; url: URL; headers: Headers; body: Buffer } | null;
     const server = Bun.serve({
       port: 0,

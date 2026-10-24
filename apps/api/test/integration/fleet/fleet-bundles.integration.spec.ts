@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1 slice 2 — bundle upload (runner, fenced) and download (member), spec §3.3, §8.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-bundles.integration.spec.ts
@@ -21,7 +22,8 @@ import { BundleIngestService } from '../../../src/fleet/ingest/bundle-ingest.ser
 import { INGEST_PARSER_VERSION } from '../../../src/fleet/ingest/domain/bundle-ingest.domain';
 import { ConflictAppException } from '../../../src/common/exceptions/conflict-app.exception';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const ENV = ['FLEET_ARTIFACT_DIR', 'FLEET_BUNDLE_MAX_BYTES'] as const;
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 

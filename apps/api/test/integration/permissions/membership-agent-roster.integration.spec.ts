@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
@@ -7,7 +8,8 @@ import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 interface Agent { id: string; slug: string; apiKey: string }
 
 describeIntegration('agent roster compatibility membership (PG)', () => {

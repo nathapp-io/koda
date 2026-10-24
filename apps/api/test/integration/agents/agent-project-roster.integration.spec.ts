@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * US-002 (D530) — PrismaAgentRepository.findProjectRoster against a real
  * Postgres. The repository tests pin the query shape on a mock; this file
@@ -14,7 +15,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 import { PrismaAgentRepository } from '../../../src/agents/prisma-agent.repository';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('PrismaAgentRepository.findProjectRoster (PG)', () => {
   const prisma = createTestPrismaClient();

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1a US-003 — PermissionService against real Postgres (AC-1 .. AC-15).
  *
@@ -12,7 +13,8 @@ import { MembershipService } from '../../../src/permissions/membership.service';
 import { PermissionService } from '../../../src/permissions/permission.service';
 import { resetDb } from '../../helpers/reset-db';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('PermissionService (PG)', () => {
   let moduleRef: TestingModule;

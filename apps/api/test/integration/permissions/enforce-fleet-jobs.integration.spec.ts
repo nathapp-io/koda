@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1d US-003 — the job routes and the ticket fleet-job routes check catalog keys, and a
  * RUN dispatch starts its linked tickets without asking the dispatcher for the ticket's edge key,
@@ -22,7 +23,8 @@ import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../sr
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const P1_SLUG = 'p1';
 const P1_KEY = 'PONE';

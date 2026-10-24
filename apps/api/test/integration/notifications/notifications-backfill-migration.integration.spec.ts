@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S4a §1: the notifications migration backfills watchers from reporters, user assignees and user
  * commenters of live tickets.
@@ -5,7 +6,8 @@
  */
 import { applyMigration, scratchSchemaBefore, ScratchSchema } from '../../helpers/migration-schema';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const TARGET = '20261009090000_notifications_core';
 
 interface WatchRow { ticketId: string; userId: string; reason: string; muted: boolean }

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../helpers/test-environment';
 /**
  * AST/Symbol Index E2E Tests
  *
@@ -21,7 +22,8 @@ import { resetDb } from '../helpers/reset-db';
 import { expectBindingOnlyFixtures, grantRole } from '../../src/permissions/test-helpers/permission-fixtures';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeE2E = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeE2E = canRunDbTests() ? describe : describe.skip;
 
 function body<T = unknown>(res: request.Response): T {
   expect(res.body).toHaveProperty('ret', 0);

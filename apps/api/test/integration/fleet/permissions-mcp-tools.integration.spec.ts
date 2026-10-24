@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1 US-005 — `POST /api/mcp` lists only the tools whose key the agent holds somewhere (AC-1 .. AC-4,
  * AC-6, over real HTTP and real Postgres).
@@ -20,7 +21,8 @@ import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const P1_SLUG = 'p1';
 /** `CreateProjectDto.key` is `^[A-Z]{2,6}$` — letters only. */

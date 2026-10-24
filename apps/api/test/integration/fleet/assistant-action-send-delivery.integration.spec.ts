@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b 2aw US-002 — the outcome hand-off inside `PrismaChatThreadRepository.sendMessage` over PG (2aw-D3): the
  * thread's undelivered terminal actions are selected in age order (at most 20 of them), marked delivered on the new
@@ -26,7 +27,8 @@ import { FLEET_CAPS } from '../../helpers/fleet-fixtures';
 import { bootHttpApp } from '../../helpers/http-app';
 import { resetDb } from '../../helpers/reset-db';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
 
 const TOOL = 'koda_add_comment';

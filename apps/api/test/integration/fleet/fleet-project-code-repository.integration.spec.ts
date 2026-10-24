@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b 1c-b — the two DB projections the PROJECT-session code read stands on, against real rows (PG):
  * `PrismaFleetJobRepository.findProjectRepos` (US-003 AC-5: the anchor order `createdAt` asc then `id` asc, one
@@ -14,7 +15,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-job.repository';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const bind = (client: unknown) => new PrismaFleetJobRepository({ client } as unknown as PrismaService<PrismaClient>);
 
 describeIntegration('PrismaFleetJobRepository project-code projections (PG, S5b 1c-b)', () => {

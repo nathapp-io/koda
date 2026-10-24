@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import type { MockInstance } from 'vitest';
 /**
  * Fleet S4b A5: booted AppModule — the seeder wrote the templates; NotifyService.send renders from the DB and records a
@@ -13,7 +14,8 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { bootHttpApp } from '../../helpers/http-app';
 import { resetDb } from '../../helpers/reset-db';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
 
 describeIntegration('nestjs-notify send on PG (S4b A5)', () => {

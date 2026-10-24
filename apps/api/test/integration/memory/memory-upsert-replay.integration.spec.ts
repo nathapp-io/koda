@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Outbox replays re-run MemoryOutboxSubscriber: an identical fact must be a no-op.
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- memory-upsert-replay
@@ -10,7 +11,8 @@ import { MemoryKind } from '../../../src/common/enums';
 import { resetDb } from '../../helpers/reset-db';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('PrismaMemoryItemRepository.upsert replay', () => {
   let prismaService: PrismaService<PrismaClient>;

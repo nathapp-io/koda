@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * UX redesign slice 2 — GET /home (PG): cross-project scoping, needs-you contents, agent 403.
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/home/home-api.integration.spec.ts
@@ -11,7 +12,8 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 interface HomeSnapshot {
   generatedAt: string;

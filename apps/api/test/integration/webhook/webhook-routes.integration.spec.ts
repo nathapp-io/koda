@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * US-003 — HTTP integration coverage for POST /api/projects/:slug/webhooks and
  * PATCH /api/projects/:slug/webhooks/:id against a real database and the real auth chain.
@@ -25,7 +26,8 @@ import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/t
 import { resetDb } from '../../helpers/reset-db';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const TEST_PASSWORD = 'Admin1234!Aa';
 const BLOCKED_URL = 'https://10.0.0.5/hook';

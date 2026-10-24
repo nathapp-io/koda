@@ -6,7 +6,8 @@
  * wrapper sets the flag when any targeted spec is DB-gated, so a story that writes
  * `test/integration/**` actually runs it. The flag makes the Vitest globalSetup push the
  * schema to the test Postgres (compose on 5433, else Testcontainers); with no database
- * the run fails instead of skipping. Unit-only targets stay database-free.
+ * the host run fails instead of skipping. With NAX_SANDBOXED=1, host-dependent suites
+ * skip and globalSetup does not provision Postgres. Unit-only targets stay database-free.
  *
  * A target that is not an existing path (a filename filter, a renamed file) also
  * turns DB mode on: vitest may still match integration specs through it, and without

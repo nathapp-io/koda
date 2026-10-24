@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Track 3 Slice 4 (M9): the webhook secret is shown on create and on rotate,
  * never on read. Rotation requires the rotate permission: legacy project/global
@@ -13,7 +14,8 @@ import { createTestPrismaClient } from '../../helpers/test-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers/permission-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const HEX_32 = /^[0-9a-f]{32}$/;
 const ROTATE = '/api/projects/hooks/vcs/webhook-secret/rotate';
 

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * S4a slice 3 — @mentions end to end on Postgres: token -> outbox -> MENTIONED notification + MENTIONED watcher.
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/notifications/mentions
@@ -10,7 +11,8 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const mention = (label: string, userId: string): string => `@[${label}](user:${userId})`;
 
 describeIntegration('@mention notifications (PG)', () => {

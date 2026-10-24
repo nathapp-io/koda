@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1 slice 1 — the four fleet tables exist with their constraints (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-schema.integration.spec.ts
@@ -5,7 +6,8 @@
 import { resetDb } from '../../helpers/reset-db';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('fleet schema (PG)', () => {
   const prisma = createTestPrismaClient();

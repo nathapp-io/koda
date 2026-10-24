@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b workspace tools US-002 (S5b-R7) — the executor's `project` argument against PG, with the real koda tools.
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/assistant-workspace-project-argument.integration.spec.ts
@@ -12,7 +13,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('AssistantToolExecutor project argument in WORKSPACE threads (PG, S5b-R7)', () => {
   let app: NathApplication;

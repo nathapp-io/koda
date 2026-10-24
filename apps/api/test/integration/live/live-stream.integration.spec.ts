@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Slice 5 — GET /projects/:slug/events over real HTTP on Postgres.
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/live
@@ -15,7 +16,8 @@ import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http
 import { openSse, SseConnection, SseMessage } from '../../helpers/sse-client';
 import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const HEARTBEAT_MS = 300;
 const isTicket = (m: SseMessage): boolean => m.event === 'ticket';

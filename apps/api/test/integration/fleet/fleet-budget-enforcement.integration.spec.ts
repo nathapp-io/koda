@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1b slice 2a — dispatch and requeue refuse a paused scope with 409 fleet.budgetPaused (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-budget-enforcement.integration.spec.ts
@@ -10,7 +11,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const monthStart = (d: Date, back = 0): Date => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - back, 1));
 

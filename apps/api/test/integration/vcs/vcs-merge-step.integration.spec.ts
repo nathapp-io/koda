@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet C9 slice 1b — one merge seen by two paths yields one transition (PG), spec §3.5, D457.
  * Run: cd apps/api && KODA_DB_TESTS=1 bun run test:scoped test/integration/vcs/vcs-merge-step.integration.spec.ts
@@ -11,7 +12,8 @@ import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import type { TicketLinkData } from '../../../src/vcs/domain/vcs.repository';
 import type { VcsPrStatus } from '../../../src/vcs/types';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('shared merge step (PG)', () => {
   let app: NathApplication;

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1d US-002 — a fleet job and a schedule record an agent requester, and the readers that
  * assumed a user (the outcome notification, the cancel activity row, the ticket events of a job's
@@ -31,7 +32,8 @@ import type { CreateScheduleDto } from '../../../src/fleet/schedules/dto/create-
 import { FakeForge, startFakeForge } from '../../helpers/fake-forge';
 import { resetDb } from '../../helpers/reset-db';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 60_000 });
 

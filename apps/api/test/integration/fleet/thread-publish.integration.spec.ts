@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
@@ -12,7 +13,8 @@ import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-j
 import { ThreadJobEffects } from '../../../src/fleet/threads/thread-job-effects';
 import type { FleetJobRecord } from '../../../src/fleet/jobs/domain/fleet-job.domain';
 
-const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeDb = canRunDbTests() ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
 
 describeDb('US-003 thread publish', () => {

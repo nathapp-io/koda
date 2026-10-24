@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1 slice 2 — placement on PG: exactly one assignment under races (spec §6.1).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/placement.integration.spec.ts
@@ -10,7 +11,8 @@ import { bootHttpApp } from '../../helpers/http-app';
 import { insertRunner, seedFleetBase, FLEET_CAPS } from '../../helpers/fleet-fixtures';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('fleet placement (PG)', () => {
   let app: NathApplication;

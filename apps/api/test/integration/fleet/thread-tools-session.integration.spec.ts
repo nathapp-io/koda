@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5a US-004 — tool summaries, questions, approvals and session state folded from the thread stream (PG).
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/thread-tools-session.integration.spec.ts
@@ -15,7 +16,8 @@ import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld, syncBody } from '../.
 import { putThreadLines, seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
 import type { SyncRequest, SyncResponse } from '../../../src/fleet/common/protocol';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const ENV = ['FLEET_ARTIFACT_DIR', 'FLEET_THREADS_ENABLED', 'FLEET_SYNC_WAIT_MS'] as const;
 
 describeIntegration('fleet thread tools, questions and session (PG, US-004)', () => {

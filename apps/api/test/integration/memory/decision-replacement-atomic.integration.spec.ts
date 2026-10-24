@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Branch review B1: recording a decision replaces the requester's previous decision on the same topic, and the
  * replacement is atomic — supersession and insertion happen in one transaction, so a replacement that fails leaves
@@ -22,7 +23,8 @@ import { MemoryKind } from '../../../src/common/enums';
 import { resetDb } from '../../helpers/reset-db';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 /** The object the temporary constraint refuses: the replacement this spec makes fail. */
 const REFUSED_OBJECT = 'koda-b1-refused-decision';

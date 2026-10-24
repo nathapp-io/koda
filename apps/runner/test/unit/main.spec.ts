@@ -1,3 +1,4 @@
+import { isNaxSandboxed } from '../helpers/test-environment';
 import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -45,7 +46,8 @@ describe('koda-runner CLI', () => {
     expect(stderr).toMatch(/--token|KODA_RUNNER_ENROLL_TOKEN/);
   });
   // The CI user name is always valid; a local one may not be, and a skipped test must say so rather than pass silently.
-  test.skipIf(!/^[a-z_][a-z0-9_-]{0,31}$/.test(process.env['USER'] ?? ''))('install-service --print shows the unit for this platform and changes nothing', async () => {
+  // The nax sandbox withholds the host user-directory lookup used by install-service.
+  test.skipIf(isNaxSandboxed() || !/^[a-z_][a-z0-9_-]{0,31}$/.test(process.env['USER'] ?? ''))('install-service --print shows the unit for this platform and changes nothing', async () => {
     const user = process.env['USER'] ?? '';
     const { stdout, code } = await cli(['--home', '/srv/koda-runner', 'install-service', '--user', user, '--print', '--path', '/usr/bin:/bin']);
     expect(code).toBe(0);

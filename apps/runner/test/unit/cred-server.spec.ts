@@ -1,3 +1,4 @@
+import { isNaxSandboxed } from '../helpers/test-environment';
 // apps/runner/test/unit/cred-server.spec.ts
 import { afterAll, describe, expect, test } from 'bun:test';
 import { chmod, mkdir, stat, symlink, writeFile } from 'node:fs/promises';
@@ -77,7 +78,8 @@ describe('socket directory (D78)', () => {
   });
 });
 
-describe('CredentialServer (D79)', () => {
+// The nax sandbox withholds real sockets or process inspection.
+describe.skipIf(isNaxSandboxed())('CredentialServer (D79)', () => {
   const socketIn = async (): Promise<string> => join(await tmp.make('cs'), 'c.sock');
 
   test('answers `get` with one JSON line, and the socket file is mode 0600', async () => {

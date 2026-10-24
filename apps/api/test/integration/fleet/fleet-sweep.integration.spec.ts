@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1 slice 2 — silence sweep (spec §5.3, plan D11) on PG with an explicit clock.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-sweep.integration.spec.ts
@@ -11,7 +12,8 @@ import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
 import { FleetSweeper } from '../../../src/fleet/sync/fleet-sweeper';
 import { ThreadEventBus, type ThreadLiveEvent } from '../../../src/live/thread-event-bus';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('fleet silence sweep (PG)', () => {
   let app: NathApplication;

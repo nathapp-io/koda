@@ -1,3 +1,4 @@
+import { isNaxSandboxed } from '../helpers/test-environment';
 import { afterAll, describe, expect, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -14,7 +15,8 @@ afterAll(() => tmp.cleanup());
 const T0 = new Date('2026-10-01T00:00:00.000Z');
 const entry = (pid: number, over: Partial<{ spawnedAt: string; workdir: string }> = {}) => JSON.stringify({ pid, spawnedAt: over.spawnedAt ?? '2026-10-01T00:00:05.000Z', workdir: over.workdir ?? '/repo' });
 
-describe('readProcessCommand', () => {
+// The nax sandbox withholds real sockets or process inspection.
+describe.skipIf(isNaxSandboxed())('readProcessCommand', () => {
   test('returns the full command line of a live process and null for none', async () => {
     const proc = Bun.spawn(['sh', '-c', 'sleep 30; true', 'koda-job-abc123'], { stdout: 'ignore', stderr: 'ignore' });
     try {
@@ -38,7 +40,8 @@ describe('readProcessCommand', () => {
   });
 });
 
-describe('readProcessStart (BUG-5a: TZ-independent)', () => {
+// The nax sandbox withholds real sockets or process inspection.
+describe.skipIf(isNaxSandboxed())('readProcessStart (BUG-5a: TZ-independent)', () => {
   test('a live process start is parsed in UTC, not the runner host TZ', async () => {
     const prev = process.env.TZ;
     process.env.TZ = 'America/New_York';                 // a UTC-4/5 host would shift an unzoned parse by hours
@@ -68,7 +71,8 @@ describe('readProcessStart (BUG-5a: TZ-independent)', () => {
 });
 
 describe('reapNaxPids with real processes', () => {
-  test('kills a registered child of this checkout, spares a recycled entry, and truncates the file', async () => {
+  // The nax sandbox withholds real TCP/Unix socket binding or ps.
+  test.skipIf(isNaxSandboxed())('kills a registered child of this checkout, spares a recycled entry, and truncates the file', async () => {
     const repoDir = await tmp.make('repo');
     const mine = Bun.spawn(['sleep', '60'], { stdout: 'ignore', stderr: 'ignore' });
     const recycled = Bun.spawn(['sleep', '60'], { stdout: 'ignore', stderr: 'ignore' });

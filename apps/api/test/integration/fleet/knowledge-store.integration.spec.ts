@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b knowledge index US-001 — the chunk store on a real temp-dir LanceDB (needs no database) and the
  * state repository on Postgres (KODA_DB_TESTS=1).
@@ -390,7 +391,8 @@ describe('Ticket search isolation on the shared table (1c-c-R6)', () => {
   });
 });
 
-const describePg = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describePg = canRunDbTests() ? describe : describe.skip;
 
 describePg('PrismaKnowledgeIndexRepository (PG)', () => {
   let prisma: PrismaService<PrismaClient>;

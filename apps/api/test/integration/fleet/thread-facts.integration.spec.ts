@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5a US-001 — web-facing thread facts (PG): `GET /projects/:slug/threads/:id` answers the
  * first send refusal (or null), `GET /projects/:slug/threads` answers `threadsEnabled`, and
@@ -17,7 +18,8 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('fleet thread facts (PG, US-001)', () => {
   let app: NathApplication;

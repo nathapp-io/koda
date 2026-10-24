@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import * as bcrypt from 'bcrypt';
 import { readFileSync } from 'fs';
@@ -13,7 +14,8 @@ import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const principal = (id: string): KodaPrincipal => ({ actorType: 'user', id, role: 'MEMBER', email: `${id}@koda.test` }) as KodaPrincipal;
 
 describeIntegration('bindings-only permission reads (PG)', () => {

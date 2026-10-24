@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b US-005 — PROJECT ASSIGN and placement (PG): a PROJECT thread's THREAD job is assigned only to a runner
  * that advertises `projectThreads` (S5b-R9), and its ASSIGN names the thread kind — `PROJECT` — with the job's own
@@ -19,7 +20,8 @@ import { enrollRunner, FLEET_CAPS, FleetHttpWorld, seedFleetHttpWorld, syncBody 
 import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import type { AssignPayload, RunnerCapabilities, SyncRequest, SyncResponse } from '../../../src/fleet/common/protocol';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 20_000 });
 
 /** A runner whose lastSeenAt predates any placement window: offline for every test that does not enroll one. */

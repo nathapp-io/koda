@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Code-intel routes enforce project access followed by permission keys.
  * Viewers can read but cannot index; custom roles need the specific route key.
@@ -20,7 +21,8 @@ const refusalMessage = (namespace: string): string => {
   return messages['40003'] ?? `${namespace}.40003`;
 };
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('code-intel project-role gate (Slice 4)', () => {
   vi.setConfig({ testTimeout: 60000 });

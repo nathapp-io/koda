@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Producers record outbox rows atomically with their business writes (Track 1 slice 2).
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- producer-atomicity
@@ -29,7 +30,8 @@ import { PermissionService } from '../../../src/permissions/permission.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
 
 describeIntegration('producers record outbox rows atomically', () => {

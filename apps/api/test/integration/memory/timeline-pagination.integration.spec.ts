@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 // apps/api/test/integration/memory/timeline-pagination.integration.spec.ts
 /**
  * Slice 3 / M20 — the timeline pages across ticket, agent and decision events
@@ -12,7 +13,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('timeline keyset pagination (PG)', () => {
   let prisma: PrismaService<PrismaClient>;

@@ -1,10 +1,12 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S4b §2.1: the S4a preference table is renamed with rows kept and channels lowercased; package tables exist.
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/notifications/notify-platform-migration.integration.spec.ts
  */
 import { applyMigration, scratchSchemaBefore, ScratchSchema } from '../../helpers/migration-schema';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const TARGET = '20261010090000_notify_platform';
 
 describeIntegration('notify platform migration (S4b §2.1)', () => {

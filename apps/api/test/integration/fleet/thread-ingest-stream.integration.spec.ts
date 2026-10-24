@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5a US-001 — the thread log stream over HTTP and the schema (PG).
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/thread-ingest-stream.integration.spec.ts
@@ -19,7 +20,8 @@ import type { LiveEvent } from '../../../src/live/live-event';
 import { applyMigration, scratchSchemaBefore, ScratchSchema } from '../../helpers/migration-schema';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const ENV = ['FLEET_ARTIFACT_DIR', 'FLEET_LOG_MAX_BYTES', 'FLEET_LOG_CHUNK_MAX_BYTES'] as const;
 const MIGRATION = '20261014090000_thread_ingest';
 

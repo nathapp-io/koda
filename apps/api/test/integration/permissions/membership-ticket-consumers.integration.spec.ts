@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1b US-003 — ticket assignment, assignee search and the domain writer read the
  * compatibility union (AC-1 .. AC-10), over real HTTP and real Postgres.
@@ -30,7 +31,8 @@ import type { PrincipalRef } from '../../../src/permissions/permissions.types';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 /** Booting `AppModule` runs the system-role seeder, so the first hook needs a generous budget. */
 const BOOT_TIMEOUT_MS = 30_000;

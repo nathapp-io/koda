@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import bcrypt from 'bcrypt';
 import type { NathApplication } from '@nathapp/nestjs-app';
@@ -7,7 +8,8 @@ import { ensureSystemRoles, grantBaseline, grantRole } from '../../../src/permis
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 
-const integration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const integration = canRunDbTests() ? describe : describe.skip;
 interface Session { accessToken: string; refreshToken: string; user: { id: string; role: string } }
 const claim = (token: string): string => JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()).role;
 

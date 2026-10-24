@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1 slice 2b — POST /fleet/runner/sync git tokens: fence, mint, never store (PG).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/runner-git-tokens.integration.spec.ts
@@ -16,7 +17,8 @@ import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld, syncBody } from '../.
 import { FakeForge, startFakeForge } from '../../helpers/fake-forge';
 import type { SyncRequest, SyncResponse } from '../../../src/fleet/common/protocol';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const ENV_KEYS = ['GITHUB_API_URL', 'GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY_FILE', 'GITHUB_APP_SLUG'] as const;
 
 describeIntegration('runner git tokens (PG)', () => {

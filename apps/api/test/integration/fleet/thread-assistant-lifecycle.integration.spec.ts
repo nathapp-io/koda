@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5a US-003 — the assistant message lifecycle folded from the thread stream (PG).
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/thread-assistant-lifecycle.integration.spec.ts
@@ -20,7 +21,8 @@ import { JobTransitionsService } from '../../../src/fleet/jobs/job-transitions.s
 import { SYSTEM_ACTOR } from '../../../src/fleet/common/system-actor';
 import { FLEET_JOB_REPOSITORY, type FleetJobRecord, type IFleetJobRepository } from '../../../src/fleet/jobs/domain/fleet-job.domain';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const ENV = ['FLEET_ARTIFACT_DIR', 'FLEET_THREADS_ENABLED'] as const;
 
 describeIntegration('fleet thread assistant lifecycle (PG, US-003)', () => {

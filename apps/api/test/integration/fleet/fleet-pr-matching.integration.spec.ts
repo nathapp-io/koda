@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet C9 slice 1b — repo-scoped VCS PR matching (PG), spec §3.6, D458, §6 regression.
  * Run: cd apps/api && KODA_DB_TESTS=1 bun run test:scoped test/integration/fleet/fleet-pr-matching.integration.spec.ts
@@ -12,7 +13,8 @@ import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 import { GitHubWebhookPayload, VcsWebhookService } from '../../../src/vcs/vcs-webhook.service';
 import type { VcsConnectionWithProjectDomain } from '../../../src/vcs/domain/vcs.domain';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const closed = (number: number, owner = 'acme', name = 'app'): GitHubWebhookPayload => ({
   action: 'closed',

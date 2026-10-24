@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1 US-002 — the fourteen project thread routes decide with catalog keys, ownership comes
  * from the keys (`canOperate`), and input that steers a live turn belongs to the turn's requester
@@ -23,7 +24,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { FLEET_CAPS } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 const P1_SLUG = 'p1';
 /** `CreateProjectDto.key` is `^[A-Z]{2,6}$` — letters only. */

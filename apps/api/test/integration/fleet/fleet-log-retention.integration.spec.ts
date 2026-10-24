@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S2a slice 1c — log retention (PG), spec §5, plus the expired-bundle 410 (D341).
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-log-retention.integration.spec.ts
@@ -14,7 +15,8 @@ import { bootHttpApp } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { FleetLogRetentionProcessor } from '../../../src/fleet/logs/fleet-log-retention.processor';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const DAY = 86_400_000;
 const ENV = ['FLEET_ARTIFACT_DIR', 'FLEET_LOG_RETENTION_DAYS'] as const;
 

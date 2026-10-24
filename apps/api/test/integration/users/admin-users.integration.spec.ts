@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Slice 4 — /admin/users on real Postgres over HTTP.
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/users
@@ -13,7 +14,8 @@ import { grantRole } from '../../../src/permissions/test-helpers/permission-fixt
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 /** `users.lastAdmin.409`, the sentence the concurrent last-admin refusal carries. */
 const LAST_ADMIN_REFUSED = (

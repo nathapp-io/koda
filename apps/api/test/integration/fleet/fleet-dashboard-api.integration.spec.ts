@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S2b (c) slice 1 — dashboard routes (PG): both scopes, the scope boundary, bounds, placement parity.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-dashboard-api.integration.spec.ts
@@ -11,7 +12,8 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { FLEET_CAPS, FleetHttpWorld, insertRunner, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 interface Item { key: string; kind: string; severity: string; subjectId: string; verdict?: string; reasons?: Array<{ runnerName: string; reason: string }>; conditions?: Array<Record<string, unknown>> }
 interface Snapshot {

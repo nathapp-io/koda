@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Track 3 Slice 4 (M13): the migration deletes every symbol row (derived data,
  * rebuilt on the next index) rather than rewriting ids embedded in the caller/callee JSON.
@@ -5,7 +6,8 @@
  */
 import { applyMigration, scratchSchemaBefore, ScratchSchema } from '../../helpers/migration-schema';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const TARGET = '20260929090100_symbol_project_scoped_ids';
 
 describeIntegration('symbol id migration (M13)', () => {

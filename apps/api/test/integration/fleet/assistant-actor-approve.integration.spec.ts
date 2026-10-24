@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b US-003 (3-D12 / 3-R3) — the whole thread path over HTTP: `dev`'s REPO THREAD job proposes
  * `koda_add_comment` through the runner tool route, `dev` approves it through the project decide route, and the
@@ -27,7 +28,8 @@ import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor } from '../../helpers/thread-fixtures';
 
-const integration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const integration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
 
 const TOOL = 'koda_add_comment';

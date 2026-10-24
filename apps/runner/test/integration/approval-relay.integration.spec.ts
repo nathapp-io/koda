@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../helpers/test-environment';
 /**
  * S1.5 2a end to end: real API + real runner daemon + fake nax. An escalate job raises an ask through the relay; a
  * decision in koda reaches nax's callback; the delivery is recorded; a daemon restart keeps the ask answerable.
@@ -9,7 +10,8 @@ import { join } from 'node:path';
 import { createWorld, type TestRunner, type World } from './harness/world';
 import { waitFor } from '../helpers/wait';
 
-const enabled = process.env['KODA_DB_TESTS'] === '1';
+// The nax sandbox withholds host Postgres/Docker.
+const enabled = canRunDbTests();
 
 let world: World;
 let runner: TestRunner;

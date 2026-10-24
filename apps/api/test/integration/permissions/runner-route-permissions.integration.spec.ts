@@ -1,9 +1,11 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, TEST_PASSWORD } from '../../helpers/http-app';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const capabilities = {
   nax: { version: '0.83.0', protocols: ['native'] },
   sandbox: { available: true, probedAt: '2026-09-30T00:00:00.000Z' },

@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b 2a US-001 — `AssistantActionService.propose` against PG: the stored action, the approval
  * summary row it opens, the activity row, the outbox event, idempotency and the per-thread cap.
@@ -19,7 +20,8 @@ import { bootHttpApp } from '../../helpers/http-app';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 import { seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
 
 const NOW = new Date('2026-10-23T09:00:00.000Z');

@@ -3,6 +3,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { FLEET_PROTOCOL_VERSION } from '@nathapp/fleet-protocol';
 import type { AssignPayload, FleetCommandOut, SyncRequest } from '@nathapp/fleet-protocol';
+import type { FetchFn } from '../../src/sync/http';
 import { parseRunnerConfig, resolveHome } from '../../src/config/runner-config';
 import { startDaemon } from '../../src/daemon/daemon';
 import { Journal } from '../../src/journal/journal';
@@ -21,6 +22,7 @@ afterAll(() => tmp.cleanup());
 
 interface FakeServer {
   url: string;
+  fetch: FetchFn;
   syncs: SyncRequest[];
   uploads: Array<{ path: string; epoch: string | null; sha: string | null; bytes: number }>;
   queue: FleetCommandOut[];
@@ -32,51 +34,48 @@ interface FakeServer {
 
 function fakeServer(): FakeServer {
   const acked = new Map<string, number>();
-  const server: FakeServer = { url: '', syncs: [], uploads: [], queue: [], mode: { status: 200, capacity: 2 }, logs: new Map(), order: [], stop: () => undefined };
-  const bun = Bun.serve({
-    port: 0,
-    async fetch(req) {
-      const url = new URL(req.url);
-      const envelope = (data: unknown, status = 200) => new Response(JSON.stringify({ ret: 0, data }), { status });
-      if (url.pathname === '/api/fleet/runner/me') return envelope({ id: 'r1', name: 'box', labels: [], capacity: server.mode.capacity, enabled: true });
-      if (url.pathname.endsWith('/bundle') && req.method === 'PUT') {
-        const bytes = (await req.arrayBuffer()).byteLength;
-        server.uploads.push({ path: url.pathname, epoch: url.searchParams.get('leaseEpoch'), sha: req.headers.get('x-content-sha256'), bytes });
-        return envelope({}, 201);
-      }
-      if (url.pathname === '/api/fleet/runner/sync') {
-        if (server.mode.status !== 200) return new Response(JSON.stringify({ ret: 1, message: 'Unsupported protocol version' }), { status: server.mode.status });
-        const body = (await req.json()) as SyncRequest;
-        server.syncs.push(body);
-        for (const job of body.jobs) for (const e of job.events) if (e.type === 'state') server.order.push(`state:${(e.payload as { to: string }).to}`);
-        const jobAcks = body.jobs.map((j) => {
-          let next = (acked.get(j.jobId) ?? 0) + 1;
-          for (const e of [...j.events].sort((a, b) => a.seq - b.seq)) if (e.seq === next) next += 1;
-          acked.set(j.jobId, next - 1);
-          return { jobId: j.jobId, ackedSeq: next - 1 };
-        });
-        const commands = server.queue.splice(0);
-        if (jobAcks.length === 0 && commands.length === 0) await Bun.sleep(25);
-        return envelope({ jobAcks, commands, gitTokens: [], gitTokenErrors: [], unknownJobIds: [] });
-      }
-      const logRoute = /^\/api\/fleet\/runner\/jobs\/([^/]+)\/logs\/(run|stdout|stderr)$/.exec(url.pathname);
-      if (logRoute && req.method === 'PUT') {
-        const key = `${logRoute[1]}:${logRoute[2]}`;
-        const text = Buffer.from(await req.arrayBuffer()).toString('utf8');
-        const offset = Number(url.searchParams.get('offset'));
-        const final = url.searchParams.get('final') === '1';
-        const current = server.logs.get(key) ?? '';
-        const next = offset === current.length ? current + text : current;
-        server.logs.set(key, next);
-        if (final) server.order.push(`log-final:${logRoute[2]}`);
-        const outcome = final && offset + text.length === next.length ? 'complete' : offset === current.length ? 'appended' : 'offset';
-        return envelope({ outcome, size: next.length });
-      }
-      return new Response('nope', { status: 404 });
-    },
-  });
-  server.url = `http://127.0.0.1:${bun.port}`;
-  server.stop = () => bun.stop(true);
+  const server: FakeServer = { url: 'https://runner.test', fetch: async () => new Response('not ready', { status: 503 }), syncs: [], uploads: [], queue: [], mode: { status: 200, capacity: 2 }, logs: new Map(), order: [], stop: () => undefined };
+  // Inject the transport: these daemon assertions need no listening socket.
+  server.fetch = async (rawUrl, init) => {
+    const req = new Request(rawUrl, init);
+    const url = new URL(req.url);
+    const envelope = (data: unknown, status = 200) => new Response(JSON.stringify({ ret: 0, data }), { status });
+    if (url.pathname === '/api/fleet/runner/me') return envelope({ id: 'r1', name: 'box', labels: [], capacity: server.mode.capacity, enabled: true });
+    if (url.pathname.endsWith('/bundle') && req.method === 'PUT') {
+      const bytes = (await req.arrayBuffer()).byteLength;
+      server.uploads.push({ path: url.pathname, epoch: url.searchParams.get('leaseEpoch'), sha: req.headers.get('x-content-sha256'), bytes });
+      return envelope({}, 201);
+    }
+    if (url.pathname === '/api/fleet/runner/sync') {
+      if (server.mode.status !== 200) return new Response(JSON.stringify({ ret: 1, message: 'Unsupported protocol version' }), { status: server.mode.status });
+      const body = (await req.json()) as SyncRequest;
+      server.syncs.push(body);
+      for (const job of body.jobs) for (const e of job.events) if (e.type === 'state') server.order.push(`state:${(e.payload as { to: string }).to}`);
+      const jobAcks = body.jobs.map((j) => {
+        let next = (acked.get(j.jobId) ?? 0) + 1;
+        for (const e of [...j.events].sort((a, b) => a.seq - b.seq)) if (e.seq === next) next += 1;
+        acked.set(j.jobId, next - 1);
+        return { jobId: j.jobId, ackedSeq: next - 1 };
+      });
+      const commands = server.queue.splice(0);
+      if (jobAcks.length === 0 && commands.length === 0) await Bun.sleep(25);
+      return envelope({ jobAcks, commands, gitTokens: [], gitTokenErrors: [], unknownJobIds: [] });
+    }
+    const logRoute = /^\/api\/fleet\/runner\/jobs\/([^/]+)\/logs\/(run|stdout|stderr)$/.exec(url.pathname);
+    if (logRoute && req.method === 'PUT') {
+      const key = `${logRoute[1]}:${logRoute[2]}`;
+      const text = Buffer.from(await req.arrayBuffer()).toString('utf8');
+      const offset = Number(url.searchParams.get('offset'));
+      const final = url.searchParams.get('final') === '1';
+      const current = server.logs.get(key) ?? '';
+      const next = offset === current.length ? current + text : current;
+      server.logs.set(key, next);
+      if (final) server.order.push(`log-final:${logRoute[2]}`);
+      const outcome = final && offset + text.length === next.length ? 'complete' : offset === current.length ? 'appended' : 'offset';
+      return envelope({ outcome, size: next.length });
+    }
+    return new Response('nope', { status: 404 });
+  };
   return server;
 }
 
@@ -103,7 +102,7 @@ describe('startDaemon', () => {
     const server = fakeServer();
     const s = await setup(server);
     const log = createMemoryLogger();
-    const daemon = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, log, executorFactory: () => s.ex });
+    const daemon = await startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, log, executorFactory: () => s.ex });
     try {
       await waitFor(() => server.syncs.length >= 1);
       expect(server.syncs[0]).toMatchObject({ protocolVersion: FLEET_PROTOCOL_VERSION, bootId: daemon.bootId, freeSlots: 2, jobs: [] });
@@ -132,7 +131,7 @@ describe('startDaemon', () => {
     await writeFile(join(files, 'nax.stdout'), 'hello\nworld\n');
     await writeFile(join(files, 'nax.stderr'), 'tail without newline');
     s.ex.logFiles = { outDir: join(files, 'nax-out'), feature: 'f', stdoutPath: join(files, 'nax.stdout'), stderrPath: join(files, 'nax.stderr'), runLog: false };
-    const daemon = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, log: createMemoryLogger(), executorFactory: () => s.ex });
+    const daemon = await startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, log: createMemoryLogger(), executorFactory: () => s.ex });
     try {
       await waitFor(() => server.syncs.length >= 1);
       expect(server.syncs[0].protocolVersion).toBe(4);
@@ -156,7 +155,7 @@ describe('startDaemon', () => {
     const server = fakeServer();
     const s = await setup(server);
     s.ex.onTick = () => undefined;                                   // never exits on its own
-    const daemon = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => s.ex });
+    const daemon = await startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => s.ex });
     try {
       server.queue.push({ commandId: 'c1', type: 'ASSIGN', jobId: 'j1', leaseEpoch: 1, payload: assignFor('RUN') });
       await waitFor(() => server.syncs.some((sync) => sync.freeSlots === 1));
@@ -171,7 +170,7 @@ describe('startDaemon', () => {
     const server = fakeServer();
     server.mode.status = 426;
     const s = await setup(server);
-    const daemon = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, log: createMemoryLogger(), executorFactory: () => s.ex });
+    const daemon = await startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, log: createMemoryLogger(), executorFactory: () => s.ex });
     try {
       expect(await daemon.stopped).toMatchObject({ kind: 'protocol' });
     } finally {
@@ -186,7 +185,7 @@ describe('startDaemon', () => {
     let failMe = true;
     const fetchFn = async (url: string, init?: RequestInit) => {
       if (failMe && url.endsWith('/me')) throw new TypeError('connect ECONNREFUSED');
-      return fetch(url, init);
+      return server.fetch(url, init);
     };
     const daemon = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning: { ...tuning, capacityRefreshMs: 30 }, log: createMemoryLogger(), fetchFn, executorFactory: () => s.ex });
     try {
@@ -216,7 +215,7 @@ describe('startDaemon', () => {
     old.close();
     await mkdir(join(s.config.naxHome, 'profiles'), { recursive: true });
     for (const name of ['koda-job-jorphan.json', 'koda-job-jlive.json', 'machine.json']) await writeFile(join(s.config.naxHome, 'profiles', name), '{}');
-    const daemon = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => s.ex });
+    const daemon = await startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => s.ex });
     try {
       expect(daemon.journal.getJob('jold', 1)).toBeNull();
       expect(daemon.journal.getJob('jlive', 1)).not.toBeNull();
@@ -245,7 +244,7 @@ describe('startDaemon', () => {
     old.markDone('jorphan', 1);
     old.close();
     const log = createMemoryLogger();
-    const daemon = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, log, executorFactory: () => s.ex });
+    const daemon = await startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, log, executorFactory: () => s.ex });
     try {
       expect(daemon.journal.getJob('jorphan', 1)).toBeNull();
       await expect(stat(oldDir)).rejects.toThrow();
@@ -262,7 +261,7 @@ describe('startDaemon', () => {
     if (process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0)) return;
     const server = fakeServer();
     const s = await setup(server);
-    const daemon = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => s.ex });
+    const daemon = await startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => s.ex });
     try {
       expect((await stat(s.home.dir)).mode & 0o777).toBe(0o700);
       expect((await stat(s.home.journalPath)).mode & 0o777).toBe(0o600);
@@ -276,13 +275,13 @@ describe('startDaemon', () => {
     const server = fakeServer();
     const s = await setup(server);
     s.ex.onTick = () => undefined;
-    const first = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => s.ex });
+    const first = await startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => s.ex });
     server.queue.push({ commandId: 'c1', type: 'ASSIGN', jobId: 'j1', leaseEpoch: 1, payload: assignFor('RUN') });
     await waitFor(() => s.ex.ticks >= 1);
     await first.stop();
     await first.stop();                                              // idempotent
     expect(s.ex.killed).toEqual([]);
-    const second = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => new FakeExecutor() });
+    const second = await startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => new FakeExecutor() });
     try {
       expect(second.bootId).not.toBe(first.bootId);
       expect(second.journal.getJob('j1', 1)).toMatchObject({ state: 'RUNNING', pid: 4242 });
@@ -301,7 +300,7 @@ describe('startDaemon', () => {
     const gate = new Promise<void>((resolve) => { release = resolve; });
     let preparing = false;
     s.ex.prepare = async () => { preparing = true; await gate; return { ok: true, branch: 'feat/x' }; };
-    const daemon = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => s.ex });
+    const daemon = await startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => s.ex });
     try {
       server.queue.push({ commandId: 'c1', type: 'ASSIGN', jobId: 'j1', leaseEpoch: 1, payload: assignFor('RUN') });
       await waitFor(() => preparing);
@@ -331,7 +330,7 @@ describe('startDaemon', () => {
     const server = fakeServer();
     const s = await setup(server);
     s.ex.onTick = () => undefined;
-    const first = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => s.ex });
+    const first = await startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => s.ex });
     server.queue.push({ commandId: 'c1', type: 'ASSIGN', jobId: 'j1', leaseEpoch: 1, payload: assignFor('RUN') });
     await waitFor(() => s.ex.ticks >= 1);
     first.crash();
@@ -339,7 +338,7 @@ describe('startDaemon', () => {
     expect(s.ex.killed).toEqual([]);
     await first.stopped;                                              // the aborted loop ends
     await first.stop();                                               // a stop after a crash is a no-op
-    const second = await startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => new FakeExecutor() });
+    const second = await startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, executorFactory: () => new FakeExecutor() });
     try {
       expect(second.bootId).not.toBe(first.bootId);
       expect(second.journal.getJob('j1', 1)).toMatchObject({ state: 'RUNNING', pid: 4242 });
@@ -354,7 +353,7 @@ describe('startDaemon', () => {
     const server = fakeServer();
     const s = await setup(server);
     const oldGit: Git = { run: async () => ({ code: 0, stdout: 'git version 2.29.2\n', stderr: '' }), ok: async () => 'git version 2.29.2\n' };
-    await expect(startDaemon({ home: s.home, config: s.config, identity: s.identity, tuning, git: oldGit, executorFactory: () => s.ex })).rejects.toThrow(/git 2\.30 or newer/);
+    await expect(startDaemon({ fetchFn: server.fetch, home: s.home, config: s.config, identity: s.identity, tuning, git: oldGit, executorFactory: () => s.ex })).rejects.toThrow(/git 2\.30 or newer/);
     await expect(stat(s.home.journalPath)).rejects.toThrow();
     await expect(stat(join(s.config.workspaceRoot, '.jobs'))).rejects.toThrow();
     server.stop();
@@ -368,7 +367,7 @@ describe('startDaemon, capabilities from nax (D95, D97, D102, D103)', () => {
       serverUrl: server.url, workspaceRoot: join(s.base, 'ws'), naxHome: join(s.base, 'naxhome'), jobRetentionDays: 1, socketDir: join(s.base, 's'),
     }, {});
     const start = (over: Partial<Parameters<typeof startDaemon>[0]> = {}) =>
-      startDaemon({ home: s.home, config, identity: s.identity, tuning, nax, executorFactory: () => s.ex, ...over });
+      startDaemon({ fetchFn: server.fetch, home: s.home, config, identity: s.identity, tuning, nax, executorFactory: () => s.ex, ...over });
     return { ...s, config, start };
   }
   const withCapabilities = (server: FakeServer) => server.syncs.filter((sync) => sync.capabilities !== undefined);

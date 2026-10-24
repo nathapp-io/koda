@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b 1d US-001 AC-12 (PG): applying 20261022090000_chat_thread_workspace to the schema every earlier
  * migration builds creates `ChatThread_createdById_kind_lastActivityAt_idx` on `ChatThread` over
@@ -11,7 +12,8 @@
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { applyMigration, migrationsBefore, scratchSchemaBefore, ScratchSchema } from '../../helpers/migration-schema';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const MIGRATION = '20261022090000_chat_thread_workspace';
 const INDEX = 'ChatThread_createdById_kind_lastActivityAt_idx';
 const SCHEMA = 'chat_thread_workspace_mig';

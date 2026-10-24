@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1a US-003 — MembershipService against real Postgres (AC-16 .. AC-25): concurrent
  * idempotent creates, binding-derived token revocation, and the owner-row lock.
@@ -18,7 +19,8 @@ import { PrismaRoleRepository } from '../../../src/permissions/prisma-role.repos
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 import { resetDb } from '../../helpers/reset-db';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('MembershipService (PG)', () => {
   let moduleRef: TestingModule;

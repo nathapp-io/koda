@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S2a slice 1c — log read routes over HTTP (PG), spec §3.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-log-read.integration.spec.ts
@@ -13,7 +14,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const line = (level: string, message: string, storyId = 'US-001') =>
   `${JSON.stringify({ timestamp: '2026-10-04T08:00:00.000Z', level, stage: 'run', storyId, message })}\n`;
 

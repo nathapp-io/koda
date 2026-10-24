@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b workspace tools US-003 (1d2-D7) — `koda_my_projects` and the workspace-scoped tool route against PG.
  *
@@ -22,7 +23,8 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor, type ThreadJobSeed } from '../../helpers/thread-fixtures';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 20_000 });
 
 const DAY_MS = 86_400_000;

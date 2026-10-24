@@ -1,3 +1,4 @@
+import { isNaxSandboxed } from '../helpers/test-environment';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
@@ -23,7 +24,8 @@ async function run(argv: string[], opts: { stdin?: string; env?: Record<string, 
   return { stdout, stderr, code };
 }
 
-describe('koda-runner git-cred through real git (design §3.1, D80, D84)', () => {
+// The nax sandbox withholds real sockets or process inspection.
+describe.skipIf(isNaxSandboxed())('koda-runner git-cred through real git (design §3.1, D80, D84)', () => {
   test('`git credential fill` gets the job token for the job host', async () => {
     const sock = join(await tmp.make('cli'), 'c.sock');
     const server = await CredentialServer.listen(sock, async () => REPLY);
@@ -50,7 +52,8 @@ describe('koda-runner git-cred through real git (design §3.1, D80, D84)', () =>
 });
 
 describe('koda-runner shim through a real shim script (D87)', () => {
-  test('Review focus 4: gh gets the token, every argument byte for byte, a PATH without the shims; its exit code comes back', async () => {
+  // The nax sandbox withholds real TCP/Unix socket binding or ps.
+  test.skipIf(isNaxSandboxed())('Review focus 4: gh gets the token, every argument byte for byte, a PATH without the shims; its exit code comes back', async () => {
     const dir = await tmp.make('cli');
     const sock = join(dir, 'c.sock');
     const binDir = join(dir, 'bin');

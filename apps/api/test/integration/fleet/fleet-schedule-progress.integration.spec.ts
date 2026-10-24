@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1b slice 3a — auto-disable through the real transition path (PG): every §3.3 rule, counted once.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-schedule-progress.integration.spec.ts
@@ -14,7 +15,8 @@ import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../../../src/fleet/jo
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
 import { JobTransitionsService } from '../../../src/fleet/jobs/job-transitions.service';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 30_000 });
 

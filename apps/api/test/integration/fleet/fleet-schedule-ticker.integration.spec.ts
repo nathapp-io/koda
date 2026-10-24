@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1b slice 3a — ScheduleTicker on PG with a fixed clock: the claim, coalescing, skips and the disable paths.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-schedule-ticker.integration.spec.ts
@@ -14,7 +15,8 @@ import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
 import { PrismaScheduleRepository } from '../../../src/fleet/schedules/prisma-schedule.repository';
 import { ScheduleTicker } from '../../../src/fleet/schedules/schedule-ticker';
 
-const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 30_000 });
 

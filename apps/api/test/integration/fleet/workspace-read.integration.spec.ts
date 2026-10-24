@@ -1,3 +1,4 @@
+import { canRunDbTests } from '../../helpers/test-environment';
 /** US-004: WORKSPACE read routes, commands and the creator-only events stream (PG, real HTTP stack). */
 import type { AddressInfo } from 'net';
 import request from 'supertest';
@@ -12,7 +13,8 @@ import { LiveStreamRegistry } from '../../../src/live/live-stream-registry';
 import { ThreadEventBus } from '../../../src/live/thread-event-bus';
 import { FLEET_CFG, type IFleetConfig } from '../../../src/config/fleet.config';
 
-const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
+// The nax sandbox withholds host Postgres/Docker.
+const describeDb = canRunDbTests() ? describe : describe.skip;
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitFor(check: () => boolean, timeoutMs = 3000): Promise<void> {
   const start = Date.now();
