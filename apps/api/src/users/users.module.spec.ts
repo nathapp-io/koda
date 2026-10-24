@@ -1,3 +1,5 @@
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import { Global, Module } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { CacheManager } from '@nathapp/nestjs-cache';
@@ -15,6 +17,7 @@ import { UsersModule } from './users.module';
 @Global()
 @Module({
   providers: [
+    { provide: AuditRecorder, useValue: mockAuditRecorder },
     { provide: PrismaService, useValue: { client: {} } },
     {
       provide: TRANSACTION_MANAGER,
@@ -38,7 +41,7 @@ import { UsersModule } from './users.module';
       },
     },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, CacheManager, PermissionService, MembershipService],
+  exports: [AuditRecorder, PrismaService, TRANSACTION_MANAGER, CacheManager, PermissionService, MembershipService],
 })
 class FakeGlobalsModule {}
 

@@ -1,3 +1,4 @@
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
@@ -20,6 +21,8 @@ describe('AuthService', () => {
   let service: AuthService;
   let authRepo: PrismaAuthRepository;
   let moduleRef: TestingModule;
+
+  const mockAuditRecorder = { record: vi.fn() };
 
   const mockUser = {
     id: 'user-123',
@@ -78,6 +81,7 @@ describe('AuthService', () => {
   };
 
   beforeEach(async () => {
+    mockAuditRecorder.record.mockReset();
     // Drop queued once-values and per-test implementations so test order cannot matter.
     Object.values(mockAuthRepository).forEach((m) => m.mockReset());
     mockConfigService.get.mockReset();
@@ -89,6 +93,7 @@ describe('AuthService', () => {
     const module: TestingModule = moduleRef = await Test.createTestingModule({
       providers: [
         AuthService,
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         { provide: PrismaAuthRepository, useValue: mockAuthRepository },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: AUTH_CFG, useValue: mockAuthConfig },
@@ -174,6 +179,20 @@ describe('AuthService', () => {
   });
 
   describe('register', () => {
+    it('AC-14/18: records only registered for the created user', async () => {
+      // Run the real transaction callback rather than skipping it in the afterCommit stub.
+      mockMembership.afterCommit.mockImplementationOnce(fn => fn());
+      await service.register({ email: mockUser.email, name: mockUser.name, password: 'Password123!' });
+      expect(mockAuditRecorder.record).toHaveBeenCalledExactlyOnceWith({ key: 'auth.register', resourceType: 'user', resourceId: mockUser.id, projectId: null, summary: 'registered' });
+    });
+    it('AC-22: a locked registration refusal creates and records nothing', async () => {
+      mockMembership.afterCommit.mockImplementationOnce(fn => fn());
+      mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce(null);
+      await expect(service.register({ email: mockUser.email, password: 'Password123!' })).rejects.toMatchObject({ httpStatus: 403 });
+      expect(mockTxManager.run).toHaveBeenCalled();
+      expect(mockAuditRecorder.record).not.toHaveBeenCalled();
+      expect(mockMembership.bindBaseline).not.toHaveBeenCalled();
+    });
     it('should create a new user with bcrypt hashed password', async () => {
       const registerDto = {
         email: 'newuser@example.com',

@@ -9,7 +9,7 @@ import type { ProjectInvitePreview } from './prisma-project-invites.repository';
 
 /**
  * S4b US-005: `InviteAcceptanceService` is constructed with, in order —
- * `(invitesRepo, membersRepo, authService, txManager, membership)`.
+ * `(invitesRepo, membersRepo, authService, txManager, membership, audit)`.
  */
 
 const NOW = new Date('2026-10-10T10:00:00Z');
@@ -110,15 +110,19 @@ function setup(opts: SetupOptions = {}) {
     }),
     bindBaseline: vi.fn(async () => { calls.push('baseline'); }),
   };
+  const mockAuditRecorder = { record: vi.fn(async (_input: unknown) => {
+    expect(inTransaction).toBe(true);
+  }) };
   const service = new InviteAcceptanceService(
     invites as never,
     members as never,
     auth as never,
     txManager as never,
     membership as never,
+    mockAuditRecorder as never,
   );
 
-  return { service, invites, members, membership, auth, calls, isInTransaction: () => inTransaction };
+  return { service, audit: mockAuditRecorder, invites, members, membership, auth, calls, isInTransaction: () => inTransaction };
 }
 
 const validBody = { name: 'New User', password: 'StrongPass123!' };
@@ -182,6 +186,16 @@ describe('InviteAcceptanceService.accept (S4b US-005)', () => {
   });
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('AC-10/12: acceptance records once after binding; replay records nothing', async () => {
+    const { service, audit, invites, membership } = setup();
+    await service.accept(RAW, validBody);
+    expect(audit.record).toHaveBeenCalledExactlyOnceWith({ key: 'invite.accept', resourceType: 'project-invite', resourceId: 'i1', projectId: 'p1', summary: 'accepted by USER u1' });
+    expect(membership.bindBaseline.mock.invocationCallOrder[0]).toBeLessThan(audit.record.mock.invocationCallOrder[0]);
+    invites.findByTokenHash.mockResolvedValueOnce(inviteRow({ status: 'ACCEPTED' }));
+    await expect(service.accept(RAW, validBody)).rejects.toMatchObject({ httpStatus: 404 });
+    expect(audit.record).toHaveBeenCalledTimes(1);
   });
 
   it('AC-3/AC-4: creates the MEMBER account, the invite-role membership and issues the session after commit', async () => {

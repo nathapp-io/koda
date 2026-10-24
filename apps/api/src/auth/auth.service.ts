@@ -4,6 +4,7 @@ import { AuthException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { CacheManager } from '@nathapp/nestjs-cache';
 import * as bcrypt from 'bcrypt';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import type { IPrincipal } from './types';
@@ -39,6 +40,7 @@ export class AuthService {
     @Inject(AUTH_CFG) private readonly authConfig: IAuthConfig,
     private readonly membership: MembershipService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -97,6 +99,10 @@ export class AuthService {
         // baseline. The hooks run before the session is issued.
         await this.membership.bindOwnerIfFirst(outcome.user.id, outcome.firstUser);
         await this.membership.bindBaseline({ type: 'USER', id: outcome.user.id });
+        await this.audit.record({
+          key: 'auth.register', resourceType: 'user', resourceId: outcome.user.id,
+          projectId: null, summary: 'registered',
+        });
         return outcome.user;
       }),
     );

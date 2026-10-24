@@ -16,6 +16,7 @@ describe('UsersAdminService', () => {
   let cache: { invalidate: Mock };
   let membership: { bindBaseline: Mock; setGlobalAdmin: Mock; isGlobalAdmin: Mock; afterCommit: Mock };
   let service: UsersAdminService;
+  let mockAuditRecorder: { record: Mock };
   /** The row `findById`/`updateUser` serve, so the service's reads reflect what was stored. */
   let stored: UserAdminRecord;
 
@@ -40,10 +41,19 @@ describe('UsersAdminService', () => {
       afterCommit: vi.fn((fn: () => Promise<unknown>) => fn()),
     };
     const txManager = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
-    // Permissions P1a (US-004): MembershipService is the required fourth parameter.
-    service = new UsersAdminService(repo as never, txManager as never, cache as never, membership as never);
+    mockAuditRecorder = { record: vi.fn() };
+    service = new UsersAdminService(repo as never, txManager as never, cache as never, membership as never, mockAuditRecorder as never);
   });
 
+  it('AC-16/18: create records only created, never account secrets', async () => {
+    repo.createUser.mockResolvedValue(user());
+    await service.create({ email: 'secret@k.t', name: 'Secret Name', password: 'Admin1234!Aa' });
+    expect(mockAuditRecorder.record).toHaveBeenCalledExactlyOnceWith({ key: 'user.create', resourceType: 'user', resourceId: 'u2', projectId: null, summary: 'created' });
+  });
+  it('AC-17: update records patch field names only', async () => {
+    await service.update('u1', 'u2', { disabled: true });
+    expect(mockAuditRecorder.record).toHaveBeenCalledExactlyOnceWith({ key: 'user.update', resourceType: 'user', resourceId: 'u2', projectId: null, summary: 'fields: disabled' });
+  });
   describe('create', () => {
     it('hashes the password and never returns it', async () => {
       // A record carrying an extra passwordHash proves UserAdminDto.from drops it.

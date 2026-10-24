@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import * as bcrypt from 'bcrypt';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { AuthService } from '../../auth/auth.service';
 import { AuthResponseDto } from '../../auth/dto/auth-response.dto';
 import { UserDomain } from '../../auth/domain/auth.domain';
@@ -44,6 +45,7 @@ export class InviteAcceptanceService {
     private readonly auth: AuthService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly membership: MembershipService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async preview(token: string): Promise<InvitePreviewDto> {
@@ -96,6 +98,10 @@ export class InviteAcceptanceService {
         throw new ConflictAppException({}, 'invites.roleGone');
       }
       await this.membership.bindBaseline({ type: 'USER', id: created.id });
+      await this.audit.record({
+        key: 'invite.accept', resourceType: 'project-invite', resourceId: invite.id,
+        projectId: invite.projectId, summary: `accepted by USER ${created.id}`,
+      });
       return created;
     }));
 
