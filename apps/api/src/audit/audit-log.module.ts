@@ -5,8 +5,10 @@ import { PrismaAuditEntryRepository } from './prisma-audit-entry.repository';
 import { PrismaAuditStorage } from './prisma-audit.storage';
 import { AuditRecorder } from './audit-recorder.service';
 import { AuditLogService } from './audit-log.service';
+import { AuditController } from './audit.controller';
 
 @Module({
+  controllers: [AuditController],
   providers: [
     PrismaAuditEntryRepository,
     { provide: AUDIT_ENTRY_REPOSITORY, useExisting: PrismaAuditEntryRepository },

@@ -12,7 +12,6 @@ describe('permission contract checker', () => {
     'approval.decide',
     'approval.policy.read',
     'approval.policy.manage',
-    'audit.read',
     'fleet.approval.decide.assistant',
     // Permissions P1 US-003 deleted the two member routes that declared this key. Removing a
     // principal from a project is now deleting its bindings, which `role.binding.manage` gates, and
@@ -43,6 +42,10 @@ describe('permission contract checker', () => {
     new Set(violations.map((violation) => JSON.stringify(violation)));
   const contains = (violations: readonly ContractViolation[], expected: ContractViolation) =>
     expect(asSet(violations)).toContain(JSON.stringify(expected));
+
+  it('AC-14: audit.read is no longer pending', () => {
+    expect(PENDING_SURFACE_KEYS.has('audit.read')).toBe(false);
+  });
 
   it('defines exactly the pending surface keys and each exists in the catalog', () => {
     expect(PENDING_SURFACE_KEYS).toEqual(expectedPending);

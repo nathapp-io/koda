@@ -338,6 +338,17 @@ describeIntegration('API Integration Tests', () => {
   // 2. Agent Registration & Auth
   // ─────────────────────────────────────────────────────────────────
 
+  describe('Audit log', () => {
+    it('AC-15: GET /api/audit with the admin token returns 200', async () => {
+      const res = await request(httpServer).get('/api/audit')
+        .set('Authorization', `Bearer ${userAccessToken}`).expect(200);
+      expect(body(res)).toMatchObject({ current: 1, size: 20, records: expect.any(Array) });
+    });
+    it('GET /api/audit without credentials returns 401', async () => {
+      await request(httpServer).get('/api/audit').expect(401);
+    });
+  });
+
   describe('2. Agent Registration & Auth', () => {
     it('POST /api/agents — creates an agent (needs user token)', async () => {
       const res = await request(httpServer)

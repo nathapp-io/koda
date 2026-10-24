@@ -10,12 +10,14 @@ import { AuditLogModule } from './audit-log.module';
 import { PrismaAuditEntryRepository } from './prisma-audit-entry.repository';
 import { PrismaAuditStorage } from './prisma-audit.storage';
 import { AuditLogService } from './audit-log.service';
+import { PermissionService } from '../permissions/permission.service';
 
 @Global()
 @Module({ providers: [
+  { provide: PermissionService, useValue: { can: vi.fn() } },
   { provide: PrismaService, useValue: { client: {} } },
   { provide: TRANSACTION_MANAGER, useValue: { run: vi.fn(), getClient: vi.fn(), isInTransaction: vi.fn() } },
-], exports: [PrismaService, TRANSACTION_MANAGER] })
+], exports: [PrismaService, TRANSACTION_MANAGER, PermissionService] })
 class GlobalMocksModule {}
 
 describe('AuditLogModule', () => {
