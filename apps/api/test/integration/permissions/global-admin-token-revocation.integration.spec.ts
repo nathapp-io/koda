@@ -1,11 +1,11 @@
 import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import type { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { ensureSystemRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const integration = canRunDbTests() ? describe : describe.skip;
@@ -17,7 +17,7 @@ integration('global admin token revocation (PG)', () => {
   let member: Session;
   beforeAll(async () => {
     app = await bootHttpApp({ registrationEnabled: true });
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    db = fixtureDb(app);
   });
   beforeEach(async () => {
     await resetDb(); await ensureSystemRoles(db); resetThrottle(app);
@@ -31,6 +31,9 @@ integration('global admin token revocation (PG)', () => {
     .post('/api/role-bindings').auth(owner.accessToken, { type: 'bearer' })
     .send({ principalType: 'USER', principalId: member.user.id, roleKey, projectId }).expect(201));
   const version = async () => (await db.user.findUniqueOrThrow({ where: { id: member.user.id } })).tokenVersion;
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
   it('AC-9: global grant revokes warmed member token', async () => {
     await me(member.accessToken).expect(200); const before = await version();
     await grant('admin'); expect(await version()).toBe(before + 1);

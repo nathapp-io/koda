@@ -4,14 +4,14 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && KODA_DB_TESTS=1 bun run test:scoped test/integration/fleet/fleet-pr-links.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import request from 'supertest';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
-import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { FleetJobTicketEffects } from '../../../src/fleet/tickets/fleet-job-ticket.effects';
 import { PrismaFleetTicketsRepository } from '../../../src/fleet/tickets/prisma-fleet-tickets.repository';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -21,7 +21,14 @@ describeIntegration('fleet PR links (PG)', () => {
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
   let effects: FleetJobTicketEffects;
+  let runnerId: string;
   let n = 0;
+  /**
+   * The PR-link effects run on the runner's sync, which is where production reports a job terminal, so a
+   * direct call runs as the job's runner.
+   */
+  const onTerminal = (jobId: string) => withTestActor({ type: 'RUNNER', id: runnerId }, () => effects.onTerminal([jobId]));
+  const upsertPrLinks = (jobId: string) => withTestActor({ type: 'RUNNER', id: runnerId }, () => effects.upsertPrLinks(jobId));
 
   const ticket = async () => {
     n += 1;
@@ -32,6 +39,7 @@ describeIntegration('fleet PR links (PG)', () => {
       data: {
         projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'RUN', feature: `f${n}-${ticketIds.length}`, profiles: [],
         maxCostUsd: new Prisma.Decimal('1'), selectorLabels: [], requestedById: world.ids.dev, state, leaseEpoch: 1, resultPrUrl,
+        runnerId, startedAt: new Date(), finishedAt: state === 'COMPLETED' ? new Date() : null,
       },
     });
     await prisma.fleetJobTicket.createMany({ data: ticketIds.map((ticketId) => ({ jobId: job.id, ticketId })) });
@@ -42,19 +50,24 @@ describeIntegration('fleet PR links (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     effects = app.get(FleetJobTicketEffects);
+    runnerId = (await insertRunner(prisma)).id;
   });
   afterAll(async () => {
     await app.close();
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('creates one fleet pr link per linked ticket, once, with a TICKET_UPDATED event', async () => {
     const [a, b] = [await ticket(), await ticket()];
     const job = await jobFor([a.id, b.id], 'https://github.com/acme/app/pull/9');
-    await effects.onTerminal([job.id]);
-    await effects.onTerminal([job.id]);
+    await onTerminal(job.id);
+    await onTerminal(job.id);
     for (const t of [a, b]) {
       expect(await links(t.id)).toEqual([expect.objectContaining({
         url: 'https://github.com/acme/app/pull/9', provider: 'github', linkType: 'pr', source: 'fleet', jobId: job.id,
@@ -69,31 +82,33 @@ describeIntegration('fleet PR links (PG)', () => {
     const url = 'https://github.com/acme/app/pull/10';
     await prisma.ticketLink.create({ data: { ticketId: t.id, url, provider: 'github', linkType: 'pr', prNumber: 10, externalRef: 'acme/app#10', prState: 'draft' } });
     const job = await jobFor([t.id], url);
-    await effects.upsertPrLinks(job.id);
+    await upsertPrLinks(job.id);
     expect(await links(t.id)).toEqual([expect.objectContaining({ source: 'vcs', jobId: job.id, prState: 'draft' })]);
     expect(await prisma.ticketEvent.count({ where: { ticketId: t.id, action: 'TICKET_UPDATED' } })).toBe(0);
   });
 
   it('ignores a PR URL on another repo, and a job without a PR', async () => {
     const t = await ticket();
-    await effects.upsertPrLinks((await jobFor([t.id], 'https://github.com/evil/fork/pull/1')).id);
-    await effects.upsertPrLinks((await jobFor([t.id], null, 'FAILED')).id);
+    await upsertPrLinks((await jobFor([t.id], 'https://github.com/evil/fork/pull/1')).id);
+    await upsertPrLinks((await jobFor([t.id], null, 'FAILED')).id);
     expect(await links(t.id)).toEqual([]);
   });
 
   it('unlink removes the fleet PR link but not a vcs link', async () => {
     const t = await ticket();
     const job = await jobFor([t.id], 'https://github.com/acme/app/pull/11');
-    await effects.upsertPrLinks(job.id);
+    await upsertPrLinks(job.id);
     await prisma.ticketLink.create({ data: { ticketId: t.id, url: 'https://example.com/doc', provider: 'other', linkType: 'url' } });
-    await expect(app.get(PrismaFleetTicketsRepository).unlink(job.id, t.id)).resolves.toBe(true);
+    // Unlink is the ticket route's write, so it runs as the member who calls it.
+    await expect(withTestActor({ type: 'USER', id: world.ids.dev }, () => app.get(PrismaFleetTicketsRepository).unlink(job.id, t.id)))
+      .resolves.toBe(true);
     expect((await links(t.id)).map((l) => l.source)).toEqual(['vcs']);
   });
 
   it('the ticket detail response carries source and jobId on the fleet link', async () => {
     const t = await ticket();
     const job = await jobFor([t.id], 'https://github.com/acme/app/pull/12');
-    await effects.upsertPrLinks(job.id);
+    await upsertPrLinks(job.id);
     const body = data<{ links: Array<{ url: string; source: string; jobId: string | null }> }>(
       await request(app.getHttpServer()).get(`/api/projects/web/tickets/WEB-${t.number}`).set({ Authorization: `Bearer ${world.tokens.dev}` }).expect(200),
     );

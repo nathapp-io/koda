@@ -11,10 +11,10 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -45,7 +45,7 @@ const projectKey = (): string =>
 describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
   let app: NathApplication;
   let server: ReturnType<NathApplication['getHttpServer']>;
-  let prisma: PrismaService<PrismaClient>;
+  let prisma: PrismaClient;
   let rootToken: string;
   let viewerToken: string;
 
@@ -58,7 +58,7 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: true });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+    prisma = fixtureDb(app);
 
     // Global admin creates the project.
     const rootRes = await request(server).post('/api/auth/register')
@@ -86,16 +86,20 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
     await app.close();
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   // ── US-004 AC-1 (role gating) ──────────────────────────────────────────────
   it('US-004 AC-1: a project member whose role is not ADMIN is forbidden from inviting', async () => {
-    const slug = (await prisma.client.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
+    const slug = (await prisma.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
     const res = await post(`/projects/${slug}/invites`, { email: `${unique()}@x.io`, roleKey: 'developer' }, viewerToken);
     expect(res.status).toBe(403);
   });
 
   // ── US-004 AC-2 (existing active user) ────────────────────────────────────
   it('US-004 AC-2: inviting an active existing user adds them with the requested role and normalised email', async () => {
-    const slug = (await prisma.client.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
+    const slug = (await prisma.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
     const email = ` New@X.io `.trim();
 
     // Seed a global user with a normalised email outside the project.
@@ -112,9 +116,9 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
     // Permissions P1l US-006: the ADDED member names its bindings instead of a display role.
     expect(body.member?.bindings).toEqual([expect.objectContaining({ roleKey: 'developer' })]);
 
-    const projectId = (await prisma.client.project.findFirstOrThrow({ where: { slug } })).id;
-    const user = await prisma.client.user.findFirstOrThrow({ where: { email: userEmail } });
-    const membership = await prisma.client.roleBinding.findFirstOrThrow({
+    const projectId = (await prisma.project.findFirstOrThrow({ where: { slug } })).id;
+    const user = await prisma.user.findFirstOrThrow({ where: { email: userEmail } });
+    const membership = await prisma.roleBinding.findFirstOrThrow({
       where: { projectId, principalType: 'USER', principalId: user.id, role: { key: 'developer' } },
     });
     expect(membership.grantedByType).toBe('USER');
@@ -123,11 +127,11 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
 
   // ── US-004 AC-3 (already-member) ──────────────────────────────────────────
   it('US-004 AC-3: inviting an existing project member responds 409', async () => {
-    const slug = (await prisma.client.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
-    const binding = await prisma.client.roleBinding.findFirstOrThrow({
+    const slug = (await prisma.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
+    const binding = await prisma.roleBinding.findFirstOrThrow({
       where: { project: { slug }, principalType: 'USER', role: { key: 'developer' } },
     });
-    const member = await prisma.client.user.findUniqueOrThrow({ where: { id: binding.principalId } });
+    const member = await prisma.user.findUniqueOrThrow({ where: { id: binding.principalId } });
 
     const res = await post(`/projects/${slug}/invites`, { email: member.email, roleKey: 'developer' });
     expect(res.status).toBe(409);
@@ -135,12 +139,12 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
 
   // ── US-004 AC-4 (disabled user) ───────────────────────────────────────────
   it('US-004 AC-4: inviting a disabled user responds 409', async () => {
-    const slug = (await prisma.client.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
+    const slug = (await prisma.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
     const disabledEmail = `disabled-${unique()}@koda.test`;
     await request(server).post('/api/auth/register')
       .send({ email: disabledEmail, name: 'Disabled', password: TEST_PASSWORD }).expect(201);
-    const user = await prisma.client.user.findFirstOrThrow({ where: { email: disabledEmail } });
-    await prisma.client.user.update({ where: { id: user.id }, data: { disabled: true } });
+    const user = await prisma.user.findFirstOrThrow({ where: { email: disabledEmail } });
+    await prisma.user.update({ where: { id: user.id }, data: { disabled: true } });
 
     const res = await post(`/projects/${slug}/invites`, { email: disabledEmail, roleKey: 'developer' });
     expect(res.status).toBe(409);
@@ -148,7 +152,7 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
 
   // ── US-004 AC-5 (new account → INVITED) ───────────────────────────────────
   it('US-004 AC-5: inviting a new email returns an INVITED outcome with a hash and a one-time raw path', async () => {
-    const slug = (await prisma.client.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
+    const slug = (await prisma.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
     const email = `new-${unique()}@example.com`;
 
     const res = await post(`/projects/${slug}/invites`, { email, roleKey: 'viewer' });
@@ -161,14 +165,14 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
     expect(body.emailed).toBe(false);
 
     const raw = (body.invitePath ?? '').split('/').pop() ?? '';
-    const row = await prisma.client.projectInvite.findFirstOrThrow({ where: { id: body.invite?.id } });
+    const row = await prisma.projectInvite.findFirstOrThrow({ where: { id: body.invite?.id } });
     expect(row.tokenHash).toMatch(/^[0-9a-f]{64}$/);
     expect(row.email).toBe(email);
   });
 
   // ── US-004 AC-6 (second invite cancels the first) ─────────────────────────
   it('US-004 AC-6: a second invite for the same project and email cancels the first', async () => {
-    const slug = (await prisma.client.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
+    const slug = (await prisma.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
     const email = `repeat-${unique()}@example.com`;
 
     const first = await post(`/projects/${slug}/invites`, { email, roleKey: 'developer' });
@@ -178,10 +182,10 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
     const second = await post(`/projects/${slug}/invites`, { email, roleKey: 'developer' });
     expect(second.status).toBe(201);
 
-    const cancelled = await prisma.client.projectInvite.findUniqueOrThrow({ where: { id: firstId } });
+    const cancelled = await prisma.projectInvite.findUniqueOrThrow({ where: { id: firstId } });
     expect(cancelled.status).toBe('CANCELLED');
 
-    const pending = await prisma.client.projectInvite.findMany({
+    const pending = await prisma.projectInvite.findMany({
       where: { project: { slug }, email, status: 'PENDING' },
     });
     expect(pending).toHaveLength(1);
@@ -189,7 +193,7 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
 
   // ── US-004 AC-7 (list omits token material) ───────────────────────────────
   it('US-004 AC-7: GET list returns invites with no token or tokenHash field', async () => {
-    const slug = (await prisma.client.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
+    const slug = (await prisma.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
     const res = await get(`/projects/${slug}/invites`);
     expect(res.status).toBe(200);
     const invites = data<InviteDto[]>(res);
@@ -205,12 +209,12 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
 
   // ── US-004 AC-8 (EXPIRED computed on read) ────────────────────────────────
   it('US-004 AC-8: a PENDING invite past its expiresAt is reported as EXPIRED without modifying the row', async () => {
-    const slug = (await prisma.client.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
+    const slug = (await prisma.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
     const email = `expired-${unique()}@example.com`;
     const created = await post(`/projects/${slug}/invites`, { email, roleKey: 'developer' });
     const id = (data<InviteCreateResult>(created).invite as InviteDto).id;
 
-    await prisma.client.projectInvite.update({
+    await prisma.projectInvite.update({
       where: { id },
       data: { expiresAt: new Date(Date.now() - 60_000) },
     });
@@ -220,13 +224,13 @@ describeIntegration('US-004 admin invite routes over HTTP (PG)', () => {
     const found = invites.find((i) => i.id === id);
     expect(found?.status).toBe('EXPIRED');
 
-    const row = await prisma.client.projectInvite.findUniqueOrThrow({ where: { id } });
+    const row = await prisma.projectInvite.findUniqueOrThrow({ where: { id } });
     expect(row.status).toBe('PENDING');
   });
 
   // ── US-004 AC-9 (bad role) ────────────────────────────────────────────────
   it('US-004 AC-9: a legacy role with no role key is rejected with 400', async () => {
-    const slug = (await prisma.client.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
+    const slug = (await prisma.project.findFirstOrThrow({ where: { name: 'S4b Admin' } })).slug;
     // US-004 (P1l): `role` is stripped, so this body carries no role name at all and the service
     // answers `invites.roleRequired` — a bad legacy enum can no longer reach the route.
     const res = await post(`/projects/${slug}/invites`, { email: `${unique()}@x.io`, role: 'AGENT' });

@@ -5,7 +5,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import { createHash } from 'node:crypto';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
 import { AssistantToolRegistry } from '../../../src/fleet/assistant/assistant-tool.registry';
@@ -15,6 +14,7 @@ import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissio
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -53,7 +53,7 @@ describeIntegration('AssistantToolExecutor audit and replay (PG, US-002)', () =>
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     executor = app.get(AssistantToolExecutor, { strict: false });
     app.get(AssistantToolRegistry, { strict: false }).register(tool);
     const base = await seedFleetBase(prisma);
@@ -71,6 +71,10 @@ describeIntegration('AssistantToolExecutor audit and replay (PG, US-002)', () =>
 
   const call = (over: Partial<{ jobId: string; toolCallId: string; name: string; input: unknown }> = {}) => ({
     jobId, toolCallId: 'c1', name: 'koda_fake_audit', input: { b: 1, a: { d: 2, c: 3 } }, ...over,
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('fixtures grant through bindings only', async () => {

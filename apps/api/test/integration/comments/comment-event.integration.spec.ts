@@ -5,10 +5,10 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 
 // The nax sandbox withholds host Postgres/Docker.
@@ -24,7 +24,7 @@ describeIntegration('comment create → COMMENT_ADDED (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get(PrismaService).client as PrismaClient;
+    prisma = fixtureDb(app);
     const root = await request(server).post('/api/auth/register')
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
     token = data<{ accessToken: string }>(root).accessToken;
@@ -36,6 +36,10 @@ describeIntegration('comment create → COMMENT_ADDED (PG)', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('writes the comment, a COMMENT_ADDED TicketEvent and a ticket_event outbox row', async () => {

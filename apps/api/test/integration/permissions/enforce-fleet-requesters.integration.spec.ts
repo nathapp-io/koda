@@ -15,9 +15,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { runWithActor } from '../../../src/action-context/action-context';
+import { ContextlessWriteError } from '../../../src/action-context/contextless-write';
 import { AppModule } from '../../../src/app.module';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { FleetJobTicketEffects } from '../../../src/fleet/tickets/fleet-job-ticket.effects';
@@ -30,7 +30,9 @@ import { SchedulesService } from '../../../src/fleet/schedules/schedules.service
 import type { DispatchFleetJobDto } from '../../../src/fleet/jobs/dto/dispatch-fleet-job.dto';
 import type { CreateScheduleDto } from '../../../src/fleet/schedules/dto/create-schedule.dto';
 import { FakeForge, startFakeForge } from '../../helpers/fake-forge';
+import { insertRunner } from '../../helpers/fleet-fixtures';
 import { resetDb } from '../../helpers/reset-db';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -60,6 +62,7 @@ describeIntegration('enforce-fleet requesters (PG)', () => {
   let repoId: string;
   let userId: string;
   let agentId: string;
+  let runnerId: string;
   let counter = 0;
 
   const dispatchDto = (feature: string): DispatchFleetJobDto => ({
@@ -96,7 +99,7 @@ describeIntegration('enforce-fleet requesters (PG)', () => {
     await resetDb();
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     await moduleRef.init();
-    prisma = moduleRef.get(PrismaService<PrismaClient>, { strict: false }).client as PrismaClient;
+    prisma = fixtureDb(moduleRef);
     jobs = moduleRef.get(FleetJobsService);
     jobRepo = moduleRef.get(FLEET_JOB_REPOSITORY);
     schedules = moduleRef.get(SchedulesService);
@@ -123,6 +126,8 @@ describeIntegration('enforce-fleet requesters (PG)', () => {
       data: { projectId, provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'trunk', githubInstallationId: BigInt(77), createdById: userId },
     });
     repoId = repo.id;
+    // Terminal-job fixtures retain their runner without making it available for new dispatches.
+    runnerId = (await insertRunner(prisma, { createdById: userId, enabled: false })).id;
   });
 
   afterAll(async () => {
@@ -143,6 +148,14 @@ describeIntegration('enforce-fleet requesters (PG)', () => {
   });
 
   // -------------------------------------------------------------------------
+  // The sentinel: the booted application's client refuses a context-less write
+  // -------------------------------------------------------------------------
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(moduleRef)).resolves.toBeUndefined();
+  });
+
+  // -------------------------------------------------------------------------
   // The sentinel: every fixture principal of this file is granted through bindings only
   // -------------------------------------------------------------------------
 
@@ -160,11 +173,23 @@ describeIntegration('enforce-fleet requesters (PG)', () => {
     expect(row).toEqual(expect.objectContaining({ requestedById: agentId, requestedByType: 'AGENT' }));
   });
 
-  it('AC-2: a user dispatch outside any context stores requestedByType USER', async () => {
-    const result = await jobs.dispatch(userId, projectId, dispatchDto('user-dispatch'));
+  it('AC-2: a user dispatch inside its actor context stores requestedByType USER', async () => {
+    const result = await withTestActor({ type: 'USER', id: userId }, () =>
+      jobs.dispatch(userId, projectId, dispatchDto('user-dispatch')));
 
     const row = await prisma.fleetJob.findUniqueOrThrow({ where: { id: result.job.id } });
     expect(row).toEqual(expect.objectContaining({ requestedById: userId, requestedByType: 'USER' }));
+  });
+
+  it('AC-3 (US-008): a user dispatch with no action context rejects with ContextlessWriteError and stores no job', async () => {
+    const before = await prisma.fleetJob.count();
+
+    await expect(jobs.dispatch(userId, projectId, dispatchDto('context-less-dispatch')))
+      .rejects.toBeInstanceOf(ContextlessWriteError);
+
+    // The guard refuses before `query` runs, so the transaction wrote nothing.
+    await expect(prisma.fleetJob.count()).resolves.toBe(before);
+    await expect(prisma.fleetJob.count({ where: { feature: 'context-less-dispatch' } })).resolves.toBe(0);
   });
 
   it('AC-3: an agent schedule create stores createdById the agent and createdByType AGENT', async () => {
@@ -182,19 +207,20 @@ describeIntegration('enforce-fleet requesters (PG)', () => {
   });
 
   it('AC-5: onTerminal writes no FLEET_JOB_OUTCOME outbox row for a FAILED job an agent requested', async () => {
-    const job = await newJob({ state: 'FAILED', requestedById: agentId, requestedByType: 'AGENT' });
+    const job = await newJob({ state: 'FAILED', requestedById: agentId, requestedByType: 'AGENT', runnerId });
 
     const record = await jobRepo.findById(job.id);
-    await outcomes.onTerminal(record as never);
+    // The runner holding the job reports its terminal transition.
+    await withTestActor({ type: 'RUNNER', id: runnerId }, () => outcomes.onTerminal(record as never));
 
     expect(await prisma.outboxEvent.count({ where: { type: 'fleet_job_outcome', eventId: `${job.id}:${job.leaseEpoch}` } })).toBe(0);
   });
 
   it('AC-6: onTerminal writes one FLEET_JOB_OUTCOME outbox row for the same FAILED job requested by a user', async () => {
-    const job = await newJob({ state: 'FAILED', requestedByType: 'USER' });
+    const job = await newJob({ state: 'FAILED', requestedByType: 'USER', runnerId });
 
     const record = await jobRepo.findById(job.id);
-    await outcomes.onTerminal(record as never);
+    await withTestActor({ type: 'RUNNER', id: runnerId }, () => outcomes.onTerminal(record as never));
 
     expect(await prisma.outboxEvent.count({ where: { type: 'fleet_job_outcome', eventId: `${job.id}:${job.leaseEpoch}` } })).toBe(1);
   });
@@ -212,11 +238,12 @@ describeIntegration('enforce-fleet requesters (PG)', () => {
   });
 
   it('AC-14: onTerminal records the failure comment of an AGENT-requested job as the agent', async () => {
-    const job = await newJob({ state: 'FAILED', requestedById: agentId, requestedByType: 'AGENT', feature: 'effects-agent' });
+    const job = await newJob({ state: 'FAILED', requestedById: agentId, requestedByType: 'AGENT', feature: 'effects-agent', runnerId });
     const ticket = await newTicket();
     await prisma.fleetJobTicket.create({ data: { jobId: job.id, ticketId: ticket.id } });
 
-    await effects.onTerminal([job.id]);
+    // The ticket effects carry the same runner actor as the terminal transition.
+    await withTestActor({ type: 'RUNNER', id: runnerId }, () => effects.onTerminal([job.id]));
 
     const comment = await prisma.comment.findFirstOrThrow({ where: { ticketId: ticket.id } });
     expect(comment.body).toContain('FAILED');
@@ -237,8 +264,9 @@ describeIntegration('enforce-fleet requesters (PG)', () => {
     expect(JSON.parse(outbox.payload)).toEqual(expect.objectContaining({ actorType: 'agent', actorId: agentId }));
   });
 
-  it('keeps the user paths: a schedule created outside any context and a user-requested job record USER', async () => {
-    const schedule = await schedules.create(userId, projectId, scheduleDto('user-schedule'));
+  it('keeps the user paths: a schedule a user creates and a user-requested job record USER', async () => {
+    const schedule = await withTestActor({ type: 'USER', id: userId }, () =>
+      schedules.create(userId, projectId, scheduleDto('user-schedule')));
     expect(await prisma.jobSchedule.findUniqueOrThrow({ where: { id: schedule.id } }))
       .toEqual(expect.objectContaining({ createdById: userId, createdByType: 'USER' }));
 

@@ -20,7 +20,6 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { CommonExceptionCode } from '@nathapp/nestjs-common';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
@@ -28,6 +27,7 @@ import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../sr
 import { RagService } from '../../../src/rag/rag.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { asTestActor, expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -129,8 +129,10 @@ describeIntegration('knowledge-base route keys and row ownership (US-007)', () =
     }
 
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
-    membership = app.get(MembershipService);
+    prisma = fixtureDb(app);
+    // The bindings below are fixture grants with no request principal, so the service writes as
+    // `SYSTEM/seed` — the same component `fixtureDb` writes under.
+    membership = asTestActor(app.get(MembershipService), { type: 'SYSTEM', id: 'seed' });
     rag = app.get(RagService);
 
     const root = await request(server).post('/api/auth/register')
@@ -152,6 +154,10 @@ describeIntegration('knowledge-base route keys and row ownership (US-007)', () =
   }, BOOT_TIMEOUT);
 
   afterAll(async () => { await app?.close(); });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('fixtures grant through bindings only', async () => {
     await expectBindingOnlyFixtures(prisma, [

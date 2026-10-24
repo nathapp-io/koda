@@ -16,7 +16,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { InternalAppException } from '@nathapp/nestjs-common';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MEMBERSHIP_READ_CAP, accessibleProjectIds, readAccessibleProjectIds } from '../../../src/permissions/membership.queries';
@@ -24,6 +23,7 @@ import { MembershipService } from '../../../src/permissions/membership.service';
 import type { PrincipalRef } from '../../../src/permissions/permissions.types';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -73,7 +73,8 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
   const agentPrincipal = (who: string): PrincipalRef => ({ type: 'AGENT', id: agents[who].id });
 
   const bind = (principal: PrincipalRef, roleKey: string, projectId: string | null): Promise<unknown> =>
-    membership.createBinding({ principal, roleKey, projectId }, { type: 'USER', id: rootId });
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+      membership.createBinding({ principal, roleKey, projectId }, { type: 'USER', id: rootId }));
 
   /** A MEMBER-role user with a working token; registration is closed, so it goes through the admin route. */
   const createUser = async (who: string): Promise<void> => {
@@ -102,7 +103,7 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     membership = app.get(MembershipService);
 
     // The bootstrap registration: the first user is the installation Owner, so it is a global ADMIN.
@@ -163,11 +164,18 @@ describeIntegration('project access and project lists read bindings (US-002, PG)
 
     // The legacy rows: a ProjectMember row for legDev (US-002 AC-5) and for listUser in p2 (AC-10),
     // plus the AgentProject row AC-14's PATCH target needs.
-    await membership.createBinding({ principal: { type: 'AGENT', id: agents.agRoster.id }, roleKey: 'viewer', projectId: projectIds.p1 }, { type: 'USER', id: rootId });
+    await withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
+      { principal: { type: 'AGENT', id: agents.agRoster.id }, roleKey: 'viewer', projectId: projectIds.p1 },
+      { type: 'USER', id: rootId },
+    ));
   }, 120_000);
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: a developer binding is enough to read the project tickets', async () => {
@@ -351,7 +359,7 @@ describeIntegration('project lists past the membership read cap (US-002 AC-11, P
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     const membership = app.get(MembershipService);
 
     const root = await request(server).post('/api/auth/register')
@@ -370,15 +378,19 @@ describeIntegration('project lists past the membership read cap (US-002 AC-11, P
     const agent = data<{ apiKey: string; agent: { id: string } }>(created);
     agentKey = agent.apiKey;
     // The only source: a projectId-null PROJECT binding, which applies in every project.
-    await membership.createBinding(
+    await withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
       { principal: { type: 'AGENT', id: agent.agent.id }, roleKey: 'developer', projectId: null },
       { type: 'USER', id: rootId },
-    );
+    ));
 
   }, 180_000);
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-11: GET /projects lists all 5005 live projects, not the first read-cap page', async () => {

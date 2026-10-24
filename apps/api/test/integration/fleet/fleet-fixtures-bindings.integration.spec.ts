@@ -11,7 +11,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { PermissionService } from '../../../src/permissions/permission.service';
 import type { PrincipalRef } from '../../../src/permissions/permissions.types';
@@ -19,6 +18,7 @@ import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { rosterFleetAgent, seedFleetBase, seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -38,7 +38,7 @@ describeIntegration('fleet fixtures grant through bindings (PG, US-002)', () => 
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
   }, 120_000);
 
@@ -54,6 +54,10 @@ describeIntegration('fleet fixtures grant through bindings (PG, US-002)', () => 
       where: { principalType: principal.type, principalId: principal.id, projectId },
       include: { role: { select: { key: true } } },
     })).map((row) => row.role.key).sort();
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('AC-1: the world grants the ticket list through bindings: dev and viewer read it, an outsider is refused', async () => {
     await request(app.getHttpServer()).get('/api/projects/web/tickets').set(as('dev')).expect(200);

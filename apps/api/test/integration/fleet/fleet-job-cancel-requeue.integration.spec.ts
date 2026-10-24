@@ -5,11 +5,11 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -28,7 +28,7 @@ describeIntegration('fleet job cancel and requeue (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     ({ projectId, repoId, ids } = world);
   });
@@ -46,6 +46,10 @@ describeIntegration('fleet job cancel and requeue (PG)', () => {
   const reload = (id: string) => prisma.fleetJob.findUniqueOrThrow({ where: { id } });
   const post = (who: keyof FleetHttpWorld['tokens'], id: string, action: 'cancel' | 'requeue') =>
     request(server).post(`/api/projects/web/fleet/jobs/${id}/${action}`).set(auth(who));
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('cancels a QUEUED job on the server', async () => {
     const job = await insertJob('c-queued');

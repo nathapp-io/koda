@@ -7,12 +7,12 @@ import type { AddressInfo } from 'net';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { OutboxRelay } from '@nathapp/nestjs-outbox';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { TicketNotificationSubscriber } from '../../../src/notifications/ticket-notification.subscriber';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 import { openSse, SseConnection } from '../../helpers/sse-client';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 // The nax sandbox withholds host Postgres/Docker.
@@ -51,7 +51,7 @@ describeIntegration('notifications API (PG)', () => {
     server = app.getHttpServer();
     baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     relay = app.get(OutboxRelay);
-    prisma = app.get(PrismaService).client as PrismaClient;
+    prisma = fixtureDb(app);
 
     const root = await request(server).post('/api/auth/register')
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
@@ -90,6 +90,10 @@ describeIntegration('notifications API (PG)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('fixtures grant through bindings only', async () => {
@@ -138,8 +142,10 @@ describeIntegration('notifications API (PG)', () => {
     const before = await prisma.notification.count();
     const last = await prisma.outboxEvent.findFirstOrThrow({ where: { type: 'ticket_event' }, orderBy: { createdAt: 'desc' } });
     const subscriber = app.get(TicketNotificationSubscriber);
-    await subscriber.handle(JSON.parse(last.payload));
-    await subscriber.handle(JSON.parse(last.payload));
+    // A subscriber's `handle` runs inside `FanOutPublisher.publish` in production, as `SYSTEM/outbox`.
+    const replay = () => withTestActor({ type: 'SYSTEM', id: 'outbox' }, () => subscriber.handle(JSON.parse(last.payload)));
+    await replay();
+    await replay();
     expect(await prisma.notification.count()).toBe(before);
   });
 

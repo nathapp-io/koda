@@ -4,7 +4,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && KODA_DB_TESTS=1 bun run test:scoped test/integration/fleet/fleet-pr-matching.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
@@ -12,6 +11,7 @@ import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures
 import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 import { GitHubWebhookPayload, VcsWebhookService } from '../../../src/vcs/vcs-webhook.service';
 import type { VcsConnectionWithProjectDomain } from '../../../src/vcs/domain/vcs.domain';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -65,7 +65,7 @@ describeIntegration('repo-scoped VCS PR matching (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     vcsRepo = app.get(PrismaVcsRepository);
     webhook = app.get(VcsWebhookService);
@@ -79,6 +79,10 @@ describeIntegration('repo-scoped VCS PR matching (PG)', () => {
   });
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('a webhook for PR #5 closes the connection repo link and leaves the other repo fleet link open', async () => {

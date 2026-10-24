@@ -6,7 +6,6 @@ import type { MockInstance } from 'vitest';
  * Run: cd apps/api && KODA_DB_TESTS=1 bun run test:scoped test/integration/fleet/fleet-pr-refresher.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
@@ -16,6 +15,7 @@ import { FleetPrStateRefresher } from '../../../src/fleet/tickets/fleet-pr-state
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import type { TicketLinkData } from '../../../src/vcs/domain/vcs.repository';
 import type { VcsPrStatus } from '../../../src/vcs/types';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -54,7 +54,7 @@ describeIntegration('fleet PR-state refresher (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     refresher = app.get(FleetPrStateRefresher);
     const github = app.get(GitHubAppClient);
@@ -67,6 +67,10 @@ describeIntegration('fleet PR-state refresher (PG)', () => {
   });
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('a merged PR moves the ticket to VERIFY_FIX once; the next pass no longer reads it', async () => {
@@ -97,7 +101,11 @@ describeIntegration('fleet PR-state refresher (PG)', () => {
       where: { id: link.id },
       include: { ticket: { select: { id: true, status: true, projectId: true, number: true, externalVcsId: true } } },
     })) as TicketLinkData;
-    await Promise.all([refresher.refresh(), app.get(VcsPrSyncService).applyMergedPr(vcsView, merged)]);
+    await Promise.all([
+      refresher.refresh(),
+      // The VCS webhook/poll is the entry that applies a merge; it runs as the vcs system component.
+      withTestActor({ type: 'SYSTEM', id: 'vcs' }, () => app.get(VcsPrSyncService).applyMergedPr(vcsView, merged)),
+    ]);
     expect(await linkState(link.id)).toBe('merged');
     expect(await fixReports(ticket.id)).toBe(1);
     expect(await prisma.ticketActivity.count({ where: { ticketId: ticket.id, action: 'VCS_PR_MERGED' } })).toBe(1);

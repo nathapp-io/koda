@@ -2,7 +2,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaPendingActionRepository } from '../../../src/fleet/assistant/actions/prisma-pending-action.repository';
 import { PrismaAssistantToolCallRepository } from '../../../src/fleet/assistant/prisma-assistant-tool-call.repository';
@@ -11,6 +10,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor } from '../../helpers/thread-fixtures';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const integration = canRunDbTests() ? describe : describe.skip;
@@ -32,7 +32,7 @@ integration('assistant action actors (PG)', () => {
     process.env.FLEET_SWEEP_ENABLED = 'false';
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    db = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), db);
     runner = await enrollRunner(app.getHttpServer(), world.tokens.root, 'actor-runner', {
       capabilities: { ...FLEET_CAPS, kodaTools: true, threadBackends: { native: ['m1'], acp: [] }, threadWrite: true },
@@ -67,6 +67,10 @@ integration('assistant action actors (PG)', () => {
     await request(app.getHttpServer()).post(`/api/projects/web/fleet/approvals/${id}/decide`)
       .set('Authorization', `Bearer ${world.tokens.dev}`).send({ decision }).expect(200);
   }
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('AC-7: permits an agent direct action with null thread fields', async () => {
     expect(await direct()).toMatchObject({ actorType: 'agent', threadId: null, jobId: null, toolCallId: null });
@@ -130,7 +134,12 @@ integration('assistant action actors (PG)', () => {
     const row = await direct();
     expect(await actions.findById(row.id)).toBeNull();
     expect(await actions.lockById(row.id)).toBeNull();
-    await expect(actions.resolve(row.id, { status: 'FAILED', decidedAt: new Date() })).rejects.toThrow();
+    // A direct action's origin is not `thread`: the repository's own `origin: 'thread'` filter is what makes the
+    // update match nothing, so the rejection must be Prisma's record-not-found, not any error the write path throws.
+    // `resolve` is written from the decide request (`AssistantActionDecisions.decide` -> `settle`), so it runs as
+    // the user deciding — the same `dev` whose `decide` helper posts the approve/reject route above.
+    await expect(withTestActor({ type: 'USER', id: world.ids.dev }, () =>
+      actions.resolve(row.id, { status: 'FAILED', decidedAt: new Date() }))).rejects.toMatchObject({ code: 'P2025' });
     expect((await db.pendingAction.findUniqueOrThrow({ where: { id: row.id } })).status).toBe('EXECUTED');
     await db.pendingAction.update({ where: { id: row.id }, data: { status: 'PENDING', expiresAt: new Date(0) } });
     expect((await actions.findDue(new Date(), 100)).map((a) => a.id)).not.toContain(row.id);

@@ -4,7 +4,6 @@ import type { NathApplication } from '@nathapp/nestjs-app';
 import request from 'supertest';
 import { hashSync } from 'bcrypt';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import {
@@ -21,13 +20,13 @@ import { PermissionService } from '../../../src/permissions/permission.service';
 import type { Granter, PrincipalRef } from '../../../src/permissions/permissions.types';
 import { grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 describeIntegration('binding-only membership queries (PG)', () => {
   let moduleRef: NathApplication;
-  let prisma: PrismaService<PrismaClient>;
   let db: PrismaClient;
   let membership: MembershipService;
   let permissions: PermissionService;
@@ -79,14 +78,14 @@ describeIntegration('binding-only membership queries (PG)', () => {
     return db.project.create({ data: { name: label, slug: `${label}-${counter}`, key: `K${counter}` } });
   };
 
+  // Fixture grants run as `SYSTEM/seed`, the context the fixture client writes under.
   const bind = (principal: PrincipalRef, roleKey: string, projectId: string | null, by: Granter = SYSTEM) =>
-    membership.createBinding({ principal, roleKey, projectId }, by);
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding({ principal, roleKey, projectId }, by));
 
   beforeAll(async () => {
     await resetDb();
     moduleRef = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
-    prisma = moduleRef.get(PrismaService<PrismaClient>, { strict: false });
-    db = prisma.client as PrismaClient;
+    db = fixtureDb(moduleRef);
     membership = moduleRef.get(MembershipService);
     permissions = moduleRef.get(PermissionService);
   }, 30_000);
@@ -103,12 +102,16 @@ describeIntegration('binding-only membership queries (PG)', () => {
     await db.user.deleteMany({});
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(moduleRef)).resolves.toBeUndefined();
+  });
+
   it('AC-3: a user whose only source in p1 is a developer binding answers DEVELOPER', async () => {
     const user = await newUser();
     const p1 = await newProject('p1');
     await bind(USER(user.id), 'developer', p1.id);
 
-    expect(await userProjectRole(prisma.client, user.id, p1.id)).toBe('DEVELOPER');
+    expect(await userProjectRole(db, user.id, p1.id)).toBe('DEVELOPER');
   });
 
   it('AC-4: a project-admin binding maps to ADMIN from its binding', async () => {
@@ -116,7 +119,7 @@ describeIntegration('binding-only membership queries (PG)', () => {
     const p1 = await newProject('p1');
     await bind(USER(user.id), 'project-admin', p1.id);
 
-    expect(await userProjectRole(prisma.client, user.id, p1.id)).toBe('ADMIN');
+    expect(await userProjectRole(db, user.id, p1.id)).toBe('ADMIN');
   });
 
   it('AC-5: a projectId-null binding is an access source but never a local one', async () => {
@@ -124,8 +127,8 @@ describeIntegration('binding-only membership queries (PG)', () => {
     const p2 = await newProject('p2');
     await bind(USER(user.id), 'reviewer', null);
 
-    expect(await userProjectRole(prisma.client, user.id, p2.id)).toBe('VIEWER');
-    expect(await localProjectRole(prisma.client, USER(user.id), p2.id)).toBeNull();
+    expect(await userProjectRole(db, user.id, p2.id)).toBe('VIEWER');
+    expect(await localProjectRole(db, USER(user.id), p2.id)).toBeNull();
   });
 
   it('AC-6: a GLOBAL-scope binding is no source at all', async () => {
@@ -133,7 +136,7 @@ describeIntegration('binding-only membership queries (PG)', () => {
     const p1 = await newProject('p1');
     await bind(USER(user.id), 'admin', null);
 
-    expect(await userProjectRole(prisma.client, user.id, p1.id)).toBeNull();
+    expect(await userProjectRole(db, user.id, p1.id)).toBeNull();
   });
 
   it('AC-7: an agent with a viewer binding has project access, an unknown project does not', async () => {
@@ -141,8 +144,8 @@ describeIntegration('binding-only membership queries (PG)', () => {
     const p1 = await newProject('p1');
     await bind(AGENT(agent.id), 'viewer', p1.id);
 
-    expect(await agentHasProjectAccess(prisma.client, agent.id, p1.id)).toBe(true);
-    expect(await agentHasProjectAccess(prisma.client, agent.id, 'no-such-project')).toBe(false);
+    expect(await agentHasProjectAccess(db, agent.id, p1.id)).toBe(true);
+    expect(await agentHasProjectAccess(db, agent.id, 'no-such-project')).toBe(false);
   });
 
   it('AC-8: accessible project ids exclude unbound projects, minus soft-deleted projects', async () => {
@@ -154,7 +157,7 @@ describeIntegration('binding-only membership queries (PG)', () => {
     await bind(AGENT(agent.id), 'viewer', p3.id);
     await db.project.update({ where: { id: p3.id }, data: { deletedAt: new Date() } });
 
-    const ids = await accessibleProjectIds(prisma.client, AGENT(agent.id));
+    const ids = await accessibleProjectIds(db, AGENT(agent.id));
 
     expect(ids).toEqual([p2.id]);
     expect(ids).toEqual([...ids].sort());
@@ -168,7 +171,7 @@ describeIntegration('binding-only membership queries (PG)', () => {
     await bind(USER(user.id), 'developer', null);
     await db.project.update({ where: { id: p3.id }, data: { deletedAt: new Date() } });
 
-    expect(await accessibleProjectIds(prisma.client, USER(user.id))).toEqual([p1.id, p2.id].sort());
+    expect(await accessibleProjectIds(db, USER(user.id))).toEqual([p1.id, p2.id].sort());
   });
 
   it('AC-10: principal ids with access are the local sources plus the global project bindings', async () => {
@@ -184,7 +187,7 @@ describeIntegration('binding-only membership queries (PG)', () => {
     await bind(USER(globalAdmin.id), 'admin', null);
     await bind(USER(elsewhere.id), 'developer', p2.id);
 
-    expect(await principalIdsWithAccess(prisma.client, p1.id, 'USER')).toEqual(
+    expect(await principalIdsWithAccess(db, p1.id, 'USER')).toEqual(
       [bound.id, globally.id].sort(),
     );
   });
@@ -197,7 +200,7 @@ describeIntegration('binding-only membership queries (PG)', () => {
     const binding = await bind(AGENT(agent.id), 'viewer', p1.id, { type: 'USER', id: otherGranter.id });
     await bind(AGENT(rosterOnlyGlobal.id), 'developer', null);
 
-    const memberships = await listProjectMemberships(prisma.client, p1.id, 'AGENT');
+    const memberships = await listProjectMemberships(db, p1.id, 'AGENT');
 
     expect(memberships).toEqual([
       { principalId: agent.id, role: 'VIEWER', since: binding.createdAt, addedByUserId: otherGranter.id },
@@ -214,7 +217,7 @@ describeIntegration('binding-only membership queries (PG)', () => {
     await bind(USER(c.id), 'project-admin', p1.id);
     await bind(USER(d.id), 'project-admin', p1.id);
 
-    expect(await countActiveProjectAdmins(prisma.client, p1.id)).toBe(2);
+    expect(await countActiveProjectAdmins(db, p1.id)).toBe(2);
   });
 
   it('AC-14: removing the only binding in p1 takes the project key away from the next check', async () => {
@@ -225,7 +228,7 @@ describeIntegration('binding-only membership queries (PG)', () => {
 
     expect((await permissions.can(principal, 'ticket.create', { projectId: p1.id })).allowed).toBe(true);
 
-    await membership.removeBinding(binding.id);
+    await withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.removeBinding(binding.id));
 
     expect((await permissions.can(principal, 'ticket.create', { projectId: p1.id })).allowed).toBe(false);
   });
@@ -234,11 +237,11 @@ describeIntegration('binding-only membership queries (PG)', () => {
     const user = await newUser();
     const p1 = await newProject('p1');
     await bind(USER(user.id), 'viewer', p1.id);
-    expect(await userProjectRole(prisma.client, user.id, p1.id)).toBe('VIEWER');
+    expect(await userProjectRole(db, user.id, p1.id)).toBe('VIEWER');
 
     await bind(USER(user.id), 'project-admin', p1.id);
 
-    expect(await userProjectRole(prisma.client, user.id, p1.id)).toBe('ADMIN');
+    expect(await userProjectRole(db, user.id, p1.id)).toBe('ADMIN');
   });
 
   it('keeps the two principal types apart for the same project', async () => {
@@ -248,12 +251,12 @@ describeIntegration('binding-only membership queries (PG)', () => {
     await bind(USER(user.id), 'developer', p1.id);
     await bind(AGENT(agent.id), 'viewer', p1.id);
 
-    expect(await principalIdsWithAccess(prisma.client, p1.id, 'USER')).toEqual([user.id]);
-    expect(await principalIdsWithAccess(prisma.client, p1.id, 'AGENT')).toEqual([agent.id]);
-    expect(await listProjectMemberships(prisma.client, p1.id, 'USER')).toEqual([
+    expect(await principalIdsWithAccess(db, p1.id, 'USER')).toEqual([user.id]);
+    expect(await principalIdsWithAccess(db, p1.id, 'AGENT')).toEqual([agent.id]);
+    expect(await listProjectMemberships(db, p1.id, 'USER')).toEqual([
       { principalId: user.id, role: 'DEVELOPER', since: expect.any(Date), addedByUserId: null },
     ]);
-    expect(await listProjectMemberships(prisma.client, p1.id, 'AGENT')).toEqual([
+    expect(await listProjectMemberships(db, p1.id, 'AGENT')).toEqual([
       { principalId: agent.id, role: 'VIEWER', since: expect.any(Date), addedByUserId: null },
     ]);
   });
@@ -372,7 +375,7 @@ describeIntegration('binding-only membership queries (PG)', () => {
       .auth(token, { type: 'bearer' })
       .send({ principalType: 'AGENT', principalId: agent.id, roleKey: 'viewer', projectId: p.id })
       .expect(201);
-    expect(await prisma.client.roleBinding.count({
+    expect(await db.roleBinding.count({
       where: { principalType: 'AGENT', principalId: agent.id, projectId: p.id },
     })).toBe(1);
   });

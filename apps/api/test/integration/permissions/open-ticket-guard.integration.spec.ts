@@ -15,7 +15,6 @@ import { join } from 'path';
 import request from 'supertest';
 import * as bcrypt from 'bcrypt';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { TicketStatus } from '../../../src/common/enums';
 import { MembershipService } from '../../../src/permissions/membership.service';
@@ -23,6 +22,7 @@ import { countOpenAgentTickets } from '../../../src/permissions/open-agent-ticke
 import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -141,7 +141,7 @@ describeIntegration('the open-ticket guard on binding removal (US-002)', () => {
     passwordHash = await bcrypt.hash(TEST_PASSWORD, 4);
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    db = fixtureDb(app);
     membership = app.get(MembershipService);
   }, BOOT_TIMEOUT_MS);
 
@@ -151,6 +151,10 @@ describeIntegration('the open-ticket guard on binding removal (US-002)', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: deleting an agent\'s only binding in P while it holds an open ticket there answers 409', async () => {

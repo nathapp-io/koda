@@ -20,7 +20,6 @@ import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { KODA_TOOL_DESCRIPTORS } from '../../../src/fleet/assistant/koda-tool-descriptors';
@@ -31,6 +30,7 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { FLEET_CAPS, FleetHttpWorld, enrollRunner, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
 import { ThreadJobSeed, putThreadLines, seedThreadJobFor } from '../../helpers/thread-fixtures';
 import type { AssignPayload, RunnerCapabilities, SyncRequest, SyncResponse } from '../../../src/fleet/common/protocol';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -174,7 +174,7 @@ describeIntegration('fleet assistant runner tool route (PG, US-005)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     // WEB-1: what the route's happy path reads back.
     await prisma.ticket.create({
@@ -201,6 +201,10 @@ describeIntegration('fleet assistant runner tool route (PG, US-005)', () => {
       }
       rmSync(artifactDir, { recursive: true, force: true });
     }
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: the holder of a RUNNING THREAD job reads a ticket through the route', async () => {
@@ -392,7 +396,8 @@ describeIntegration('fleet assistant runner tool route (PG, US-005)', () => {
     });
     await appendStream(ended.id, 1, [sessionStarted('2026-10-14T00:00:00.000Z')]);
 
-    await app.get(ThreadIngestor).catchUp(ended.id, 1);
+    // `ThreadIngestBootstrap` runs the startup catch-up, so the direct call carries the thread component.
+    await withTestActor({ type: 'SYSTEM', id: 'thread' }, () => app.get(ThreadIngestor).catchUp(ended.id, 1));
 
     expect(await readSession(s.threadId)).toEqual(live);
     expect(await threadOf(s.threadId)).toMatchObject({ session: live });

@@ -17,11 +17,11 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -96,17 +96,17 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
 
   /** The binding that is the caller's only source in p1. */
   const bind = (who: string, roleKey: RoleKey): Promise<unknown> =>
-    membership.createBinding(
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
       { principal: { type: 'USER', id: userIds[who] }, roleKey, projectId: p1Id },
       { type: 'SYSTEM', id: 'test' },
-    );
+    ));
 
   /** The global binding that makes a principal a global admin (role `admin`, no project). */
   const bindGlobal = (who: string, roleKey: string): Promise<unknown> =>
-    membership.createBinding(
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
       { principal: { type: 'USER', id: userIds[who] }, roleKey, projectId: null },
       { type: 'SYSTEM', id: 'test' },
-    );
+    ));
 
   /** An agent created by the Owner; created OFFLINE-free and not yet on any roster. */
   const createAgent = async (slug: string): Promise<Agent> => {
@@ -118,10 +118,10 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
 
   /** Puts the agent on p1's roster: a viewer binding in the project, as the Owner. */
   const roster = async (slug: string): Promise<void> => {
-    await membership.createBinding(
+    await withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
       { principal: { type: 'AGENT', id: agents[slug]?.id ?? '' }, roleKey: 'viewer', projectId: p1Id },
       { type: 'SYSTEM', id: 'test' },
-    );
+    ));
   };
 
   /** The roster bindings the agent holds in p1 — what "no binding created" is measured against. */
@@ -135,7 +135,7 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    db = fixtureDb(app);
     membership = app.get(MembershipService);
 
     const root = await request(server)
@@ -177,6 +177,10 @@ describeIntegration('project, roster and assignee route keys (US-007)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   // -------------------------------------------------------------------------

@@ -10,7 +10,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/assistant-actions-expiry.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { FleetJobState } from '../../../src/common/enums';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
@@ -22,7 +21,8 @@ import { FLEET_JOB_REPOSITORY, type FleetJobRecord, type IFleetJobRepository } f
 import { JobTransitionsService } from '../../../src/fleet/jobs/job-transitions.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
-import { seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { insertRunner, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -41,6 +41,7 @@ describeIntegration('expiring an assistant_action (PG, US-007)', () => {
   let transitions: JobTransitionsService;
   let jobs: IFleetJobRepository;
   let tx: ITransactionManager;
+  let runnerId: string;
   let seq = 0;
   const saved: Record<string, string | undefined> = {};
 
@@ -48,7 +49,10 @@ describeIntegration('expiring an assistant_action (PG, US-007)', () => {
   const approvalRow = (id: string) => prisma.fleetApproval.findUniqueOrThrow({ where: { id } });
   const systemNotes = (threadId: string) => prisma.chatMessage.findMany({ where: { threadId, role: 'system' }, orderBy: { seq: 'asc' } });
 
-  /** A REPO thread of the web project owned by dev, with the RUNNING THREAD job the action's approval hangs off. */
+  /**
+   * A REPO thread of the web project owned by dev, with the RUNNING THREAD job the action's approval hangs off,
+   * held by the runner the file's state changes arrive from.
+   */
   async function seedThread(): Promise<{ threadId: string; jobId: string }> {
     const thread = await prisma.chatThread.create({
       data: {
@@ -61,7 +65,7 @@ describeIntegration('expiring an assistant_action (PG, US-007)', () => {
       data: {
         projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
         profiles: [], selectorLabels: [], maxCostUsd: new Prisma.Decimal(5), requestedById: world.ids.dev,
-        state: 'RUNNING', threadId: thread.id,
+        state: 'RUNNING', runnerId, leaseEpoch: 1, threadId: thread.id,
       },
     });
     return { threadId: thread.id, jobId: job.id };
@@ -73,11 +77,11 @@ describeIntegration('expiring an assistant_action (PG, US-007)', () => {
    */
   async function propose(over: Partial<ProposeInput> = {}): Promise<Proposal> {
     const { threadId, jobId } = await seedThread();
-    const result = await actions.propose({
+    const result = await withTestActor({ type: 'SYSTEM', id: 'assistant' }, () => actions.propose({
       projectId: world.projectId, threadId, threadKind: 'REPO', threadProjectSlug: 'web', jobId,
       toolCallId: `tc-${++seq}`, tool: TOOL, input: { ref: 'KODA-1', body: 'hello' }, preview: 'Add a comment',
       actorId: world.ids.dev, now: new Date(), ...over,
-    });
+    }));
     if ('refused' in result) throw new Error('propose refused');
     const row = await prisma.pendingAction.findUniqueOrThrow({ where: { id: result.actionId } });
     return { actionId: result.actionId, approvalId: row.approvalId as string, threadId, jobId };
@@ -88,11 +92,12 @@ describeIntegration('expiring an assistant_action (PG, US-007)', () => {
 
   /** One real transition, inside its own transaction, exactly as the sync and sweep paths do it. */
   async function advance(jobId: string, to: FleetJobState): Promise<void> {
-    await tx.run(async () => {
+    // The runner sync reports the state change, so the transition runs as the job's runner.
+    await withTestActor({ type: 'RUNNER', id: runnerId }, () => tx.run(async () => {
       const job = await jobs.findById(jobId);
       if (!job) throw new Error(`job ${jobId} is gone`);
       await transitions.apply({ job: job as FleetJobRecord, to, by: 'runner', now: new Date(), actor: SYSTEM_ACTOR, reason: 'test' });
-    });
+    }));
   }
 
   /** The runner reports UPLOADING and then COMPLETED; the first step is what closes a RUNNING job's bash asks. */
@@ -107,13 +112,14 @@ describeIntegration('expiring an assistant_action (PG, US-007)', () => {
     process.env['FLEET_SWEEP_ENABLED'] = 'false';
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     actions = app.get(AssistantActionService, { strict: false });
     sweeper = app.get(PendingActionExpirySweeper, { strict: false });
     transitions = app.get(JobTransitionsService);
     jobs = app.get<IFleetJobRepository>(FLEET_JOB_REPOSITORY);
     tx = app.get<ITransactionManager>(TRANSACTION_MANAGER);
+    runnerId = (await insertRunner(prisma)).id;
   }, 120_000);
 
   afterAll(async () => {
@@ -125,6 +131,10 @@ describeIntegration('expiring an assistant_action (PG, US-007)', () => {
         else process.env[key] = saved[key];
       }
     }
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: tick(now) with one due pending action answers { expired: 1, failed: 0 }', async () => {

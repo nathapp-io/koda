@@ -15,7 +15,6 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { IMPLICIT_KEYS, PUBLIC_KEYS } from '../../../src/permissions/catalog';
 import { expandEntries } from '../../../src/permissions/entry-matcher';
@@ -23,6 +22,7 @@ import { MembershipService } from '../../../src/permissions/membership.service';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -88,7 +88,7 @@ describeIntegration('GET /me/permissions (US-001)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    db = fixtureDb(app);
     membership = app.get(MembershipService);
 
     const root = await request(server)
@@ -134,6 +134,10 @@ describeIntegration('GET /me/permissions (US-001)', () => {
 
   beforeEach(() => {
     if (app) resetThrottle(app);
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: a baseline member gets the member role\'s expanded keys under the global scope', async () => {

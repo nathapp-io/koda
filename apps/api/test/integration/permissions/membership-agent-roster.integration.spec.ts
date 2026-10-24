@@ -2,11 +2,11 @@ import { canRunDbTests } from '../../helpers/test-environment';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -41,9 +41,10 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
     for (const row of rows) last = await request(server).delete(`/api/role-bindings/${row.id}`).set(auth());
     return last;
   };
-  const bind = (agent: Agent, projectId: string | null = projects.p1, roleKey = 'viewer') => membership.createBinding(
-    { principal: { type: 'AGENT', id: agent.id }, roleKey, projectId }, { type: 'USER', id: adminId },
-  );
+  const bind = (agent: Agent, projectId: string | null = projects.p1, roleKey = 'viewer') =>
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
+      { principal: { type: 'AGENT', id: agent.id }, roleKey, projectId }, { type: 'USER', id: adminId },
+    ));
   const agent = async (slug: string, name = slug, roles: string[] = ['DEVELOPER']): Promise<Agent> => {
     const res = await request(server).post('/api/agents').set({ Authorization: `Bearer ${rootToken}` })
       .send({ slug, name, roles }).expect(201);
@@ -67,7 +68,7 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
       else process.env.AGENT_PROJECT_SCOPING = previous;
     }
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    db = fixtureDb(app);
     membership = app.get(MembershipService);
     const root = await request(server).post('/api/auth/register')
       .send({ email: 'root@roster.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
@@ -80,12 +81,16 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
     for (const [i, slug] of ['p1', 'p-alpha', 'p-beta'].entries()) {
       const p = await db.project.create({ data: { slug, name: slug, key: ['RP', 'RA', 'RB'][i] } });
       projects[slug] = p.id;
-      await membership.createBinding({ principal: { type: 'USER', id: adminId }, roleKey: 'project-admin', projectId: p.id },
-        { type: 'SYSTEM', id: 'test' });
+      await withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding({ principal: { type: 'USER', id: adminId }, roleKey: 'project-admin', projectId: p.id },
+        { type: 'SYSTEM', id: 'test' }));
     }
   }, 120_000);
   beforeEach(() => resetThrottle(app));
   afterAll(async () => { await app?.close(); });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('AC-1: the viewer binding POST records the caller, not a legacy row', async () => {
     const a = await agent('add-bot');
@@ -191,11 +196,13 @@ describeIntegration('agent roster compatibility membership (PG)', () => {
   });
   it('earliest local source determines provenance, and a SYSTEM granter is not a user', async () => {
     const a = await agent('earliest-bot');
-    const binding = await membership.createBinding({ principal: { type: 'AGENT', id: a.id }, roleKey: 'viewer', projectId: projects.p1 },
-      { type: 'SYSTEM', id: adminId });
+    const binding = await withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+      membership.createBinding({ principal: { type: 'AGENT', id: a.id }, roleKey: 'viewer', projectId: projects.p1 },
+        { type: 'SYSTEM', id: adminId }));
     const b = await agent('system-granter-bot');
-    await membership.createBinding({ principal: { type: 'AGENT', id: b.id }, roleKey: 'viewer', projectId: projects.p1 },
-      { type: 'SYSTEM', id: adminId });
+    await withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+      membership.createBinding({ principal: { type: 'AGENT', id: b.id }, roleKey: 'viewer', projectId: projects.p1 },
+        { type: 'SYSTEM', id: adminId }));
     const res = await request(server).get('/api/projects/p1/agents').set(auth()).expect(200);
     const rows = data<{ items: { slug: string; addedAt: string; addedBy: unknown }[] }>(res).items;
     expect(rows.find(row => row.slug === a.slug)).toMatchObject({ addedAt: binding.createdAt.toISOString(), addedBy: null });

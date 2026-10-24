@@ -20,13 +20,13 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaAssistantToolCallRepository } from '../../../src/fleet/assistant/prisma-assistant-tool-call.repository';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor } from '../../helpers/thread-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const integration = canRunDbTests() ? describe : describe.skip;
@@ -58,7 +58,7 @@ integration('an approved thread action runs as its actor (PG, US-003)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    db = fixtureDb(app);
     world = await seedFleetHttpWorld(server, db);
     runner = await enrollRunner(server, world.tokens.root, 'actor-approve-runner', {
       capabilities: { ...FLEET_CAPS, kodaTools: true, threadBackends: { native: ['m1'], acp: [] }, threadWrite: true },
@@ -108,6 +108,10 @@ integration('an approved thread action runs as its actor (PG, US-003)', () => {
       .set({ Authorization: `Bearer ${world.tokens.dev}` })
       .send({ decision: 'approve' })
       .expect(200);
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('AC-5: after dev approves the proposed action the comment exists on the ticket and the action is EXECUTED', async () => {
     const { action, ticket } = await propose();

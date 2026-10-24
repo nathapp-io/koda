@@ -9,12 +9,12 @@ import { canRunDbTests } from '../../helpers/test-environment';
 import { randomUUID } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import { TestingModule, Test } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { AppModule } from '../../../src/app.module';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { EmailScheduleService } from '../../../src/email/schedule/email-schedule.service';
 import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
+import { asTestActor, expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -42,6 +42,7 @@ describeIntegration('EmailScheduleService (PG) (S4b US-001)', () => {
   let app: INestApplication;
   let prisma: PrismaClient;
   let service: EmailScheduleService;
+  let scheduler: EmailScheduleService;
 
   const seed = async (over: Partial<SeedRow> = {}): Promise<string> => {
     const id = randomUUID();
@@ -92,8 +93,12 @@ describeIntegration('EmailScheduleService (PG) (S4b US-001)', () => {
     const created = nest.createNestApplication();
     await created.init();
     app = created;
-    prisma = created.get(PrismaService).client as PrismaClient;
-    service = created.get(EmailScheduleService);
+    prisma = fixtureDb(created);
+    // The claim/close/retry writes run below `EmailDispatcher.runScheduledTick` in production, so the
+    // direct calls carry the same `SYSTEM/email` component. `scheduler` stays the raw instance for the
+    // one call that plays a different flow (see `scheduleNotifications` below).
+    service = asTestActor(created.get(EmailScheduleService), { type: 'SYSTEM', id: 'email' });
+    scheduler = created.get(EmailScheduleService);
   });
 
   afterAll(async () => {
@@ -102,6 +107,10 @@ describeIntegration('EmailScheduleService (PG) (S4b US-001)', () => {
 
   beforeEach(async () => {
     await prisma.$executeRawUnsafe(`DELETE FROM "EmailSchedule"`);
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('fixtures grant through bindings only', async () => {
@@ -162,8 +171,10 @@ describeIntegration('EmailScheduleService (PG) (S4b US-001)', () => {
       },
     });
     const rows = [{ notificationId: notification.id, userId: user.id, toEmail: user.email, dueAt: min(5) }];
-    await service.scheduleNotifications(rows);
-    await service.scheduleNotifications(rows);
+    // `scheduleNotifications` is the write `NotificationWriter.deliver` makes from the outbox fan-out.
+    const schedule = () => withTestActor({ type: 'SYSTEM', id: 'outbox' }, () => scheduler.scheduleNotifications(rows));
+    await schedule();
+    await schedule();
     expect(await scheduledCount(notification.id)).toBe(1);
   });
 

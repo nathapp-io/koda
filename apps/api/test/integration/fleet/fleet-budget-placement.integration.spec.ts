@@ -4,12 +4,12 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-budget-placement.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -38,11 +38,15 @@ describeIntegration('fleet budget placement (PG)', () => {
     },
   });
   const reload = (id: string) => prisma.fleetJob.findUniqueOrThrow({ where: { id } });
+  /** `placeJob` is what the dispatch route reaches for the admin's job, so it runs as that admin. */
+  const asAdmin = <T>(call: () => T | PromiseLike<T>) => withTestActor({ type: 'USER', id: base.adminId }, call);
+  /** `fillRunner` is the runner's own sync asking for work, so it runs as that runner. */
+  const fillAsRunner = (runnerId: string, slots: number) => withTestActor({ type: 'RUNNER', id: runnerId }, () => placement.fillRunner(runnerId, slots));
 
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     placement = app.get(PlacementService);
     base = await seedFleetBase(prisma);
     other = await seedFleetBase(prisma);
@@ -57,11 +61,15 @@ describeIntegration('fleet budget placement (PG)', () => {
     await prisma.runner.deleteMany();
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('placeJob cancels a QUEUED job whose project paused after it was queued', async () => {
     await insertRunner(prisma);
     const job = await queue();
     const policy = await pause('project', base.projectId, base.projectId);
-    const outcome = await placement.placeJob(job.id);
+    const outcome = await asAdmin(() => placement.placeJob(job.id));
     expect(outcome.assigned).toBe(false);
     expect(await reload(job.id)).toEqual(expect.objectContaining({
       state: 'CANCELLED', stateReason: `budget:${policy.id}`, cancelReason: `budget:${policy.id}`,
@@ -74,7 +82,7 @@ describeIntegration('fleet budget placement (PG)', () => {
     const blocked = await queue();
     const free = await queue({ projectId: other.projectId, repoId: other.repoId });
     const policy = await pause('repo', base.repoId, base.projectId);
-    expect(await placement.fillRunner(runner.id, 2)).toBe(1);
+    expect(await fillAsRunner(runner.id, 2)).toBe(1);
     expect(await reload(blocked.id)).toEqual(expect.objectContaining({ state: 'CANCELLED', stateReason: `budget:${policy.id}` }));
     expect(await reload(free.id)).toEqual(expect.objectContaining({ state: 'ASSIGNED', runnerId: runner.id }));
   });
@@ -84,7 +92,7 @@ describeIntegration('fleet budget placement (PG)', () => {
     const open = await insertRunner(prisma);
     await pause('runner', paused.id);
     const job = await queue();
-    const outcome = await placement.placeJob(job.id);
+    const outcome = await asAdmin(() => placement.placeJob(job.id));
     expect(outcome).toEqual(expect.objectContaining({ assigned: true, runnerId: open.id }));
     expect(outcome.misfits).toEqual([expect.objectContaining({ runnerId: paused.id, reason: 'budget_paused' })]);
   });
@@ -101,7 +109,7 @@ describeIntegration('fleet budget placement (PG)', () => {
         pausedWindowStart: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)),
       },
     });
-    expect(await placement.placeJob(job.id)).toEqual(expect.objectContaining({ assigned: true, runnerId: runner.id }));
+    expect(await asAdmin(() => placement.placeJob(job.id))).toEqual(expect.objectContaining({ assigned: true, runnerId: runner.id }));
   });
 
   it('leaves an unpinned job queued when the only runner is paused, and cancels a job pinned to it', async () => {
@@ -109,8 +117,8 @@ describeIntegration('fleet budget placement (PG)', () => {
     const policy = await pause('runner', runner.id);
     const unpinned = await queue();
     const pinned = await queue({ pinnedRunnerId: runner.id });
-    expect((await placement.placeJob(unpinned.id)).misfits).toEqual([expect.objectContaining({ reason: 'budget_paused' })]);
-    expect(await placement.fillRunner(runner.id, 1)).toBe(0);
+    expect((await asAdmin(() => placement.placeJob(unpinned.id))).misfits).toEqual([expect.objectContaining({ reason: 'budget_paused' })]);
+    expect(await fillAsRunner(runner.id, 1)).toBe(0);
     expect((await reload(unpinned.id)).state).toBe('QUEUED');
     expect(await reload(pinned.id)).toEqual(expect.objectContaining({ state: 'CANCELLED', stateReason: `budget:${policy.id}` }));
   });

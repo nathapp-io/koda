@@ -4,14 +4,14 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-approval-repository.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
-import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { PrismaApprovalRepository } from '../../../src/fleet/approvals/prisma-approval.repository';
 import type { ApprovalResolution, NewFleetApproval } from '../../../src/fleet/approvals/domain/approval.domain';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -26,6 +26,13 @@ describeIntegration('approval repository (PG)', () => {
   let tx: ITransactionManager;
   let n = 0;
   const T0 = new Date('2026-10-02T10:00:00.000Z');
+  /**
+   * A budget approval is opened and closed by the budget component (the evaluator's closer and the sweeper's
+   * rollover), which is the system context production writes these rows under.
+   */
+  const asBudget = <T>(call: () => T | PromiseLike<T>) => withTestActor({ type: 'SYSTEM', id: 'budget' }, call);
+  /** A decision is the admin route's write, so it runs as the admin who decides (the `decidedById` it stamps). */
+  const asRoot = <T>(call: () => T | PromiseLike<T>) => withTestActor({ type: 'USER', id: world.ids.root }, call);
   const job = (over: Partial<Prisma.FleetJobUncheckedCreateInput> = {}) => prisma.fleetJob.create({
     data: {
       projectId: world.projectId, repoId: world.repoId, ref: 'main', command: 'RUN', feature: `rp${++n}`, profiles: [],
@@ -33,14 +40,14 @@ describeIntegration('approval repository (PG)', () => {
       cancelReason: 'budget:pol', startedAt: null, finishedAt: new Date(T0.getTime() + 1_000), queuedAt: new Date(T0.getTime() + n), ...over,
     },
   });
-  const budget = (over: Partial<Parameters<PrismaApprovalRepository['create']>[0]> = {}) => repo.create({
+  const budget = (over: Partial<Parameters<PrismaApprovalRepository['create']>[0]> = {}) => asBudget(() => repo.create({
     type: 'budget_override_required', projectId: world.projectId, policyId: 'pol', payload: { spentUsd: '10' }, requestedAt: T0, ...over,
-  });
+  }));
 
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     repo = app.get(PrismaApprovalRepository);
     tx = app.get(TRANSACTION_MANAGER);
@@ -53,6 +60,10 @@ describeIntegration('approval repository (PG)', () => {
     await prisma.fleetJob.deleteMany();
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('creates, finds the pending one per policy, locks and resolves', async () => {
     const a = await budget();
     expect(a).toEqual(expect.objectContaining({ status: 'pending', payload: { spentUsd: '10' }, outcome: null }));
@@ -62,16 +73,16 @@ describeIntegration('approval repository (PG)', () => {
     const other = await budget({ policyId: 'other' });
     expect((await repo.findPendingForPolicy('other'))?.id).toBe(other.id);
     expect((await repo.findPendingForPolicy('pol'))?.id).toBe(a.id);
-    const resolved = await tx.run(async () => {
+    const resolved = await asRoot(() => tx.run(async () => {
       expect((await repo.lockById(a.id))?.id).toBe(a.id);
       return repo.resolve(a.id, { status: 'rejected', resolvedBy: 'user', decidedAt: T0, decision: 'keep_paused', decidedById: world.ids.root, comment: 'no' });
-    });
+    }));
     expect(resolved).toEqual(expect.objectContaining({ status: 'rejected', decision: 'keep_paused', resolvedBy: 'user', comment: 'no' }));
     expect(resolved.outcome).toBeNull();
     expect(await repo.findPendingForPolicy('pol')).toBeNull();
     // The other policy's approval is untouched by pol's resolution.
     expect((await repo.findPendingForPolicy('other'))?.id).toBe(other.id);
-    expect((await repo.setOutcome(a.id, { requeueResults: [] })).outcome).toEqual({ requeueResults: [] });
+    expect((await asRoot(() => repo.setOutcome(a.id, { requeueResults: [] }))).outcome).toEqual({ requeueResults: [] });
     expect(await tx.run(() => repo.lockById('missing'))).toBeNull();
   });
 
@@ -80,24 +91,24 @@ describeIntegration('approval repository (PG)', () => {
 
     // Omitted outcome leaves the column alone (ApprovalCloser.closeForPolicy relies on this).
     const kept = await budget({ policyId: 'k' });
-    await repo.setOutcome(kept.id, { resumedAmountUsd: '5' });
-    expect((await repo.resolve(kept.id, {
+    await asRoot(() => repo.setOutcome(kept.id, { resumedAmountUsd: '5' }));
+    expect((await asRoot(() => repo.resolve(kept.id, {
       ...decided, decision: 'raise_budget_and_resume', decidedById: world.ids.root, comment: 'ok',
-    })).outcome).toEqual({ resumedAmountUsd: '5' });
+    }))).outcome).toEqual({ resumedAmountUsd: '5' });
 
     // Omitted decision fields zero the columns rather than being left as they were.
-    expect(await repo.resolve(kept.id, decided)).toEqual(expect.objectContaining({
+    expect(await asRoot(() => repo.resolve(kept.id, decided))).toEqual(expect.objectContaining({
       outcome: { resumedAmountUsd: '5' }, decision: null, decidedById: null, comment: null,
     }));
 
     const cleared = await budget({ policyId: 'j' });
-    await repo.setOutcome(cleared.id, { resumedAmountUsd: '5' });
-    expect((await repo.resolve(cleared.id, { ...decided, outcome: null })).outcome).toBeNull();
+    await asRoot(() => repo.setOutcome(cleared.id, { resumedAmountUsd: '5' }));
+    expect((await asRoot(() => repo.resolve(cleared.id, { ...decided, outcome: null }))).outcome).toBeNull();
 
     const stamped = await budget({ policyId: 'i' });
-    expect((await repo.resolve(stamped.id, {
+    expect((await asRoot(() => repo.resolve(stamped.id, {
       ...decided, outcome: { resumedAmountUsd: '7', requeueResults: [] },
-    })).outcome).toEqual({ resumedAmountUsd: '7', requeueResults: [] });
+    }))).outcome).toEqual({ resumedAmountUsd: '7', requeueResults: [] });
   });
 
   it('pages newest first with filters', async () => {
@@ -115,7 +126,7 @@ describeIntegration('approval repository (PG)', () => {
     await budget({ policyId: 'c', projectId: world.opsProjectId });
     await budget({ policyId: 'd', projectId: null });
     const closed = await budget({ policyId: 'e' });
-    await repo.resolve(closed.id, { status: 'cancelled', resolvedBy: 'policy_deleted', decidedAt: T0 });
+    await asBudget(() => repo.resolve(closed.id, { status: 'cancelled', resolvedBy: 'policy_deleted', decidedAt: T0 }));
     expect(await repo.countPending([world.projectId, world.opsProjectId])).toEqual([
       { projectId: world.opsProjectId, slug: 'ops', pending: 1 },
       { projectId: world.projectId, slug: 'web', pending: 2 },
@@ -154,6 +165,9 @@ describeIntegration('bash lookups (S1.5 2a)', () => {
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
   let repo: PrismaApprovalRepository;
+  let runner: { id: string };
+  /** A bash ask is what the runner's sync reports, and its `job_ended` close runs on that same path. */
+  const asRunner = <T>(call: () => T | PromiseLike<T>) => withTestActor({ type: 'RUNNER', id: runner.id }, call);
   let n = 0;
   const T0 = new Date('2026-10-02T10:00:00.000Z');
   const job = (over: Partial<Prisma.FleetJobUncheckedCreateInput> = {}) => prisma.fleetJob.create({
@@ -167,9 +181,10 @@ describeIntegration('bash lookups (S1.5 2a)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     repo = app.get(PrismaApprovalRepository);
+    runner = await insertRunner(prisma);
   });
   afterAll(async () => {
     await app.close();
@@ -188,10 +203,10 @@ describeIntegration('bash lookups (S1.5 2a)', () => {
   });
 
   it('finds by ask, lists pending for a job, finds expired, counts by job', async () => {
-    const a = await repo.create(bash());
-    await repo.create(bash({ naxAskId: 'ask-b', expiresAt: new Date('2026-10-04T10:01:00Z') }));
-    const c = await repo.create(bash({ naxAskId: 'ask-c' }));
-    await repo.resolve(c.id, { status: 'cancelled', resolvedBy: 'job_ended', decidedAt: new Date() });
+    const a = await asRunner(() => repo.create(bash()));
+    await asRunner(() => repo.create(bash({ naxAskId: 'ask-b', expiresAt: new Date('2026-10-04T10:01:00Z') })));
+    const c = await asRunner(() => repo.create(bash({ naxAskId: 'ask-c' })));
+    await asRunner(() => repo.resolve(c.id, { status: 'cancelled', resolvedBy: 'job_ended', decidedAt: new Date() }));
 
     expect((await repo.findByAsk(jobId, 1, 'ask-a'))?.id).toBe(a.id);
     expect(await repo.findByAsk(jobId, 2, 'ask-a')).toBeNull();

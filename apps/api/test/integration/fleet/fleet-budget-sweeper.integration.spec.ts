@@ -4,13 +4,13 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-budget-sweeper.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
 import { BudgetSweeper } from '../../../src/fleet/budgets/budget-sweeper';
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -42,7 +42,7 @@ describeIntegration('budget sweeper (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     sweeper = app.get(BudgetSweeper);
     base = await seedFleetBase(prisma);
   });
@@ -52,6 +52,10 @@ describeIntegration('budget sweeper (PG)', () => {
   beforeEach(async () => {
     await prisma.budgetPolicy.deleteMany();
     await prisma.fleetJob.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('clears a monthly pause when the month rolls over, and keeps a lifetime pause (B8)', async () => {
@@ -91,7 +95,9 @@ describeIntegration('budget sweeper (PG)', () => {
     });
     await prisma.budgetIncident.create({ data: { policyId: orphan.id, kind: 'hard_stop', windowStart: new Date(0), spentUsd: new Prisma.Decimal(1), amountUsd: new Prisma.Decimal(1) } });
     await prisma.runner.delete({ where: { id: runner.id } });
-    const dispatched = await app.get(FleetJobsService).dispatch(base.adminId, base.projectId, { repoId: base.repoId, command: 'RUN', feature: 'after-orphan', maxCostUsd: 5 });
+    // The dispatch route is where production reaches this, so it runs as the admin who asks for the job.
+    const dispatched = await withTestActor({ type: 'USER', id: base.adminId }, () =>
+      app.get(FleetJobsService).dispatch(base.adminId, base.projectId, { repoId: base.repoId, command: 'RUN', feature: 'after-orphan', maxCostUsd: 5 }));
     expect(dispatched.job.state).toBe('QUEUED');
     expect((await sweeper.tick()).deleted).toBe(1);
     expect(await reload(orphan.id)).toBeNull();

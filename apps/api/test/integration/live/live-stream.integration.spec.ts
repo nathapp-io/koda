@@ -7,11 +7,11 @@ import type { AddressInfo } from 'net';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { OutboxRelay } from '@nathapp/nestjs-outbox';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MAX_LIVE_STREAMS_PER_USER } from '../../../src/config/live.config';
 import { LiveStreamRegistry } from '../../../src/live/live-stream-registry';
 import { resetDb } from '../../helpers/reset-db';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 import { openSse, SseConnection, SseMessage } from '../../helpers/sse-client';
 import { expectBindingOnlyFixtures, grantBaseline } from '../../../src/permissions/test-helpers/permission-fixtures';
@@ -83,7 +83,7 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
     baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     relay = app.get(OutboxRelay);
     registry = app.get(LiveStreamRegistry);
-    prisma = app.get(PrismaService).client as PrismaClient;
+    prisma = fixtureDb(app);
 
     const root = await request(server).post('/api/auth/register')
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
@@ -122,6 +122,10 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('fixtures grant through bindings only', async () => {

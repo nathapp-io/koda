@@ -14,13 +14,13 @@ import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import { CommonExceptionCode } from '@nathapp/nestjs-common';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { PrismaUsersRepository } from '../../../src/users/prisma-users.repository';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
-import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
+import { Prisma } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -45,8 +45,8 @@ interface BoundRole {
 /** A booted app plus the reads and calls these ACs share. */
 function harness(app: NathApplication) {
   const server: ReturnType<NathApplication['getHttpServer']> = app.getHttpServer();
-  const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-  const db = prisma.client as PrismaClient;
+  // The fixture client writes as `SYSTEM/seed`, the context the boot-time seeders run in.
+  const db = fixtureDb(app);
 
   const register = (email: string) =>
     request(server)
@@ -94,6 +94,10 @@ describeIntegration('registration with no owner email configured (US-004)', () =
 
   beforeEach(() => {
     resetThrottle(app);
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-5: the first registration gets a projectId-null owner binding and a projectId-null member binding', async () => {
@@ -188,6 +192,10 @@ describeIntegration('KODA_OWNER_EMAIL gates the first registration (US-004)', ()
    * do not depend on another test having run.
    */
   const registerOwnerFromEmptyTable = () => h.emptyPrincipalTables().then(() => h.register(OWNER_EMAIL));
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('AC-8: a refused first registration leaves the users table empty', async () => {
     await h.emptyPrincipalTables();
@@ -315,6 +323,10 @@ describeIntegration('admin user and agent routes as the Owner (US-004)', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-11: an admin-created MEMBER gets a member binding and no admin binding', async () => {

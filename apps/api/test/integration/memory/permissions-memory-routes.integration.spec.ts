@@ -21,13 +21,13 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { asTestActor, expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -164,8 +164,10 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
-    membership = app.get(MembershipService);
+    prisma = fixtureDb(app);
+    // The bindings below are fixture grants with no request principal, so the service writes as
+    // `SYSTEM/seed` — the same component `fixtureDb` writes under.
+    membership = asTestActor(app.get(MembershipService), { type: 'SYSTEM', id: 'seed' });
     memoryRepository = app.get(PrismaMemoryItemRepository);
 
     const root = await request(server).post('/api/auth/register')
@@ -212,6 +214,14 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
       if (savedMcpEnabled === undefined) delete process.env[MCP_ENABLED];
       else process.env[MCP_ENABLED] = savedMcpEnabled;
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // The guard is on for this application
+  // -------------------------------------------------------------------------
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   // -------------------------------------------------------------------------
@@ -293,9 +303,9 @@ describeIntegration('memory route keys and item ownership (US-008)', () => {
 
   it('AC-7: a developer binding is refused a replace of a system item (ownerType null)', async () => {
     // A system writer passes no replace check and stores no owner type — the outbox subscriber's path.
-    await memoryRepository.upsert({
+    await withTestActor({ type: 'SYSTEM', id: 'outbox' }, () => memoryRepository.upsert({
       projectId: p1Id, kind: 'FACT', subject: 'ac7:system', predicate: 'uses', object: 'system value',
-    });
+    }));
     const systemRow = await activeRow('ac7:system', 'uses');
     expect(systemRow).toMatchObject({ ownerType: null, status: 'active' });
 

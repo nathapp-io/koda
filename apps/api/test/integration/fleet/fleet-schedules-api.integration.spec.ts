@@ -5,7 +5,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
@@ -14,6 +13,7 @@ import { SchedulesService } from '../../../src/fleet/schedules/schedules.service
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -47,7 +47,7 @@ describeIntegration('fleet schedules API (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     // A second DEVELOPER of web (fourth login: within the 5/min throttle). The root global admin stands in for a project ADMIN.
     await request(server).post('/api/admin/users').set(tok('root')).send({ email: 'dev2@koda.test', name: 'dev2', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
@@ -62,6 +62,10 @@ describeIntegration('fleet schedules API (PG)', () => {
     await prisma.fleetJob.deleteMany();
     await prisma.jobSchedule.deleteMany();
     await prisma.fleetActivity.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('fixtures grant through bindings only', async () => {
@@ -193,7 +197,9 @@ describeIntegration('fleet schedules API (PG)', () => {
       await holder.$transaction(async (tx) => {
         // What the sync path does when a job ends: the job row first, then (onJobEnded) the schedule row.
         await tx.$queryRaw`SELECT "id" FROM "FleetJob" WHERE "id" = ${job.id} FOR UPDATE`;
-        removing = app.get(SchedulesService).remove(world.ids.dev, world.projectId, row.id, false);
+        // The owner's DELETE is the entry that reaches `remove`, so the direct call runs as that member.
+        removing = withTestActor({ type: 'USER', id: world.ids.dev }, () =>
+          app.get(SchedulesService).remove(world.ids.dev, world.projectId, row.id, false));
         removing.catch(() => undefined);
         await new Promise((resolve) => setTimeout(resolve, 500)); // remove is now waiting for the job row
         await tx.$queryRaw`SELECT "id" FROM "JobSchedule" WHERE "id" = ${row.id} FOR UPDATE`;

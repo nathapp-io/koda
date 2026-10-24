@@ -14,13 +14,13 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { CommonExceptionCode } from '@nathapp/nestjs-common';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 // The nax sandbox withholds host Postgres/Docker.
@@ -41,7 +41,7 @@ function body<T = unknown>(res: request.Response): T {
 describeIntegration('GET /projects/:slug/memory (HTTP route via MemoryReadController)', () => {
   let app: NathApplication;
   let httpServer: ReturnType<INestApplication['getHttpServer']>;
-  let prisma: PrismaService<PrismaClient>;
+  let prisma: PrismaClient;
 
   let memberToken: string;
   let nonMemberToken: string;
@@ -76,12 +76,12 @@ describeIntegration('GET /projects/:slug/memory (HTTP route via MemoryReadContro
     const adminData = body<{ accessToken: string }>(registerRes);
 
     // Promote to ADMIN so they can create a project
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-    const adminUser = await prisma.client.user.findUnique({ where: { email: 'memtest-admin@koda.test' } });
+    prisma = fixtureDb(app);
+    const adminUser = await prisma.user.findUnique({ where: { email: 'memtest-admin@koda.test' } });
     adminUserId = adminUser?.id ?? '';
     // Permissions P1 US-004: the global admin grant is a role binding, not a legacy `User.role` write.
     // Its mirror keeps `User.role` at `ADMIN` for the notification and mention readers.
-    await grantRole(prisma.client, { type: 'USER', id: adminUserId }, 'admin', null);
+    await grantRole(prisma, { type: 'USER', id: adminUserId }, 'admin', null);
     // The request that follows reads the principal's keys, so the cached set is dropped first.
     await app.get(MembershipService).invalidatePermissions();
 
@@ -106,13 +106,13 @@ describeIntegration('GET /projects/:slug/memory (HTTP route via MemoryReadContro
       .send({ email: 'memtest-nonmember@koda.test', name: 'Non Member', password: 'Admin1234!Aa' })
       .expect(201);
     nonMemberToken = body<{ accessToken: string }>(nonMemberRes).accessToken;
-    nonMemberUserId = (await prisma.client.user.findUniqueOrThrow({ where: { email: 'memtest-nonmember@koda.test' } })).id;
+    nonMemberUserId = (await prisma.user.findUniqueOrThrow({ where: { email: 'memtest-nonmember@koda.test' } })).id;
 
-    const projectRow = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+    const projectRow = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
     const projectId = projectRow.id;
 
     // 20 active DECISION items (kind filter + pagination coverage)
-    await prisma.client.memoryItem.createMany({
+    await prisma.memoryItem.createMany({
       data: Array.from({ length: decisionCount }, (_, i) => ({
         projectId,
         kind: 'DECISION',
@@ -125,7 +125,7 @@ describeIntegration('GET /projects/:slug/memory (HTTP route via MemoryReadContro
     });
 
     // 35 active FACT items (bulk, for the size=1000 rejection and paging assertions)
-    await prisma.client.memoryItem.createMany({
+    await prisma.memoryItem.createMany({
       data: Array.from({ length: factCount }, (_, i) => ({
         projectId,
         kind: 'FACT',
@@ -138,7 +138,7 @@ describeIntegration('GET /projects/:slug/memory (HTTP route via MemoryReadContro
     });
 
     // 3 superseded items — must not appear in the default (active) filter
-    await prisma.client.memoryItem.createMany({
+    await prisma.memoryItem.createMany({
       data: Array.from({ length: supersededCount }, (_, i) => ({
         projectId,
         kind: 'FACT',
@@ -151,7 +151,7 @@ describeIntegration('GET /projects/:slug/memory (HTTP route via MemoryReadContro
     });
 
     // 1 active item with an expired TTL — must not appear in the default (active) filter
-    await prisma.client.memoryItem.create({
+    await prisma.memoryItem.create({
       data: {
         projectId,
         kind: 'FACT',
@@ -169,8 +169,12 @@ describeIntegration('GET /projects/:slug/memory (HTTP route via MemoryReadContro
     if (app) await app.close();
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('fixtures grant through bindings only', async () => {
-    await expectBindingOnlyFixtures(prisma.client, [
+    await expectBindingOnlyFixtures(prisma, [
       { type: 'USER', id: adminUserId },
       { type: 'USER', id: nonMemberUserId },
     ]);

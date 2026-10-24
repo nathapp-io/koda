@@ -15,11 +15,10 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 import { resetDb } from '../helpers/reset-db';
 import { expectBindingOnlyFixtures, grantRole } from '../../src/permissions/test-helpers/permission-fixtures';
+import { expectGuardActive, fixtureDb } from '../helpers/action-context';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 // The nax sandbox withholds host Postgres/Docker.
@@ -66,6 +65,10 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
     if (app) await app.close();
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   describe('1. Auth setup', () => {
     it('should register admin user and get access token', async () => {
       const res = await request(httpServer)
@@ -76,8 +79,8 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
       const data = body<{ accessToken: string }>(res);
       adminAccessToken = data.accessToken;
       expect(adminAccessToken).toBeDefined();
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      adminUserId = (await prisma.client.user.findUniqueOrThrow({ where: { email: 'admin@koda-ast.test' } })).id;
+      const prisma = fixtureDb(app);
+      adminUserId = (await prisma.user.findUniqueOrThrow({ where: { email: 'admin@koda-ast.test' } })).id;
     });
 
     it('should register agent with DEVELOPER role', async () => {
@@ -87,8 +90,8 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
 
       expect(res.status).toBe(201);
 
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      devAgentUserId = (await prisma.client.user.findUniqueOrThrow({ where: { email: 'dev-agent@koda-ast.test' } })).id;
+      const prisma = fixtureDb(app);
+      devAgentUserId = (await prisma.user.findUniqueOrThrow({ where: { email: 'dev-agent@koda-ast.test' } })).id;
 
       const agentRes = await request(httpServer)
         .post('/api/agents')
@@ -120,18 +123,18 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
       // Permissions P1 US-005: the DEVELOPER agent reaches the project through role bindings — the
       // `viewer` reach of the roster plus the `developer` role it acts with. The fixture agent carries
       // no legacy role, so production wrote no `AgentRoleEntry` row for it.
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
-      const agent = await prisma.client.agent.findUniqueOrThrow({ where: { slug: agentSlug } });
-      await grantRole(prisma.client, { type: 'AGENT', id: agent.id }, 'viewer', project.id);
-      await grantRole(prisma.client, { type: 'AGENT', id: agent.id }, 'developer', project.id);
+      const prisma = fixtureDb(app);
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const agent = await prisma.agent.findUniqueOrThrow({ where: { slug: agentSlug } });
+      await grantRole(prisma, { type: 'AGENT', id: agent.id }, 'viewer', project.id);
+      await grantRole(prisma, { type: 'AGENT', id: agent.id }, 'developer', project.id);
     });
   });
 
   describe('AC-1, AC-6: indexCommit parses source files and stores symbol metadata', () => {
     it('fixtures grant through bindings only', async () => {
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      await expectBindingOnlyFixtures(prisma.client, [
+      const prisma = fixtureDb(app);
+      await expectBindingOnlyFixtures(prisma, [
         { type: 'USER', id: adminUserId },
         { type: 'USER', id: devAgentUserId },
         { type: 'AGENT', id: developerAgentId },

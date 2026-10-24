@@ -11,7 +11,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/assistant-action-delivery.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-job.repository';
 import { PrismaPendingActionRepository } from '../../../src/fleet/assistant/actions/prisma-pending-action.repository';
@@ -20,6 +19,7 @@ import { outcomeNote } from '../../../src/fleet/assistant/actions/outcome-note';
 import type { PendingActionStatus } from '../../../src/fleet/assistant/actions/pending-action.domain';
 import { bootHttpApp } from '../../helpers/http-app';
 import { resetDb } from '../../helpers/reset-db';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -106,7 +106,7 @@ describeIntegration('delivering outcome notes on a new-turn assign (PG, 2aw US-0
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     jobs = app.get(PrismaFleetJobRepository, { strict: false });
     pendingActions = app.get(PrismaPendingActionRepository, { strict: false });
     await seedWorld();
@@ -114,6 +114,10 @@ describeIntegration('delivering outcome notes on a new-turn assign (PG, 2aw US-0
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-7: the assign text is the notes delivered on the initial message, in createdAt order, above the content', async () => {
@@ -159,7 +163,9 @@ describeIntegration('delivering outcome notes on a new-turn assign (PG, 2aw US-0
     const action = await seedAction({ turn, deliveredMessageId: null, status: 'REJECTED', createdAt: new Date() });
     const target = await otherMessage(turn.threadId);
 
-    const updated = await pendingActions.update(action.id, { deliveredMessageId: target, deliveredAt: new Date() });
+    // `sendMessage` writes this back inside the sender's request, so the call runs as that user.
+    const updated = await withTestActor({ type: 'USER', id: userId }, () =>
+      pendingActions.update(action.id, { deliveredMessageId: target, deliveredAt: new Date() }));
     const read = await pendingActions.findById(action.id);
 
     expect(updated.deliveredMessageId).toBe(target);

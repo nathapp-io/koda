@@ -18,7 +18,6 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { PrismaClient } from '../../../src/generated/prisma/client';
@@ -46,6 +45,7 @@ import { KnowledgeIndexQueue } from '../../../src/fleet/knowledge/knowledge-inde
 import { DEFAULT_KNOWLEDGE_PATTERNS } from '../../../src/fleet/knowledge/knowledge-patterns';
 import { PrismaCiWebhookRepository } from '../../../src/ci-webhook/prisma-ci-webhook.repository';
 import { currentContext, type ActionContext } from '../../../src/action-context/action-context';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 // The nax sandbox withholds host Postgres/Docker.
@@ -127,7 +127,7 @@ describeIntegration('API Integration Tests', () => {
   /** The projects the agent is rostered in; its project grants follow the keys it acts with. */
   const agentRosterProjectIds: string[] = [];
 
-  const prismaClient = (): PrismaClient => app.get<PrismaService<PrismaClient>>(PrismaService).client;
+  const prismaClient = (): PrismaClient => fixtureDb(app);
 
   /**
    * Permissions P1 US-005: the roster reach and the roles the agent acts with are role bindings —
@@ -215,12 +215,12 @@ describeIntegration('API Integration Tests', () => {
     it('promote user to ADMIN (a global admin binding)', async () => {
       // New users default to MEMBER — grant the global admin binding for full API access.
       // Permissions P1 US-005: the admin's access is a role binding, not `User { role: 'ADMIN' }`.
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const user = await prisma.client.user.findUnique({ where: { email: 'admin@koda.test' } });
+      const prisma = fixtureDb(app);
+      const user = await prisma.user.findUnique({ where: { email: 'admin@koda.test' } });
       expect(user).toBeTruthy();
       const safeUser = user as NonNullable<typeof user>;
       adminUserId = safeUser.id;
-      await grantRole(prisma.client, { type: 'USER', id: safeUser.id }, 'admin', null);
+      await grantRole(prisma, { type: 'USER', id: safeUser.id }, 'admin', null);
       // The grant is written under the permission cache, so the cache is dropped explicitly.
       await app.get(MembershipService).invalidatePermissions();
     });
@@ -426,13 +426,13 @@ describeIntegration('API Integration Tests', () => {
       expect(data.key).toBe('KT');
       projectSlug = data.slug;
 
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const project = await prisma.client.project.findUnique({ where: { slug: projectSlug } });
-      const adminUser = await prisma.client.user.findUnique({ where: { email: 'admin@koda.test' } });
+      const prisma = fixtureDb(app);
+      const project = await prisma.project.findUnique({ where: { slug: projectSlug } });
+      const adminUser = await prisma.user.findUnique({ where: { email: 'admin@koda.test' } });
       if (project && adminUser) {
         // Permissions P1 US-005: the project grants are role bindings, not legacy membership rows.
         // They are written before the admin's first project request, so the cache is still cold.
-        await grantRole(prisma.client, { type: 'USER', id: adminUser.id }, 'project-admin', project.id);
+        await grantRole(prisma, { type: 'USER', id: adminUser.id }, 'project-admin', project.id);
       }
       // S4c US-001: the agent API key reaches this project through its
       // AgentProject roster row, not through any ProjectMember row.
@@ -580,18 +580,18 @@ describeIntegration('API Integration Tests', () => {
     it('US-001 AC-7: PATCH /api/projects/:slug — 403 for a project member who is not a global ADMIN', async () => {
       // A dedicated project: adding `member@koda.test` to `projectSlug` here
       // would break the non-member 403 assertions later in this suite.
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const prisma = fixtureDb(app);
       const created = await request(httpServer)
         .post('/api/projects')
         .set('Authorization', `Bearer ${userAccessToken}`)
         .send({ name: 'Brief Guard Project', slug: 'brief-guard-project', key: 'BGP' })
         .expect(201);
       const guardSlug = body<{ slug: string }>(created).slug;
-      const member = await prisma.client.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
-      const guardProject = await prisma.client.project.findUniqueOrThrow({ where: { slug: guardSlug } });
+      const member = await prisma.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
+      const guardProject = await prisma.project.findUniqueOrThrow({ where: { slug: guardSlug } });
       // Permissions P1 US-005: the project grant is a role binding, not a legacy membership row. It is
       // written before the member's first request in this project, so the cache is still cold.
-      await grantRole(prisma.client, { type: 'USER', id: member.id }, 'developer', guardProject.id);
+      await grantRole(prisma, { type: 'USER', id: member.id }, 'developer', guardProject.id);
 
       const previous = 'Koda is a fleet platform.';
       await request(httpServer)
@@ -1483,11 +1483,11 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('US-004 AC1: rejects a disabled non-member user and leaves the ticket unassigned', async () => {
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const member = await prisma.client.user.findUnique({ where: { email: 'member@koda.test' } });
+      const prisma = fixtureDb(app);
+      const member = await prisma.user.findUnique({ where: { email: 'member@koda.test' } });
       expect(member).toBeTruthy();
       const user = member as NonNullable<typeof member>;
-      await prisma.client.user.update({ where: { id: user.id }, data: { disabled: true } });
+      await prisma.user.update({ where: { id: user.id }, data: { disabled: true } });
 
       try {
         const res = await request(httpServer)
@@ -1496,22 +1496,22 @@ describeIntegration('API Integration Tests', () => {
           .send({ userId: user.id })
           .expect(409);
         refusal(res, 'tickets.userDisabled.409');
-        const ticket = await prisma.client.ticket.findUnique({ where: { id: safeAssignTicketId } });
+        const ticket = await prisma.ticket.findUnique({ where: { id: safeAssignTicketId } });
         expect(ticket?.assignedToUserId).toBeNull();
       } finally {
-        await prisma.client.user.update({ where: { id: user.id }, data: { disabled: false } });
+        await prisma.user.update({ where: { id: user.id }, data: { disabled: false } });
       }
     });
 
     it('US-004 AC2: rejects an unrostered offline agent', async () => {
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const project = await prisma.client.project.findUnique({ where: { slug: projectSlug } });
+      const prisma = fixtureDb(app);
+      const project = await prisma.project.findUnique({ where: { slug: projectSlug } });
       expect(project).toBeTruthy();
       const safeProject = project as NonNullable<typeof project>;
-      await prisma.client.agent.update({ where: { id: agentId }, data: { status: 'OFFLINE' } });
+      await prisma.agent.update({ where: { id: agentId }, data: { status: 'OFFLINE' } });
       // Permissions P1 US-005: the roster reach is a project binding, so dropping it is what takes the
       // agent out of the project.
-      await revokeProjectRoles(prisma.client, { type: 'AGENT', id: agentId }, safeProject.id);
+      await revokeProjectRoles(prisma, { type: 'AGENT', id: agentId }, safeProject.id);
       await app.get(MembershipService).invalidatePermissions();
       try {
         const res = await request(httpServer)
@@ -1523,13 +1523,13 @@ describeIntegration('API Integration Tests', () => {
       } finally {
         await rosterAgentIn(safeProject.id);
         await app.get(MembershipService).invalidatePermissions();
-        await prisma.client.agent.update({ where: { id: agentId }, data: { status: 'ACTIVE' } });
+        await prisma.agent.update({ where: { id: agentId }, data: { status: 'ACTIVE' } });
       }
     });
 
     it('US-004 AC3: rejects an offline agent that is on the project roster', async () => {
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const agent = await prisma.client.agent.update({ where: { id: agentId }, data: { status: 'OFFLINE' } });
+      const prisma = fixtureDb(app);
+      const agent = await prisma.agent.update({ where: { id: agentId }, data: { status: 'OFFLINE' } });
       try {
         const res = await request(httpServer)
           .post(`/api/projects/${projectSlug}/tickets/${safeAssignTicketRef}/assign`)
@@ -1538,7 +1538,7 @@ describeIntegration('API Integration Tests', () => {
           .expect(409);
         refusal(res, 'tickets.agentOffline.409');
       } finally {
-        await prisma.client.agent.update({ where: { id: agent.id }, data: { status: 'ACTIVE' } });
+        await prisma.agent.update({ where: { id: agent.id }, data: { status: 'ACTIVE' } });
       }
     });
 
@@ -1560,7 +1560,7 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('binding-only assignees: offers a custom GLOBAL project.read holder with no project binding', async () => {
-      const db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+      const db = fixtureDb(app);
       const membership = app.get(MembershipService);
       const role = await db.role.create({ data: {
         key: 'endpoint-assignee-reader', name: 'Assignee reader', scope: 'GLOBAL', permissions: ['project.read'],
@@ -2004,13 +2004,13 @@ describeIntegration('API Integration Tests', () => {
     // S4c US-001: the pickup target must be on the project's AgentProject roster.
     // Permissions P1 US-005: that roster is the `viewer` binding, and the pickup needs
     // `agent.pickup`, so the `developer` role it acts with is bound there too.
-    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-    const pickupProject = await prisma.client.project.findUnique({ where: { slug: projectSlug } });
-    const pickupAgent = await prisma.client.agent.findUnique({ where: { slug: freshAgentSlug } });
+    const prisma = fixtureDb(app);
+    const pickupProject = await prisma.project.findUnique({ where: { slug: projectSlug } });
+    const pickupAgent = await prisma.agent.findUnique({ where: { slug: freshAgentSlug } });
     if (pickupProject && pickupAgent) {
       const principal = { type: 'AGENT' as const, id: pickupAgent.id };
-      await grantRole(prisma.client, principal, 'viewer', pickupProject.id);
-      await grantRole(prisma.client, principal, 'developer', pickupProject.id);
+      await grantRole(prisma, principal, 'viewer', pickupProject.id);
+      await grantRole(prisma, principal, 'developer', pickupProject.id);
     }
 
     // Use a project that has no VERIFIED unassigned tickets for this new agent
@@ -2044,12 +2044,12 @@ describeIntegration('API Integration Tests', () => {
       // yes, ticket.delete no.
       // Permissions P1 US-003: the roles are role bindings, so this is a `DELETE /role-bindings/:id`
       // plus `POST /role-bindings` grants (the `PATCH /agents/:slug/update-roles` route is gone).
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
-      const agent = await prisma.client.agent.findUniqueOrThrow({ where: { slug: agentSlug } });
+      const prisma = fixtureDb(app);
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const agent = await prisma.agent.findUniqueOrThrow({ where: { slug: agentSlug } });
       // The roster granted this agent developer and reviewer; the block pins developer, so the
       // reviewer binding goes (the viewer and developer bindings keep the open-ticket guard quiet).
-      const reviewer = await prisma.client.roleBinding.findFirst({
+      const reviewer = await prisma.roleBinding.findFirst({
         where: { principalType: 'AGENT', principalId: agent.id, projectId: project.id, role: { key: 'reviewer' } },
         select: { id: true },
       });
@@ -2427,8 +2427,8 @@ describeIntegration('API Integration Tests', () => {
     const ciWebhookSecret = 'ci-webhook-secret-for-e2e-tests-123456';
 
     beforeAll(async () => {
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      await prisma.client.project.update({
+      const prisma = fixtureDb(app);
+      await prisma.project.update({
         where: { slug: projectSlug },
         data: { ciWebhookToken: ciWebhookSecret },
       });
@@ -2503,9 +2503,9 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('POST /api/projects/:slug/ci-webhook — a signed invalid payload returns 400 and creates no ticket', async () => {
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
-      const ticketsBefore = await prisma.client.ticket.count({ where: { projectId: project.id } });
+      const prisma = fixtureDb(app);
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const ticketsBefore = await prisma.ticket.count({ where: { projectId: project.id } });
       const payload = {
         event: 'pipeline_failed',
         pipeline: { id: '12347' },
@@ -2521,7 +2521,7 @@ describeIntegration('API Integration Tests', () => {
         .send(payload)
         .expect(400);
 
-      expect(await prisma.client.ticket.count({ where: { projectId: project.id } })).toBe(ticketsBefore);
+      expect(await prisma.ticket.count({ where: { projectId: project.id } })).toBe(ticketsBefore);
     });
 
     it('POST /api/projects/:slug/ci-webhook — unknown slug, missing signature and bad signature get the same 401', async () => {
@@ -2923,8 +2923,8 @@ describeIntegration('API Integration Tests', () => {
       request(httpServer).post('/api/role-bindings').set('Authorization', `Bearer ${token}`).send(body);
 
     const viewerBinding = async (agentId: string, projectId: string) => {
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      return prisma.client.roleBinding.findFirst({
+      const prisma = fixtureDb(app);
+      return prisma.roleBinding.findFirst({
         where: { principalType: 'AGENT', principalId: agentId, projectId, role: { key: 'viewer' } },
       });
     };
@@ -2942,8 +2942,8 @@ describeIntegration('API Integration Tests', () => {
       rosterAgentId = created.agent.id;
       rosterAgentApiKey = created.apiKey;
 
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const prisma = fixtureDb(app);
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
       const res = await postBinding(userAccessToken, {
         principalType: 'AGENT', principalId: rosterAgentId, roleKey: 'viewer', projectId: project.id,
       }).expect(201);
@@ -2951,7 +2951,7 @@ describeIntegration('API Integration Tests', () => {
       expect(body<{ principalId: string; roleKey: string }>(res)).toMatchObject({
         principalId: rosterAgentId, roleKey: 'viewer',
       });
-      const admin = await prisma.client.user.findUniqueOrThrow({ where: { email: 'admin@koda.test' } });
+      const admin = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@koda.test' } });
       const rosterEntry = await viewerBinding(rosterAgentId, project.id);
       expect(rosterEntry?.grantedById).toBe(admin.id);
       expect(rosterEntry?.grantedByType).toBe('USER');
@@ -2972,9 +2972,9 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('AC3: a project DEVELOPER cannot grant or revoke the agent binding', async () => {
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
-      const user = await prisma.client.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
+      const prisma = fixtureDb(app);
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const user = await prisma.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
       // Permissions P1 US-005: the project grant is a role binding, not a legacy membership row.
       await setProjectRole(user.id, project.id, 'developer');
       const candidate = await request(httpServer)
@@ -3003,16 +3003,16 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('AC6: granting a viewer binding for an unknown principal answers 404', async () => {
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const prisma = fixtureDb(app);
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
       await postBinding(userAccessToken, {
         principalType: 'AGENT', principalId: 'no-such-agent-id', roleKey: 'viewer', projectId: project.id,
       }).expect(404);
     });
 
     it('AC12: a rostered agent cannot grant roster bindings using its API key', async () => {
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const prisma = fixtureDb(app);
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
       await postBinding(rosterAgentApiKey, {
         principalType: 'AGENT', principalId: rosterAgentId, roleKey: 'viewer', projectId: project.id,
       }).expect(403);
@@ -3020,8 +3020,8 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('AC13: a rostered agent cannot revoke a roster binding using its API key', async () => {
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const prisma = fixtureDb(app);
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
       const granted = await viewerBinding(rosterAgentId, project.id);
       if (!granted) throw new Error('the viewer binding was not written');
       await request(httpServer)
@@ -3048,9 +3048,9 @@ describeIntegration('API Integration Tests', () => {
           .expect(201);
         refs.push(body<{ ref: string }>(created).ref);
       }
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
-      await prisma.client.ticket.updateMany({
+      const prisma = fixtureDb(app);
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await prisma.ticket.updateMany({
         where: { projectId: project.id, number: { in: refs.map((ref) => Number(ref.split('-')[1])) } },
         data: { assignedToAgentId: rosterAgentId },
       });
@@ -3068,9 +3068,9 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('AC8: revoking the binding of an agent without open tickets answers 204', async () => {
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
-      await prisma.client.ticket.updateMany({
+      const prisma = fixtureDb(app);
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await prisma.ticket.updateMany({
         where: { projectId: project.id, assignedToAgentId: rosterAgentId },
         data: { assignedToAgentId: null },
       });
@@ -3152,15 +3152,15 @@ describeIntegration('API Integration Tests', () => {
     const disabledMemberEmail = 'disabled-member@koda.test';
 
     it('AC14: adding a disabled user is refused with the disabled-account message and stores no membership', async () => {
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const prisma = fixtureDb(app);
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
 
       const registered = await request(httpServer)
         .post('/api/auth/register')
         .send({ email: disabledMemberEmail, name: 'Disabled Member', password: 'Member1234!Aa' })
         .expect(201);
       const disabledUser = body<{ user: { id: string } }>(registered).user;
-      await prisma.client.user.update({ where: { id: disabledUser.id }, data: { disabled: true } });
+      await prisma.user.update({ where: { id: disabledUser.id }, data: { disabled: true } });
 
       const res = await request(httpServer)
         .post(`/api/projects/${projectSlug}/members`)
@@ -3170,7 +3170,7 @@ describeIntegration('API Integration Tests', () => {
 
       refusal(res, 'members.userDisabled.409');
 
-      const membership = await prisma.client.roleBinding.findFirst({
+      const membership = await prisma.roleBinding.findFirst({
         where: { projectId: project.id, principalType: 'USER', principalId: disabledUser.id },
       });
       expect(membership).toBeNull();
@@ -3298,7 +3298,7 @@ describeIntegration('API Integration Tests', () => {
     const uniqueName = () => `e2e-project-skill-${++serial}`;
 
     async function seedSkill(name: string): Promise<string> {
-      const db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+      const db = fixtureDb(app);
       const admin = await db.user.findUniqueOrThrow({ where: { email: 'admin@koda.test' } });
       const source = await db.skillSource.create({
         data: {
@@ -3332,7 +3332,7 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('GET /api/projects/:slug/skills — 403 for a non-member', async () => {
-      const db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+      const db = fixtureDb(app);
       const project = await db.project.findUniqueOrThrow({ where: { slug: projectSlug } });
       const user = await db.user.findUniqueOrThrow({ where: { email: 'member@koda.test' } });
       // Permissions P1 US-005: the project grant is a role binding, so dropping it is what takes the
@@ -3404,7 +3404,7 @@ describeIntegration('API Integration Tests', () => {
     let githubSpies: Array<{ mockRestore: () => void }> = [];
 
     const config = () => app.get<IFleetConfig>(FLEET_CFG, { strict: false });
-    const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    const db = () => fixtureDb(app);
     const threadMessage = (res: request.Response, key: string) => {
       const [namespace, ...segments] = key.split('.');
       const path = join(__dirname, '../../../src/i18n/en', `${namespace}.json`);
@@ -3619,9 +3619,12 @@ describeIntegration('API Integration Tests', () => {
         profiles: [], maxCostUsd: 5, selectorLabels: [], requestedById: world.ids.dev, threadId: thread.id, state: 'COMPLETED',
       } });
       const line = { type: 'published' as const, sha: 'a'.repeat(40), paths: [thread.specPath], ignored: [], specPresent: true };
-      await app.get(PrismaThreadIngestRepository, { strict: false }).fold({
-        jobId: ingestJob.id, leaseEpoch: 0, lines: [{ line, endOffset: 128 }], endOffset: 128, badLines: 0,
-      });
+      // `ThreadIngestBootstrap` wraps the catch-up that folds a runner's lines, so a direct fold in a test
+      // runs as the same system component.
+      await withTestActor({ type: 'SYSTEM', id: 'thread' }, () =>
+        app.get(PrismaThreadIngestRepository, { strict: false }).fold({
+          jobId: ingestJob.id, leaseEpoch: 0, lines: [{ line, endOffset: 128 }], endOffset: 128, badLines: 0,
+        }));
       expect((await db().chatThread.findUniqueOrThrow({ where: { id: thread.id } })).specPublished).toBe(true);
       await attachThreadRunner(thread.id);
       const res = await request(httpServer).post(`/api/projects/${projectSlug}/threads/${thread.id}/plan`)
@@ -4461,11 +4464,13 @@ describeIntegration('API Integration Tests', () => {
       const proposeAction = async (): Promise<{ actionId: string; approvalId: string; threadId: string }> => {
         // A fresh feature per call: the active (repo, feature) pair is unique and the fixture defaults to `add-auth`.
         const seeded = await seedThreadJob(httpServer, db(), world, { feature: `decide-${Math.random().toString(36).slice(2, 10)}` });
-        const result = await app.get(AssistantActionService, { strict: false }).propose({
-          projectId: world.projectId, threadId: seeded.threadId, threadKind: 'REPO', threadProjectSlug: projectSlug, jobId: seeded.jobId,
-          toolCallId: `e2e-${Math.random().toString(36).slice(2, 10)}`, tool: 'koda_add_comment', input: { ref: 'X-1', body: 'hi' },
-          preview: 'Add a comment', actorId: world.ids.dev, now: new Date(),
-        });
+        // The propose route runs as the user who asked for the action, so the direct call does too.
+        const result = await withTestActor({ type: 'USER', id: world.ids.dev }, () =>
+          app.get(AssistantActionService, { strict: false }).propose({
+            projectId: world.projectId, threadId: seeded.threadId, threadKind: 'REPO', threadProjectSlug: projectSlug, jobId: seeded.jobId,
+            toolCallId: `e2e-${Math.random().toString(36).slice(2, 10)}`, tool: 'koda_add_comment', input: { ref: 'X-1', body: 'hi' },
+            preview: 'Add a comment', actorId: world.ids.dev, now: new Date(),
+          }));
         if ('refused' in result) throw new Error('propose refused');
         const row = await db().pendingAction.findUniqueOrThrow({ where: { id: result.actionId } });
         return { actionId: result.actionId, approvalId: row.approvalId as string, threadId: seeded.threadId };
@@ -4526,7 +4531,7 @@ describeIntegration('API Integration Tests', () => {
     let enabledBefore: boolean;
 
     const fleetConfigOf = () => app.get<IFleetConfig>(FLEET_CFG, { strict: false });
-    const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    const db = () => fixtureDb(app);
     const search = (token: string, payload: Record<string, unknown>) => request(httpServer)
       .post(`/api/projects/${slug}/knowledge/search`)
       .set('Authorization', `Bearer ${token}`)
@@ -4670,7 +4675,7 @@ describeIntegration('API Integration Tests', () => {
     let enabledBefore: boolean;
 
     const fleetConfigOf = () => app.get<IFleetConfig>(FLEET_CFG, { strict: false });
-    const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    const db = () => fixtureDb(app);
     const reindex = (token: string, repo: string) => request(httpServer)
       .post(`/api/projects/${slug}/knowledge/repos/${repo}/reindex`)
       .set('Authorization', `Bearer ${token}`);
@@ -4814,7 +4819,7 @@ describeIntegration('API Integration Tests', () => {
     let enabledBefore: boolean;
 
     const fleetConfigOf = () => app.get<IFleetConfig>(FLEET_CFG, { strict: false });
-    const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    const db = () => fixtureDb(app);
     const putPatterns = (token: string, payload: Record<string, unknown>) => request(httpServer)
       .put(`/api/projects/${slug}/knowledge/patterns`)
       .set('Authorization', `Bearer ${token}`)
@@ -4947,7 +4952,7 @@ describeIntegration('API Integration Tests', () => {
       roleOwnerToken = userAccessToken ?? await register('roles-owner@koda.test');
       roleMemberToken = nonAdminUserAccessToken ?? await register('roles-member@koda.test');
     });
-    const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    const db = () => fixtureDb(app);
     const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
     const roles = (token: string) => request(httpServer).get('/api/roles').set(auth(token));
     const createRole = (token: string, payload: Record<string, unknown>) =>
@@ -5063,7 +5068,7 @@ describeIntegration('API Integration Tests', () => {
   // ─────────────────────────────────────────────────────────────────
 
   describe('Role bindings API (permissions P1a US-006)', () => {
-    const db = () => app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    const db = () => fixtureDb(app);
     const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
     const bindings = (token: string, query: Record<string, string> = {}) =>
       request(httpServer).get('/api/role-bindings').query(query).set(auth(token));
@@ -5308,5 +5313,9 @@ describeIntegration('API Integration Tests', () => {
       select: { id: true },
     });
     expect(adminBinding).not.toBeNull();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 });

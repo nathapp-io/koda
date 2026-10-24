@@ -20,13 +20,13 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, enrollRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
 import { deliveryText } from '../../../src/fleet/assistant/actions/outcome-delivery';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -88,7 +88,7 @@ describeIntegration('fleet assistant link tickets tool (PG, US-005)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     // The acceptance ref is `KODA-1`, so the web project answers the `KODA` key.
     await prisma.project.update({ where: { id: world.projectId }, data: { key: WEB_KEY } });
@@ -123,6 +123,10 @@ describeIntegration('fleet assistant link tickets tool (PG, US-005)', () => {
         else process.env[key] = saved[key];
       }
     }
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-12: a runner holding a RUNNING REPO THREAD job proposes one pull request URL and is answered pending', async () => {

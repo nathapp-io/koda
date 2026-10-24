@@ -23,7 +23,6 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaScheduleRepository } from '../../../src/fleet/schedules/prisma-schedule.repository';
 import { ScheduleTicker } from '../../../src/fleet/schedules/schedule-ticker';
@@ -33,6 +32,7 @@ import { PermissionService } from '../../../src/permissions/permission.service';
 import type { PrincipalRef } from '../../../src/permissions/permissions.types';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -101,7 +101,8 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
   /** US-005: the owner's own effective keys in p1, which `mayDispatch` combines with its existence. */
   const keysOf = (who: string) => permissions.effectiveKeys(userPrincipal(who), { projectId: p1Id });
   const bind = (principal: PrincipalRef, roleKey: string, projectId: string) =>
-    membership.createBinding({ principal, roleKey, projectId }, { type: 'USER', id: ids.root });
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+      membership.createBinding({ principal, roleKey, projectId }, { type: 'USER', id: ids.root }));
 
   /** A MEMBER-role user with a working account; registration is closed, so it goes through the admin route. */
   const createUser = async (who: string): Promise<string> => {
@@ -158,7 +159,7 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     membership = app.get(MembershipService);
     permissions = app.get(PermissionService);
     ticker = app.get(ScheduleTicker);
@@ -204,13 +205,17 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
 
   beforeEach(async () => {
     // The tick tests need an empty fleet world: no other due schedule, no job in an active state and no
-    // paused budget (which would skip the tick instead of dispatching).
+    // paused budget (which would skip the tick instead of dispatching). The rows a test creates are its own.
     await prisma.budgetPolicy.deleteMany();
     await prisma.fleetCommand.deleteMany();
     await prisma.fleetJob.deleteMany();
     await prisma.jobSchedule.deleteMany();
     await prisma.fleetActivity.deleteMany();
     await prisma.fleetApproval.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: a user whose only source in p1 is a developer binding sees p1\'s activity and not p2\'s', async () => {
@@ -278,7 +283,9 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
     await expectOnlyProjectBinding(ids.devBind, p1Id, 'developer');
     const due = await schedule({ createdById: ids.devBind, feature: 'us004-dispatched' });
 
-    expect(await ticker.tick(NOW)).toEqual(expect.objectContaining({ claimed: 1, dispatched: 1, disabled: 0 }));
+    // A timer round as `runOnce` runs it: the ticker is the `schedule` system component.
+    expect(await withTestActor({ type: 'SYSTEM', id: 'schedule' }, () => ticker.tick(NOW)))
+      .toEqual(expect.objectContaining({ claimed: 1, dispatched: 1, disabled: 0 }));
 
     const jobs = await prisma.fleetJob.findMany({ where: { scheduleId: due.id } });
     expect(jobs).toHaveLength(1);
@@ -294,7 +301,8 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
     await expectOnlyProjectBinding(ids.viewerOwner, p1Id, 'viewer');
     const due = await schedule({ createdById: ids.viewerOwner, feature: 'us004-refused' });
 
-    expect(await ticker.tick(NOW)).toEqual(expect.objectContaining({ claimed: 1, dispatched: 0, disabled: 1 }));
+    expect(await withTestActor({ type: 'SYSTEM', id: 'schedule' }, () => ticker.tick(NOW)))
+      .toEqual(expect.objectContaining({ claimed: 1, dispatched: 0, disabled: 1 }));
 
     expect(await prisma.fleetJob.count({ where: { scheduleId: due.id } })).toBe(0);
     expect(await reload(due.id)).toEqual(expect.objectContaining({ enabled: false, disabledReason: 'owner_lost_access' }));

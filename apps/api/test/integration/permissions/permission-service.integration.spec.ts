@@ -5,13 +5,13 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/permissions/permission-service.integration.spec.ts
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { AppModule } from '../../../src/app.module';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { PermissionService } from '../../../src/permissions/permission.service';
 import { resetDb } from '../../helpers/reset-db';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -43,13 +43,15 @@ describeIntegration('PermissionService (PG)', () => {
     return prisma.project.create({ data: { name: `P${counter}`, slug: `p${counter}`, key: `P${counter}` } });
   };
   const bind = (principalType: 'USER' | 'AGENT', principalId: string, roleKey: string, projectId: string | null) =>
-    membership.createBinding({ principal: { type: principalType, id: principalId }, roleKey, projectId }, SYSTEM);
+    // Fixture grants run as `SYSTEM/seed`, the context the fixture client writes under.
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+      membership.createBinding({ principal: { type: principalType, id: principalId }, roleKey, projectId }, SYSTEM));
 
   beforeAll(async () => {
     await resetDb();
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     await moduleRef.init();
-    prisma = moduleRef.get(PrismaService<PrismaClient>, { strict: false }).client as PrismaClient;
+    prisma = fixtureDb(moduleRef);
     permissions = moduleRef.get(PermissionService);
     membership = moduleRef.get(MembershipService);
   });
@@ -63,6 +65,10 @@ describeIntegration('PermissionService (PG)', () => {
     await prisma.agent.deleteMany({});
     await prisma.user.deleteMany({});
     await prisma.project.deleteMany({});
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(moduleRef)).resolves.toBeUndefined();
   });
 
   it('AC-1: a developer binding in p1 grants ticket.create', async () => {
@@ -170,7 +176,8 @@ describeIntegration('PermissionService (PG)', () => {
     const principal = userPrincipal(user.id);
 
     expect((await permissions.can(principal, 'ticket.create', { projectId: p1.id })).allowed).toBe(true);
-    await membership.removeBinding(binding.id);
+    // A route-reached write, called here as the fixture setup step it is: `SYSTEM/seed`.
+    await withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.removeBinding(binding.id));
     expect((await permissions.can(principal, 'ticket.create', { projectId: p1.id })).allowed).toBe(false);
   });
 });

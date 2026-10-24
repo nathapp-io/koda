@@ -5,10 +5,10 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:scoped test/integration/notifications/fleet-budget-approval-notifications.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
+import { asTestActor, expectGuardActive, fixtureDb } from '../../helpers/action-context';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { outboxRecord } from '../../helpers/outbox-record';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
@@ -52,9 +52,11 @@ describeIntegration('fleet budget and approval notifications (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: true });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
-    evaluator = app.get(BudgetEvaluator);
+    // `evaluate` runs below two wrapped entries: the sync path's `signal` and `BudgetSweeper.tick`,
+    // whose `system.budget.window-reset` key makes the budget component the actor.
+    evaluator = asTestActor(app.get(BudgetEvaluator), { type: 'SYSTEM', id: 'budget' });
     publisher = app.get(FanOutPublisher);
   });
   afterAll(async () => {
@@ -66,6 +68,10 @@ describeIntegration('fleet budget and approval notifications (PG)', () => {
     await prisma.fleetJob.deleteMany();
     await prisma.outboxEvent.deleteMany();
     await prisma.notification.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('warn: one event per incident, admins notified once, members not', async () => {

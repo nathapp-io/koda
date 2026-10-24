@@ -5,7 +5,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import { NathApplication } from '@nathapp/nestjs-app';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import type { FleetJobState } from '../../../src/common/enums';
 import { resetDb } from '../../helpers/reset-db';
@@ -14,6 +13,7 @@ import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../../../src/fleet/jobs/domain/fleet-job.domain';
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
 import { JobTransitionsService } from '../../../src/fleet/jobs/job-transitions.service';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -44,11 +44,13 @@ describeIntegration('schedule auto-disable (PG)', () => {
       selectorLabels: [], requestedById: world.ids.dev, scheduleId, state: 'UPLOADING', ...(progress === null ? {} : { progress }),
     },
   });
-  const end = (jobId: string, to: FleetJobState) => tx.run(async () => {
+  /** The runner whose sync ends a job; the transition input and its action context name the same principal. */
+  const RUNNER_ID = 'r1';
+  const end = (jobId: string, to: FleetJobState) => withTestActor({ type: 'RUNNER', id: RUNNER_ID }, () => tx.run(async () => {
     const job = await jobsRepo.lockById(jobId);
     if (!job) throw new Error(`no job ${jobId}`);
-    return transitions.apply({ job, to, by: 'runner', now: NOW, actor: { type: 'RUNNER', id: 'r1' } });
-  });
+    return transitions.apply({ job, to, by: 'runner', now: NOW, actor: { type: 'RUNNER', id: RUNNER_ID } });
+  }));
   const reload = (id: string) => prisma.jobSchedule.findUniqueOrThrow({ where: { id } });
   const hooks = () => prisma.outboxEvent.count({ where: { type: 'webhook_delivery', payload: { contains: '"event":"fleet.schedule.disabled"' } } });
   const autoDisabledRows = (id: string) => prisma.fleetActivity.count({ where: { entityType: 'schedule', entityId: id, action: 'schedule.auto_disabled' } });
@@ -56,7 +58,7 @@ describeIntegration('schedule auto-disable (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     transitions = app.get(JobTransitionsService);
     jobsRepo = app.get<IFleetJobRepository>(FLEET_JOB_REPOSITORY);
@@ -75,6 +77,10 @@ describeIntegration('schedule auto-disable (PG)', () => {
     await prisma.jobSchedule.deleteMany();
     await prisma.outboxEvent.deleteMany();
     await prisma.fleetActivity.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('COMPLETED disables with completed, with one activity row and one webhook', async () => {
@@ -137,7 +143,8 @@ describeIntegration('schedule auto-disable (PG)', () => {
     const j = await uploading(s.id, { passed: 0, total: 3 });
     await end(j.id, 'FAILED');
     expect((await reload(s.id)).noProgressTicks).toBe(1);
-    await jobs.requeue(world.ids.dev, world.projectId, j.id);
+    // Requeue is the owner's POST /jobs/:id/requeue, so the direct call runs as that member.
+    await withTestActor({ type: 'USER', id: world.ids.dev }, () => jobs.requeue(world.ids.dev, world.projectId, j.id));
     await prisma.fleetJob.update({ where: { id: j.id }, data: { state: 'UPLOADING' } });
     await end(j.id, 'FAILED');
     expect((await reload(s.id)).noProgressTicks).toBe(1);

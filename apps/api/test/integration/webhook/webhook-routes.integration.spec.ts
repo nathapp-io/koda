@@ -17,13 +17,13 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { CommonExceptionCode } from '@nathapp/nestjs-common';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 // The nax sandbox withholds host Postgres/Docker.
@@ -43,7 +43,7 @@ function body<T = unknown>(res: request.Response): T {
 describeIntegration('webhook routes over HTTP (US-003)', () => {
   let app: NathApplication;
   let httpServer: ReturnType<INestApplication['getHttpServer']>;
-  let prisma: PrismaService<PrismaClient>;
+  let prisma: PrismaClient;
 
   let adminToken: string;
   let memberToken: string;
@@ -65,7 +65,7 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
   }
 
   async function storedUrl(id: string): Promise<string | undefined> {
-    const row = await prisma.client.webhook.findUnique({ where: { id } });
+    const row = await prisma.webhook.findUnique({ where: { id } });
     return row?.url;
   }
 
@@ -79,7 +79,7 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
     app.useAppGlobalPrefix().useAppGlobalPipes().useAppGlobalFilters().useAppGlobalGuards();
     await app.init();
     httpServer = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+    prisma = fixtureDb(app);
 
     // Register the ADMIN (promoted straight in the database, then re-logged-in so the
     // token carries the ADMIN authority the route guard checks).
@@ -87,13 +87,13 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
       .post('/api/auth/register')
       .send({ email: 'webhook-admin@koda.test', name: 'Webhook Admin', password: TEST_PASSWORD })
       .expect(201);
-    const adminUser = await prisma.client.user.findUniqueOrThrow({
+    const adminUser = await prisma.user.findUniqueOrThrow({
       where: { email: 'webhook-admin@koda.test' },
     });
     adminUserId = adminUser.id;
     // Permissions P1 US-004: the global admin grant is a role binding, not a legacy `User.role` write.
     // Its mirror keeps `User.role` at `ADMIN` for the notification and mention readers.
-    await grantRole(prisma.client, { type: 'USER', id: adminUserId }, 'admin', null);
+    await grantRole(prisma, { type: 'USER', id: adminUserId }, 'admin', null);
     // The requests that follow read the principal's keys, so the cached set is dropped first.
     await app.get(MembershipService).invalidatePermissions();
     const loginRes = await request(httpServer)
@@ -108,7 +108,7 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
       .send({ email: 'webhook-member@koda.test', name: 'Webhook Member', password: TEST_PASSWORD })
       .expect(201);
     memberToken = body<{ accessToken: string }>(memberRes).accessToken;
-    memberUserId = (await prisma.client.user.findUniqueOrThrow({ where: { email: 'webhook-member@koda.test' } })).id;
+    memberUserId = (await prisma.user.findUniqueOrThrow({ where: { email: 'webhook-member@koda.test' } })).id;
 
     projectASlug = body<{ slug: string }>(
       await request(httpServer)
@@ -125,23 +125,27 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
         .expect(201),
     ).slug;
 
-    projectAId = (await prisma.client.project.findUniqueOrThrow({ where: { slug: projectASlug } })).id;
-    projectBId = (await prisma.client.project.findUniqueOrThrow({ where: { slug: projectBSlug } })).id;
+    projectAId = (await prisma.project.findUniqueOrThrow({ where: { slug: projectASlug } })).id;
+    projectBId = (await prisma.project.findUniqueOrThrow({ where: { slug: projectBSlug } })).id;
   }, 60_000);
 
   afterAll(async () => {
     if (app) await app.close();
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('fixtures grant through bindings only', async () => {
-    await expectBindingOnlyFixtures(prisma.client, [
+    await expectBindingOnlyFixtures(prisma, [
       { type: 'USER', id: adminUserId },
       { type: 'USER', id: memberUserId },
     ]);
   });
 
   it('AC9: POST with the blocked destination returns 400 and creates no webhook row', async () => {
-    const before = await prisma.client.webhook.count({ where: { projectId: projectAId } });
+    const before = await prisma.webhook.count({ where: { projectId: projectAId } });
 
     const res = await request(httpServer)
       .post(`/api/projects/${projectASlug}/webhooks`)
@@ -150,9 +154,9 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.ret).toBe(CommonExceptionCode.REQUEST_PARAMETER_ERROR);
-    const after = await prisma.client.webhook.count({ where: { projectId: projectAId } });
+    const after = await prisma.webhook.count({ where: { projectId: projectAId } });
     expect(after).toBe(before);
-    expect(await prisma.client.webhook.count({ where: { projectId: projectAId, url: BLOCKED_URL } })).toBe(0);
+    expect(await prisma.webhook.count({ where: { projectId: projectAId, url: BLOCKED_URL } })).toBe(0);
   });
 
   it('AC10: POST with the allowed destination returns 201 and stores the webhook', async () => {
@@ -191,13 +195,13 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
     const data = body<{ id: string; active: boolean }>(res);
     expect(data.active).toBe(false);
     expect(data).not.toHaveProperty('secret');
-    const row = await prisma.client.webhook.findUniqueOrThrow({ where: { id } });
+    const row = await prisma.webhook.findUniqueOrThrow({ where: { id } });
     expect(row.active).toBe(false);
   });
 
   it('AC12 boundary: PATCH { active: true } after a deactivation returns 200 with data.active true', async () => {
     const id = await registerWebhook(projectASlug, ALLOWED_URL);
-    await prisma.client.webhook.update({ where: { id }, data: { active: false } });
+    await prisma.webhook.update({ where: { id }, data: { active: false } });
 
     const res = await request(httpServer)
       .patch(`/api/projects/${projectASlug}/webhooks/${id}`)
@@ -217,13 +221,13 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
       .send({ active: false });
 
     expect(res.status).toBe(403);
-    const row = await prisma.client.webhook.findUniqueOrThrow({ where: { id } });
+    const row = await prisma.webhook.findUniqueOrThrow({ where: { id } });
     expect(row.active).toBe(true);
   });
 
   it('AC14: PATCH of a webhook owned by another project returns 404 and leaves it unchanged', async () => {
     const id = await registerWebhook(projectBSlug, OTHER_ALLOWED_URL);
-    expect(await prisma.client.webhook.findUniqueOrThrow({ where: { id } })).toBeDefined();
+    expect(await prisma.webhook.findUniqueOrThrow({ where: { id } })).toBeDefined();
     expect(projectBId).not.toBe(projectAId);
 
     const res = await request(httpServer)
@@ -244,7 +248,7 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
       .send({ events: null });
 
     expect(res.status).toBe(400);
-    const row = await prisma.client.webhook.findUniqueOrThrow({ where: { id } });
+    const row = await prisma.webhook.findUniqueOrThrow({ where: { id } });
     expect(row.events).toBe('["STATUS_CHANGE"]');
   });
 
@@ -256,7 +260,7 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(res.status).toBe(404);
-    expect(await prisma.client.webhook.findUnique({ where: { id } })).not.toBeNull();
+    expect(await prisma.webhook.findUnique({ where: { id } })).not.toBeNull();
   });
 
   it("Slice 2b: DELETE projects/:slug/webhooks/:id of the project's own webhook returns 204 and removes the row", async () => {
@@ -267,7 +271,7 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(204);
 
-    expect(await prisma.client.webhook.findUnique({ where: { id } })).toBeNull();
+    expect(await prisma.webhook.findUnique({ where: { id } })).toBeNull();
   });
 
   it('Slice 2b: DELETE projects/:slug/webhooks/:id under an unknown slug returns 404 and keeps the row', async () => {
@@ -278,7 +282,7 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(res.status).toBe(404);
-    expect(await prisma.client.webhook.findUnique({ where: { id } })).not.toBeNull();
+    expect(await prisma.webhook.findUnique({ where: { id } })).not.toBeNull();
   });
 
   it('Slice 2b: slug-less DELETE webhooks/:id stays the global-ADMIN cross-project route', async () => {
@@ -288,12 +292,12 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
       .delete(`/api/webhooks/${id}`)
       .set('Authorization', `Bearer ${memberToken}`);
     expect(asMember.status).toBe(403);
-    expect(await prisma.client.webhook.findUnique({ where: { id } })).not.toBeNull();
+    expect(await prisma.webhook.findUnique({ where: { id } })).not.toBeNull();
 
     await request(httpServer)
       .delete(`/api/webhooks/${id}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(204);
-    expect(await prisma.client.webhook.findUnique({ where: { id } })).toBeNull();
+    expect(await prisma.webhook.findUnique({ where: { id } })).toBeNull();
   });
 });

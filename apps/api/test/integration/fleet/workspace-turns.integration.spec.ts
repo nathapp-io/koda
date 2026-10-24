@@ -1,7 +1,6 @@
 import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
@@ -12,6 +11,7 @@ import { MembershipService } from '../../../src/permissions/membership.service';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
 import { SkillsService } from '../../../src/skills/skills.service';
 import { expectBindingOnlyFixtures, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeDb = canRunDbTests() ? describe : describe.skip;
@@ -25,11 +25,15 @@ describeDb('workspace turns and archive', () => {
   const send = (id: string, token = world.tokens.dev) => request(server).post(`/api/threads/${id}/messages`).set(as(token)).send({ text: 'hello', clientMessageId: 'cm1' });
   beforeAll(async () => {
     await resetDb(); app = await bootHttpApp({ registrationEnabled: false }); await app.init();
-    server = app.getHttpServer(); prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    server = app.getHttpServer(); prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     app.get<IFleetConfig>(FLEET_CFG, { strict: false }).threadsEnabled = true;
   }, 60000);
   afterAll(async () => { await app?.close(); });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('fixtures grant through bindings only', async () => {
     await expectBindingOnlyFixtures(prisma, [
@@ -144,7 +148,8 @@ describeDb('workspace turns and archive', () => {
     try {
       const thread = await create();
       const result = data<{ jobId: string }>(await send(thread.id).expect(201));
-      const placement = await app.get(PlacementService).placeJob(result.jobId);
+      // The send's dispatch places the job, so a direct call runs as the sender.
+      const placement = await withTestActor({ type: 'USER', id: world.ids.dev }, () => app.get(PlacementService).placeJob(result.jobId));
       const job = await prisma.fleetJob.findUniqueOrThrow({ where: { id: result.jobId } });
       if (!workspaceThreads) {
         expect(job.state).toBe('QUEUED');

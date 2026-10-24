@@ -14,7 +14,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
 import { mcpToolDescriptors } from '../../../src/fleet/assistant/mcp/mcp-tool-catalog';
@@ -23,6 +22,7 @@ import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { rosterFleetAgent, seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -61,7 +61,7 @@ describeIntegration('MCP route (PG, US-007)', () => {
     if (enabled) process.env.MCP_ENABLED = 'true';
     else delete process.env.MCP_ENABLED;
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
   }
 
   beforeAll(async () => {
@@ -79,8 +79,11 @@ describeIntegration('MCP route (PG, US-007)', () => {
     );
     dispatchAgent = { id: created.agent.id, apiKey: created.apiKey };
     const membership = app.get(MembershipService);
-    await membership.createBinding({ principal: { type: 'AGENT', id: dispatchAgent.id }, roleKey: 'viewer', projectId: world.projectId }, { type: 'SYSTEM', id: 'test' });
-    await membership.createBinding({ principal: { type: 'AGENT', id: dispatchAgent.id }, roleKey: 'developer', projectId: world.opsProjectId }, { type: 'SYSTEM', id: 'test' });
+    // Fixture grants: the agent's only reach in each project, written as the seeder writes role bindings.
+    await withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+      membership.createBinding({ principal: { type: 'AGENT', id: dispatchAgent.id }, roleKey: 'viewer', projectId: world.projectId }, { type: 'SYSTEM', id: 'test' }));
+    await withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+      membership.createBinding({ principal: { type: 'AGENT', id: dispatchAgent.id }, roleKey: 'developer', projectId: world.opsProjectId }, { type: 'SYSTEM', id: 'test' }));
     webTicket = await prisma.ticket.create({ data: { projectId: world.projectId, number: 501, type: 'TASK', title: 'MCP route ticket' } });
   }, 120_000);
 
@@ -88,6 +91,10 @@ describeIntegration('MCP route (PG, US-007)', () => {
     await app?.close();
     if (saved === undefined) delete process.env.MCP_ENABLED;
     else process.env.MCP_ENABLED = saved;
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('fixtures grant through bindings only', async () => {

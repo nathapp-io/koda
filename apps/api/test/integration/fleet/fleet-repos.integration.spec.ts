@@ -9,12 +9,12 @@ import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
 import { FakeForge, startFakeForge } from '../../helpers/fake-forge';
 import { encryptToken } from '../../../src/common/utils/encryption.util';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -69,6 +69,10 @@ describeIntegration('fleet repos (PG)', () => {
     }
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('registers a GitHub repo under its canonical name; a second registration in any case is 409', async () => {
     const repo = data<{ owner: string; name: string; defaultBranch: string; githubInstallationId: string }>(
       await request(server).post('/api/fleet/repos').set(auth(admin)).send({ projectSlug: 'web', provider: 'github', owner: 'Acme', name: 'App' }).expect(201),
@@ -85,7 +89,7 @@ describeIntegration('fleet repos (PG)', () => {
   });
 
   it('registers the GitLab repo bound to the project VcsConnection only', async () => {
-    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    const prisma = fixtureDb(app);
     const ops = await prisma.project.findUniqueOrThrow({ where: { slug: 'ops' } });
     await prisma.vcsConnection.create({
       data: { projectId: ops.id, provider: 'gitlab', repoOwner: 'infra', repoName: 'deploy', encryptedToken: encryptToken('glpat-9', ENC_KEY) },
@@ -135,7 +139,7 @@ describeIntegration('fleet repos (PG)', () => {
       expect(checkRequests.some((r) => r.path === '/app/installations/99/access_tokens')).toBe(false);
       expect(checkRequests.some((r) => r.path === '/repos/acme/app/installation')).toBe(false);
 
-      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+      const prisma = fixtureDb(app);
       const afterCheck = await prisma.fleetRepo.findUniqueOrThrow({ where: { id: registered.id } });
       expect(afterCheck.githubInstallationId).toBe(BigInt(77));
     } finally {

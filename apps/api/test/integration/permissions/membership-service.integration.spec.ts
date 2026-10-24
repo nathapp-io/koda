@@ -6,7 +6,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/permissions/membership-service.integration.spec.ts
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaClient } from '../../../src/generated/prisma/client';
@@ -18,6 +17,7 @@ import { PrismaRoleBindingRepository } from '../../../src/permissions/prisma-rol
 import { PrismaRoleRepository } from '../../../src/permissions/prisma-role.repository';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 import { resetDb } from '../../helpers/reset-db';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -29,6 +29,13 @@ describeIntegration('MembershipService (PG)', () => {
   let counter = 0;
 
   const SYSTEM = { type: 'SYSTEM' as const, id: 'test' };
+  /**
+   * The action context a direct service call needs. `SYSTEM` above is the *granter parameter* these
+   * methods take; the context guard reads the action context instead, and a fixture operation runs as
+   * `SYSTEM/seed` — the same context `fixtureDb` writes under.
+   */
+  const asSeed = <T>(call: () => T | PromiseLike<T>): Promise<T> =>
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, call);
   const newUser = async () => {
     counter += 1;
     return prisma.user.create({
@@ -36,7 +43,11 @@ describeIntegration('MembershipService (PG)', () => {
     });
   };
   const bindGlobal = (userId: string, roleKey: string) =>
-    membership.createBinding({ principal: { type: 'USER', id: userId }, roleKey, projectId: null }, SYSTEM);
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+      membership.createBinding({ principal: { type: 'USER', id: userId }, roleKey, projectId: null }, SYSTEM));
+  const removeBinding = (id: string) => asSeed(() => membership.removeBinding(id));
+  const setGlobalAdmin = (userId: string, admin: boolean) =>
+    asSeed(() => membership.setGlobalAdmin(userId, admin, SYSTEM));
   const ownerCount = () => prisma.roleBinding.count({ where: { role: { key: 'owner' } } });
   const userRow = (id: string) => prisma.user.findUniqueOrThrow({ where: { id } });
 
@@ -44,7 +55,7 @@ describeIntegration('MembershipService (PG)', () => {
     await resetDb();
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     await moduleRef.init();
-    prisma = moduleRef.get(PrismaService<PrismaClient>, { strict: false }).client as PrismaClient;
+    prisma = fixtureDb(moduleRef);
     membership = moduleRef.get(MembershipService);
   });
 
@@ -58,12 +69,20 @@ describeIntegration('MembershipService (PG)', () => {
     await prisma.project.deleteMany({});
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(moduleRef)).resolves.toBeUndefined();
+  });
+
   describe('concurrent createBinding', () => {
     const racePair = async () => {
       const user = await newUser();
       const project = await prisma.project.create({ data: { name: 'P', slug: `p-${user.id}`, key: 'P' } });
       const input = { principal: { type: 'USER' as const, id: user.id }, roleKey: 'developer', projectId: project.id };
-      const results = await Promise.all([membership.createBinding(input, SYSTEM), membership.createBinding(input, SYSTEM)]);
+      // Each call wraps itself: one actor callback around both would serialize them and stop being a race.
+      const results = await Promise.all([
+        asSeed(() => membership.createBinding(input, SYSTEM)),
+        asSeed(() => membership.createBinding(input, SYSTEM)),
+      ]);
       return { user, results };
     };
 
@@ -97,7 +116,7 @@ describeIntegration('MembershipService (PG)', () => {
     it('AC-20/21: removing the only global admin binding sets MEMBER and isGlobalAdmin false', async () => {
       const user = await newUser();
       const binding = await bindGlobal(user.id, 'admin');
-      await membership.removeBinding(binding.id);
+      await removeBinding(binding.id);
       const row = await userRow(user.id);
       expect(row.tokenVersion).toBe(2);
       expect(await membership.isGlobalAdmin(user.id)).toBe(false);
@@ -107,12 +126,12 @@ describeIntegration('MembershipService (PG)', () => {
       const owner = await newUser();
       await bindGlobal(owner.id, 'owner');
       await bindGlobal(owner.id, 'admin');
-      await membership.setGlobalAdmin(owner.id, false, SYSTEM);
+      await setGlobalAdmin(owner.id, false);
       expect(await ownerCount()).toBe(1);
       expect((await userRow(owner.id)).tokenVersion).toBe(1);
 
       const legacy = await newUser();
-      await membership.setGlobalAdmin(legacy.id, false, SYSTEM);
+      await setGlobalAdmin(legacy.id, false);
       expect((await userRow(legacy.id)).tokenVersion).toBe(0);
     });
   });
@@ -121,7 +140,7 @@ describeIntegration('MembershipService (PG)', () => {
     it('AC-22/23: the last enabled owner binding is refused with permissions.ownerLocked and stays', async () => {
       const user = await newUser();
       const binding = await bindGlobal(user.id, 'owner');
-      const error = await membership.removeBinding(binding.id).catch((e: unknown) => e);
+      const error = await removeBinding(binding.id).catch((e: unknown) => e);
       expect(error).toBeInstanceOf(ForbiddenAppException);
       expect(JSON.stringify(error)).toContain('permissions.ownerLocked');
       expect(await ownerCount()).toBe(1);
@@ -131,7 +150,7 @@ describeIntegration('MembershipService (PG)', () => {
       const [first, second] = [await newUser(), await newUser()];
       const [a, b] = [await bindGlobal(first.id, 'owner'), await bindGlobal(second.id, 'owner')];
 
-      const results = await Promise.allSettled([membership.removeBinding(a.id), membership.removeBinding(b.id)]);
+      const results = await Promise.allSettled([removeBinding(a.id), removeBinding(b.id)]);
 
       expect(await ownerCount()).toBe(1);
       const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
@@ -151,8 +170,8 @@ describeIntegration('MembershipService (PG)', () => {
       expect(await membership.isGlobalAdmin(user.id)).toBe(true);
 
       const results = await Promise.allSettled([
-        membership.removeBinding(owner.id),
-        membership.removeBinding(admin.id),
+        removeBinding(owner.id),
+        removeBinding(admin.id),
       ]);
 
       expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
@@ -171,7 +190,7 @@ describeIntegration('MembershipService (PG)', () => {
       await bindGlobal((await newUser()).id, 'owner');
 
       const [removed, granted] = await Promise.allSettled([
-        membership.removeBinding(owner.id),
+        removeBinding(owner.id),
         bindGlobal(user.id, 'admin'),
       ]);
 
@@ -217,7 +236,7 @@ describeIntegration('MembershipService (PG)', () => {
       };
 
       const observer = createTestPrismaClient();
-      const removal = membership.removeAllBindings(principal);
+      const removal = asSeed(() => membership.removeAllBindings(principal));
       try {
         await Promise.race([
           paused,
@@ -285,7 +304,7 @@ describeIntegration('MembershipService (PG)', () => {
 
         await membership.afterCommit(() =>
           tx.run(async () => {
-            await membership.setGlobalAdmin(user.id, false, SYSTEM);
+            await setGlobalAdmin(user.id, false);
             // The read that makes the timing matter: between the nested write and the commit, the
             // demotion is invisible outside, so the keys are unchanged — and this read must not cache
             // them under a generation the commit will not invalidate again.

@@ -14,7 +14,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/assistant-action-send-delivery.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { PrismaChatThreadRepository } from '../../../src/fleet/threads/prisma-chat-thread.repository';
@@ -26,6 +25,7 @@ import { THREAD_LIMITS } from '../../../src/fleet/common/thread-jobs';
 import { FLEET_CAPS } from '../../helpers/fleet-fixtures';
 import { bootHttpApp } from '../../helpers/http-app';
 import { resetDb } from '../../helpers/reset-db';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -80,10 +80,11 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
    */
   async function seedThread(opts: { live?: boolean } = {}): Promise<SeededThread> {
     const live = opts.live ?? true;
-    const created = await threads.create({
+    // The create route writes the row from the creator's request.
+    const created = await withTestActor({ type: 'USER', id: userId }, () => threads.create({
       kind: 'REPO', projectId, repoId, baseRef: 'trunk', feature: uid('handoff'), title: 'Hand-off',
       createdById: userId, backend: { kind: 'native', model: 'm1' }, skills: [], maxCostUsd: '5',
-    });
+    }));
     if (!live) return { threadId: created.id, jobId: null };
     // The pinned runner is online for the send that is about to run, whatever the file's elapsed time.
     await prisma.chatThread.update({ where: { id: created.id }, data: { runnerId } });
@@ -118,7 +119,8 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
   }
 
   const send = (threadId: string, text: string, clientMessageId: string) =>
-    threads.sendMessage({ scope, threadId, userId, text, clientMessageId });
+    withTestActor({ type: 'USER', id: userId }, () =>
+      threads.sendMessage({ scope, threadId, userId, text, clientMessageId }));
 
   /** The one action of a due pair of assertions: the row as stored. */
   const actionRow = (id: string) => prisma.pendingAction.findUniqueOrThrow({ where: { id } });
@@ -141,7 +143,7 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
     process.env['FLEET_THREADS_ENABLED'] = 'true';
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     threads = app.get(PrismaChatThreadRepository, { strict: false });
     jobs = app.get(PrismaFleetJobRepository, { strict: false });
     // The booted config must have taken the flag, not the env var alone: otherwise every send is refused.
@@ -156,6 +158,10 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
       if (savedThreadsEnabled === undefined) delete process.env['FLEET_THREADS_ENABLED'];
       else process.env['FLEET_THREADS_ENABLED'] = savedThreadsEnabled;
     }
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: a live send queues a THREAD_INPUT whose text is the note block above the user text', async () => {

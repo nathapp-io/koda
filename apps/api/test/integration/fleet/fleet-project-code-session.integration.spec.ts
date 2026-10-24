@@ -16,13 +16,13 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { putThreadLines } from '../../helpers/thread-fixtures';
 import type { RunnerCapabilities } from '../../../src/fleet/common/protocol';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -88,7 +88,7 @@ describeIntegration('fleet project-code session notice (PG + HTTP, S5b 1c-b)', (
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     noCode = await enrollRunner(server, world.tokens.root, 'pc-no-code', { capabilities: caps() });
     withCode = await enrollRunner(server, world.tokens.root, 'pc-with-code', { capabilities: caps({ projectCode: true }) });
@@ -107,6 +107,10 @@ describeIntegration('fleet project-code session notice (PG + HTTP, S5b 1c-b)', (
       }
       if (artifactDir) rmSync(artifactDir, { recursive: true, force: true });
     }
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('US-003 AC-9: a PROJECT thread on a runner without projectCode stores the notice with the runner name', async () => {

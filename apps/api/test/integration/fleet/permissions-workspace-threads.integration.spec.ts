@@ -18,7 +18,6 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { FLEET_CFG, type IFleetConfig } from '../../../src/config/fleet.config';
 import { MembershipService } from '../../../src/permissions/membership.service';
@@ -27,6 +26,7 @@ import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../sr
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { FLEET_CAPS } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -94,9 +94,10 @@ describeIntegration('workspace thread keys and hosting (US-003)', () => {
     tokens[who] = await loginToken(server, `${who}@koda.test`);
   };
 
-  /** The binding that is the caller's only source in the project. */
+  /** The binding that is the caller's only source in the project: a fixture grant, so it writes as the seeder. */
   const bind = (principal: PrincipalRef, roleKey: string, projectId: string | null): Promise<unknown> =>
-    membership.createBinding({ principal, roleKey, projectId }, { type: 'SYSTEM', id: 'test' });
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+      membership.createBinding({ principal, roleKey, projectId }, { type: 'SYSTEM', id: 'test' }));
 
   /** An agent with a real API key, its project bindings and its baseline; no legacy `AgentRoleEntry`. */
   const createAgent = async (slug: string, roster: string[], bindings: Array<{ roleKey: string; projectId: string | null }>): Promise<string> => {
@@ -153,7 +154,7 @@ describeIntegration('workspace thread keys and hosting (US-003)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    prisma = fixtureDb(app);
     membership = app.get(MembershipService);
     // Thread routes are behind the kill switch; every other thread suite sets it the same way.
     config = app.get<IFleetConfig>(FLEET_CFG);
@@ -213,6 +214,14 @@ describeIntegration('workspace thread keys and hosting (US-003)', () => {
 
   const createBody = (homeProject?: string) => ({
     title: 'Workspace', backend: { kind: 'native', model: 'm1' }, ...(homeProject === undefined ? {} : { homeProject }),
+  });
+
+  // -------------------------------------------------------------------------
+  // The guard is on for this application
+  // -------------------------------------------------------------------------
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   // -------------------------------------------------------------------------

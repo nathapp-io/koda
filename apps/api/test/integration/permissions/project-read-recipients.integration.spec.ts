@@ -2,7 +2,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
 import { randomUUID } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { AppModule } from '../../../src/app.module';
 import { NotificationEligibility } from '../../../src/notifications/notification-eligibility';
 import type { NotificationDraft } from '../../../src/notifications/notification.types';
@@ -11,6 +10,7 @@ import { MembershipService } from '../../../src/permissions/membership.service';
 import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -45,7 +45,7 @@ describeIntegration('project.read notification recipients (PG)', () => {
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    db = fixtureDb(app);
     membership = app.get(MembershipService);
     eligibility = app.get(NotificationEligibility);
     mentions = app.get(TicketMentionResolver);
@@ -57,6 +57,10 @@ describeIntegration('project.read notification recipients (PG)', () => {
     await db.roleBinding.deleteMany({});
     await db.user.deleteMany({});
     await membership.invalidatePermissions();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: admits a custom GLOBAL project.read holder', async () => {

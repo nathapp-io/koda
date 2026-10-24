@@ -7,12 +7,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { ContextBuilderService } from '../../../src/context/context-builder.service';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { asTestActor, expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const refusalMessage = (namespace: string): string => {
   const messages = JSON.parse(readFileSync(join(__dirname, `../../../src/i18n/en/${namespace}.json`), 'utf8')) as Record<string, string>;
@@ -54,8 +54,10 @@ describeIntegration('US-003 context route permissions', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
-    membership = app.get(MembershipService);
+    db = fixtureDb(app);
+    // The bindings below are fixture grants with no request principal, so the service writes as
+    // `SYSTEM/seed` — the same component `fixtureDb` writes under.
+    membership = asTestActor(app.get(MembershipService), { type: 'SYSTEM', id: 'seed' });
     contextBuilder = app.get(ContextBuilderService);
     vi.spyOn(contextBuilder, 'getProjectContext').mockResolvedValue({ projectId: 'context-project' } as never);
 
@@ -115,6 +117,10 @@ describeIntegration('US-003 context route permissions', () => {
   afterAll(async () => {
     vi.restoreAllMocks();
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: viewer binding reads context', async () => {

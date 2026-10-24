@@ -8,12 +8,12 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { FleetLogRetentionProcessor } from '../../../src/fleet/logs/fleet-log-retention.processor';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -56,6 +56,11 @@ describeIntegration('fleet log retention (PG)', () => {
       await prisma.fleetJobEvent.create({ data: { jobId, seq, leaseEpoch: epoch, runnerSeq: seq, type, payload: {} } });
     }
   };
+  /** The retention component's own pass, as `scheduledPurge` runs it. */
+  const purge = (beforeDate: Date, now: Date) => withTestActor({ type: 'SYSTEM', id: 'log' }, () => retention.purge(beforeDate, now));
+  /** One selected job, expired by the same component inside its pass. */
+  const expireJob = (selected: Parameters<FleetLogRetentionProcessor['expireJob']>[0], now: Date) =>
+    withTestActor({ type: 'SYSTEM', id: 'log' }, () => retention.expireJob(selected, now));
   const eventTypes = async (jobId: string) =>
     (await prisma.fleetJobEvent.findMany({ where: { jobId }, orderBy: { seq: 'asc' } })).map((e) => `${e.leaseEpoch}:${e.type}`);
   const get = (path: string) => request(server).get(`/api/projects/web/fleet/jobs/${path}`).set({ Authorization: `Bearer ${world.tokens.dev}` });
@@ -68,7 +73,7 @@ describeIntegration('fleet log retention (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     retention = app.get(FleetLogRetentionProcessor);
   });
@@ -78,6 +83,10 @@ describeIntegration('fleet log retention (PG)', () => {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
     }
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('expires old terminal jobs only, keeps the job row and non-log events, and is idempotent', async () => {
@@ -93,7 +102,7 @@ describeIntegration('fleet log retention (PG)', () => {
     const running = await job('running', { state: 'RUNNING', finishedAt: null });
     await attempt(running.id, 1);
 
-    expect(await retention.purge(before, now)).toEqual({ expired: 2, failed: 0 });
+    expect(await purge(before, now)).toEqual({ expired: 2, failed: 0 });
 
     for (const epoch of ['0', '1', '2']) expect(existsSync(file('logs', old.id, epoch))).toBe(false);
     expect(existsSync(file('jobs', old.id, '1', 'b.tar.gz'))).toBe(false);
@@ -110,13 +119,13 @@ describeIntegration('fleet log retention (PG)', () => {
       expect(await eventTypes(kept.id)).toEqual(['1:log', '1:state']);
     }
 
-    expect(await retention.purge(before, now)).toEqual({ expired: 0, failed: 0 });
+    expect(await purge(before, now)).toEqual({ expired: 0, failed: 0 });
   });
 
   it('answers 410 for the expired logs and bundle (D341)', async () => {
     const j = await job('gone', {});
     await attempt(j.id, 1);
-    await retention.purge(before, now);
+    await purge(before, now);
     await get(`${j.id}/bundle`).expect(410);
     await get(`${j.id}/logs/run/entries`).expect(410);
     await get(`${j.id}/logs/run/raw?download=1`).expect(410);
@@ -129,7 +138,7 @@ describeIntegration('fleet log retention (PG)', () => {
     await prisma.fleetJob.update({ where: { id: j.id }, data: { state: 'RUNNING', leaseEpoch: 2, finishedAt: null } });
     await attempt(j.id, 2);
 
-    await retention.expireJob(selected, now);
+    await expireJob(selected, now);
 
     expect(existsSync(file('logs', j.id, '1'))).toBe(false);
     expect(existsSync(file('logs', j.id, '2', 'run.log'))).toBe(true);
@@ -145,7 +154,7 @@ describeIntegration('fleet log retention (PG)', () => {
     await attempt(j.id, 1);
     rmSync(file('logs', j.id), { recursive: true, force: true });
     rmSync(file('jobs', j.id), { recursive: true, force: true });
-    expect(await retention.purge(before, now)).toEqual({ expired: 1, failed: 0 });
+    expect(await purge(before, now)).toEqual({ expired: 1, failed: 0 });
     expect(await prisma.fleetJobLog.count({ where: { jobId: j.id, expiredAt: null } })).toBe(0);
   });
 });

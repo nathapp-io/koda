@@ -5,12 +5,12 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import { NathApplication } from '@nathapp/nestjs-app';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
 import { BUDGET_REPOSITORY, DuplicateBudgetPolicyError, IBudgetRepository, NewBudgetPolicy } from '../../../src/fleet/budgets/domain/budget.domain';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -29,6 +29,11 @@ describeIntegration('budget repository (PG)', () => {
       maxCostUsd: new Prisma.Decimal(5), selectorLabels: [], requestedById: base.adminId, state: 'COMPLETED', ...over,
     },
   });
+  /** A policy is created by the admin route, so the repository runs as the admin who posts it. */
+  const createPolicy = (over: Partial<NewBudgetPolicy> = {}) =>
+    withTestActor({ type: 'USER', id: base.adminId }, () => repo.create(newPolicy(over)));
+  /** An incident is inserted by the budget evaluator inside its transaction, as `SYSTEM/budget`. */
+  const asBudget = <T>(call: () => T | PromiseLike<T>) => withTestActor({ type: 'SYSTEM', id: 'budget' }, call);
   const newPolicy = (over: Partial<NewBudgetPolicy> = {}): NewBudgetPolicy => ({
     scopeType: 'global', scopeId: null, scopeKey: 'global', projectId: null, windowKind: 'calendar_month_utc',
     amountUsd: '10', warnPercent: 80, hardStop: true, runningJobs: 'finish', createdById: base.adminId, ...over,
@@ -37,7 +42,7 @@ describeIntegration('budget repository (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     repo = app.get<IBudgetRepository>(BUDGET_REPOSITORY);
     base = await seedFleetBase(prisma);
   });
@@ -47,6 +52,10 @@ describeIntegration('budget repository (PG)', () => {
   beforeEach(async () => {
     await prisma.budgetPolicy.deleteMany();
     await prisma.fleetJob.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('sums spent plus carried for jobs first started in the window, per scope', async () => {
@@ -63,23 +72,23 @@ describeIntegration('budget repository (PG)', () => {
   });
 
   it('inserts a warn incident once per (policy, window, amount) without aborting the transaction', async () => {
-    const p = await repo.create(newPolicy());
+    const p = await createPolicy();
     const tx = app.get<ITransactionManager>(TRANSACTION_MANAGER);
     const incident = { policyId: p.id, kind: 'warn' as const, windowStart: OCT, spentUsd: '8', amountUsd: '10', actorId: null };
-    const results = await tx.run(async () => [
+    const results = await asBudget(() => tx.run(async () => [
       await repo.insertIncident(incident),
       await repo.insertIncident(incident),
       await repo.insertIncident({ ...incident, amountUsd: '20' }),
       await repo.insertIncident({ ...incident, kind: 'resumed' }),
       await repo.insertIncident({ ...incident, kind: 'resumed' }),
-    ]);
+    ]));
     expect(results).toEqual([true, false, true, true, true]);
     expect(await prisma.budgetIncident.count({ where: { policyId: p.id } })).toBe(4);
   });
 
   it('refuses a second policy for one scope and window', async () => {
-    await repo.create(newPolicy());
-    await expect(repo.create(newPolicy())).rejects.toBeInstanceOf(DuplicateBudgetPolicyError);
+    await createPolicy();
+    await expect(createPolicy()).rejects.toBeInstanceOf(DuplicateBudgetPolicyError);
   });
 
   it('knows which scope rows exist, treating a soft-deleted project as gone (D166)', async () => {
@@ -111,12 +120,12 @@ describeIntegration('budget repository (PG)', () => {
 
   it('shows a project its own policies and the global ones, not another project\'s', async () => {
     const other = await seedFleetBase(prisma);
-    await repo.create(newPolicy());
-    await repo.create(newPolicy({ scopeType: 'project', scopeId: base.projectId, scopeKey: `project:${base.projectId}`, projectId: base.projectId }));
-    await repo.create(newPolicy({ scopeType: 'repo', scopeId: base.repoId, scopeKey: `repo:${base.repoId}`, projectId: base.projectId }));
-    await repo.create(newPolicy({ scopeType: 'project', scopeId: other.projectId, scopeKey: `project:${other.projectId}`, projectId: other.projectId }));
+    await createPolicy();
+    await createPolicy({ scopeType: 'project', scopeId: base.projectId, scopeKey: `project:${base.projectId}`, projectId: base.projectId });
+    await createPolicy({ scopeType: 'repo', scopeId: base.repoId, scopeKey: `repo:${base.repoId}`, projectId: base.projectId });
+    await createPolicy({ scopeType: 'project', scopeId: other.projectId, scopeKey: `project:${other.projectId}`, projectId: other.projectId });
     const runner = await insertRunner(prisma);
-    await repo.create(newPolicy({ scopeType: 'runner', scopeId: runner.id, scopeKey: `runner:${runner.id}` }));
+    await createPolicy({ scopeType: 'runner', scopeId: runner.id, scopeKey: `runner:${runner.id}` });
     expect((await repo.findVisibleToProject(base.projectId)).map((p) => p.scopeType).sort()).toEqual(['global', 'project', 'repo']);
     expect((await repo.findPaused())).toEqual([]);
   });

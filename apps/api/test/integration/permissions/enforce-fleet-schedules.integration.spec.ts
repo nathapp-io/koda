@@ -15,7 +15,6 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { ScheduleTicker } from '../../../src/fleet/schedules/schedule-ticker';
 import { MembershipService } from '../../../src/permissions/membership.service';
@@ -23,6 +22,7 @@ import type { PrincipalRef } from '../../../src/permissions/permissions.types';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -95,10 +95,10 @@ describeIntegration('fleet schedule keys and ownership (US-005)', () => {
 
   /** The binding that is the caller's only source in p1. */
   const bind = (who: string, roleKey: string): Promise<unknown> =>
-    membership.createBinding(
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
       { principal: { type: 'USER', id: ids[who] }, roleKey, projectId: p1Id },
       { type: 'SYSTEM', id: 'test' },
-    );
+    ));
 
   /** A roster-only agent: its one key source in p1 is the `viewer` binding plus its role binding. */
   const createAgent = async (slug: string): Promise<string> => {
@@ -135,7 +135,7 @@ describeIntegration('fleet schedule keys and ownership (US-005)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    prisma = fixtureDb(app);
     membership = app.get(MembershipService);
     ticker = app.get(ScheduleTicker);
 
@@ -177,6 +177,10 @@ describeIntegration('fleet schedule keys and ownership (US-005)', () => {
     await prisma.jobSchedule.deleteMany();
     await prisma.budgetPolicy.deleteMany();
     await prisma.fleetActivity.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   // -------------------------------------------------------------------------

@@ -9,13 +9,13 @@ import { mkdtempSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { tarGz } from '../../helpers/tar-gz';
 import { LogFallbackService } from '../../../src/fleet/logs/log-fallback.service';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -51,7 +51,7 @@ describeIntegration('fleet log fallback (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     runner = await enrollRunner(server, world.tokens.root, 'box-fallback');
   });
@@ -59,6 +59,10 @@ describeIntegration('fleet log fallback (PG)', () => {
     await app.close();
     if (savedDir === undefined) delete process.env.FLEET_ARTIFACT_DIR;
     else process.env.FLEET_ARTIFACT_DIR = savedDir;
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('fills a stream whose upload stopped before final from the uploaded bundle', async () => {

@@ -1,13 +1,13 @@
 import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { EmailAvailability } from '../../../src/email/email-availability';
 import { MEMBERSHIP_READ_CAP } from '../../../src/permissions/membership.queries';
 import { PrismaProjectMembersRepository } from '../../../src/projects/members/prisma-project-members.repository';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -42,7 +42,7 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    db = fixtureDb(app);
     rootToken = data<{ accessToken: string }>(await request(server).post('/api/auth/register').send({ email: 'root@bindings.test', name: 'Root', password: TEST_PASSWORD }).expect(201)).accessToken;
     const root = await db.user.findUniqueOrThrow({ where: { email: 'root@bindings.test' } });
     rootId = root.id;
@@ -60,6 +60,10 @@ describeIntegration('project member binding writes (PG HTTP)', () => {
     await bind('project-admin', adminId);
   });
   afterEach(() => vi.restoreAllMocks());
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
   afterAll(async () => { await app?.close(); });
 
   it('AC-1: adds a developer binding with the caller as granter and no legacy row', async () => {

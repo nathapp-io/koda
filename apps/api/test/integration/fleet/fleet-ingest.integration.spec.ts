@@ -9,17 +9,17 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { Readable } from 'stream';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
-import { seedFleetBase } from '../../helpers/fleet-fixtures';
+import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
 import { tarGz } from '../../helpers/tar-gz';
 import { ARTIFACT_STORE, ArtifactStore } from '../../../src/fleet/artifacts/artifact-store';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 import { BundleIngestService } from '../../../src/fleet/ingest/bundle-ingest.service';
 import { BUNDLE_INGEST_REPOSITORY, IBundleIngestRepository } from '../../../src/fleet/ingest/domain/bundle-ingest.domain';
 import { ESCALATED_FROM_AUDIT, NOTHING_PUSHED } from '../../../src/fleet/ingest/ingest-corrections';
+import { asTestActor, expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -41,6 +41,9 @@ describeIntegration('fleet bundle ingest (PG)', () => {
   let store: ArtifactStore;
   let ingest: BundleIngestService;
   let repo: IBundleIngestRepository;
+  let runnerId: string;
+  /** The drain runs as its own component; production chains it off the upload transaction's kick. */
+  const drainAs = () => asTestActor(ingest, { type: 'SYSTEM', id: 'ingest' });
   const savedDir = process.env.FLEET_ARTIFACT_DIR;
   const now = new Date('2026-10-05T10:00:00Z');
 
@@ -60,7 +63,8 @@ describeIntegration('fleet bundle ingest (PG)', () => {
       create: { jobId, leaseEpoch: epoch, kind: 'bundle', storageKey: key, sizeBytes: BigInt(gz.length), sha256: sha(gz) },
       update: { storageKey: key, sizeBytes: BigInt(gz.length), sha256: sha(gz) },
     });
-    await repo.enqueue(artifact.id, jobId, epoch, 1);
+    // The row is enqueued inside the runner's upload transaction, so it is written as that runner.
+    await withTestActor({ type: 'RUNNER', id: runnerId }, () => repo.enqueue(artifact.id, jobId, epoch, 1));
     return artifact.id;
   };
   const fullBundle = (finish: string | null) => [
@@ -75,11 +79,12 @@ describeIntegration('fleet bundle ingest (PG)', () => {
     process.env.FLEET_ARTIFACT_DIR = mkdtempSync(join(tmpdir(), 'koda-ingest-'));
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     store = app.get<ArtifactStore>(ARTIFACT_STORE);
     ingest = app.get(BundleIngestService);
     repo = app.get<IBundleIngestRepository>(BUNDLE_INGEST_REPOSITORY);
     base = await seedFleetBase(prisma);
+    runnerId = (await insertRunner(prisma)).id;
   });
   afterAll(async () => {
     await app.close();
@@ -87,11 +92,15 @@ describeIntegration('fleet bundle ingest (PG)', () => {
     else process.env.FLEET_ARTIFACT_DIR = savedDir;
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('ingests rows, raises cost, corrects an escalated finish, and is idempotent (Review Focus 1)', async () => {
     const signal = vi.spyOn(app.get(BudgetEvaluator), 'signal').mockImplementation(() => undefined);
     const job = await seedJob();
     await attach(job.id, fullBundle('escalated'));
-    expect(await ingest.drain(now)).toBe(1);
+    expect(await drainAs().drain(now)).toBe(1);
 
     expect(await prisma.fleetCostEvent.count({ where: { jobId: job.id } })).toBe(2);
     expect(await prisma.fleetStoryResult.count({ where: { jobId: job.id } })).toBe(1);
@@ -105,8 +114,8 @@ describeIntegration('fleet bundle ingest (PG)', () => {
     expect(row.ledgerCostUsd?.toString()).toBe('0.1573');
     expect(signal).toHaveBeenCalledWith(expect.arrayContaining([`project:${base.projectId}`]));
 
-    await repo.rerunJob(job.id);
-    expect(await ingest.drain(now)).toBe(1);
+    await asTestActor(repo, { type: 'USER', id: base.adminId }).rerunJob(job.id);
+    expect(await drainAs().drain(now)).toBe(1);
     expect(await prisma.fleetCostEvent.count({ where: { jobId: job.id } })).toBe(2);
     expect(await prisma.fleetActivity.count({ where: { jobId: job.id, action: 'job.verdict_corrected' } })).toBe(1);
     signal.mockRestore();
@@ -115,22 +124,22 @@ describeIntegration('fleet bundle ingest (PG)', () => {
   it('waits for a terminal job before ingesting', async () => {
     const job = await seedJob({ state: 'UPLOADING', finishedAt: null });
     await attach(job.id, fullBundle(null));
-    expect(await ingest.drain(now)).toBe(0);
+    expect(await drainAs().drain(now)).toBe(0);
     await prisma.fleetJob.update({ where: { id: job.id }, data: { state: 'COMPLETED', finishedAt: now } });
-    expect(await ingest.drain(now)).toBe(1);
+    expect(await drainAs().drain(now)).toBe(1);
   });
 
   it('marks a COMPLETED run without finish or branch as nothing pushed (#204)', async () => {
     const job = await seedJob();
     await attach(job.id, fullBundle(null));
-    await ingest.drain(now);
+    await drainAs().drain(now);
     expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: job.id } }))).toMatchObject({ state: 'COMPLETED', stateReason: NOTHING_PUSHED });
   });
 
   it('raises a PLAN job cost from its ledger (#203)', async () => {
     const job = await seedJob({ command: 'PLAN', costSpentUsd: new Prisma.Decimal(0) });
     await attach(job.id, [{ name: 'nax-out/cost/u.jsonl', body: costLine('p1', 0.0044) }]);
-    await ingest.drain(now);
+    await drainAs().drain(now);
     const after = await prisma.fleetJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(after.costSpentUsd.toString()).toBe('0.0044');
     expect(after.stateReason).toBeNull();
@@ -139,7 +148,7 @@ describeIntegration('fleet bundle ingest (PG)', () => {
   it('an earlier attempt adds rows but never touches the job (D367, Review Focus 2)', async () => {
     const job = await seedJob({ leaseEpoch: 2, naxRunId: 'run-2' });
     await attach(job.id, fullBundle('escalated'), 1);
-    await ingest.drain(now);
+    await drainAs().drain(now);
     const after = await prisma.fleetJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(after).toMatchObject({ state: 'COMPLETED', stateReason: null });
     expect(after.costSpentUsd.toString()).toBe('0.0745');
@@ -150,7 +159,7 @@ describeIntegration('fleet bundle ingest (PG)', () => {
     const job = await seedJob();
     await attach(job.id, fullBundle(null));
     const spy = vi.spyOn(repo, 'markOutcome').mockRejectedValueOnce(new Error('db went away'));
-    await ingest.drain(now);
+    await drainAs().drain(now);
     spy.mockRestore();
     expect(await prisma.fleetCostEvent.count({ where: { jobId: job.id } })).toBe(0);
     const row = await prisma.fleetBundleIngest.findFirstOrThrow({ where: { jobId: job.id } });
@@ -161,11 +170,11 @@ describeIntegration('fleet bundle ingest (PG)', () => {
   it('fails an expired bundle without retry, and analytics survive bundle expiry', async () => {
     const job = await seedJob();
     const artifactId = await attach(job.id, fullBundle(null));
-    await ingest.drain(now);
+    await drainAs().drain(now);
     await prisma.fleetJobArtifact.update({ where: { id: artifactId }, data: { expiredAt: now } });
     expect(await prisma.fleetCostEvent.count({ where: { jobId: job.id } })).toBe(2);
-    await repo.rerunJob(job.id);
-    await ingest.drain(now);
+    await asTestActor(repo, { type: 'USER', id: base.adminId }).rerunJob(job.id);
+    await drainAs().drain(now);
     expect(await prisma.fleetBundleIngest.findFirstOrThrow({ where: { jobId: job.id } })).toMatchObject({ status: 'failed', error: 'bundle expired' });
   });
 
@@ -176,7 +185,7 @@ describeIntegration('fleet bundle ingest (PG)', () => {
       { name: 'nax-out/metrics.json', body: metricsJson('run-1') },
       { name: 'nax-out/status.json', body: statusJson('run-1') },
     ]);
-    await ingest.drain(now);
+    await drainAs().drain(now);
     expect(await prisma.fleetBundleIngest.findFirstOrThrow({ where: { jobId: job.id } })).toMatchObject({ status: 'partial', files: { cost: 'skipped:v99', metrics: 'done' } });
     expect(await prisma.fleetStoryResult.count({ where: { jobId: job.id } })).toBe(1);
   });

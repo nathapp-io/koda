@@ -20,11 +20,11 @@ import { join } from 'path';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -106,17 +106,17 @@ describeIntegration('agent route keys (US-009)', () => {
 
   /** The global binding that makes a principal a global admin (role `admin`, no project). */
   const bindGlobal = (who: string, roleKey: string): Promise<unknown> =>
-    membership.createBinding(
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
       { principal: { type: 'USER', id: userIds[who] }, roleKey, projectId: null },
       { type: 'SYSTEM', id: 'test' },
-    );
+    ));
 
   /** The binding that is the caller's only source in p1. */
   const bind = (who: string, roleKey: RoleKey): Promise<unknown> =>
-    membership.createBinding(
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () => membership.createBinding(
       { principal: { type: 'USER', id: userIds[who] }, roleKey, projectId: p1Id },
       { type: 'SYSTEM', id: 'test' },
-    );
+    ));
 
   /**
    * An agent created through the route as the Owner, then given explicit
@@ -163,7 +163,7 @@ describeIntegration('agent route keys (US-009)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    db = fixtureDb(app);
     membership = app.get(MembershipService);
 
     const root = await request(server)
@@ -217,6 +217,10 @@ describeIntegration('agent route keys (US-009)', () => {
     // The `/agents` controller throttles at 10/min; the counters are reset so a suite of twenty
     // requests never answers 429 for a reason no AC here is about.
     if (app) resetThrottle(app);
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   // -------------------------------------------------------------------------

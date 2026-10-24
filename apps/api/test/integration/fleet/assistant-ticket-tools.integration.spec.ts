@@ -9,7 +9,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && KODA_DB_TESTS=1 bun run test:scoped test/integration/fleet/assistant-ticket-tools.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
 import { CommentsService } from '../../../src/comments/comments.service';
@@ -18,6 +17,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -74,7 +74,7 @@ describeIntegration('fleet assistant ticket tools (PG, US-003)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     const runner = await insertRunner(prisma, { createdById: world.ids.root });
     thread = await seedThreadJobFor(prisma, world, { runnerId: runner.id, apiKey: 'unused' }, { feature: 'us003-tickets' });
@@ -126,6 +126,10 @@ describeIntegration('fleet assistant ticket tools (PG, US-003)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-2: koda_search_tickets { status: IN_PROGRESS } names the IN_PROGRESS tickets and omits the CREATED one', async () => {

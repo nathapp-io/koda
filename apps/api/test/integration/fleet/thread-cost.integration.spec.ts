@@ -4,13 +4,13 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { putThreadLines, seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
 import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -34,7 +34,7 @@ describeIntegration('fleet thread cost folding and spend (PG, US-005)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     runner = await enrollRunner(server, world.tokens.root, 'cost-runner');
     await prisma.runner.update({ where: { id: runner.runnerId }, data: { protocolVersion: 4, lastSeenAt: new Date(), enabled: true, capacity: 5 } });
@@ -68,6 +68,10 @@ describeIntegration('fleet thread cost folding and spend (PG, US-005)', () => {
   const job = (seed: ThreadJobSeed) => prisma.fleetJob.findUniqueOrThrow({ where: { id: seed.jobId } });
   const message = (seed: ThreadJobSeed) => prisma.chatMessage.findFirstOrThrow({
     where: { threadId: seed.threadId, turnId: 't1', role: 'assistant' },
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('rederives multiple touched turns with exact rounding and literal turn-id matching', async () => {
@@ -198,7 +202,8 @@ describeIntegration('fleet thread cost folding and spend (PG, US-005)', () => {
       createdById: world.ids.root, updatedById: world.ids.dev,
     } });
     await put(s, [start(), usage({ costUsd: 0.02 })]);
-    await app.get(BudgetEvaluator).evaluate(policy.id, new Date());
+    // The evaluator's entry is the budget sweeper, the `budget` system component.
+    await withTestActor({ type: 'SYSTEM', id: 'budget' }, () => app.get(BudgetEvaluator).evaluate(policy.id, new Date()));
     expect(await prisma.fleetJob.findUniqueOrThrow({ where: { id: queued.id } })).toMatchObject({ state: 'CANCELLED', stateReason: `budget:${policy.id}` });
     expect(await prisma.fleetJob.findUniqueOrThrow({ where: { id: s.jobId } })).toMatchObject({ state: 'RUNNING', cancelRequestedAt: expect.any(Date) });
     expect(await prisma.fleetCommand.count({ where: { jobId: s.jobId, type: 'CANCEL' } })).toBe(1);

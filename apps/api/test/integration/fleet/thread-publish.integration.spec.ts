@@ -3,7 +3,6 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
@@ -12,6 +11,7 @@ import { seedFleetHttpWorld, FleetHttpWorld } from '../../helpers/fleet-fixtures
 import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-job.repository';
 import { ThreadJobEffects } from '../../../src/fleet/threads/thread-job-effects';
 import type { FleetJobRecord } from '../../../src/fleet/jobs/domain/fleet-job.domain';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeDb = canRunDbTests() ? describe : describe.skip;
@@ -32,7 +32,7 @@ describeDb('US-003 thread publish', () => {
     app.useAppGlobalPrefix().useAppGlobalPipes().useAppGlobalFilters().useAppGlobalGuards();
     await app.init();
     httpServer = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    db = fixtureDb(app);
     world = await seedFleetHttpWorld(httpServer, db);
     config = app.get<IFleetConfig>(FLEET_CFG);
     config.threadsEnabled = true;
@@ -53,6 +53,10 @@ describeDb('US-003 thread publish', () => {
   } });
   const send = (id: string) => request(httpServer).post(`/api/projects/web/threads/${id}/messages`)
     .set('Authorization', `Bearer ${world.tokens.dev}`).send({ text: 'hello', clientMessageId: 'publish-busy' });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('AC-2: refuses a message while a PLAN job for the thread is queued', async () => {
     const thread = await makeThread();
@@ -186,13 +190,16 @@ describeDb('US-003 thread publish', () => {
       jobId: 'earlier-session-job', state: 'closed', resumed: true, contextReset: false,
       reason: 'session ended', at: '2026-10-01T00:00:00.000Z',
     };
+    const runner = await makeRunner(`publish-session-${Math.random().toString(36).slice(2)}`);
     const thread = await makeThread({ session });
     const job = await db.fleetJob.create({ data: {
       projectId: world.projectId, repoId: world.repoId, ref: 'trunk', command: 'THREAD', feature: `thread-${thread.id}`,
       profiles: [], maxCostUsd: 0, selectorLabels: [], requestedById: world.ids.dev, state: 'COMPLETED',
-      stateReason: 'published', threadId: thread.id, finishedAt: new Date('2026-10-02T00:00:00.000Z'),
+      stateReason: 'published', threadId: thread.id, finishedAt: new Date('2026-10-02T00:00:00.000Z'), runnerId: runner.id,
     } });
-    await app.get(ThreadJobEffects).onJobEnded(job as unknown as FleetJobRecord);
+    // The runner holding the job reports it ended, so the effect runs as that runner.
+    const events = await withTestActor({ type: 'RUNNER', id: runner.id }, () => app.get(ThreadJobEffects).onJobEnded(job as unknown as FleetJobRecord));
+    expect(events).toContainEqual(expect.objectContaining({ type: 'thread', threadId: job.threadId }));
     const saved = await db.chatThread.findUniqueOrThrow({ where: { id: thread.id }, select: { session: true } });
     expect(saved.session).toEqual(session);
   });

@@ -4,10 +4,9 @@ import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { resetDb } from '../helpers/reset-db';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 import { expectBindingOnlyFixtures, grantRole } from '../../src/permissions/test-helpers/permission-fixtures';
+import { expectGuardActive, fixtureDb } from '../helpers/action-context';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 // The nax sandbox withholds host Postgres/Docker.
@@ -47,7 +46,7 @@ describeIntegration('Agents API E2E', () => {
    * the `viewer` of the roster plus one binding per project role key, in that project only.
    */
   const rosterAgentIn = async (projectId: string): Promise<void> => {
-    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    const prisma = fixtureDb(app);
     const principal = { type: 'AGENT' as const, id: agentId };
     await grantRole(prisma, principal, 'viewer', projectId);
     for (const roleKey of agentProjectRoleKeys) {
@@ -78,12 +77,12 @@ describeIntegration('Agents API E2E', () => {
       .send({ email: 'agents-admin@koda.test', name: 'Agents Admin', password: 'Admin1234!Aa' })
       .expect(201);
 
-    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-    const adminUser = await prisma.client.user.findUnique({ where: { email: 'agents-admin@koda.test' } });
+    const prisma = fixtureDb(app);
+    const adminUser = await prisma.user.findUnique({ where: { email: 'agents-admin@koda.test' } });
     expect(adminUser).toBeTruthy();
     adminUserId = (adminUser as NonNullable<typeof adminUser>).id;
     // Permissions P1 US-005: the admin's global access is a role binding, not `User { role: 'ADMIN' }`.
-    await grantRole(prisma.client, { type: 'USER', id: adminUserId }, 'admin', null);
+    await grantRole(prisma, { type: 'USER', id: adminUserId }, 'admin', null);
 
     const adminLoginRes = await request(httpServer)
       .post('/api/auth/login')
@@ -98,7 +97,7 @@ describeIntegration('Agents API E2E', () => {
       .expect(201);
 
     memberAccessToken = body<{ accessToken: string }>(memberRegisterRes).accessToken;
-    const memberUser = await prisma.client.user.findUniqueOrThrow({ where: { email: 'agents-member@koda.test' } });
+    const memberUser = await prisma.user.findUniqueOrThrow({ where: { email: 'agents-member@koda.test' } });
     memberUserId = memberUser.id;
 
     const projectRes = await request(httpServer)
@@ -112,6 +111,10 @@ describeIntegration('Agents API E2E', () => {
 
   afterAll(async () => {
     if (app) await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('POST /api/agents — creates agent with API key (admin only)', async () => {
@@ -135,8 +138,8 @@ describeIntegration('Agents API E2E', () => {
 
     // Permissions P1 US-005: the agent reaches the setup project through the `viewer` binding of its
     // roster, and acts there with a binding per project role key it holds.
-    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-    const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+    const prisma = fixtureDb(app);
+    const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
     await rosterAgentIn(project.id);
   });
 
@@ -181,7 +184,7 @@ describeIntegration('Agents API E2E', () => {
     // beforeAll, so a pass cannot come from insertion order, and `zulu` is
     // soft-deleted after its roster row exists, so only the deletedAt filter can
     // keep it out of the list.
-    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+    const prisma = fixtureDb(app);
 
     const alphaRes = await request(httpServer)
       .post('/api/projects')
@@ -189,7 +192,7 @@ describeIntegration('Agents API E2E', () => {
       .send({ name: 'Agents E2E Alpha', slug: 'agents-e2e-alpha', key: 'AEA' })
       .expect(201);
     const alphaSlug = body<{ slug: string }>(alphaRes).slug;
-    const alpha = await prisma.client.project.findUniqueOrThrow({ where: { slug: alphaSlug } });
+    const alpha = await prisma.project.findUniqueOrThrow({ where: { slug: alphaSlug } });
 
     const zuluRes = await request(httpServer)
       .post('/api/projects')
@@ -197,7 +200,7 @@ describeIntegration('Agents API E2E', () => {
       .send({ name: 'Agents E2E Zulu', slug: 'agents-e2e-zulu', key: 'AEZ' })
       .expect(201);
     const zuluSlug = body<{ slug: string }>(zuluRes).slug;
-    const zulu = await prisma.client.project.findUniqueOrThrow({ where: { slug: zuluSlug } });
+    const zulu = await prisma.project.findUniqueOrThrow({ where: { slug: zuluSlug } });
 
     // Permissions P1 US-005: the roster is a `viewer` binding per project.
     await rosterAgentIn(alpha.id);
@@ -317,8 +320,8 @@ describeIntegration('Agents API E2E', () => {
     // (it has no VERIFIED tickets, so pickup returns null rather than 403).
     // Permissions P1 US-005: that roster is a `viewer` binding plus the bindings of the project role
     // keys the agent acts with.
-    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
-    const emptyProject = await prisma.client.project.findUniqueOrThrow({ where: { slug: emptyProjectSlug } });
+    const prisma = fixtureDb(app);
+    const emptyProject = await prisma.project.findUniqueOrThrow({ where: { slug: emptyProjectSlug } });
     await rosterAgentIn(emptyProject.id);
 
     const res = await request(httpServer)
@@ -340,23 +343,23 @@ describeIntegration('Agents API E2E', () => {
   });
 
   it('fixtures grant through bindings only', async () => {
-    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+    const prisma = fixtureDb(app);
     // Permissions P1l (US-005): creation writes no `AgentRoleEntry`, so no exemption is needed —
     // every grant of the agent (baseline, roster viewer and project role keys) is a binding.
-    await expectBindingOnlyFixtures(prisma.client, [
+    await expectBindingOnlyFixtures(prisma, [
       { type: 'USER', id: adminUserId },
       { type: 'USER', id: memberUserId },
       { type: 'AGENT', id: agentId },
     ]);
     // Permissions P1 US-005: the admin's global access is the `admin` binding, not `User.role`.
-    const adminBinding = await prisma.client.roleBinding.findFirst({
+    const adminBinding = await prisma.roleBinding.findFirst({
       where: { principalType: 'USER', principalId: adminUserId, projectId: null, role: { key: 'admin' } },
       select: { id: true },
     });
     expect(adminBinding).not.toBeNull();
     // AC-6: the member holds its member baseline and nothing else, so its POST /api/agents refusal
     // is the non-admin refusal.
-    const memberBindings = await prisma.client.roleBinding.findMany({
+    const memberBindings = await prisma.roleBinding.findMany({
       where: { principalType: 'USER', principalId: memberUserId },
       include: { role: { select: { key: true } } },
     });

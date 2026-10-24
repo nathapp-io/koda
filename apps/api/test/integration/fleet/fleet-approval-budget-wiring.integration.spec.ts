@@ -4,7 +4,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-approval-budget-wiring.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
@@ -14,6 +13,7 @@ import { BudgetsService } from '../../../src/fleet/budgets/budgets.service';
 import { BudgetSweeper } from '../../../src/fleet/budgets/budget-sweeper';
 import { ProjectEventBus } from '../../../src/live/project-event-bus';
 import type { LiveEvent } from '../../../src/live/live-event';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -49,10 +49,15 @@ describeIntegration('budget approval wiring (PG)', () => {
   const hooks = (event: string) => prisma.outboxEvent.count({ where: { type: 'webhook_delivery', payload: { contains: `"event":"${event}"` } } });
   const project = { kind: 'project' as const, projectId: '' };
 
+  /** One evaluation as the budget sweeper runs it: the wrapped entry production reaches `evaluate` from. */
+  const evaluate = (policyId: string) => withTestActor({ type: 'SYSTEM', id: 'budget' }, () => evaluator.evaluate(policyId));
+  /** The resume/delete service calls are what the admin routes reach, so they run as the acting admin. */
+  const asRoot = <T>(call: () => T | PromiseLike<T>) => withTestActor({ type: 'USER', id: world.ids.root }, call);
+
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     evaluator = app.get(BudgetEvaluator);
     budgets = app.get(BudgetsService);
@@ -75,10 +80,14 @@ describeIntegration('budget approval wiring (PG)', () => {
     seen.length = 0;
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('a hard stop opens one pending approval, stamps the incident, sends the webhook and a live event', async () => {
     const policy = await projectPolicy();
     await job({ costSpentUsd: 10 });
-    expect((await evaluator.evaluate(policy.id)).stopped).toBe(true);
+    expect((await evaluate(policy.id)).stopped).toBe(true);
     const [a] = await approvals(policy.id);
     expect(a).toEqual(expect.objectContaining({ type: 'budget_override_required', status: 'pending', projectId: world.projectId }));
     expect(a.payload).toEqual(expect.objectContaining({ spentUsd: '10', amountUsd: '10', scopeType: 'project' }));
@@ -92,8 +101,8 @@ describeIntegration('budget approval wiring (PG)', () => {
   it('a manual resume closes it as manual_resume and stamps the resumed incident', async () => {
     const policy = await projectPolicy();
     await job({ costSpentUsd: 10 });
-    await evaluator.evaluate(policy.id);
-    await budgets.resume(world.ids.root, project, policy.id, 20);
+    await evaluate(policy.id);
+    await asRoot(() => budgets.resume(world.ids.root, project, policy.id, 20));
     const [a] = await approvals(policy.id);
     expect(a).toEqual(expect.objectContaining({ status: 'approved', resolvedBy: 'manual_resume', decision: 'raise_budget_and_resume', decidedById: world.ids.root }));
     expect(a.outcome).toEqual({ resumedAmountUsd: '20', requeueResults: [] });
@@ -104,9 +113,9 @@ describeIntegration('budget approval wiring (PG)', () => {
   it('a resume with an approvalId stamps it and closes nothing', async () => {
     const policy = await projectPolicy();
     await job({ costSpentUsd: 10 });
-    await evaluator.evaluate(policy.id);
+    await evaluate(policy.id);
     const [pending] = await approvals(policy.id);
-    await budgets.resume(world.ids.root, project, policy.id, 20, new Date(), { approvalId: pending.id });
+    await asRoot(() => budgets.resume(world.ids.root, project, policy.id, 20, new Date(), { approvalId: pending.id }));
     expect((await approvals(policy.id))[0].status).toBe('pending');
     expect((await prisma.budgetIncident.findFirstOrThrow({ where: { policyId: policy.id, kind: 'resumed' } })).approvalId).toBe(pending.id);
   });
@@ -114,8 +123,8 @@ describeIntegration('budget approval wiring (PG)', () => {
   it('policy delete closes it as policy_deleted (review focus 3)', async () => {
     const policy = await projectPolicy();
     await job({ costSpentUsd: 10 });
-    await evaluator.evaluate(policy.id);
-    await budgets.remove(world.ids.root, project, policy.id);
+    await evaluate(policy.id);
+    await asRoot(() => budgets.remove(world.ids.root, project, policy.id));
     expect((await approvals(policy.id))[0]).toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'policy_deleted', decidedById: null }));
   });
 
@@ -141,10 +150,10 @@ describeIntegration('budget approval wiring (PG)', () => {
     // month boundary would fall in different windows and insert a second `hard_stop`, reading 2 here.
     const policy = await projectPolicy({ windowKind: 'lifetime' });
     await job({ costSpentUsd: 10 });
-    await evaluator.evaluate(policy.id);
+    await evaluate(policy.id);
     await prisma.budgetPolicy.update({ where: { id: policy.id }, data: { pausedAt: null, pausedWindowStart: null } });
     await prisma.fleetApproval.updateMany({ where: { policyId: policy.id }, data: { status: 'approved', resolvedBy: 'manual_resume' } });
-    expect((await evaluator.evaluate(policy.id)).stopped).toBe(true);
+    expect((await evaluate(policy.id)).stopped).toBe(true);
     expect((await approvals(policy.id)).map((a) => a.status)).toEqual(['approved', 'pending']);
     expect(await prisma.budgetIncident.count({ where: { policyId: policy.id, kind: 'hard_stop' } })).toBe(1);
     expect(await hooks('fleet.approval.requested')).toBe(2);

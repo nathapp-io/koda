@@ -10,7 +10,6 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/assistant-action-detail.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import request from 'supertest';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantActionService } from '../../../src/fleet/assistant/actions/assistant-action.service';
@@ -19,6 +18,7 @@ import { FleetApprovalRequestedSubscriber } from '../../../src/notifications/fle
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -63,13 +63,13 @@ describeIntegration('thread detail pending actions and the creator-only ask (PG,
     return { threadId: thread.id, jobId: job.id };
   }
 
-  /** One real propose call for `seed`; every field is the default unless a test overrides it. */
+  /** One real propose call for `seed`: the thread tool call the assistant makes; every field defaults. */
   async function propose(seed: Seed, over: Partial<ProposeInput> = {}): Promise<string> {
-    const result = await actions.propose({
+    const result = await withTestActor({ type: 'SYSTEM', id: 'assistant' }, () => actions.propose({
       projectId: world.projectId, threadId: seed.threadId, threadKind: 'REPO', threadProjectSlug: 'web',
       jobId: seed.jobId, toolCallId: `tc-${++seq}`, tool: TOOL, input: { ref: 'KODA-1', body: 'hello' },
       preview: PREVIEW, actorId: world.ids.dev, now: NOW, ...over,
-    });
+    }));
     if ('refused' in result) throw new Error('propose refused');
     return result.actionId;
   }
@@ -83,10 +83,14 @@ describeIntegration('thread detail pending actions and the creator-only ask (PG,
 
   const notifications = () => prisma.notification.findMany({ orderBy: { createdAt: 'asc' } });
 
+  /** The ask handled from the outbox relay, which is the context production runs a subscriber's handle in. */
+  const publishAsk = (payload: unknown): Promise<void> =>
+    withTestActor({ type: 'SYSTEM', id: 'outbox' }, () => subscriber.handle(payload));
+
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     actions = app.get(AssistantActionService, { strict: false });
     subscriber = app.get(FleetApprovalRequestedSubscriber, { strict: false });
@@ -99,6 +103,10 @@ describeIntegration('thread detail pending actions and the creator-only ask (PG,
   beforeEach(async () => {
     // The ask tests assert on the rows one handle creates, so each starts from an empty inbox.
     await prisma.notification.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: a thread with one PENDING and one REJECTED action answers exactly one entry', async () => {
@@ -159,7 +167,7 @@ describeIntegration('thread detail pending actions and the creator-only ask (PG,
     const payload = JSON.parse(event.payload) as { requestedById: string; threadPath: string; tool: string; type: string };
     expect(payload).toMatchObject({ type: 'assistant_action', requestedById: world.ids.dev, threadPath: `/web/threads/${seed.threadId}`, tool: TOOL });
 
-    await subscriber.handle(payload);
+    await publishAsk(payload);
 
     const rows = await notifications();
     expect(rows).toHaveLength(1);
@@ -179,8 +187,8 @@ describeIntegration('thread detail pending actions and the creator-only ask (PG,
     const [event] = await prisma.outboxEvent.findMany({ where: { type: 'fleet_approval_requested', eventId: approvalId as string } });
     const payload = JSON.parse(event.payload) as unknown;
 
-    await subscriber.handle(payload);
-    await subscriber.handle(payload);
+    await publishAsk(payload);
+    await publishAsk(payload);
 
     expect(await notifications()).toHaveLength(1);
   });

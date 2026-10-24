@@ -2,13 +2,13 @@ import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import * as bcrypt from 'bcrypt';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PermissionService } from '../../../src/permissions/permission.service';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -43,7 +43,7 @@ describeIntegration('project.read assignees (PG + HTTP)', () => {
     await resetDb();
     passwordHash = await bcrypt.hash(TEST_PASSWORD, 4);
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    db = fixtureDb(app);
     permissions = app.get(PermissionService);
     membership = app.get(MembershipService);
   }, 60_000);
@@ -54,6 +54,10 @@ describeIntegration('project.read assignees (PG + HTTP)', () => {
     await db.agent.deleteMany({});
     await membership.invalidatePermissions();
     resetThrottle(app);
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('P1m AC-6: HTTP offers developer-bound users before ACTIVE developer-bound agents', async () => {

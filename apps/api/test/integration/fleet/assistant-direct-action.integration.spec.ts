@@ -1,6 +1,5 @@
 import { canRunDbTests } from '../../helpers/test-environment';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
 import type { ToolCaller } from '../../../src/fleet/assistant/assistant-tool.types';
@@ -8,6 +7,7 @@ import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { rosterFleetAgent, seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -22,7 +22,7 @@ describeIntegration('direct assistant actions (PG)', () => {
     process.env.FLEET_THREADS_ENABLED = 'true';
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     executor = app.get(AssistantToolExecutor, { strict: false });
   }, 120_000);
@@ -39,6 +39,11 @@ describeIntegration('direct assistant actions (PG)', () => {
   async function seedTicket(projectId = world.projectId) {
     return prisma.ticket.create({ data: { projectId, number: ++number, type: 'TASK', title: 'Direct action ticket' } });
   }
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('fixtures grant through bindings only', async () => {
     await expectBindingOnlyFixtures(prisma, [
       { type: 'USER', id: world.ids.root },

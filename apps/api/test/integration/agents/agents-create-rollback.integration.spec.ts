@@ -22,6 +22,7 @@ import { authConfig } from '../../../src/config/auth.config';
 import { KodaPrincipal, UserPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { resetDb } from '../../helpers/reset-db';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -43,10 +44,12 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
   let module: TestingModule;
   let app: NestFastifyApplication;
   let prisma: PrismaService<PrismaClient>;
+  /** The fixture client: every write and read below runs as `SYSTEM/seed`. */
+  let db: PrismaClient;
 
   /** The `AGENT` bindings that exist right now, as an order-independent id set. */
   async function agentBindingIds(): Promise<string[]> {
-    const rows = await prisma.client.roleBinding.findMany({
+    const rows = await db.roleBinding.findMany({
       where: { principalType: 'AGENT' },
       select: { id: true },
     });
@@ -70,10 +73,11 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
 
     prisma = module.get(PrismaService);
     await prisma.onModuleInit();
+    db = fixtureDb(module);
 
     // `POST /agents` checks `agent.create` from bindings alone. Neither the injected principal's
     // ADMIN claim nor the legacy User.role column grants permission without an explicit binding.
-    await prisma.client.user.create({
+    await db.user.create({
       data: {
         id: adminUser.id,
         email: adminUser.email,
@@ -82,7 +86,7 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
 
       },
     });
-    await grantRole(prisma.client, { type: 'USER', id: adminUser.id }, 'admin');
+    await grantRole(db, { type: 'USER', id: adminUser.id }, 'admin');
 
     app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
     app.setGlobalPrefix('api');
@@ -106,13 +110,17 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
     if (module) await module.close();
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(module)).resolves.toBeUndefined();
+  });
+
   it('AC7: a failing agentCapabilityEntry.createMany rolls back the agent row (real Prisma transaction)', async () => {
     const bindingsBefore = await agentBindingIds();
 
     // Force the capability write to fail by renaming its table away, so the service's
     // `agentCapabilityEntry.createMany` raises a "relation does not exist" error. The table is
     // renamed back afterwards so the rest of the suite is unaffected.
-    await prisma.client.$executeRawUnsafe(
+    await db.$executeRawUnsafe(
       'ALTER TABLE "AgentCapabilityEntry" RENAME TO "AgentCapabilityEntry_disabled"',
     );
     try {
@@ -129,15 +137,15 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
       // swallow the createCapabilities error.
       expect(res.status).toBe(500);
     } finally {
-      await prisma.client.$executeRawUnsafe(
+      await db.$executeRawUnsafe(
         'ALTER TABLE "AgentCapabilityEntry_disabled" RENAME TO "AgentCapabilityEntry"',
       );
     }
 
     // The agent row must have been rolled back: no Agent row with the requested slug exists.
-    expect(await prisma.client.agent.findUnique({ where: { slug: 'rollback-agent' } })).toBeNull();
+    expect(await db.agent.findUnique({ where: { slug: 'rollback-agent' } })).toBeNull();
 
-    expect(await prisma.client.agentCapabilityEntry.count()).toBe(0);
+    expect(await db.agentCapabilityEntry.count()).toBe(0);
 
     // AC25: the rollback takes the new agent's baseline binding with it.
     expect(await agentBindingIds()).toEqual(bindingsBefore);
@@ -152,7 +160,7 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
     const bindingsBefore = await agentBindingIds();
 
     // Reject the transaction's agent-binding write while leaving authorization reads available.
-    await prisma.client.$executeRawUnsafe(
+    await db.$executeRawUnsafe(
       'ALTER TABLE "RoleBinding" ADD CONSTRAINT "test_reject_agent_binding" CHECK ("principalType" <> \'AGENT\') NOT VALID',
     );
     try {
@@ -166,14 +174,14 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
 
       expect(res.status).toBe(500);
     } finally {
-      await prisma.client.$executeRawUnsafe(
+      await db.$executeRawUnsafe(
         'ALTER TABLE "RoleBinding" DROP CONSTRAINT "test_reject_agent_binding"',
       );
     }
 
-    expect(await prisma.client.agent.findUnique({ where: { slug: 'binding-failure-agent' } })).toBeNull();
+    expect(await db.agent.findUnique({ where: { slug: 'binding-failure-agent' } })).toBeNull();
 
-    expect(await prisma.client.agentCapabilityEntry.count()).toBe(0);
+    expect(await db.agentCapabilityEntry.count()).toBe(0);
     expect(await agentBindingIds()).toEqual(bindingsBefore);
   });
 
@@ -188,10 +196,10 @@ describeIntegration('POST /api/agents AC7 rollback (US-003)', () => {
       });
 
     expect(res.status).toBe(201);
-    const persisted = await prisma.client.agent.findUnique({ where: { slug: 'healthy-agent' } });
+    const persisted = await db.agent.findUnique({ where: { slug: 'healthy-agent' } });
     expect(persisted).not.toBeNull();
     expect(persisted?.name).toBe('Healthy Agent');
-    const capabilities = await prisma.client.agentCapabilityEntry.findMany({
+    const capabilities = await db.agentCapabilityEntry.findMany({
       where: { agentId: persisted?.id as string },
       select: { capability: true },
     });

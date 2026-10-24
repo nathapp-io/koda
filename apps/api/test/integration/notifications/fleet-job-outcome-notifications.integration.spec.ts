@@ -6,10 +6,10 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import { NathApplication } from '@nathapp/nestjs-app';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { outboxRecord } from '../../helpers/outbox-record';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
@@ -38,10 +38,13 @@ describeIntegration('fleet job outcome notifications (PG)', () => {
       maxCostUsd: new Prisma.Decimal(5), selectorLabels: [], requestedById: world.ids.dev, state: 'UPLOADING', runnerId, leaseEpoch: 1, ...over,
     },
   });
-  const finish = (jobId: string, to: 'ESCALATED' | 'FAILED' | 'CANCELLED') => tx.run(async () => {
-    const job = await jobs.lockById(jobId);
-    return transitions.apply({ job, to, by: 'runner', now: new Date(), actor: { type: 'RUNNER', id: runnerId } });
-  });
+  // The transition effect a runner's report drives: the write runs as that runner, as it does when the
+  // runner route applies it.
+  const finish = (jobId: string, to: 'ESCALATED' | 'FAILED' | 'CANCELLED') =>
+    withTestActor({ type: 'RUNNER', id: runnerId }, () => tx.run(async () => {
+      const job = await jobs.lockById(jobId);
+      return transitions.apply({ job, to, by: 'runner', now: new Date(), actor: { type: 'RUNNER', id: runnerId } });
+    }));
   const deliverAll = async (): Promise<void> => {
     for (const row of await prisma.outboxEvent.findMany({ where: { type: 'fleet_job_outcome' }, orderBy: { createdAt: 'asc' } })) {
       await publisher.publish(outboxRecord(row.type, JSON.parse(row.payload), { id: row.id, metadata: { projectId: row.projectId, eventId: row.eventId } }));
@@ -52,7 +55,7 @@ describeIntegration('fleet job outcome notifications (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: true });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     tx = app.get(TRANSACTION_MANAGER);
     jobs = app.get(FLEET_JOB_REPOSITORY);
@@ -68,6 +71,10 @@ describeIntegration('fleet job outcome notifications (PG)', () => {
     await prisma.outboxEvent.deleteMany();
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('enqueues one event per terminal transition, keyed by job and epoch, and none for CANCELLED', async () => {
     const escalated = await uploading();
     const cancelled = await uploading();
@@ -79,10 +86,10 @@ describeIntegration('fleet job outcome notifications (PG)', () => {
 
   it('a rolled-back transition leaves no event', async () => {
     const job = await uploading();
-    await expect(tx.run(async () => {
+    await expect(withTestActor({ type: 'RUNNER', id: runnerId }, () => tx.run(async () => {
       await transitions.apply({ job: await jobs.lockById(job.id), to: 'FAILED', by: 'runner', now: new Date(), actor: { type: 'RUNNER', id: runnerId } });
       throw new Error('later step failed');
-    })).rejects.toThrow('later step failed');
+    }))).rejects.toThrow('later step failed');
     expect(await prisma.outboxEvent.count({ where: { type: 'fleet_job_outcome' } })).toBe(0);
   });
 

@@ -5,12 +5,12 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { insertAnalyticsJob, insertCostEvent, insertIngestRow } from '../../helpers/fleet-analytics-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -29,7 +29,7 @@ describeIntegration('fleet analytics admin API (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     webJob = await insertAnalyticsJob(prisma, { projectId: world.projectId, repoId: world.repoId, requestedById: world.ids.dev });
     const opsJob = await insertAnalyticsJob(prisma, { projectId: world.opsProjectId, repoId: world.foreignRepoId, requestedById: world.ids.root });
@@ -42,6 +42,10 @@ describeIntegration('fleet analytics admin API (PG)', () => {
   });
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('refuses non-admins', async () => {

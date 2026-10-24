@@ -20,11 +20,10 @@ import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { resetDb } from '../helpers/reset-db';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 import { RagService } from '../../src/rag/rag.service';
 import { expectBindingOnlyFixtures, grantRole } from '../../src/permissions/test-helpers/permission-fixtures';
+import { expectGuardActive, fixtureDb, withTestActor } from '../helpers/action-context';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 // The nax sandbox withholds host Postgres/Docker.
@@ -119,12 +118,12 @@ describeIntegration('Hybrid Retriever — KB Search E2E', () => {
       .expect(201);
     projectSlug = body<{ slug: string }>(projectRes).slug;
 
-    const prisma = app.get(PrismaService<PrismaClient>);
-    const project = await prisma.client.project.findUnique({ where: { slug: projectSlug } });
-    const adminUser = await prisma.client.user.findUnique({ where: { email: 'hybrid-admin@koda.test' } });
-    const developerUser = await prisma.client.user.findUnique({ where: { email: 'hybrid-developer@koda.test' } });
-    const viewerUser = await prisma.client.user.findUnique({ where: { email: 'hybrid-viewer@koda.test' } });
-    const outsiderUser = await prisma.client.user.findUnique({ where: { email: 'hybrid-outsider@koda.test' } });
+    const prisma = fixtureDb(app);
+    const project = await prisma.project.findUnique({ where: { slug: projectSlug } });
+    const adminUser = await prisma.user.findUnique({ where: { email: 'hybrid-admin@koda.test' } });
+    const developerUser = await prisma.user.findUnique({ where: { email: 'hybrid-developer@koda.test' } });
+    const viewerUser = await prisma.user.findUnique({ where: { email: 'hybrid-viewer@koda.test' } });
+    const outsiderUser = await prisma.user.findUnique({ where: { email: 'hybrid-outsider@koda.test' } });
     expect(adminUser).toBeTruthy();
     expect(developerUser).toBeTruthy();
     expect(viewerUser).toBeTruthy();
@@ -137,24 +136,26 @@ describeIntegration('Hybrid Retriever — KB Search E2E', () => {
     if (project && adminUser) {
       // Permissions P1 US-005: the project grants are role bindings, not legacy membership rows. They are
       // written before either user's first project request, so the effective-key cache is still cold.
-      await grantRole(prisma.client, { type: 'USER', id: adminUserId }, 'project-admin', project.id);
+      await grantRole(prisma, { type: 'USER', id: adminUserId }, 'project-admin', project.id);
     }
     if (project && developerUser) {
-      await grantRole(prisma.client, { type: 'USER', id: developerUserId }, 'developer', project.id);
+      await grantRole(prisma, { type: 'USER', id: developerUserId }, 'developer', project.id);
     }
     if (project && viewerUser) {
-      await grantRole(prisma.client, { type: 'USER', id: viewerUserId }, 'viewer', project.id);
+      await grantRole(prisma, { type: 'USER', id: viewerUserId }, 'viewer', project.id);
     }
 
     // US-007: `ticket` and `code` are not REST-writable sources any more, so the ticket fixture is seeded through
     // the same internal write path the ticket indexer uses (no creator → a system row). The REST posts below stay
-    // on the user sources.
-    await app.get(RagService).indexDocument(project?.id ?? '', {
-      source: 'ticket',
-      sourceId: 'HYE-1',
-      content: 'Memory leak in worker pool on high load',
-      metadata: { ref: 'HYE-1', type: 'BUG' },
-    });
+    // on the user sources. `system.kb.ticket-index` is that path's system key, so the call runs as SYSTEM/kb.
+    await withTestActor({ type: 'SYSTEM', id: 'kb' }, () =>
+      app.get(RagService).indexDocument(project?.id ?? '', {
+        source: 'ticket',
+        sourceId: 'HYE-1',
+        content: 'Memory leak in worker pool on high load',
+        metadata: { ref: 'HYE-1', type: 'BUG' },
+      }),
+    );
 
     await request(httpServer)
       .post(`/api/projects/${projectSlug}/kb/documents`)
@@ -172,10 +173,14 @@ describeIntegration('Hybrid Retriever — KB Search E2E', () => {
     if (app) await app.close();
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   describe('AC11: HybridRetrieverService wired as primary search path', () => {
     it('fixtures grant through bindings only', async () => {
-      const prisma = app.get(PrismaService<PrismaClient>);
-      await expectBindingOnlyFixtures(prisma.client, [
+      const prisma = fixtureDb(app);
+      await expectBindingOnlyFixtures(prisma, [
         { type: 'USER', id: adminUserId },
         { type: 'USER', id: developerUserId },
         { type: 'USER', id: viewerUserId },
