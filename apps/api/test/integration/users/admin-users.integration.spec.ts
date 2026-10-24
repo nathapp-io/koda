@@ -6,12 +6,12 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { DefaultThrottlerGuard } from '@nathapp/nestjs-throttler';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -27,7 +27,7 @@ interface UserRow { id: string; email: string; disabled: boolean }
 describeIntegration('/admin/users (PG)', () => {
   let app: NathApplication;
   let server: ReturnType<NathApplication['getHttpServer']>;
-  let prisma: PrismaService<PrismaClient>;
+  let prisma: PrismaClient;
   let rootToken: string;
   let rootId: string;
 
@@ -47,13 +47,13 @@ describeIntegration('/admin/users (PG)', () => {
       await request(server).post('/api/admin/users').set(auth(rootToken))
         .send({ email, name: email.split('@')[0], password: TEST_PASSWORD }).expect(201),
     );
-    if (admin) await grantRole(prisma.client, { type: 'USER', id: created.id }, 'admin');
+    if (admin) await grantRole(prisma, { type: 'USER', id: created.id }, 'admin');
     return created;
   };
 
   /** The user's global `admin` binding id, for a demotion through the role-binding route. */
   const adminBindingId = async (userId: string): Promise<string> =>
-    (await prisma.client.roleBinding.findFirstOrThrow({
+    (await prisma.roleBinding.findFirstOrThrow({
       where: { principalType: 'USER', principalId: userId, projectId: null, role: { key: 'admin' } },
       select: { id: true },
     })).id;
@@ -62,7 +62,7 @@ describeIntegration('/admin/users (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+    prisma = fixtureDb(app);
     // The in-memory ThrottlerStorageService is held (protected) by the global
     // DefaultThrottlerGuard; reach it through the guard instance.
     const guard = app.get(DefaultThrottlerGuard);
@@ -93,6 +93,10 @@ describeIntegration('/admin/users (PG)', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('creates a user (email canonicalised) without leaking the hash; duplicate casing is 409', async () => {
@@ -167,11 +171,11 @@ describeIntegration('/admin/users (PG)', () => {
   });
 
   const enabledAdminCount = async () => {
-    const bindings = await prisma.client.roleBinding.findMany({
+    const bindings = await prisma.roleBinding.findMany({
       where: { principalType: 'USER', projectId: null, role: { key: { in: ['owner', 'admin'] } } },
       select: { principalId: true },
     });
-    return prisma.client.user.count({ where: { disabled: false, id: { in: bindings.map(row => row.principalId) } } });
+    return prisma.user.count({ where: { disabled: false, id: { in: bindings.map(row => row.principalId) } } });
   };
 
   it('two admins disabling each other at once refuse exactly one with users.lastAdmin', async () => {

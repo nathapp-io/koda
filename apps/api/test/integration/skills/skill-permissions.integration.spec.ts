@@ -1,11 +1,11 @@
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { SkillResolver, SKILL_RESOLVER } from '../../../src/skills/skill-resolver';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { asTestActor, expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const PROJECT = 'skill-permissions-p1';
@@ -50,8 +50,10 @@ describeIntegration('US-006 skills route permissions', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
-    membership = app.get(MembershipService);
+    db = fixtureDb(app);
+    // The bindings below are fixture grants with no request principal, so the service writes as
+    // `SYSTEM/seed` — the same component `fixtureDb` writes under.
+    membership = asTestActor(app.get(MembershipService), { type: 'SYSTEM', id: 'seed' });
     const root = await request(server).post('/api/auth/register').send({
       email: 'skills-permissions-root@koda.test', name: 'Root', password: TEST_PASSWORD,
     }).expect(201);
@@ -96,6 +98,10 @@ describeIntegration('US-006 skills route permissions', () => {
   afterAll(async () => {
     vi.restoreAllMocks();
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: non-admin user cannot list sources with a permissions refusal', async () => {

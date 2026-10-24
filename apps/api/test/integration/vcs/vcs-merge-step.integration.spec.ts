@@ -3,10 +3,10 @@
  * Run: cd apps/api && KODA_DB_TESTS=1 bun run test:scoped test/integration/vcs/vcs-merge-step.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import type { TicketLinkData } from '../../../src/vcs/domain/vcs.repository';
 import type { VcsPrStatus } from '../../../src/vcs/types';
@@ -21,11 +21,15 @@ describeIntegration('shared merge step (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     prSync = app.get(VcsPrSyncService);
   });
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('two concurrent merge steps on one link: one VERIFY_FIX, one FIX_REPORT comment, one VCS_PR_MERGED activity', async () => {
@@ -43,7 +47,12 @@ describeIntegration('shared merge step (PG)', () => {
       number: 3, state: 'closed', draft: false, merged: true, mergedAt: new Date(), mergedBy: 'dev', mergeSha: 'abc', url, title: 'PR',
     };
 
-    const outcomes = await Promise.all([prSync.applyMergedPr(link, status), prSync.applyMergedPr(link, status)]);
+    // The VCS webhook and the poll are the wrapped entries that call `applyMergedPr` in production, both
+    // as `SYSTEM/vcs`; one wrapper per call keeps the two running concurrently.
+    const outcomes = await Promise.all([
+      withTestActor({ type: 'SYSTEM', id: 'vcs' }, () => prSync.applyMergedPr(link, status)),
+      withTestActor({ type: 'SYSTEM', id: 'vcs' }, () => prSync.applyMergedPr(link, status)),
+    ]);
 
     expect([...outcomes].sort()).toEqual(['already-merged', 'updated']);
     expect((await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe('VERIFY_FIX');
