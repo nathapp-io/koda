@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-core",
   "branchName": "feat/permissions-p2-audit-core",
   "createdAt": "2026-10-24T00:00:00.000Z",
-  "updatedAt": "2026-10-24T14:50:29.952Z",
+  "updatedAt": "2026-10-24T15:00:13.461Z",
   "userStories": [
     {
       "id": "US-001",
@@ -519,14 +519,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Credential creation/rotation and permission-binding cleanup combine with new atomic boundaries and after-commit invalidation; security override is mandatory."
+        "reasoning": "Credential creation/rotation and permission-binding cleanup combine with new atomic boundaries and after-commit invalidation; security override is mandatory.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/agents/agents.service.ts",
@@ -573,7 +576,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0eebfeeef2c25685289c3ccfe0ad41bf1825778f"
     },
     {
       "id": "US-007",
