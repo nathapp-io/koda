@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-core",
   "branchName": "feat/permissions-p2-audit-core",
   "createdAt": "2026-10-24T00:00:00.000Z",
-  "updatedAt": "2026-10-24T14:21:09.513Z",
+  "updatedAt": "2026-10-24T14:33:08.103Z",
   "userStories": [
     {
       "id": "US-001",
@@ -329,14 +329,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three services and one repository receive repetitive recorder calls/wrappers and a narrow ref-selection change, without a new abstraction; author-based permission checks on edits/removals require strict security-isolated TDD."
+        "reasoning": "Three services and one repository receive repetitive recorder calls/wrappers and a narrow ref-selection change, without a new abstraction; author-based permission checks on edits/removals require strict security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/comments/comments.service.ts",
@@ -390,7 +393,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "dd3c65c5cfb8d80c2a8fdd4d68346a51df7c4316"
     },
     {
       "id": "US-005",
