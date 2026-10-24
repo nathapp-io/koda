@@ -1,9 +1,5 @@
 import { Logger } from '@nestjs/common';
-import {
-  currentContext,
-  runAsSystem,
-  runWithActor,
-} from './action-context';
+import { currentContext, runWithActor } from './action-context';
 import {
   ContextlessWriteError,
   contextlessWriteHandler,
@@ -38,8 +34,11 @@ describe('contextlessWriteHandler', () => {
     const query = vi.fn(async () => 'written');
     const args = { data: { name: 'A' } };
 
-    await expect(handler({ model: 'User', operation: 'create', args, query })).rejects.toMatchObject({
-      name: 'ContextlessWriteError',
+    const write = handler({ model: 'User', operation: 'create', args, query });
+    await expect(write).rejects.toBeInstanceOf(ContextlessWriteError);
+    await expect(write).rejects.toMatchObject({
+      operation: 'create',
+      model: 'User',
       message: 'write outside an action context: User.create',
     });
     expect(query).not.toHaveBeenCalled();
@@ -71,21 +70,30 @@ describe('contextlessWriteHandler', () => {
   });
 
   it('runs the lazy query thenable in the unknown system context and logs the violation', async () => {
+    // `test-setup.ts` silences `Logger.prototype.error` for the whole run; this asserts on that very
+    // spy, so it is never restored — restoring would unsilence the Nest logger for every later test
+    // in this file. The silencing implementation is re-applied in `finally`, so it survives a failing
+    // assertion too.
     const logger = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     logger.mockClear();
-    let actor: unknown;
-    const query = vi.fn(() => ({
-      then(resolve: (value: string) => void) {
-        actor = currentContext()?.actor;
-        resolve('created');
-      },
-    }));
 
-    await expect(contextlessWriteHandler('record')({ model: 'User', operation: 'create', args: {}, query }))
-      .resolves.toBe('created');
-    expect(actor).toEqual({ type: 'SYSTEM', id: 'unknown' });
-    expect(logger).toHaveBeenCalledWith('write outside an action context: User.create');
-    logger.mockRestore();
+    try {
+      let actor: unknown;
+      const query = vi.fn(() => ({
+        then(resolve: (value: string) => void) {
+          actor = currentContext()?.actor;
+          resolve('created');
+        },
+      }));
+
+      await expect(contextlessWriteHandler('record')({ model: 'User', operation: 'create', args: {}, query }))
+        .resolves.toBe('created');
+      expect(actor).toEqual({ type: 'SYSTEM', id: 'unknown' });
+      expect(logger).toHaveBeenCalledWith('write outside an action context: User.create');
+    } finally {
+      logger.mockClear();
+      logger.mockImplementation(() => undefined);
+    }
   });
 
   it('returns the record-mode query result', async () => {

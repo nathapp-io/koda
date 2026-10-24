@@ -12,9 +12,8 @@
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/action-context/test-helpers.integration.spec.ts
  */
 import { Test } from '@nestjs/testing';
-import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaModule } from '@nathapp/nestjs-prisma';
 import type { NathApplication } from '@nathapp/nestjs-app';
-import type { ActionContext } from '../../../src/action-context/action-context';
 import { currentContext } from '../../../src/action-context/action-context';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaClient as PlainPrismaClient } from '../../../src/generated/prisma/client';

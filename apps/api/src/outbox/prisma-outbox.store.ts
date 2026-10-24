@@ -17,6 +17,13 @@ import { SystemWriter } from '../permissions/system-writer.decorator';
  * FOR UPDATE SKIP LOCKED statement (Prisma has no SKIP LOCKED). Every state
  * write is guarded by owner, so a relay whose lease expired cannot overwrite
  * a newer claim.
+ *
+ * Context (permissions P2b): `@SystemWriter('system.outbox.dispatch')` covers the relay's own
+ * bookkeeping only — `markPublished`, `markRetry` and `markDead` run on the relay interval, outside
+ * any request, so each awaits its `updateMany` inside `runAsSystemWriter(this, …)` as SYSTEM/outbox.
+ * The class key does not reach the other two writes: `save` deliberately runs in the *producer's*
+ * context (it writes in the producer's transaction, as the principal or component that emitted the
+ * event), and `claimBatch` is an unguarded `$queryRaw` whose actor the audit features decide.
  */
 @Injectable()
 @SystemWriter('system.outbox.dispatch')

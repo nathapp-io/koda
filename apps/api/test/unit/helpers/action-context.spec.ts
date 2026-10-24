@@ -6,8 +6,9 @@
  * async context of the awaiter, so a helper that returned the promise out of its context would
  * pass a naive test and fail on a real guarded client.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { currentContext, type ActionContext } from '../../../src/action-context/action-context';
-import { asTestActor, withTestActor } from '../../helpers/action-context';
+import { asTestActor, fixtureDb, withTestActor, type PrismaAppContext } from '../../helpers/action-context';
 
 /** A thenable that records `currentContext()` only when it is awaited — a lazy Prisma promise. */
 class LazyThenable<T> implements PromiseLike<T> {
@@ -105,6 +106,58 @@ describe('withTestActor', () => {
     expect(lazy.contexts).toHaveLength(1);
     expect(lazy.contexts[0]?.actor).toEqual({ type: 'USER', id: 'u1' });
     expect(currentContext()).toBeUndefined();
+  });
+});
+
+describe('fixtureDb', () => {
+  /**
+   * Stands in for what `@nathapp/nestjs-prisma` installs on `PrismaService.client`
+   * (`patchWithTransactionProxy`): a client whose properties resolve from the async-local transaction
+   * client while a transaction is active, and from the root client otherwise. The delegates are
+   * distinct objects, so a view cached for the root delegate must not serve a call made inside the
+   * transaction — that write would run outside it.
+   */
+  function appWithTransactionProxy() {
+    const als = new AsyncLocalStorage<object>();
+    const served: string[] = [];
+
+    const delegate = (client: string) => ({
+      create: async (args: unknown) => {
+        served.push(client);
+        return args;
+      },
+    });
+
+    const root = { user: delegate('root') };
+    const transactional = { user: delegate('transaction') };
+    const client = new Proxy(root, {
+      get(target, property, receiver) {
+        const active = als.getStore();
+        return Reflect.get(active ?? target, property, receiver);
+      },
+    });
+
+    const app: PrismaAppContext = { get: () => ({ client }) as never };
+
+    return { app, served, runInTransaction: (fn: () => Promise<unknown>) => als.run(transactional, fn) };
+  }
+
+  it('resolves a model delegate from the client at call time, not from the first read', async () => {
+    const { app, served, runInTransaction } = appWithTransactionProxy();
+    const db = fixtureDb(app);
+
+    // Prime the view: outside a transaction `client.user` is the root client's delegate.
+    await db.user.create({ data: { email: 'outside@koda.test', passwordHash: 'not-a-real-hash' } });
+    await runInTransaction(() => db.user.create({ data: { email: 'inside@koda.test', passwordHash: 'not-a-real-hash' } }));
+
+    expect(served).toEqual(['root', 'transaction']);
+  });
+
+  it('serves two reads of the same delegate the same view', () => {
+    const { app } = appWithTransactionProxy();
+    const db = fixtureDb(app);
+
+    expect(db.user).toBe(db.user);
   });
 });
 

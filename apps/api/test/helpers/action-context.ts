@@ -95,10 +95,20 @@ export function asTestActor<T extends object>(target: T, actor: ActionActor): T 
  * The array form `$transaction([…])` is deliberately unsupported — the wrapped calls return started
  * promises rather than Prisma promises. The interactive form works, and its callback runs inside the
  * `seed` context because the transaction is entered (and the callback awaited) from inside it.
+ *
+ * A model delegate is resolved from the client on *every* read and cached per delegate object, so the
+ * view follows `PrismaService.client`: `patchWithTransactionProxy` swaps in the transaction client's
+ * delegate while a transaction is active. That swap lives in the library's async-local store, which only
+ * `PrismaTransactionManager.run` enters — a raw `client.$transaction(async (tx) => …)` callback still sees
+ * the root client, so write through its `tx` argument when the write must be transactional.
  */
 export function fixtureDb(app: PrismaAppContext): PrismaClient {
   const client = prismaClientOf(app);
-  const delegates = new Map<string, unknown>();
+  // Keyed by the delegate object read from the client, never by property name alone: `PrismaService.client`
+  // is the transaction proxy, so while a transaction is active `client.user` is the *transaction* client's
+  // delegate and otherwise the root one. A view captured for one delegate must not serve a call made under
+  // the other, which would then run outside the transaction (or on a closed one).
+  const delegates = new WeakMap<object, object>();
 
   return new Proxy(client, {
     get(target, property, receiver) {
@@ -113,11 +123,12 @@ export function fixtureDb(app: PrismaAppContext): PrismaClient {
       if (property.startsWith('$') || property.startsWith('_')) return value;
       if (typeof value !== 'object' || value === null) return value;
 
-      // A model delegate; one cached view each, so two reads of `db.user` are the same object.
-      const cached = delegates.get(property);
+      // A model delegate; one cached view per delegate object, so two reads of `db.user` outside a
+      // transaction are the same object, while the transaction's own delegate gets its own view.
+      const cached = delegates.get(value);
       if (cached !== undefined) return cached;
       const delegate = seededDelegate(value);
-      delegates.set(property, delegate);
+      delegates.set(value, delegate);
       return delegate;
     },
   });

@@ -133,7 +133,9 @@ describe('FanOutPublisher', () => {
     expect(observed?.actor).toEqual({ type: 'SYSTEM', id: 'outbox' });
   });
 
-  it('AC-9: still rejects with the handler failure when writing lastError fails', async () => {
+  // US-003 suggested criterion (not an acceptance criterion of its own, and AC-9 already labels the
+  // aggregate-failure case above): a failing recordLastError must not mask the handler failure.
+  it('still rejects with the handler failure when writing lastError fails', async () => {
     recordLastError.mockRejectedValue(new Error('db down'));
     publisher.register('ticket_event', () => {
       throw new Error('handler failed');

@@ -215,12 +215,16 @@ describeIntegration('workspace thread keys and hosting (US-003)', () => {
   });
 
   // -------------------------------------------------------------------------
-  // The sentinel: every principal of this file is granted through bindings only
+  // The guard is on for this application
   // -------------------------------------------------------------------------
 
   it('writes need an action context', async () => {
     await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
+
+  // -------------------------------------------------------------------------
+  // The sentinel: every principal of this file is granted through bindings only
+  // -------------------------------------------------------------------------
 
   it('fixtures grant through bindings only', async () => {
     await expectBindingOnlyFixtures(prisma, [
