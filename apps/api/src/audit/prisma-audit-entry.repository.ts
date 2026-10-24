@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService, Paginate } from '@nathapp/nestjs-prisma';
+import { AbstractPrismaRepository, PrismaModelDelegate, PrismaService, Paginate } from '@nathapp/nestjs-prisma';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult, ITransactionManager } from '@nathapp/nestjs-data';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -10,8 +10,8 @@ import type { AuditEntryFilters, AuditEntryRecord } from './domain/audit-entry.d
 export class PrismaAuditEntryRepository extends AbstractPrismaRepository<AuditEntryRecord, AuditEntryModel, string> {
   constructor(@Inject(TRANSACTION_MANAGER) tx: ITransactionManager, private readonly prisma: PrismaService<PrismaClient>) { super(tx); }
 
-  protected modelDelegate(client: PrismaClientLike): PrismaModelDelegate<AuditEntryModel, string> {
-    return (client as unknown as Record<string, unknown>).auditEntry as PrismaModelDelegate<AuditEntryModel, string>;
+  protected modelDelegate(client: unknown): PrismaModelDelegate<AuditEntryModel, string> {
+    return (client as Record<string, unknown>).auditEntry as PrismaModelDelegate<AuditEntryModel, string>;
   }
   protected toDomain(m: AuditEntryModel): AuditEntryRecord {
     return { ...m } as AuditEntryRecord;
