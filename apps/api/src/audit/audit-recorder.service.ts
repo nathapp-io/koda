@@ -14,12 +14,24 @@ export interface AuditRecordInput {
   summary?: string;
 }
 
+export type AuditEntriesOf<T> = (result: T) => AuditRecordInput | readonly AuditRecordInput[];
+
 @Injectable()
 export class AuditRecorder {
   constructor(
     @Inject(AUDIT_STORAGE) private readonly storage: IAuditStorage,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
+
+  /** Runs a write and its resulting audit entries in one transaction. */
+  async audited<T>(fn: () => Promise<T>, entriesOf: AuditEntriesOf<T>): Promise<T> {
+    return this.txManager.run(async () => {
+      const result = await fn();
+      const entries = entriesOf(result);
+      for (const entry of Array.isArray(entries) ? entries : [entries]) await this.record(entry);
+      return result;
+    });
+  }
 
   /** Call inside the domain write's txManager.run, so the entry commits or rolls back with it. */
   async record(input: AuditRecordInput): Promise<void> {
