@@ -18,11 +18,11 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { CaslAbilityFactory, JwtCaslAbilityFactory } from '@nathapp/nestjs-auth';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -92,7 +92,7 @@ describeIntegration('retired CASL factory and IN_PROGRESS -> VERIFIED (US-005)',
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    db = fixtureDb(app);
 
     const root = await request(server)
       .post('/api/auth/register')
@@ -107,6 +107,10 @@ describeIntegration('retired CASL factory and IN_PROGRESS -> VERIFIED (US-005)',
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-4: the container answers CaslAbilityFactory with the nestjs-auth default JwtCaslAbilityFactory', () => {

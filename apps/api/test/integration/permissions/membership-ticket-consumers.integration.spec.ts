@@ -21,7 +21,6 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { KodaDomainWriter } from '../../../src/koda-domain-writer/koda-domain-writer.service';
@@ -29,6 +28,7 @@ import { MembershipService } from '../../../src/permissions/membership.service';
 import type { PrincipalRef } from '../../../src/permissions/permissions.types';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -68,8 +68,10 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
   const auth = () => ({ Authorization: `Bearer ${rootToken}` });
 
   const userPrincipal = (who: string): PrincipalRef => ({ type: 'USER', id: ids[who] });
+  // Fixture grants run as `SYSTEM/seed`, the context the fixture client writes under.
   const bind = (principal: PrincipalRef, roleKey: string, projectIdOrNull: string | null) =>
-    membership.createBinding({ principal, roleKey, projectId: projectIdOrNull }, { type: 'USER', id: rootId });
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+      membership.createBinding({ principal, roleKey, projectId: projectIdOrNull }, { type: 'USER', id: rootId }));
 
   /** A MEMBER-role user with a working account; registration is closed, so it goes through the admin route. */
   const createUser = async (who: string, options: { disabled?: boolean } = {}): Promise<string> => {
@@ -137,8 +139,7 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    const prismaService = app.get<PrismaService<PrismaClient>>(PrismaService);
-    prisma = prismaService.client;
+    prisma = fixtureDb(app);
     membership = app.get(MembershipService);
     writer = app.get(KodaDomainWriter);
 
@@ -176,6 +177,10 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: a developer binding is enough to assign the ticket to that user', async () => {
@@ -276,15 +281,17 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
     ]);
     const ticket = await createTicket('Written through a developer binding');
 
-    const result = await writer.writeTicketEvent({
-      ticketId: ticket.id,
-      projectId,
-      action: 'TICKET_CREATED',
-      actorId: ids.devBind,
-      actorType: 'user',
-      source: 'api',
-      data: {},
-    });
+    // The writer runs inside the request that creates the event: its principal is the actor.
+    const result = await withTestActor({ type: 'USER', id: ids.devBind as string }, () =>
+      writer.writeTicketEvent({
+        ticketId: ticket.id,
+        projectId,
+        action: 'TICKET_CREATED',
+        actorId: ids.devBind,
+        actorType: 'user',
+        source: 'api',
+        data: {},
+      }));
 
     expect(result.canonicalId).toBeTruthy();
     expect(await prisma.ticketEvent.count({ where: { projectId, actorId: ids.devBind } })).toBe(1);
@@ -298,15 +305,16 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
 
     // US-003: the writer decides on `project.read`, which the viewer role holds — this is the
     // behaviour the legacy ADMIN/DEVELOPER/REVIEWER/TRIAGER/AGENT allow-list got wrong.
-    const result = await writer.writeTicketEvent({
-      ticketId: ticket.id,
-      projectId,
-      action: 'TICKET_CREATED',
-      actorId: ids.viewerBind,
-      actorType: 'user',
-      source: 'api',
-      data: {},
-    });
+    const result = await withTestActor({ type: 'USER', id: ids.viewerBind as string }, () =>
+      writer.writeTicketEvent({
+        ticketId: ticket.id,
+        projectId,
+        action: 'TICKET_CREATED',
+        actorId: ids.viewerBind,
+        actorType: 'user',
+        source: 'api',
+        data: {},
+      }));
 
     expect(result.canonicalId).toBeTruthy();
     expect(await prisma.ticketEvent.count({ where: { projectId, actorId: ids.viewerBind } })).toBe(1);
@@ -323,15 +331,16 @@ describeIntegration('ticket consumers read bindings (US-003, PG)', () => {
     await membership.invalidatePermissions();
 
     await expect(
-      writer.writeTicketEvent({
-        ticketId: ticket.id,
-        projectId,
-        action: 'TICKET_CREATED',
-        actorId: ids.noSource,
-        actorType: 'user',
-        source: 'api',
-        data: {},
-      }),
+      withTestActor({ type: 'USER', id: ids.noSource as string }, () =>
+        writer.writeTicketEvent({
+          ticketId: ticket.id,
+          projectId,
+          action: 'TICKET_CREATED',
+          actorId: ids.noSource,
+          actorType: 'user',
+          source: 'api',
+          data: {},
+        })),
     ).rejects.toBeInstanceOf(ForbiddenAppException);
 
     expect(await prisma.ticketEvent.count({ where: { projectId, actorId: ids.noSource } })).toBe(0);

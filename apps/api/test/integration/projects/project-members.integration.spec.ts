@@ -5,10 +5,10 @@
 import request from 'supertest';
 import * as bcrypt from 'bcrypt';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -29,7 +29,7 @@ describeIntegration('/projects/:slug/members (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    db = fixtureDb(app);
     passwordHash = await bcrypt.hash(TEST_PASSWORD, 4);
 
     const root = await request(server).post('/api/auth/register')
@@ -49,6 +49,10 @@ describeIntegration('/projects/:slug/members (PG)', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('a global admin adds a project admin and a developer', async () => {

@@ -9,12 +9,12 @@
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { DefaultThrottlerGuard } from '@nathapp/nestjs-throttler';
 import { IS_PUBLIC_KEY } from '@nathapp/nestjs-auth';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -80,7 +80,7 @@ const authLoginLimit = async (): Promise<number> =>
 describeIntegration('US-005 public invite preview, accept, resend and cancel (PG)', () => {
   let app: NathApplication;
   let server: ReturnType<NathApplication['getHttpServer']>;
-  let prisma: PrismaService<PrismaClient>;
+  let prisma: PrismaClient;
   let rootToken: string;
 
   const auth = (token: string = rootToken) => ({ Authorization: `Bearer ${token}` });
@@ -92,7 +92,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
   const accept = (token: string, body: { name: string; password: string } = { name: 'New User', password: TEST_PASSWORD }) =>
     request(server).post(`/api/invites/${token}/accept`).send(body);
 
-  const inviteRow = (id: string) => prisma.client.projectInvite.findUniqueOrThrow({ where: { id } });
+  const inviteRow = (id: string) => prisma.projectInvite.findUniqueOrThrow({ where: { id } });
 
   const freshInvite = async (email: string = `${unique()}@example.com`, roleKey = 'developer') => {
     const res = await post('/projects/s4b/invites', { email, roleKey }).expect(201);
@@ -112,7 +112,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+    prisma = fixtureDb(app);
 
     const guard = app.get(DefaultThrottlerGuard);
     const storageService = (guard as unknown as {
@@ -139,11 +139,15 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
   let bindingCount: number;
   beforeEach(async () => {
     resetThrottle();
-    bindingCount = await prisma.client.roleBinding.count();
+    bindingCount = await prisma.roleBinding.count();
   });
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   // ── US-005 AC-1 ───────────────────────────────────────────────────────────
@@ -182,12 +186,12 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
   // ── US-005 AC-2 ───────────────────────────────────────────────────────────
   it('US-005 AC-2: unknown, expired and cancelled tokens produce byte-identical 404 responses', async () => {
     const expired = await freshInvite();
-    await prisma.client.projectInvite.update({
+    await prisma.projectInvite.update({
       where: { id: expired.row.id },
       data: { expiresAt: new Date(Date.now() - 60_000) },
     });
     const cancelled = await freshInvite();
-    await prisma.client.projectInvite.update({
+    await prisma.projectInvite.update({
       where: { id: cancelled.row.id },
       data: { status: 'CANCELLED' },
     });
@@ -212,7 +216,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     const body = data<SessionDto>(res);
     expect(body.user.email.toLowerCase()).toBe(row.email);
 
-    const users = await prisma.client.user.findMany({
+    const users = await prisma.user.findMany({
       where: { email: { equals: row.email, mode: 'insensitive' } },
     });
     expect(users).toHaveLength(1);
@@ -223,11 +227,11 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
   it('US-005 AC-3: replaying an accepted token creates no second account', async () => {
     const { token, row } = await freshInvite();
     await accept(token).expect(201);
-    const beforeReplay = await prisma.client.roleBinding.count();
+    const beforeReplay = await prisma.roleBinding.count();
 
     expect((await accept(token)).status).toBe(404);
-    expect(await prisma.client.roleBinding.count()).toBe(beforeReplay);
-    expect(await prisma.client.user.count({ where: { email: { equals: row.email, mode: 'insensitive' } } })).toBe(1);
+    expect(await prisma.roleBinding.count()).toBe(beforeReplay);
+    expect(await prisma.user.count({ where: { email: { equals: row.email, mode: 'insensitive' } } })).toBe(1);
   });
 
   // ── US-005 AC-4 ───────────────────────────────────────────────────────────
@@ -240,7 +244,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     expect(accepted.acceptedByUserId).toEqual(expect.any(String));
 
     const userId = accepted.acceptedByUserId ?? '';
-    const bindings = await prisma.client.roleBinding.findMany({ where: { principalType: 'USER', principalId: userId }, include: { role: true } });
+    const bindings = await prisma.roleBinding.findMany({ where: { principalType: 'USER', principalId: userId }, include: { role: true } });
     expect(bindings).toEqual(expect.arrayContaining([
       expect.objectContaining({ projectId: row.projectId, role: expect.objectContaining({ key: 'developer' }), grantedByType: 'SYSTEM', grantedById: 'invite' }),
       expect.objectContaining({ projectId: null, role: expect.objectContaining({ key: 'member' }) }),
@@ -251,12 +255,12 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
 
   it('US-005 AC-4: no membership is written when acceptance is rejected', async () => {
     const { token, row } = await freshInvite();
-    await prisma.client.user.create({
+    await prisma.user.create({
       data: { email: row.email, name: 'Taken', passwordHash: 'x' },
     });
 
     expect((await accept(token)).status).toBe(409);
-    expect(await prisma.client.roleBinding.count()).toBe(bindingCount);
+    expect(await prisma.roleBinding.count()).toBe(bindingCount);
   });
 
   // ── US-005 AC-5 ───────────────────────────────────────────────────────────
@@ -272,7 +276,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
   it('US-005 AC-5: the new token does not authorise a project the member was not invited to', async () => {
     await post('/projects', { name: 'Other', slug: `other-${unique()}`, key: randomKey() })
       .expect(201);
-    const otherSlug = (await prisma.client.project.findFirstOrThrow({ where: { name: 'Other' } })).slug;
+    const otherSlug = (await prisma.project.findFirstOrThrow({ where: { name: 'Other' } })).slug;
 
     const { token } = await freshInvite();
     const body = data<SessionDto>(await accept(token).expect(201));
@@ -284,7 +288,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
   it('US-005 AC-6: an expired token responds 404 and writes nothing', async () => {
     const expired = await freshInvite();
     const live = await freshInvite();
-    await prisma.client.projectInvite.update({
+    await prisma.projectInvite.update({
       where: { id: expired.row.id },
       data: { expiresAt: new Date(Date.now() - 1_000) },
     });
@@ -292,8 +296,8 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     // Positive control: a live token still previews, so the 404 below is expiry, not a missing route.
     expect((await preview(live.token)).status).toBe(200);
     expect((await accept(expired.token)).status).toBe(404);
-    expect(await prisma.client.roleBinding.count()).toBe(bindingCount);
-    expect(await prisma.client.user.count({ where: { email: expired.row.email } })).toBe(0);
+    expect(await prisma.roleBinding.count()).toBe(bindingCount);
+    expect(await prisma.user.count({ where: { email: expired.row.email } })).toBe(0);
     expect((await inviteRow(expired.row.id)).status).toBe('PENDING');
     // Scoped to the invited address: the earlier accepts in this file already put members in this
     // project, so a project-wide count says nothing about the expired token having written a row.
@@ -309,12 +313,12 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     expect(statuses.filter((s) => s === 201)).toHaveLength(1);
     expect(statuses.filter((s) => s === 404)).toHaveLength(1);
 
-    const users = await prisma.client.user.findMany({
+    const users = await prisma.user.findMany({
       where: { email: { equals: row.email, mode: 'insensitive' } },
     });
     expect(users).toHaveLength(1);
 
-    expect(await prisma.client.roleBinding.count({ where: { projectId: row.projectId, principalId: users[0].id, role: { key: 'developer' } } })).toBe(1);
+    expect(await prisma.roleBinding.count({ where: { projectId: row.projectId, principalId: users[0].id, role: { key: 'developer' } } })).toBe(1);
     expect((await inviteRow(row.id)).status).toBe('ACCEPTED');
   });
 
@@ -326,10 +330,10 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     const next = tokenFrom(data<{ invitePath: string }>(res).invitePath);
 
     expect(next).not.toBe(token);
-    expect(await prisma.client.projectInvite.findUniqueOrThrow({ where: { id: row.id } }))
+    expect(await prisma.projectInvite.findUniqueOrThrow({ where: { id: row.id } }))
       .toMatchObject({ status: 'PENDING' });
     expect((await accept(token)).status).toBe(404);
-    expect(await prisma.client.roleBinding.count()).toBe(bindingCount);
+    expect(await prisma.roleBinding.count()).toBe(bindingCount);
   });
 
   // ── US-005 AC-9 ───────────────────────────────────────────────────────────
@@ -339,12 +343,12 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
       email: row.email.toUpperCase(), name: 'Taken', password: TEST_PASSWORD, role: 'MEMBER',
     }).expect(201);
     const newUserId = data<{ id: string }>(created).id;
-    bindingCount = await prisma.client.roleBinding.count();
+    bindingCount = await prisma.roleBinding.count();
 
     expect((await accept(token)).status).toBe(409);
-    expect(await prisma.client.roleBinding.count()).toBe(bindingCount);
-    expect(await prisma.client.user.count({ where: { email: { equals: row.email, mode: 'insensitive' } } })).toBe(1);
-    expect(await prisma.client.roleBinding.count({ where: { principalType: 'USER', principalId: newUserId, projectId: row.projectId } })).toBe(0);
+    expect(await prisma.roleBinding.count()).toBe(bindingCount);
+    expect(await prisma.user.count({ where: { email: { equals: row.email, mode: 'insensitive' } } })).toBe(1);
+    expect(await prisma.roleBinding.count({ where: { principalType: 'USER', principalId: newUserId, projectId: row.projectId } })).toBe(0);
     expect((await inviteRow(row.id)).status).toBe('PENDING');
   });
 
@@ -373,8 +377,8 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
     const { token, row } = await freshInvite();
 
     expect((await accept(token, { name: 'Valid Name', password: 'short' })).status).toBe(400);
-    expect(await prisma.client.roleBinding.count()).toBe(bindingCount);
-    expect(await prisma.client.user.count({ where: { email: row.email } })).toBe(0);
+    expect(await prisma.roleBinding.count()).toBe(bindingCount);
+    expect(await prisma.user.count({ where: { email: row.email } })).toBe(0);
     expect((await inviteRow(row.id)).status).toBe('PENDING');
   });
 
@@ -414,7 +418,7 @@ describeIntegration('US-005 public invite preview, accept, resend and cancel (PG
   // ── US-005 AC-14 ──────────────────────────────────────────────────────────
   it('US-005 AC-14: resending an expired invite returns a fresh token that accepts with 201', async () => {
     const { row } = await freshInvite();
-    await prisma.client.projectInvite.update({
+    await prisma.projectInvite.update({
       where: { id: row.id },
       data: { expiresAt: new Date(Date.now() - 1_000) },
     });

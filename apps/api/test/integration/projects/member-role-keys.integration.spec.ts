@@ -12,10 +12,10 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -103,7 +103,7 @@ describeIntegration('member role keys (US-004)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    db = fixtureDb(app);
 
     const registered = await request(server)
       .post('/api/auth/register')
@@ -160,6 +160,10 @@ describeIntegration('member role keys (US-004)', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: a Project Admin adds a user with roleKey triager, granting only a triager binding in the project', async () => {

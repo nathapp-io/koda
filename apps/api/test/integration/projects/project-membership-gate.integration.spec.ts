@@ -24,7 +24,6 @@
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { CommentsService } from '../../../src/comments/comments.service';
@@ -35,6 +34,7 @@ import type {
 } from '../../../src/auth/principal/koda-principal.types';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -176,7 +176,7 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get(PrismaService).client as PrismaClient;
+    prisma = fixtureDb(app);
     commentsService = app.get(CommentsService);
     projectsService = app.get(ProjectsService);
 
@@ -278,6 +278,10 @@ describeIntegration('US-002 project membership gate (PG)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('fixtures grant through bindings only', async () => {
@@ -387,11 +391,9 @@ describeIntegration('US-002 project membership gate (PG)', () => {
   }, TEST_TIMEOUT_MS);
 
   it('AC3: CommentsService.update proceeds to the CASL check without membership resolution for an agent principal', async () => {
-    const updated = await commentsService.update(
-      agentCommentId,
-      { body: 'agent edit' },
-      agentPrincipal(agent),
-    );
+    // The direct call stands in for the agent's own PATCH request, so it carries that principal.
+    const updated = await withTestActor({ type: 'AGENT', id: agent.id }, () =>
+      commentsService.update(agentCommentId, { body: 'agent edit' }, agentPrincipal(agent)));
 
     expect(updated.body).toBe('agent edit');
     const row = await prisma.comment.findUnique({ where: { id: agentCommentId } });

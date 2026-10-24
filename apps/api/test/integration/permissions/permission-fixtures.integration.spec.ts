@@ -1,5 +1,4 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { AppModule } from '../../../src/app.module';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
@@ -15,6 +14,7 @@ import {
 } from '../../../src/permissions/test-helpers/permission-fixtures';
 import type { PrincipalRef } from '../../../src/permissions/permissions.types';
 import { resetDb } from '../../helpers/reset-db';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -42,7 +42,7 @@ describeIntegration('permission fixture bindings (PG)', () => {
     await resetDb();
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     await moduleRef.init();
-    db = moduleRef.get(PrismaService<PrismaClient>, { strict: false }).client as PrismaClient;
+    db = fixtureDb(moduleRef);
     permissions = moduleRef.get(PermissionService);
   });
   afterAll(async () => { await moduleRef?.close(); });
@@ -51,6 +51,10 @@ describeIntegration('permission fixture bindings (PG)', () => {
     await db.agent.deleteMany();
     await db.user.deleteMany();
     await db.project.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(moduleRef)).resolves.toBeUndefined();
   });
 
   it('P1m AC-7: reports exactly the two binding invariants for a baseline user', async () => {
