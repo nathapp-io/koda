@@ -21,11 +21,15 @@ describeDb('AuditEntry repository (PG)', () => {
   });
   beforeAll(async () => { await resetDb(); app = await bootHttpApp({ registrationEnabled: false }); repo = new PrismaAuditEntryRepository(app.get(TRANSACTION_MANAGER), app.get(PrismaService)); });
   afterAll(async () => { await app?.close(); await prisma.$disconnect(); });
+  beforeEach(async () => { await withTestActor({ type: 'USER', id: 'u1' }, () => prisma.auditEntry.deleteMany()); });
   const create = (input = row()) => withTestActor({ type: 'USER', id: 'u1' }, () => repo.create(input));
   it('round trips create and rejects updates', async () => {
     const created = await create();
-    await expect(withTestActor({ type: 'USER', id: 'u1' }, () => repo.findById(created.id!))).resolves.toEqual(created);
-    await expect(withTestActor({ type: 'USER', id: 'u1' }, () => repo.update(created.id!, { summary: 'x' }))).rejects.toThrow('audit entries are append-only');
+    const createdId = created.id;
+    expect(createdId).toEqual(expect.any(String));
+    if (createdId === undefined) throw new Error('created audit entry has no id');
+    await expect(withTestActor({ type: 'USER', id: 'u1' }, () => repo.findById(createdId))).resolves.toEqual(created);
+    await expect(withTestActor({ type: 'USER', id: 'u1' }, () => repo.update(createdId, { summary: 'x' }))).rejects.toThrow('audit entries are append-only');
   });
   it.each([
     [{ key: 'ticket.create' }, [row(), row({ key: 'comment.create' })]],
@@ -36,14 +40,14 @@ describeDb('AuditEntry repository (PG)', () => {
   ])('filters using %o', async (filters, inputs) => {
     const made = await Promise.all(inputs.map((input) => create(input)));
     const result = await withTestActor({ type: 'USER', id: 'u1' }, () => repo.findPage(filters, { current: 1, size: 20 }));
-    expect(result.data.map((item) => item.id)).toEqual([made[0].id]);
+    expect(result.records.map((item) => item.id)).toEqual([made[0].id]);
   });
   it('filters inclusive date bounds and sorts createdAt then id descending', async () => {
     const d1 = new Date('2026-01-02T00:00:00Z'); const d2 = new Date('2026-01-03T00:00:00Z');
     const inputs = [row({ createdAt: new Date(d1.getTime() - 1) }), row({ createdAt: d1 }), row({ createdAt: new Date('2026-01-02T12:00:00Z') }), row({ createdAt: d2 }), row({ createdAt: new Date(d2.getTime() + 1) })];
     await Promise.all(inputs.map((input) => create(input)));
     const page = await withTestActor({ type: 'USER', id: 'u1' }, () => repo.findPage({ from: d1, to: d2 }, { current: 1, size: 20 }));
-    expect(page.data).toHaveLength(3);
-    expect(page.data.map((x) => x.createdAt.getTime())).toEqual([d2.getTime(), new Date('2026-01-02T12:00:00Z').getTime(), d1.getTime()]);
+    expect(page.records).toHaveLength(3);
+    expect(page.records.map((x) => x.createdAt.getTime())).toEqual([d2.getTime(), new Date('2026-01-02T12:00:00Z').getTime(), d1.getTime()]);
   });
 });

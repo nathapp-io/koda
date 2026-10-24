@@ -18,6 +18,6 @@ describeDb('AuditEntry migration (PG)', () => {
     const indexes = await scratch.db.$queryRawUnsafe<Array<{ indexdef: string }>>(
       `SELECT indexdef FROM pg_indexes WHERE schemaname = 'audit_entry_migration' AND tablename = 'AuditEntry' AND indexname <> 'AuditEntry_pkey' ORDER BY indexname`,
     );
-    expect(indexes.map((x) => x.indexdef.match(/USING btree \((.*?)\)/)?.[1].replaceAll('"', '')).toEqual(['actorId, createdAt','actorType','approverId','createdAt','key','projectId, createdAt','resourceType, resourceId'].sort());
+    expect(indexes.map((x) => x.indexdef.match(/USING btree \((.*?)\)/)?.[1].replaceAll('"', ''))).toEqual(['actorId, createdAt','actorType','approverId','createdAt','key','projectId, createdAt','resourceType, resourceId'].sort());
   });
 });
