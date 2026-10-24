@@ -2,12 +2,16 @@
 description: "Writing apps/api tests: endpoint e2e coverage in endpoint.e2e.spec.ts, module/DI specs as DB-free unit tests, test/integration for DB behavior only, TestingModule cleanup, pagination-aware mocks"
 paths:
   - "apps/api/*"
+appliesTo:
+  - "**/*.spec.ts"
+  - "**/*.test.ts"
+  - "**/test/**"
+  - "**/test-helpers/**"
+  - "**/test-setup.ts"
 priority: 80
 ---
 
 # API Testing — apps/api
-
-> Always-on for apps/api stories. Rules about how to write tests cannot be `appliesTo:`-filtered against test-file globs — the test files are produced by the agent, not declared upfront in `contextFiles`.
 
 ## Testing
 - API endpoint changes must be reflected in `test/e2e/api-endpoint/endpoint.e2e.spec.ts`

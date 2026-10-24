@@ -1,7 +1,9 @@
 ---
 description: "Logging in apps/api/src: Logger from @nestjs/common (nestjs-logging only in main.ts), no console calls in source"
 paths:
-  - "apps/api/src/**/*"
+  - "apps/api/*"
+appliesTo:
+  - "apps/api/src/**"
 priority: 50
 ---
 
