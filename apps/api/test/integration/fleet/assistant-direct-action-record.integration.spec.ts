@@ -9,7 +9,6 @@
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/assistant-direct-action-record.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantActionService } from '../../../src/fleet/assistant/actions/assistant-action.service';
 import { PendingActionExpirySweeper } from '../../../src/fleet/assistant/actions/pending-action-expiry.sweeper';
@@ -18,6 +17,7 @@ import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { rosterFleetAgent, seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
@@ -41,7 +41,7 @@ describeIntegration('recording a direct assistant action (PG, US-004)', () => {
     process.env['FLEET_SWEEP_ENABLED'] = 'false';
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     claude = await seedFleetHttpAgent(app.getHttpServer(), world.tokens.root);
     await rosterFleetAgent(prisma, claude.id, world.projectId);
@@ -72,9 +72,14 @@ describeIntegration('recording a direct assistant action (PG, US-004)', () => {
   /** A real `recordDirect`, answering the id and the exact input it stored so a test can compare the clock. */
   async function record(over: Partial<DirectActionInput> = {}): Promise<{ actionId: string; input: DirectActionInput }> {
     const input = direct(over);
-    const { actionId } = await actions.recordDirect(input);
+    // The direct-action record is written from the MCP call it stands for, so it runs as that agent.
+    const { actionId } = await withTestActor({ type: 'AGENT', id: claude.id }, () => actions.recordDirect(input));
     return { actionId, input };
   }
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('fixtures grant through bindings only', async () => {
     await expectBindingOnlyFixtures(prisma, [

@@ -3,7 +3,6 @@
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/assistant-workspace-project-argument.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
 import { MembershipService } from '../../../src/permissions/membership.service';
@@ -11,6 +10,7 @@ import { expectBindingOnlyFixtures, grantBaseline, grantRole, revokeProjectRoles
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { seedFleetBase } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -43,7 +43,7 @@ describeIntegration('AssistantToolExecutor project argument in WORKSPACE threads
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     executor = app.get(AssistantToolExecutor, { strict: false });
     const base = await seedFleetBase(prisma);
     adminId = base.adminId;
@@ -73,6 +73,10 @@ describeIntegration('AssistantToolExecutor project argument in WORKSPACE threads
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('fixtures grant through bindings only', async () => {

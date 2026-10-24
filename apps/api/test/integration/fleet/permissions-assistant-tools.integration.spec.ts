@@ -17,13 +17,13 @@
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { enrollRunner } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -85,9 +85,10 @@ describeIntegration('assistant tools check their key (US-004)', () => {
     tokens[who] = await loginToken(server, `${who}@koda.test`);
   };
 
-  /** The binding that is the caller's only source in the project. */
+  /** The binding that is the caller's only source in the project: a fixture grant, so it writes as the seeder. */
   const bind = (principal: { type: 'USER' | 'AGENT'; id: string }, roleKey: string, projectId: string): Promise<unknown> =>
-    membership.createBinding({ principal, roleKey, projectId }, { type: 'SYSTEM', id: 'test' });
+    withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+      membership.createBinding({ principal, roleKey, projectId }, { type: 'SYSTEM', id: 'test' }));
 
   const createUserWithBinding = async (who: string, roleKey: string, projectId = p1Id): Promise<void> => {
     await createUser(who);
@@ -165,7 +166,7 @@ describeIntegration('assistant tools check their key (US-004)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    prisma = fixtureDb(app);
     membership = app.get(MembershipService);
 
     const root = await request(server).post('/api/auth/register')
@@ -233,6 +234,14 @@ describeIntegration('assistant tools check their key (US-004)', () => {
         else process.env[key] = saved[key];
       }
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // The guard is on for this application
+  // -------------------------------------------------------------------------
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   // -------------------------------------------------------------------------

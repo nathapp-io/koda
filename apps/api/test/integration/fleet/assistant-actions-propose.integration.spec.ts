@@ -9,7 +9,6 @@
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/assistant-actions-propose.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantActionService } from '../../../src/fleet/assistant/actions/assistant-action.service';
 import { PrismaPendingActionRepository } from '../../../src/fleet/assistant/actions/prisma-pending-action.repository';
@@ -18,6 +17,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
 import { seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
@@ -64,7 +64,9 @@ describeIntegration('AssistantActionService.propose (PG, US-001)', () => {
     actorId: world.ids.dev, now: NOW, ...over,
   });
 
-  const call = (seed: Seed, over: Partial<ProposeInput> = {}) => service.propose(ask(seed, over));
+  /** One propose call for `seed`: the thread tool call the assistant makes for the requester. */
+  const call = (seed: Seed, over: Partial<ProposeInput> = {}) =>
+    withTestActor({ type: 'SYSTEM', id: 'assistant' }, () => service.propose(ask(seed, over)));
 
   const actionId = (result: { actionId: string } | { refused: true }): string => {
     if ('refused' in result) throw new Error('propose refused');
@@ -78,7 +80,7 @@ describeIntegration('AssistantActionService.propose (PG, US-001)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     service = app.get(AssistantActionService, { strict: false });
     repo = app.get(PrismaPendingActionRepository, { strict: false });
@@ -86,6 +88,10 @@ describeIntegration('AssistantActionService.propose (PG, US-001)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: propose answers the id of a stored PENDING action', async () => {

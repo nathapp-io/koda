@@ -13,12 +13,12 @@
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { mcpToolDescriptors } from '../../../src/fleet/assistant/mcp/mcp-tool-catalog';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -80,10 +80,12 @@ describeIntegration('MCP tools/list lists only the tools whose key the agent hol
     agentIds[who] = created.agent.id;
     agentKeys[who] = created.apiKey;
     if (opts.role) {
-      await membership.createBinding({ principal: { type: 'AGENT', id: created.agent.id }, roleKey: opts.role, projectId: p1Id }, { type: 'SYSTEM', id: 'test' });
+      await withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+        membership.createBinding({ principal: { type: 'AGENT', id: created.agent.id }, roleKey: opts.role, projectId: p1Id }, { type: 'SYSTEM', id: 'test' }));
     }
     if (opts.globalRole) {
-      await membership.createBinding({ principal: { type: 'AGENT', id: created.agent.id }, roleKey: opts.globalRole, projectId: null }, { type: 'SYSTEM', id: 'test' });
+      await withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+        membership.createBinding({ principal: { type: 'AGENT', id: created.agent.id }, roleKey: opts.globalRole, projectId: null }, { type: 'SYSTEM', id: 'test' }));
     }
   };
 
@@ -93,7 +95,7 @@ describeIntegration('MCP tools/list lists only the tools whose key the agent hol
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false, ownerEmail: null });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
+    prisma = fixtureDb(app);
     membership = app.get(MembershipService);
 
     rootToken = data<{ accessToken: string }>(
@@ -131,6 +133,10 @@ describeIntegration('MCP tools/list lists only the tools whose key the agent hol
         else process.env[key] = value;
       }
     }
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-1: a viewer binding lists the read tools it holds and not the writes it does not', async () => {

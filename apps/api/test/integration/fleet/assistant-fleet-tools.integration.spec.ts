@@ -17,7 +17,6 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { AnalyticsService } from '../../../src/fleet/analytics/analytics.service';
 import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
@@ -26,6 +25,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 vi.setConfig({ testTimeout: 20_000 });
@@ -118,7 +118,7 @@ describeIntegration('fleet assistant fleet tools (PG, US-004)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     // box-a enrolled (online, and the holder of the log job's lease); box-offline last seen ten minutes ago.
     runner = await enrollRunner(server, world.tokens.root, 'box-a');
@@ -174,6 +174,10 @@ describeIntegration('fleet assistant fleet tools (PG, US-004)', () => {
     if (artifactDir) rmSync(artifactDir, { recursive: true, force: true });
     if (savedArtifactDir === undefined) delete process.env.FLEET_ARTIFACT_DIR;
     else process.env.FLEET_ARTIFACT_DIR = savedArtifactDir;
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('AC-2: koda_list_jobs { state: FAILED } names the FAILED web job and omits the others', async () => {

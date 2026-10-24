@@ -14,7 +14,6 @@
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/assistant-actions-approve.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import request from 'supertest';
 import { CommentsService } from '../../../src/comments/comments.service';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
@@ -25,6 +24,7 @@ import { expectBindingOnlyFixtures, grantRole, revokeProjectRoles } from '../../
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
@@ -96,11 +96,11 @@ describeIntegration('approving an assistant_action (PG, US-006)', () => {
   async function propose(over: Partial<ProposeInput> = {}, archived = false): Promise<Proposal> {
     const { threadId, jobId } = await seedThread(archived);
     const ticket = await newTicket();
-    const result = await actions.propose({
+    const result = await withTestActor({ type: 'SYSTEM', id: 'assistant' }, () => actions.propose({
       projectId: world.projectId, threadId, threadKind: 'REPO', threadProjectSlug: 'web', jobId,
       toolCallId: `tc-${++seq}`, tool: TOOL, input: { ref: ticket.ref, body: BODY },
       preview: `Add a comment to ${ticket.ref} "${TITLE}":\n\n${BODY}`, actorId: world.ids.dev, now: new Date(), ...over,
-    });
+    }));
     if ('refused' in result) throw new Error('propose refused');
     const row = await prisma.pendingAction.findUniqueOrThrow({ where: { id: result.actionId } });
     return { actionId: result.actionId, approvalId: row.approvalId as string, threadId, ticketId: ticket.id };
@@ -111,7 +111,7 @@ describeIntegration('approving an assistant_action (PG, US-006)', () => {
     process.env['FLEET_THREADS_ENABLED'] = 'true';
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     // The ACs name `KODA-<n>`, so the web project answers the `KODA` key.
     await prisma.project.update({ where: { id: world.projectId }, data: { key: WEB_KEY } });
@@ -126,6 +126,10 @@ describeIntegration('approving an assistant_action (PG, US-006)', () => {
       if (saved['FLEET_THREADS_ENABLED'] === undefined) delete process.env['FLEET_THREADS_ENABLED'];
       else process.env['FLEET_THREADS_ENABLED'] = saved['FLEET_THREADS_ENABLED'];
     }
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('fixtures grant through bindings only', async () => {

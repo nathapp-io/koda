@@ -8,7 +8,6 @@
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/assistant-actions-decide.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import request from 'supertest';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantActionService } from '../../../src/fleet/assistant/actions/assistant-action.service';
@@ -18,6 +17,7 @@ import { expectBindingOnlyFixtures, grantRole, revokeProjectRoles } from '../../
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
@@ -60,11 +60,11 @@ describeIntegration('deciding an assistant_action approval (PG, US-005)', () => 
   /** A real propose for a fresh thread; `actorId` defaults to dev, `now` to the present. */
   async function propose(over: Partial<ProposeInput> = {}): Promise<{ actionId: string; approvalId: string; threadId: string }> {
     const seed = await seedThread();
-    const result = await actions.propose({
+    const result = await withTestActor({ type: 'SYSTEM', id: 'assistant' }, () => actions.propose({
       projectId: world.projectId, threadId: seed.threadId, threadKind: 'REPO', threadProjectSlug: 'web', jobId: seed.jobId,
       toolCallId: `tc-${++seq}`, tool: TOOL, input: { ref: 'KODA-1', body: 'hello' }, preview: 'Add a comment',
       actorId: world.ids.dev, now: new Date(), ...over,
-    });
+    }));
     if ('refused' in result) throw new Error('propose refused');
     const row = await prisma.pendingAction.findUniqueOrThrow({ where: { id: result.actionId } });
     return { actionId: result.actionId, approvalId: row.approvalId as string, threadId: seed.threadId };
@@ -81,7 +81,7 @@ describeIntegration('deciding an assistant_action approval (PG, US-005)', () => 
     process.env['FLEET_THREADS_ENABLED'] = 'true';
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     actions = app.get(AssistantActionService, { strict: false });
     // A project ADMIN who is not the requester: the viewer, promoted.
@@ -98,6 +98,10 @@ describeIntegration('deciding an assistant_action approval (PG, US-005)', () => 
       if (saved['FLEET_THREADS_ENABLED'] === undefined) delete process.env['FLEET_THREADS_ENABLED'];
       else process.env['FLEET_THREADS_ENABLED'] = saved['FLEET_THREADS_ENABLED'];
     }
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('fixtures grant through bindings only', async () => {

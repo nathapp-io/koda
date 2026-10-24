@@ -1,5 +1,4 @@
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { AGENT_ROLES } from '../../../src/common/enums';
 import { AssistantToolExecutor } from '../../../src/fleet/assistant/assistant-tool.executor';
@@ -8,6 +7,7 @@ import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { rosterFleetAgent, seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 describeIntegration('MCP caller project isolation (PG)', () => {
@@ -20,7 +20,7 @@ describeIntegration('MCP caller project isolation (PG)', () => {
     process.env.FLEET_THREADS_ENABLED = 'true';
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     executor = app.get(AssistantToolExecutor, { strict: false });
   }, 120_000);
@@ -34,6 +34,11 @@ describeIntegration('MCP caller project isolation (PG)', () => {
     await rosterFleetAgent(prisma, agent.id, world.projectId);
     return { principal: { actorType: 'agent', id: agent.id, slug: agent.slug, name: 'claude', status: 'ACTIVE', agentRoles: [...AGENT_ROLES], capabilities: [], authorities: [], blacklisted: false, revoked: false }, origin: { kind: 'mcp' }, disabled: false };
   }
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('fixtures grant through bindings only', async () => {
     await expectBindingOnlyFixtures(prisma, [
       { type: 'USER', id: world.ids.root },

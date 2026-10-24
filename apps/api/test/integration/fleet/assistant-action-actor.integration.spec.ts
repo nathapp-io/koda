@@ -1,7 +1,6 @@
 import request from 'supertest';
 import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaPendingActionRepository } from '../../../src/fleet/assistant/actions/prisma-pending-action.repository';
 import { PrismaAssistantToolCallRepository } from '../../../src/fleet/assistant/prisma-assistant-tool-call.repository';
@@ -10,6 +9,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor } from '../../helpers/thread-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const integration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -30,7 +30,7 @@ integration('assistant action actors (PG)', () => {
     process.env.FLEET_SWEEP_ENABLED = 'false';
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    db = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), db);
     runner = await enrollRunner(app.getHttpServer(), world.tokens.root, 'actor-runner', {
       capabilities: { ...FLEET_CAPS, kodaTools: true, threadBackends: { native: ['m1'], acp: [] }, threadWrite: true },
@@ -65,6 +65,10 @@ integration('assistant action actors (PG)', () => {
     await request(app.getHttpServer()).post(`/api/projects/web/fleet/approvals/${id}/decide`)
       .set('Authorization', `Bearer ${world.tokens.dev}`).send({ decision }).expect(200);
   }
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('AC-7: permits an agent direct action with null thread fields', async () => {
     expect(await direct()).toMatchObject({ actorType: 'agent', threadId: null, jobId: null, toolCallId: null });
