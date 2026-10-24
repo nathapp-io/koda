@@ -4,6 +4,7 @@ import { CreateTicketLinkDto } from './dto/create-ticket-link.dto';
 import { TicketLinkDomain } from './domain/ticket-link.domain';
 import type { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
 import type { PermissionService } from '../permissions/permission.service';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 
 const userPrincipal: UserPrincipal = {
   actorType: 'user',
@@ -20,6 +21,10 @@ describe('TicketLinksService', () => {
   let service: TicketLinksService;
 
   const mockPermissions = { can: vi.fn() };
+  const mockAudit = {
+    record: vi.fn(async () => undefined),
+    audited: vi.fn(async <T>(fn: () => Promise<T>) => fn()),
+  };
 
   const mockLink: TicketLinkDomain = {
     id: 'link-123',
@@ -54,6 +59,7 @@ describe('TicketLinksService', () => {
     service = new TicketLinksService(
       mockTicketLinkRepo as unknown as ConstructorParameters<typeof TicketLinksService>[0],
       mockPermissions as unknown as PermissionService,
+      mockAudit as unknown as AuditRecorder,
     );
     mockPermissions.can.mockResolvedValue({ allowed: true, reason: 'granted' });
   });
@@ -140,6 +146,7 @@ describe('TicketLinksService', () => {
       expect(result.status).toBe(200);
       expectLinkDto(result.link, mockLink);
       expect(mockTicketLinkRepo.createLink).not.toHaveBeenCalled();
+      expect(mockAudit.audited).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when ticket ref does not exist', async () => {
@@ -448,7 +455,7 @@ describe('TicketLinksService', () => {
     });
 
     it('CUID refs are unaffected by the prefix rule (already project-scoped)', async () => {
-      mockTicketLinkRepo.findTicketById.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findTicketById.mockResolvedValue({ id: 'ticket-123', number: 1 });
       mockTicketLinkRepo.findLinkByUrl.mockResolvedValue(null);
       mockTicketLinkRepo.createLink.mockResolvedValue(mockLink);
 

@@ -1,3 +1,5 @@
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Global, Module } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -60,6 +62,7 @@ const mockAuthConfig: IAuthConfig = {
 @Global()
 @Module({
   providers: [
+    { provide: AuditRecorder, useValue: mockAuditRecorder },
     { provide: PrismaService, useValue: mockPrismaService },
     { provide: TRANSACTION_MANAGER, useValue: mockTransactionManager },
     // The application registers the cache globally (`CacheModule.register({ isGlobal: true })`).
@@ -67,7 +70,7 @@ const mockAuthConfig: IAuthConfig = {
     // The application registers it globally (`ConfigBridgeModule` over `ConfigModule.forRoot`).
     { provide: AUTH_CFG, useValue: mockAuthConfig },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, CacheManager, AUTH_CFG],
+  exports: [AuditRecorder, PrismaService, TRANSACTION_MANAGER, CacheManager, AUTH_CFG],
 })
 class PermissionStubsModule {}
 

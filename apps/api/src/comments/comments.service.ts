@@ -15,6 +15,7 @@ import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketEventService } from '../events/ticket-event.service';
 import { buildTicketEventOutboxPayload } from '../events/outbox-envelope.util';
 import { ProjectAccessService } from '../projects/project-access.service';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 
 @Injectable()
 export class CommentsService {
@@ -25,6 +26,7 @@ export class CommentsService {
     private readonly ticketEventService: TicketEventService,
     private readonly outbox: NathappOutboxService,
     private readonly access: ProjectAccessService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   private async resolveTicketByRef(projectSlug: string, ticketRef: string) {
@@ -151,6 +153,10 @@ export class CommentsService {
         updatedAt: new Date(),
       });
       await this.recordCommentAdded(ticket.id, project.id, created.id, principal);
+      await this.audit.record({
+        key: 'comment.create', resourceType: 'comment', resourceId: created.id,
+        projectId: project.id, summary: `on ${project.key}-${ticket.number}`,
+      });
       return created;
     });
 
@@ -199,10 +205,13 @@ export class CommentsService {
     const { projectId, comment } = await this.assertCommentProjectMembership(commentId, principal);
     await this.assertCommentKey(principal, 'comment.update', projectId, comment);
 
-    // Update the comment via repository
-    const updatedComment = await this.commentRepo.update(commentId, {
-      body: updateCommentDto.body,
-    });
+    const updatedComment = await this.audit.audited(
+      () => this.commentRepo.update(commentId, { body: updateCommentDto.body }),
+      (updated) => ({
+        key: 'comment.update', resourceType: 'comment', resourceId: updated.id,
+        projectId, summary: 'edited',
+      }),
+    );
 
     return CommentResponseDto.from(updatedComment);
   }
@@ -219,8 +228,16 @@ export class CommentsService {
     const { projectId, comment } = await this.assertCommentProjectMembership(commentId, principal);
     await this.assertCommentKey(principal, 'comment.delete', projectId, comment);
 
-    // Delete the comment via repository
-    await this.commentRepo.delete(commentId);
+    await this.audit.audited(
+      async () => {
+        await this.commentRepo.delete(commentId);
+        return commentId;
+      },
+      (id) => ({
+        key: 'comment.delete', resourceType: 'comment', resourceId: id,
+        projectId, summary: 'deleted',
+      }),
+    );
   }
 }
 

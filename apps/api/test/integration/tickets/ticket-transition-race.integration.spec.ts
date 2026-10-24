@@ -1,3 +1,5 @@
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * M3 — Transition check-then-act race integration test
@@ -64,6 +66,7 @@ describeIntegration('M3 ticket transition race (verify vs reject)', () => {
         }),
       ],
       providers: [
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         TicketTransitionsService,
         // Permissions P1 (US-003): the required third dependency; this spec races two writers on the
         // same ticket, so the edge check allows them.

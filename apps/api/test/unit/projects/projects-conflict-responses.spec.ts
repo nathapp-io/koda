@@ -23,6 +23,7 @@ import request from 'supertest';
 import { GlobalExceptionsFilter } from '@nathapp/nestjs-common';
 import { ProjectsController } from '../../../src/projects/projects.controller';
 import { ProjectsService } from '../../../src/projects/projects.service';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
 import { ProjectAccessService } from '../../../src/projects/project-access.service';
 import { PrismaProjectRepository } from '../../../src/projects/prisma-project.repository';
 import { PermissionService } from '../../../src/permissions/permission.service';
@@ -95,6 +96,7 @@ describe('US-004: project conflict responses', () => {
       controllers: [ProjectsController],
       providers: [
         ProjectsService,
+        { provide: AuditRecorder, useValue: { audited: vi.fn(async (fn: () => Promise<unknown>) => fn()) } },
         ProjectAccessService,
         { provide: PrismaProjectRepository, useValue: projectRepo },
         { provide: RagService, useValue: ragService },

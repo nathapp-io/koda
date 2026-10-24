@@ -21,6 +21,7 @@ import { LIVE_CFG, ILiveConfig } from '../../config/live.config';
 import { WEBHOOK_CFG, IWebhookConfig } from '../../config/webhook.config';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { testFleetConfig } from './fleet-config';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 
 export const mockPrismaService = {
   client: {
@@ -37,6 +38,11 @@ export const mockPrismaService = {
     },
   },
 } as unknown as PrismaService;
+
+export const mockAuditRecorder = {
+  record: vi.fn(async () => undefined),
+  audited: vi.fn(<T>(fn: () => Promise<T>) => fn()),
+} as unknown as AuditRecorder;
 
 export const mockTransactionManager: ITransactionManager = {
   run: <T>(fn: () => Promise<T>): Promise<T> => fn(),
@@ -180,6 +186,7 @@ export const mockFleetConfig: IFleetConfig = testFleetConfig();
     EventEmitterModule.forRoot(),
   ],
   providers: [
+    { provide: AuditRecorder, useValue: mockAuditRecorder },
     { provide: PrismaService, useValue: mockPrismaService },
     { provide: TRANSACTION_MANAGER, useValue: mockTransactionManager },
     { provide: AgentsService, useValue: mockAgentsService },
@@ -199,6 +206,6 @@ export const mockFleetConfig: IFleetConfig = testFleetConfig();
     { provide: WEBHOOK_CFG, useValue: mockWebhookConfig },
     { provide: FLEET_CFG, useValue: mockFleetConfig },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, OutboxService, PREFERENCE_SERVICE, NOTIFY_SERVICE, EmailAvailability, EmailScheduleService, PermissionService, MembershipService, RoleAdminService, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG, FLEET_CFG],
+  exports: [AuditRecorder, PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, OutboxService, PREFERENCE_SERVICE, NOTIFY_SERVICE, EmailAvailability, EmailScheduleService, PermissionService, MembershipService, RoleAdminService, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG, FLEET_CFG],
 })
 export class GlobalStubsModule {}

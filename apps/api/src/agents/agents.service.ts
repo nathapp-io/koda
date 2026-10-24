@@ -19,6 +19,8 @@ import { ConflictAppException } from '../common/exceptions/conflict-app.exceptio
 import { isUniqueViolation } from '../common/utils/prisma-errors';
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { UpdateAgentDto } from './dto/update-agent.dto';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { fieldsSummary } from '../audit/audit-summary';
 
 export class UpdateCapabilitiesDto {
   @ApiProperty({ example: ['typescript', 'nestjs'] })
@@ -37,6 +39,7 @@ export class AgentsService {
     // Permissions P1 (US-009): pickup is authorized by the *target* agent's project keys, so the
     // service asks the one permission decision point. Required, and before the two optional seams.
     private readonly permissions: PermissionService,
+    private readonly audit: AuditRecorder,
     @Optional() private readonly kodaDomainWriter?: KodaDomainWriter,
     @Optional() private readonly agentAuthProvider?: AgentAuthProvider,
   ) {}
@@ -80,7 +83,10 @@ export class AgentsService {
 
     if (typeof agentIdOrDto === 'string') {
       // Update existing agent
-      const agent = await this.agentRepo.updateApiKeyHash(agentIdOrDto, apiKeyHash);
+      const agent = await this.audit.audited(
+        () => this.agentRepo.updateApiKeyHash(agentIdOrDto, apiKeyHash),
+        (updated) => ({ key: 'agent.key.rotate', resourceType: 'agent', resourceId: updated.id, projectId: null, summary: 'key rotated' }),
+      );
       await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
       await this.recordAgentAction(agent.id, 'API_KEY_ROTATED', { agentId: agent.id });
       return {
@@ -121,6 +127,10 @@ export class AgentsService {
           });
           await this.agentRepo.createCapabilities(agent.id, capabilities ?? []);
           await this.membership.bindBaseline({ type: 'AGENT', id: agent.id });
+          await this.audit.record({
+            key: 'agent.create', resourceType: 'agent', resourceId: agent.id,
+            projectId: null, summary: `created ${agent.slug}`,
+          });
           return agent;
         }),
       );
@@ -213,7 +223,10 @@ export class AgentsService {
     if (updateData.maxConcurrentTickets !== undefined) data.maxConcurrentTickets = updateData.maxConcurrentTickets;
     if (updateData.status !== undefined) data.status = updateData.status;
 
-    const updated = await this.agentRepo.update(slug, data);
+    const updated = await this.audit.audited(
+      () => this.agentRepo.update(slug, data),
+      (agent) => ({ key: 'agent.update', resourceType: 'agent', resourceId: agent.id, projectId: null, summary: fieldsSummary(data) }),
+    );
     await this.agentAuthProvider?.invalidateByTag(`AGENT:${updated.id}`);
     return AgentResponseDto.from(updated);
   }
@@ -221,7 +234,10 @@ export class AgentsService {
   async updateCapabilities(agentId: string, updateData: UpdateCapabilitiesDto): Promise<AgentResponseDto> {
     // Filter out duplicates
     const uniqueCapabilities = [...new Set(updateData.capabilities)];
-    await this.agentRepo.replaceCapabilities(agentId, uniqueCapabilities);
+    await this.audit.audited(
+      () => this.agentRepo.replaceCapabilities(agentId, uniqueCapabilities),
+      () => ({ key: 'agent.capabilities.update', resourceType: 'agent', resourceId: agentId, projectId: null, summary: `capabilities: ${uniqueCapabilities.length}` }),
+    );
 
     // Return updated agent with capabilities
     const updated = await this.agentRepo.findById(agentId);
@@ -233,10 +249,15 @@ export class AgentsService {
     const agent = await this.agentRepo.findBySlug(slug);
     if (!agent) throw new NotFoundAppException({}, 'agents');
 
-    await this.agentRepo.deleteBySlug(slug);
-    // Permissions P1a (US-004): `RoleBinding.principalId` has no foreign key, so the agent's bindings
-    // outlive its row. A deleted principal must not keep a role.
-    await this.membership.removeAllBindings({ type: 'AGENT', id: agent.id });
+    // Bindings have no principal foreign key. Delete both in one transaction and defer
+    // the nested membership write's cache invalidation until the outer commit.
+    await this.membership.afterCommit(() => this.audit.audited(
+      async () => {
+        await this.agentRepo.deleteBySlug(slug);
+        await this.membership.removeAllBindings({ type: 'AGENT', id: agent.id });
+      },
+      () => ({ key: 'agent.delete', resourceType: 'agent', resourceId: agent.id, projectId: null, summary: `deleted ${agent.slug}` }),
+    ));
     await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
     return AgentResponseDto.from(agent);
   }

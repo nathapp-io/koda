@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { AUDIT_STORAGE } from '@nathapp/nestjs-audit';
 import { AUDIT_ENTRY_REPOSITORY } from './domain/audit-entry.domain';
 import { PrismaAuditEntryRepository } from './prisma-audit-entry.repository';
@@ -7,6 +7,7 @@ import { AuditRecorder } from './audit-recorder.service';
 import { AuditLogService } from './audit-log.service';
 import { AuditController } from './audit.controller';
 
+@Global()
 @Module({
   controllers: [AuditController],
   providers: [

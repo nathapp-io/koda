@@ -40,6 +40,8 @@ interface WriteOutcome<T> {
 export interface RemoveBindingOptions {
   /** The caller may remove a project's last active Project Admin (it holds role.binding.global). */
   lastProjectAdminOverride?: boolean;
+  /** Runs after the delete inside its transaction; rejection rolls the write back. */
+  onWritten?: (binding: RoleBindingView) => Promise<void>;
 }
 
 /**
@@ -136,10 +138,11 @@ export class MembershipService {
   async createBinding(
     input: { principal: PrincipalRef; roleKey: string; projectId: string | null },
     by: Granter,
+    onWritten?: (binding: RoleBindingView) => Promise<void>,
   ): Promise<RoleBindingView> {
     const role = await this.roles.findOne({ key: input.roleKey });
     if (!role) throw new NotFoundAppException({}, 'permissions.roleNotFound');
-    return this.bindRole(role, input, by);
+    return this.bindRole(role, input, by, onWritten);
   }
 
   /**
@@ -177,11 +180,16 @@ export class MembershipService {
     role: RoleDomain,
     input: { principal: PrincipalRef; projectId: string | null },
     by: Granter,
+    onWritten?: (binding: RoleBindingView) => Promise<void>,
   ): Promise<RoleBindingView> {
     await this.assertTargetsExist(input.principal, input.projectId);
 
     try {
-      const outcome = await this.txManager.run(() => this.insertBinding(role, input, by));
+      const outcome = await this.txManager.run(async () => {
+        const written = await this.insertBinding(role, input, by);
+        if (written.changed) await onWritten?.(written.value);
+        return written;
+      });
       await this.afterWrite(outcome);
       return outcome.value;
     } catch (error) {
@@ -248,6 +256,7 @@ export class MembershipService {
       if (!(await this.bindings.deleteById(id))) {
         throw new NotFoundAppException({}, 'permissions.bindingNotFound');
       }
+      await options.onWritten?.(toView(current.binding, current.roleKey));
       return this.afterRemoval([current]);
     });
     await this.afterWrite(outcome);

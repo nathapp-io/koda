@@ -15,6 +15,7 @@ import { PrismaProjectRepository } from '../projects/prisma-project.repository';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketEventService } from '../events/ticket-event.service';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 
 describe('CommentsService', () => {
   let service: CommentsService;
@@ -294,6 +295,10 @@ describe('CommentsService', () => {
       callOrder.push('outbox');
     }),
   };
+  const mockAudit = {
+    record: vi.fn(async () => undefined),
+    audited: vi.fn(async <T>(fn: () => Promise<T>) => fn()),
+  };
 
   beforeEach(async () => {
     // Tests below override this per case; reset so order cannot matter.
@@ -309,6 +314,7 @@ describe('CommentsService', () => {
         { provide: PermissionService, useValue: mockPermissions },
         { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
         { provide: TicketEventService, useValue: mockTicketEventService },
+        { provide: AuditRecorder, useValue: mockAudit },
         { provide: NathappOutboxService, useValue: mockOutbox },
         // US-002: update/delete resolve the owning project and check membership
         // before the key check.
@@ -334,6 +340,18 @@ describe('CommentsService', () => {
   });
 
   describe('create', () => {
+    it('audits the canonical ref when the route uses a ticket CUID', async () => {
+      mockCommentRepo.findProjectBySlug.mockResolvedValueOnce(mockProject);
+      mockCommentRepo.findTicketScoped.mockResolvedValueOnce(mockTicket);
+      mockCommentRepo.create.mockResolvedValueOnce(mockComment);
+
+      await service.create('koda', mockTicket.id, { body: 'hello' }, mockUserPrincipal);
+
+      expect(mockAudit.record).toHaveBeenCalledExactlyOnceWith({
+        key: 'comment.create', resourceType: 'comment', resourceId: mockComment.id,
+        projectId: mockProject.id, summary: 'on KODA-1',
+      });
+    });
     it('should create a comment on a ticket by slug and ref', async () => {
       const createDto: CreateCommentDto = {
         body: 'This is a test comment',
@@ -612,6 +630,33 @@ describe('CommentsService', () => {
   });
 
   describe('update', () => {
+    it('runs the repository update inside one audited callback', async () => {
+      givenComment(mockComment);
+      mockCommentRepo.update.mockResolvedValue({ ...mockComment, body: 'changed' });
+      const steps: string[] = [];
+      mockAudit.audited.mockImplementationOnce(async (fn: () => Promise<unknown>) => {
+        steps.push('audited:start');
+        const result = await fn();
+        steps.push('audited:end');
+        return result;
+      });
+      mockCommentRepo.update.mockImplementationOnce(async () => {
+        steps.push('repository:update');
+        return { ...mockComment, body: 'changed' };
+      });
+
+      await service.update('comment-123', { body: 'changed' }, mockUserPrincipal);
+
+      expect(mockAudit.audited).toHaveBeenCalledTimes(1);
+      expect(steps).toEqual(['audited:start', 'repository:update', 'audited:end']);
+      const entriesOf = mockAudit.audited.mock.calls[0]?.[1];
+      expect(entriesOf).toEqual(expect.any(Function));
+      expect(entriesOf?.({ id: 'comment-123' })).toMatchObject({
+        key: 'comment.update', resourceType: 'comment', resourceId: 'comment-123',
+        projectId: 'proj-123', summary: 'edited',
+      });
+    });
+
     it('should allow author (user) to edit own comment', async () => {
       const updateDto: UpdateCommentDto = {
         body: 'Updated comment body',

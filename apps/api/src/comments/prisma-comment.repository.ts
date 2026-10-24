@@ -94,20 +94,20 @@ export class PrismaCommentRepository extends AbstractPrismaRepository<CommentDom
     projectId: string,
     projectKey: string,
     ticketRef: string,
-  ): Promise<{ id: string; deletedAt: Date | null } | null> {
+  ): Promise<{ id: string; number: number; deletedAt: Date | null } | null> {
     const match = parseTicketRef(ticketRef);
 
     if (match) {
       if (match.prefix !== projectKey) return null;
       return this.prisma.client.ticket.findUnique({
         where: { projectId_number: { projectId, number: match.number } },
-        select: { id: true, deletedAt: true },
+        select: { id: true, number: true, deletedAt: true },
       });
     }
 
     return this.prisma.client.ticket.findFirst({
       where: { id: ticketRef, projectId },
-      select: { id: true, deletedAt: true },
+      select: { id: true, number: true, deletedAt: true },
     });
   }
 

@@ -1,3 +1,5 @@
+import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { Global, Module } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -17,6 +19,7 @@ import { ProjectMembersService } from './project-members.service';
 @Global()
 @Module({
   providers: [
+    { provide: AuditRecorder, useValue: mockAuditRecorder },
     { provide: MembershipService, useValue: {} },
     // US-008: RequiresGuard is instantiated by the DI container (the controller carries it
     // class-level) and needs the global PermissionService.
@@ -30,7 +33,7 @@ import { ProjectMembersService } from './project-members.service';
       useValue: { run: <T>(fn: () => Promise<T>) => fn(), getClient: () => ({}), isInTransaction: () => false },
     },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, MembershipService, PermissionService, RoleAdminService],
+  exports: [AuditRecorder, PrismaService, TRANSACTION_MANAGER, MembershipService, PermissionService, RoleAdminService],
 })
 class FakeGlobalsModule {}
 

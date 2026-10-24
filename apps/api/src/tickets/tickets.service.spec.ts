@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsService } from './tickets.service';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { Prisma } from '../generated/prisma/client';
 import { TICKET_REPOSITORY } from './domain/ticket.domain';
@@ -133,6 +134,7 @@ describe('TicketsService', () => {
 
   const mockTicketEventService = { create: vi.fn().mockResolvedValue({ id: 'evt-mock' }) };
   const mockOutbox = { record: vi.fn().mockResolvedValue(undefined) };
+  const mockAudit = { record: vi.fn().mockResolvedValue(undefined) };
 
   const mockTransitionsService = {
     executeTransitionPublic: vi.fn(),
@@ -162,6 +164,7 @@ describe('TicketsService', () => {
     // Permissions P1 (US-002): an assignee holds `project.read` in the project unless a test says
     // otherwise, which is the eligibility the assign cases below are about.
     mockPermissions.effectiveKeys.mockReset().mockResolvedValue(new Set<string>(['project.read']));
+    mockAudit.record.mockReset().mockResolvedValue(undefined);
     inTx = false;
 
     const module: TestingModule = await Test.createTestingModule({
@@ -173,6 +176,7 @@ describe('TicketsService', () => {
         { provide: NathappOutboxService, useValue: mockOutbox },
         { provide: TicketTransitionsService, useValue: mockTransitionsService },
         { provide: PermissionService, useValue: mockPermissions },
+        { provide: AuditRecorder, useValue: mockAudit },
       ],
     }).compile();
 
@@ -183,7 +187,52 @@ describe('TicketsService', () => {
     vi.clearAllMocks();
   });
 
+  it.each(['update', 'softDelete'] as const)('refuses %s before writing when the project disappears after ticket resolution', async (method) => {
+    const lookup = vi.spyOn(service, 'findByRef').mockResolvedValueOnce(mockTicket as never);
+    mockTicketRepo.findProjectBySlug.mockResolvedValueOnce(null);
+    try {
+      const action = method === 'update'
+        ? service.update('koda', 'KODA-1', { title: 'changed' }, mockUserPrincipal)
+        : service.softDelete('koda', 'KODA-1', mockUserPrincipal);
+      await expect(action).rejects.toBeInstanceOf(NotFoundAppException);
+      expect(mockTicketRepo.updateTicket).not.toHaveBeenCalled();
+      expect(mockTicketRepo.softDeleteTicket).not.toHaveBeenCalled();
+      expect(mockAudit.record).not.toHaveBeenCalled();
+    } finally { lookup.mockRestore(); }
+  });
+
   describe('create', () => {
+    it('records once, only on the successful number-retry attempt and inside its transaction', async () => {
+      const conflict = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002', clientVersion: 'test', meta: { target: ['projectId', 'number'] },
+      });
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findLastTicketInProject.mockResolvedValue(null);
+      mockTicketRepo.createTicket.mockRejectedValueOnce(conflict).mockResolvedValueOnce(mockTicket);
+      let recordingInTransaction = false;
+      mockAudit.record.mockImplementation(async () => { recordingInTransaction = mockTxManager.isInTransaction(); });
+
+      await service.create('koda', { type: 'BUG', title: 'Retry me' }, mockUserPrincipal);
+
+      expect(mockTicketRepo.createTicket).toHaveBeenCalledTimes(2);
+      expect(mockAudit.record).toHaveBeenCalledTimes(1);
+      expect(mockAudit.record).toHaveBeenCalledWith(expect.objectContaining({ key: 'ticket.create' }));
+      expect(recordingInTransaction).toBe(true);
+    });
+
+    it('records the created ticket after the successful ticket event', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findLastTicketInProject.mockResolvedValue(null);
+      mockTicketRepo.createTicket.mockResolvedValue(mockTicket);
+
+      await service.create('koda', { type: 'BUG', title: 'Fix login bug' }, mockUserPrincipal);
+
+      expect(mockAudit.record).toHaveBeenCalledWith({
+        key: 'ticket.create', resourceType: 'ticket', resourceId: mockTicket.id,
+        projectId: mockProject.id, summary: 'created KODA-1',
+      });
+    });
+
     it('should create a new ticket with auto-incremented number', async () => {
       const createDto: CreateTicketDto = {
         type: 'BUG',

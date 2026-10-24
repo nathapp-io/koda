@@ -1,0 +1,829 @@
+{
+  "project": "koda",
+  "feature": "permissions-p2-audit-core",
+  "branchName": "feat/permissions-p2-audit-core",
+  "createdAt": "2026-10-24T00:00:00.000Z",
+  "updatedAt": "2026-10-24T15:30:42.250Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add audited command wrapper, summary helper and global recorder wiring",
+      "description": "**Goal** — Add the shared atomic audit command helper, privacy-preserving field summaries and globally injectable recorder.\n\n**Motivation** — The core routes are the ones a human uses every day, so they come first.\n\n**Approach** — The command layer (US-001):\n\n`AuditRecorder` (`src/audit/audit-recorder.service.ts`) gains one method:\n\n```typescript\nexport type AuditEntriesOf<T> = (result: T) => AuditRecordInput | readonly AuditRecordInput[];\n\n/**\n * Runs `fn` in one transaction and records the entries its result describes, in that transaction.\n * For a write that owns no transaction of its own; a method that already runs `txManager.run`\n * calls `record` inside that callback instead.\n */\nasync audited<T>(fn: () => Promise<T>, entriesOf: AuditEntriesOf<T>): Promise<T> {\n  return this.txManager.run(async () => {\n    const result = await fn();\n    const entries = entriesOf(result);\n    for (const entry of Array.isArray(entries) ? entries : [entries]) await this.record(entry);\n    return result;\n  });\n}\n```\n\n- `audited` runs `fn` before it calls `entriesOf`, so the entry can name an id the write created.\n- When `fn` rejects, no entry is recorded and the rejection propagates.\n- When `entriesOf` returns `[]`, nothing is recorded and `audited` resolves to `fn`'s value.\n- When `record` rejects (an unknown key, a storage failure), the transaction rolls back, so the write does not commit either.\n- Nested in an open transaction, `txManager.run` joins it, so `audited` inside a caller's transaction records in that transaction.\n\n`src/audit/audit-summary.ts`:\n\n```typescript\n/** `fields: a, b` for the own keys of `patch` whose value is not undefined, sorted; undefined when none. Never values. */\nexport function fieldsSummary(patch: object): string | undefined;\n```\n\n`AuditLogModule` gains `@Global()`. `GlobalStubsModule` gains `mockAuditRecorder`, exported, and provides it for `AuditRecorder`:\n- `record` is a `vi.fn` resolving `undefined`.\n- `audited` is a `vi.fn` implemented as `(fn) => fn()`.\n\n**The command layer is `AuditRecorder.audited`, not `KodaDomainWriter`.** The design names \"a generalised `apps/api/src/koda-domain-writer/`\". `KodaDomainWriter`'s only production caller is `AgentsService.recordAgentAction`, and of its three call sites only `suggestTicket` (`GET /agents/:slug/pickup`, `agents.service.ts:316`) passes a project id, so its one live write is the `TICKET_SUGGESTED` agent event. Its methods also carry an access check and an outbox record that no core write needs. A two-argument method on the recorder every writer already needs is the smaller generalisation. `KodaDomainWriter` is left unchanged (see Out of Scope).\n\n**`AuditLogModule` becomes `@Global()`.** Twelve feature modules need the recorder, and `PermissionsModule` is the precedent for a global cross-cutting module. `GlobalStubsModule` (`src/common/test-helpers/global-stubs.module.ts`) provides `mockAuditRecorder`, so module specs that import it keep compiling.\n\nKeep AuditRecorder.record, AuditLogModule's existing providers/exports, and all existing GlobalStubsModule stubs unchanged. Extend audit-log.module.spec.ts with the sibling consumer global-resolution AC while retaining provider/export assertions. No package AuditInterceptor or @Audit decorator.\n\n**Scope** — In: recorder helper, fieldsSummary, global module and shared stub plus their unit/transaction integration behavior. Out: domain writer adoption belongs to US-002 through US-008; MembershipService callbacks belong to US-007; the runtime coverage guard and walker belong to audit-integrations; KodaDomainWriter remains unchanged.\n\n**Interface** — Existing record input is unchanged: `AuditRecordInput { key; resourceType; resourceId; projectId?; summary? }`. The exact new TypeScript signatures and implementation contract are embedded above.",
+      "acceptanceCriteria": [
+        "[unit] AuditRecorder.audited(fn, entriesOf), with a stub transaction manager whose run calls its callback and whose isInTransaction returns true, calls fn exactly once.",
+        "[unit] With run invoking its callback and isInTransaction returning true, AuditRecorder.audited(fn, entriesOf) calls entriesOf with fn's resolved value after fn resolves.",
+        "[unit] With run invoking its callback and isInTransaction returning true, AuditRecorder.audited(fn, entriesOf) calls the stub storage's record once per entry returned by entriesOf, after entriesOf runs.",
+        "[unit] With run invoking its callback and isInTransaction returning true, AuditRecorder.audited(fn, entriesOf) resolves to fn's value after recording the returned entries.",
+        "[unit] When fn rejects, audited rejects with that same error.",
+        "[unit] When fn rejects, audited calls neither entriesOf nor the storage's record.",
+        "[unit] With isInTransaction true only while the run callback executes, audited calls txManager.run exactly once.",
+        "[unit] With isInTransaction true only while the run callback executes, audited calls the storage's record while isInTransaction is true.",
+        "[integration] Inside withTestActor({ type: 'USER', id: <user id> }, ...), app.get(AuditRecorder).audited whose fn creates a Label and whose entriesOf names label.create and the created label id leaves one Label row.",
+        "[integration] That audited Label creation leaves one AuditEntry row with key label.create and resourceId the label's id.",
+        "[integration] When entriesOf returns key not.a.catalog.key, audited rejects with Error('unknown audit key: not.a.catalog.key').",
+        "[integration] When entriesOf returns key not.a.catalog.key, the Label row created by audited's fn is absent afterwards.",
+        "[integration] When audited joins an open txManager.run that then throws, neither fn's row nor its AuditEntry remains.",
+        "[unit] fieldsSummary({ title: 'x', priority: 'HIGH' }) returns 'fields: priority, title'.",
+        "[unit] fieldsSummary({ title: 'x', description: undefined }) returns 'fields: title'.",
+        "[unit] fieldsSummary({}) returns undefined.",
+        "[unit] fieldsSummary({ title: 'secret-title' }) returns a string that does not include secret-title.",
+        "[unit] A TestingModule importing GlobalStubsModule resolves a consumer whose constructor takes AuditRecorder with the injected recorder equal to mockAuditRecorder.",
+        "[unit] A TestingModule importing AuditLogModule, a local @Global() stub module exporting PrismaService, TRANSACTION_MANAGER and PermissionService for AuditController's RequiresGuard, and a second module providing a consumer of AuditRecorder without importing AuditLogModule resolves that consumer with the real AuditRecorder because AuditLogModule is global.",
+        "[unit] When entriesOf returns [], audited resolves to fn's value.",
+        "[unit] When entriesOf returns [], audited does not call the storage's record.",
+        "[integration] When record rejects because audit storage fails during audited, the domain row written by fn does not commit."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "transactions",
+        "security",
+        "dependency-injection"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Three existing source files and one new pure helper implement a small transaction wrapper, field-name formatting and standard global DI/stub wiring; existing catalog checks, context attribution, approval mapping and authentication logic stay unchanged, so ordinary TDD is sufficient.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/audit/audit-recorder.service.ts",
+        "apps/api/src/audit/audit-log.module.ts",
+        "apps/api/src/common/test-helpers/global-stubs.module.ts",
+        "apps/api/src/permissions/permissions.module.ts",
+        "apps/api/test/integration/audit/audit-recorder.rollback.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/audit/audit-summary.ts",
+        "apps/api/src/audit/audit-summary.spec.ts",
+        "apps/api/src/audit/audit-recorder.audited.spec.ts",
+        "apps/api/test/integration/audit/audit-recorder.audited.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "fieldsSummary ignores inherited enumerable properties and excludes own properties whose values are undefined.",
+        "When entriesOf throws after fn writes a Label, audited rejects and neither a Label nor an AuditEntry commits.",
+        "When the second of multiple audit entries fails storage, audited leaves neither the domain write nor the first entry committed."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/audit/audit-recorder.service.ts",
+          "reason": "gains the audited method; record is unchanged."
+        },
+        {
+          "path": "apps/api/src/audit/audit-log.module.ts",
+          "reason": "gains @Global(); its providers and exports are unchanged."
+        },
+        {
+          "path": "apps/api/src/audit/audit-log.module.spec.ts",
+          "reason": "holds US-001's global-module AC (a consumer module resolves the real AuditRecorder without importing AuditLogModule); its existing provider and export assertions are kept."
+        },
+        {
+          "path": "apps/api/src/common/test-helpers/global-stubs.module.ts",
+          "reason": "gains the exported mockAuditRecorder (record resolves undefined, audited runs its fn) and provides it for AuditRecorder; every existing stub is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "3edc318108d2250c3f5b7daad43f2ce76bdf450d"
+    },
+    {
+      "id": "US-002",
+      "title": "Audit ticket create, field update, delete and assignment",
+      "description": "**Goal** — Record ticket CRUD and assignment actions inside their existing write transactions.\n\n**Motivation** — The core routes are the ones a human uses every day, so they come first.\n\n**Approach** — Each service below injects `AuditRecorder` as `private readonly audit: AuditRecorder` and records per the contract table. The integration point of each write:\n\n| Story | Service.method | Today | Change |\n|:--|:--|:--|:--|\n| US-002 | `TicketsService.create` | `runWithTicketNumberRetry` callback, `tickets.service.ts:119` | `record` after `recordTicketEvent`, inside the callback |\n| US-002 | `TicketsService.applyUpdate` (field path) | `txManager.run`, `:358` | `record` inside |\n| US-002 | `TicketsService.softDelete` | `txManager.run`, `:393` | `record` inside |\n| US-002 | `TicketsService.assign` | `txManager.run`, `:431` | `record` inside, after the write |\n\n**Record inside an existing transaction; wrap only when there is none.** A method that already owns a `txManager.run` (ticket create, update, delete, assign, the transitions, comment create, ticket label assign and remove, agent create, register, admin user create and update, invite create, invite accept, member add) calls `record` inside that callback. Wrapping it in an outer `audited` instead would break two things. `runWithTicketNumberRetry` re-runs a failed transaction, and a nested `run` that throws poisons the outer one (`PrismaTransactionManager.run`, SEC-16), so the retry could never succeed. And `MembershipService` defers cache invalidation to the outermost commit only inside `afterCommit` scopes.\n\n**`AuditRecorder` is a required constructor dependency.** It is never `@Optional()`: an optional recorder skips the audit silently, the failure this phase exists to remove. `TicketTransitionsService` already documents the same rule for `PermissionService`. Its position is the same in every service: immediately before the first `@Optional()` parameter, or last when the constructor has none. `ProjectsService` is the one exception: its `@Optional()` `hybridRetrieverService` is followed by the required `access`, so `AuditRecorder` goes last, as the fifth parameter. TypeScript does not allow a required parameter after a `?` one, and one fixed rule keeps the positional `new` calls in specs predictable.\n\n**An empty field patch records nothing.** When `toUpdateData` yields no writable field (a `PATCH` of `{}`, or a status with only dropped keys), no `ticket.update` entry is recorded; the field update and `fieldPatch` paths skip `record` when `fieldsSummary(updateData)` is `undefined`.\n\nSummary/resource contract:\n| Write | Key | `resourceType` | `resourceId` | `projectId` | `summary` |\n|:--|:--|:--|:--|:--|:--|\n| ticket create | `ticket.create` | `ticket` | ticket id | project id | `created <REF>` (e.g. `created SB-12`) |\n| ticket field update | `ticket.update` | `ticket` | ticket id | project id | `fieldsSummary(updateData)` (e.g. `fields: priority, title`) |\n| ticket delete | `ticket.delete` | `ticket` | ticket id | project id | `deleted <REF>` |\n| ticket assign | `ticket.assign` | `ticket` | ticket id | project id | `assignee: USER <id>`, `assignee: AGENT <id>` or `assignee: none` |\n\n`<REF>` is the ticket ref (`<project key>-<number>`). Summaries contain field names and permitted refs/ids, not title or description values. A refused request (401, 403, 404, 409, 400) writes nothing, so it records nothing. Ticket number retry must start a new transaction after conflict and leave exactly one committed create entry.\n\nUpdate TicketsService's unit provider and the explicit providers in agent-permissions/tickets-agent-permissions, outbox/producer-atomicity, tickets/ticket-tenancy and tickets/tickets-status-update integration specs with mockAuditRecorder. Preserve their assertions and stub transaction behavior. Update direct new TicketsService calls in memory/outbox-envelope integration spec in the new constructor position; its TicketTransitionsService positional adaptation is completed with US-003.\n\n**Scope** — In: TicketsService create/applyUpdate/softDelete/assign recording and required dependency adaptation. Out: status transitions and fieldPatch recording belong to US-003; comments/links/ticket labels belong to US-004; no domain-event or outbox shape changes.\n\n**Interface** — `private readonly audit: AuditRecorder`; existing `AuditRecorder.record(input: AuditRecordInput)`; `fieldsSummary(patch: object): string | undefined`. Preserve TicketsService public method signatures and responses; append the required recorder after current required constructor parameters.",
+      "acceptanceCriteria": [
+        "[integration] POST /api/projects/:slug/tickets as a user holding ticket.create returns 201.",
+        "[integration] That POST leaves one entry for the new ticket id with key ticket.create, resourceType ticket, projectId the project id, actorType USER, actorId the user's id and origin rest.",
+        "[integration] That entry's summary is 'created <ref>', where <ref> is the ticket ref returned by the response.",
+        "[integration] POST /api/projects/:slug/tickets as an agent holding ticket.create leaves an entry with actorType AGENT and actorId the agent's id.",
+        "[integration] POST /api/projects/:slug/tickets as a user without ticket.create returns 403.",
+        "[integration] That refused POST leaves no AuditEntry with key ticket.create and projectId the project's id.",
+        "[integration] PATCH /api/projects/:slug/tickets/:ref with { title: 'New title', priority: 'HIGH' } and no status returns 200.",
+        "[integration] That PATCH leaves one ticket entry with key ticket.update and summary 'fields: priority, title'.",
+        "[integration] PATCH /api/projects/:slug/tickets/:ref with { title: 'New title' } leaves a ticket.update summary that does not include 'New title'.",
+        "[integration] DELETE /api/projects/:slug/tickets/:ref returns the route's success status.",
+        "[integration] That DELETE leaves one ticket entry with key ticket.delete and summary 'deleted <ref>'.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/assign with { userId: <member id> } leaves one ticket entry with key ticket.assign and summary 'assignee: USER <member id>'.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/assign with { agentId: <rostered agent id> } leaves an entry with summary 'assignee: AGENT <agent id>'.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/assign with {} leaves an entry with summary 'assignee: none'.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/assign with both userId and agentId returns 400.",
+        "[integration] That invalid assignment adds no ticket.assign entry for the ticket.",
+        "[unit] TicketsService.create with a stub repository whose first createTicket rejects with a projectId, number unique violation and whose second resolves calls record with key ticket.create only after the successful attempt.",
+        "[unit] In that retry scenario, record executes inside the transaction callback that created the successful ticket.",
+        "[integration] When runWithTicketNumberRetry retries after a number conflict, the failed attempt leaves no committed audit row and the created ticket has exactly one ticket.create entry."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "tickets",
+        "transactions",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Only TicketsService gains four recorder calls in existing transactions, with positional/provider test adjustments; assignment's permission and roster eligibility checks still make strict security-isolated TDD necessary.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/common/utils/ticket-number-retry.ts",
+        "apps/api/src/audit/audit-summary.ts",
+        "apps/api/test/integration/permissions/core-ticket-routes.integration.spec.ts",
+        "apps/api/test/helpers/action-context.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-core-tickets.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "PATCH /api/projects/:slug/tickets/:ref with {} and no writable fields adds no ticket.update entry.",
+        "When AuditRecorder.record rejects during ticket assignment, the previous assignee remains stored."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/tickets/tickets.service.ts",
+          "reason": "injects AuditRecorder and records inside the create, field-update, delete and assign transactions; no existing behaviour or return value changes."
+        },
+        {
+          "path": "apps/api/src/tickets/tickets.service.spec.ts",
+          "reason": "its TestingModule providers gain AuditRecorder with mockAuditRecorder from global-stubs.module.ts; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/test/integration/agent-permissions/tickets-agent-permissions.integration.spec.ts",
+          "reason": "its TestingModule providers gain { provide: AuditRecorder, useValue: mockAuditRecorder } (mockAuditRecorder from global-stubs.module.ts), because its stub transaction manager reports isInTransaction false and the real recorder would refuse; its assertions are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/outbox/producer-atomicity.integration.spec.ts",
+          "reason": "its TestingModule providers gain { provide: AuditRecorder, useValue: mockAuditRecorder } so TicketsService and TicketTransitionsService resolve without AuditController's guard dependencies; its row-count assertions are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/tickets/ticket-tenancy.integration.spec.ts",
+          "reason": "its TestingModule providers gain { provide: AuditRecorder, useValue: mockAuditRecorder } (mockAuditRecorder from global-stubs.module.ts), because its stub transaction manager reports isInTransaction false and the real recorder would refuse; its assertions are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/tickets/tickets-status-update.integration.spec.ts",
+          "reason": "its TestingModule providers gain { provide: AuditRecorder, useValue: mockAuditRecorder } (mockAuditRecorder from global-stubs.module.ts), because its stub transaction manager reports isInTransaction false and the real recorder would refuse; its assertions are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/memory/outbox-envelope.integration.spec.ts",
+          "reason": "its direct new TicketsService(...) and new TicketTransitionsService(...) calls pass mockAuditRecorder in the new constructor position (immediately before the first @Optional() parameter); its assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "9e4db096a97db0004cedd8b2e152324fa1d83a21"
+    },
+    {
+      "id": "US-003",
+      "title": "Audit ticket transitions by edge key and mixed status patches atomically",
+      "description": "**Goal** — Audit every core transition, mixed status/field PATCH and shared dispatch start using the existing action context and transaction.\n\n**Motivation** — Others record the wrong one (agent creation and key rotation record the new agent, not the admin who acted).\n\n**Approach** — Each service below injects `AuditRecorder` as `private readonly audit: AuditRecorder` and records per the contract table. The integration point of each write:\n\n| Story | Service.method | Today | Change |\n|:--|:--|:--|:--|\n| US-003 | `TicketTransitionsService.executeTransitionInternal` | `txManager.run`, `ticket-transitions.service.ts:660` | `record` inside, after the status event; this covers `verify`, `start`, `fix`, `verifyFix`, `reject`, `executeTransitionPublic` (the `PATCH` status path) and `startForDispatch` |\n| US-003 | `TicketTransitionsService.close` | `txManager.run`, `:488` | `record` inside |\n| US-003 | `TicketsService.fieldPatch` (the closure passed to `executeTransitionPublic`) | runs inside the transition's `txManager.run` | `record` `ticket.update` after `updateTicket` |\n\n**A `PATCH` that changes status and fields records two entries, in one transaction.** The transition records its edge-key entry (`status: <FROM> -> <TO>`). The field patch `TicketsService.fieldPatch` builds already runs inside the transition's transaction, and it records a `ticket.update` entry with `fieldsSummary(updateData)` after its `updateTicket`. Each key then finds its own change, and `executeTransitionPublic`'s signature does not change. A `PATCH` with fields and no status records only `ticket.update`; a `PATCH` with a status and no fields records only the transition.\n\n**Every transition has an edge key.** Every pair `TRANSITION_RULES` accepts (`ticket-transitions.ts:14`) has a key in `EDGE_KEYS`, so the transition entry's key is `transitionKeyFor(from, to)`; `close` uses `ticket.transition.close`. There is no fallback key.\n\n**Transitions** use `transitionKeyFor(from, to)`. `verify` on a `VERIFY_FIX` ticket is therefore `ticket.transition.verify-fix.approve`, and `verify-fix` is `.approve` or `.return` by target status.\n**`close`** uses `ticket.transition.close`.\n\n**An empty field patch records nothing.** When `toUpdateData` yields no writable field (a `PATCH` of `{}`, or a status with only dropped keys), no `ticket.update` entry is recorded; the field update and `fieldPatch` paths skip `record` when `fieldsSummary(updateData)` is `undefined`.\n\nSummary/resource contract:\n| Write | Key | `resourceType` | `resourceId` | `projectId` | `summary` |\n|:--|:--|:--|:--|:--|:--|\n| transition (route, `PATCH` status, dispatch start) | `transitionKeyFor(from, to)`; `close` uses `ticket.transition.close` | `ticket` | ticket id | project id | `status: <FROM> -> <TO>` |\n| field patch of a `PATCH` that also changes status | `ticket.update` | `ticket` | ticket id | project id | `fieldsSummary(updateData)` |\n\nRequired recorder goes immediately before TicketTransitionsService's first @Optional() constructor parameter; do not add an outer audited around existing txManager.run. Preserve lost-race 409 and rollback of comments, fields and activities. `startForDispatch` reached through FleetJobTicketEffects uses its surrounding context, not a reconstructed requester. On record failure the transition rolls back and FleetJobTicketEffects.onRunDispatched logs and swallows the error as today.\n\nUpdate ticket-transitions.service.spec.ts, ticket-transitions.autoindex.spec.ts and direct constructors in vcs/auto-create-pr-on-verified and memory/outbox-envelope integration specs in the new constructor position, ahead of optional collaborators. Add explicit mockAuditRecorder providers in rag/rag-close-to-search and tickets/ticket-transition-race integration specs where the stub transaction manager cannot host the real recorder or AuditController dependencies are absent. Preserve existing assertions.\n\n**Scope** — In: transition/close recording and TicketsService.fieldPatch ticket.update entry; dispatch-start seam assertions. Out: ticket CRUD/assignment belongs to US-002; independent comment creation belongs to US-004; fleet route/system auditing belongs to audit-fleet. A comment.create entry for transition-created comments and auditing transition after-commit auto-index, PR creation or webhook effects are out of scope.\n\n**Interface** — `private readonly audit: AuditRecorder`; `transitionKeyFor(from: TicketStatus, to: TicketStatus): string | undefined`; `fieldsSummary(patch: object): string | undefined`. Keep executeTransitionPublic's existing signature and TransitionFieldPatch interface unchanged.",
+      "acceptanceCriteria": [
+        "[integration] POST /api/projects/:slug/tickets/:ref/verify with a body on a CREATED ticket returns the route's success status.",
+        "[integration] That verify leaves one ticket entry with key ticket.transition.verify and summary 'status: CREATED -> VERIFIED'.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/start on a VERIFIED ticket leaves an entry with key ticket.transition.start and summary 'status: VERIFIED -> IN_PROGRESS'.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/fix with a body on an IN_PROGRESS ticket leaves an entry with key ticket.transition.fix and summary 'status: IN_PROGRESS -> VERIFY_FIX'.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/verify-fix?approve=true with a body on a VERIFY_FIX ticket, targeting CLOSED, leaves an entry with key ticket.transition.verify-fix.approve.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/verify-fix with a body and no approve query on a VERIFY_FIX ticket, targeting IN_PROGRESS, leaves an entry with key ticket.transition.verify-fix.return.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/verify with a body on a VERIFY_FIX ticket leaves an entry with edge key ticket.transition.verify-fix.approve, not ticket.transition.verify.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/reject with a body on a CREATED ticket leaves an entry with key ticket.transition.reject and summary 'status: CREATED -> REJECTED'.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/close leaves one ticket entry with key ticket.transition.close and summary 'status: <from> -> CLOSED'.",
+        "[integration] PATCH /api/projects/:slug/tickets/:ref with { status: 'IN_PROGRESS', priority: 'LOW' } on a VERIFIED ticket leaves an entry with key ticket.transition.start and summary 'status: VERIFIED -> IN_PROGRESS'.",
+        "[integration] That same PATCH also leaves exactly one entry with key ticket.update and summary 'fields: priority'.",
+        "[integration] That same PATCH leaves exactly two entries for the ticket in total.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/verify with a body on a CREATED ticket while PrismaTicketsRepository.updateTicketStatusIf is spied to resolve null once returns 409 for the lost status race.",
+        "[integration] That lost-race verify leaves no AuditEntry for the ticket.",
+        "[integration] That lost-race verify leaves no new Comment row on the ticket.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/fix with a body on a CREATED ticket, refused by the state machine, adds no entry for the ticket.",
+        "[integration] startForDispatch reached through FleetJobTicketEffects inside runAsSystem('schedule', ...) on a VERIFIED ticket leaves an entry with key ticket.transition.start, actorType SYSTEM and actorId schedule.",
+        "[integration] FleetJobTicketEffects.onRunDispatched for a VERIFIED ticket while app.get(AuditRecorder).record is spied to reject resolves without throwing.",
+        "[integration] In that dispatch audit-failure scenario the stored ticket status remains VERIFIED.",
+        "[integration] In that dispatch audit-failure scenario no entry exists for the ticket.",
+        "[integration] When AuditRecorder.record rejects during a VERIFIED ticket's startForDispatch reached through FleetJobTicketEffects.onRunDispatched, the effects logger emits a warn message 'Fleet ticket <ref>: start failed: <error message>', preserving the existing best-effort start-failure logging."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "tickets",
+        "state-machine",
+        "security"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Edge-key authorization, mixed-write atomicity, race rollback and system dispatch context cross multiple modules and require the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
+        "apps/api/src/tickets/state-machine/transition-keys.ts",
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts",
+        "apps/api/test/integration/permissions/core-ticket-transitions.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-core-transitions.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A status-only PATCH on a VERIFIED ticket moving to IN_PROGRESS leaves only a ticket.transition.start entry and no ticket.update entry.",
+        "When recording ticket.update rejects for a mixed status/field PATCH, the ticket keeps both its previous status and previous field values."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/tickets/tickets.service.ts",
+          "reason": "fieldPatch's closure records a ticket.update entry with fieldsSummary(updateData) after updateTicket, inside the transition's transaction; update's call to executeTransitionPublic is unchanged."
+        },
+        {
+          "path": "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
+          "reason": "injects AuditRecorder before the first @Optional() parameter and records inside executeTransitionInternal's and close's transactions; no existing behaviour or return value changes."
+        },
+        {
+          "path": "apps/api/src/tickets/state-machine/ticket-transitions.service.spec.ts",
+          "reason": "its TestingModule or direct construction gains AuditRecorder (mockAuditRecorder) in the new constructor position; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/tickets/state-machine/ticket-transitions.autoindex.spec.ts",
+          "reason": "its direct new TicketTransitionsService(...) passes mockAuditRecorder in the new constructor position, ahead of the optional collaborators; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/auto-create-pr-on-verified.integration.spec.ts",
+          "reason": "its direct new TicketTransitionsService(...) passes an AuditRecorder in the new constructor position, ahead of the optional collaborators; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/test/integration/rag/rag-close-to-search.integration.spec.ts",
+          "reason": "its TestingModule providers gain { provide: AuditRecorder, useValue: mockAuditRecorder } (mockAuditRecorder from global-stubs.module.ts), because its stub transaction manager reports isInTransaction false and the real recorder would refuse; its assertions are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/tickets/ticket-transition-race.integration.spec.ts",
+          "reason": "its TestingModule providers gain { provide: AuditRecorder, useValue: mockAuditRecorder } so TicketTransitionsService resolves without AuditController's guard dependencies; its race assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f94f1019db8d706947a815ec695bd23a35c12c85"
+    },
+    {
+      "id": "US-004",
+      "title": "Audit comments, ticket links and ticket-label actions",
+      "description": "**Goal** — Record comment, link and ticket-label writes once per action at their shared service methods.\n\n**Motivation** — The design's inventory (`2026-10-18-permission-action-inventory.tsv`) found that most core writes record no actor at all: project CRUD, label definitions, ticket links, comment edits and deletes, invites resend and cancel, admin user writes, roles and bindings.\n\n**Approach** — Each service below injects `AuditRecorder` as `private readonly audit: AuditRecorder` and records per the contract table. The integration point of each write:\n\n| Story | Service.method | Today | Change |\n|:--|:--|:--|:--|\n| US-004 | `CommentsService.create` | `txManager.run`, `comments.service.ts:142` | `record` inside |\n| US-004 | `CommentsService.update`, `delete` | one write each, no transaction | wrap the write in `audited` |\n| US-004 | `TicketLinksService.create`, `remove` | one write each, no transaction | wrap the write in `audited`; the idempotent existing-link return of `create` stays outside and records nothing. The private `resolveTicket` (`ticket-links.service.ts:26`) returns `{ id, projectId }` today; it also returns `ref` (`<project key>-<ticket number>`; on the CUID path the number comes from `PrismaTicketLinkRepository.findTicketById`, which also selects `number`) for the summary |\n| US-004 | `LabelsService.assignToTicket`, `removeFromTicket` | `repo.runInTransaction` (= `txManager.run`), `labels.service.ts:119`, `:172` | `record` inside |\n\n**Comment edit and delete, and ticket link remove,** use the route key (`comment.update`, `comment.delete`, `ticket.link.remove`) even when the service allowed the author through the ownership rule; the catalog has no separate `.own` key for them.\n\n**Only committed writes are recorded.** A refused request (401, 403, 404, 409, 400) writes nothing, so it records nothing. Writes that can find nothing to do record nothing: the idempotent `POST …/links` that finds the link already present.\n\nSummary/resource contract:\n| Write | Key | `resourceType` | `resourceId` | `projectId` | `summary` |\n|:--|:--|:--|:--|:--|:--|\n| comment create | `comment.create` | `comment` | comment id | project id | `on <REF>` |\n| comment update | `comment.update` | `comment` | comment id | project id | `edited` |\n| comment delete | `comment.delete` | `comment` | comment id | project id | `deleted` |\n| ticket link add | `ticket.link.add` | `ticket-link` | link id | project id | `on <REF>` |\n| ticket link remove | `ticket.link.remove` | `ticket-link` | link id | project id | `from <REF>` |\n| ticket label assign | `ticket.label.assign` | `ticket` | ticket id | project id | `label <labelId> added` |\n| ticket label remove | `ticket.label.remove` | `ticket` | ticket id | project id | `label <labelId> removed` |\n\n`<REF>` is the ticket ref (`<project key>-<number>`). Preserve permission/membership checks and existing return DTOs. Never put comment bodies, URLs or label names into summaries. Required recorder is appended after required constructor parameters. Existing transaction owners call record, never an outer audited.\n\nPrismaTicketLinkRepository.findTicketById also selects number and returns { id: string; number: number } | null; no other repository query changes. Extend resolveTicket's internal return shape to include ref for both KEY-N and CUID paths. The parsed KEY-N number can supply the former; the latter uses selected number. Update ticket-links.service.spec.ts direct construction and findTicketById mocks accordingly. Add mockAuditRecorder providers to comments.service.spec.ts, labels.service.spec.ts and agent-permissions/labels-agent-permissions.integration.spec.ts without changing their existing assertions.\n\n**Scope** — In: CommentsService writes, TicketLinksService writes and ref resolver, minimal ticket-link repository selection, ticket-label half of LabelsService. Out: label-definition CRUD belongs to US-005; transitions' comment rows belong to US-003's transaction and do not get comment.create here; dedicated VCS/CI/assistant-only caller ACs belong to audit-integrations.\n\n**Interface** — `private readonly audit: AuditRecorder`; private resolveTicket returns `{ id, projectId, ref }`; `PrismaTicketLinkRepository.findTicketById` return type widens to `{ id: string; number: number } | null`. All public method and route response signatures remain unchanged.",
+      "acceptanceCriteria": [
+        "[integration] POST /api/projects/:slug/tickets/:ref/comments with { body: 'hello secret' } returns 201.",
+        "[integration] That POST leaves one entry for the new comment id with key comment.create, resourceType comment, projectId the project id and summary 'on <ref>'.",
+        "[integration] That comment.create summary does not include 'hello secret'.",
+        "[integration] PATCH /api/comments/:id by the comment's author leaves one entry with key comment.update and summary edited.",
+        "[integration] PATCH /api/comments/:id by a member who is not the author and holds no override key returns 403.",
+        "[integration] That refused comment PATCH adds no comment.update entry for the comment.",
+        "[integration] DELETE /api/comments/:id by the author leaves one entry with key comment.delete and summary deleted.",
+        "[unit] CommentsService.update with a stub recorder calls audited exactly once.",
+        "[unit] CommentsService.update calls the comment repository's update inside audited's fn.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/links with a new URL returns 201.",
+        "[integration] That link POST leaves one entry for the new link id with key ticket.link.add, resourceType ticket-link and summary 'on <ref>'.",
+        "[integration] Repeating that link POST with the same URL returns 200.",
+        "[integration] Repeating that link POST leaves still exactly one ticket.link.add entry for that link.",
+        "[integration] DELETE /api/projects/:slug/tickets/:ref/links/:linkId leaves one entry for the link with key ticket.link.remove and summary 'from <ref>'.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/labels with { labelId } leaves one ticket entry with key ticket.label.assign and summary 'label <labelId> added'.",
+        "[integration] DELETE /api/projects/:slug/tickets/:ref/labels/:labelId leaves one ticket entry with key ticket.label.remove and summary 'label <labelId> removed'.",
+        "[integration] POST /api/projects/:slug/tickets/:ref/links using the ticket CUID id as :ref, not KEY-N, leaves summary 'on <KEY>-<number>', the ticket's KEY-N ref.",
+        "[unit] When TicketLinksService.create finds an existing link for the resolved ticket id and URL, it returns that existing link with status 200 without calling repo.createLink, preserving the idempotent no-write branch."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "comments",
+        "ticket-links",
+        "labels",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three services and one repository receive repetitive recorder calls/wrappers and a narrow ref-selection change, without a new abstraction; author-based permission checks on edits/removals require strict security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/comments/comments.service.ts",
+        "apps/api/src/ticket-links/ticket-links.service.ts",
+        "apps/api/src/ticket-links/prisma-ticket-link.repository.ts",
+        "apps/api/src/labels/labels.service.ts",
+        "apps/api/test/integration/permissions/core-ticket-links.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-core-comments-links-labels.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When AuditRecorder.record rejects during CommentsService.update, the stored comment retains its previous body.",
+        "An assistant add-comment call through CommentsService.create records the surrounding thread origin and on-behalf-of principal rather than changing the actor to the comment author."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/comments/comments.service.ts",
+          "reason": "injects AuditRecorder, records inside create's transaction and wraps update and delete in audited; no existing behaviour or return value changes."
+        },
+        {
+          "path": "apps/api/src/comments/comments.service.spec.ts",
+          "reason": "its TestingModule providers gain AuditRecorder with mockAuditRecorder; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/ticket-links/ticket-links.service.ts",
+          "reason": "injects AuditRecorder, wraps create's write and remove in audited, and the private resolveTicket also returns the ticket's KEY-N ref; the idempotent existing-link return and every response are unchanged."
+        },
+        {
+          "path": "apps/api/src/ticket-links/ticket-links.service.spec.ts",
+          "reason": "its direct new TicketLinksService(...) passes mockAuditRecorder in the new constructor position, and its findTicketById mocks gain a number field; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/ticket-links/prisma-ticket-link.repository.ts",
+          "reason": "findTicketById also selects number, and its return type widens to { id: string; number: number } | null, so resolveTicket can build the KEY-N ref on the CUID path; no other query changes."
+        },
+        {
+          "path": "apps/api/src/labels/labels.service.ts",
+          "reason": "injects AuditRecorder and records inside assignToTicket's and removeFromTicket's transactions; no existing behaviour or return value changes."
+        },
+        {
+          "path": "apps/api/src/labels/labels.service.spec.ts",
+          "reason": "its TestingModule providers gain AuditRecorder with mockAuditRecorder; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/test/integration/agent-permissions/labels-agent-permissions.integration.spec.ts",
+          "reason": "its TestingModule providers gain { provide: AuditRecorder, useValue: mockAuditRecorder } (mockAuditRecorder from global-stubs.module.ts), because its stub transaction manager reports isInTransaction false and the real recorder would refuse; its assertions are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "dd3c65c5cfb8d80c2a8fdd4d68346a51df7c4316"
+    },
+    {
+      "id": "US-005",
+      "title": "Audit label definitions and project writes",
+      "description": "**Goal** — Wrap label-definition and project mutations in atomic audited writes with field-name-only summaries.\n\n**Motivation** — The design's inventory (`2026-10-18-permission-action-inventory.tsv`) found that most core writes record no actor at all: project CRUD, label definitions, ticket links, comment edits and deletes, invites resend and cancel, admin user writes, roles and bindings.\n\n**Approach** — Each service below injects `AuditRecorder` as `private readonly audit: AuditRecorder` and records per the contract table. The integration point of each write:\n\n| Story | Service.method | Today | Change |\n|:--|:--|:--|:--|\n| US-005 | `LabelsService.create`, `update`, `delete` | one write each, no transaction | wrap the write in `audited` |\n| US-005 | `ProjectsService.create`, `update`, `softDelete` | one write each, no transaction | wrap the write in `audited`; `softDelete`'s cache clearing stays after the commit |\n\n**`AuditRecorder` is a required constructor dependency.** It is never `@Optional()`: an optional recorder skips the audit silently, the failure this phase exists to remove. `TicketTransitionsService` already documents the same rule for `PermissionService`. Its position is the same in every service: immediately before the first `@Optional()` parameter, or last when the constructor has none. `ProjectsService` is the one exception: its `@Optional()` `hybridRetrieverService` is followed by the required `access`, so `AuditRecorder` goes last, as the fifth parameter. TypeScript does not allow a required parameter after a `?` one, and one fixed rule keeps the positional `new` calls in specs predictable.\n\n**`projectId` is the project the row belongs to, or `null` for a global row.** Agents, users, roles and global bindings are `null`. `PATCH /projects/:slug/agents/:agentSlug` writes the global `Agent` row, so its entry has `projectId` `null`, like `PATCH /agents/:slug`. A project's own create, update and delete entries carry the project's id.\n\nSummary/resource contract:\n| Write | Key | `resourceType` | `resourceId` | `projectId` | `summary` |\n|:--|:--|:--|:--|:--|:--|\n| label create / update / delete | `label.create` / `label.update` / `label.delete` | `label` | label id | project id | `created` / `fieldsSummary(dto)` / `deleted` |\n| project create / update / delete | `project.create` / `project.update` / `project.delete` | `project` | project id | project id | `created <KEY>` / `fieldsSummary(dto)` / `deleted <KEY>` |\n\n**Summaries name what changed, never values.**\n- `fieldsSummary(patch)` (new, `src/audit/audit-summary.ts`) returns `fields: <names>`: the own keys of `patch` whose value is not `undefined`, sorted and joined with `, `. It returns `undefined` when there are none.\n- A title, a description, a comment body, a label name, a project name, a password, an API key, an invite token and a CI webhook token never appear in a summary. The table below is the whole summary contract.\n\nFor a non-ticket patch whose fieldsSummary is undefined, retain the successful action's entry without a summary. Preserve validation, conflicts and responses. The project update's graphify cleanup/cache invalidation and softDelete's cache clearing must not move into audited's write function. LabelsService already receives its required recorder from US-004. Update ProjectsService positional callers in projects.service.spec.ts and test/unit/projects/projects-find-all-for-principal.spec.ts; add mockAuditRecorder providers in projects-brief.routes.spec.ts and test/unit/projects/projects-conflict-responses.spec.ts, keeping their assertions.\n\n**Scope** — In: label definition create/update/delete and project create/update/softDelete audit wrappers. Out: ticket-label association recording belongs to US-004 and stays as it left it; project membership/invites belong to US-007/US-008; project-scoped agent writes belong to US-006. No secret values or RAG/integration audit expansion.\n\n**Interface** — `private readonly audit: AuditRecorder`; `fieldsSummary(patch: object): string | undefined`; consume `AuditRecorder.audited<T>(fn: () => Promise<T>, entriesOf: AuditEntriesOf<T>): Promise<T>` from US-001. Preserve all domain public signatures and DTO responses.",
+      "acceptanceCriteria": [
+        "[integration] POST /api/projects/:slug/labels with { name: 'secret-name', color } returns 201.",
+        "[integration] That POST leaves one entry for the new label id with key label.create, resourceType label, projectId the project id and summary created.",
+        "[integration] PATCH /api/projects/:slug/labels/:id with { name: 'renamed' } leaves one label entry with key label.update and summary 'fields: name'.",
+        "[integration] DELETE /api/projects/:slug/labels/:id leaves one label entry with key label.delete and summary deleted.",
+        "[integration] The label.create summary from name secret-name and label.update summary from name renamed include neither 'secret-name' nor 'renamed'.",
+        "[integration] POST /api/projects as a user holding project.create returns 201.",
+        "[integration] That POST leaves one entry with key project.create, resourceType project, resourceId and projectId equal to the new project's id and summary 'created <KEY>'.",
+        "[integration] PATCH /api/projects/:slug with { name: 'Renamed', description: 'd' } leaves one entry with key project.update and summary 'fields: description, name'.",
+        "[integration] PATCH /api/projects/:slug with { ciWebhookToken: <random token> } leaves an entry with summary 'fields: ciWebhookToken' that does not include the token value.",
+        "[integration] DELETE /api/projects/:slug leaves one project entry with key project.delete and summary 'deleted <KEY>'.",
+        "[integration] DELETE /api/projects/:slug as a member without project.delete returns 403.",
+        "[integration] That refused DELETE adds no project.delete entry for the project.",
+        "[unit] ProjectsService.softDelete with a stub recorder whose audited runs its fn clears the RAG cache after audited resolves, not inside its fn."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "projects",
+        "labels",
+        "security"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Standard wrappers across two services with post-commit cache constraints; CI webhook credential privacy and permission-gated project deletion trigger the security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/labels/labels.service.ts",
+        "apps/api/src/projects/projects.service.ts",
+        "apps/api/src/audit/audit-summary.ts",
+        "apps/api/test/integration/permissions/core-project-routes.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-core-labels-projects.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When audit storage rejects a project softDelete entry, the project's deletedAt remains unchanged and its caches are not cleared.",
+        "When a project update records a summary for a changed name and description, neither submitted value appears in that summary."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/labels/labels.service.ts",
+          "reason": "wraps the create, update and delete label writes in audited; the ticket-label methods are as US-004 left them."
+        },
+        {
+          "path": "apps/api/src/projects/projects.service.ts",
+          "reason": "injects AuditRecorder and wraps create, update and softDelete's writes in audited; softDelete's cache clearing stays after the commit."
+        },
+        {
+          "path": "apps/api/src/projects/projects.service.spec.ts",
+          "reason": "its direct new ProjectsService(...) passes mockAuditRecorder in the new constructor position; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/test/unit/projects/projects-find-all-for-principal.spec.ts",
+          "reason": "its direct new ProjectsService(...) passes mockAuditRecorder in the new constructor position; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/projects/projects-brief.routes.spec.ts",
+          "reason": "its TestingModule providers gain AuditRecorder with mockAuditRecorder so ProjectsService resolves; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/test/unit/projects/projects-conflict-responses.spec.ts",
+          "reason": "its TestingModule providers gain AuditRecorder with mockAuditRecorder so ProjectsService resolves; the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ed2d2695dce0fea9d18c340d53ee8bba34ed1e92"
+    },
+    {
+      "id": "US-006",
+      "title": "Audit agent writes and make capability replacement and deletion atomic",
+      "description": "**Goal** — Attribute agent writes to the acting context while atomically auditing capability replacement and binding cleanup.\n\n**Motivation** — Others record the wrong one (agent creation and key rotation record the new agent, not the admin who acted).\n\n**Approach** — Each service below injects `AuditRecorder` as `private readonly audit: AuditRecorder` and records per the contract table. The integration point of each write:\n\n| Story | Service.method | Today | Change |\n|:--|:--|:--|:--|\n| US-006 | `AgentsService.generateApiKey` (create branch) | `afterCommit` at `agents.service.ts:114`, `txManager.run` at `:115` | `record` inside the run |\n| US-006 | `AgentsService.generateApiKey` (rotate branch, reached through `rotateApiKey`) | one write, no transaction | wrap in `audited`, key `agent.key.rotate` |\n| US-006 | `AgentsService.update` | one write, no transaction | wrap in `audited` |\n| US-006 | `AgentsService.updateCapabilities` | two writes, no transaction | both inside one `audited` |\n| US-006 | `AgentsService.remove` | delete, then `removeAllBindings` in its own transaction | both inside `membership.afterCommit(() => audit.audited(…))` |\n\n**Writes that were two transactions become one.**\n- `AgentsService.updateCapabilities` (a `deleteMany` then a `createMany`) runs both writes inside `audited`, so a crash between them no longer leaves an agent with no capabilities.\n- `AgentsService.remove` runs the agent delete and `MembershipService.removeAllBindings` inside `membership.afterCommit(() => audit.audited(…))`, the pattern `ProjectMembersService.add` uses, so the binding cache is invalidated after the outer commit.\n\n**Flows that create a binding as part of a larger action record only the action.** Member add records `member.add`. Invite create for an existing user records `invite.create`, and invite accept records `invite.accept`. Register, admin user create and agent create record only their create key, not the baseline binding beside it. `MembershipService` itself records nothing.\n\n**`projectId` is the project the row belongs to, or `null` for a global row.** Agents, users, roles and global bindings are `null`. `PATCH /projects/:slug/agents/:agentSlug` writes the global `Agent` row, so its entry has `projectId` `null`, like `PATCH /agents/:slug`. A project's own create, update and delete entries carry the project's id.\n\nSummary/resource contract:\n| Write | Key | `resourceType` | `resourceId` | `projectId` | `summary` |\n|:--|:--|:--|:--|:--|:--|\n| agent create | `agent.create` | `agent` | agent id | `null` | `created <slug>` |\n| agent update (both routes) | `agent.update` | `agent` | agent id | `null` | `fieldsSummary` of the whitelisted update object the service builds (the `data` object, `agents.service.ts:211-216`), not the raw DTO |\n| agent capabilities | `agent.capabilities.update` | `agent` | agent id | `null` | `capabilities: <count>` |\n| agent delete | `agent.delete` | `agent` | agent id | `null` | `deleted <slug>` |\n| agent key rotate | `agent.key.rotate` | `agent` | agent id | `null` | `key rotated` |\n\nRequired AuditRecorder goes immediately before the first @Optional() collaborator (KodaDomainWriter). Keep raw key generation/HMAC, response shapes, DTO whitelisting and capability deduplication unchanged; count effective capabilities, never print capability values or raw keys. Record actor is read from action context, not set to the created/rotated agent. An agent capabilities write or its record failing rolls replacement and entry back together so old capabilities survive. Existing auth-cache invalidation stays after commit; do not alter its mechanism. Do not change recordAgentAction or KodaDomainWriter.\n\nAdd mockAuditRecorder providers in agents.service.spec.ts, agents-create.service.spec.ts, agents-create.routes.spec.ts, agent-create-canonical-dto.routes.spec.ts and agents-pickup.routes.spec.ts. Keep remove's delete-before-removeAllBindings ordering assertions; any old assertion that those use separate transactions changes to a single audited block.\n\n**Scope** — In: agent create, both update routes, capabilities replacement, delete/binding cleanup and key rotation. Out: membership onWritten callback belongs to US-007; KodaDomainWriter and pickup auditing belong to audit-fleet; baseline binding audit is not added; no changes to auth-cache invalidation or credentials algorithms.\n\n**Interface** — `private readonly audit: AuditRecorder`; `fieldsSummary(patch: object): string | undefined`; use `membership.afterCommit(() => audit.audited(…))` for removal, preserving all AgentsService public overloads and response types.",
+      "acceptanceCriteria": [
+        "[integration] POST /api/agents as a global admin returns the route's success status.",
+        "[integration] That POST leaves one entry for the new agent id with key agent.create, resourceType agent, projectId null, actorType USER, actorId the admin's id and summary 'created <slug>'.",
+        "[integration] That agent.create summary does not include the raw API key returned by the response.",
+        "[integration] POST /api/agents/:slug/rotate-key leaves one agent entry with key agent.key.rotate, actorId the admin's id rather than the agent's, and summary 'key rotated'.",
+        "[integration] That rotation entry's summary does not include the new raw API key.",
+        "[integration] PATCH /api/agents/:slug with { name: 'Renamed' } leaves one entry with key agent.update and summary 'fields: name'.",
+        "[integration] PATCH /api/projects/:slug/agents/:agentSlug updating the agent leaves one entry with key agent.update and projectId null.",
+        "[integration] PATCH /api/agents/:slug/update-capabilities with three capabilities leaves one entry with key agent.capabilities.update and summary 'capabilities: 3'.",
+        "[unit] AgentsService.updateCapabilities with a stub recorder whose audited runs fn calls audited exactly once.",
+        "[unit] AgentsService.updateCapabilities calls the repository's replaceCapabilities inside audited's fn.",
+        "[integration] PATCH /api/agents/:slug/update-capabilities with three new capabilities while app.get(AuditRecorder).record is spied to reject returns an error status.",
+        "[integration] That rejected capabilities PATCH leaves the agent's previous capabilities stored in the database.",
+        "[integration] DELETE /api/agents/:slug for an agent with a project binding and no open tickets leaves the agent and its bindings deleted.",
+        "[integration] That agent DELETE leaves one entry with key agent.delete and summary 'deleted <slug>'.",
+        "[unit] AgentsService.remove with stub collaborators calls membership.afterCommit exactly once.",
+        "[unit] AgentsService.remove executes the agent delete and membership.removeAllBindings inside the one audited fn wrapped by membership.afterCommit.",
+        "[integration] DELETE /api/agents/:slug as a user without agent.delete returns 403.",
+        "[integration] That refused agent DELETE adds no agent.delete entry.",
+        "[integration] When the capability replacement write itself fails during audited, the previous agent capabilities remain stored and no agent.capabilities.update entry commits."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "agents",
+        "credentials",
+        "transactions",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Credential creation/rotation and permission-binding cleanup combine with new atomic boundaries and after-commit invalidation; security override is mandatory.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/agents/agents.service.ts",
+        "apps/api/src/agents/prisma-agent.repository.ts",
+        "apps/api/src/projects/projects.controller.ts",
+        "apps/api/src/permissions/membership.service.ts",
+        "apps/api/test/integration/permissions/core-agent-routes.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-core-agents.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Replacing capabilities with repeated values records a count equal to the number of distinct stored capabilities.",
+        "When audit recording fails during agent removal, both the agent and all of its preexisting bindings remain stored.",
+        "An agent update whose request includes dropped fields records a summary containing only keys from the whitelisted update object."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/agents/agents.service.ts",
+          "reason": "injects AuditRecorder, records inside create's transaction, wraps rotate, update and updateCapabilities in audited, and runs remove's delete and removeAllBindings in one afterCommit(audited) block; responses are unchanged."
+        },
+        {
+          "path": "apps/api/src/agents/agents.service.spec.ts",
+          "reason": "its TestingModule providers gain AuditRecorder with mockAuditRecorder; assertions that remove calls removeAllBindings after the delete are kept, and an assertion that the two run in separate transactions, if any, changes to one audited block."
+        },
+        {
+          "path": "apps/api/src/agents/agents-create.service.spec.ts",
+          "reason": "its TestingModule providers gain AuditRecorder with mockAuditRecorder; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/agents/agents-create.routes.spec.ts",
+          "reason": "its TestingModule providers gain AuditRecorder with mockAuditRecorder; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/agents/agent-create-canonical-dto.routes.spec.ts",
+          "reason": "its TestingModule providers gain AuditRecorder with mockAuditRecorder; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/agents/agents-pickup.routes.spec.ts",
+          "reason": "its TestingModule providers gain AuditRecorder with mockAuditRecorder; the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0eebfeeef2c25685289c3ccfe0ad41bf1825778f"
+    },
+    {
+      "id": "US-007",
+      "title": "Audit role administration, binding routes and member add",
+      "description": "**Goal** — Audit role, binding and member actions while preserving binding idempotency, concurrency recovery and after-commit cache behavior.\n\n**Motivation** — The design's inventory (`2026-10-18-permission-action-inventory.tsv`) found that most core writes record no actor at all: project CRUD, label definitions, ticket links, comment edits and deletes, invites resend and cancel, admin user writes, roles and bindings.\n\n**Approach** — Each service below injects `AuditRecorder` as `private readonly audit: AuditRecorder` and records per the contract table. The integration point of each write:\n\n| Story | Service.method | Today | Change |\n|:--|:--|:--|:--|\n| US-007 | `RoleAdminService.createRole`, `updateRole`, `deleteRole` | one write each, no transaction | wrap the write in `audited`, inside the existing `try` so its unique, foreign-key and not-found mapping still sees the error; `permissionCache.invalidate()` stays after `audited` resolves |\n| US-007 | `RoleAdminService.createBinding`, `removeBinding` | `MembershipService.bindRole` / `removeBinding` run their own `txManager.run` | pass `onWritten`, which calls `record` inside that transaction |\n| US-007 | `ProjectMembersService.add` | `afterCommit(txManager.run)`, `project-members.service.ts:79` | `record` inside the run, after `createBinding` returns |\n\n`MembershipService` (US-007):\n- **Baseline:** `createBinding(input, by)` and `removeBinding(id, options)`, where `RemoveBindingOptions` is `{ lastProjectAdminOverride?: boolean }`.\n- **Target:** `createBinding(input, by, onWritten?: (binding: RoleBindingView) => Promise<void>)` and `RemoveBindingOptions` adds `onWritten?: (binding: RoleBindingView) => Promise<void>`.\n- `onWritten` runs inside the binding's `txManager.run`, after the insert (`insertBinding`) or the delete, with the binding's view. Every existing caller passes none and behaves as before.\n- `createBinding` calls `onWritten` only when the insert happened (`outcome.changed` is true). It is not called when `insertBinding` found the binding already present (`changed: false`, `membership.service.ts:290`), nor on the concurrent-duplicate path (`bindRole` returns the winner it re-read, `:190`), because this call wrote nothing.\n\n**Role-binding routes record inside the binding transaction.** `MembershipService.createBinding` and `removeBinding` gain an optional `onWritten` callback that runs inside their own `txManager.run`, after the insert or delete. `RoleAdminService` passes one that records the entry. Wrapping the call in an outer `audited` would put the concurrent-duplicate retry in `bindRole` (re-read the winner after a unique violation) inside an aborted transaction.\n\n**Role bindings** use the most specific key `RoleAdminService.assertBindingKeys` (`role-admin.service.ts:336`) checks: `role.binding.owner` when the role key is `owner` (an owner binding is always global), else `role.binding.global` for a binding with no project, else `role.binding.manage`.\n\n**Flows that create a binding as part of a larger action record only the action.** Member add records `member.add`. Invite create for an existing user records `invite.create`, and invite accept records `invite.accept`. Register, admin user create and agent create record only their create key, not the baseline binding beside it. `MembershipService` itself records nothing.\n\nOnly committed writes record: an existing binding (insertBinding changed: false) and the re-read concurrent winner produce no callback or new entry. updateRole with an empty patch returns before writing. Member add refuses an existing member with 409 under its members lock and therefore records unconditionally after createBinding returns. Preserve last-owner, last-Project-Admin override, open-agent-ticket, self-binding, scope and anti-escalation rules, lock order and token revocation. Required audit is appended to RoleAdminService and ProjectMembersService; MembershipService gets no recorder dependency.\n\nSummary/resource contract:\n| Write | Key | `resourceType` | `resourceId` | `projectId` | `summary` |\n|:--|:--|:--|:--|:--|:--|\n| role create / update / delete | `role.manage` | `role` | role id | `null` | `created <key>` / `fieldsSummary(input)` / `deleted <key>` |\n| role binding create | binding key (see calls) | `role-binding` | binding id | binding project id or `null` | `<roleKey> to <PRINCIPAL_TYPE> <principalId>` |\n| role binding remove | binding key (from the stored binding) | `role-binding` | binding id | binding project id or `null` | `<roleKey> from <PRINCIPAL_TYPE> <principalId>` |\n| member add | `member.add` | `role-binding` | binding id | project id | `<roleKey> to <PRINCIPAL_TYPE> <principalId>` |\n\nUpdate positional constructors in role-admin.service.spec.ts, role-admin.service.removal-override.spec.ts and project-members.service.spec.ts using mockAuditRecorder. Callback argument expectations must accept onWritten while preserving lastProjectAdminOverride assertions. Add exported AuditRecorder mock providers to FakeGlobalsModule/PermissionStubsModule/stubsFor in project-members.module.spec.ts, permissions.module.spec.ts and permissions-owner-bootstrap.spec.ts. Keep existing assertions.\n\n**Scope** — In: RoleAdminService writes, MembershipService's optional in-transaction callback, ProjectMembersService.add action. Out: invites/acceptance/registration/admin-user adoption belongs to US-008; agent cleanup belongs to US-006; no audit of baseline bindings or SystemRoleSeeder; no generic MembershipService recording.\n\n**Interface** — Verbatim callback target: `createBinding(input, by, onWritten?: (binding: RoleBindingView) => Promise<void>)`; `removeBinding(id, options)` with `RemoveBindingOptions` adding `onWritten?: (binding: RoleBindingView) => Promise<void>` alongside `lastProjectAdminOverride?: boolean`. Existing RoleBindingView and return types remain unchanged.",
+      "acceptanceCriteria": [
+        "[integration] POST /api/roles as an owner returns 201.",
+        "[integration] That POST leaves one entry for the new role id with key role.manage, resourceType role, projectId null and summary 'created <role key>'.",
+        "[integration] PATCH /api/roles/:id with { name: 'Renamed' } on a custom non-system role created by the spec leaves one entry with key role.manage and summary 'fields: name'.",
+        "[integration] DELETE /api/roles/:id for an unbound role leaves one entry with key role.manage and summary 'deleted <role key>'.",
+        "[integration] POST /api/role-bindings binding a project role to a user in a project leaves one entry for the new binding id with key role.binding.manage, resourceType role-binding, projectId that project id and summary '<role key> to USER <user id>'.",
+        "[integration] POST /api/role-bindings binding a global role with projectId absent leaves an entry with key role.binding.global and projectId null.",
+        "[integration] POST /api/role-bindings binding the owner role leaves an entry with key role.binding.owner.",
+        "[integration] DELETE /api/role-bindings/:id for a project binding leaves one entry with key role.binding.manage and summary '<role key> from <PRINCIPAL_TYPE> <principal id>'.",
+        "[integration] DELETE /api/role-bindings/:id refused by the last-Project-Admin guard returns its error status.",
+        "[integration] That refused binding DELETE adds no entry for the binding id.",
+        "[unit] RoleAdminService.createBinding with stub collaborators passes a third-argument callback to membership.createBinding.",
+        "[unit] Calling that captured callback with a binding view calls record with the binding's id as resourceId and the binding key as key.",
+        "[unit] MembershipService.createBinding(input, by, onWritten) with findExisting returning null calls onWritten exactly once with the inserted binding view inside the txManager.run callback that inserted it.",
+        "[unit] MembershipService.createBinding(input, by, onWritten) with findExisting returning an existing row resolves to that row's view.",
+        "[unit] MembershipService.createBinding(input, by, onWritten) with an existing row does not call onWritten.",
+        "[unit] MembershipService.createBinding on the concurrent-duplicate path, where insert rejects with a principalId unique violation and the winner is re-read, does not call onWritten.",
+        "[unit] MembershipService.removeBinding(id, { onWritten }) calls onWritten exactly once with the deleted binding view inside the delete's txManager.run callback.",
+        "[integration] Repeating the same successful POST /api/role-bindings with the same role, principal and project returns the existing binding.",
+        "[integration] That repeated binding POST leaves still exactly one entry for the binding id.",
+        "[integration] POST /api/projects/:slug/members returns 201.",
+        "[integration] That member POST leaves one entry with key member.add, resourceType role-binding, resourceId the created binding id, projectId the project id and summary '<role key> to <PRINCIPAL_TYPE> <principal id>'.",
+        "[integration] That member POST leaves no role.binding.manage entry for the created binding.",
+        "[integration] When updateRole receives an empty patch and returns without writing, it adds no AuditEntry.",
+        "[unit] MembershipService.createBinding(input, by) with no onWritten argument returns the inserted RoleBindingView, preserving existing callers' two-argument behavior.",
+        "[unit] MembershipService.removeBinding(id, { lastProjectAdminOverride: true }) with no onWritten option still deletes the binding when the override is set and resolves undefined."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "permissions",
+        "roles",
+        "membership",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Access-control writes gain callbacks within lock-protected transactions while preserving duplicate recovery, revocation and last-admin invariants; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/role-admin.service.ts",
+        "apps/api/src/permissions/membership.service.ts",
+        "apps/api/src/projects/members/project-members.service.ts",
+        "apps/api/test/integration/permissions/role-bindings-api.integration.spec.ts",
+        "apps/api/test/integration/permissions/roles-api.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-core-roles-bindings.integration.spec.ts",
+        "apps/api/src/permissions/membership.service.on-written.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a binding create onWritten callback rejects, no new binding, token-version bump or audit entry commits.",
+        "When a binding remove onWritten callback rejects, the binding remains and no post-commit cache invalidation occurs.",
+        "Deleting a global owner binding records role.binding.owner using the deleted binding's scope and role rather than request-supplied data."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/membership.service.ts",
+          "reason": "createBinding and RemoveBindingOptions gain the optional onWritten callback, run inside the binding transaction only when a row was inserted or deleted; callers that pass none behave as before."
+        },
+        {
+          "path": "apps/api/src/permissions/role-admin.service.ts",
+          "reason": "injects AuditRecorder, wraps createRole's, updateRole's (after its empty-patch return) and deleteRole's write in audited, and passes onWritten from createBinding and removeBinding; checks and responses are unchanged."
+        },
+        {
+          "path": "apps/api/src/permissions/role-admin.service.spec.ts",
+          "reason": "its direct new RoleAdminService(...) passes mockAuditRecorder in the new constructor position; assertions on the arguments passed to membership.createBinding and membership.removeBinding accept the added onWritten callback; the rest are kept."
+        },
+        {
+          "path": "apps/api/src/permissions/role-admin.service.removal-override.spec.ts",
+          "reason": "its direct new RoleAdminService(...) passes mockAuditRecorder; assertions on the options passed to membership.removeBinding accept the added onWritten field; the lastProjectAdminOverride assertions are kept."
+        },
+        {
+          "path": "apps/api/src/projects/members/project-members.service.ts",
+          "reason": "injects AuditRecorder and records member.add inside add's transaction; no existing behaviour changes."
+        },
+        {
+          "path": "apps/api/src/projects/members/project-members.service.spec.ts",
+          "reason": "its direct new ProjectMembersService(...) passes mockAuditRecorder in the new constructor position; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/projects/members/project-members.module.spec.ts",
+          "reason": "its FakeGlobalsModule gains { provide: AuditRecorder, useValue: mockAuditRecorder } (exported) so the real ProjectMembersService resolves; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/permissions/permissions.module.spec.ts",
+          "reason": "its PermissionStubsModule gains { provide: AuditRecorder, useValue: mockAuditRecorder } (exported) so the real RoleAdminService resolves; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/permissions/permissions-owner-bootstrap.spec.ts",
+          "reason": "the stub module stubsFor builds gains { provide: AuditRecorder, useValue: mockAuditRecorder } (exported) so the real RoleAdminService resolves; the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "85b07a177a232c27ab0f6b574a0a3c78e56bf4c5"
+    },
+    {
+      "id": "US-008",
+      "title": "Audit invites, public registration and admin user mutations",
+      "description": "**Goal** — Audit invite lifecycle and user creation/update actions atomically without exposing account or token secrets.\n\n**Motivation** — None records the approval block or the on-behalf-of principal.\n\n**Approach** — Each service below injects `AuditRecorder` as `private readonly audit: AuditRecorder` and records per the contract table. The integration point of each write:\n\n| Story | Service.method | Today | Change |\n|:--|:--|:--|:--|\n| US-008 | `ProjectInvitesService.create` | existing user: `txManager.run` `:143`; new address: `txManager.run` `:184` | `record` inside each |\n| US-008 | `ProjectInvitesService.resend`, `cancel` | one write each, no transaction | wrap the write and its 409 check in `audited`; the resend email stays after the commit |\n| US-008 | `InviteAcceptanceService.accept` | `afterCommit(txManager.run)`, `invite-acceptance.service.ts:69` | `record` inside, after the binding |\n| US-008 | `AuthService.register` | `afterCommit(txManager.run)`, `auth.service.ts:87` | `record` inside, only on the path that created a user |\n| US-008 | `UsersAdminService.create`, `update` | `afterCommit(txManager.run)`, `users-admin.service.ts:51`, `:80` | `record` inside each |\n\n**A conflict found by the write is thrown inside `audited`.** `ProjectInvitesService.resend` and `cancel` move their \"nothing rotated / nothing cancelled\" 409 throw (`project-invites.service.ts:115`, `:128`; the status guards at `:108` and `:127` stay outside) inside `audited`'s `fn`, so `entriesOf` never runs for a write that did not happen. `entriesOf` may also return `[]`, which records nothing. Recording refusals is P3's (see Out of Scope).\n\n**Flows that create a binding as part of a larger action record only the action.** Member add records `member.add`. Invite create for an existing user records `invite.create`, and invite accept records `invite.accept`. Register, admin user create and agent create record only their create key, not the baseline binding beside it. `MembershipService` itself records nothing.\n\nOnly committed writes record. Invite create for an existing user refuses an existing member with a 409 under the members lock before createBinding runs, so record unconditionally after createBinding returns. AuthService.register records nothing on the transaction callback path that returns null without creating a user. Do not change the outward refusal behavior. No outer audited around existing afterCommit/txManager.run owners. Required recorder is last in these constructors.\n\nSummary/resource contract:\n| Write | Key | `resourceType` | `resourceId` | `projectId` | `summary` |\n|:--|:--|:--|:--|:--|:--|\n| invite create, existing user | `invite.create` | `role-binding` | binding id | project id | `<roleKey> to USER <userId>` |\n| invite create, new address | `invite.create` | `project-invite` | invite id | project id | `<roleKey> invited` |\n| invite resend | `invite.resend` | `project-invite` | invite id | project id | `resent` |\n| invite cancel | `invite.cancel` | `project-invite` | invite id | project id | `cancelled` |\n| invite accept | `invite.accept` | `project-invite` | invite id | invite project id | `accepted by USER <userId>` |\n| register | `auth.register` | `user` | user id | `null` | `registered` |\n| admin user create | `user.create` | `user` | user id | `null` | `created` |\n| admin user update | `user.update` | `user` | user id | `null` | `fieldsSummary(patch)` |\n\nUse action context unchanged: public registration and invite acceptance use SYSTEM/anonymous, not the new user; admin writes name the admin USER. Never put passwords, emails, user names, invite tokens or hashes in summaries. Preserve persisted-role-id invite binding, one-use token claim/replay behavior, baseline/owner binding and member email scheduling within existing transactions. Resend/send-invite email and session issuance stay after commit; retain auth-cache/token-version behavior.\n\nUpdate direct constructors with mockAuditRecorder in project-invites.service.spec.ts, invite-acceptance.service.spec.ts and users-admin.service.spec.ts; add a provider in auth.service.spec.ts and exported fake-global provider in users.module.spec.ts. Preserve their existing assertions.\n\n**Scope** — In: both invite-create branches, resend/cancel, acceptance, register and admin user create/update. Out: MembershipService callbacks and member.add belong to US-007; no duplicate binding entries; login/refresh/logout auditing belongs to audit-integrations; refusal records belong to P3, and no session/auth algorithm changes.\n\n**Interface** — `private readonly audit: AuditRecorder`; consume `AuditRecorder.record(input: AuditRecordInput)` inside existing transactions, `AuditRecorder.audited<T>(fn: () => Promise<T>, entriesOf: AuditEntriesOf<T>): Promise<T>` only for resend/cancel, and `fieldsSummary(patch: object): string | undefined` for admin update. All public route/service response signatures are unchanged.",
+      "acceptanceCriteria": [
+        "[integration] POST /api/projects/:slug/invites for an address with no account returns 201.",
+        "[integration] That POST leaves one entry for the new invite id with key invite.create, resourceType project-invite, projectId the project id and summary '<role key> invited'.",
+        "[integration] That new-address invite.create summary includes neither the invited email address nor the invite token.",
+        "[integration] POST /api/projects/:slug/invites for an address that already has an account leaves one entry with key invite.create, resourceType role-binding, resourceId the created binding id and summary '<role key> to USER <user id>'.",
+        "[integration] POST /api/projects/:slug/invites/:id/resend leaves one invite entry with key invite.resend and summary resent.",
+        "[integration] DELETE /api/projects/:slug/invites/:id leaves one invite entry with key invite.cancel and summary cancelled.",
+        "[unit] ProjectInvitesService.resend with a stub recorder whose audited runs fn and an invite repository whose rotate resolves null rejects with 409 inside audited's fn, so entriesOf is not called.",
+        "[unit] ProjectInvitesService.cancel with a stub recorder whose audited runs fn and an invite repository whose cancel resolves false rejects with 409 inside audited's fn, so entriesOf is not called.",
+        "[integration] POST /api/invites/:token/accept with a valid token returns the route's success status.",
+        "[integration] That accept leaves one invite entry with key invite.accept, projectId the invite's project id, actorType SYSTEM, actorId anonymous and summary 'accepted by USER <new user id>'.",
+        "[integration] Replaying POST /api/invites/:token/accept for an already-accepted invite returns its error status.",
+        "[integration] That replay leaves still exactly one invite.accept entry for the invite.",
+        "[integration] POST /api/auth/register with registration open and a new email returns the route's success status.",
+        "[integration] That registration leaves one entry for the new user id with key auth.register, resourceType user, projectId null, actorType SYSTEM, actorId anonymous and summary registered.",
+        "[integration] POST /api/admin/users as a global admin returns 201.",
+        "[integration] That admin user creation leaves one entry for the new user id with key user.create, actorType USER, actorId the admin's id and summary created.",
+        "[integration] PATCH /api/admin/users/:id with { disabled: true } leaves one user entry with key user.update and summary 'fields: disabled'.",
+        "[integration] The auth.register entry from POST /api/auth/register and the user.create entry from POST /api/admin/users each have a summary excluding the password, email and name sent in that request body.",
+        "[integration] POST /api/admin/users as a user without user.create returns 403.",
+        "[integration] That refused admin user creation adds no user.create entry.",
+        "[integration] When ProjectInvitesService.resend's repository rotate resolves null, or cancel's repository cancel resolves false, after the PENDING status guard has passed, the route returns 409 and adds no invite.resend or invite.cancel AuditEntry for the invite.",
+        "[unit] When AuthService.register's transaction callback returns null without creating a user, it does not call AuditRecorder.record."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "invites",
+        "auth",
+        "users",
+        "security"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Anonymous token acceptance, registration, admin user disable and membership composition are security-critical and require strict isolated TDD across transactional boundaries.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/projects/invites/project-invites.service.ts",
+        "apps/api/src/projects/invites/invite-acceptance.service.ts",
+        "apps/api/src/auth/auth.service.ts",
+        "apps/api/src/users/users-admin.service.ts",
+        "apps/api/test/integration/permissions/core-members-invites.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-core-invites-users.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When audit recording fails during invite acceptance, the invite remains PENDING and neither the new user nor its bindings commits.",
+        "When audit recording fails during invite resend, the original token hash remains stored and no replacement email is sent.",
+        "When audit recording fails during admin user disable, the user's disabled flag and tokenVersion retain their previous values."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/invites/project-invites.service.ts",
+          "reason": "injects AuditRecorder, records inside both create transactions, and wraps resend's and cancel's write together with their 409 check in audited; emails stay after the commit and the responses are unchanged."
+        },
+        {
+          "path": "apps/api/src/projects/invites/project-invites.service.spec.ts",
+          "reason": "its direct new ProjectInvitesService(...) passes mockAuditRecorder in the new constructor position; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/projects/invites/invite-acceptance.service.ts",
+          "reason": "injects AuditRecorder and records invite.accept inside accept's transaction; no existing behaviour changes."
+        },
+        {
+          "path": "apps/api/src/projects/invites/invite-acceptance.service.spec.ts",
+          "reason": "its direct new InviteAcceptanceService(...) passes mockAuditRecorder in the new constructor position; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/auth/auth.service.ts",
+          "reason": "injects AuditRecorder and records auth.register inside register's transaction on the path that created a user; no existing behaviour changes."
+        },
+        {
+          "path": "apps/api/src/auth/auth.service.spec.ts",
+          "reason": "its TestingModule providers gain AuditRecorder with mockAuditRecorder; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/users/users-admin.service.ts",
+          "reason": "injects AuditRecorder and records inside create's and update's transactions; no existing behaviour changes."
+        },
+        {
+          "path": "apps/api/src/users/users-admin.service.spec.ts",
+          "reason": "its direct new UsersAdminService(...) passes mockAuditRecorder in the new constructor position; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/users/users.module.spec.ts",
+          "reason": "its FakeGlobalsModule gains { provide: AuditRecorder, useValue: mockAuditRecorder } (exported) so the real UsersAdminService resolves; the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "54112a1024d686cd9d59f6f9c16bec41516852b0"
+    }
+  ],
+  "analysis": "Goal and completion: populate the existing AuditEntry store from all 42 live core write routes, at the service seam shared by REST, assistant tools and applicable system callers. Audit and domain rows must commit or roll back together. Use catalog action keys, resource/project ownership, privacy-preserving summaries and the existing action context. This is the fourth P2 feature, after context, context-guard and audit-entry, before audit-fleet, audit-integrations and web. Implement the eight binding stories as one coherent feature; do not add coverage-guard, walker, frontend or contract-change stories.\n\nExploration and architecture: codebase-memory MCP is not exposed in this session, so discovery used direct Read/Grep/Glob against the supplied execution root. Repository guidance is .nax/mono/apps/api/context.md:1. The supplied automatic framework labels are inaccurate: apps/api is NestJS 12 with Fastify through Nathapp AppFactory, not Express; the web app is Nuxt, not Next.js. Runtime dependency versions are ~4.2.3 for Nathapp platform packages and Prisma ^7.10.0 (apps/api/package.json:45). All work is scoped to apps/api, with no CLI, runner, web, generated client or OpenAPI changes. Read the nathapp-nestjs-patterns skill before writing NestJS implementation code; this planning session writes JSON only.\n\nExisting audit substrate: apps/api/src/audit/audit-recorder.service.ts:9 declares AuditRecordInput { key, resourceType, resourceId, projectId?, summary? }; :24 validates the catalog key and ambient transaction, and :33 reads currentContext, falling back to SYSTEM/unknown only when no context exists. Unknown keys throw exactly 'unknown audit key: <key>'; recording outside a transaction throws 'AuditRecorder.record must run inside a transaction'. Metadata already carries projectId, onBehalfOf, origin, approval and correlationId; summary is bounded by AUDIT_SUMMARY_MAX. Keep record unchanged. apps/api/src/audit/prisma-audit.storage.ts:10 translates package entries to Koda rows, including approval/on-behalf-of fields. apps/api/src/audit/prisma-audit-entry.repository.ts:11 uses the ambient transaction manager; :28 enforces append-only updates and :30 serves filtered reads. AuditEntry already exists in apps/api/prisma/schema.prisma:831. apps/api/src/audit/audit-log.module.ts:10 currently provides and exports AuditRecorder and AuditLogService but is not global. AppModule imports it already (apps/api/src/app.module.ts:49,147). The @Global precedent is apps/api/src/permissions/permissions.module.ts:35, whose repositories remain module-private. Add audited and fieldsSummary in US-001 and globalize the existing module without replacing its storage/provider aliases or exports. apps/api/src/common/test-helpers/global-stubs.module.ts:40 intentionally reports isInTransaction false in the common transaction stub; :168 registers global mock dependencies. Add exported mockAuditRecorder with record resolving undefined and audited invoking its fn; do not make real record tolerate this stub. The existing apps/api/src/audit/audit-log.module.spec.ts:16 already supplies global PrismaService, transaction manager and PermissionService stubs; extend it with a sibling-module consumer test rather than introducing a DB-dependent DI test.\n\nTransaction invariant and migration approach: add audited<T>(fn, entriesOf) to wrap only writers without a transaction; existing txManager.run owners call record after their write inside their existing callback. Nested run joins and a throwing nested run poisons the outer transaction. Never wrap ticket-number retry or binding duplicate recovery in an outer audited transaction. No schema migration, historical backfill or dependency upgrade is needed; deploy additive recorder/wiring and all service callers together. The intentional behavior change is fail-closed atomic writes when audit storage fails, plus atomic capability replacement and agent deletion/binding cleanup. Preserve responses, errors, validation, route keys, domain events, activities, outbox shapes, authentication mechanisms and after-commit side effects. No interceptor or @Audit decorator.\n\nUS-002 verified seams: apps/api/src/tickets/tickets.service.ts:44 constructor currently has six required collaborators; append required AuditRecorder. create starts runWithTicketNumberRetry at :119, creates the ticket and records event/outbox at :136; record ticket.create after that event in the retry callback. apps/api/src/common/utils/ticket-number-retry.ts:32 selects one attempt if already inside a transaction, otherwise retries full transactions; :46 catches number uniqueness errors using isUniqueViolation, not raw error.meta. applyUpdate at apps/api/src/tickets/tickets.service.ts:342 uses a whitelisted title/description/priority object and txManager.run at :358. softDelete uses its existing transaction at :393, assign at :431 with roster/member eligibility locks/checks; both need record after successful writes. Skip ticket.update recording for an empty writable patch. Keep TicketEvent/outbox behavior unchanged. Fields, descriptions, titles, assignee eligibility and soft-delete/number-allocation invariants are API-owned.\n\nUS-003 verified seams: apps/api/src/tickets/state-machine/ticket-transitions.service.ts:89 constructor has required permissions immediately before optional collaborators, so put audit there; positional constructors must shift. executeTransitionInternal at :619 checks edge permission and validateTransition before transaction :660; conditional status race failure at :680 throws 409; field patch runs after the conditional status write at :693; status event at :714 is the audit insertion seam. close has a separate transaction at :488 and its own route key. apps/api/src/tickets/state-machine/transition-keys.ts:13 enumerates all legal state-machine edges; transitionKeyFor at :36 returns undefined for invalid pairs, but successful validated edges have keys; do not invent a fallback key. apps/api/src/tickets/tickets.service.ts:271 routes status PATCH through executeTransitionPublic and :308 builds fieldPatch that already runs in the transition transaction. Add ticket.update there only for nonempty writable fields; status plus fields yields exactly two entries. Do not change executeTransitionPublic's signature. apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts:40 calls startForDispatch and :44 catches/logs start failures. Audit failure must roll back the start while preserving this best-effort contract; test via that seam under runAsSystem('schedule'), not by auditing unrelated fleet writes. Comment-bearing transitions receive one transition entry, not an additional comment.create entry. RAG auto-index and PR creation remain after the transaction (:735 and earlier completion paths).\n\nUS-004/005 verified seams: apps/api/src/comments/comments.service.ts:20 has no audit dependency; :142 creates comment/event/outbox in one transaction. update/delete perform membership and author permission checks before direct repository writes (:188,209); wrap those writes in audited, preserving ownership behavior while recording comment.update/comment.delete, never .own keys. apps/api/src/ticket-links/ticket-links.service.ts:26 resolveTicket returns id/projectId only; :92 returns an existing link without a write; :98 creates a link directly; :141 remove uses a stored-row ownership check before delete. Add ref to the internal resolver; apps/api/src/ticket-links/prisma-ticket-link.repository.ts:51 findTicketById currently selects id only and must also select number; findTicketByNumber can keep its existing query and use the parsed number for the summary. Preserve CUID/project scoping, URL idempotency and first-creator ownership. apps/api/src/labels/labels.service.ts:13 has only its repository dependency; :119 and :172 use repo.runInTransaction for ticket-label actions; call record within those callbacks, retaining activities unchanged. Its label definition writes at :34, :71 and :87 lack transactions and are wrapped by US-005 after US-004 modifies the same file. apps/api/src/projects/projects.service.ts:18 constructor is exceptional: optional-decorated HybridRetrieverService is a required positional union with undefined, followed by required access; append audit as parameter five. create at :26, update at :99 and softDelete at :204 currently perform direct writes. Keep validation/conflict mapping and graphify/RAG behavior. softDelete cache clearing at :218 must remain after audited resolves, and update's RAG effects remain outside the audited write. Project own entries use project.id for both resourceId and projectId, including creation/deletion; field summaries expose ciWebhookToken's field name, never its value.\n\nUS-006 verified seams: apps/api/src/agents/agents.service.ts:32 constructor places optional KodaDomainWriter and AgentAuthProvider after required permissions; insert required audit before them. generateApiKey rotate path at :83 is a direct update followed by auth-cache invalidation, while create at :114 already uses membership.afterCommit(txManager.run) around agent/capabilities/baseline binding. Record only agent.create for that composite action and only agent.key.rotate for rotation, actor from context rather than new/target agent. update at :207 builds an explicit scalar data whitelist at :211; summaries must use data, not raw DTO. updateCapabilities at :223 deduplicates capabilities, but replaceCapabilities performs deleteMany/createMany without owning a transaction (apps/api/src/agents/prisma-agent.repository.ts:98); audited must enclose both and use the effective capability count. remove at agents.service.ts:234 currently deletes before removeAllBindings; move both into membership.afterCommit(() => audit.audited(...)) and invalidate auth cache only after commit. Agents are global rows even through a project-scoped route. recordAgentAction at :49 is a separate legacy mechanism whose only meaningful project-scoped live action is pickup at :316; leave it and KodaDomainWriter unchanged.\n\nUS-007 verified seams: apps/api/src/permissions/role-admin.service.ts:92 constructor has no optional parameters; append audit. createRole :131 has uniqueness mapping in its try/catch, updateRole :157 returns early on empty data at :177, deleteRole :184 maps FK and not-found errors. Wrap only repository writes inside their existing error-mapping scopes; cache invalidation follows successful audited resolution. createBinding at :260 and removeBinding at :308 delegate to MembershipService after scope/anti-escalation/self/last-admin rules. Key choice must mirror assertBindingKeys at :362: owner beats global beats project manage, using the stored binding on removal. apps/api/src/permissions/membership.service.ts:40 exposes RemoveBindingOptions; :137 createBinding resolves role and delegates to bindRole at :179. bindRole owns run at :188 and catches concurrent duplicate violations outside it at :193. Add optional onWritten through createBinding/bindRole, await it inside the transaction only if insertBinding's WriteOutcome.changed is true; unchanged existing-row outcome occurs at :290. Do not audit MembershipService globally: baseline bindings, invite/member composites and system seeders must not acquire extra entries. removeBinding at :236 deletes under existing locks and guards at :264, and invokes options.onWritten with the deleted view inside that same run. Existing callers without callbacks remain unchanged, including createBindingForRole's persisted-role-id behavior. apps/api/src/projects/members/project-members.service.ts:79 already wraps run in membership.afterCommit and rejects duplicate members under lock at :81. Capture createBinding's result and record member.add for that binding inside the run, without also recording role.binding.manage. apps/api/src/permissions/after-commit.service.ts:31 joins nested scopes and runs deferred tasks only after outer success; membership.service.ts:420 defers permission/auth invalidation through that scope. Changing transaction shape without retaining it would cache stale permissions or invalidate after rollback.\n\nUS-008 verified seams: apps/api/src/projects/invites/project-invites.service.ts:40 constructor is required-only. addExistingUser :143 owns afterCommit/run and duplicate-member lock; capture binding for invite.create (role-binding resource), not member.add or binding-manage. inviteNewAddress :184 owns one run cancelling prior pending invites and inserting replacement; record just the new invite action. resend :96 checks pending status at :108, rotates at :113 and throws conflict at :115; move rotation plus null-result throw inside audited, retain status guards before it and email delivery after commit. cancel :122 likewise moves conditional write and false-result 409 inside audited. apps/api/src/projects/invites/invite-acceptance.service.ts:64 hashes before its :69 afterCommit/run, conditionally claims the invite, creates user, binds the persisted role id and baseline, then issues session at :106 after commit; record only invite.accept inside the run with invite.projectId and accepted user id. Preserve role-replacement and token-replay guards. apps/api/src/auth/auth.service.ts:44 register hashes before afterCommit/run :87, can return null from its callback at :94, binds owner/baseline then issues session after commit; only record when a user was actually created. The public request context actor is SYSTEM/anonymous, not the created user. apps/api/src/users/users-admin.service.ts:36 create and :69 update already own afterCommit/run; record user.create/user.update inside them, keeping self-disable/last-admin guards, token-version bumps and cache invalidation outside commit. User/role/agent/global-binding entries use projectId null. Do not log credentials, passwords, invite tokens or invited email addresses in summaries.\n\nImport/caller impact and regression surface: required constructor additions are intentionally not optional. Globalizing AuditLogModule avoids importing it into every domain module (and dragging AuditController guards into isolated specs). Existing module tests importing GlobalStubsModule receive mockAuditRecorder; other local fake-global modules and direct TestingModule providers must explicitly add it. Direct positional construction is present in apps/api/src/ticket-links/ticket-links.service.spec.ts:54, users/users-admin.service.spec.ts:44, projects/invites/project-invites.service.spec.ts:129, invite-acceptance.service.spec.ts:113, projects/members/project-members.service.spec.ts:54, tickets/state-machine/ticket-transitions.autoindex.spec.ts:11, ticket-transitions.service.spec.ts:1070,1252,1307, projects/projects.service.spec.ts:53, permissions/role-admin.service.spec.ts:78,449, role-admin.service.removal-override.spec.ts:57, test/integration/vcs/auto-create-pr-on-verified.integration.spec.ts:149,385, test/integration/memory/outbox-envelope.integration.spec.ts:137,152 and test/unit/projects/projects-find-all-for-principal.spec.ts:212. Adjust those positions without weakening existing assertions. US-002's memory/outbox spec constructs both ticket services: keep interim dependency ordering viable when US-003 adds transition audit. Additional explicit mock providers required by the spec: tickets.service.spec.ts, agent-permissions/tickets-agent-permissions.integration.spec.ts, outbox/producer-atomicity.integration.spec.ts, tickets/ticket-tenancy.integration.spec.ts, tickets/tickets-status-update.integration.spec.ts (US-002); rag/rag-close-to-search.integration.spec.ts and tickets/ticket-transition-race.integration.spec.ts (US-003); comments.service.spec.ts, labels.service.spec.ts and agent-permissions/labels-agent-permissions.integration.spec.ts (US-004); projects/projects-brief.routes.spec.ts and test/unit/projects/projects-conflict-responses.spec.ts (US-005); agents.service.spec.ts, agents-create.service.spec.ts, agents-create.routes.spec.ts, agent-create-canonical-dto.routes.spec.ts and agents-pickup.routes.spec.ts (US-006); projects/members/project-members.module.spec.ts, permissions/permissions.module.spec.ts and permissions/permissions-owner-bootstrap.spec.ts (US-007); auth/auth.service.spec.ts and users/users.module.spec.ts (US-008). Preserve module export/provider, permission, conflict, race, outbox and tenancy assertions; ticket-link CUID mocks need number.\n\nShared service callers are intentionally covered without changing their APIs: apps/api/src/fleet/assistant/tools/action-tools.ts:39 builds addCommentTool, create-tickets-tool.ts:45 builds createTicketsTool, update-ticket-tool.ts:43 builds updateTicketTool and link-tickets-tool.ts:44 builds linkTicketsTool. ticket-write-tools.ts:24 composes those with the real services. They inherit their surrounding thread/MCP/system context through AuditRecorder, not a hardcoded REST actor. Integrations calling the same methods inherit auditing too, but dedicated caller ACs belong to audit-integrations. No controller audit duplication or new context creation belongs here. apps/api/src/action-context/action-context.ts:47 defines ActionContext, :93 installs it, :132 runAsSystem validates system ids. Existing audit-recorder.service.spec.ts:17-64 already tests actors, delegation, approval, correlation and summaries; keep it and audit-recorder.refusals.spec.ts unchanged while adding audited-specific tests.\n\nTest implementation plan: new outputs are enumerated by story; every listed context file exists now, except audit-summary.ts where it is an upstream US-001 output. Existing route precedents under test/integration/permissions include core-ticket-routes, core-ticket-transitions, core-comments-labels-watchers, core-ticket-links, core-project-routes, core-agent-routes, core-members-invites, roles-api and role-bindings-api; user/auth precedents are test/integration/users/admin-users.integration.spec.ts and test/integration/auth/registration.integration.spec.ts. test/helpers/http-app.ts:26 boots AppModule with real guards/pipes/filters and :77 unwraps envelopes. test/helpers/action-context.ts:74 withTestActor supplies context for direct calls; :108 fixtureDb executes each awaited fixture query under SYSTEM/seed while following the ambient transaction proxy. Never replace the real recorder in new core-audit integration tests. Create fresh fixture ids, grant baseline/roles via src/permissions/test-helpers/permission-fixtures.ts, call HTTP using acting-principal tokens, read stored entries with fixtureDb(app).auditEntry.findMany({ where: { resourceId } }). Avoid hardcoded ids and isolate preexisting setup entries with direct fixture construction or per-action key/delta assertions. Transition verify/fix/reject/verify-fix need body; approve is ?approve=true. Existing rollback integration precedent is test/integration/audit/audit-recorder.rollback.integration.spec.ts:34-79. Restore record/repository spies after negative tests. Unit tests use vi, decorator metadata is emitted by SWC (vitest.config.ts:8), and DI tests remain DB-free next to source.\n\nVerification and rollout risks: DB-mode Vitest shares a schema and serializes files (apps/api/vitest.config.ts:43), but separate invocations must not run against the same database concurrently. canRunDbTests is re-exported at apps/api/test/helpers/test-environment.ts:1; real DB runs require KODA_DB_TESTS=1 outside NAX_SANDBOXED=1. Use bun run test:scoped <files> from apps/api; it selects DB mode for integration paths. Host PostgreSQL on compose port 5433 or a private Testcontainer is required; a sandbox skip is not verification. A second checkout sets KODA_TEST_DB_CONTAINER=1. Unit/DI tests run under bun run test without DB. Keep generated acceptance material in its .nax feature location and run with vitest.nax.config.ts, never copy it into src. Security-critical role, credentials, auth and permission paths use three-session-tdd in US-002 through US-008. US-001 uses tdd-simple: it adds orchestration, formatting and DI wiring while leaving record's existing actor, approval and catalog logic unchanged. Complexity reflects changed source behavior rather than the count of regression fixtures: US-001, US-002, US-004 and US-005 are medium; US-003, US-006, US-007 and US-008 remain complex because of mixed-write transitions, new atomic membership composition or binding lifecycle/concurrency seams. This planning pass did not execute tests or alter application code.\n\nSpec interpretation: the explicit ticket-empty-patch rule overrides the generic table note that an undefined fieldsSummary can simply omit summary: ticket field paths skip the entry entirely; other successful writes may record without summary, while empty updateRole returns without writing. AuthService's null branch is the transaction outcome, not a newly invented public null response. Constructor position follows the explicit ProjectsService exception. Existing transaction-owning methods never gain an outer audited wrapper just for uniformity. Failure-table rows are represented in the assigned stories, including storage rollback, retry atomicity, refusals, duplicate binding recovery, status races, dispatch swallowing, resend/cancel no-op conflicts and capability rollback. Additional hardening ideas, where not already required by the spec, are kept in suggestedCriteria rather than promoted to required ACs.\n\nRefine-pass AC preservation ledger (source number -> 1-based acceptanceCriteria indices in the same story; all 98 numbered source ACs were checked individually): US-001: 1->1-4 (fn/entriesOf/storage order and returned result), 2->5-6 (same rejection and no downstream calls), 3->7-8 (one run and storage in transaction), 4->9-10 (withTestActor Label plus keyed audit row), 5->11-12 (exact unknown-key error and rollback), 6->13 (joined outer rollback), 7->14 (sorted fields), 8->15-16 (undefined values and empty object), 9->17 (secret title excluded), 10->18 (GlobalStubsModule consumer gets mock), 11->19 (global real recorder with sibling consumer and guard collaborators), 12->20-21 (empty entries result/no storage). US-002: 1->1-2 (user create status and actor/resource/origin), 2->3 (returned ref summary), 3->4 (agent actor), 4->5-6 (403/no create entry), 5->7-8 (field PATCH status/summary), 6->9 (title value excluded), 7->10-11 (delete status/ref), 8->12 (USER assignee), 9->13 (rostered AGENT assignee), 10->14 (none), 11->15-16 (dual assignee 400/no entry), 12->17-18 (number retry success-only record in its creating callback). US-003: 1->1-2 (CREATED verify status/entry), 2->3 (VERIFIED start), 3->4 (IN_PROGRESS fix), 4->5 (approve=true to CLOSED), 5->6 (no approve query returns IN_PROGRESS), 6->7 (VERIFY_FIX verify uses approve edge, not verify route key), 7->8 (reject), 8->9 (close route key), 9->10 (mixed PATCH edge entry), 10->11-12 (same PATCH field entry and exactly two total), 11->13-15 (one null status race ->409/no audit/no new Comment), 12->16 (state-machine-refused fix/no entry, with required body), 13->17 (dispatch seam under SYSTEM/schedule), 14->18-20 (audit-failed dispatch swallows, status still VERIFIED, no entry). US-004: 1->1-2 (comment create status/resource/project/ref), 2->3 (body excluded), 3->4 (author edit), 4->5-6 (non-author without override 403/no entry), 5->7 (author delete), 6->8-9 (one audited call and repository update in fn), 7->10-11 (new link status/resource/ref), 8->12-13 (repeated same URL 200/still one entry), 9->14 (link remove), 10->15 (label assign), 11->16 (label remove), 12->17 (CUID input still yields KEY-N summary). US-005: 1->1-2 (label create), 2->3 (rename field), 3->4 (delete), 4->5 (both label values excluded), 5->6-7 (project create and its own project id), 6->8 (sorted name/description fields), 7->9 (token field name but not value), 8->10 (project delete), 9->11-12 (403/no delete entry), 10->13 (cache clearing after audited resolves, not fn). US-006: 1->1-2 (admin create status/global resource/admin actor), 2->3 (response raw key excluded), 3->4-5 (rotate names admin not agent, new key excluded), 4->6 (agent name field), 5->7 (project route writes global agent), 6->8 (three capabilities), 7->9-10 (single audited replace in fn), 8->11-12 (record-failed PATCH error/previous capabilities), 9->13-14 (delete agent with project binding and no open tickets removes bindings and records once), 10->15-16 (one afterCommit and both deletes in one audited fn), 11->17-18 (403/no delete entry). US-007: 1->1-2 (owner creates role), 2->3 (spec-created custom non-system role rename), 3->4 (unbound role deletion), 4->5 (project binding summary/resource), 5->6 (projectId absent ->global), 6->7 (owner most-specific key), 7->8 (project binding removal), 8->9-10 (last-Project-Admin refusal/no entry), 9->11-12 (third callback passed and records view's id/key), 10->13 (inserted view callback once inside inserting run), 11->14-16 (existing row view/no callback and concurrent duplicate winner re-read/no callback), 12->17 (deleted view callback inside delete run), 13->18-19 (repeat same role/principal/project returns existing binding/still one entry), 14->20-22 (member add 201/action entry/no role.binding.manage entry). US-008: 1->1-2 (unknown-address invite create), 2->3 (email/token excluded), 3->4 (existing-account invite is binding resource), 4->5 (resend), 5->6 (cancel), 6->7-8 (rotate null and cancel false throw409 inside fn before entriesOf), 7->9-10 (valid acceptance status/SYSTEM anonymous/invite project/new user summary), 8->11-12 (already-accepted replay error/still exactly one), 9->13-14 (open registration/new email/SYSTEM anonymous), 10->15-16 (admin create), 11->17 (disabled field), 12->18 (both user-create summaries exclude request password/email/name), 13->19-20 (403/no user.create). Splitting compound source criteria did not discard their setup or regression qualifiers: returned ref, joined outer transaction, current versus route edge, same PATCH, lost-race comment rollback, repeated existing link/binding, custom non-system fixture, absent projectId, admin-not-agent actor and already-accepted replay remain part of their assertions.\n\nFailure-table audit: row 1 maps to US-001:5-6; row 2 to US-001:11-12,22-23; row 3 to each of US-002:20, US-003:21, US-004:18, US-005:14, US-006:21, US-007:25 and US-008:23; row 4 to US-003:13-15; row 5 to US-002:17-19; row 6 to US-004:12-13,19; row 7 to US-007:16,23; row 8 to US-007:14-15,18-19; row 9 to US-001:20-21; row 10 to US-008:7-8,21; row 11 to US-003:18-20,22; row 12 to US-006:11-12,19-20. The first draft relegated row 11's existing warning behavior to suggestedCriteria: it is now required and anchored to the actual warn message at apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts:45. Idempotent links now explicitly assert repo.createLink is not called, rather than inferring no write from the audit count. Every story already had a directly observable negative case; none needed a new failure category.\n\nRefine-pass compatibility and structure audit: US-001:24 protects existing record metadata mapping against apps/api/src/audit/audit-recorder.service.spec.ts:31; US-007:26-27 protect callers omitting the new callback and the existing lastProjectAdminOverride option. Existing route statuses, retry behavior, dispatch swallowing, author edit permission, link idempotency, post-commit cache clearing, agent deletion cleanup and accepted-token replay supply regression anchors in the other stories. Scope remains the same shared service seam, not a new controller, writer or helper invented by the PRD. All contextFiles exactly match their spec-recommended sets (US-005 has four; the others five); audit-summary.ts is only consumed after US-001, and no story lists its own new outputs as context. All eight workdirs and dependencies remain the binding structure: 001 none; 002->001; 003->002; 004->001; 005->004; 006->001; 007->001; 008->007. No dangling ids or added edges. All 16 feature-level exclusions before Stories are preserved verbatim, including the explicitly US-003-only and US-006-only bullets that the source placed in that feature-level section; their wording limits their scope and descriptions echo the nearby boundaries. No story-local Out of scope block from beneath the source ACs was hoisted. No description/AC contradiction was found after correcting the fix refusal's required body. Validation here is a source/requirements audit, not an executed application test run.",
+  "outOfScope": [
+    "Fleet routes and fleet system writers (jobs, threads, budgets, schedules, runners, repos, approvals, ingest, knowledge) are out of scope (feature `permissions-p2-audit-fleet`).",
+    "VCS, CI webhook, RAG, memory, skills, notifications, webhooks, code-intel, outbox subscribers and the assistant/MCP tools that do not call a core service method are out of scope (feature `permissions-p2-audit-integrations`). Where a VCS or CI-webhook writer calls a core service method this feature audits (`TicketLinksService.create`, a transition), it is recorded under its system context, and the integrations feature owns the ACs for those callers.",
+    "The runtime coverage guard and the walker test over write surfaces are out of scope (feature `permissions-p2-audit-integrations`).",
+    "Auditing `POST /auth/login`, `/auth/refresh` and `/auth/logout` is out of scope; the coverage feature decides whether session writes are audited or allowlisted with a reason.",
+    "Recording refused or failed attempts (403, 409, validation errors) is out of scope; only committed writes are recorded, and refusal records belong to P3's approval engine.",
+    "Changing `KodaDomainWriter`, removing its unused methods, or auditing its one live write (the `TICKET_SUGGESTED` agent event of `GET /agents/:slug/pickup`) is out of scope; the command layer is `AuditRecorder.audited`, and pickup belongs to `permissions-p2-audit-fleet`.",
+    "Auditing `SystemRoleSeeder`'s writes to `Role` rows is out of scope (a boot-time seeder writing through the repository, feature `permissions-p2-audit-integrations`).",
+    "Auditing the baseline binding that register, admin user create, agent create and invite accept write next to their main row is out of scope; each records one entry for its action.",
+    "Putting any request value (title, description, comment body, label or project name, password, API key, invite token, CI webhook token) into an audit summary is out of scope; summaries carry only the names, ids, refs, keys and statuses in the contract table.",
+    "A before/after diff of values in `AuditEntry` is out of scope; the summary names the fields that changed, not their values.",
+    "Changing `TicketEvent`, `TicketActivity`, `AgentEvent` or outbox payloads is out of scope; they keep their current shapes.",
+    "Changing any route's status codes, response bodies or `@Requires` keys is out of scope; `openapi.json` does not change.",
+    "The web Audit log page is out of scope (feature `permissions-p2-web`).",
+    "US-003 only: a `comment.create` entry for the `Comment` row a comment-bearing transition (`verify`, `fix`, `reject`, `verify-fix`, `close`) writes is out of scope; the transition's entry covers its transaction.",
+    "US-003 only: auditing the after-commit side effects of a transition (auto-index on `CLOSED`, PR creation on `VERIFIED`, webhook dispatch) is out of scope; the entry covers the transition's transaction.",
+    "US-006 only: changing how `AgentsService` invalidates its auth cache is out of scope; it stays after the commit."
+  ],
+  "routingProfile": "native-codex"
+}

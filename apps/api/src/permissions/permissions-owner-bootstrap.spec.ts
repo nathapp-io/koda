@@ -1,3 +1,5 @@
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 /**
  * Permissions P1a US-004 — the owner bootstrap's configuration surface (AC-1 .. AC-4).
  *
@@ -35,6 +37,7 @@ function stubsFor(authCfg: IAuthConfig): Type<unknown> {
   @Global()
   @Module({
     providers: [
+      { provide: AuditRecorder, useValue: mockAuditRecorder },
       { provide: PrismaService, useValue: { client: {} } as unknown as PrismaService<PrismaClient> },
       {
         provide: TRANSACTION_MANAGER,
@@ -47,7 +50,7 @@ function stubsFor(authCfg: IAuthConfig): Type<unknown> {
       { provide: CacheManager, useValue: { get: vi.fn(), set: vi.fn(), invalidate: vi.fn() } },
       { provide: AUTH_CFG, useValue: authCfg },
     ],
-    exports: [PrismaService, TRANSACTION_MANAGER, CacheManager, AUTH_CFG],
+    exports: [AuditRecorder, PrismaService, TRANSACTION_MANAGER, CacheManager, AUTH_CFG],
   })
   class PermissionStubsModule {}
 

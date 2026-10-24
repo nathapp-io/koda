@@ -1,3 +1,4 @@
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import {
   AppException,
   ForbiddenAppException,
@@ -81,6 +82,7 @@ describe('RoleAdminService', () => {
       permissions,
       permissionCache,
       membership,
+      mockAuditRecorder,
     );
 
     // A caller who may administer roles without holding every key: the escalation tests' baseline.
@@ -463,6 +465,7 @@ describe('RoleAdminService', () => {
           cache as never,
           new AfterCommitService(),
         ),
+        mockAuditRecorder,
       );
 
       const error = await thrown(() => racing.createRole(owner, qa));

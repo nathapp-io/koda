@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { EmailAvailability } from '../../email/email-availability';
 import { EmailScheduleService } from '../../email/schedule/email-schedule.service';
 import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
@@ -47,6 +48,7 @@ export class ProjectInvitesService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly membership: MembershipService,
     private readonly roles: RoleAdminService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async create(
@@ -110,9 +112,12 @@ export class ProjectInvitesService {
     const now = new Date();
     const { raw, hash } = generateInviteToken();
     const expiresAt = new Date(now.getTime() + this.email.config().inviteTtlDays * DAY_MS);
-    const rotated = await this.invites.rotate({ id, projectId, tokenHash: hash, expiresAt });
-    // An accept or cancel that won the race left a final row; nothing was written, so this is a 409.
-    if (!rotated) throw new ConflictAppException({}, 'invites.final');
+    const rotated = await this.audit.audited(async () => {
+      const written = await this.invites.rotate({ id, projectId, tokenHash: hash, expiresAt });
+      // A lost race wrote nothing; throw before entriesOf can produce an entry.
+      if (!written) throw new ConflictAppException({}, 'invites.final');
+      return written;
+    }, () => ({ key: 'invite.resend', resourceType: 'project-invite', resourceId: id, projectId, summary: 'resent' }));
 
     const emailed = this.email.configured ? await this.sendInvite(rotated, raw, rotated.email, locale) : false;
     return { invite: this.toDto(rotated, now), invitePath: `/invite/${raw}`, emailed };
@@ -125,7 +130,9 @@ export class ProjectInvitesService {
     const invite = await this.invites.findByIdForProject(projectId, id);
     if (!invite) throw new NotFoundAppException({}, 'invites');
     if (invite.status !== 'PENDING') throw new ConflictAppException({}, 'invites.final');
-    if (!(await this.invites.cancel(id, projectId))) throw new ConflictAppException({}, 'invites.final');
+    await this.audit.audited(async () => {
+      if (!(await this.invites.cancel(id, projectId))) throw new ConflictAppException({}, 'invites.final');
+    }, () => ({ key: 'invite.cancel', resourceType: 'project-invite', resourceId: id, projectId, summary: 'cancelled' }));
   }
 
   /** An active account joins immediately; a disabled account (or an existing membership) is a 409. */
@@ -145,10 +152,14 @@ export class ProjectInvitesService {
       if ((await this.members.findLocalRole(projectId, userId)) !== null) {
         throw new ConflictAppException({}, 'invites.memberExists');
       }
-      await this.membership.createBinding(
+      const binding = await this.membership.createBinding(
         { principal: { type: 'USER', id: userId }, projectId, roleKey: role.key },
         granterOf(principal),
       );
+      await this.audit.record({
+        key: 'invite.create', resourceType: 'role-binding', resourceId: binding.id,
+        projectId, summary: `${role.key} to USER ${userId}`,
+      });
       // Read the written membership back inside the same transaction, so the outcome carries the same
       // record (and the same role chips) the members routes answer with.
       const created: ProjectMemberRecord = await this.members.findRequiredMember(projectId, userId);
@@ -183,7 +194,7 @@ export class ProjectInvitesService {
     // Cancel any earlier pending invite and mint the replacement in one transaction (AC-7).
     const invite = await this.txManager.run(async () => {
       await this.invites.cancelPending(projectId, email);
-      return this.invites.create({
+      const created = await this.invites.create({
         projectId,
         email,
         roleId: role.id,
@@ -192,6 +203,11 @@ export class ProjectInvitesService {
         invitedByAgentId: inviter.invitedByAgentId,
         expiresAt,
       });
+      await this.audit.record({
+        key: 'invite.create', resourceType: 'project-invite', resourceId: created.id,
+        projectId, summary: `${role.key} invited`,
+      });
+      return created;
     });
 
     const emailed = this.email.configured ? await this.sendInvite(invite, raw, email, locale) : false;

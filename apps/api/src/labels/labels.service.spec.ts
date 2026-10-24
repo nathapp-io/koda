@@ -3,6 +3,7 @@ import { LabelsService } from './labels.service';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { LABEL_REPOSITORY } from './domain/label.domain';
 import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 
 describe('LabelsService', () => {
   let service: LabelsService;
@@ -87,6 +88,16 @@ describe('LabelsService', () => {
     name: 'Test Agent',
   };
 
+  const recordedEntries: unknown[] = [];
+  const mockAudit = {
+    record: vi.fn(async () => undefined),
+    audited: vi.fn(async (fn: () => Promise<unknown>, entriesOf: (result: unknown) => unknown) => {
+      const result = await fn();
+      recordedEntries.push(entriesOf(result));
+      return result;
+    }),
+  };
+
   const mockLabelRepo = {
     findProjectBySlug: vi.fn(),
     createLabel: vi.fn(),
@@ -105,10 +116,12 @@ describe('LabelsService', () => {
   };
 
   beforeEach(async () => {
+    recordedEntries.length = 0;
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         LabelsService,
         { provide: LABEL_REPOSITORY, useValue: mockLabelRepo },
+        { provide: AuditRecorder, useValue: mockAudit },
       ],
     }).compile();
 
@@ -135,6 +148,10 @@ describe('LabelsService', () => {
       expect(result.name).toBe('typescript');
       expect(result.color).toBe('#0066CC');
       expect(mockLabelRepo.createLabel).toHaveBeenCalled();
+      expect(mockAudit.audited).toHaveBeenCalledTimes(1);
+      expect(recordedEntries).toEqual([{
+        key: 'label.create', resourceType: 'label', resourceId: 'label-123', projectId: 'proj-123', summary: 'created',
+      }]);
     });
 
     it('should allow label creation for non-ADMIN user (authorization at controller level)', async () => {
@@ -208,6 +225,21 @@ describe('LabelsService', () => {
     });
   });
 
+  describe('audited label update', () => {
+    it('records only changed field names, never the supplied value', async () => {
+      mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockLabelRepo.findLabelById.mockResolvedValue(mockLabel);
+      mockLabelRepo.updateLabel.mockResolvedValue({ ...mockLabel, name: 'renamed-secret' });
+
+      await service.update('koda', 'label-123', { name: 'renamed-secret' }, mockUserPrincipal);
+
+      expect(recordedEntries).toEqual([{
+        key: 'label.update', resourceType: 'label', resourceId: 'label-123', projectId: 'proj-123', summary: 'fields: name',
+      }]);
+      expect(JSON.stringify(recordedEntries)).not.toContain('renamed-secret');
+    });
+  });
+
   describe('findByProject', () => {
     it('should return all labels for a project', async () => {
       const labels = [
@@ -262,6 +294,9 @@ describe('LabelsService', () => {
       await service.delete('koda', 'label-123', mockUserPrincipal);
 
       expect(mockLabelRepo.deleteLabel).toHaveBeenCalledWith('label-123');
+      expect(recordedEntries).toEqual([{
+        key: 'label.delete', resourceType: 'label', resourceId: 'label-123', projectId: 'proj-123', summary: 'deleted',
+      }]);
     });
 
     it('should allow delete from non-ADMIN user (authorization at controller level)', async () => {
@@ -366,6 +401,10 @@ describe('LabelsService', () => {
       expect(mockLabelRepo.createTicketActivity).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'LABEL_CHANGE', newValue: 'typescript' })
       );
+      expect(mockAudit.record).toHaveBeenCalledWith({
+        key: 'ticket.label.assign', resourceType: 'ticket', resourceId: 'ticket-123',
+        projectId: 'proj-123', summary: 'label label-123 added',
+      });
     });
 
     it('should allow any authenticated user to assign label', async () => {

@@ -1,4 +1,4 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Inject, Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AUDIT_STORAGE } from '@nathapp/nestjs-audit';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -11,6 +11,12 @@ import { PrismaAuditEntryRepository } from './prisma-audit-entry.repository';
 import { PrismaAuditStorage } from './prisma-audit.storage';
 import { AuditLogService } from './audit-log.service';
 import { PermissionService } from '../permissions/permission.service';
+import { AuditRecorder } from './audit-recorder.service';
+import { GlobalStubsModule, mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
+
+class RecorderConsumer { constructor(@Inject(AuditRecorder) readonly recorder: AuditRecorder) {} }
+@Module({ providers: [RecorderConsumer], exports: [RecorderConsumer] })
+class ConsumerModule {}
 
 @Global()
 @Module({ providers: [
@@ -36,5 +42,15 @@ describe('AuditLogModule', () => {
   it('exports AuditLogService as a public service', async () => {
     moduleRef = await compile();
     expect(moduleRef.get(AuditLogService)).toBeInstanceOf(AuditLogService);
+  });
+
+  it('AC-19: makes AuditRecorder available to a sibling consumer module', async () => {
+    moduleRef = await Test.createTestingModule({ imports: [GlobalMocksModule, AuditLogModule, ConsumerModule] }).compile();
+    expect(moduleRef.get(RecorderConsumer).recorder).toBeInstanceOf(AuditRecorder);
+  });
+
+  it('AC-18: GlobalStubsModule injects its exported audit recorder mock', async () => {
+    moduleRef = await Test.createTestingModule({ imports: [GlobalStubsModule, ConsumerModule] }).compile();
+    expect(moduleRef.get(RecorderConsumer).recorder).toBe(mockAuditRecorder);
   });
 });

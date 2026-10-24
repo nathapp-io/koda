@@ -10,6 +10,8 @@ import { ProjectDomain } from './domain/project.domain';
 import { RagService } from '../rag/rag.service';
 import { HybridRetrieverService } from '../rag/hybrid-retriever.service';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { fieldsSummary } from '../audit/audit-summary';
 
 @Injectable()
 export class ProjectsService {
@@ -21,6 +23,7 @@ export class ProjectsService {
     @Optional()
     private hybridRetrieverService: HybridRetrieverService | undefined,
     private access: ProjectAccessService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async create(createProjectDto: CreateProjectDto) {
@@ -54,8 +57,8 @@ export class ProjectsService {
     }
 
     // Create project
-    return ProjectResponseDto.from(
-      await this.projectRepo.createProject({
+    return this.audit.audited(
+      async () => ProjectResponseDto.from(await this.projectRepo.createProject({
         name: createProjectDto.name,
         slug: createProjectDto.slug,
         key: createProjectDto.key,
@@ -63,7 +66,8 @@ export class ProjectsService {
         gitRemoteUrl: createProjectDto.gitRemoteUrl,
         autoIndexOnClose: createProjectDto.autoIndexOnClose ?? true,
         autoAssign: createProjectDto.autoAssign ?? 'OFF',
-      })
+      })),
+      (project) => ({ key: 'project.create', resourceType: 'project', resourceId: project.id, projectId: project.id, summary: `created ${project.key}` }),
     );
   }
 
@@ -146,18 +150,21 @@ export class ProjectsService {
     }
 
     // Update project
-    const updatedProject = await this.projectRepo.updateBySlug(slug, {
-      name: updateProjectDto.name,
-      slug: updateProjectDto.slug,
-      key: updateProjectDto.key,
-      description: updateProjectDto.description,
-      brief: updateProjectDto.brief,
-      gitRemoteUrl: updateProjectDto.gitRemoteUrl,
-      autoIndexOnClose: updateProjectDto.autoIndexOnClose,
-      autoAssign: updateProjectDto.autoAssign,
-      ciWebhookToken: updateProjectDto.ciWebhookToken,
-      graphifyEnabled: updateProjectDto.graphifyEnabled,
-    });
+    const updatedProject = await this.audit.audited(
+      () => this.projectRepo.updateBySlug(slug, {
+        name: updateProjectDto.name,
+        slug: updateProjectDto.slug,
+        key: updateProjectDto.key,
+        description: updateProjectDto.description,
+        brief: updateProjectDto.brief,
+        gitRemoteUrl: updateProjectDto.gitRemoteUrl,
+        autoIndexOnClose: updateProjectDto.autoIndexOnClose,
+        autoAssign: updateProjectDto.autoAssign,
+        ciWebhookToken: updateProjectDto.ciWebhookToken,
+        graphifyEnabled: updateProjectDto.graphifyEnabled,
+      }),
+      (project) => ({ key: 'project.update', resourceType: 'project', resourceId: project.id, projectId: project.id, summary: fieldsSummary(updateProjectDto) }),
+    );
 
     // Handle graphifyEnabled transition from true to false
     if (
@@ -211,9 +218,10 @@ export class ProjectsService {
     }
 
     // Soft delete by setting deletedAt
-    const deletedProject = await this.projectRepo.updateBySlug(slug, {
-      deletedAt: new Date(),
-    });
+    const deletedProject = await this.audit.audited(
+      () => this.projectRepo.updateBySlug(slug, { deletedAt: new Date() }),
+      (deleted) => ({ key: 'project.delete', resourceType: 'project', resourceId: deleted.id, projectId: deleted.id, summary: `deleted ${deleted.key}` }),
+    );
 
     this.ragService.clearProjectCaches(deletedProject.id);
     this.hybridRetrieverService?.invalidateGraphifyEnabledCache(deletedProject.id);

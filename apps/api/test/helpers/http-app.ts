@@ -12,6 +12,8 @@ export const TEST_PASSWORD = 'Admin1234!Aa';
 
 export interface HttpAppOptions {
   registrationEnabled: boolean;
+  /** Opt into production's Fastify adapter, including socket-free Fastify.inject tests. */
+  adapter?: 'fastify' | 'express';
   /**
    * `KODA_OWNER_EMAIL` for this boot (permissions P1a US-004): a string sets it, `null`/unset deletes
    * it, so a suite never inherits an owner email from the machine it runs on.
@@ -33,7 +35,9 @@ export async function bootHttpApp(opts: HttpAppOptions): Promise<NathApplication
   if (opts.ownerEmail) process.env.KODA_OWNER_EMAIL = opts.ownerEmail;
   else delete process.env.KODA_OWNER_EMAIL;
   try {
-    const app = await AppFactory.create(AppModule);
+    const app = opts.adapter === 'fastify'
+      ? await AppFactory.createFastifyApp(AppModule)
+      : await AppFactory.create(AppModule);
     app.setJwtAuthGuard(app.get(CombinedAuthGuard));
     app.useAppGlobalPrefix().useAppGlobalPipes().useAppGlobalFilters().useAppGlobalGuards();
     await app.init();

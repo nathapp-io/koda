@@ -23,6 +23,8 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { TicketsService } from '../../../src/tickets/tickets.service';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
@@ -74,6 +76,7 @@ describeIntegration('H5 ticket tenancy', () => {
     module = await Test.createTestingModule({
       providers: [
         TicketsService,
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         TicketTransitionsService,
         // Permissions P1 (US-003): TicketTransitionsService's required third dependency; the tenancy
         // assertions below are about lookups and writes, not about who may make them.
