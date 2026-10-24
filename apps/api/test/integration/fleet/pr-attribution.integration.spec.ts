@@ -10,7 +10,6 @@ import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
@@ -18,6 +17,7 @@ import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld, syncBody } from '../.
 import { FakeForge, startFakeForge } from '../../helpers/fake-forge';
 import { PrAttributionService } from '../../../src/fleet/sync/pr-attribution.service';
 import type { SyncRequest, SyncResponse } from '../../../src/fleet/common/protocol';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const ENV_KEYS = ['GITHUB_API_URL', 'GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY_FILE', 'GITHUB_APP_SLUG'] as const;
@@ -80,7 +80,7 @@ describeIntegration('pr attribution (PG)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     runner = await enrollRunner(server, world.tokens.root, 'box-1');
   });
@@ -95,12 +95,17 @@ describeIntegration('pr attribution (PG)', () => {
     else process.env.FLEET_SYNC_WAIT_MS = savedWait;
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('comments once on the job\'s own PR, naming the requester by name', async () => {
     const j = await runToCompletion('attr', 'https://github.com/acme/app/pull/12');
     const comments = () => forge.requests.filter((r) => r.method === 'POST' && r.path === '/repos/acme/app/issues/12/comments');
     expect(await waitFor(() => comments().length === 1)).toBe(true);
     expect((comments()[0].body as { body: string }).body).toBe(`Dispatched by dev via koda job ${j.id}`);
-    await expect(app.get(PrAttributionService).attribute(j.id)).resolves.toBe('skipped');
+    // The sync that ends the job is what asks for the comment, so a direct call runs as that runner.
+    await expect(withTestActor({ type: 'RUNNER', id: runner.runnerId }, () => app.get(PrAttributionService).attribute(j.id))).resolves.toBe('skipped');
     expect(comments()).toHaveLength(1);
   });
 

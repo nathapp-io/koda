@@ -3,7 +3,6 @@
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-schedule-ticker.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
@@ -13,6 +12,7 @@ import { ROLE_KEY_FOR_LEGACY_ROLE, type LegacyProjectRole } from '../../../src/p
 import { FleetJobsService } from '../../../src/fleet/jobs/fleet-jobs.service';
 import { PrismaScheduleRepository } from '../../../src/fleet/schedules/prisma-schedule.repository';
 import { ScheduleTicker } from '../../../src/fleet/schedules/schedule-ticker';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -46,11 +46,13 @@ describeIntegration('schedule ticker (PG)', () => {
   const skipReasons = async (id: string) => (await prisma.fleetActivity.findMany({ where: { entityId: id, action: 'schedule.tick_skipped' } }))
     .map((r) => (r.payload as { reason: string }).reason);
   const hooks = () => prisma.outboxEvent.count({ where: { type: 'webhook_delivery', payload: { contains: '"event":"fleet.schedule.disabled"' } } });
+  /** One timer round as `runOnce` runs it: the ticker is the `schedule` system component. */
+  const tick = (now: Date) => withTestActor({ type: 'SYSTEM', id: 'schedule' }, () => ticker.tick(now));
 
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     ticker = app.get(ScheduleTicker);
     await prisma.webhook.create({
@@ -69,6 +71,10 @@ describeIntegration('schedule ticker (PG)', () => {
     await prisma.fleetActivity.deleteMany();
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('fixtures grant through bindings only', async () => {
     await expectBindingOnlyFixtures(prisma, [
       { type: 'USER', id: world.ids.root },
@@ -80,32 +86,32 @@ describeIntegration('schedule ticker (PG)', () => {
 
   it('dispatches a due schedule once: a QUEUED RUN linked to it, lastJobId set, nextFireAt moved to the next fire', async () => {
     const s = await schedule();
-    expect(await ticker.tick(NOW)).toEqual(expect.objectContaining({ claimed: 1, dispatched: 1 }));
+    expect(await tick(NOW)).toEqual(expect.objectContaining({ claimed: 1, dispatched: 1 }));
     const [job] = await jobsOf(s.id);
     expect(job).toEqual(expect.objectContaining({ command: 'RUN', feature: s.feature, ref: 'trunk', state: 'QUEUED', requestedById: world.ids.dev }));
     expect(await reload(s.id)).toEqual(expect.objectContaining({ lastJobId: job.id, nextFireAt: NEXT, lastFiredAt: NOW, enabled: true }));
-    expect(await ticker.tick(NOW)).toEqual(expect.objectContaining({ claimed: 0 }));
+    expect(await tick(NOW)).toEqual(expect.objectContaining({ claimed: 0 }));
   });
 
   it('two concurrent ticks create exactly one job', async () => {
     const s = await schedule();
-    const [a, b] = await Promise.all([ticker.tick(NOW), ticker.tick(NOW)]);
+    const [a, b] = await Promise.all([tick(NOW), tick(NOW)]);
     expect(a.claimed + b.claimed).toBe(1);
     expect(await jobsOf(s.id)).toHaveLength(1);
   });
 
   it('collapses fires missed while the API was down into one job and a future nextFireAt', async () => {
     const s = await schedule({ nextFireAt: new Date('2026-09-29T03:00:00.000Z') });
-    await ticker.tick(NOW);
+    await tick(NOW);
     expect(await jobsOf(s.id)).toHaveLength(1);
     expect((await reload(s.id)).nextFireAt).toEqual(NEXT);
   });
 
   it('coalesces the next tick into the still-QUEUED job', async () => {
     const s = await schedule();
-    await ticker.tick(NOW);
+    await tick(NOW);
     await prisma.jobSchedule.update({ where: { id: s.id }, data: { nextFireAt: NEXT } });
-    expect(await ticker.tick(new Date('2026-10-02T04:00:30.000Z'))).toEqual(expect.objectContaining({ coalesced: 1, dispatched: 0 }));
+    expect(await tick(new Date('2026-10-02T04:00:30.000Z'))).toEqual(expect.objectContaining({ coalesced: 1, dispatched: 0 }));
     const jobs = await jobsOf(s.id);
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toEqual(expect.objectContaining({ state: 'QUEUED', coalescedCount: 1 }));
@@ -114,10 +120,10 @@ describeIntegration('schedule ticker (PG)', () => {
 
   it('skips while the schedule\'s job is RUNNING, and stays enabled', async () => {
     const s = await schedule();
-    await ticker.tick(NOW);
+    await tick(NOW);
     await prisma.fleetJob.updateMany({ where: { scheduleId: s.id }, data: { state: 'RUNNING' } });
     await prisma.jobSchedule.update({ where: { id: s.id }, data: { nextFireAt: NEXT } });
-    expect(await ticker.tick(new Date('2026-10-02T04:00:30.000Z'))).toEqual(expect.objectContaining({ skipped: 1 }));
+    expect(await tick(new Date('2026-10-02T04:00:30.000Z'))).toEqual(expect.objectContaining({ skipped: 1 }));
     expect(await jobsOf(s.id)).toHaveLength(1);
     expect(await skipReasons(s.id)).toEqual(['job_active']);
     expect((await reload(s.id)).enabled).toBe(true);
@@ -131,7 +137,7 @@ describeIntegration('schedule ticker (PG)', () => {
         pausedWindowStart: new Date(0), createdById: world.ids.root, updatedById: world.ids.root,
       },
     });
-    expect(await ticker.tick(NOW)).toEqual(expect.objectContaining({ skipped: 1 }));
+    expect(await tick(NOW)).toEqual(expect.objectContaining({ skipped: 1 }));
     expect(await jobsOf(s.id)).toHaveLength(0);
     expect(await skipReasons(s.id)).toEqual(['budget_paused']);
     expect(await reload(s.id)).toEqual(expect.objectContaining({ enabled: true, nextFireAt: NEXT }));
@@ -145,7 +151,7 @@ describeIntegration('schedule ticker (PG)', () => {
         maxCostUsd: new Prisma.Decimal(5), selectorLabels: [], requestedById: world.ids.dev, state: 'QUEUED',
       },
     });
-    expect(await ticker.tick(NOW)).toEqual(expect.objectContaining({ skipped: 1, dispatched: 0 }));
+    expect(await tick(NOW)).toEqual(expect.objectContaining({ skipped: 1, dispatched: 0 }));
     expect(await jobsOf(s.id)).toHaveLength(0);
     expect(await skipReasons(s.id)).toEqual(['active_job_elsewhere']);
     expect((await reload(s.id)).enabled).toBe(true);
@@ -157,17 +163,17 @@ describeIntegration('schedule ticker (PG)', () => {
     ['disabled', () => owner('DEVELOPER', { disabled: true })],
   ])('owner %s: disabled once with owner_lost_access, one activity row and one webhook, and not ticked again', async (_name, makeOwner) => {
     const s = await schedule({ createdById: await makeOwner(), updatedById: world.ids.root });
-    expect(await ticker.tick(NOW)).toEqual(expect.objectContaining({ disabled: 1, dispatched: 0 }));
+    expect(await tick(NOW)).toEqual(expect.objectContaining({ disabled: 1, dispatched: 0 }));
     expect(await reload(s.id)).toEqual(expect.objectContaining({ enabled: false, disabledReason: 'owner_lost_access' }));
     expect(await prisma.fleetActivity.count({ where: { entityId: s.id, action: 'schedule.auto_disabled' } })).toBe(1);
     expect(await hooks()).toBe(1);
     expect(await jobsOf(s.id)).toHaveLength(0);
-    expect(await ticker.tick(new Date('2026-10-02T05:00:30.000Z'))).toEqual(expect.objectContaining({ claimed: 0 }));
+    expect(await tick(new Date('2026-10-02T05:00:30.000Z'))).toEqual(expect.objectContaining({ claimed: 0 }));
   });
 
   it('a global ADMIN owner with no project membership may dispatch', async () => {
     const s = await schedule({ createdById: world.ids.root });
-    expect(await ticker.tick(NOW)).toEqual(expect.objectContaining({ dispatched: 1 }));
+    expect(await tick(NOW)).toEqual(expect.objectContaining({ dispatched: 1 }));
     expect(await jobsOf(s.id)).toHaveLength(1);
   });
 
@@ -182,7 +188,7 @@ describeIntegration('schedule ticker (PG)', () => {
       return rows;
     });
     try {
-      expect(await ticker.tick(NOW)).toEqual(expect.objectContaining({ claimed: 0, failed: 0 }));
+      expect(await tick(NOW)).toEqual(expect.objectContaining({ claimed: 0, failed: 0 }));
     } finally {
       spy.mockRestore();
     }
@@ -198,7 +204,7 @@ describeIntegration('schedule ticker (PG)', () => {
       return original(...args);
     });
     try {
-      expect(await ticker.tick(NOW)).toEqual(expect.objectContaining({ failed: 0, dispatched: 0 }));
+      expect(await tick(NOW)).toEqual(expect.objectContaining({ failed: 0, dispatched: 0 }));
     } finally {
       spy.mockRestore();
     }
@@ -212,14 +218,14 @@ describeIntegration('schedule ticker (PG)', () => {
     });
     const s = await schedule({ repoId: repo.id });
     await prisma.fleetRepo.delete({ where: { id: repo.id } });
-    expect(await ticker.tick(NOW)).toEqual(expect.objectContaining({ disabled: 1 }));
+    expect(await tick(NOW)).toEqual(expect.objectContaining({ disabled: 1 }));
     expect(await reload(s.id)).toEqual(expect.objectContaining({ enabled: false, disabledReason: 'template_invalid' }));
     expect(await hooks()).toBe(1);
   });
 
   it('a pinned runner that is gone disables with template_invalid', async () => {
     const s = await schedule({ pinnedRunnerId: 'runner-that-was-deleted' });
-    expect(await ticker.tick(NOW)).toEqual(expect.objectContaining({ disabled: 1 }));
+    expect(await tick(NOW)).toEqual(expect.objectContaining({ disabled: 1 }));
     expect(await reload(s.id)).toEqual(expect.objectContaining({ enabled: false, disabledReason: 'template_invalid' }));
   });
 
@@ -227,7 +233,7 @@ describeIntegration('schedule ticker (PG)', () => {
     const s = await schedule({ projectId: world.opsProjectId, repoId: world.foreignRepoId, createdById: world.ids.root });
     await prisma.project.update({ where: { id: world.opsProjectId }, data: { deletedAt: new Date() } });
     try {
-      expect(await ticker.tick(NOW)).toEqual(expect.objectContaining({ claimed: 0 }));
+      expect(await tick(NOW)).toEqual(expect.objectContaining({ claimed: 0 }));
       expect(await reload(s.id)).toEqual(expect.objectContaining({ enabled: true, nextFireAt: DUE }));
       expect(await jobsOf(s.id)).toHaveLength(0);
     } finally {
@@ -237,7 +243,7 @@ describeIntegration('schedule ticker (PG)', () => {
 
   it('fires a Singapore-zone cron at its local time, whatever the process zone', async () => {
     const s = await schedule({ cron: '30 8 * * *', timezone: 'Asia/Singapore', nextFireAt: new Date('2026-10-02T00:30:00.000Z') });
-    await ticker.tick(new Date('2026-10-02T00:30:10.000Z'));
+    await tick(new Date('2026-10-02T00:30:10.000Z'));
     expect(await jobsOf(s.id)).toHaveLength(1);
     expect((await reload(s.id)).nextFireAt).toEqual(new Date('2026-10-03T00:30:00.000Z'));
   });

@@ -5,10 +5,10 @@
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { DefaultThrottlerGuard } from '@nathapp/nestjs-throttler';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -57,6 +57,10 @@ describeIntegration('fleet enrollment (PG)', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('enrolls once; the key works on /fleet/runner/me and nowhere else', async () => {
@@ -112,7 +116,7 @@ describeIntegration('fleet enrollment (PG)', () => {
 
   it('rejects an expired token', async () => {
     const { id, token } = await newToken();
-    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    const prisma = fixtureDb(app);
     await prisma.runnerEnrollment.update({ where: { id }, data: { expiresAt: new Date(Date.now() - 1000) } });
     await request(server).post('/api/fleet/runner/enroll').send(enrollBody(token, 'box-5')).expect(401);
   });

@@ -3,13 +3,13 @@
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-sweep.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
 import { FleetSweeper } from '../../../src/fleet/sync/fleet-sweeper';
 import { ThreadEventBus, type ThreadLiveEvent } from '../../../src/live/thread-event-bus';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -20,7 +20,7 @@ describeIntegration('fleet silence sweep (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
   });
   afterAll(async () => {
     await app.close();
@@ -57,6 +57,10 @@ describeIntegration('fleet silence sweep (PG)', () => {
     }
     return { job, thread, message };
   };
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('US-007 AC14: silence sweep crashes a THREAD job and errors its pending message without losing content', async () => {
     const { job, message } = await crashedThread('sweeper-thread-message');

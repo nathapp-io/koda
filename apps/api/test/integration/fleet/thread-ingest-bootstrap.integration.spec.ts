@@ -6,7 +6,6 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
@@ -14,6 +13,7 @@ import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/
 import { LogStore, LOG_STORE, logKey } from '../../../src/fleet/logs/log-store';
 import { ThreadIngestor } from '../../../src/fleet/threads/ingest/thread-ingestor';
 import { ThreadIngestBootstrap } from '../../../src/fleet/threads/ingest/thread-ingest.bootstrap';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const ENV = ['FLEET_ARTIFACT_DIR'] as const;
@@ -38,7 +38,7 @@ describeIntegration('fleet thread ingest startup catch-up (PG, US-007)', () => {
     process.env.FLEET_ARTIFACT_DIR = artifactDir;
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     runnerId = (await enrollRunner(app.getHttpServer(), world.tokens.root, 'bootstrap-runner')).runnerId;
     store = app.get<LogStore>(LOG_STORE);
@@ -87,6 +87,10 @@ describeIntegration('fleet thread ingest startup catch-up (PG, US-007)', () => {
   const cursorOf = (jobId: string) => prisma.threadIngestCursor.findUnique({ where: { jobId_leaseEpoch: { jobId, leaseEpoch: 1 } } });
   const assistantOf = (threadId: string) => prisma.chatMessage.findFirst({ where: { threadId, role: 'assistant' } });
   const bootstrap = () => app.get(ThreadIngestBootstrap).onApplicationBootstrap();
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('US-007 AC1: a RUNNING THREAD job with an unfolded stream is folded at startup, cursor at the file size', async () => {
     const s = await seedJob('ac1');

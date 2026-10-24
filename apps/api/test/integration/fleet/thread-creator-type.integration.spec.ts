@@ -11,7 +11,6 @@
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/thread-creator-type.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { runWithActor } from '../../../src/action-context/action-context';
 import { ThreadsService } from '../../../src/fleet/threads/threads.service';
@@ -21,6 +20,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { seedFleetHttpAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { applyMigration, scratchSchemaBefore, ScratchSchema } from '../../helpers/migration-schema';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 vi.setConfig({ testTimeout: 20_000 });
@@ -42,7 +42,7 @@ describeIntegration('thread creator and requester type (PG, US-001)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     agent = await seedFleetHttpAgent(app.getHttpServer(), world.tokens.root);
     threads = app.get(ThreadsService, { strict: false });
@@ -64,6 +64,10 @@ describeIntegration('thread creator and requester type (PG, US-001)', () => {
 
   const threadJob = (threadId: string) => prisma.fleetJob.findFirstOrThrow({ where: { threadId, command: 'THREAD' } });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it("AC-1: create inside an AGENT context stores createdById the agent's id and createdByType 'AGENT'", async () => {
     const created = await createThread(agent.id, 'AGENT');
     const row = await prisma.chatThread.findUniqueOrThrow({ where: { id: created.id } });
@@ -71,8 +75,11 @@ describeIntegration('thread creator and requester type (PG, US-001)', () => {
     expect(row.createdByType).toBe('AGENT');
   });
 
-  it("AC-2: create outside any context stores createdByType 'USER'", async () => {
-    const created = await threads.create(world.projectId, world.ids.dev, projectThreadInput('No context'));
+  it("AC-2: create outside any principal context stores createdByType 'USER'", async () => {
+    // The guard refuses a write with no context at all, so the no-principal case is only reachable from a
+    // system component now; `actorTypeFor` answers 'USER' for it exactly as it does with no context.
+    const created = await withTestActor({ type: 'SYSTEM', id: 'seed' }, () =>
+      threads.create(world.projectId, world.ids.dev, projectThreadInput('No context')));
     const row = await prisma.chatThread.findUniqueOrThrow({ where: { id: created.id } });
     expect(row.createdById).toBe(world.ids.dev);
     expect(row.createdByType).toBe('USER');

@@ -7,7 +7,6 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
@@ -19,6 +18,7 @@ import { ThreadIngestor } from '../../../src/fleet/threads/ingest/thread-ingesto
 import { JobTransitionsService } from '../../../src/fleet/jobs/job-transitions.service';
 import { SYSTEM_ACTOR } from '../../../src/fleet/common/system-actor';
 import { FLEET_JOB_REPOSITORY, type FleetJobRecord, type IFleetJobRepository } from '../../../src/fleet/jobs/domain/fleet-job.domain';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const ENV = ['FLEET_ARTIFACT_DIR', 'FLEET_THREADS_ENABLED'] as const;
@@ -40,7 +40,7 @@ describeIntegration('fleet thread assistant lifecycle (PG, US-003)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     // POST /fleet/runner/enroll is throttled to 10 per minute per route, so one runner serves every case.
     runner = await enrollRunner(server, world.tokens.root, 'lifecycle-runner');
@@ -73,6 +73,12 @@ describeIntegration('fleet thread assistant lifecycle (PG, US-003)', () => {
     type: 'turn_end', turnId: 't1', status: 'completed', output: 'Final', usage: { inputTokens: 0, outputTokens: 0 }, costUsd: 0, ...over,
   });
   const cursor = (s: ThreadJobSeed) => prisma.threadIngestCursor.findUniqueOrThrow({ where: { jobId_leaseEpoch: { jobId: s.jobId, leaseEpoch: 1 } } });
+  /** `ThreadIngestBootstrap` is the entry that catches up an unfolded stream: the `thread` component. */
+  const catchUp = (s: ThreadJobSeed) => withTestActor({ type: 'SYSTEM', id: 'thread' }, () => app.get(ThreadIngestor).catchUp(s.jobId, 1));
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('US-003 AC1: turn_start creates one streaming assistant message at seq 2 with jobId and turnId', async () => {
     const s = await fresh('lifecycle-ac1');
@@ -123,7 +129,7 @@ describeIntegration('fleet thread assistant lifecycle (PG, US-003)', () => {
     const s = await fresh('lifecycle-ac8');
     await put(s, [start('t1'), delta('Hello')]);
     const before = await prisma.chatMessage.count({ where: { threadId: s.threadId } });
-    await app.get(ThreadIngestor).catchUp(s.jobId, 1);
+    await catchUp(s);
     expect((await assistant(s)).content).toBe('Hello');
     expect(await prisma.chatMessage.count({ where: { threadId: s.threadId } })).toBe(before);
   });
@@ -133,10 +139,11 @@ describeIntegration('fleet thread assistant lifecycle (PG, US-003)', () => {
     await put(s, [start('t1'), delta('partial')]);
     const transitions = app.get(JobTransitionsService);
     const jobs = app.get<IFleetJobRepository>(FLEET_JOB_REPOSITORY);
-    await app.get(TRANSACTION_MANAGER).run(async () => transitions.apply({
+    // The silence sweep is what crashes a held job server-side, so the transition runs as its `job` component.
+    await withTestActor({ type: 'SYSTEM', id: 'job' }, () => app.get(TRANSACTION_MANAGER).run(async () => transitions.apply({
       job: (await jobs.findById(s.jobId)) as FleetJobRecord,
       to: 'CRASHED', by: 'server', now: new Date(), actor: SYSTEM_ACTOR, reason: 'test crash',
-    }));
+    })));
     expect((await assistant(s)).status).toBe('errored');
     const late = Buffer.from(`${JSON.stringify(end({ output: 'Late' }))}\n`);
     const store = app.get<LogStore>(LOG_STORE);
@@ -146,7 +153,7 @@ describeIntegration('fleet thread assistant lifecycle (PG, US-003)', () => {
       where: { jobId_leaseEpoch_stream: { jobId: s.jobId, leaseEpoch: 1, stream: 'thread' } },
       data: { sizeBytes: BigInt(await store.size(key)) },
     });
-    await app.get(ThreadIngestor).catchUp(s.jobId, 1);
+    await catchUp(s);
     expect(await assistant(s)).toMatchObject({ status: 'errored', content: 'Late' });
   });
 

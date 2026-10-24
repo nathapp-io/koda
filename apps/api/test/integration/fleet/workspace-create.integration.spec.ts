@@ -1,6 +1,5 @@
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
@@ -8,6 +7,7 @@ import { seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fix
 import { FLEET_CFG, type IFleetConfig } from '../../../src/config/fleet.config';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 describeDb('workspace create HTTP', () => {
@@ -22,7 +22,7 @@ describeDb('workspace create HTTP', () => {
   const root = () => ({ type: 'USER' as const, id: world.ids.root });
   beforeAll(async () => {
     await resetDb(); app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
     config = app.get(FLEET_CFG, { strict: false });
   }, 60_000);
@@ -38,6 +38,10 @@ describeDb('workspace create HTTP', () => {
     await invalidatePermissions();
   });
   afterAll(async () => { await app?.close(); });
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('fixtures grant through bindings only', async () => {
     await expectBindingOnlyFixtures(prisma, [
       { type: 'USER', id: world.ids.root },

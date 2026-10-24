@@ -2,13 +2,13 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { resetDb } from '../../helpers/reset-db';
 import { seedFleetHttpWorld, FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-job.repository';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -28,7 +28,7 @@ describeDb('US-004 thread discard', () => {
     app.useAppGlobalPrefix().useAppGlobalPipes().useAppGlobalFilters().useAppGlobalGuards();
     await app.init();
     httpServer = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    db = fixtureDb(app);
     world = await seedFleetHttpWorld(httpServer, db);
     config = app.get<IFleetConfig>(FLEET_CFG);
     config.threadsEnabled = true;
@@ -60,6 +60,10 @@ describeDb('US-004 thread discard', () => {
     } });
     return job;
   };
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('AC-1: creates a zero-cost DISCARD job and turn for an idle pinned thread', async () => {
     const runner = await makeRunner(`discard-idle-${uid()}`);

@@ -4,11 +4,11 @@
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -41,7 +41,7 @@ describeIntegration('fleet test hooks (PG)', () => {
       else process.env.FLEET_TEST_HOOKS = previous;
     }
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
   });
   afterAll(async () => {
@@ -50,6 +50,10 @@ describeIntegration('fleet test hooks (PG)', () => {
   beforeEach(async () => {
     await prisma.fleetJob.deleteMany();
     await prisma.jobSchedule.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('a global admin fires a schedule that is not due yet: one RUN as the owner, linked as lastJobId, next fire moved on', async () => {

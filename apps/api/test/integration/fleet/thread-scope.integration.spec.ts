@@ -1,6 +1,5 @@
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
@@ -12,6 +11,7 @@ import { LiveStreamRegistry } from '../../../src/live/live-stream-registry';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 describeDb('thread scope isolation', () => {
@@ -28,7 +28,7 @@ describeDb('thread scope isolation', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server(), prisma);
     app.get<IFleetConfig>(FLEET_CFG, { strict: false }).threadsEnabled = true;
     repo = app.get(PrismaChatThreadRepository, { strict: false });
@@ -48,6 +48,10 @@ describeDb('thread scope isolation', () => {
     await seed('WORKSPACE', world.ids.root, 4000);
   }, 60_000);
   afterAll(async () => { await app?.close(); });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('fixtures grant through bindings only', async () => {
     await expectBindingOnlyFixtures(prisma, [

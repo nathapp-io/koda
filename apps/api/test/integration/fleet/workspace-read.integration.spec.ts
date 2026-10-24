@@ -2,7 +2,6 @@
 import type { AddressInfo } from 'net';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
@@ -11,6 +10,7 @@ import { openSse, type SseConnection } from '../../helpers/sse-client';
 import { LiveStreamRegistry } from '../../../src/live/live-stream-registry';
 import { ThreadEventBus } from '../../../src/live/thread-event-bus';
 import { FLEET_CFG, type IFleetConfig } from '../../../src/config/fleet.config';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -47,7 +47,7 @@ describeDb('workspace read routes, commands and events (us-004)', () => {
     await app.listen(0, '127.0.0.1');
     server = app.getHttpServer();
     baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     config = app.get(FLEET_CFG, { strict: false });
     config.threadsEnabled = true;
@@ -76,6 +76,10 @@ describeDb('workspace read routes, commands and events (us-004)', () => {
     await waitFor(() => registry.activeFor(world.ids.dev) === 0 && registry.activeFor(world.ids.root) === 0);
   });
   afterAll(async () => { await app?.close(); });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('AC-1/AC-2/AC-3: lists only the caller’s workspace threads, each with its home project', async () => {
     const list = data<{ items: Array<{ id: string; kind: string; homeProject: { slug: string; name: string } }>; threadsEnabled: boolean }>(

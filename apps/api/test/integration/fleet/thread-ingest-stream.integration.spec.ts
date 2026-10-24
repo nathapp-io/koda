@@ -8,7 +8,6 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
@@ -18,6 +17,7 @@ import { ProjectEventBus } from '../../../src/live/project-event-bus';
 import type { LiveEvent } from '../../../src/live/live-event';
 import { applyMigration, scratchSchemaBefore, ScratchSchema } from '../../helpers/migration-schema';
 import { createTestPrismaClient } from '../../helpers/test-prisma';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const ENV = ['FLEET_ARTIFACT_DIR', 'FLEET_LOG_MAX_BYTES', 'FLEET_LOG_CHUNK_MAX_BYTES'] as const;
@@ -42,7 +42,7 @@ describeIntegration('fleet thread log stream (PG, US-001)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     app.get(ProjectEventBus).subscribe(world.projectId, (e) => { events.push(e); });
     thread = await seedThreadJob(server, prisma, world);
@@ -61,6 +61,10 @@ describeIntegration('fleet thread log stream (PG, US-001)', () => {
 
   // One 40-byte JSONL line with its newline. putThreadLines appends "\n" to each line.
   const LINE_40 = ['{"type":"turn_start","id":"1","pad":""}'];
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('US-001 AC3: a 40-byte thread upload from the held runner appends and records sizeBytes 40', async () => {
     expect(Buffer.byteLength(`${LINE_40[0]}\n`, 'utf8')).toBe(40);

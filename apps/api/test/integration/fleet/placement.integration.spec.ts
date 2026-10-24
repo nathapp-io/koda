@@ -3,12 +3,12 @@
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/placement.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { insertRunner, seedFleetBase, FLEET_CAPS } from '../../helpers/fleet-fixtures';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -18,6 +18,10 @@ describeIntegration('fleet placement (PG)', () => {
   let placement: PlacementService;
   let base: Awaited<ReturnType<typeof seedFleetBase>>;
 
+  /** Dispatch reaches `placeJob` for the requester's job, so a direct call runs as that admin. */
+  const place = (jobId: string) => withTestActor({ type: 'USER', id: base.adminId }, () => placement.placeJob(jobId));
+  /** `fillRunner` is the runner's own sync asking for work, so it runs as that runner. */
+  const fillAsRunner = (runnerId: string, slots: number) => withTestActor({ type: 'RUNNER', id: runnerId }, () => placement.fillRunner(runnerId, slots));
   const queue = (feature: string, over: Partial<Prisma.FleetJobUncheckedCreateInput> = {}) => prisma.fleetJob.create({
     data: {
       projectId: base.projectId, repoId: base.repoId, ref: 'main', command: 'RUN', feature, profiles: ['fast'],
@@ -28,7 +32,7 @@ describeIntegration('fleet placement (PG)', () => {
   beforeAll(async () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     placement = app.get(PlacementService);
     base = await seedFleetBase(prisma);
   });
@@ -41,12 +45,16 @@ describeIntegration('fleet placement (PG)', () => {
     await prisma.runner.deleteMany();
   });
 
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('assigns to the best runner and queues one ASSIGN carrying no secret', async () => {
     const busy = await insertRunner(prisma, { capacity: 2 });
     const idle = await insertRunner(prisma, { capacity: 2 });
     const other = await queue('other', { state: 'RUNNING', runnerId: busy.id, leaseEpoch: 1 });
     const job = await queue('feat');
-    const outcome = await placement.placeJob(job.id);
+    const outcome = await place(job.id);
     expect(outcome).toEqual(expect.objectContaining({ assigned: true, runnerId: idle.id, leaseEpoch: 1 }));
     const commands = await prisma.fleetCommand.findMany({ where: { jobId: job.id } });
     expect(commands).toHaveLength(1);
@@ -63,7 +71,7 @@ describeIntegration('fleet placement (PG)', () => {
     const off = await insertRunner(prisma, { enabled: false });
     const mac = await insertRunner(prisma, { labels: ['mac'] });
     const job = await queue('lonely', { selectorLabels: ['linux'] });
-    const outcome = await placement.placeJob(job.id);
+    const outcome = await place(job.id);
     expect(outcome.assigned).toBe(false);
     expect(outcome.misfits).toEqual(expect.arrayContaining([
       expect.objectContaining({ runnerId: off.id, reason: 'disabled' }),
@@ -76,7 +84,7 @@ describeIntegration('fleet placement (PG)', () => {
     const unavailable = { ...FLEET_CAPS, credentials: [{ providerId: 'deepseek', available: false, stored: null, ambient: false }] };
     const r = await insertRunner(prisma, { capabilities: unavailable });
     const job = await queue('unavail', { pinnedRunnerId: r.id });
-    const outcome = await placement.placeJob(job.id);
+    const outcome = await place(job.id);
     expect(outcome.assigned).toBe(false);
     expect(outcome.misfits).toEqual([expect.objectContaining({ runnerId: r.id, reason: 'provider_unavailable' })]);
     expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: job.id } })).state).toBe('QUEUED');
@@ -86,7 +94,7 @@ describeIntegration('fleet placement (PG)', () => {
     const r = await insertRunner(prisma, { capacity: 3 });
     for (let i = 0; i < 5; i += 1) {
       const job = await queue(`race-${i}`);
-      await Promise.all([placement.placeJob(job.id), placement.fillRunner(r.id, 3), placement.placeJob(job.id)]);
+      await Promise.all([place(job.id), fillAsRunner(r.id, 3), place(job.id)]);
       const after = await prisma.fleetJob.findUniqueOrThrow({ where: { id: job.id } });
       expect(after.leaseEpoch).toBeLessThanOrEqual(1);
       expect(await prisma.fleetCommand.count({ where: { jobId: job.id, type: 'ASSIGN' } })).toBe(after.state === 'ASSIGNED' ? 1 : 0);
@@ -98,7 +106,7 @@ describeIntegration('fleet placement (PG)', () => {
     const r = await insertRunner(prisma, { capacity: 2 });
     const first = await queue('a');
     await queue('b'); // same repo as `a`: busy_repo once `a` is assigned
-    expect(await placement.fillRunner(r.id, 5)).toBe(1);
+    expect(await fillAsRunner(r.id, 5)).toBe(1);
     expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: first.id } })).state).toBe('ASSIGNED');
   });
 
@@ -107,9 +115,9 @@ describeIntegration('fleet placement (PG)', () => {
     const pinnedTo = await insertRunner(prisma);
     const other = await insertRunner(prisma);
     await queue('p', { pinnedRunnerId: pinnedTo.id });
-    expect(await placement.fillRunner(disabled.id, 1)).toBe(0);
-    expect(await placement.fillRunner(other.id, 1)).toBe(0);
-    expect(await placement.fillRunner(pinnedTo.id, 1)).toBe(1);
+    expect(await fillAsRunner(disabled.id, 1)).toBe(0);
+    expect(await fillAsRunner(other.id, 1)).toBe(0);
+    expect(await fillAsRunner(pinnedTo.id, 1)).toBe(1);
   });
 
   it('re-evaluates a pinned runner that was disabled between verdict and placeJob (422)', async () => {
@@ -131,7 +139,7 @@ describeIntegration('fleet placement (PG)', () => {
       },
     });
     await prisma.runner.update({ where: { id: pinned.id }, data: { enabled: false } });
-    const outcome = await placement.placeJob(job.id);
+    const outcome = await place(job.id);
     expect(outcome.assigned).toBe(false);
     expect(outcome.misfits).toEqual([{ runnerId: pinned.id, name: pinned.name, reason: 'disabled' }]);
   });
@@ -147,6 +155,6 @@ describeIntegration('fleet placement (PG)', () => {
       },
     });
     await prisma.runner.delete({ where: { id: pinned.id } });
-    await expect(placement.placeJob(job.id)).resolves.toEqual(expect.objectContaining({ assigned: false, misfits: [] }));
+    await expect(place(job.id)).resolves.toEqual(expect.objectContaining({ assigned: false, misfits: [] }));
   });
 });

@@ -1,7 +1,6 @@
 /** Content-carrying thread SSE events (PG). */
 import type { AddressInfo } from 'net';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
@@ -9,6 +8,7 @@ import { enrollRunner, FleetHttpWorld, seedFleetHttpAgent, seedFleetHttpWorld } 
 import { putThreadLines, seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
 import { openSse, SseConnection, SseMessage } from '../../helpers/sse-client';
 import { LiveStreamRegistry } from '../../../src/live/live-stream-registry';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const describeDb = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 type LivePayload = Record<string, unknown>;
@@ -43,7 +43,7 @@ describeDb('Content thread events over HTTP (PG, US-006)', () => {
     await app.listen(0, '127.0.0.1');
     server = app.getHttpServer();
     baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    prisma = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     runner = await enrollRunner(server, world.tokens.root, 'thread-events-runner');
     await prisma.runner.update({ where: { id: runner.runnerId }, data: { protocolVersion: 4, lastSeenAt: new Date(), enabled: true } });
@@ -72,6 +72,10 @@ describeDb('Content thread events over HTTP (PG, US-006)', () => {
   const start = (turnId = 't1') => ({ type: 'turn_start', turnId });
   const delta = (text: string, round = 1) => ({ type: 'text_delta', turnId: 't1', round, text });
   const end = () => ({ type: 'turn_end', turnId: 't1', status: 'completed', output: 'Hello', usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, costUsd: 0 });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
 
   it('US-006 AC2: emits a delta after a separate text_delta PUT', async () => {
     const s = await fresh('ac2');
