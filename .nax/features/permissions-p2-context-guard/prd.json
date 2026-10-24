@@ -3,7 +3,7 @@
   "feature": "permissions-p2-context-guard",
   "branchName": "feat/permissions-p2-context-guard",
   "createdAt": "2026-10-24T00:00:00.000Z",
-  "updatedAt": "2026-10-24T03:56:28.985Z",
+  "updatedAt": "2026-10-24T04:38:18.067Z",
   "userStories": [
     {
       "id": "US-001",
@@ -267,14 +267,17 @@
         "US-003",
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Large explicit migration spans tool execution, MCP permissions, approvals and actor attribution; security override requires strict isolation even though the binding story is primarily spec conversions."
+        "reasoning": "Large explicit migration spans tool execution, MCP permissions, approvals and actor attribution; security override requires strict isolation even though the binding story is primarily spec conversions.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/test/helpers/action-context.ts",
@@ -424,7 +427,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "036ed130f5e39b1b014e1ff94031d6ff1a4a00b7"
     },
     {
       "id": "US-006",
