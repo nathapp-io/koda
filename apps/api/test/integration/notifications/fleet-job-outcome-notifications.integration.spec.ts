@@ -64,13 +64,13 @@ describeIntegration('fleet job outcome notifications (PG)', () => {
   afterAll(async () => {
     await app.close();
   });
-
-  it('writes need an action context', async () => {
-    await expect(expectGuardActive(app)).resolves.toBeUndefined();
-  });
   beforeEach(async () => {
     await prisma.notification.deleteMany();
     await prisma.outboxEvent.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('enqueues one event per terminal transition, keyed by job and epoch, and none for CANCELLED', async () => {

@@ -40,6 +40,7 @@ describeIntegration('EmailScheduleService (PG) (S4b US-001)', () => {
   let app: INestApplication;
   let prisma: PrismaClient;
   let service: EmailScheduleService;
+  let scheduler: EmailScheduleService;
 
   const seed = async (over: Partial<SeedRow> = {}): Promise<string> => {
     const id = randomUUID();
@@ -92,8 +93,10 @@ describeIntegration('EmailScheduleService (PG) (S4b US-001)', () => {
     app = created;
     prisma = fixtureDb(created);
     // The claim/close/retry writes run below `EmailDispatcher.runScheduledTick` in production, so the
-    // direct calls carry the same `SYSTEM/email` component.
+    // direct calls carry the same `SYSTEM/email` component. `scheduler` stays the raw instance for the
+    // one call that plays a different flow (see `scheduleNotifications` below).
     service = asTestActor(created.get(EmailScheduleService), { type: 'SYSTEM', id: 'email' });
+    scheduler = created.get(EmailScheduleService);
   });
 
   afterAll(async () => {
@@ -167,7 +170,7 @@ describeIntegration('EmailScheduleService (PG) (S4b US-001)', () => {
     });
     const rows = [{ notificationId: notification.id, userId: user.id, toEmail: user.email, dueAt: min(5) }];
     // `scheduleNotifications` is the write `NotificationWriter.deliver` makes from the outbox fan-out.
-    const schedule = () => withTestActor({ type: 'SYSTEM', id: 'outbox' }, () => service.scheduleNotifications(rows));
+    const schedule = () => withTestActor({ type: 'SYSTEM', id: 'outbox' }, () => scheduler.scheduleNotifications(rows));
     await schedule();
     await schedule();
     expect(await scheduledCount(notification.id)).toBe(1);

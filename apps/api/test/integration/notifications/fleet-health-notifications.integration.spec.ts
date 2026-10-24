@@ -43,15 +43,15 @@ describeIntegration('fleet health notifications (PG)', () => {
   afterAll(async () => {
     await app.close();
   });
-
-  it('writes need an action context', async () => {
-    await expect(expectGuardActive(app)).resolves.toBeUndefined();
-  });
   beforeEach(async () => {
     await prisma.runner.deleteMany();
     await prisma.fleetHealthAlert.deleteMany();
     await prisma.outboxEvent.deleteMany();
     await prisma.notification.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('offline -> one episode and one admin notification; back online closes it; a second outage is new', async () => {

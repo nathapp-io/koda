@@ -60,16 +60,16 @@ describeIntegration('fleet budget and approval notifications (PG)', () => {
   afterAll(async () => {
     await app.close();
   });
-
-  it('writes need an action context', async () => {
-    await expect(expectGuardActive(app)).resolves.toBeUndefined();
-  });
   beforeEach(async () => {
     await prisma.budgetPolicy.deleteMany();
     await prisma.fleetApproval.deleteMany();
     await prisma.fleetJob.deleteMany();
     await prisma.outboxEvent.deleteMany();
     await prisma.notification.deleteMany();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   it('warn: one event per incident, admins notified once, members not', async () => {
