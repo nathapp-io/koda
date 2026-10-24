@@ -3,6 +3,7 @@ import { LabelsService } from './labels.service';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { LABEL_REPOSITORY } from './domain/label.domain';
 import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 
 describe('LabelsService', () => {
   let service: LabelsService;
@@ -87,6 +88,8 @@ describe('LabelsService', () => {
     name: 'Test Agent',
   };
 
+  const mockAudit = { record: vi.fn(async () => undefined) };
+
   const mockLabelRepo = {
     findProjectBySlug: vi.fn(),
     createLabel: vi.fn(),
@@ -109,6 +112,7 @@ describe('LabelsService', () => {
       providers: [
         LabelsService,
         { provide: LABEL_REPOSITORY, useValue: mockLabelRepo },
+        { provide: AuditRecorder, useValue: mockAudit },
       ],
     }).compile();
 
@@ -366,6 +370,10 @@ describe('LabelsService', () => {
       expect(mockLabelRepo.createTicketActivity).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'LABEL_CHANGE', newValue: 'typescript' })
       );
+      expect(mockAudit.record).toHaveBeenCalledWith({
+        key: 'ticket.label.assign', resourceType: 'ticket', resourceId: 'ticket-123',
+        projectId: 'proj-123', summary: 'label label-123 added',
+      });
     });
 
     it('should allow any authenticated user to assign label', async () => {

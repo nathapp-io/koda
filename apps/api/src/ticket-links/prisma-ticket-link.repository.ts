@@ -51,10 +51,10 @@ export class PrismaTicketLinkRepository {
   async findTicketById(
     id: string,
     projectId: string,
-  ): Promise<{ id: string } | null> {
+  ): Promise<{ id: string; number: number } | null> {
     return this.db.ticket.findFirst({
       where: { id, projectId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, number: true },
     });
   }
 

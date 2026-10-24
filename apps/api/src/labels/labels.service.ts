@@ -7,11 +7,13 @@ import { LabelResponseDto } from './dto/label-response.dto';
 import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { LABEL_REPOSITORY, ILabelRepository } from './domain/label.domain';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 
 @Injectable()
 export class LabelsService {
   constructor(
     @Inject(LABEL_REPOSITORY) private readonly repo: ILabelRepository,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async create(
@@ -137,6 +139,10 @@ export class LabelsService {
         actorUserId: actor.actorUserId ?? null,
         actorAgentId: actor.actorAgentId ?? null,
       });
+      await this.audit.record({
+        key: 'ticket.label.assign', resourceType: 'ticket', resourceId: ticket.id,
+        projectId: project.id, summary: `label ${assignLabelDto.labelId} added`,
+      });
 
       const updated = await this.repo.findTicketWithLabels(ticket.id);
       if (!updated) {
@@ -180,6 +186,10 @@ export class LabelsService {
         oldValue: ticketLabel.label.name,
         actorUserId: actor.actorUserId ?? null,
         actorAgentId: actor.actorAgentId ?? null,
+      });
+      await this.audit.record({
+        key: 'ticket.label.remove', resourceType: 'ticket', resourceId: ticket.id,
+        projectId: project.id, summary: `label ${labelId} removed`,
       });
 
       const updated = await this.repo.findTicketWithLabels(ticket.id);
