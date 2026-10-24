@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-entry",
   "branchName": "feat/permissions-p2-audit-entry",
   "createdAt": "2026-11-03T09:00:00.000Z",
-  "updatedAt": "2026-10-24T11:36:52.438Z",
+  "updatedAt": "2026-10-24T11:40:34.061Z",
   "userStories": [
     {
       "id": "US-001",
@@ -167,14 +167,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "The recorder copies an existing AsyncLocalStorage context into a prescribed storage entry and registers services; it neither authenticates actors nor evaluates role grants, and existing transaction helpers supply the integration seam."
+        "reasoning": "The recorder copies an existing AsyncLocalStorage context into a prescribed storage entry and registers services; it neither authenticates actors nor evaluates role grants, and existing transaction helpers supply the integration seam.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/audit/audit-log.module.ts",
@@ -203,7 +206,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0ec3fa63062e8898dce5a7715caed1acb8a55ad4"
     },
     {
       "id": "US-004",
