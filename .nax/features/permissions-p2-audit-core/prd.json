@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-core",
   "branchName": "feat/permissions-p2-audit-core",
   "createdAt": "2026-10-24T00:00:00.000Z",
-  "updatedAt": "2026-10-24T13:49:44.761Z",
+  "updatedAt": "2026-10-24T14:09:38.528Z",
   "userStories": [
     {
       "id": "US-001",
@@ -131,14 +131,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Only TicketsService gains four recorder calls in existing transactions, with positional/provider test adjustments; assignment's permission and roster eligibility checks still make strict security-isolated TDD necessary."
+        "reasoning": "Only TicketsService gains four recorder calls in existing transactions, with positional/provider test adjustments; assignment's permission and roster eligibility checks still make strict security-isolated TDD necessary.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/tickets/tickets.service.ts",
@@ -188,7 +191,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "9e4db096a97db0004cedd8b2e152324fa1d83a21"
     },
     {
       "id": "US-003",
