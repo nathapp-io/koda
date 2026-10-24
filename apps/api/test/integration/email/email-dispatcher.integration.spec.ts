@@ -7,7 +7,6 @@
 import { randomUUID } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NOTIFY_SERVICE } from '@nathapp/nestjs-notify';
 import { AppModule } from '../../../src/app.module';
 import { EmailDispatcher } from '../../../src/email/email-dispatcher';
@@ -17,6 +16,7 @@ import type { NotificationDraft } from '../../../src/notifications/notification.
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
@@ -46,7 +46,7 @@ describeIntegration('EmailDispatcher end-to-end (PG) (S4b US-002)', () => {
     nest = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = nest.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService).client as PrismaClient;
+    prisma = fixtureDb(app);
     writer = app.get(NotificationWriter);
     dispatcher = app.get(EmailDispatcher);
     me = app.get(MeNotificationsService);
@@ -73,6 +73,19 @@ describeIntegration('EmailDispatcher end-to-end (PG) (S4b US-002)', () => {
     vi.restoreAllMocks();
   });
 
+  /**
+   * `NotificationWriter.deliver` runs inside the outbox fan-out in production, so a test that seeds a
+   * notification plays that subscriber; `EmailDispatcher.tick` is called below its
+   * `runScheduledTick` wrapper, so it runs as the email component.
+   */
+  const deliver = (target: NotificationDraft) =>
+    withTestActor({ type: 'SYSTEM', id: 'outbox' }, () => writer.deliver([target]));
+  const tick = (now: Date) => withTestActor({ type: 'SYSTEM', id: 'email' }, () => dispatcher.tick(now));
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
+
   it('fixtures grant through bindings only', async () => {
     await expectBindingOnlyFixtures(prisma, [
       { type: 'USER', id: ids.b },
@@ -81,41 +94,41 @@ describeIntegration('EmailDispatcher end-to-end (PG) (S4b US-002)', () => {
   });
 
   it('US-002 AC28: an assigned notification is scheduled at createdAt + EMAIL_DELAY_SEC and sent once to the member address', async () => {
-    await writer.deliver([draft()]);
+    await deliver(draft());
     const note = await prisma.notification.findFirstOrThrow({ where: { userId: ids.b, kind: 'ticket_assigned' } });
     const row = await prisma.emailSchedule.findUniqueOrThrow({ where: { notificationId: note.id } });
     expect(row.dueAt).toEqual(new Date(note.createdAt.getTime() + DELAY_MS));
 
     const send = vi.spyOn(app.get(NOTIFY_SERVICE), 'send').mockResolvedValue({} as never);
-    await dispatcher.tick(new Date(row.dueAt.getTime() + 1000));
+    await tick(new Date(row.dueAt.getTime() + 1000));
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][0]).toEqual(expect.objectContaining({ recipient: ids.bEmail }));
     expect(await prisma.emailSchedule.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({ status: 'SENT' });
   });
 
   it('US-002 AC29: a second tick after the send never calls the channel again', async () => {
-    await writer.deliver([draft()]);
+    await deliver(draft());
     const note = await prisma.notification.findFirstOrThrow({ where: { userId: ids.b, kind: 'ticket_assigned' } });
     const row = await prisma.emailSchedule.findUniqueOrThrow({ where: { notificationId: note.id } });
 
     const send = vi.spyOn(app.get(NOTIFY_SERVICE), 'send').mockResolvedValue({} as never);
-    await dispatcher.tick(new Date(row.dueAt.getTime() + 1000));
+    await tick(new Date(row.dueAt.getTime() + 1000));
     expect(send).toHaveBeenCalledTimes(1);
-    await dispatcher.tick(new Date(row.dueAt.getTime() + 61_000));
+    await tick(new Date(row.dueAt.getTime() + 61_000));
     expect(send).toHaveBeenCalledTimes(1);
   });
 
   it('US-002 AC30: reading the notification before its due time skips the email with reason READ', async () => {
     const target = draft({ sourceId: `evt-read-${randomUUID()}` });
-    await writer.deliver([target]);
+    await deliver(target);
     const note = await prisma.notification.findFirstOrThrow({ where: { sourceId: target.sourceId } });
     const row = await prisma.emailSchedule.findUniqueOrThrow({ where: { notificationId: note.id } });
 
-    await me.markRead(ids.b, note.id);
+    await withTestActor({ type: 'USER', id: ids.b }, () => me.markRead(ids.b, note.id));
     expect((await prisma.notification.findUniqueOrThrow({ where: { id: note.id } })).readAt).not.toBeNull();
 
     const send = vi.spyOn(app.get(NOTIFY_SERVICE), 'send').mockResolvedValue({} as never);
-    await dispatcher.tick(new Date(row.dueAt.getTime() + 1000));
+    await tick(new Date(row.dueAt.getTime() + 1000));
     expect(send).not.toHaveBeenCalled();
     expect(await prisma.emailSchedule.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({ status: 'SKIPPED', skipReason: 'READ' });
   });

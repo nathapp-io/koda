@@ -9,11 +9,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { asTestActor, expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const refusalMessage = (namespace: string): string => {
   const messages = JSON.parse(readFileSync(join(__dirname, `../../../src/i18n/en/${namespace}.json`), 'utf8')) as Record<string, string>;
@@ -46,8 +46,10 @@ describeIntegration('code-intel project-role gate (Slice 4)', () => {
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     server = app.getHttpServer();
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client as PrismaClient;
-    membership = app.get(MembershipService);
+    db = fixtureDb(app);
+    // The bindings below are fixture grants with no request principal, so the service writes as
+    // `SYSTEM/seed` — the same component `fixtureDb` writes under.
+    membership = asTestActor(app.get(MembershipService), { type: 'SYSTEM', id: 'seed' });
     const root = await request(server).post('/api/auth/register')
       .send({ email: 'root@koda.test', name: 'Root', password: TEST_PASSWORD }).expect(201);
     tokens.root = data<{ accessToken: string }>(root).accessToken;
@@ -96,6 +98,10 @@ describeIntegration('code-intel project-role gate (Slice 4)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
   const enc = () => encodeURIComponent(symbolId);

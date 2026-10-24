@@ -1,11 +1,11 @@
 import request from 'supertest';
 import bcrypt from 'bcrypt';
 import type { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { ensureSystemRoles, grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 const integration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 interface Session { accessToken: string; refreshToken: string; user: { id: string; role: string } }
@@ -16,10 +16,14 @@ integration('binding-derived role claims (PG)', () => {
   let db: PrismaClient;
   beforeAll(async () => {
     app = await bootHttpApp({ registrationEnabled: true });
-    db = app.get<PrismaService<PrismaClient>>(PrismaService).client;
+    db = fixtureDb(app);
   });
   beforeEach(async () => { await resetDb(); await ensureSystemRoles(db); resetThrottle(app); });
   afterAll(async () => { await app?.close(); });
+
+  it('writes need an action context', async () => {
+    await expect(expectGuardActive(app)).resolves.toBeUndefined();
+  });
   const register = async (email = 'first@claim.test') => data<Session>(await request(app.getHttpServer())
     .post('/api/auth/register').send({ email, name: 'Claim', password: TEST_PASSWORD }).expect(201));
   const login = async (email: string) => data<Session>(await request(app.getHttpServer())
