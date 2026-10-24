@@ -24,6 +24,8 @@ import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.t
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { OutboxService } from '@nathapp/nestjs-outbox';
 import { PermissionService } from '../../../src/permissions/permission.service';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 
 describe('US-003 (M2): TicketsService.update() — status field routes through transitions', () => {
   let service: TicketsService;
@@ -110,6 +112,7 @@ describe('US-003 (M2): TicketsService.update() — status field routes through t
         // Permissions P1 (US-004): the sixth constructor argument is the key check. This suite asserts the
         // update() -> transitions delegation; the route keys are RequiresGuard's.
         { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
       ],
     }).compile();
 

@@ -187,6 +187,24 @@ describe('TicketsService', () => {
   });
 
   describe('create', () => {
+    it('records once, only on the successful number-retry attempt and inside its transaction', async () => {
+      const conflict = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002', clientVersion: 'test', meta: { target: ['projectId', 'number'] },
+      });
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findLastTicketInProject.mockResolvedValue(null);
+      mockTicketRepo.createTicket.mockRejectedValueOnce(conflict).mockResolvedValueOnce(mockTicket);
+      let recordingInTransaction = false;
+      mockAudit.record.mockImplementation(async () => { recordingInTransaction = mockTxManager.isInTransaction(); });
+
+      await service.create('koda', { type: 'BUG', title: 'Retry me' }, mockUserPrincipal);
+
+      expect(mockTicketRepo.createTicket).toHaveBeenCalledTimes(2);
+      expect(mockAudit.record).toHaveBeenCalledTimes(1);
+      expect(mockAudit.record).toHaveBeenCalledWith(expect.objectContaining({ key: 'ticket.create' }));
+      expect(recordingInTransaction).toBe(true);
+    });
+
     it('records the created ticket after the successful ticket event', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findLastTicketInProject.mockResolvedValue(null);
