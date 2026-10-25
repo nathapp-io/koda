@@ -118,6 +118,11 @@
       "column": { "time": "时间", "key": "操作键", "actor": "执行者", "project": "项目", "resource": "资源", "summary": "摘要" },
       "actorType": { "USER": "用户", "AGENT": "智能体", "RUNNER": "运行器", "SYSTEM": "系统" },
       "onBehalfOf": "代表 {name}",
+      "refresh": "刷新",
+      "prev": "上一页",
+      "next": "下一页",
+      "adminOnly": "审计日志仅对管理员开放。",
+      "empty": "没有符合这些筛选条件的审计记录。",
       "chip": {
         "actor": "执行者",
         "approver": "审批人",

@@ -118,6 +118,11 @@
       "column": { "time": "Time", "key": "Key", "actor": "Actor", "project": "Project", "resource": "Resource", "summary": "Summary" },
       "actorType": { "USER": "User", "AGENT": "Agent", "RUNNER": "Runner", "SYSTEM": "System" },
       "onBehalfOf": "on behalf of {name}",
+      "refresh": "Refresh",
+      "prev": "Previous",
+      "next": "Next",
+      "adminOnly": "The audit log is available to administrators only.",
+      "empty": "No audit entries match these filters.",
       "chip": {
         "actor": "Actor",
         "approver": "Approver",

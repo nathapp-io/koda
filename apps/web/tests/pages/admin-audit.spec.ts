@@ -73,6 +73,8 @@ const { FleetNativeSelect: _nativeSelectStub, ...stubs } = uiStubs
 function mountPage(get: Get, query: Record<string, unknown> = {}) {
   const route = reactive({ params: {}, query: { ...query } })
   const replace = jest.fn(async (to: { query: Query }) => { route.query = { ...to.query } })
+  // US-006 made the page toast a failed load, so the mount needs a toast; these assertions do not read it.
+  const toast = { error: jest.fn(), success: jest.fn() }
   const held = permissionSet(['audit.read'])
   const app = mountSfc(page, {
     components: { ...stubs, FilterBar },
@@ -80,6 +82,7 @@ function mountPage(get: Get, query: Record<string, unknown> = {}) {
     globals: {
       ref, computed, watch, onMounted: Vue.onMounted, onBeforeUnmount: Vue.onBeforeUnmount,
       useI18n: () => enI18n(),
+      useAppToast: () => toast,
       useApi: () => ({ $api: { get } }),
       useRoute: () => route,
       useRouter: () => ({ replace }),

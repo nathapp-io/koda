@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
-import { X } from 'lucide-vue-next'
+import { computed, onMounted, ref, watch } from 'vue'
+import { RefreshCw, X } from 'lucide-vue-next'
 import { useAuditLog } from '~/composables/useAuditLog'
 import type { AuditEntry } from '~/composables/useAuditLog'
+import { ApiError, extractApiError } from '~/composables/useApi'
 import { AUDIT_ACTOR_TYPES, auditRouteQuery, parseAuditRoute, principalLabel, withFilter } from '~/lib/audit-log'
 import type { AuditFilters } from '~/lib/audit-log'
 
@@ -17,7 +18,11 @@ const route = useRoute()
 const router = useRouter()
 const i18n = useI18n()
 const { t } = i18n
-const { entries, keys, load, loadKeys } = useAuditLog()
+const toast = useAppToast()
+const { entries, keys, hasNext, pending, load, loadKeys } = useAuditLog()
+
+/** Set when the API refuses `GET /audit` with a permission error: the page is admin-only. */
+const adminOnly = ref(false)
 
 /** The URL query is the only filter state. */
 const filters = computed(() => parseAuditRoute(route.query))
@@ -164,23 +169,69 @@ function filterByResource(entry: AuditEntry): void {
 
 /**
  * A failed load rethrows so the caller knows the page is stale: the table keeps its last good rows
- * (the `useAdminUsers` pattern) and US-006 renders the refusal, error and empty states. US-004 has
- * no error copy yet, so the failure is deliberately not surfaced here.
+ * (the `useAdminUsers` pattern) and the refusal, error and empty states render around it.
+ *
+ * `ApiError.code` is the envelope `ret`, not the HTTP status: a 403 from the permission guards
+ * arrives as ret 40003 (the `pages/admin/roles.vue` predicate). A refusal is not an error to toast —
+ * the page says who may read the log; anything else (a reversed window, a 500) is an API error worth
+ * reading, so it is toasted with `extractApiError`, never the raw message.
  */
-async function attempt(task: Promise<void>): Promise<void> {
+function isForbidden(err: unknown): boolean {
+  return err instanceof ApiError && (err.code === 40003 || err.code === 403)
+}
+
+/**
+ * Load the current filters. `adminOnly` is only cleared by a load that actually succeeded: a
+ * refusal hides the table even when an earlier load filled it, and it stays hidden until the API
+ * lets the reader read again.
+ */
+async function reload(): Promise<void> {
   try {
-    await task
-  } catch {
-    // Nothing to do: the previous page stays on screen until the next successful load.
+    await load(filters.value)
+    adminOnly.value = false
+  } catch (err: unknown) {
+    if (isForbidden(err)) {
+      adminOnly.value = true
+      return
+    }
+    toast.error(extractApiError(err))
   }
 }
 
+/**
+ * The key list feeds the key select only, so its failure is toasted and nothing else changes: the
+ * entries the reader is studying stay on screen (the two loads are deliberately not coupled).
+ */
+async function reloadKeys(): Promise<void> {
+  try {
+    await loadKeys()
+  } catch (err: unknown) {
+    toast.error(extractApiError(err))
+  }
+}
+
+/** Refresh is the one control that loads without touching the URL: same filters, one more request. */
+function refresh(): void {
+  void reload()
+}
+
+/**
+ * Paging writes `page` into the URL like every other control, so `auditRouteQuery` omits page 1 and
+ * keeps the filters the reader has set.
+ */
+function setPage(page: number): void {
+  void router.replace({ query: auditRouteQuery({ ...filters.value, page: Math.max(1, page) }) })
+}
+
+/** Nothing loaded yet is not an empty page: only a finished load can say the log is empty. */
+const isEmpty = computed(() => !pending.value && entries.value.length === 0)
+
 onMounted(() => {
-  void attempt(load(filters.value))
-  void attempt(loadKeys())
+  void reload()
+  void reloadKeys()
 })
 
-watch(filterKey, () => { void attempt(load(filters.value)) })
+watch(filterKey, () => { void reload() })
 </script>
 
 <template>
@@ -207,6 +258,12 @@ watch(filterKey, () => { void attempt(load(filters.value)) })
         <label class="text-xs font-medium text-muted-foreground" for="audit-to">{{ t('admin.audit.filter.to') }}</label>
         <Input id="audit-to" :model-value="filters.to" type="date" data-testid="audit-to" @update:model-value="setTo" />
       </div>
+
+      <div class="flex items-end">
+        <Button variant="outline" data-testid="audit-refresh" @click="refresh">
+          <RefreshCw class="mr-2 h-4 w-4" />{{ t('admin.audit.refresh') }}
+        </Button>
+      </div>
     </FilterBar>
 
     <div v-if="chips.length > 0" class="flex flex-wrap items-center gap-1.5" data-testid="audit-chips">
@@ -231,41 +288,58 @@ watch(filterKey, () => { void attempt(load(filters.value)) })
       </span>
     </div>
 
-    <Table data-testid="audit-table">
-      <TableHeader>
-        <TableRow>
-          <TableHead>{{ t('admin.audit.column.time') }}</TableHead>
-          <TableHead>{{ t('admin.audit.column.key') }}</TableHead>
-          <TableHead>{{ t('admin.audit.column.actor') }}</TableHead>
-          <TableHead>{{ t('admin.audit.column.project') }}</TableHead>
-          <TableHead>{{ t('admin.audit.column.resource') }}</TableHead>
-          <TableHead>{{ t('admin.audit.column.summary') }}</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        <TableRow v-for="entry in entries" :key="entry.id" data-testid="audit-row">
-          <TableCell class="whitespace-nowrap text-xs text-muted-foreground">{{ localTime(entry.createdAt) }}</TableCell>
-          <TableCell><code class="text-xs">{{ entry.key }}</code></TableCell>
-          <TableCell>
-            <button type="button" class="flex flex-wrap items-center gap-1.5 text-left hover:underline" data-testid="audit-actor" :title="t('admin.audit.filter.byActor')" @click="filterByActor(entry)">
-              <span>{{ actorLabel(entry) }}</span>
-              <Badge variant="secondary">{{ t(`admin.audit.actorType.${entry.actor.type}`) }}</Badge>
-              <span v-if="entry.onBehalfOf" class="text-xs text-muted-foreground">{{ t('admin.audit.onBehalfOf', { name: onBehalfLabel(entry) }) }}</span>
-            </button>
-          </TableCell>
-          <TableCell>
-            <button v-if="entry.projectId" type="button" class="text-left hover:underline" data-testid="audit-project" :title="t('admin.audit.filter.byProject')" @click="filterByProject(entry)">{{ projectLabel(entry) }}</button>
-            <span v-else class="text-muted-foreground">{{ projectLabel(entry) }}</span>
-          </TableCell>
-          <TableCell>
-            <button type="button" class="flex flex-wrap items-center gap-1 text-left hover:underline" data-testid="audit-resource" :title="t('admin.audit.filter.byResource')" @click="filterByResource(entry)">
-              <code class="text-xs">{{ entry.resourceType }}</code>
-              <code class="text-xs text-muted-foreground">{{ entry.resourceId }}</code>
-            </button>
-          </TableCell>
-          <TableCell class="text-sm">{{ entry.summary ?? '' }}</TableCell>
-        </TableRow>
-      </TableBody>
-    </Table>
+    <p v-if="adminOnly" class="text-sm text-muted-foreground" data-testid="audit-admin-only">{{ t('admin.audit.adminOnly') }}</p>
+
+    <template v-else>
+      <LoadingState v-if="pending && entries.length === 0" />
+
+      <p v-else-if="isEmpty" class="text-sm text-muted-foreground" data-testid="audit-empty">{{ t('admin.audit.empty') }}</p>
+
+      <Table v-else data-testid="audit-table">
+        <TableHeader>
+          <TableRow>
+            <TableHead>{{ t('admin.audit.column.time') }}</TableHead>
+            <TableHead>{{ t('admin.audit.column.key') }}</TableHead>
+            <TableHead>{{ t('admin.audit.column.actor') }}</TableHead>
+            <TableHead>{{ t('admin.audit.column.project') }}</TableHead>
+            <TableHead>{{ t('admin.audit.column.resource') }}</TableHead>
+            <TableHead>{{ t('admin.audit.column.summary') }}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow v-for="entry in entries" :key="entry.id" data-testid="audit-row">
+            <TableCell class="whitespace-nowrap text-xs text-muted-foreground">{{ localTime(entry.createdAt) }}</TableCell>
+            <TableCell><code class="text-xs">{{ entry.key }}</code></TableCell>
+            <TableCell>
+              <button type="button" class="flex flex-wrap items-center gap-1.5 text-left hover:underline" data-testid="audit-actor" :title="t('admin.audit.filter.byActor')" @click="filterByActor(entry)">
+                <span>{{ actorLabel(entry) }}</span>
+                <Badge variant="secondary">{{ t(`admin.audit.actorType.${entry.actor.type}`) }}</Badge>
+                <span v-if="entry.onBehalfOf" class="text-xs text-muted-foreground">{{ t('admin.audit.onBehalfOf', { name: onBehalfLabel(entry) }) }}</span>
+              </button>
+            </TableCell>
+            <TableCell>
+              <button v-if="entry.projectId" type="button" class="text-left hover:underline" data-testid="audit-project" :title="t('admin.audit.filter.byProject')" @click="filterByProject(entry)">{{ projectLabel(entry) }}</button>
+              <span v-else class="text-muted-foreground">{{ projectLabel(entry) }}</span>
+            </TableCell>
+            <TableCell>
+              <button type="button" class="flex flex-wrap items-center gap-1 text-left hover:underline" data-testid="audit-resource" :title="t('admin.audit.filter.byResource')" @click="filterByResource(entry)">
+                <code class="text-xs">{{ entry.resourceType }}</code>
+                <code class="text-xs text-muted-foreground">{{ entry.resourceId }}</code>
+              </button>
+            </TableCell>
+            <TableCell class="text-sm">{{ entry.summary ?? '' }}</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+
+      <div class="flex items-center gap-2">
+        <Button variant="outline" size="sm" data-testid="audit-prev" :disabled="filters.page <= 1" @click="setPage(filters.page - 1)">
+          {{ t('admin.audit.prev') }}
+        </Button>
+        <Button variant="outline" size="sm" data-testid="audit-next" :disabled="!hasNext" @click="setPage(filters.page + 1)">
+          {{ t('admin.audit.next') }}
+        </Button>
+      </div>
+    </template>
   </div>
 </template>
