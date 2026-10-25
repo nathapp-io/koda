@@ -3,7 +3,7 @@
   "feature": "permissions-p2-web",
   "branchName": "feat/permissions-p2-web",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T10:59:01.744Z",
+  "updatedAt": "2026-10-25T11:09:24.131Z",
   "userStories": [
     {
       "id": "US-001",
@@ -404,14 +404,17 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Existing URL and composable patterns make paging/refresh standard, but permission-refusal handling and hiding retained data on 403 trigger strict security TDD."
+        "reasoning": "Existing URL and composable patterns make paging/refresh standard, but permission-refusal handling and hiding retained data on 403 trigger strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/pages/admin/audit.vue",
@@ -437,7 +440,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "fec573ebf3dacde0b593c4fbdf80457d9250b43a"
     },
     {
       "id": "US-007",
