@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-fleet-routes",
   "branchName": "feat/permissions-p2-audit-fleet-routes",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T02:44:35.001Z",
+  "updatedAt": "2026-10-25T02:55:35.684Z",
   "userStories": [
     {
       "id": "US-001",
@@ -123,14 +123,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "One repository gains existing-recorder calls and a small pure key mapping; transaction ownership and archive follow-ons already exist, so complexity is medium, while human/agent ownership and audit attribution retain the security TDD override."
+        "reasoning": "One repository gains existing-recorder calls and a small pure key mapping; transaction ownership and archive follow-ons already exist, so complexity is medium, while human/agent ownership and audit attribution retain the security TDD override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
@@ -166,7 +169,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "cd96d712e36464c7ecf07c785b5f74a7d2d3b0c0"
     },
     {
       "id": "US-003",
