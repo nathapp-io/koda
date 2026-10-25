@@ -1,4 +1,5 @@
 import { Controller, HttpCode, Inject, Param, Post, UseGuards } from '@nestjs/common';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { JsonResponse, NotFoundAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
@@ -23,6 +24,7 @@ export class FleetTestHooksController {
     private readonly ticker: ScheduleTicker,
     @Inject(SCHEDULE_REPOSITORY) private readonly schedules: IScheduleRepository,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'testHooksEnabled'>,
+    private readonly audit: AuditRecorder,
   ) {}
 
   @Post('schedules/:id/fire')
@@ -36,6 +38,9 @@ export class FleetTestHooksController {
     if (!schedule) throw new NotFoundAppException({}, 'fleet.schedules');
     if (!schedule.enabled) throw new ConflictAppException({}, 'fleet.scheduleDisabled');
     const at = schedule.nextFireAt;
+    await this.audit.audited(async () => undefined, () => ({
+      key: 'testhook.schedule.fire', resourceType: 'fleet-schedule', resourceId: schedule.id, projectId: schedule.projectId, summary: 'fired',
+    }));
     return JsonResponse.Ok({ firedAt: at.toISOString(), result: await this.ticker.tick(at) });
   }
 }
