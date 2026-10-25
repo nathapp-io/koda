@@ -17,6 +17,8 @@ import { parseRepoPath } from './factory';
 import { VcsPollingService } from './vcs-polling.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { fieldsSummary } from '../audit/audit-summary';
 
 @Injectable()
 export class VcsConnectionService {
@@ -24,6 +26,7 @@ export class VcsConnectionService {
     @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
     @Inject(VCS_CFG) private readonly vcsConfig: IVcsConfig,
     private readonly vcsPollingService: VcsPollingService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /**
@@ -76,18 +79,27 @@ export class VcsConnectionService {
     // authenticated before the controller acknowledges them as ignored.
     const webhookSecret = generateWebhookSecret();
 
-    const connection = await this.vcsRepo.createVcsConnection({
-      projectId,
-      provider: dto.provider.toLowerCase(),
-      repoOwner,
-      repoName,
-      encryptedToken,
-      syncMode,
-      allowedAuthors: JSON.stringify(dto.allowedAuthors ?? []),
-      pollingIntervalMs,
-      webhookSecret,
-      isActive: true,
-    });
+    const connection = await this.audit.audited(
+      () => this.vcsRepo.createVcsConnection({
+        projectId,
+        provider: dto.provider.toLowerCase(),
+        repoOwner,
+        repoName,
+        encryptedToken,
+        syncMode,
+        allowedAuthors: JSON.stringify(dto.allowedAuthors ?? []),
+        pollingIntervalMs,
+        webhookSecret,
+        isActive: true,
+      }),
+      (created) => ({
+        key: 'vcs.connection.create',
+        resourceType: 'vcs-connection',
+        resourceId: created.id,
+        projectId,
+        summary: `${created.provider} ${created.repoOwner}/${created.repoName}, sync ${created.syncMode}`,
+      }),
+    );
 
     await this.vcsPollingService.refreshConnectionSchedule(connection.id);
 
@@ -168,7 +180,17 @@ export class VcsConnectionService {
       return this.mapToResponseDto(connection);
     }
 
-    const updated = await this.vcsRepo.updateVcsConnection(projectId, updateData);
+    const { encryptedToken: token, ...updateFields } = updateData;
+    const updated = await this.audit.audited(
+      () => this.vcsRepo.updateVcsConnection(projectId, updateData),
+      (result) => ({
+        key: 'vcs.connection.update',
+        resourceType: 'vcs-connection',
+        resourceId: result.id,
+        projectId,
+        summary: fieldsSummary({ ...updateFields, ...(token === undefined ? {} : { token }) }),
+      }),
+    );
 
     await this.vcsPollingService.refreshConnectionSchedule(updated.id);
 
@@ -186,7 +208,16 @@ export class VcsConnectionService {
       throw new NotFoundAppException({}, 'vcs');
     }
 
-    await this.vcsRepo.deleteVcsConnection(projectId);
+    await this.audit.audited(
+      () => this.vcsRepo.deleteVcsConnection(projectId),
+      () => ({
+        key: 'vcs.connection.delete',
+        resourceType: 'vcs-connection',
+        resourceId: connection.id,
+        projectId: connection.projectId,
+        summary: `deleted ${connection.provider} ${connection.repoOwner}/${connection.repoName}`,
+      }),
+    );
 
     this.vcsPollingService.unschedulePolling(connection.id);
   }
@@ -203,7 +234,16 @@ export class VcsConnectionService {
     }
 
     const webhookSecret = generateWebhookSecret();
-    await this.vcsRepo.updateVcsConnection(projectId, { webhookSecret });
+    await this.audit.audited(
+      () => this.vcsRepo.updateVcsConnection(projectId, { webhookSecret }),
+      (updated) => ({
+        key: 'vcs.webhook-secret.rotate',
+        resourceType: 'vcs-connection',
+        resourceId: updated.id,
+        projectId: updated.projectId,
+        summary: 'webhook secret rotated',
+      }),
+    );
     return { webhookSecret };
   }
 
