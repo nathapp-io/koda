@@ -166,6 +166,8 @@ export const isIgnoredLine = (parsed: ParsedThreadLine): parsed is { ignored: tr
 const IGNORED_TYPES = new Set(['thinking_delta', 'compaction', 'tool_progress']);
 const TURN_ID_MAX = 128;
 const MAX_TOKEN_COUNT = 2_147_483_647;
+// Rounds are persisted in PostgreSQL Int columns (streamRound and usage round).
+const isRound = (value: unknown): value is number => isIntegerAtLeastZero(value) && value <= 2_147_483_647;
 const MAX_COST_USD = 999_999.99999999;
 
 function replaceNuls(value: unknown): unknown {
@@ -205,7 +207,7 @@ function withRunnerAt<T extends SessionThreadLine | WriteThreadLine>(line: T, at
 }
 
 function parseUsage(value: Record<string, unknown>): UsageThreadLine | null {
-  if (!isTurnId(value.turnId) || !isIntegerAtLeastZero(value.round) ||
+  if (!isTurnId(value.turnId) || !isRound(value.round) ||
     !isTokenCount(value.inputTokens) || !isTokenCount(value.outputTokens) ||
     !isFiniteNonNegative(value.costUsd) || value.costUsd > MAX_COST_USD) return null;
   if (value.cacheRead !== undefined && !isTokenCount(value.cacheRead)) return null;
@@ -280,11 +282,11 @@ export function parseThreadLine(raw: Buffer | string): ParsedThreadLine {
     case 'turn_start':
       return isTurnId(value.turnId) ? { type: 'turn_start', turnId: value.turnId } : { bad: true };
     case 'text_delta':
-      return isTurnId(value.turnId) && isIntegerAtLeastZero(value.round) && isString(value.text)
+      return isTurnId(value.turnId) && isRound(value.round) && isString(value.text)
         ? { type: 'text_delta', turnId: value.turnId, round: value.round, text: value.text }
         : { bad: true };
     case 'stream_reset':
-      return isTurnId(value.turnId) && isIntegerAtLeastZero(value.round)
+      return isTurnId(value.turnId) && isRound(value.round)
         ? { type: 'stream_reset', turnId: value.turnId, round: value.round }
         : { bad: true };
     case 'usage':

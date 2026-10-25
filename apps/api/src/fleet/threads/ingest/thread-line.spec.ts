@@ -13,6 +13,18 @@ describe('parseThreadLine (US-002)', () => {
   });
 });
 
+describe('parseThreadLine round persistence bounds', () => {
+  it.each(['text_delta', 'stream_reset', 'usage'])('bounds %s rounds to PostgreSQL Int', type => {
+    const fields = { type, turnId: 't1', text: 'x', inputTokens: 0, outputTokens: 0, costUsd: 0 };
+    for (const round of [0, 2_147_483_647]) {
+      expect(parseThreadLine(JSON.stringify({ ...fields, round }))).toMatchObject({ type, round });
+    }
+    for (const round of [-1, 1.5, 2_147_483_648, Number.MAX_SAFE_INTEGER]) {
+      expect(parseThreadLine(JSON.stringify({ ...fields, round }))).toEqual({ bad: true });
+    }
+  });
+});
+
 describe('parseThreadLine (US-003)', () => {
   it('US-003 AC1: parses a turn_start line with its turnId', () => {
     expect(parseThreadLine('{"type":"turn_start","turnId":"t1"}')).toEqual({ type: 'turn_start', turnId: 't1' });
