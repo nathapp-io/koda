@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import type { AuditEntryRecord } from '../domain/audit-entry.domain';
+import { EMPTY_AUDIT_DISPLAY, type AuditDisplay, type AuditEntryRecord } from '../domain/audit-entry.domain';
 
 export class AuditEntryDto {
   @ApiProperty() declare id: string;
@@ -19,9 +19,10 @@ export class AuditEntryDto {
   };
   @ApiProperty() declare correlationId: string;
   @ApiPropertyOptional({ nullable: true, type: String }) declare summary: string | null;
+  @ApiProperty({ type: Object }) declare display: AuditDisplay;
   @ApiProperty() declare createdAt: string;
 
-  static from(r: AuditEntryRecord): AuditEntryDto {
+  static from(r: AuditEntryRecord, display: AuditDisplay = EMPTY_AUDIT_DISPLAY): AuditEntryDto {
     return Object.assign(new AuditEntryDto(), {
       id: r.id,
       key: r.key,
@@ -40,6 +41,7 @@ export class AuditEntryDto {
       },
       correlationId: r.correlationId,
       summary: r.summary,
+      display,
       createdAt: r.createdAt.toISOString(),
     });
   }

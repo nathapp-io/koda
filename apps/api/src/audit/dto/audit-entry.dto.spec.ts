@@ -28,4 +28,7 @@ describe('AuditEntryDto.from', () => {
   it('AC-13: serializes createdAt as an ISO instant', () => {
     expect(AuditEntryDto.from(base).createdAt).toBe('2026-10-24T10:15:00.000Z');
   });
+  it('AC-15: defaults the display block to four nulls when no display is passed', () => {
+    expect(AuditEntryDto.from(base).display).toEqual({ actor: null, onBehalfOf: null, approver: null, project: null });
+  });
 });

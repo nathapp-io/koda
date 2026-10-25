@@ -38,6 +38,46 @@ export interface AuditEntryFilters {
   to?: Date;
 }
 
+/**
+ * Resolved display labels for one audit entry (Permissions P2 US-001). The audit row stores ids
+ * only — they are not foreign keys — so the names a human reads are projected per page and never
+ * change the entry's own fields.
+ */
+export interface AuditDisplay {
+  /** USER: name, else email; AGENT: agent name; RUNNER: runner name; SYSTEM: null (the web shows the component id). */
+  actor: string | null;
+  /** USER: name, else email; AGENT: agent name; null when the entry has no on-behalf-of principal. */
+  onBehalfOf: string | null;
+  /** USER: name, else email; AGENT: agent name; null when the entry has no approver. */
+  approver: string | null;
+  /** null when the entry carries no projectId. */
+  project: { slug: string; name: string } | null;
+}
+
+/** The display block of an entry whose principal and project resolve to nothing. */
+export const EMPTY_AUDIT_DISPLAY: AuditDisplay = Object.freeze({
+  actor: null,
+  onBehalfOf: null,
+  approver: null,
+  project: null,
+});
+
+/** The distinct ids one page needs labels for, split by the table that owns each kind. */
+export interface AuditDisplayIds {
+  userIds: string[];
+  agentIds: string[];
+  runnerIds: string[];
+  projectIds: string[];
+}
+
+/** Label projection for one page of audit entries, keyed by id. A missing id stays unresolved. */
+export interface AuditDisplayNames {
+  users: Map<string, string>;
+  agents: Map<string, string>;
+  runners: Map<string, string>;
+  projects: Map<string, { slug: string; name: string }>;
+}
+
 /** What AuditRecorder puts in the package entry's `metadata`, and PrismaAuditStorage reads back. */
 export interface KodaAuditMetadata {
   projectId: string | null;
