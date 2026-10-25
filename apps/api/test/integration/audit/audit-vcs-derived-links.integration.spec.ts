@@ -44,6 +44,8 @@ interface AuditRow {
   actorId: string;
   origin: string;
   summary: string | null;
+  onBehalfOfType: string | null;
+  onBehalfOfId: string | null;
 }
 
 interface TicketRow {
@@ -227,6 +229,8 @@ describeIntegration('derived VCS and fleet writes are audited (real AppModule)',
       expect(row).toMatchObject({
         key: 'ticket.link.add', resourceType: 'ticket-link', projectId: world.projectId,
         actorType: 'USER', actorId: world.ids.root, summary: `on ${refOf(ticket)}`,
+        // No entry in this feature sets onBehalfOf: the derived write is attributed to the current actor.
+        onBehalfOfType: null, onBehalfOfId: null,
       });
       // Summaries never carry a URL, a title or a branch/commit message.
       expect(row.summary).not.toContain('https://');
