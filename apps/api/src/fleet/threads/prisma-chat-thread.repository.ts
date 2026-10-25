@@ -396,6 +396,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         // The refusal gate passed, so a RUNNING job here is a live session with no turn in flight.
         if (currentAfterLock?.state === 'RUNNING' && currentAfterLock.runnerId) {
           await this.jobs.createCommand({ runnerId: currentAfterLock.runnerId, jobId: currentAfterLock.id, type: FleetCommandType.THREAD_INPUT, leaseEpoch: currentAfterLock.leaseEpoch, payload: { messageId: message.id, text: handoffText } });
+          await this.audit.record({ key: threadAuditKey('message', input.scope.kind === 'workspace'), resourceType: 'thread', resourceId: thread.id, projectId: thread.projectId, summary: `message ${message.id}` });
           return { kind: 'done' as const, result: { message, jobId: null, deduplicated: false }, notifyRunnerId: currentAfterLock.runnerId };
         }
 
@@ -406,6 +407,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         // The job names where it runs: a PROJECT thread's job carries the anchor repo, not the thread's null repo fields.
         await this.activity.record({ actorType: 'USER', actorId: input.userId, action: 'job.dispatched', entityType: 'job', entityId: job.id, jobId: job.id,
           projectId: thread.projectId, responsibleUserId: input.userId, payload: { repoId: job.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: job.ref } });
+        await this.audit.record({ key: threadAuditKey('message', input.scope.kind === 'workspace'), resourceType: 'thread', resourceId: thread.id, projectId: thread.projectId, summary: `message ${message.id}, job ${job.id}` });
         return { kind: 'done' as const, result: { message: linkedMessage, jobId: job.id, deduplicated: false }, placeJobId: job.id };
       });
       if (outcome.kind === 'retry') continue;

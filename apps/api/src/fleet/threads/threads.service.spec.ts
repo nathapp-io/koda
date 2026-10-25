@@ -116,7 +116,7 @@ describe('ThreadsService.plan (US-006)', () => {
     expect(dispatch).toHaveBeenCalledWith('u1', 'p1', {
       repoId: 'r1', command: 'PLAN', ref: 'feat/auth', feature: 'auth',
       planFrom: '.nax/features/auth/spec.md', profiles: undefined, maxCostUsd: 5, pinnedRunnerId: 'runner-1',
-    }, { threadId: 't1' });
+    }, { threadId: 't1', auditKey: 'thread.plan' });
   });
 
   it('refuses a published thread whose owning runner was deleted', async () => {
@@ -166,7 +166,7 @@ describe('ThreadsService.run (US-007)', () => {
     expect(dispatch).toHaveBeenCalledWith('u1', 'p1', {
       repoId: 'r1', command: 'RUN', ref: 'feat/auth', feature: 'auth',
       profiles: undefined, maxCostUsd: 5, bashMode: undefined, pinnedRunnerId: 'runner-1',
-    }, { threadId: 't1' });
+    }, { threadId: 't1', auditKey: 'thread.run' });
   });
 
   it('AC-2: refuses with threads.notPlanned when the thread has no PLAN job', async () => {
@@ -211,7 +211,7 @@ describe('ThreadsService.run (US-007)', () => {
     await service.run('p1', 't1', 'u1', { bashMode: 'escalate', profiles: ['native'], maxCostUsd: 3 });
     expect(dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({
       command: 'RUN', profiles: ['native'], bashMode: 'escalate', maxCostUsd: 3,
-    }), { threadId: 't1' });
+    }), { threadId: 't1', auditKey: 'thread.run' });
   });
 
   it('refuses with threads.disabled before reading the plan when threads are off', async () => {
@@ -246,7 +246,7 @@ describe('ThreadsService.run (US-007)', () => {
 
     await service.run('p1', 't1', 'u1', {}, true);
 
-    expect(dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'RUN' }), { threadId: 't1' });
+    expect(dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'RUN' }), { threadId: 't1', auditKey: 'thread.run' });
   });
 });
 
@@ -512,7 +512,7 @@ describe('ThreadsService canOperate (US-002)', () => {
 
     await service.plan('p1', 't1', 'u1', {}, true);
 
-    expect(dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'PLAN' }), { threadId: 't1' });
+    expect(dispatch).toHaveBeenCalledWith('u1', 'p1', expect.objectContaining({ command: 'PLAN' }), { threadId: 't1', auditKey: 'thread.plan' });
   });
 
   it('refuses a plan of another creator\'s thread with 403 permissions when canOperate is false', async () => {

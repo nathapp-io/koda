@@ -111,7 +111,7 @@ export class ThreadsService {
       repoId, command: 'PLAN', ref: `feat/${feature}`, feature,
       planFrom: specPath, profiles: input.profiles, maxCostUsd: input.maxCostUsd ?? THREAD_HANDOFF_DEFAULT_MAX_COST_USD,
       pinnedRunnerId: thread.runnerId ?? undefined,
-    }, { threadId });
+    }, { threadId, auditKey: 'thread.plan' });
   }
 
   /** US-007: dispatches the thread's RUN after its latest PLAN completed. Same gates and cap default as Plan. */
@@ -131,7 +131,7 @@ export class ThreadsService {
       repoId, command: 'RUN', ref: `feat/${feature}`, feature,
       profiles: input.profiles, maxCostUsd: input.maxCostUsd ?? THREAD_HANDOFF_DEFAULT_MAX_COST_USD,
       bashMode: input.bashMode, pinnedRunnerId: thread.runnerId ?? undefined,
-    }, { threadId });
+    }, { threadId, auditKey: 'thread.run' });
   }
 
   publish(projectId: string, threadId: string, userId: string, canOperate = false): Promise<{ jobId: string | null }> {
