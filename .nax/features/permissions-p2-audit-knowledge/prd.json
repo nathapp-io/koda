@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-knowledge",
   "branchName": "feat/permissions-p2-audit-knowledge",
   "createdAt": "2026-10-26T00:00:00.000Z",
-  "updatedAt": "2026-10-25T17:41:35.708Z",
+  "updatedAt": "2026-10-25T18:10:58.576Z",
   "userStories": [
     {
       "id": "US-001",
@@ -234,14 +234,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Integrates shared hooks across assistant tools, two fan-out handlers and non-atomic governance; security override applies to MCP/approval attribution, onBehalfOf and preservation of replacement checks."
+        "reasoning": "Integrates shared hooks across assistant tools, two fan-out handlers and non-atomic governance; security override applies to MCP/approval attribution, onBehalfOf and preservation of replacement checks.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/tools/memory-write-tools.ts",
@@ -307,7 +310,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c10fa848d987ebaa1ac3457b701813c8bcc9db9f"
     },
     {
       "id": "US-004",
