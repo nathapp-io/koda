@@ -1,6 +1,8 @@
 import { MemoryKind } from '../../../common/enums';
 import type { ExtractionService } from '../../../memory/extraction.service';
 import type { PrismaMemoryItemRepository } from '../../../memory/prisma-memory-item.repository';
+import { memoryAuditHook } from '../../../memory/memory-audit';
+import type { AuditRecorder } from '../../../audit/audit-recorder.service';
 import {
   MemoryReplaceRefusedError,
   ownerTypeFor,
@@ -39,11 +41,16 @@ export interface RecordDecisionInput {
  * `koda_record_decision` (2b1-D3): the decision to record in the thread's project. `execute` is what an approve
  * runs: it records through `ExtractionService.recordDecision`, so the usual `DECISION` item is written, subject
  * `agent:<requester>` and predicate `topic`, and the requester's active decision on that topic is superseded.
+ *
+ * Permissions P2 US-003: `deps.audit` records the decision as `memory.decision.record`. The tool sets no actor,
+ * approval or `onBehalfOf`: the executor's action context already carries the assistant on behalf of the requester (an
+ * approve) or the agent itself (MCP), and `record` copies it.
  */
 export function recordDecisionTool(deps: {
   memory: PrismaMemoryItemRepository;
   extraction: ExtractionService;
   guard: MemoryWriteGuard;
+  audit: AuditRecorder;
 }): AssistantTool<RecordDecisionInput> {
   return {
     descriptor: KODA_RECORD_DECISION,
@@ -121,7 +128,12 @@ export function recordDecisionTool(deps: {
             ownerType: ownerTypeFor(ctx.actor),
           },
           deps.memory,
-          { beforeSupersede: deps.guard.replaceCheck(ctx.actor, ctx.projectId) },
+          {
+            beforeSupersede: deps.guard.replaceCheck(ctx.actor, ctx.projectId),
+            // Permissions P2 US-003: recorded inside the upsert's own transaction, so a refused entry rolls the
+            // decision back.
+            onWritten: memoryAuditHook(deps.audit, 'memory.decision.record'),
+          },
         );
         return `decision memory:${recorded.memoryId} recorded`;
       } catch (error) {

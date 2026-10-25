@@ -128,6 +128,10 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
       publisher,
       new ExtractionService(),
       memoryRepository,
+      // Permissions P2 US-003: the subscriber records onWritten through an AuditRecorder. This spec is about the
+      // envelope and the rows it drives, and its pass-through transaction manager never enters one, so the recorder
+      // is a stub; the entry itself is asserted in `test/integration/audit/audit-memory-system.integration.spec.ts`.
+      mockAuditRecorder as never,
     );
     memorySubscriber.onModuleInit();
 

@@ -1,6 +1,8 @@
 import { MemoryKind } from '../../../common/enums';
 import type { MemoryItem } from '../../../memory/memory-item-repository';
 import type { PrismaMemoryItemRepository } from '../../../memory/prisma-memory-item.repository';
+import { memoryAuditHook } from '../../../memory/memory-audit';
+import type { AuditRecorder } from '../../../audit/audit-recorder.service';
 import {
   MemoryReplaceRefusedError,
   ownerTypeFor,
@@ -50,8 +52,16 @@ const isMemoryWriteKind = (value: unknown): value is MemoryWriteKind =>
  * `koda_add_memory` (2b1-D3): the memory item to remember in the thread's project. `execute` is what an approve runs:
  * it upserts through `PrismaMemoryItemRepository`, so the usual active-key supersession happens and the item is
  * readable by `koda_memory_search`.
+ *
+ * Permissions P2 US-003: `deps.audit` is the recorder the write records through. The tool sets no actor, approval or
+ * `onBehalfOf` of its own: an approved action already runs as the assistant with the requester on behalf of, an MCP
+ * call as the agent itself, and `record` copies whichever context it finds.
  */
-export function addMemoryTool(deps: { memory: PrismaMemoryItemRepository; guard: MemoryWriteGuard }): AssistantTool<AddMemoryInput> {
+export function addMemoryTool(deps: {
+  memory: PrismaMemoryItemRepository;
+  guard: MemoryWriteGuard;
+  audit: AuditRecorder;
+}): AssistantTool<AddMemoryInput> {
   return {
     descriptor: KODA_ADD_MEMORY,
     key: 'memory.create',
@@ -127,7 +137,12 @@ export function addMemoryTool(deps: { memory: PrismaMemoryItemRepository; guard:
           confidence: THREAD_CONFIDENCE,
           ownerId: ctx.actor.id,
           ownerType: ownerTypeFor(ctx.actor),
-        }, { beforeSupersede: deps.guard.replaceCheck(ctx.actor, ctx.projectId) });
+        }, {
+          beforeSupersede: deps.guard.replaceCheck(ctx.actor, ctx.projectId),
+          // Permissions P2 US-003: the entry is recorded inside the upsert's own transaction, so a refused one
+          // rolls the write back.
+          onWritten: memoryAuditHook(deps.audit, 'memory.create'),
+        });
       } catch (error) {
         if (error instanceof MemoryReplaceRefusedError) {
           throw new ToolActionError(`forbidden: memory:${error.itemId} needs memory.update`);
