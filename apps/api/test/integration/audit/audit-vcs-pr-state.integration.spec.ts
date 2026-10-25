@@ -17,6 +17,10 @@ vi.mock('../../../src/vcs/factory', async (importOriginal) => {
 import { createVcsProvider } from '../../../src/vcs/factory';
 
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
+const prNumberOf = (prNumber: number | null): number => {
+  if (prNumber === null) throw new Error('Expected a persisted PR number');
+  return prNumber;
+};
 const SLUG = 'vcs-pr-state-audit';
 const BASE = `/api/projects/${SLUG}/vcs`;
 const WEBHOOK = `/api/projects/${SLUG}/vcs-webhook`;
@@ -110,7 +114,7 @@ describeIntegration('VCS PR-state audit entries', () => {
 
   it('AC-1/AC-2: manual PR sync records the state change only, for the request actor', async () => {
     const { link } = await newLink('open');
-    provider.getPullRequestStatus.mockResolvedValue(prStatus(link.prNumber!, 'closed'));
+    provider.getPullRequestStatus.mockResolvedValue(prStatus(prNumberOf(link.prNumber), 'closed'));
     await request(server).post(`${BASE}/sync-pr`).set(auth()).expect(201);
     expect(await rows(link.id)).toHaveLength(1);
     expect(await rows(link.id)).toMatchObject([{
@@ -119,7 +123,7 @@ describeIntegration('VCS PR-state audit entries', () => {
     }]);
 
     const unchanged = await newLink('open');
-    provider.getPullRequestStatus.mockResolvedValue(prStatus(unchanged.link.prNumber!, 'open'));
+    provider.getPullRequestStatus.mockResolvedValue(prStatus(prNumberOf(unchanged.link.prNumber), 'open'));
     await request(server).post(`${BASE}/sync-pr`).set(auth()).expect(201);
     expect(await rows(unchanged.link.id)).toHaveLength(0);
   });
@@ -136,7 +140,7 @@ describeIntegration('VCS PR-state audit entries', () => {
 
   it('AC-4: poller key is recorded with SYSTEM/vcs actor', async () => {
     const { link } = await newLink('draft');
-    provider.getPullRequestStatus.mockResolvedValue(prStatus(link.prNumber!, 'open'));
+    provider.getPullRequestStatus.mockResolvedValue(prStatus(prNumberOf(link.prNumber), 'open'));
     const project = await db.project.findUniqueOrThrow({ where: { id: projectId } });
     const connection = await db.vcsConnection.findUniqueOrThrow({ where: { projectId } });
     await withTestActor({ type: 'SYSTEM', id: 'vcs' }, () =>
@@ -150,10 +154,10 @@ describeIntegration('VCS PR-state audit entries', () => {
     const { link } = await newLink(null);
     const eventId = `vcs-pr-audit-retry-${link.id}`;
     rejectRecord('system.vcs.webhook-intake');
-    await deliver(link.prNumber!, 'closed', false, eventId).expect(500);
+    await deliver(prNumberOf(link.prNumber), 'closed', false, eventId).expect(500);
     expect((await db.ticketLink.findUniqueOrThrow({ where: { id: link.id } })).prState).toBeNull();
     restoreRecord?.(); restoreRecord = undefined;
-    await deliver(link.prNumber!, 'closed', false, eventId).expect(200);
+    await deliver(prNumberOf(link.prNumber), 'closed', false, eventId).expect(200);
     expect(await rows(link.id)).toMatchObject([{
       key: 'system.vcs.webhook-intake', resourceType: 'ticket-link', projectId,
       actorType: 'SYSTEM', actorId: 'vcs', summary: 'pr none -> closed',
@@ -162,12 +166,12 @@ describeIntegration('VCS PR-state audit entries', () => {
 
   it('AC-7/AC-8/AC-9: converted-to-draft is recorded; same-state reopen is not', async () => {
     const { link } = await newLink('open');
-    await deliver(link.prNumber!, 'converted_to_draft').expect(200);
+    await deliver(prNumberOf(link.prNumber), 'converted_to_draft').expect(200);
     expect(await rows(link.id)).toMatchObject([{
       key: 'system.vcs.webhook-intake', summary: 'pr open -> draft',
     }]);
     const reopened = await newLink('open');
-    await deliver(reopened.link.prNumber!, 'reopened').expect(200);
+    await deliver(prNumberOf(reopened.link.prNumber), 'reopened').expect(200);
     expect(await rows(reopened.link.id)).toHaveLength(0);
   });
 
@@ -175,8 +179,8 @@ describeIntegration('VCS PR-state audit entries', () => {
     const first = await newLink('draft');
     const second = await newLink('draft');
     provider.getPullRequestStatus
-      .mockResolvedValueOnce(prStatus(first.link.prNumber!, 'open'))
-      .mockResolvedValueOnce(prStatus(second.link.prNumber!, 'open'));
+      .mockResolvedValueOnce(prStatus(prNumberOf(first.link.prNumber), 'open'))
+      .mockResolvedValueOnce(prStatus(prNumberOf(second.link.prNumber), 'open'));
     const recorder = app.get(AuditRecorder);
     const original = recorder.record.bind(recorder);
     const spy = vi.spyOn(recorder, 'record').mockImplementation(async (input) => {
@@ -185,7 +189,8 @@ describeIntegration('VCS PR-state audit entries', () => {
     });
     const project = await db.project.findUniqueOrThrow({ where: { id: projectId } });
     const connection = await db.vcsConnection.findUniqueOrThrow({ where: { projectId } });
-    const result = await app.get(VcsPrSyncService).syncPrStatus(project, connection, 'ab'.repeat(32), describeKey);
+    const result = await withTestActor({ type: 'SYSTEM', id: 'vcs' }, () =>
+      app.get(VcsPrSyncService).syncPrStatus(project, connection, 'ab'.repeat(32), describeKey));
     spy.mockRestore();
     expect(result.skipped).toBe(1);
     expect((await db.ticketLink.findUniqueOrThrow({ where: { id: first.link.id } })).prState).toBe('draft');
@@ -195,8 +200,8 @@ describeIntegration('VCS PR-state audit entries', () => {
 
     const terminal = await newLink('closed');
     const vanished = await newLink('draft');
-    provider.getPullRequestStatus.mockResolvedValueOnce(prStatus(terminal.link.prNumber!, 'open'))
-      .mockResolvedValueOnce(prStatus(vanished.link.prNumber!, 'open'));
+    provider.getPullRequestStatus.mockResolvedValueOnce(prStatus(prNumberOf(terminal.link.prNumber), 'open'))
+      .mockResolvedValueOnce(prStatus(prNumberOf(vanished.link.prNumber), 'open'));
     const repo = app.get(VcsPrSyncService);
     // A deleted row is reported by the repository's conditional write as not-found.
     await db.ticketLink.delete({ where: { id: vanished.link.id } });
@@ -209,7 +214,7 @@ describeIntegration('VCS PR-state audit entries', () => {
     const first = await newLink('draft');
     const second = await newLink('draft');
     provider.getPullRequestStatus.mockRejectedValueOnce(new NotFoundAppException({}, 'vcs'))
-      .mockResolvedValueOnce(prStatus(second.link.prNumber!, 'open'));
+      .mockResolvedValueOnce(prStatus(prNumberOf(second.link.prNumber), 'open'));
     const recorder = app.get(AuditRecorder);
     const original = recorder.record.bind(recorder);
     const spy = vi.spyOn(recorder, 'record').mockImplementation(async (input) => {
@@ -218,7 +223,8 @@ describeIntegration('VCS PR-state audit entries', () => {
     });
     const project = await db.project.findUniqueOrThrow({ where: { id: projectId } });
     const connection = await db.vcsConnection.findUniqueOrThrow({ where: { projectId } });
-    const result = await app.get(VcsPrSyncService).syncPrStatus(project, connection, 'ab'.repeat(32), describeKey);
+    const result = await withTestActor({ type: 'SYSTEM', id: 'vcs' }, () =>
+      app.get(VcsPrSyncService).syncPrStatus(project, connection, 'ab'.repeat(32), describeKey));
     spy.mockRestore();
     expect(result.skipped).toBe(1);
     expect((await db.ticketLink.findUniqueOrThrow({ where: { id: first.link.id } })).prState).toBe('draft');
@@ -227,7 +233,7 @@ describeIntegration('VCS PR-state audit entries', () => {
 
   it('AC-10/AC-11/AC-12/AC-13: merged and missing links are ignored without audit', async () => {
     const { link } = await newLink('merged');
-    await deliver(link.prNumber!, 'closed').expect(200);
+    await deliver(prNumberOf(link.prNumber), 'closed').expect(200);
     expect((await db.ticketLink.findUniqueOrThrow({ where: { id: link.id } })).prState).toBe('merged');
     expect(await rows(link.id)).toHaveLength(0);
     const before = await db.auditEntry.count({ where: { key: 'system.vcs.webhook-intake' } });
