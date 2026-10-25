@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-fleet-ops",
   "branchName": "feat/permissions-p2-audit-fleet-ops",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T04:49:33.245Z",
+  "updatedAt": "2026-10-25T04:58:31.606Z",
   "userStories": [
     {
       "id": "US-001",
@@ -157,14 +157,17 @@
         "repos"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three existing services gain the same required recorder and five in-transaction calls, with existing fake-forge and constructor-test patterns and no new abstraction; permission-gated enrollment and runner/repo administration retain the mandatory security TDD override."
+        "reasoning": "Three existing services gain the same required recorder and five in-transaction calls, with existing fake-forge and constructor-test patterns and no new abstraction; permission-gated enrollment and runner/repo administration retain the mandatory security TDD override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/runners/enrollment.service.ts",
@@ -206,7 +209,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "972f6a0076fb7b8540a66126dedb422936543504"
     },
     {
       "id": "US-004",
