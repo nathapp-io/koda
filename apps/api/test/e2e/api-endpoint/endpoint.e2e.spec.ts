@@ -350,7 +350,8 @@ describeIntegration('API Integration Tests', () => {
     it('AC-16: GET /api/audit/keys with the admin token returns 200', async () => {
       const res = await request(httpServer).get('/api/audit/keys')
         .set('Authorization', `Bearer ${userAccessToken}`).expect(200);
-      expect(body<{ keys: string[] }>(res).keys).toEqual(expect.any(Array));
+      // The envelope is the whole contract: keys only, no page fields.
+      expect(body<{ keys: string[] }>(res)).toEqual({ keys: expect.any(Array) });
     });
     it('GET /api/audit/keys without credentials returns 401', async () => {
       await request(httpServer).get('/api/audit/keys').expect(401);
