@@ -3,7 +3,7 @@
   "feature": "permissions-p2-web",
   "branchName": "feat/permissions-p2-web",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T10:40:49.280Z",
+  "updatedAt": "2026-10-25T10:51:57.492Z",
   "userStories": [
     {
       "id": "US-001",
@@ -273,14 +273,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "One new page and two locale additions reuse the existing URL-state, composable and control patterns with a ready-made mount harness; no novel abstraction or access-control enforcement is introduced."
+        "reasoning": "One new page and two locale additions reuse the existing URL-state, composable and control patterns with a ready-made mount harness; no novel abstraction or access-control enforcement is introduced.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/tests/pages/fleet-analytics-page.spec.ts",
@@ -307,7 +310,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ce158ed2409af86be312778d445d65ef6b1d7aa6"
     },
     {
       "id": "US-005",
