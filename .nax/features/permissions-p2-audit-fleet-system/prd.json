@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-fleet-system",
   "branchName": "feat/permissions-p2-audit-fleet-system",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T07:10:27.886Z",
+  "updatedAt": "2026-10-25T07:21:45.441Z",
   "userStories": [
     {
       "id": "US-001",
@@ -110,14 +110,17 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two existing transactional services use established audit patterns, but enrollment tokens, runner credentials and fenced uploads require the security override."
+        "reasoning": "Two existing transactional services use established audit patterns, but enrollment tokens, runner credentials and fenced uploads require the security override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/runners/enrollment.service.ts",
@@ -151,7 +154,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "8db9b790c5c44d62a58613a718a9208594de646b"
     },
     {
       "id": "US-003",
