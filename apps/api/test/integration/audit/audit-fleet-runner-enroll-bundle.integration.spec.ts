@@ -1,6 +1,8 @@
 import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
+import { tarGz } from '../../helpers/tar-gz';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,7 +37,7 @@ describeIntegration('audit runner enrollment and bundle upload (PG)', () => {
   const upload = (jobId: string, body: Buffer, epoch = 1) => request(server).put(`/api/fleet/runner/jobs/${jobId}/bundle?leaseEpoch=${epoch}`)
     .set({ ...auth(runner.apiKey), 'content-type': 'application/gzip', 'x-content-sha256': sha(body) }).send(body);
   const bundleEntries = (jobId: string) => prisma.auditEntry.findMany({ where: { key: 'runner.bundle.upload', resourceId: jobId } });
-  const runnerEntries = () => prisma.auditEntry.count({ where: { key: 'runner.enroll', actorId: runner.runnerId } });
+  const runnerActorEntries = () => prisma.auditEntry.count({ where: { actorId: runner.runnerId } });
 
   beforeAll(async () => {
     for (const k of ENV) saved[k] = process.env[k];
@@ -96,8 +98,12 @@ describeIntegration('audit runner enrollment and bundle upload (PG)', () => {
 
   it('AC-5/6: records first bundle and replacement summaries for the runner', async () => {
     const j = await job('audit-first-upload');
-    await upload(j.id, Buffer.from('first')).expect(201);
-    await upload(j.id, Buffer.from('second')).expect(201);
+    const firstBundle = await tarGz([{ name: 'nax-out/run/result.json', body: '{"ok":true}' }]);
+    const replacementBundle = await tarGz([{ name: 'nax-out/run/replacement.json', body: '{"ok":true}' }]);
+    expect(gunzipSync(firstBundle).length).toBeGreaterThan(0);
+    expect(gunzipSync(replacementBundle).length).toBeGreaterThan(0);
+    await upload(j.id, firstBundle).expect(201);
+    await upload(j.id, replacementBundle).expect(201);
     const entries = await bundleEntries(j.id);
     expect(entries.map((entry) => entry.summary)).toEqual(['bundle uploaded at epoch 1', 'bundle replaced at epoch 1']);
     expect(entries[0]).toEqual(expect.objectContaining({ resourceType: 'fleet-job', projectId: world.projectId, actorType: 'RUNNER', actorId: runner.runnerId, origin: 'runner' }));
@@ -125,12 +131,12 @@ describeIntegration('audit runner enrollment and bundle upload (PG)', () => {
   });
 
   it('AC-10/11: log upload and runner/me do not add runner audit entries', async () => {
-    const before = await runnerEntries();
+    const before = await runnerActorEntries();
     const logBody = Buffer.from('log chunk');
     await request(server).put(`/api/fleet/runner/jobs/${(await job('audit-log-no-entry')).id}/logs/stdout?leaseEpoch=1&offset=0`)
       .set({ ...auth(runner.apiKey), 'content-type': 'application/octet-stream', 'x-content-sha256': sha(logBody) }).send(logBody).expect(200);
     await request(server).get('/api/fleet/runner/me').set(auth(runner.apiKey)).expect(200);
-    expect(await runnerEntries()).toBe(before);
+    expect(await runnerActorEntries()).toBe(before);
   });
 
   it('AC-13: wrong and expired enrollment tokens return 401 without audit entries', async () => {
