@@ -89,10 +89,12 @@ describeIntegration('VCS connection audit (real AppModule)', () => {
     }).expect(409);
     expect(await db.auditEntry.count({ where: { resourceId: created.id, key: 'vcs.connection.create' } })).toBe(1);
 
+    const existingUpdates = await db.auditEntry.count({ where: { resourceId: created.id, key: 'vcs.connection.update' } });
     await request(server).patch(connectionPath).set(auth()).send({ token: 'ghp_rotated', syncMode: 'polling' }).expect(200);
     rows = await db.auditEntry.findMany({ where: { resourceId: created.id }, orderBy: { createdAt: 'asc' } });
     expect(rows.at(-1)?.summary).toBe('fields: syncMode, token');
     const updateCount = rows.filter((row) => row.key === 'vcs.connection.update').length;
+    expect(updateCount).toBe(existingUpdates + 1);
     await request(server).patch(connectionPath).set({ Authorization: `Bearer ${viewerToken}` }).send({ syncMode: 'off' }).expect(403);
     expect(await db.auditEntry.count({ where: { resourceId: created.id, key: 'vcs.connection.update' } })).toBe(updateCount);
     await request(server).patch(connectionPath).set(auth()).send({}).expect(200);
@@ -113,16 +115,20 @@ describeIntegration('VCS connection audit (real AppModule)', () => {
     rejectUpdate.mockRestore();
 
     await db.vcsConnection.update({ where: { id: created.id }, data: { webhookSecret: null } });
+    const updatesBeforeLegacySecret = await db.auditEntry.count({ where: { resourceId: created.id, key: 'vcs.connection.update' } });
     await request(server).patch(connectionPath).set(auth()).send({ syncMode: 'webhook' }).expect(200);
     rows = await db.auditEntry.findMany({ where: { resourceId: created.id }, orderBy: { createdAt: 'asc' } });
     expect(rows.at(-1)?.summary).toBe('fields: syncMode, webhookSecret');
+    expect(await db.auditEntry.count({ where: { resourceId: created.id, key: 'vcs.connection.update' } })).toBe(updatesBeforeLegacySecret + 1);
 
     const beforeRotate = (await db.vcsConnection.findUniqueOrThrow({ where: { id: created.id } })).webhookSecret;
+    const rotationsBefore = await db.auditEntry.count({ where: { resourceId: created.id, key: 'vcs.webhook-secret.rotate' } });
     const rotateResponse = await request(server).post(`${connectionPath}/webhook-secret/rotate`).set(auth()).expect(200);
     const rotated = data<{ webhookSecret: string }>(rotateResponse).webhookSecret;
     expect(rotated).not.toBe(beforeRotate);
     rows = await db.auditEntry.findMany({ where: { resourceId: created.id }, orderBy: { createdAt: 'asc' } });
     expect(rows.at(-1)?.summary).toBe('webhook secret rotated');
+    expect(await db.auditEntry.count({ where: { resourceId: created.id, key: 'vcs.webhook-secret.rotate' } })).toBe(rotationsBefore + 1);
     expect(JSON.stringify(rows.map((row) => row.summary))).not.toContain(rotated);
 
     const rejectRotate = vi.spyOn(recorder, 'record').mockImplementation(async (input) => {
