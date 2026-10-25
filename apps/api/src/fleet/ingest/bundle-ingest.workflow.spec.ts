@@ -46,7 +46,7 @@ function make() {
   const svc = new BundleIngestService(
     repo as never, store as never, jobs as never, live as never, activity as never, { signal: vi.fn() } as never,
     { run: (fn: () => unknown) => fn() } as never, ticketEffects as never, outcomes as never,
-    { emit: vi.fn() } as never,
+    { emit: vi.fn() } as never, { record: vi.fn(async () => undefined) } as never,
   );
   return { svc, repo, jobs, activity, ticketEffects };
 }
@@ -118,7 +118,7 @@ describe('BundleIngestService workflow draft correction (US-005 AC-13/AC-14)', (
     const realEffects = new FleetJobTicketEffects({} as never, effectRepo as never, events as never, txManager as never);
     const svc = new BundleIngestService(
       ingestRepo as never, store as never, jobs as never, live as never, activity as never, { signal: vi.fn() } as never,
-      txManager as never, realEffects as never, outcomes as never, { emit: vi.fn() } as never,
+      txManager as never, realEffects as never, outcomes as never, { emit: vi.fn() } as never, { record: vi.fn(async () => undefined) } as never,
     );
     await svc.ingestOne(now);
     // BundleIngestService fires upsertPrLinks without awaiting it; flush before asserting.

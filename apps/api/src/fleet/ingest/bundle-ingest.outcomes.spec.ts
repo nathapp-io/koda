@@ -32,7 +32,7 @@ function make(updated: Record<string, unknown>) {
   const svc = new BundleIngestService(
     repo as never, store as never, jobs as never, live as never, { record: vi.fn() } as never, { signal: vi.fn() } as never,
     { run: async (fn: () => unknown) => { order.push('tx:start'); const r = await fn(); order.push('tx:end'); return r; } } as never,
-    { upsertPrLinks: vi.fn().mockResolvedValue(undefined) } as never, outcomes as never, { emit: vi.fn() } as never,
+    { upsertPrLinks: vi.fn().mockResolvedValue(undefined) } as never, outcomes as never, { emit: vi.fn() } as never, { record: vi.fn(async () => undefined) } as never,
   );
   return { svc, outcomes, repo, order };
 }
@@ -92,7 +92,7 @@ function makeForCommand(command: string, events: { emit: (...args: never[]) => u
   const svc = new BundleIngestService(
     repo as never, store as never, jobs as never, { event: vi.fn(() => ({})), publish: vi.fn() } as never,
     { record: vi.fn() } as never, { signal: vi.fn() } as never, txManager as never,
-    { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never, events as never,
+    { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never, events as never, { record: vi.fn(async () => undefined) } as never,
   );
   return { svc, repo, events: events as { emit: Mock }, order };
 }
