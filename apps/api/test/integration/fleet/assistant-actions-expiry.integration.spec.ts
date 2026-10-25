@@ -10,12 +10,14 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/fleet/assistant-actions-expiry.integration.spec.ts
  */
 import { NathApplication } from '@nathapp/nestjs-app';
+import request from 'supertest';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { FleetJobState } from '../../../src/common/enums';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { AssistantActionService } from '../../../src/fleet/assistant/actions/assistant-action.service';
 import { ACTION_TTL_MS, type ProposeInput } from '../../../src/fleet/assistant/actions/pending-action.domain';
 import { PendingActionExpirySweeper } from '../../../src/fleet/assistant/actions/pending-action-expiry.sweeper';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
 import { SYSTEM_ACTOR } from '../../../src/fleet/common/system-actor';
 import { FLEET_JOB_REPOSITORY, type FleetJobRecord, type IFleetJobRepository } from '../../../src/fleet/jobs/domain/fleet-job.domain';
 import { JobTransitionsService } from '../../../src/fleet/jobs/job-transitions.service';
@@ -34,6 +36,7 @@ interface Proposal { actionId: string; approvalId: string; threadId: string; job
 
 describeIntegration('expiring an assistant_action (PG, US-007)', () => {
   let app: NathApplication;
+  let server: ReturnType<NathApplication['getHttpServer']>;
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
   let actions: AssistantActionService;
@@ -110,10 +113,12 @@ describeIntegration('expiring an assistant_action (PG, US-007)', () => {
     // The interval must stay armless: the tests call `tick` themselves, and a background tick would sweep a second time.
     for (const key of ['FLEET_SWEEP_ENABLED', 'FLEET_THREADS_ENABLED'] as const) saved[key] = process.env[key];
     process.env['FLEET_SWEEP_ENABLED'] = 'false';
+    process.env['FLEET_THREADS_ENABLED'] = 'true';
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
+    server = app.getHttpServer();
     prisma = fixtureDb(app);
-    world = await seedFleetHttpWorld(app.getHttpServer(), prisma);
+    world = await seedFleetHttpWorld(server, prisma);
     actions = app.get(AssistantActionService, { strict: false });
     sweeper = app.get(PendingActionExpirySweeper, { strict: false });
     transitions = app.get(JobTransitionsService);
@@ -121,6 +126,8 @@ describeIntegration('expiring an assistant_action (PG, US-007)', () => {
     tx = app.get<ITransactionManager>(TRANSACTION_MANAGER);
     runnerId = (await insertRunner(prisma)).id;
   }, 120_000);
+
+  afterEach(() => { vi.restoreAllMocks(); });
 
   afterAll(async () => {
     try {
@@ -160,6 +167,9 @@ describeIntegration('expiring an assistant_action (PG, US-007)', () => {
     await sweeper.tick(new Date());
 
     expect(await approvalRow(approvalId)).toMatchObject({ status: 'expired', resolvedBy: 'timeout' });
+    expect(await prisma.auditEntry.findMany({ where: { resourceId: approvalId, key: 'system.assistant-action.expire' } })).toMatchObject([
+      { resourceType: 'fleet-approval', actorType: 'SYSTEM', actorId: 'assistant-action', summary: 'expired', projectId: world.projectId },
+    ]);
   });
 
   it('AC-4: after that tick the thread carries the system note of an expired action', async () => {
@@ -171,6 +181,32 @@ describeIntegration('expiring an assistant_action (PG, US-007)', () => {
     expect(notes.map((note) => note.content)).toEqual([`Action ${actionId} (${TOOL}) expired without a decision.`]);
     expect(notes[0]).toMatchObject({ role: 'system', status: 'complete', authorUserId: null });
     expect(notes[0].seq).toBeGreaterThan(0);
+  });
+
+  it('AC-10: requester decide expiry commits system audit before HTTP 409', async () => {
+    const { actionId, approvalId } = await propose({ now: past() });
+    const response = await request(server).post(`/api/projects/web/fleet/approvals/${approvalId}/decide`)
+      .set({ Authorization: `Bearer ${world.tokens.dev}` }).send({ decision: 'approve' });
+    expect(response.status).toBe(409);
+    expect(await actionRow(actionId)).toMatchObject({ status: 'EXPIRED' });
+    expect(await prisma.auditEntry.findMany({ where: { resourceId: approvalId, key: 'system.assistant-action.expire' } })).toMatchObject([
+      { actorType: 'SYSTEM', actorId: 'assistant-action', summary: 'expired', resourceType: 'fleet-approval', projectId: world.projectId },
+    ]);
+    expect(await prisma.auditEntry.findMany({ where: { resourceId: approvalId, key: 'fleet.approval.decide.assistant' } })).toHaveLength(0);
+  });
+
+  it('AC-15: an audit failure rolls back the expired action, approval and note', async () => {
+    const { actionId, approvalId, threadId } = await propose({ now: past() });
+    const audit = app.get(AuditRecorder);
+    const record = vi.spyOn(audit, 'record').mockRejectedValue(new Error('audit refused'));
+
+    const failed = await sweeper.tick(new Date());
+    expect(failed.expired).toBe(0);
+    expect(failed.failed).toBeGreaterThanOrEqual(1);
+    expect(await actionRow(actionId)).toMatchObject({ status: 'PENDING', decidedAt: null });
+    expect(await approvalRow(approvalId)).toMatchObject({ status: 'pending', resolvedBy: null });
+    expect(await systemNotes(threadId)).toHaveLength(0);
+    record.mockRestore();
   });
 
   it('AC-5: an action whose expiresAt is after now keeps PENDING, and its approval keeps pending', async () => {
