@@ -1,0 +1,633 @@
+{
+  "project": "koda",
+  "feature": "permissions-p2-audit-fleet-system",
+  "branchName": "feat/permissions-p2-audit-fleet-system",
+  "createdAt": "2026-10-25T00:00:00.000Z",
+  "updatedAt": "2026-10-25T06:56:55.068Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Audit runner job transitions and boot reconciliation",
+      "description": "**Goal** \u2014 Record runner.sync atomically for runner-reported and command-ack job transitions and boot reconciles that write runner.rebooted.\n\n**Motivation** \u2014 A job that a runner finishes, a job crashed by the sweeper, a budget hard stop, an expired approval, a scheduled fire or a nightly log purge records none.\n\n**Approach** \u2014 **Runner-reported transitions record `runner.sync`.** `JobReportProcessor` and `CommandAckProcessor` record after each `JobTransitionsService.apply`, with the summary `<FROM> -> <TO>` (the job's state before and after). `JobTransitionsService` itself does not record: audit-fleet-routes already records `fleet.job.cancel` and `fleet.job.requeue` around its route calls, and a recording in `apply` would double them.\n\n**A reboot records once per reconcile that writes its activity row.** `CommandAckProcessor.reconcileBoot` records `runner.sync` on the runner when it writes `runner.rebooted`, with summary `rebooted, <n> readopts queued` (or `<n> readopts queued` when the boot id did not change).\n\n**Runner traffic records only state changes.** A job transition, a bash ask opened, a `READOPT` queued after a reboot, an enrollment, a bundle stored. Heartbeats, command delivery, acks that change nothing, log chunks, event rows, cost mirrors and fences record nothing (see the Bookkeeping table). This follows the audit-fleet-routes call \"audited only where they change state\".\n\nImplement record after applyOne's transition and after each of processOne's three transitions (READOPT rejected -> CRASHED, ASSIGN rejected -> FAILED, CANCEL rejected -> CANCELLED), in the already-open per-job/per-ack transaction. Job entries use resourceType fleet-job, resourceId job.id, projectId job.projectId; boot entries use fleet-runner, runnerId, null. The actor is RUNNER/runnerId and origin runner from the request context. Reconcile records iff rebooted || queued > 0, including reboot with zero readopts. Add required AuditRecorder last to JobReportProcessor and immediately before optional threadEffects in CommandAckProcessor. Update every direct construction in job-report.processor.spec.ts and command-ack.processor.spec.ts with mockAuditRecorder, preserving all existing assertions. Do not move dedup, fencing, mirrors, rejected-event activity or ack logic. Await audit so rejection rolls back the job/ack/reconcile transaction; existing sync catches log and skip that report or ack without changing the 200 response, leaving failed reports unacked.\n\n**Scope** \u2014 In: JobReportProcessor.applyOne, CommandAckProcessor.processOne/reconcileBoot, corresponding constructor callers and new real-AppModule integration scenarios. Out: enrollment/bundles (US-002), server job writers and placement (US-003), budgets (US-004), bash ask creation/expiry (US-005), schedules (US-006), retention/PR refresh (US-007), thread turn ends/knowledge (US-008). Do not add audit to JobTransitionsService, assignment, fencing or other Bookkeeping writes.\n\n**Interface** \u2014 `AuditRecorder.record(input)` and `AuditRecorder.audited(fn, entriesOf)` (`entriesOf` may return `[]`), `AuditRecordInput { key; resourceType; resourceId; projectId?; summary? }`. Use record inside existing txManager.run; no interceptor or @Audit decorator.\n\n**Verification** \u2014 Create audit-fleet-runner-sync.integration.spec.ts using real runner HTTP sync and stored AuditEntry queries. Mirror runner-sync-lifecycle and runner-sync fixtures; set/restore FLEET_SYNC_WAIT_MS=800, finish held jobs after each case, and isolate matching-key audit failure spies as described in analysis.",
+      "acceptanceCriteria": [
+        "When a RUN job's ASSIGN is acked and its runner sync reports { seq: 1, type: 'state', payload: { to: 'RUNNING' } }, then one job AuditEntry matches { key: 'runner.sync', resourceType: 'fleet-job', projectId: web.id, actorType: 'RUNNER', actorId: runner.id, origin: 'runner', summary: 'ASSIGNED -> RUNNING' } (spec AC1, integration).",
+        "When a running job's sync reports seq 2 UPLOADING and seq 3 COMPLETED state events, then its new runner.sync entries have exactly the summaries ['RUNNING -> UPLOADING', 'UPLOADING -> COMPLETED'] (spec AC2, integration).",
+        "When AC2's two events are resent with identical seqs and payloads in a later sync, then the job's runner.sync entry count is unchanged (spec AC3, integration).",
+        "When a running job's sync reports a state event to QUEUED, which the runner transition table refuses, then the job remains RUNNING and its runner.sync entry count is unchanged, with only the existing job.event_rejected activity row recording the refusal (spec AC4, integration; Failure Handling).",
+        "When a running job's sync reports a snapshot as fleet-budget-evaluator.integration.spec.ts does, then its runner.sync entry count is unchanged (spec AC5, integration).",
+        "When a running job's sync reports a state event at a lease epoch other than the job's, then the count of entries for the job is unchanged and the fence queues ABANDON as bookkeeping (spec AC6, integration; Failure Handling).",
+        "When sync acknowledges ASSIGN with result rejected, then the outcome is { jobState: 'FAILED', newJobEntries: [{ key: 'runner.sync', summary: 'ASSIGNED -> FAILED' }] } (spec AC7, integration).",
+        "When sync reports bootId boot-2 while the runner holds one RUNNING job, then one entry for the runner matches { key: 'runner.sync', resourceType: 'fleet-runner', projectId: null, actorType: 'RUNNER', summary: 'rebooted, 1 readopts queued' } (spec AC8, integration).",
+        "When sync acknowledges AC8's READOPT with result rejected, then the outcome is { jobState: 'CRASHED', newJobEntries: [{ key: 'runner.sync', summary: 'RUNNING -> CRASHED' }] } (spec AC9, integration).",
+        "When a second running job's runner reboots with bootId boot-3 and then acknowledges its READOPT with result ok, then the count of entries for that job is unchanged by the acknowledgement (spec AC10, integration).",
+        "When sync has no events, no acks and the runner's current boot id, then the count of entries with actorId runner.id is unchanged (spec AC11, integration).",
+        "When sync acknowledges ASSIGN with result rejected and AuditRecorder.record rejects for runner.sync, then the outcome is { httpStatus: 200, jobState: 'ASSIGNED' } (spec AC12, integration).",
+        "When sync reports to RUNNING for an ASSIGNED job and AuditRecorder.record rejects for runner.sync, then the outcome is { httpStatus: 200, jobAcksForJob: [], jobState: 'ASSIGNED' } (spec AC13, integration).",
+        "When record rejects inside a job report, command ack or boot reconcile transaction, then that transaction's domain rows and audit entry roll back and sync logs and skips that failed report, ack or reconcile through its existing error path (Failure Handling, integration)."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "audit",
+        "runner-protocol"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two existing processors add recorder calls at established transaction boundaries without a new abstraction; runner identity and lease-fencing regression cases retain the security-mandated strict test strategy."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/sync/job-report.processor.ts",
+        "apps/api/src/fleet/sync/command-ack.processor.ts",
+        "apps/api/src/fleet/sync/sync.service.ts",
+        "apps/api/test/integration/fleet/runner-sync-lifecycle.integration.spec.ts",
+        "apps/api/test/integration/fleet/runner-sync.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-fleet-runner-sync.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a runner rejects a CANCEL command that transitions its RUNNING job to CANCELLED, then exactly one runner.sync entry has summary RUNNING -> CANCELLED.",
+        "When reconcileBoot queues READOPTs without a changed boot id, then its fleet-runner entry summary is <n> readopts queued without the rebooted prefix."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/sync/job-report.processor.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter and records runner.sync on the job after each transition applyOne applies; dedup, fencing, mirrors, rejected events and the ack are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/job-report.processor.spec.ts",
+          "reason": "its direct new JobReportProcessor(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/command-ack.processor.ts",
+          "reason": "injects AuditRecorder right before the optional threadEffects parameter, records runner.sync on the job after each of processOne's three transitions, and on the runner when reconcileBoot writes its runner.rebooted row; acks that change no job are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/command-ack.processor.spec.ts",
+          "reason": "its direct new CommandAckProcessor(...) passes mockAuditRecorder (from global-stubs.module.ts) right before the threadEffects argument; the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Audit runner enrollment and bundle uploads",
+      "description": "**Goal** \u2014 Record runner.enroll and runner.bundle.upload in their domain transactions with the enrolling or uploading runner's identity.\n\n**Motivation** \u2014 Those are the writes nobody clicked, and the Audit log (`GET /api/audit`) is the only place that would show who or what made them.\n\n**Approach** \u2014 **The enroll entry is the new runner's.** `POST /fleet/runner/enroll` is `@Public`, so its request context is `SYSTEM/anonymous`. `EnrollmentService.enroll` records `runner.enroll` inside `runWithActionContext({ actor: { type: 'RUNNER', id: created.id }, origin: 'runner' }, ...)`, so the entry names the runner that enrolled.\n\nEnrollmentService already injects AuditRecorder: reuse this.audit. Record inside enroll's txManager.run after the activity row, with key runner.enroll, resourceType fleet-runner, resourceId created.id, projectId null, summary enrolled from enrollment <enrollmentId>. Only the audit call changes context; token checks, name uniqueness, enrollment linking and response are unchanged. Add the capturing-currentActor unit case to enrollment.service.spec.ts.\n\nBundleService.upload injects required AuditRecorder as the last constructor argument and records runner.bundle.upload after the activity row, inside the existing upload transaction. Use resourceType fleet-job, resourceId job.id, projectId job.projectId, summary bundle uploaded at epoch <E>, or bundle replaced at epoch <E> when the epoch already had one. Preserve the fence, state checks, stored-file streaming, ingest enqueue and post-commit fallback/kick. The actor is RUNNER/runnerId with origin runner supplied by ActionContextInterceptor. Update direct new BundleService calls in bundle.service.spec.ts with mockAuditRecorder and keep existing assertions. An audit rejection must roll back Runner creation/token consumption or the artifact/ingest rows and surface an existing request error, not be swallowed.\n\n**Scope** \u2014 In: EnrollmentService.enroll, BundleService.upload, constructor callers and integration/unit behavior. Out: transition/reconcile entries (US-001), ingest drain auditing (US-003), approval asks (US-005), enrollment/log purges (US-007), thread folding (US-008), all other stories' writers. Logs and runner/me remain unaudited. Deleting the stored bundle file when upload's transaction throws is excluded: retain today's file lifecycle rather than adding compensation.\n\n**Interface** \u2014 `AuditRecorder.record(input)`; `runWithActionContext(input, fn)`; `AuditRecordInput { key; resourceType; resourceId; projectId?; summary? }`. EnrollmentService reuses its existing dependency; BundleService gains a required AuditRecorder last.\n\n**Verification** \u2014 Create audit-fleet-runner-enroll-bundle.integration.spec.ts with bootHttpApp, seedFleetHttpWorld, fixtureDb and real runner routes. Mirror runner-enrollment and fleet-bundles integration precedents, tarGz, throttle resets and key-filtered audit rejection spies; do not bypass token or fencing checks. The spec's FleetArtifact means the existing FleetJobArtifact persistence model, not a new schema.",
+      "acceptanceCriteria": [
+        "When POST /api/fleet/runner/enroll receives a fresh enrollment token, then the 201 result's runnerId has exactly one entry matching { key: 'runner.enroll', resourceType: 'fleet-runner', projectId: null, actorType: 'RUNNER', actorId: returnedRunnerId, origin: 'runner', summary: 'enrolled from enrollment <enrollmentId>' } (spec AC1, integration).",
+        "When POST /api/fleet/runner/enroll receives an already-used token, then the outcome is { httpStatus: 401, runnerEnrollEntryCount: unchanged } (spec AC2, integration).",
+        "When enroll first uses a fresh token with a taken runner name and then reuses that token with a free name, then the outcomes are { firstHttpStatus: 409, firstRunnerEnrollEntryCount: unchanged, secondHttpStatus: 201 } (spec AC3, integration).",
+        "When enroll uses a fresh token and record rejects for runner.enroll, then the outcome is { httpStatus: error, runnerRowCount: unchanged, enrollmentUsedAt: null } (spec AC4, integration).",
+        "When PUT /api/fleet/runner/jobs/:jobId/bundle?leaseEpoch=<E> uploads a valid gzip bundle for the runner's RUNNING job at epoch E, then the 201 outcome includes one job entry matching { key: 'runner.bundle.upload', resourceType: 'fleet-job', projectId: web.id, actorType: 'RUNNER', actorId: runner.id, origin: 'runner', summary: 'bundle uploaded at epoch <E>' } (spec AC5, integration).",
+        "When the same job receives a second bundle at the same epoch, then one new runner.bundle.upload entry has summary bundle replaced at epoch <E> (spec AC6, integration).",
+        "When bundle upload uses an epoch other than the job's, then it returns 409 with the job's runner.bundle.upload entry count unchanged, while the fence queues ABANDON as bookkeeping (spec AC7, integration; Failure Handling).",
+        "When bundle upload targets a job the runner held that is now COMPLETED, then the outcome is { httpStatus: 409, runnerBundleUploadEntryCountForJob: unchanged } (spec AC8, integration).",
+        "When bundle upload's record rejects for runner.bundle.upload, then the outcome is { httpStatus: error, FleetArtifactRowsForJob: [], FleetBundleIngestRowsForJob: [] } using the existing FleetJobArtifact model for the artifact assertion (spec AC9, integration).",
+        "When PUT /api/fleet/runner/jobs/:jobId/logs/stdout?leaseEpoch=<E>&offset=0 uploads one chunk for a running job, then the outcome is { httpStatus: 200, entryCountWithActorIdRunner: unchanged } (spec AC10, integration).",
+        "When GET /api/fleet/runner/me uses the runner's key, then the outcome is { httpStatus: 200, entryCountWithActorIdRunner: unchanged } (spec AC11, integration).",
+        "When EnrollmentService.enroll runs with stub collaborators, a transaction manager whose run calls its callback and a recorder capturing currentActor(), then its one record call has key runner.enroll and captured actor { type: 'RUNNER', id: createdRunner.id } (spec AC12, unit).",
+        "When enroll receives a wrong or expired enrollment token, then the outcome for each token is { httpStatus: 401, newRunnerEnrollEntries: [] } (Failure Handling, integration)."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "audit",
+        "runner-protocol",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two existing transactional services use established audit patterns, but enrollment tokens, runner credentials and fenced uploads require the security override."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/runners/enrollment.service.ts",
+        "apps/api/src/fleet/artifacts/bundle.service.ts",
+        "apps/api/src/action-context/action-context.ts",
+        "apps/api/test/integration/fleet/runner-enrollment.integration.spec.ts",
+        "apps/api/test/integration/fleet/fleet-bundles.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-fleet-runner-enroll-bundle.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/runners/enrollment.service.ts",
+          "reason": "records runner.enroll inside enroll's transaction after the activity row, within runWithActionContext with the new runner as RUNNER actor and origin runner; the token checks and the response are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/runners/enrollment.service.spec.ts",
+          "reason": "gains the US-002 AC-12 case (enroll records as the new runner); the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/artifacts/bundle.service.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter and records runner.bundle.upload inside upload's transaction after the activity row; the fence, the state check, the ingest enqueue and the kick are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/artifacts/bundle.service.spec.ts",
+          "reason": "its direct new BundleService(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Audit system job transitions and bundle ingest commits",
+      "description": "**Goal** \u2014 Audit silent-runner crashes, paused-budget placement cancellations and completed bundle-ingest write transactions.\n\n**Motivation** \u2014 A job that a runner finishes, a job crashed by the sweeper, a budget hard stop, an expired approval, a scheduled fire or a nightly log purge records none.\n\n**Approach** \u2014 **Placement's assignments are not recorded; its pause-cancels are.** Assigning a `QUEUED` job to a runner is the scheduler's mechanics. The dispatch entry already records who asked for the job, and the runner's `ASSIGNED -> RUNNING` entry records which runner took it. Cancelling a `QUEUED` job because its budget scope is paused is a state change nobody asked for, so `PlacementService.cancelForPause` records it.\n\n**The ingest drain records on its write transaction only.** `BundleIngestService.write` records `system.ingest.drain` on the job. A claim, a retry mark, a failure mark and an expired-bundle failure are the ingest queue's bookkeeping.\n\n**An entry under a `system.*` key always carries that component's actor.** The actor is `SYSTEM/<id>`, where `<id>` is the key's second segment (`system.approval.expire` \u2192 `approval`). It holds even when a request, a runner sync or another component triggered the write. Such a write calls `runAsSystem('<id>', () => this.audit.record(...))`, and in the schedule case passes the owner as `onBehalfOf`. `runAsSystem` inherits the enclosing context's `correlationId`, so the entry still joins the request that caused it. The domain write keeps its own context; only the entry's actor changes. Where the writer already runs as that component (a sweeper's `tick`, the ingest drain, the knowledge drain), it calls `record` or `audited` directly.\n\nInject required AuditRecorder last into FleetSweeper, PlacementService and BundleIngestService. FleetSweeper.crashSilent awaits transitions.apply in its per-job transaction and records system.job.crash-silent-runner with summary <FROM> -> CRASHED before returning the transition result; sweep already runs as SYSTEM/job. In cancelForPause record system.budget.window-reset as SYSTEM/budget after apply, with summary QUEUED -> CANCELLED: budget <policyId> paused; this covers placeJob, fillRunner and fillRunnerThreads without touching assign. BundleIngestService.write records system.ingest.drain after markOutcome with ingested done or ingested partial; corrections are covered by that same entry. Every entry uses fleet-job, job.id and job.projectId, origin system. Keep scans/rechecks, claim/retry/failure behavior and all post-commit publication, budget signals, knowledge events and ticket effects unchanged. Audit failure rolls back domain writes: sweep and fillRunner reject as today, while ingest marks retry/attempt through its existing catch.\n\nUpdate direct constructors with mockAuditRecorder in fleet-sweeper.spec.ts; placement.service.project-code.spec.ts, placement.service.thread-write.spec.ts, placement.service.project-thread.spec.ts, placement.service.koda-tools.spec.ts; bundle-ingest.service.spec.ts, bundle-ingest.pr-links.spec.ts, bundle-ingest.workflow.spec.ts and bundle-ingest.outcomes.spec.ts. Preserve all existing assertions.\n\n**Scope** \u2014 In: the three system write boundaries and their tests. Out: runner transitions (US-001), bundle upload (US-002), evaluator/sweeper budget incidents and hard-stop cancels (US-004), shared approval expiry/opening (US-005), schedules (US-006), retention/PR refresh (US-007), thread/knowledge (US-008). FleetJobTicketEffects, placement assignments, ingest queue bookkeeping and naming verdict corrections in the summary remain excluded.\n\n**Interface** \u2014 `AuditRecorder.record(input)` inside existing `txManager.run`; `runAsSystem(component, fn, opts?)`. No JobTransitionsService, activity payload, repository contract or caller signature change beyond the required constructor dependency.\n\n**Verification** \u2014 Create audit-fleet-system-jobs.integration.spec.ts through app.get(FleetSweeper).sweep, real PlacementService.fillRunner under a runner actor, and BundleIngestService.drain under ingest actor. Mirror fleet-sweep, fleet-budget-placement and fleet-ingest precedents and inspect stored audit rows plus domain rollback.",
+      "acceptanceCriteria": [
+        "When app.get(FleetSweeper).sweep(now) sees a RUNNING job on an insertRunner runner last seen 301 seconds before now (as fleet-sweep.integration.spec.ts sets it up), then the outcome is { jobState: 'CRASHED', newJobEntries: [{ key: 'system.job.crash-silent-runner', resourceType: 'fleet-job', projectId: job.projectId, actorType: 'SYSTEM', actorId: 'job', origin: 'system', summary: 'RUNNING -> CRASHED' }] } (spec AC1, integration).",
+        "When sweep(now) repeats after AC1, then the job's system.job.crash-silent-runner entry count is unchanged (spec AC2, integration).",
+        "When sweep(now) sees a RUNNING job whose runner was last seen 10 seconds before now, then the outcome is { jobState: 'RUNNING', entriesForJob: [] } (spec AC3, integration).",
+        "When sweep(now) processes a silent runner's RUNNING job and record rejects for system.job.crash-silent-runner, then the call rejects with the job still RUNNING (spec AC4, integration).",
+        "When fillRunner(runnerId, 1) runs inside withTestActor({ type: 'RUNNER', id: runnerId }) with one QUEUED job in a project whose project budget policy is paused (as fleet-budget-placement.integration.spec.ts sets it up), then the outcome is { jobState: 'CANCELLED', newJobEntries: [{ key: 'system.budget.window-reset', actorType: 'SYSTEM', actorId: 'budget', summary: 'QUEUED -> CANCELLED: budget <policyId> paused' }] } (spec AC5, integration).",
+        "When fillRunner(runnerId, 1) runs under that runner actor with a QUEUED job and no paused policy, then the outcome is { jobState: 'ASSIGNED', entriesForJob: [] } (spec AC6, integration).",
+        "When BundleIngestService.drain(now) runs under SYSTEM/ingest with one pending ingest row for a COMPLETED job whose bundle is stored as in fleet-ingest.integration.spec.ts, then its outcome is { returned: 1, newJobEntries: [{ key: 'system.ingest.drain', resourceType: 'fleet-job', actorType: 'SYSTEM', actorId: 'ingest', summary: 'ingested done' }] } (spec AC7, integration).",
+        "When drain(now) has no claimable ingest row, then the outcome is { returned: 0, systemIngestDrainEntryCount: unchanged } (spec AC8, integration).",
+        "When drain(now) processes a pending row whose artifact has expiredAt set, then the outcome is { ingestStatus: 'failed', systemIngestDrainEntriesForJob: [] } (spec AC9, integration).",
+        "When drain(now) processes one pending row and record rejects for system.ingest.drain, then its ingest row matches { status: not 'done', attempts: 1 } (spec AC10, integration).",
+        "When AC5's fillRunner call encounters record rejection for system.budget.window-reset, then it rejects with the job still QUEUED (spec AC11, integration)."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "audit",
+        "system-writers",
+        "ingest"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Three existing writer classes add the same recorder pattern after existing mutations; transaction owners, placement locks and ingest retries already exist, and no authentication or authorization logic changes."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/sync/fleet-sweeper.ts",
+        "apps/api/src/fleet/jobs/placement.service.ts",
+        "apps/api/src/fleet/ingest/bundle-ingest.service.ts",
+        "apps/api/test/integration/fleet/fleet-sweep.integration.spec.ts",
+        "apps/api/test/integration/fleet/fleet-budget-placement.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-fleet-system-jobs.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a stored bundle parses as partial and its ingest transaction commits, then its system.ingest.drain summary is ingested partial."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/sync/fleet-sweeper.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter and records system.job.crash-silent-runner inside the per-job transaction after the transition; the scan, the re-check and the post-commit effects are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/fleet-sweeper.spec.ts",
+          "reason": "its direct new FleetSweeper(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement.service.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter and records system.budget.window-reset as SYSTEM/budget in cancelForPause after the transition; assignments record nothing and are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement.service.project-code.spec.ts",
+          "reason": "its direct new PlacementService(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement.service.thread-write.spec.ts",
+          "reason": "its direct new PlacementService(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement.service.project-thread.spec.ts",
+          "reason": "its direct new PlacementService(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement.service.koda-tools.spec.ts",
+          "reason": "its direct new PlacementService(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.service.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter and records system.ingest.drain inside write's transaction after markOutcome; claims, retries, failures and the post-commit hooks are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.service.spec.ts",
+          "reason": "its direct new BundleIngestService(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.pr-links.spec.ts",
+          "reason": "its direct new BundleIngestService(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.workflow.spec.ts",
+          "reason": "its direct new BundleIngestService(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.outcomes.spec.ts",
+          "reason": "its direct new BundleIngestService(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Audit budget sweeps, warnings and hard stops",
+      "description": "**Goal** \u2014 Audit orphan budget deletion, monthly window reset, inserted warning incidents and hard stops under SYSTEM/budget in their write transaction.\n\n**Motivation** \u2014 A job that a runner finishes, a job crashed by the sweeper, a budget hard stop, an expired approval, a scheduled fire or a nightly log purge records none.\n\n**Approach** \u2014 **A system writer records under its own catalog key; the summary names the event.** `BudgetSweeper` and `BudgetEvaluator` both belong to the `system.budget.window-reset` family, so an orphan delete, a window reset, a warn, a hard stop and placement's pause-cancel all record `system.budget.window-reset` and differ by summary. Adding a catalog key per event would change the inventory TSV, `NEW_KEY_SCOPES` in `catalog.spec.ts` and the role-matrix snapshot. This is the same pattern as audit-fleet-ops' `fleet.schedule.update` for enable and disable.\n\n**An entry under a `system.*` key always carries that component's actor.** The actor is `SYSTEM/<id>`, where `<id>` is the key's second segment (`system.approval.expire` \u2192 `approval`). It holds even when a request, a runner sync or another component triggered the write. Such a write calls `runAsSystem('<id>', () => this.audit.record(...))`, and in the schedule case passes the owner as `onBehalfOf`. `runAsSystem` inherits the enclosing context's `correlationId`, so the entry still joins the request that caused it. The domain write keeps its own context; only the entry's actor changes. Where the writer already runs as that component (a sweeper's `tick`, the ingest drain, the knowledge drain), it calls `record` or `audited` directly.\n\nAdd required AuditRecorder last to BudgetSweeper and BudgetEvaluator. In deleteOrphan/resetWindow, record after the activity row inside their txManager.run callbacks; tick already enters budget context. In warn record only after insertIncident returned true and after activity; in hardStop record after activity using cancelForBudget's returned cancelled/requested list lengths. Wrap evaluator entries with runAsSystem('budget', ...) rather than changing the entire evaluation's context. All four use key system.budget.window-reset, resourceType fleet-budget, resourceId policy.id, projectId policy.projectId (null for global/runner). Exact summaries are deleted: scope gone; window reset; warn incident; hard stop: <c> cancelled, <r> cancel requested. Do not print spend or amount. No incident/no stop means no entry; an already-paused hard stop makes no write and no new entry. Preserve debounce, signal, webhooks, approval closes and post-commit publishing. On audit failure, direct evaluate rejects and rolls back pause/incident/cancel writes; BudgetSweeper logs and skips the policy with failed incremented. Update budget-sweeper.spec.ts and budget-evaluator.spec.ts constructors with mockAuditRecorder, keeping assertions.\n\n**Scope** \u2014 In: BudgetSweeper.deleteOrphan/resetWindow and BudgetEvaluator.warn/hardStop plus their real integration behavior. Out: placement's pause-cancel (US-003), approval-specific expiry/opening (US-005), other stories' writers and all additional entries on cancelForBudget's nested job cancels or closeForPolicy. Catalog keys and monetary logic remain unchanged.\n\n**Interface** \u2014 `AuditRecorder.record(input)` in existing `txManager.run`; `runAsSystem(component, fn, opts?)`. Add no new public service method or catalog key.\n\n**Verification** \u2014 Create audit-fleet-system-budgets.integration.spec.ts using BudgetSweeper.tick and BudgetEvaluator.evaluate fetched from booted AppModule. Mirror fleet-budget-sweeper/evaluator fixtures, including Decimal spend, orphan scope, previous monthly window and explicit runner-context attribution; assert durable audit rows and rollback on matching-key rejection.",
+      "acceptanceCriteria": [
+        "When app.get(BudgetSweeper).tick(now) processes a runner-scope policy whose runner row was deleted (as fleet-budget-sweeper.integration.spec.ts sets up an orphan), then the outcome is { deleted: 1, newPolicyEntries: [{ key: 'system.budget.window-reset', resourceType: 'fleet-budget', projectId: null, actorType: 'SYSTEM', actorId: 'budget', origin: 'system', summary: 'deleted: scope gone' }] } (spec AC1, integration).",
+        "When tick(now) processes a calendar_month_utc project policy paused in the previous month's window, then the outcome is { reset: 1, newPolicyEntries: [{ key: 'system.budget.window-reset', projectId: policy.projectId, summary: 'window reset' }] } (spec AC2, integration).",
+        "When tick(now) processes an existing-scope, unpaused policy whose spend reaches neither warn nor amount, then no entry exists for the policy (spec AC3, integration).",
+        "When evaluate(policyId) runs under SYSTEM/budget for a project policy with warnPercent 50, amountUsd 10 and hardStop false over a COMPLETED job of that project with costSpentUsd 6 started in the window (as fleet-budget-evaluator.integration.spec.ts sets spend), then one policy entry has summary warn incident (spec AC4, integration).",
+        "When evaluate(policyId) repeats for AC4's policy, then its warn incident entry count is unchanged (spec AC5, integration).",
+        "When evaluate(policyId) processes a project policy with amountUsd 5, warnPercent null and hardStop true over spend 6 from a COMPLETED job of that project and one QUEUED job of that project (no job held by a runner), then the outcome is { policyPaused: true, queuedJobState: 'CANCELLED', newPolicyEntries: [{ summary: 'hard stop: 1 cancelled, 0 cancel requested' }] } (spec AC6, integration).",
+        "When AC6's hard stop cancels the QUEUED job, then no system.budget.window-reset entry has that job's resourceId (spec AC7, integration).",
+        "When evaluate(policyId) repeats for AC6's paused policy, then its hard stop entry count is unchanged (spec AC8, integration).",
+        "When evaluate(policyId) reaches a hard stop with warnPercent null inside withTestActor({ type: 'RUNNER', id: runnerId }), then the hard-stop entry actor is { actorType: 'SYSTEM', actorId: 'budget' } (spec AC9, integration).",
+        "When evaluate(policyId) reaches a hard stop with warnPercent null and record rejects for system.budget.window-reset, then the call rejects with { policyPausedAt: null, queuedJobState: 'QUEUED' } (spec AC10, integration).",
+        "When BudgetSweeper.tick(now) processes AC1's orphan and record rejects, then the outcome is { failed: 1, deleted: 0, orphanPolicyStillStored: true } (spec AC11, integration)."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "audit",
+        "budgets",
+        "system-writers"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Two existing budget writers add established recorder calls with explicit context and result-derived summaries; no new authorization, financial computation or abstraction is introduced."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/budgets/budget-sweeper.ts",
+        "apps/api/src/fleet/budgets/budget-evaluator.ts",
+        "apps/api/src/audit/audit-recorder.service.ts",
+        "apps/api/test/integration/fleet/fleet-budget-sweeper.integration.spec.ts",
+        "apps/api/test/integration/fleet/fleet-budget-evaluator.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-fleet-system-budgets.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a hard stop cancels one queued job and requests cancellation of one held job, then its policy entry summary is hard stop: 1 cancelled, 1 cancel requested."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/budgets/budget-sweeper.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter and records system.budget.window-reset inside deleteOrphan's and resetWindow's transactions after the activity row; evaluation and the approval closes are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/budgets/budget-sweeper.spec.ts",
+          "reason": "its direct new BudgetSweeper(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/budgets/budget-evaluator.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter and records system.budget.window-reset as SYSTEM/budget in warn (when it inserted the incident) and hardStop after the activity row; signal, debounce and webhooks are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/budgets/budget-evaluator.spec.ts",
+          "reason": "its direct new BudgetEvaluator(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Audit new bash asks and committed approval expiry closes",
+      "description": "**Goal** \u2014 Audit new runner bash asks, shared bash/assistant expiry paths and the job-ended close that a bash decide commits before its existing 409.\n\n**Motivation** \u2014 A job that a runner finishes, a job crashed by the sweeper, a budget hard stop, an expired approval, a scheduled fire or a nightly log purge records none.\n\n**Approach** \u2014 **Expiry closes record in the shared closer, so a sweeper and a decide record the same way.** `ApprovalCloser.expire` (called by `ApprovalExpirySweeper` and by a bash decide past `expiresAt`) records `system.approval.expire`. `AssistantActionDecisions.expireLocked` (called by `PendingActionExpirySweeper` and by an assistant decide past `expiresAt`) records `system.assistant-action.expire`. The bash decide's job-end close (`resolvedBy: 'job_ended'`, `approvals.service.ts:172`) records `system.approval.expire` in `ApprovalsService.decideBash`. The decide then refuses with 409 as today; the close and its entry have already committed.\n\n**A bash ask opened by a runner records in `ApprovalCloser.openBash`.** Only `openBash` knows whether it created the row: it returns an existing ask unchanged. It records `runner.sync` on the new approval after creating it (after the resolve, for an ask born closed, so the summary carries the stored status), and not on the existing-ask return. A close of a job's asks when the job leaves `RUNNING` (`closeForJob`) is in the transition's transaction and is covered by the transition's entry.\n\nAdd required AuditRecorder last to ApprovalCloser; ApprovalsService and AssistantActionDecisions reuse this.audit. All entries use resourceType fleet-approval, resourceId approval.id, projectId approval.projectId. A new bash ask records runner.sync as RUNNER/runnerId, origin runner, summary bash ask opened, <status>, where status is stored pending/cancelled/expired. Bash expiry records system.approval.expire as SYSTEM/approval, origin system, summary expired; the decide job-end close uses the same key/actor and closed: job ended. Assistant expiry records system.assistant-action.expire as SYSTEM/assistant-action, origin system, summary expired. Wrap only these system audit calls with runAsSystem so user/runner-triggered closes retain the component actor and inherit correlationId while the domain context is unchanged. Record in the caller's existing transaction; never move the refusal inside it. Keep decision validation, self-approval/requester restrictions, successful decision entries, returned statuses, webhook/outbox and live events unchanged. Generic recordResolved and closeForJob/closeForPolicy must not acquire their own entries. Audit failure rolls back the close and any related action/note, causing the existing sweeper log/failed path or a request error other than the normal 409.\n\nUpdate new ApprovalCloser calls in approval-closer.spec.ts and approvals.service.spec.ts with mockAuditRecorder and preserve assertions; add the existing-ask unit case.\n\n**Scope** \u2014 In: ApprovalCloser.openBash/expire, decideBash's job-end branch, AssistantActionDecisions.expireLocked. Out: runner transitions (US-001), other runner operations (US-002), server transitions (US-003), budget transaction closes (US-004), scheduled job counters/closes (US-006), retention (US-007), transcript folds (US-008). Nested closes covered by another transaction's entry and broader P3 refusal auditing remain excluded.\n\n**Interface** \u2014 `AuditRecorder.record(input)`; `runAsSystem(component, fn, opts?)`. No change to decide HTTP status/body/@Requires keys or shared closer method signatures.\n\n**Verification** \u2014 Create audit-fleet-system-approvals.integration.spec.ts. New asks enter by runner sync; closes enter by real decide HTTP or the booted ApprovalExpirySweeper/PendingActionExpirySweeper.tick. Mirror fleet-approval-relay, assistant-actions-expiry and audit-fleet-approvals fixtures; verify stored actor/resource rows and the committed close despite a 409, not a stubbed service decision.",
+      "acceptanceCriteria": [
+        "When runner sync reports an approval_request for a RUNNING job with bashMode escalate as in fleet-approval-relay.integration.spec.ts, then one entry for the new approval matches { key: 'runner.sync', resourceType: 'fleet-approval', projectId: web.id, actorType: 'RUNNER', actorId: runner.id, summary: 'bash ask opened, pending' } (spec AC1, integration).",
+        "When runner sync reports an approval_request for a RUNNING job with bashMode raw, then one new approval entry matches { key: 'runner.sync', summary: 'bash ask opened, cancelled' } (spec AC2, integration).",
+        "When AC1's approval_request is resent with the same seq and payload, then the approval's entry count is unchanged (spec AC3, integration).",
+        "When ApprovalExpirySweeper.tick(now) processes a pending bash ask with expiresAt before now using the audit-fleet-approvals bashApproval setup, then the outcome is { expired: 1, newApprovalEntries: [{ key: 'system.approval.expire', actorType: 'SYSTEM', actorId: 'approval', origin: 'system', summary: 'expired' }] } (spec AC4, integration).",
+        "When tick(now) repeats for AC4's approval, then its system.approval.expire entry count is unchanged (spec AC5, integration).",
+        "When root POSTs { decision: 'allow' } to /api/fleet/approvals/:id/decide for a pending bash ask past expiresAt, then the outcome is { httpStatus: 409, newApprovalEntries: [{ key: 'system.approval.expire', actorType: 'SYSTEM', actorId: 'approval', summary: 'expired' }], fleetApprovalDecideBashEntries: [] } with the close and expiry entry committed before the fleet.approvalNotPending refusal (spec AC6, integration; Failure Handling).",
+        "When root POSTs { decision: 'allow' } to /api/fleet/approvals/:id/decide for a pending bash ask whose job is COMPLETED, then the outcome is { httpStatus: 409, newApprovalEntries: [{ key: 'system.approval.expire', actorType: 'SYSTEM', actorId: 'approval', summary: 'closed: job ended' }], fleetApprovalDecideBashEntries: [] } with the close and entry committed before the fleet.approvalNotPending refusal (spec AC7, integration; Failure Handling).",
+        "When sync reports to UPLOADING for a RUNNING job with a pending bash ask, then the outcome is { askClosed: true, systemApprovalExpireEntriesForAsk: [] } (spec AC8, integration).",
+        "When app.get(PendingActionExpirySweeper, { strict: false }).tick(now) processes a proposed assistant action past expiresAt as in assistant-actions-expiry.integration.spec.ts, then the outcome is { expired: 1, newApprovalEntries: [{ key: 'system.assistant-action.expire', resourceType: 'fleet-approval', actorType: 'SYSTEM', actorId: 'assistant-action', summary: 'expired' }] } (spec AC9, integration).",
+        "When the requester's POST /api/fleet/approvals/:id/decide uses decision approve for a pending assistant action past expiresAt, then the outcome is { httpStatus: 409, newApprovalEntries: [{ key: 'system.assistant-action.expire', actorId: 'assistant-action' }], fleetApprovalDecideAssistantEntries: [] } with the expiry and entry committed before refusal (spec AC10, integration; Failure Handling).",
+        "When ApprovalExpirySweeper.tick(now) processes an expired pending bash ask and record rejects for system.approval.expire, then the outcome is { failed: 1, approvalStatus: 'pending' } (spec AC11, integration).",
+        "When POST /api/fleet/approvals/:id/decide finds a pending bash ask's job COMPLETED and record rejects for system.approval.expire, then the outcome is { httpStatus: error other than 409, approvalStatus: 'pending' } (spec AC12, integration).",
+        "When POST /api/fleet/approvals/:id/decide allows a pending unexpired bash ask of a RUNNING job, then the outcome is { httpStatus: 200, systemApprovalExpireEntriesForAsk: [] } (spec AC13, integration).",
+        "When ApprovalCloser.openBash uses a stub repository whose findByAsk returns an existing approval, then it returns that existing approval unchanged with live [] and does not call the stub recorder's record (spec AC14, unit; Failure Handling).",
+        "When record rejects while PendingActionExpirySweeper expires an action, then the item's transaction rolls back and the sweeper logs/skips that item with its approval still pending (Failure Handling, integration)."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "audit",
+        "approvals",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three existing approval writers add audit calls without changing their shared closer interfaces or locks; security-critical decide paths and commit-before-409 behavior require strict test isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/approval-closer.ts",
+        "apps/api/src/fleet/approvals/approvals.service.ts",
+        "apps/api/src/fleet/assistant/actions/assistant-action-decisions.ts",
+        "apps/api/test/integration/fleet/fleet-approval-relay.integration.spec.ts",
+        "apps/api/test/integration/fleet/assistant-actions-expiry.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-fleet-system-approvals.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter, records runner.sync in openBash after creating the row (not on the existing-ask return), and records system.approval.expire as SYSTEM/approval in expire; the other closers are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.spec.ts",
+          "reason": "its direct new ApprovalCloser(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument, and it gains the US-005 AC-14 case (an existing ask records nothing); the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.service.ts",
+          "reason": "decideBash records system.approval.expire as SYSTEM/approval after the job-ended resolve; the 409, the decided path and its fleet.approval.decide.bash entry are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.service.spec.ts",
+          "reason": "its direct new ApprovalCloser(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/assistant-action-decisions.ts",
+          "reason": "expireLocked records system.assistant-action.expire as SYSTEM/assistant-action after resolving the approval; approve, reject and their entries are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Audit schedule fires, coalesces, disables and the fire hook",
+      "description": "**Goal** \u2014 Attribute scheduled dispatch/coalesce/auto-disable to SYSTEM/schedule on the owner's behalf and audit the fire hook separately as its caller.\n\n**Motivation** \u2014 A job that a runner finishes, a job crashed by the sweeper, a budget hard stop, an expired approval, a scheduled fire or a nightly log purge records none.\n\n**Approach** \u2014 **A scheduled fire records `system.schedule.dispatch`.** `FleetJobsService.dispatch`'s `opts.auditKey` union gains `'system.schedule.dispatch'`, and `ScheduleTicker.dispatchFresh` passes it. The fire records one entry under that key, as `SYSTEM/schedule` on the owner's behalf, and no `fleet.job.dispatch` entry beside it. A coalesce and an auto-disable record the same key on the schedule. A skip records nothing; neither does `linkDispatched` (the pointer and its activity row), because the dispatch entry covers the fire. An auto-disable for `owner_lost_access` is decision 7's \"the refusal recorded\".\n\n**The fire test hook records its own entry.** `POST /fleet/test-hooks/schedules/:id/fire` records `testhook.schedule.fire` on the schedule, as the caller, through `audited` with a callback that writes nothing, before it runs the tick. The tick's own entries follow under the rules above. `PUT /fleet/test-hooks/repos/:repoId/nax-files` writes no row (it fills the in-memory fake reader) and records nothing.\n\nAdd required AuditRecorder last to ScheduleTicker and FleetTestHooksController; FleetJobsService already injects it. dispatchFresh retains runAsSystem('schedule', ..., { onBehalfOf: owner }) and passes { scheduleId: s.id, auditKey: 'system.schedule.dispatch' }; no transaction is open around dispatch. Existing dispatch recording remains unchanged except its union: the scheduled job entry is fleet-job/job.id/job.projectId with summary RUN on repo <repoId>, schedule <scheduleId>. In fire's coalesce branch, run coalesceIntoQueued plus its activity row and audit in a single txManager.run; record only if absorbed is truthy. In disable, keep progress.disable and the new record in one transaction, record only if disable returns true. Coalesce/disable are system.schedule.dispatch on fleet-schedule/s.id/s.projectId, summaries coalesced into job <jobId> and disabled: <reason>, where reason is owner_lost_access or template_invalid. For both, wrap only the entry in runAsSystem('schedule', ..., { onBehalfOf: owner }) so a test-hook/user-triggered tick cannot leak USER attribution; owner uses createdByType ?? USER and createdById. Origin system and inherited correlationId apply. The hook entry uses fleet-schedule/s.id/s.projectId, summary fired, caller actor and rest origin, only after off/unknown/disabled checks and before tick. Preserve skips, claimFire, linkDispatched, response and permission keys. Audit failure rolls back the relevant write and the existing ticker catch logs/skips that schedule. Update schedule-ticker.spec.ts constructor and dispatch expectations, plus fleet-test-hooks.controller.spec.ts constructor, with mockAuditRecorder and preserve existing assertions.\n\n**Scope** \u2014 In: ScheduleTicker.dispatchFresh/fire/disable, FleetJobsService.dispatch auditKey union and fire controller. Out: other runner/system writers (US-001 through US-005, US-007 and US-008), placement auditing (US-003), ScheduleProgressService job-end counters/auto-disables covered by their transition transaction, skip/claim/link bookkeeping and nax-files fake-reader hooks. Do not change @Requires, HTTP statuses or OpenAPI.\n\n**Interface** \u2014 Baseline: `opts.auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run'`. Target: `opts.auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run' | 'system.schedule.dispatch'`. `AuditRecorder.audited(fn, entriesOf)` (`entriesOf` may return `[]`); `runAsSystem(component, fn, opts?)`.\n\n**Verification** \u2014 Create audit-fleet-system-schedules.integration.spec.ts with real AppModule. Call ScheduleTicker.tick under withTestActor(SYSTEM/schedule) and fire through HTTP as root; mirror fleet-schedule-ticker fixtures, no enrolled runner for QUEUED coalesces, save/restore FLEET_CFG.testHooksEnabled and assert stored onBehalfOf and actor fields. Confirm manual dispatch retains fleet.job.dispatch.",
+      "acceptanceCriteria": [
+        "When ScheduleTicker.tick(now) runs inside withTestActor({ type: 'SYSTEM', id: 'schedule' }) for an enabled schedule dev created on web's repo whose nextFireAt is before now and which has no active job (as fleet-schedule-ticker.integration.spec.ts sets it up), then the dispatched job has one entry matching { key: 'system.schedule.dispatch', resourceType: 'fleet-job', actorType: 'SYSTEM', actorId: 'schedule', onBehalfOfType: 'USER', onBehalfOfId: dev.id, summary: 'RUN on repo <repoId>, schedule <scheduleId>' } (spec AC1, integration).",
+        "When AC1 dispatches its scheduled job, then no fleet.job.dispatch entry exists for that job (spec AC2, integration).",
+        "When tick reaches that schedule's next nextFireAt while the job remains QUEUED with no runner enrolled, then one schedule entry matches { key: 'system.schedule.dispatch', resourceType: 'fleet-schedule', onBehalfOfId: dev.id, summary: 'coalesced into job <jobId>' } (spec AC3, integration).",
+        "When a tick fires the schedule while its job is RUNNING, then the count of entries for the schedule's id is unchanged, with only the existing schedule.tick_skipped activity row recording the skip (spec AC4, integration; Failure Handling).",
+        "When a tick fires a schedule whose owner no longer holds the project's dispatch key, using owner(null) from the precedent to create an owner with no role in web, then the outcome is { scheduleEnabled: false, newScheduleEntries: [{ key: 'system.schedule.dispatch', actorId: 'schedule', summary: 'disabled: owner_lost_access' }] } (spec AC5, integration).",
+        "When a tick fires a schedule whose cron was directly set to not a cron, then the outcome is { scheduleEnabled: false, newScheduleEntries: [{ summary: 'disabled: template_invalid' }] } (spec AC6, integration).",
+        "When a tick fires AC5's setup and record rejects for system.schedule.dispatch, then the schedule remains enabled (spec AC7, integration).",
+        "When root POSTs /api/fleet/test-hooks/schedules/:id/fire for an enabled schedule with FLEET_CFG.testHooksEnabled true, then the 200 outcome has one schedule entry matching { key: 'testhook.schedule.fire', resourceType: 'fleet-schedule', actorType: 'USER', actorId: root.id, origin: 'rest', summary: 'fired' } (spec AC8, integration).",
+        "When the fire hook coalesces into the schedule's QUEUED job, then the coalesced into job <jobId> entry actor is { actorType: 'SYSTEM', actorId: 'schedule' } (spec AC9, integration).",
+        "When POST /api/fleet/test-hooks/schedules/:id/fire runs with testHooksEnabled false, then the outcome is { httpStatus: 404, testhookScheduleFireEntriesForSchedule: [] } (spec AC10, integration).",
+        "When that POST runs with hooks enabled and an unknown schedule id, then the outcome is { httpStatus: 404, testhookScheduleFireEntryCount: unchanged } (spec AC11, integration).",
+        "When that POST targets a disabled schedule with hooks enabled, then the outcome is { httpStatus: 409, testhookScheduleFireEntriesForSchedule: [] } (spec AC12, integration).",
+        "When dev POSTs /api/projects/web/fleet/jobs manually, then the dispatched job still has a fleet.job.dispatch entry and no system.schedule.dispatch entry (spec AC13, integration).",
+        "When record rejects inside a schedule coalesce or auto-disable transaction, then its domain and audit rows roll back and ScheduleTicker logs/skips that schedule through its existing error path (Failure Handling, integration)."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "audit",
+        "schedules",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The existing ticker/controller gain recorder calls and one coalesce transaction while dispatch only widens its audit-key union; owner-access and permission-guarded hook regressions invoke the strict security strategy."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/schedules/schedule-ticker.ts",
+        "apps/api/src/fleet/schedules/fleet-test-hooks.controller.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/schedules/schedule-ticker.spec.ts",
+        "apps/api/test/integration/fleet/fleet-schedule-ticker.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-fleet-system-schedules.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/schedules/schedule-ticker.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter; dispatchFresh passes auditKey system.schedule.dispatch; the coalesce runs with its activity row in one transaction and records as SYSTEM/schedule on the owner's behalf; disable records likewise when progress.disable returned true; skips record nothing."
+        },
+        {
+          "path": "apps/api/src/fleet/schedules/schedule-ticker.spec.ts",
+          "reason": "its direct new ScheduleTicker(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument, and its dispatch expectations name the new auditKey option; the existing assertions are kept otherwise."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+          "reason": "dispatch's opts.auditKey union gains system.schedule.dispatch; the recording itself is unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/schedules/fleet-test-hooks.controller.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter and records testhook.schedule.fire through audit.audited with a callback that writes nothing, after the off, unknown and disabled refusals and before the tick; the response is unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/schedules/fleet-test-hooks.controller.spec.ts",
+          "reason": "its direct new FleetTestHooksController(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Audit retention runs and non-merge PR refreshes",
+      "description": "**Goal** \u2014 Record per-job log expiry, nonempty spent-enrollment purges and actual non-merge fleet PR link state updates atomically with their row writes.\n\n**Motivation** \u2014 A job that a runner finishes, a job crashed by the sweeper, a budget hard stop, an expired approval, a scheduled fire or a nightly log purge records none.\n\n**Approach** \u2014 **The enrollment purge records one entry per run that deleted rows.** `EnrollmentRetentionProcessor` runs `deleteSpentEnrollmentsBefore` inside `audit.audited`, whose `entriesOf` returns `[]` when the count is 0.\n\n**The PR refresher records only its own link update.** `FleetPrStateRefresher.apply` runs `updateTicketLinkWithPrState` inside `audit.audited` and records when it returned `'updated'`. The merged path calls `VcsPrSyncService.applyMergedPr`, a VCS writer (`system.vcs.pr-merge-transition`), which audit-integrations records.\n\nInject required AuditRecorder last into FleetLogRetentionProcessor, EnrollmentRetentionProcessor and FleetPrStateRefresher. In expireJob keep files-first deletion unchanged, lock the job in the existing transaction, retain the locked job, expire rows and record system.log.retention only when the job was locked. Use fleet-job/candidate.id, projectId the locked job's projectId (a retention candidate carries none), summary logs expired through epoch <E> where E is the candidate's selected lease epoch; never touch newer attempts. The existing scheduledPurge supplies SYSTEM/log; direct purge tests must supply it. Enrollment retention's scheduledPurge already runs as SYSTEM/enrollment: audited wraps just deleteSpentEnrollmentsBefore, yielding one system.enrollment.retention entry on fleet-enrollment/all with projectId null and purged <n> spent enrollments when n > 0, otherwise []. Keep disabled/null retention behavior and swallowed/logged errors. PR refresh already runs as SYSTEM/ticket-link: wrap only the non-merge row update in audited; entry is system.ticket-link.pr-refresh on ticket-link/link.id, projectId link.ticket.projectId, summary pr <before> -> <after>, using none for null previous state and stored PR enum values. Return [] unless outcome is updated. Keep no-change and already-merged paths unaudited and retain knowledge merge events. Forge HTTP stays outside the audit transaction.\n\nA rejecting record rolls back row expiry, deleted enrollment rows or PR-state update. Existing retention/refresher per-item catches log/skip; enrollment scheduledPurge logs and resolves. Already-deleted files are not restored by a DB rollback. Update direct constructors in fleet-log-retention.processor.spec.ts, enrollment-retention.processor.spec.ts and fleet-pr-state.refresher.spec.ts with mockAuditRecorder and preserve all assertions.\n\n**Scope** \u2014 In: FleetLogRetentionProcessor.expireJob, EnrollmentRetentionProcessor.purgeSpentEnrollments and FleetPrStateRefresher.apply's non-merge update. Out: runner enrollment/upload (US-002), ingest (US-003), other stories' state writers, VcsPrSyncService.applyMergedPr and FleetJobTicketEffects (audit-integrations). Do not audit log chunk ingestion or add filesystem compensation.\n\n**Interface** \u2014 `AuditRecorder.record(input)` in the existing retention transaction; `AuditRecorder.audited(fn, entriesOf)` (`entriesOf` may return `[]`) for purge and non-merge link update. No repository or public response change is required.\n\n**Verification** \u2014 Create audit-fleet-system-retention.integration.spec.ts with booted component entry points purge, scheduledPurge and refresh, mirroring fleet-log-retention, enrollment-retention and fleet-pr-refresher integration fixtures. Clear all RunnerEnrollment rows before each enrollment AC, save/restore enrollmentRetentionDays via FLEET_CFG resolved with strict false, stub forge clients but not recorder/storage, and inspect durable audit rows and rollback.",
+      "acceptanceCriteria": [
+        "When FleetLogRetentionProcessor.purge(before, now) runs under SYSTEM/log over one web job finished before before at lease epoch 1 as in fleet-log-retention.integration.spec.ts, then one job entry matches { key: 'system.log.retention', resourceType: 'fleet-job', projectId: web.id, actorType: 'SYSTEM', actorId: 'log', origin: 'system', summary: 'logs expired through epoch 1' } (spec AC1, integration).",
+        "When purge(before, now) has no job finished before before, then the system.log.retention entry count is unchanged (spec AC2, integration).",
+        "When purge(before, now) processes a due job and record rejects for system.log.retention, then the job's log rows remain unexpired (spec AC3, integration).",
+        "When app.get(EnrollmentRetentionProcessor).scheduledPurge() runs with enrollmentRetentionDays 7 and two RunnerEnrollment rows used 30 days ago, then one entry matches { key: 'system.enrollment.retention', resourceType: 'fleet-enrollment', resourceId: 'all', projectId: null, actorType: 'SYSTEM', actorId: 'enrollment', summary: 'purged 2 spent enrollments' } (spec AC4, integration).",
+        "When scheduledPurge() has no enrollment spent before its cutoff, then the system.enrollment.retention entry count is unchanged (spec AC5, integration).",
+        "When scheduledPurge() runs with enrollmentRetentionDays null, then the outcome is { systemEnrollmentRetentionEntryCount: unchanged, allRunnerEnrollmentRowsPreserved: true } (spec AC6, integration).",
+        "When scheduledPurge() processes two spent enrollments and record rejects for system.enrollment.retention, then it resolves with both RunnerEnrollment rows still stored (spec AC7, integration).",
+        "When app.get(FleetPrStateRefresher).refresh() processes a fleet PR link with prState open and the stubbed GitHub client reports its PR closed as in fleet-pr-refresher.integration.spec.ts, then one link entry matches { key: 'system.ticket-link.pr-refresh', resourceType: 'ticket-link', projectId: ticket.projectId, actorType: 'SYSTEM', actorId: 'ticket-link', summary: 'pr open -> closed' } (spec AC8, integration).",
+        "When refresh() sees the PR is still open, then no entry exists for that link (spec AC9, integration).",
+        "When refresh() sees the PR is merged, then no system.ticket-link.pr-refresh entry exists for the link (spec AC10, integration).",
+        "When refresh() processes AC8's setup and record rejects for system.ticket-link.pr-refresh, then the link's prState remains open (spec AC11, integration).",
+        "When a PR link is already merged, then a refresh adds no system.ticket-link.pr-refresh entry for it (Failure Handling, integration)."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "audit",
+        "retention",
+        "system-writers"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three existing processors gain standard record/audited calls without a new deletion or PR-refresh algorithm; touching spent enrollment-token records retains the security override despite the additive scope."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/logs/fleet-log-retention.processor.ts",
+        "apps/api/src/fleet/runners/enrollment-retention.processor.ts",
+        "apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts",
+        "apps/api/test/integration/fleet/fleet-log-retention.integration.spec.ts",
+        "apps/api/test/integration/fleet/fleet-pr-refresher.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-fleet-system-retention.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/logs/fleet-log-retention.processor.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter and records system.log.retention inside expireJob's transaction when the job row was locked; file deletes and batching are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/logs/fleet-log-retention.processor.spec.ts",
+          "reason": "its direct new FleetLogRetentionProcessor(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/runners/enrollment-retention.processor.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter and runs deleteSpentEnrollmentsBefore inside audit.audited with one system.enrollment.retention entry, none when it deleted 0; the log lines and the swallowed error are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/runners/enrollment-retention.processor.spec.ts",
+          "reason": "its direct new EnrollmentRetentionProcessor(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter and runs apply's updateTicketLinkWithPrState inside audit.audited with one system.ticket-link.pr-refresh entry when it returned updated; the merged path and the knowledge event are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/fleet-pr-state.refresher.spec.ts",
+          "reason": "its direct new FleetPrStateRefresher(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Audit successful knowledge checkpoints and folded thread turn ends",
+      "description": "**Goal** \u2014 Record a successful repository knowledge pass at its final checkpoint and each non-skipped thread turn_end in the transcript fold transaction.\n\n**Motivation** \u2014 Those are the writes nobody clicked, and the Audit log (`GET /api/audit`) is the only place that would show who or what made them.\n\n**Approach** \u2014 **A knowledge pass records once, when it completes.** A pass that only moves the head (no file written or deleted) still records, with `indexed 0 changed, 0 removed`, because it changed the stored `indexedSha`. `KnowledgeRepoIndexer.indexRepo` runs its final idle `finish` (`knowledge-repo-indexer.ts:142`) inside `audit.audited`, with summary `indexed <changed> changed, <removed> removed`. A skipped, unchanged, busy or failed pass, and the claim, renew and per-file rows of any pass, are bookkeeping. An outcome pass (`indexOutcomes`) writes only the LanceDB table, not Postgres, and records nothing.\n\n**A thread turn records once, at its `turn_end`.** `PrismaThreadIngestRepository.fold` records `system.thread.ingest` on the thread for each `turn_end` line it folds (not skipped), with summary `turn ended <status>`. Text deltas, tool lines, usage, questions, session and write lines, and the cursor are the transcript's bookkeeping.\n\n**`AuditRecorder` is a required constructor dependency, last.** The exceptions: `CommandAckProcessor`'s last parameter is the optional `threadEffects`, and `KnowledgeRepoIndexer`'s last is the defaulted `clock`. In both, `AuditRecorder` goes right before that parameter. Classes that already inject it (`EnrollmentService`, `ApprovalsService`, `AssistantActionDecisions`, `FleetJobsService`) reuse their `this.audit`.\n\n**`projectId` is the row's project.** A job's, an approval's, a budget policy's (`null` for a global or runner policy), a schedule's, a thread's, a ticket link's ticket's, a repo's. A runner and an enrollment purge have no project (`null`).\n\nFor knowledge, use system.knowledge.index, resourceType fleet-repo, resourceId repo.id, projectId repo.projectId and SYSTEM/knowledge origin system from its drain context. `<changed>` counts the files the pass wrote or deleted because their blob changed or vanished from the tree; `<removed>` counts files deleted because they left the selection. Count in the existing per-file mutation and left-selection loops; do not count unchanged matching blobs. Run the successful final idle finish in audited, leaving remote tree/file reads, embedding, per-file LanceDB mutations and earlier claims/renewals/finishes outside it. Preserve the existing regression anchor that idle finish precedes conditional rag.optimizeTable and that an optimization failure ends with a failed finish and the prior indexedSha (knowledge-repo-indexer.spec.ts:193-200). Include that existing post-finish optimization inside audited's fn after finish, so entriesOf/record run only when both operations succeed; a rejected optimization must not leave a committed success entry for a failed pass. Keep finishedIdle/previousSha failure handling and the catch's failed finish outside audited. On an audit rejection the idle checkpoint rolls back and the pass still returns failed with its previous indexedSha. This does not make any already-completed per-file/external store writes transactional. Update every new KnowledgeRepoIndexer in knowledge-repo-indexer.spec.ts with a stub recorder whose audited runs fn, immediately before clock, and add the five specified unit branches without dropping existing assertions.\n\nFor threads add required recorder last to PrismaThreadIngestRepository. Inside fold's txManager.run, after foldAssistantLine reports not skipped, record one system.thread.ingest entry per turn_end as SYSTEM/thread using runAsSystem('thread', () => this.audit.record(...)); the runner-triggered fold keeps its domain context and correlationId. Use resourceType thread, resourceId thread.id, projectId thread.projectId and summary turn ended <status>, allowing every TURN_END_STATUSES value completed, cancelled, errored, timed_out, interrupted. A missing assistant message skips the turn_end and records nothing; each tested turn must have a preceding turn_start. Do not condition auditing on a cost change or the foldTurnEnd cost helper's boolean. Preserve cursor, costs, live events and retries. If audit fails the fold transaction rolls back and the ingestor falls back to line-by-line retry; the rollback AC spies every record call to fail so retry cannot hide failure. Update prisma-thread-ingest.repository.spec.ts and prisma-thread-cost-review.spec.ts direct constructors with mockAuditRecorder, keeping assertions.\n\n**Scope** \u2014 In: KnowledgeRepoIndexer.indexRepo successful finish/counters and PrismaThreadIngestRepository.fold non-skipped turn ends. Out: runner transitions/boot (US-001), upload/enroll (US-002), run bundle-ingest entries and post-commit hooks (US-003), budget evaluation (US-004), assistant approval expiry (US-005), schedules (US-006), retention/PR state (US-007). KnowledgePoller, indexOutcomes and transcript/per-file bookkeeping are explicitly excluded; do not add audit to external LanceDB writes.\n\n**Interface** \u2014 `AuditRecorder.audited(fn, entriesOf)` (`entriesOf` may return `[]`); `AuditRecorder.record(input)`; `runAsSystem(component, fn, opts?)`. No new public API or repository signature is required.\n\n**Verification** \u2014 Create audit-fleet-system-thread-ingest.integration.spec.ts for thread AC1-7 through real runner putThreadLines and knowledge AC8-9 through app.get(KnowledgeRepoIndexer).indexRepo under knowledge context. Mirror thread-assistant-lifecycle, seedThreadJob, putThreadLines and the existing knowledge-repo-indexer unit fixtures; spy GitHub mintReadOnlyToken/getBranchHead/getTree/getFile for the head-only integration pass. Store knowledge AC10-14 in the existing unit file, not a separate story. Inspect stored AuditEntry rows, assistant status, and indexedSha rollback.",
+      "acceptanceCriteria": [
+        "When putThreadLines uploads turn_start t1 followed by turn_end t1 with status completed, output Done, usage { inputTokens: 0, outputTokens: 0 } and costUsd 0 for a RUNNING THREAD job from seedThreadJob, then one thread entry matches { key: 'system.thread.ingest', resourceType: 'thread', projectId: web.id, actorType: 'SYSTEM', actorId: 'thread', origin: 'system', summary: 'turn ended completed' } despite the runner request context (spec AC1, integration).",
+        "When putThreadLines uploads turn_start t2 and text_delta lines without turn_end, then the thread's system.thread.ingest entry count is unchanged (spec AC2, integration).",
+        "When putThreadLines uploads turn_start t3 followed by turn_end t3 with status cancelled, then one thread entry has summary turn ended cancelled (spec AC3, integration).",
+        "When one upload contains a turn_start and turn_end for each of turns t4 and t5, then the thread has two new system.thread.ingest entries (spec AC4, integration).",
+        "When turn_start t6 was stored by an earlier upload and a turn_end t6 upload runs while vi.spyOn(app.get(AuditRecorder), 'record').mockRejectedValue(new Error('audit down')) rejects every record call including the ingestor's line-by-line retry, then the outcome is { httpStatus: 200, systemThreadIngestEntryCount: unchanged, assistantMessageStatusForT6: not 'complete' } (spec AC5, integration).",
+        "When putThreadLines uploads turn_start and turn_end at lease epoch 1 after the job's leaseEpoch was directly set to 2, then the outcome is { httpStatus: 409, systemThreadIngestEntryCount: unchanged } (spec AC6, integration).",
+        "When AC1's turn_end upload commits, then the assistant message for t1 has status complete (spec AC7, integration).",
+        "When app.get(KnowledgeRepoIndexer).indexRepo(repoId) runs under SYSTEM/knowledge for web's GitHub repo with a KnowledgeRepoIndex { projectId: web.id, indexedSha: 'sha-1', status: 'idle', leaseUntil: null, patternsKey: DEFAULT_PATTERNS_KEY ('default', the key of web's default patterns) } and a KnowledgeRepoFile { path: 'README.md', blobSha: 'b1', unembeddedCount: 0 }, while GitHub mintReadOnlyToken is spied, getBranchHead returns sha-2, getTree returns { entries: [{ path: 'README.md', type: 'blob', sha: 'b1', size: 10 }], truncated: false } and getFile is spied, then the outcome is { status: 'indexed', getFileCalled: false, newRepoEntries: [{ key: 'system.knowledge.index', resourceType: 'fleet-repo', projectId: web.id, actorType: 'SYSTEM', actorId: 'knowledge', summary: 'indexed 0 changed, 0 removed' }] } (spec AC8, integration).",
+        "When AC8's knowledge pass runs with record rejecting for system.knowledge.index, then the outcome is { status: 'failed', storedIndexedSha: 'sha-1' } (spec AC9, integration).",
+        "When indexRepo uses the knowledge-repo-indexer.spec.ts stubs with a changed head, two kept files whose blobs changed, one stored file no longer selected and a recorder whose audited executes its fn, then it calls audited exactly once and that call's entriesOf(fnResult) yields one entry matching { key: 'system.knowledge.index', resourceType: 'fleet-repo', resourceId: repo.id, projectId: repo.projectId, summary: 'indexed 2 changed, 1 removed' } (spec AC10, unit).",
+        "When indexRepo finds unchanged head, file states and patterns key, then the outcome is { status: 'unchanged', auditedCalls: 0 } (spec AC11, unit).",
+        "When indexRepo receives a repository not on GitHub, then the outcome is { status: 'skipped', auditedCalls: 0 } (spec AC12, unit).",
+        "When indexRepo's state.claim returns false, then the outcome is { status: 'busy', auditedCalls: 0 } (spec AC13, unit).",
+        "When indexRepo's recorder.audited rejects, then the outcome is { status: 'failed', lastFinishStatus: 'failed' } (spec AC14, unit).",
+        "When a thread turn_end has no preceding assistant message, then the line is skipped and produces no system.thread.ingest entry (US-008 acceptance preamble)."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "audit",
+        "knowledge",
+        "threads",
+        "system-writers"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Two existing ingest classes add counters and standard recorder calls at existing checkpoint/fold boundaries; focused failing tests cover retry and optimization sequencing without introducing a new integration or changing authentication."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/knowledge/knowledge-repo-indexer.ts",
+        "apps/api/src/fleet/knowledge/knowledge-repo-indexer.spec.ts",
+        "apps/api/src/fleet/threads/ingest/prisma-thread-ingest.repository.ts",
+        "apps/api/src/fleet/threads/ingest/thread-ingestor.ts",
+        "apps/api/test/integration/fleet/thread-assistant-lifecycle.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-fleet-system-thread-ingest.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a non-skipped turn ends with errored, timed_out or interrupted status, then its entry summary contains exactly that stored status without error detail."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/knowledge/knowledge-repo-indexer.ts",
+          "reason": "injects AuditRecorder right before the defaulted clock parameter, counts changed and removed files, and runs the final idle finish of indexRepo inside audit.audited with one system.knowledge.index entry; other finishes and indexOutcomes are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/knowledge/knowledge-repo-indexer.spec.ts",
+          "reason": "its direct new KnowledgeRepoIndexer(...) passes a stub recorder whose audited runs its fn right before the clock argument, and it gains the US-008 AC-10 to AC-14 cases; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/ingest/prisma-thread-ingest.repository.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter and records system.thread.ingest as SYSTEM/thread inside fold's transaction for each folded turn_end line; the other lines, the cursor and the live events are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/ingest/prisma-thread-ingest.repository.spec.ts",
+          "reason": "its direct new PrismaThreadIngestRepository(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/ingest/prisma-thread-cost-review.spec.ts",
+          "reason": "its direct new PrismaThreadIngestRepository(...) passes mockAuditRecorder (from global-stubs.module.ts) as the new last argument; the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Repository assessment and architecture\nThis is an enhancement of the existing API, not greenfield work. All eight stories stay in apps/api with no story dependencies and ship as one capability/PR. Graph-first navigation was unavailable because this session exposes no codebase-memory MCP tools; findings below come from direct reads and targeted searches in the supplied execution worktree. Read .nax/mono/apps/api/context.md before implementation and follow the nathapp-nestjs-patterns skill before writing NestJS code. Repository guidance identifies production as NestJS 12/Fastify, Prisma 7, Bun workspaces and Vitest/oxlint, not the automatically detected generic Express/Next.js stacks. The HTTP integration helper intentionally defaults to AppFactory.create (Express) and also supports Fastify; use the prescribed bootHttpApp({ registrationEnabled: false }) rather than changing adapters (apps/api/test/helpers/http-app.ts:28-48). No CLI, runner daemon, web, generated client, schema, migration, catalog or OpenAPI changes are needed.\n\nRead-only integration contracts\nAuditRecordInput is already { key: string; resourceType: string; resourceId: string; projectId?: string | null; summary?: string } (apps/api/src/audit/audit-recorder.service.ts:9-15). AuditRecorder.audited<T>(fn: () => Promise<T>, entriesOf: AuditEntriesOf<T>): Promise<T> executes fn and records its result-derived entries in txManager.run; [] produces no entry (same file:17,31-38). record(input: AuditRecordInput): Promise<void> rejects unknown catalog keys and calls outside a transaction, then derives actor, onBehalfOf, origin, approval and correlationId from currentContext (same file:41-68). Await record inside the existing domain transaction; use audited only for a writer without one. Never catch an audit failure inside the transaction in a way that commits the domain mutation without its entry. AuditLogModule is global and exports AuditRecorder (apps/api/src/audit/audit-log.module.ts:10-22); GlobalStubsModule already provides mockAuditRecorder.record and an audited stub that executes fn (apps/api/src/common/test-helpers/global-stubs.module.ts:41-44,184-210). Module tests need no new AuditLogModule imports. The runtime write coverage guard and walker are deferred to audit-integrations.\n\nAction-context rules\nrunWithActionContext replaces the context for its callback, and resolveCorrelationId inherits the enclosing context (apps/api/src/action-context/action-context.ts:94-124). runAsSystem(component, fn, opts?) validates the id against SYSTEM_ACTOR_IDS, sets SYSTEM/component with origin system, and can set onBehalfOf (same file:132-150). SYSTEM_ACTOR_IDS derives the second segment of system catalog keys (same file:84-88). Every system entry must be attributed to that component even when a runner or user request triggered it: wrap only the record call where the domain write must retain its enclosing context. Schedule entries must additionally name the owner with createdByType ?? USER and createdById. Runner requests already receive RUNNER/id and origin runner; public enroll receives SYSTEM/anonymous and must override only the entry to the newly created runner (apps/api/src/action-context/action-context.interceptor.ts:21-33). Do not use the activity row's legacy SYSTEM_ACTOR.id as the audit actor. All required keys already exist (apps/api/src/permissions/catalog.ts:179,215-224,333-343,360). AuditEntry already stores project, actor, onBehalfOf, origin, approval, correlation and summary without domain foreign keys (apps/api/prisma/schema.prisma:831-859), so an orphan-policy deletion can retain an audit entry.\n\nUS-001 findings, modifications and dependents\nJobReportProcessor.process wraps each job report in txManager.run; applyOne calls transitions.apply only for allowed transitions (apps/api/src/fleet/sync/job-report.processor.ts:65-69,116-126). Record after apply with before/returned states, never in JobTransitionsService itself. Contiguous seq processing and stored-event dedup already prevent duplicate transitions (same file:73-112); mirrors, rejected events, fences and ack bookkeeping remain unaudited. CommandAckProcessor has three transition branches (READOPT rejection, ASSIGN rejection, CANCEL rejection), an optional threadEffects constructor parameter, and a per-ack catch (apps/api/src/fleet/sync/command-ack.processor.ts:23-46,85-104). Insert the required recorder immediately before threadEffects; record each actual transition, not successful or stale/no-op acks. reconcileBoot owns a transaction and writes runner.rebooted only if rebooted || queued > 0 (same file:111-134); the entry follows precisely that condition, including reboot with zero readopts and queued readopts without a changed boot id. SyncService catches a failed job report and boot reconcile, publishes after transactions, and long-polls without holding a transaction (apps/api/src/fleet/sync/sync.service.ts:75-115). Do not change SyncService. Update all direct constructions in job-report.processor.spec.ts:60,134 and command-ack.processor.spec.ts:40,71,86 using mockAuditRecorder, preserving thread-effects assertions. SyncModule registers these providers (apps/api/src/fleet/sync/sync.module.ts:21). Precedents are runner-sync-lifecycle.integration.spec.ts and runner-sync.integration.spec.ts; the former supplies the complete startRunning protocol and cleanup (apps/api/test/integration/fleet/runner-sync-lifecycle.integration.spec.ts:29-67). Create test/integration/audit/audit-fleet-runner-sync.integration.spec.ts.\n\nUS-002 findings, modifications and dependents\nEnrollmentService already injects this.audit and audits admin enrollment creation, but enroll's transaction consumes a token, creates the runner, links enrollment and records activity without auditing (apps/api/src/fleet/runners/enrollment.service.ts:23-40,59-82). Reuse the dependency, recording runner.enroll after activity in runWithActionContext with created.id, origin runner. Keep deterministic hashing, protocol/token validation, name uniqueness, token rollback and response unchanged. Add the capturing-currentActor unit case to enrollment.service.spec.ts. BundleService streams store.put before its row-lock transaction, rechecks fence and RUNNING/UPLOADING, reads previous artifact, upserts it, enqueues ingest and writes activity (apps/api/src/fleet/artifacts/bundle.service.ts:49-104). Add recorder last, use previous artifact presence for uploaded/replaced, and record before commit. Existing returned-error paths clean up the attempted file; a thrown transaction after store.put does not, and adding cleanup for that is excluded. Preserve fallback scheduling, ingest kick and old-bundle cleanup after commit. Update bundle.service.spec.ts:12 with mockAuditRecorder. The spec's FleetArtifact rollback assertion refers to the actual FleetJobArtifact model/delegate (apps/api/prisma/schema.prisma:1332), not a new model. Mirror runner-enrollment.integration.spec.ts and fleet-bundles.integration.spec.ts; create audit-fleet-runner-enroll-bundle.integration.spec.ts.\n\nUS-003 findings, modifications and dependents\nFleetSweeper.sweep already runs as SYSTEM/job via runAsSystemWriter; crashSilent scans then locks/rechecks each held job and runner, applying CRASHED in a per-job transaction; there is no per-row catch and publication/effects occur after commit (apps/api/src/fleet/sync/fleet-sweeper.ts:52-75). Await apply, record and return its result. PlacementService.placeJob, fillRunner and fillRunnerThreads already transact and funnel budget cancellations through cancelForPause (apps/api/src/fleet/jobs/placement.service.ts:63-110,113-181,184-188). Record there as SYSTEM/budget; leave assign/casAssign/ASSIGN/pin/activity mechanics unaudited (same file:191-204). BundleIngestService.write locks the job, replaces parsed ledger/outcome rows, applies corrections and markOutcome in one transaction; drain claims and handles retry/failure outside that transaction, and post-commit effects remain outside (apps/api/src/fleet/ingest/bundle-ingest.service.ts:67-138). Record system.ingest.drain after markOutcome with done/partial only. kick already creates an ingest context with its own correlationId (same file:51-57); a direct drain test must supply ingest context. Inject recorder last in all three. Update fleet-sweeper.spec.ts; placement.service.project-code.spec.ts, .thread-write.spec.ts, .project-thread.spec.ts and .koda-tools.spec.ts; bundle-ingest.service.spec.ts, bundle-ingest.pr-links.spec.ts, bundle-ingest.workflow.spec.ts and bundle-ingest.outcomes.spec.ts, including multiple constructor sites. Placement is also called by FleetJobsService, ConfigJobsService, SchedulesService, PrismaChatThreadRepository and SyncService (apps/api/src/fleet/jobs/fleet-jobs.service.ts:52; repo-config/config-jobs.service.ts:40; schedules/schedules.service.ts:74; threads/prisma-chat-thread.repository.ts:59; sync/sync.service.ts:41). No caller API changes are needed. Mirror fleet-sweep, fleet-budget-placement and fleet-ingest integration specs; create audit-fleet-system-jobs.integration.spec.ts.\n\nUS-004 findings, modifications and dependents\nBudgetSweeper.tick already supplies SYSTEM/budget and catches/logs individual policy failures (apps/api/src/fleet/budgets/budget-sweeper.ts:59-81). deleteOrphan and resetWindow each lock/recheck, mutate, close approvals and write activity inside txManager.run (same file:85-113). Add record after activity, preserving approval closes without their own entries. BudgetEvaluator.evaluate owns the policy transaction and publishes/wakes afterward; warn returns false on an already-inserted incident; hardStop pauses, opens approval, inserts incident and calls cancelForBudget (apps/api/src/fleet/budgets/budget-evaluator.ts:77-92,95-120). Add system.budget.window-reset records after activity, wrapping the entry as SYSTEM/budget even when evaluate inherited runner context. Count cancelled/requested lists, never costs or amount. Preserve debounce, signal, webhook/outbox calls, Decimal comparisons and budget locks. Direct evaluate rejects on audit failure, whereas sweeper catches it. Add recorder last to both, update budget-sweeper.spec.ts and budget-evaluator.spec.ts. BudgetsModule provides both (apps/api/src/fleet/budgets/budgets.module.ts:20-21); callers include JobReportProcessor, ingest, thread cost folding and BudgetsService. Mirror fleet-budget-sweeper and fleet-budget-evaluator integration specs; create audit-fleet-system-budgets.integration.spec.ts.\n\nUS-005 findings, modifications and dependents\nApprovalCloser.openBash alone distinguishes an existing ask from a newly created pending/born-closed one (apps/api/src/fleet/approvals/approval-closer.ts:120-145). Add runner.sync only on new asks after any born-closed resolve; the summary uses stored pending/cancelled/expired status. expire resolves timeout in the caller transaction (same file:174-177); record there as SYSTEM/approval for sweeper and decide alike. Do not audit recordResolved generically: closeForJob and closeForPolicy are covered by their owning transaction (same file:100-115,162-171). ApprovalsService.decideBash closes job-ended asks inside its transaction, then throws fleet.approvalNotPending only after commit (apps/api/src/fleet/approvals/approvals.service.ts:160-193). Reuse this.audit to record the job-end close as SYSTEM/approval, leaving valid decision audits and auth checks intact. AssistantActionDecisions already injects audit; expireLocked resolves EXPIRED action, expired approval and note inside the caller lock scope (apps/api/src/fleet/assistant/actions/assistant-action-decisions.ts:61,105-111). Add SYSTEM/assistant-action entry on the approval there, not on approve/reject/finalize. ApprovalExpirySweeper and PendingActionExpirySweeper own per-item transactions and catches (apps/api/src/fleet/approvals/approval-expiry-sweeper.ts:49-75; apps/api/src/fleet/assistant/actions/pending-action-expiry.sweeper.ts:60-91). Preserve their lock orders, post-commit live publication and failed counters. ApprovalStoreModule exports the shared closer, used by transitions, budgets, reports and assistant actions (apps/api/src/fleet/approvals/approval-store.module.ts:15-16). Inject closer's recorder last; update approval-closer.spec.ts and the closer constructed in approvals.service.spec.ts:107. Mirror fleet-approval-relay, assistant-actions-expiry and audit-fleet-approvals integration specs; create audit-fleet-system-approvals.integration.spec.ts.\n\nUS-006 findings, modifications and dependents\nScheduleTicker.runOnce supplies schedule context, but tick intentionally does not because a request test hook calls it (apps/api/src/fleet/schedules/schedule-ticker.ts:89-102). fire currently coalesces and writes activity without a shared transaction (same file:122-137); wrap coalesce/activity/audit together, recording only absorbed jobs as SYSTEM/schedule on owner's behalf. dispatchFresh checks owner access and calls jobs.dispatch outside a transaction in runAsSystem with onBehalfOf (same file:140-164); pass auditKey system.schedule.dispatch there. FleetJobsService already records exactly one opts.auditKey ?? fleet.job.dispatch entry with the required RUN/repo/schedule summary (apps/api/src/fleet/jobs/fleet-jobs.service.ts:67,113-117); widen only the union to include system.schedule.dispatch. Existing callers ThreadsService plan/run keep their keys (apps/api/src/fleet/threads/threads.service.ts:114,134). disable currently wraps progress.disable alone (apps/api/src/fleet/schedules/schedule-ticker.ts:205-208); record in the same transaction only if true, as schedule on owner's behalf. claimFire, skip and linkDispatched are bookkeeping. Do not surround dispatch with an outer transaction: duplicate-key failures must not poison it. FleetTestHooksController.fire refuses off/unknown/disabled before ticker.tick (apps/api/src/fleet/schedules/fleet-test-hooks.controller.ts:31-40); after refusals and before tick add audited with an empty-write callback, recording fired as the caller. Required permissions, HTTP status and excluded OpenAPI status stay unchanged. Inject recorder last into ticker/controller, update schedule-ticker.spec.ts (including dispatch option expectations) and fleet-test-hooks.controller.spec.ts. Mirror fleet-schedule-ticker integration spec; create audit-fleet-system-schedules.integration.spec.ts.\n\nUS-007 findings, modifications and dependents\nFleetLogRetentionProcessor deletes files first and expires rows under a job row lock; candidates have no project, so retain the locked job to obtain projectId (apps/api/src/fleet/logs/fleet-log-retention.processor.ts:53-88). Record per locked job in the expiry transaction, through the selected candidate epoch only. Audit failure can roll back row expiry but cannot restore already-deleted files; preserve this existing files-first design. EnrollmentRetentionProcessor.scheduledPurge supplies enrollment context and swallows/logs failures; the current delete has no transaction (apps/api/src/fleet/runners/enrollment-retention.processor.ts:27-42). Wrap deleteSpentEnrollmentsBefore in audited with [] when count is zero and one all/null entry otherwise. FleetPrStateRefresher.refresh supplies ticket-link context and per-link errors are caught; apply separates merged VcsPrSyncService work from its own updateTicketLinkWithPrState (apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts:65-121,136-145). Use audited only on the non-merge update, with [] unless outcome is updated; use link.ticket.projectId and none for null previous state. RefreshableLink already carries ticket.projectId (apps/api/src/fleet/tickets/prisma-fleet-tickets.repository.ts:31-35); no repository interface change is necessary. Preserve forge calls outside transactions and knowledge merge events. Inject recorder last and update fleet-log-retention.processor.spec.ts, enrollment-retention.processor.spec.ts and fleet-pr-state.refresher.spec.ts (including timer constructions). Mirror fleet-log-retention, enrollment-retention and fleet-pr-refresher integration specs; create audit-fleet-system-retention.integration.spec.ts.\n\nUS-008 findings, modifications and dependents\nKnowledgeRepoIndexer has a defaulted injected clock last and no transaction manager (apps/api/src/fleet/knowledge/knowledge-repo-indexer.ts:53-60). Insert recorder before clock, including both direct constructions at knowledge-repo-indexer.spec.ts:50,530. The pass's successful checkpoint is the final idle finish after selection/per-file mutations (knowledge-repo-indexer.ts:108-154). Count changed files in the kept-file mutation loop and removed files in the left-selection loop; no file read is needed for a matching blob. Only wrap the final successful finish in audited; unchanged/skipped/failed finishes and claim/renew/per-file rows remain bookkeeping. A changed head with no blob change must still record 0/0. Existing catch writes a failed finish and restores the previous checkpoint after later optimization failure. The existing regression test explicitly requires finish(idle) before optimizeTable and finish(failed) with the prior SHA on optimization failure (apps/api/src/fleet/knowledge/knowledge-repo-indexer.spec.ts:193-200). A callback containing only finish would commit a success entry before a later optimization failure, contradicting the spec's failed-pass/no-entry rule. Keep the existing idle finish followed by conditional optimizeTable together inside audited's fn, so record executes only after both succeed; leave the catch's failed finish outside audited. This preserves the asserted finish/optimize order and prior-SHA behavior while rolling back the Postgres idle checkpoint and withholding its entry on either optimization or recorder failure. Do not move GitHub reads, embedding, claims, renewals or per-file LanceDB writes into this transaction, and do not claim that already-completed external store writes roll back. KnowledgeIndexQueue already runs the drain as knowledge (apps/api/src/fleet/knowledge/knowledge-index.queue.ts:92-120). AppModule integration calls indexRepo through app.get with GitHub spies; unit stubs must execute audited's fn and expose/capture entriesOf rather than treating mockAuditRecorder as real storage. PrismaThreadIngestRepository.fold owns the batch transaction and locks job/thread, delegates assistant lines and accumulates skipped lines before cursor/live event creation (apps/api/src/fleet/threads/ingest/prisma-thread-ingest.repository.ts:74-201). Record as SYSTEM/thread per turn_end only after foldAssistantLine reports not skipped, independent of cost changes; do not record on the earlier foldTurnEnd cost helper or on deltas/tool/usage/session/write lines. A turn_end with no assistant message is skipped (same file:335-371). ThreadIngestor retries failed batches line by line and may mark an irrecoverable line bad (apps/api/src/fleet/threads/ingest/thread-ingestor.ts:75-102); persistent rejection is required for the rollback AC so a retry cannot succeed and hide the failure. ChatThread.projectId is present (apps/api/prisma/schema.prisma:1181-1184); entries use the thread's project. Inject recorder last into repository and update prisma-thread-ingest.repository.spec.ts:105 and prisma-thread-cost-review.spec.ts:24. Mirror thread-assistant-lifecycle integration spec and existing indexer unit fixtures; create audit-fleet-system-thread-ingest.integration.spec.ts, containing the knowledge integration cases too rather than inventing a ninth story or additional file.\n\nBookkeeping boundary for the next feature\nDo not record heartbeat/boot/version/capability mirrors (recordRunnerSync), deliveredAt, no-transition command acks including approval delivery/thread input/READOPT ok/stale, runner event rows/ackedRunnerSeq/snapshot/rejection activities, FenceService.abandon, pending-ASSIGN runnerBootId updates, placement assignments/pins/commands/activity, log chunk size/flags, transcript non-turn_end lines/cursors, ingest queue claim/retry/failure, schedule nextFireAt claims/skips/linkDispatched, knowledge claims/lease/per-file/non-success finishes, or PrAttributionService.claimAttribution. This is the allowlist inventory for audit-integrations, not a new guard implementation. Nested closes/counters/cancels inside the already-audited transaction do not get their own entries.\n\nTest execution and fixture conventions\nEach new integration file boots real AppModule through bootHttpApp({ registrationEnabled: false }), uses fixtureDb(app) for fixtures, seedFleetHttpWorld or seedFleetBase, and queries fixtureDb(app).auditEntry.findMany({ where: { resourceId, key when relevant } }). Root is Owner; dev is web's developer. Runner integrations exercise the runner HTTP routes with a protocol-1 enrollRunner key (insertRunner only where specified); do not bypass guards or stub the recorder for stored-row ACs. Fixture ids must be created by the spec. Use existing withTestActor for background/direct entry calls; its mapping preserves runner/system origins (apps/api/test/helpers/action-context.ts:65-76), and fixtureDb awaits Prisma calls in seed context and follows transaction delegates (same file:90-139). Guard sentinel expectGuardActive is available at same file:147-161. Set FLEET_SYNC_WAIT_MS=800 before boot and restore it; finish held jobs in afterEach as runner-sync-lifecycle does. resetThrottle before multiple enrollments or login after the fourth login (apps/api/test/helpers/http-app.ts:58-76). Resolve FLEET_CFG with { strict: false }, save changed testHooksEnabled/enrollmentRetentionDays and restore in afterAll. Enrollment purge ACs must clear all RunnerEnrollment rows beforeEach because deletion is global. For failure injection, spy on app.get(AuditRecorder).record, reject only the first matching writer key with Error('audit down') and delegate other keys, restoring spies; thread rollback AC deliberately rejects every call including retries. Preserve all existing assertions when supplying new constructor arguments. Unit mocks prove invocation and actor context; only PostgreSQL integration tests prove atomic domain/audit rollback. Use Vitest vi.*, lazy await import for TypeScript modules, and generated Prisma types/createTestPrismaClient per guidance. DB suites use canRunDbTests; KODA_DB_TESTS=1 and an outside-sandbox run are required. From apps/api use bun run test:scoped <target files>; it enables DB mode for integration paths. Missing host Postgres is not a passing skip. DB globalSetup force-resets the private test DB, so do not run independent stories' DB suites concurrently against the same DB; use KODA_TEST_DB_CONTAINER=1 for another checkout. Module/DI regression specs stay co-located unit tests with GlobalStubsModule, not new DB wiring tests.\n\nRisks, compatibility and migration\nLargest risks are duplicate route/transition or nested-close entries, seed/user/runner attribution leaking into system entries, missing schedule onBehalfOf or request correlation, no-op/replay entries, accidental inclusion of runner-supplied reasons/credentials/paths/costs in summaries, committing a close without its audit before the existing 409, and breaking direct constructor callers by placing the new dependency after optional parameters. Await every audit inside the owning transaction and keep live events/notifiers/kicks after commit. Preserve idempotency, lease fencing, lock order, partial indexes and short transaction boundaries. Audit storage failures deliberately make the write fail/retry through existing component error handling; they must never be silently best-effort. No historical backfill or data migration is specified: deployment adds entries only for future committed state changes using the existing table/catalog/recorder. Keep route contracts, statuses, @Requires keys and generated outputs unchanged. All stories can be implemented independently; constructor mock updates belong to the story changing that class, and no new shared symbol is introduced. The schedule union is changed and consumed within US-006 only. Validate the whole capability together because no story alone closes the system audit gap.\n\nRefine-pass adversarial audit\nRe-read the committed feature spec, all 99 numbered acceptance criteria, the 19 Failure Handling rows (the first row spans every story), and all 18 feature-level exclusions. The numbered ACs remain in their original stories in original order, identified by spec AC<n>; supplemental failure criteria follow them and do not renumber those references. No story was merged, split, renamed or given a dependency; US-001 through US-008 all retain workdir apps/api and dependencies []. Each expectedFiles path is the spec's new integration file, never a context input. Restored spec context recommendations for US-001 (runner-sync.integration.spec.ts), US-003 (fleet-sweep.integration.spec.ts) and US-005 (assistant-actions-expiry.integration.spec.ts), displacing secondary context already explained in this analysis. All context files exist; the four- or five-file lists retain every explicitly recommended spec context.\n\nNumbered AC preservation ledger (each item maps to acceptanceCriteria with the same spec AC number; counts total 99):\nUS-001, 13: AC1 ASSIGNED -> RUNNING entry with runner/resource/project/origin; AC2 seq 2/3 transitions produce two summaries; AC3 identical seq/payload resend leaves count unchanged; AC4 forbidden QUEUED leaves RUNNING and count unchanged; AC5 snapshot as fleet-budget-evaluator precedent leaves count unchanged; AC6 wrong lease leaves entry count unchanged; AC7 ASSIGN rejection -> FAILED entry; AC8 boot-2 reconcile -> one runner reboot entry/null project/readopt count; AC9 its READOPT rejection -> CRASHED entry; AC10 second job boot-3 READOPT ok leaves job count unchanged; AC11 idle current-boot sync leaves actor count unchanged; AC12 rejected ASSIGN with audit rejection returns 200/still ASSIGNED; AC13 RUNNING report with audit rejection returns 200/no jobAck/still ASSIGNED.\nUS-002, 12: AC1 fresh enroll returns 201/new-runner actor and enrollment-id summary; AC2 already-used token returns 401/count unchanged; AC3 taken name returns 409/count unchanged/token works with a free name; AC4 audit rejection gives error/no new Runner/token usedAt null; AC5 valid held RUNNING bundle returns 201/runner actor/uploaded epoch summary; AC6 same-epoch replacement adds replaced summary; AC7 wrong epoch returns 409/count unchanged; AC8 previously held now-COMPLETED job returns 409/count unchanged; AC9 audit rejection gives error/no artifact or ingest row; AC10 log chunk returns 200/runner actor entry count unchanged; AC11 runner/me returns 200/count unchanged; AC12 stubbed enroll records once with currentActor equal to newly created runner.\nUS-003, 11: AC1 insertRunner seen 301 seconds ago crashes RUNNING job with SYSTEM/job entry as fleet-sweep fixture; AC2 repeat sweep count unchanged; AC3 seen 10 seconds ago stays RUNNING/no entry; AC4 audit rejection makes sweep reject/still RUNNING; AC5 fillRunner under runner actor cancels paused-project QUEUED job as SYSTEM/budget; AC6 unpaused fill assigns/no entry; AC7 ingest drain under ingest context returns 1/ingested done entry; AC8 empty drain returns 0/count unchanged; AC9 expired artifact marks failed/no entry; AC10 audit rejection leaves status not done/attempts 1; AC11 pause-cancel audit rejection rejects/still QUEUED.\nUS-004, 11: AC1 orphan runner policy deletion returns deleted 1/null project/SYSTEM budget entry; AC2 prior-month project pause reset returns reset 1/project/window reset entry; AC3 live-scope unpaused below thresholds has no entry; AC4 same-project completed spend 6 against amount 10/warn 50/hardStop false creates warn incident entry; AC5 repeat warn count unchanged; AC6 completed spend 6 against amount 5/warn null/hardStop true plus project QUEUED job and no held job pauses/cancels/records 1 cancelled and 0 requested; AC7 nested cancelled job has no own budget-key entry; AC8 repeat paused evaluation hard-stop count unchanged; AC9 hard stop triggered under RUNNER records SYSTEM/budget; AC10 rejecting audit rejects evaluation/pause null/job QUEUED; AC11 orphan rejection reports failed 1/deleted 0/policy remains.\nUS-005, 14: AC1 escalate ask opens pending with runner approval entry; AC2 raw ask opens cancelled entry; AC3 identical seq/payload resend count unchanged; AC4 expired bash sweep returns expired 1/SYSTEM approval/expired entry; AC5 repeat expiry count unchanged; AC6 root expired-bash allow returns 409/committed system expiry/no decide entry; AC7 root job-ended allow returns 409/committed closed: job ended entry; AC8 RUNNING -> UPLOADING closes asks without separate expiry entry; AC9 PendingActionExpirySweeper resolved with strict false expires action with SYSTEM assistant-action approval entry; AC10 requester approve on expired action returns 409/committed system expiry/no assistant decide entry; AC11 failed audit reports failed 1/approval pending; AC12 job-ended decide audit rejection gives error other than 409/approval pending; AC13 valid unexpired RUNNING bash allow still returns 200/no expiry entry; AC14 findByAsk existing ask never calls record.\nUS-006, 13: AC1 due enabled dev-owned schedule under schedule context dispatches exactly one owner-attributed system job entry with repo/schedule summary; AC2 no fleet.job.dispatch duplicate; AC3 next nextFireAt coalesces QUEUED job with no runner enrolled and owner-attributed schedule entry; AC4 RUNNING job skip count unchanged; AC5 owner(null) with no role disables owner_lost_access; AC6 directly invalid cron disables template_invalid; AC7 failed disable audit leaves enabled; AC8 enabled hook as root returns 200/USER root/rest/fired; AC9 hook coalesce records SYSTEM/schedule; AC10 hooks off returns 404/no entry; AC11 hooks enabled unknown schedule returns 404/count unchanged; AC12 hooks enabled disabled schedule returns 409/no entry; AC13 dev manual dispatch still records fleet.job.dispatch and not system.schedule.dispatch.\nUS-007, 11: AC1 due web job epoch-1 purge under log context records project/SYSTEM log/selected epoch; AC2 no due job count unchanged; AC3 failed audit leaves rows unexpired; AC4 7-day retention of two enrollments used 30 days ago yields one all/null/SYSTEM enrollment/purged 2 entry; AC5 no spent rows count unchanged; AC6 null retention count unchanged/all enrollment rows preserved; AC7 failed audit resolves/both rows preserved; AC8 stub GitHub open -> closed refresh records ticket project/SYSTEM ticket-link; AC9 still-open PR no entry; AC10 merged PR no refresher-key entry; AC11 failed audit leaves prState open.\nUS-008, 14: AC1 running seeded THREAD turn_start t1 plus completed turn_end with Done/zero usage/cost records SYSTEM/thread rather than runner; AC2 t2 start/deltas without end count unchanged; AC3 t3 start/cancelled end entry; AC4 t4/t5 start/end in one upload adds two entries; AC5 t6 start in earlier upload plus end with every record/retry rejected returns 200/count unchanged/message not complete; AC6 epoch 1 upload after direct bump to 2 returns 409/count unchanged; AC7 t1 assistant complete; AC8 sha-1 -> sha-2 head-only pass with matching README b1/default patterns returns indexed/no getFile/0 changed 0 removed SYSTEM knowledge entry; AC9 audit failure returns failed/stored sha-1; AC10 two changed kept files and one deselected produce one audited call and 2/1 summary; AC11 unchanged head/files/patterns returns unchanged/no audited; AC12 non-GitHub skipped/no audited; AC13 claim false busy/no audited; AC14 audited rejection returns failed/last finish failed. Inline turn_start/missing-message rules remain part of US-008's description and criteria. No deprecated grep/file/verbatim AC tags were present. All unchanged, already-used, existing-ask, no-held-job, no-runner-enrolled, earlier-upload, every-call-rejects, matching-blob and manual-dispatch regression qualifiers remain attached to their assertions.\n\nFailure table audit, row by row: 1 recorder rejection is covered in every story with domain rollback and the original log/skip/retry/reject/request-error behavior; 2 runner resend is US-001 AC3; 3 rejected transition is US-001 AC4, including existing job.event_rejected activity; 4 stale lease is US-001 AC6 and US-002 AC7, including unaudited ABANDON; 5 used token is US-002 AC2 and wrong/expired tokens its supplemental failure criterion; 6 taken name/token usability is US-002 AC3; 7 invalid upload state is US-002 AC8; 8 recent runner is US-003 AC3; 9 no incident/no stop is US-004 AC3; 10 already-paused hard stop is US-004 AC8 and its supplemental no-write criterion; 11 existing ask is US-005 AC3/AC14, including existing-row return; 12 committed expired/job-ended close before 409 is US-005 AC6/AC7; 13 committed assistant expiry before 409 is US-005 AC10; 14 running-job schedule skip is US-006 AC4, including existing schedule.tick_skipped activity; 15 hook off/unknown/disabled are US-006 AC10-12; 16 empty retention is US-007 AC2/AC5; 17 unchanged/already-merged PR is US-007 AC9/AC10 plus its supplemental already-merged criterion; 18 skipped/unchanged/busy/failed knowledge is US-008 AC9/AC11-14 and supplemental failed-pass criterion; 19 head-only indexing is US-008 AC8. A newly identified ordering conflict was resolved in US-008's implementation notes: audited must not record before the existing fallible post-finish optimization, while its existing idle-finish-before-optimize regression remains intact. The supplemental optimization-rejection assertion is an instance of row 18, not a new feature.\n\nTestability and compatibility: every criterion reads stored rows/counts, spies collaborator calls or log output, checks a method result/rejection, or checks HTTP status. The outcome objects in criteria are shorthand for a test observation assembled from HTTP status, actual method return and database queries; they are NOT new return types, DTO fields or route response bodies. For example newJobEntries means querying AuditEntry by resourceId/key, and httpStatus never means adding a body field. Error status means the existing non-2xx failure response, excluding 409 only where the spec explicitly says so. Placeholder ids/E/now/default-patterns-key come from the test's fixtures, never new helpers; obtain the patterns key with existing knowledgePatternsKey in src/fleet/knowledge/knowledge-patterns.ts. Every story includes negative paths and a legacy behavior anchor: dedup/no-op sync; token reuse after name conflict and unaudited reads/logs; placement assignment/no-op sweep; incident idempotency; valid decide/covered nested closes; manual dispatch and hook refusals; disabled/empty retention and unchanged/merged refresh; unchanged/skipped/busy knowledge and transcript deltas.\n\nScope and routing audit: the 18 top-level exclusions remain verbatim and feature-wide: assignments; Bookkeeping writes; runner tool route; FleetJobTicketEffects; VcsPrSyncService.applyMergedPr; all non-fleet system writers; KnowledgePoller/indexOutcomes; nested transaction closes/cancels/counters; new catalog keys; transition/activity/event/outbox shapes; failed/refused attempts; sensitive summary contents; ingest correction naming; thrown-upload bundle compensation; before/after diffs; route/OpenAPI changes; coverage guard/walker; web Audit log. Adjacent story scopes echo their relevant boundaries, and there are no story-local exclusions hoisted over another story's work. Complexity is medium for the bounded additions to existing classes rather than inferred from integration-test count. US-001/002/005/006/007 retain strict security strategies for runner identity/fences, enrollment credentials, approval decisions, owner access/guarded hook and enrollment-token records respectively; standard system writer additions in US-003/004/008 use tdd-simple. No new dependency or shared abstraction justifies heavier routing.",
+  "outOfScope": [
+    "Recording placement's assignments (`PlacementService.assign` through `placeJob`, `fillRunner` and `fillRunnerThreads`) is out of scope; the dispatch entry and the runner's `ASSIGNED -> RUNNING` entry cover who asked for the job and which runner took it.",
+    "Recording the writes in the Bookkeeping table is out of scope; they are the input for audit-integrations' coverage-guard allowlist.",
+    "The runner tool route (`POST /fleet/runner/jobs/:jobId/tools/:name`) is out of scope: its `AssistantToolCall` row is the call's bookkeeping, the tools' writes are recorded by the services audit-core and audit-fleet-routes audit, and the tools that reach no audited service are audit-integrations'.",
+    "`FleetJobTicketEffects` (the failure comment and the PR link written after a job ends, and the late PR link after an ingest) is out of scope (feature `permissions-p2-audit-integrations`); these are ticket writes with no fleet system key.",
+    "`VcsPrSyncService.applyMergedPr`, which the PR refresher calls for a merged PR, is out of scope (feature `permissions-p2-audit-integrations`, with the other VCS writers).",
+    "Every non-fleet system writer (email, outbox, notifications, memory, RAG, entity graph, code intel, VCS, CI, webhook delivery) is out of scope (feature `permissions-p2-audit-integrations`).",
+    "`KnowledgePoller` writes no row (it only enqueues) and records nothing; outcome passes (`indexOutcomes`) write only LanceDB and record nothing.",
+    "Recording a close inside a transition's or an action's own transaction (`closeForJob` when a job leaves `RUNNING`, `closeForPolicy` in a budget delete, reset or hard stop, `cancelForBudget`'s cancels in a hard stop, `ScheduleProgressService` counters and auto-disables when a scheduled job ends) is out of scope; the entry of that transaction covers it, as audit-core's rule says.",
+    "Adding catalog keys (one per system event) is out of scope; each writer records under its existing `system.*` key and the summary names the event.",
+    "Changing `JobTransitionsService`, `FleetActivityService`, `FleetJobEvent`, outbox payloads or any activity row's shape is out of scope.",
+    "Recording refused or failed attempts (401, 403, 404, 409, validation errors, rejected runner events) is out of scope; only committed writes are recorded, and refusal records belong to P3's approval engine.",
+    "Putting a runner-sent reason or detail text, a cost or amount, a file path, a label, a PR URL or a log line into an audit summary is out of scope; summaries carry only the states, ids, epochs, counts and enum values in the contract table.",
+    "Naming an ingest's verdict correction (`job.verdict_corrected`) in the `system.ingest.drain` summary is out of scope; the correction commits in the same transaction and is covered by that entry, whose summary stays `ingested done` or `ingested partial`.",
+    "Deleting the stored bundle file when `BundleService.upload`'s transaction throws (a rejected `record`, or any other error after `store.put`) is out of scope; the file stays until log retention removes it, as it does today for any throw in that transaction.",
+    "A before/after diff of values in `AuditEntry` is out of scope.",
+    "Changing any route's status codes, response bodies or `@Requires` keys is out of scope; `openapi.json` does not change.",
+    "The runtime coverage guard and the walker test over write surfaces are out of scope (feature `permissions-p2-audit-integrations`).",
+    "The web Audit log page is out of scope (feature `permissions-p2-web`)."
+  ],
+  "routingProfile": "native-codex"
+}

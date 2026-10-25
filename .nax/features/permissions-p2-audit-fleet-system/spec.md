@@ -155,7 +155,7 @@ This list is the input for audit-integrations' coverage-guard allowlist; this fe
 | the fire test hook is off, the schedule unknown or disabled | 404 / 404 / 409; no entry | US-006 |
 | a retention or purge run with nothing to delete | no entry | US-007 |
 | the PR state did not change, or the link is already merged | no entry | US-007 |
-| a knowledge pass that is skipped, unchanged, busy or failed | no entry | US-008 |
+| a knowledge pass that is skipped, unchanged or busy, or fails before its idle finish | no entry; a failure after the idle finish (`rag.optimizeTable`) keeps the committed entry and the catch restores `indexedSha` | US-008 |
 | a knowledge pass that moves the head but changes no file | the idle finish records `indexed 0 changed, 0 removed` (the stored `indexedSha` changed) | US-008 |
 
 ### Integration
@@ -390,7 +390,7 @@ Integration ACs boot `AppModule` against the test database with `bootHttpApp({ r
 6. [integration] A second bundle upload for that job at the same epoch leaves a new entry for the job with `key` `runner.bundle.upload` and `summary` `bundle replaced at epoch <E>`.
 7. [integration] A bundle upload at an epoch other than the job's returns 409 and the count of `runner.bundle.upload` entries for the job is unchanged.
 8. [integration] A bundle upload for a job the runner held that is now `COMPLETED` returns 409 and the count of `runner.bundle.upload` entries for the job is unchanged.
-9. [integration] A bundle upload, while `record` is spied to reject, returns an error status and leaves no `FleetArtifact` row and no `FleetBundleIngest` row for the job.
+9. [integration] A bundle upload, while `record` is spied to reject, returns an error status and leaves no `FleetJobArtifact` row and no `FleetBundleIngest` row for the job.
 10. [integration] `PUT /api/fleet/runner/jobs/:jobId/logs/stdout?leaseEpoch=<E>&offset=0` with one chunk for a running job returns 200 and leaves the count of entries with `actorId` the runner's id unchanged.
 11. [integration] `GET /api/fleet/runner/me` with the runner's key returns 200 and leaves the count of entries with `actorId` the runner's id unchanged.
 12. [unit] `EnrollmentService.enroll` with stub collaborators, a stub transaction manager whose `run` calls its callback, and a stub recorder whose `record` captures `currentActor()` when called, records once with `key` `runner.enroll`, and the captured actor is `{ type: 'RUNNER', id: <the created runner's id> }`.
