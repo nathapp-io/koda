@@ -55,6 +55,43 @@ describe('PrismaVcsRepository', () => {
     expect(result).toEqual({ id: 't1', number: 8, title: 'Issue title' });
   });
 
+  it('createTicketFromIssue awaits onCreated after the insert, inside the attempt', async () => {
+    mockFindFirst.mockResolvedValue(null);
+    mockCreate.mockResolvedValue({ id: 't1', number: 1, title: 'Issue title' });
+    const onCreated = vi.fn(async () => undefined);
+
+    const result = await repo.createTicketFromIssue(
+      { id: 'p1' } as never,
+      { number: 99, title: 'Issue title', body: null, url: 'http://gh/issue/99' } as never,
+      'acme/widgets#99',
+      onCreated,
+    );
+
+    expect(onCreated).toHaveBeenCalledWith({ id: 't1', number: 1 });
+    expect(onCreated.mock.invocationCallOrder[0]).toBeGreaterThan(mockCreate.mock.invocationCallOrder[0]);
+    expect(result).toEqual({ id: 't1', number: 1, title: 'Issue title' });
+  });
+
+  it('AC-28: a rejecting onCreated propagates without being retried as a number conflict', async () => {
+    mockFindFirst.mockResolvedValue(null);
+    mockCreate.mockResolvedValue({ id: 't1', number: 1, title: 'Issue title' });
+    const onCreated = vi.fn(async () => {
+      throw new Error('audit down');
+    });
+
+    await expect(
+      repo.createTicketFromIssue(
+        { id: 'p1' } as never,
+        { number: 99, title: 'Issue title', body: null, url: 'http://gh/issue/99' } as never,
+        'acme/widgets#99',
+        onCreated,
+      ),
+    ).rejects.toThrow('audit down');
+
+    expect(mockRun).toHaveBeenCalledTimes(1);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
+
   it('findActiveTicketLinksWithPrs filters merged/closed and null deleted tickets', async () => {
     mockFindMany.mockResolvedValue([]);
     await repo.findActiveTicketLinksWithPrs('p1', { repoOwner: 'acme', repoName: 'app' });

@@ -17,6 +17,12 @@ export interface CreateTicketFromIssueResult {
   title: string;
 }
 
+/**
+ * Runs inside the ticket-number attempt's transaction, after the new ticket's insert (Permissions P2
+ * US-002); the import's audit entry commits or rolls back with the ticket.
+ */
+export type OnTicketCreated = (ticket: { id: string; number: number }) => Promise<void>;
+
 export interface TicketLinkData {
   id: string;
   ticketId: string;
@@ -90,6 +96,7 @@ export interface IVcsRepository {
     project: { id: string },
     issue: { number: number; title: string; body: string | null },
     externalVcsId: string,
+    onCreated?: OnTicketCreated,
   ): Promise<CreateTicketFromIssueResult>;
 
   // TicketLink operations

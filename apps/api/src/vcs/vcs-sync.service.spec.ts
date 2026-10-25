@@ -4,6 +4,8 @@ import { VcsSyncService } from './vcs-sync.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VcsIssue } from './types';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 
 vi.mock('./factory', () => ({
   createVcsProvider: vi.fn(),
@@ -82,14 +84,17 @@ function createMockRepo(): Mocked<IVcsRepository> {
 describe('VcsSyncService', () => {
   let service: VcsSyncService;
   let mockRepo: Mocked<IVcsRepository>;
+  const auditRecord = vi.mocked(mockAuditRecorder.record);
 
   beforeEach(async () => {
     mockRepo = createMockRepo();
+    auditRecord.mockClear();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         VcsSyncService,
         { provide: VCS_REPOSITORY, useValue: mockRepo },
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
       ],
     }).compile();
 
@@ -104,7 +109,7 @@ describe('VcsSyncService', () => {
       mockRepo.findExistingTicketByExternalId.mockResolvedValue(null);
       mockRepo.createTicketFromIssue.mockResolvedValue({ id: 't-1', number: 5, title: issue.title });
 
-      const result = await service.syncIssue(project, issue, 'manual', makeConnection());
+      const result = await service.syncIssue(project, issue, 'manual', makeConnection(), 'vcs.sync.issue');
 
       expect(result.action).toBe('created');
       expect(result.ticketId).toBe('t-1');
@@ -113,6 +118,7 @@ describe('VcsSyncService', () => {
         project,
         expect.objectContaining({ number: issue.number }),
         'owner/repo#1',
+        expect.any(Function),
       );
     });
 
@@ -122,7 +128,7 @@ describe('VcsSyncService', () => {
 
       mockRepo.findExistingTicketByExternalId.mockResolvedValue({ id: 'existing-t' } as any);
 
-      const result = await service.syncIssue(project, issue, 'polling', makeConnection());
+      const result = await service.syncIssue(project, issue, 'polling', makeConnection(), 'system.vcs.poll-issues');
 
       expect(result.action).toBe('skipped');
       expect(mockRepo.createTicketFromIssue).not.toHaveBeenCalled();
@@ -132,9 +138,41 @@ describe('VcsSyncService', () => {
       const project = makeProject();
       const issue = makeIssue({ number: 99 });
 
-      await service.syncIssue(project, issue, 'webhook', makeConnection());
+      await service.syncIssue(project, issue, 'webhook', makeConnection(), 'system.vcs.webhook-intake');
 
       expect(mockRepo.findExistingTicketByExternalId).toHaveBeenCalledWith(project.id, 'owner/repo#99');
+    });
+
+    it('AC-21: records the import on the new ticket with the caller key and the issue number', async () => {
+      const project = makeProject();
+      const issue = makeIssue({ number: 7 });
+      mockRepo.findExistingTicketByExternalId.mockResolvedValue(null);
+      mockRepo.createTicketFromIssue.mockImplementation(async (_project, _issue, _externalVcsId, onCreated) => {
+        await onCreated?.({ id: 't-1', number: 3 });
+        return { id: 't-1', number: 3, title: 'Test issue' };
+      });
+
+      await service.syncIssue(project, issue, 'manual', makeConnection(), 'vcs.sync.issue');
+
+      expect(auditRecord).toHaveBeenCalledTimes(1);
+      expect(auditRecord).toHaveBeenCalledWith({
+        key: 'vcs.sync.issue',
+        resourceType: 'ticket',
+        resourceId: 't-1',
+        projectId: project.id,
+        summary: 'imported issue #7',
+      });
+    });
+
+    it('records nothing for an issue that was already imported', async () => {
+      const project = makeProject();
+      const issue = makeIssue({ number: 42 });
+
+      mockRepo.findExistingTicketByExternalId.mockResolvedValue({ id: 'existing-t' } as never);
+
+      await service.syncIssue(project, issue, 'polling', makeConnection(), 'system.vcs.poll-issues');
+
+      expect(auditRecord).not.toHaveBeenCalled();
     });
   });
 
@@ -144,13 +182,16 @@ describe('VcsSyncService', () => {
         findExistingTicketByExternalId: vi.fn().mockResolvedValue(null),
         createTicketFromIssue: vi.fn().mockResolvedValue({ id: 't1', number: 1, title: 'Issue' }),
       };
-      const service = new VcsSyncService(repo as unknown as IVcsRepository);
+      const service = new VcsSyncService(
+        repo as unknown as IVcsRepository,
+        mockAuditRecorder as never,
+      );
       const issue = { number: 5, title: 'Issue', body: null, authorLogin: 'a', url: 'u', labels: [], createdAt: new Date() };
 
-      await service.syncIssue({ id: 'p1' }, issue, 'polling', { repoOwner: 'acme', repoName: 'widgets' });
+      await service.syncIssue({ id: 'p1' }, issue, 'polling', { repoOwner: 'acme', repoName: 'widgets' }, 'vcs.sync.all');
 
       expect(repo.findExistingTicketByExternalId).toHaveBeenCalledWith('p1', 'acme/widgets#5');
-      expect(repo.createTicketFromIssue).toHaveBeenCalledWith({ id: 'p1' }, issue, 'acme/widgets#5');
+      expect(repo.createTicketFromIssue).toHaveBeenCalledWith({ id: 'p1' }, issue, 'acme/widgets#5', expect.any(Function));
     });
   });
 
@@ -273,6 +314,33 @@ describe('VcsSyncService', () => {
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0]).toContain('Issue 1');
       expect(result.issuesSynced).toBe(1);
+    });
+
+    it('AC-29: lists an issue whose audit recording failed and keeps going', async () => {
+      const project = makeProject();
+      const connection = makeConnection({ allowedAuthors: '[]' });
+      const encryptionKey = 'test-key-32-chars-exactly-padded!!';
+      const mockProvider = {
+        fetchIssues: vi.fn().mockResolvedValue({ issues: [makeIssue({ number: 13 })], cursor: null, capped: false }),
+        testConnection: vi.fn(),
+        fetchIssue: vi.fn(),
+        getPullRequestStatus: vi.fn(),
+        listPrCommits: vi.fn(),
+      };
+      (createVcsProvider as Mock).mockReturnValue(mockProvider);
+      mockRepo.findExistingTicketByExternalId.mockResolvedValue(null);
+      mockRepo.createTicketFromIssue.mockImplementation(async (_project, _issue, _externalVcsId, onCreated) => {
+        await onCreated?.({ id: 't-13', number: 13 });
+        return { id: 't-13', number: 13, title: 'Issue 13' };
+      });
+      auditRecord.mockRejectedValueOnce(new Error('audit down'));
+
+      const result = await service.fullSync(project, connection, encryptionKey);
+
+      expect(result.errors).toContain('Issue 13: audit down');
+      expect(result.issuesSynced).toBe(0);
+      expect(result.issuesSkipped).toBe(1);
+      expect(result.createdTickets).toEqual([]);
     });
 
     it('should surface a top-level error when provider.fetchIssues fails', async () => {

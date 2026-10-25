@@ -17,6 +17,8 @@ import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { VcsIssue } from '../../../src/vcs/types';
 import { ConfigService } from '@nestjs/config';
 import { VCS_CFG, IVcsConfig } from '../../../src/config/vcs.config';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 
 describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
   let pollingService: VcsPollingService;
@@ -126,6 +128,7 @@ describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
           provide: ConfigService,
           useValue: { get: vi.fn().mockReturnValue('test-encryption-key') },
         },
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         { provide: VCS_CFG, useValue: mockVcsConfig },
         {
           provide: SchedulerRegistry,

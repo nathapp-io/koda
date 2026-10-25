@@ -6,6 +6,7 @@ import type { Mock } from 'vitest';
  * escapes as an unhandled rejection (VCS LOW).
  */
 import { SchedulerRegistry } from '@nestjs/schedule';
+import { Logger } from '@nestjs/common';
 import { VcsPollingService } from './vcs-polling.service';
 import type { IVcsRepository } from './domain/vcs.repository';
 import type { VcsConnectionWithProjectDomain } from './domain/vcs.domain';
@@ -36,6 +37,14 @@ describe('VcsPollingService tick (M10)', () => {
   let fetchIssues: Mock;
   let service: VcsPollingService;
   let unhandled: Mock;
+  let sync: { filterByAllowedAuthors: Mock; syncIssue: Mock };
+  let prSync: { syncPrStatus: Mock };
+  const loggerError = vi.mocked(Logger.prototype.error);
+
+  const issue = (number: number) => ({
+    number, title: `Issue ${number}`, body: null, authorLogin: 'octo',
+    url: `https://github.com/o/r/issues/${number}`, labels: [], createdAt: new Date(),
+  });
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -49,8 +58,9 @@ describe('VcsPollingService tick (M10)', () => {
       createVcsSyncLog: vi.fn().mockResolvedValue({}),
     };
     registry = { addInterval: vi.fn(), deleteInterval: vi.fn() };
-    const sync = { filterByAllowedAuthors: vi.fn((issues) => issues), syncIssue: vi.fn() };
-    const prSync = { syncPrStatus: vi.fn().mockResolvedValue({ updated: 0, skipped: 0 }) };
+    sync = { filterByAllowedAuthors: vi.fn((issues) => issues), syncIssue: vi.fn().mockResolvedValue({ action: 'created' }) };
+    prSync = { syncPrStatus: vi.fn().mockResolvedValue({ updated: 0, skipped: 0 }) };
+    loggerError.mockClear();
     service = new VcsPollingService(
       repo as unknown as IVcsRepository,
       registry as unknown as SchedulerRegistry,
@@ -147,5 +157,56 @@ describe('VcsPollingService tick (M10)', () => {
     await tick();
 
     expect(unhandled).not.toHaveBeenCalled();
+  });
+
+  describe('Permissions P2 US-002: the poll entry point audit key', () => {
+    it('AC-20: passes system.vcs.poll-issues to syncIssue', async () => {
+      const fetched = issue(11);
+      repo.findVcsConnectionById.mockResolvedValue(connection());
+      fetchIssues.mockResolvedValue({ issues: [fetched], cursor: null, capped: false });
+      service.schedulePolling(connection());
+
+      await tick();
+
+      expect(sync.syncIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'proj-1' }),
+        fetched,
+        'polling',
+        expect.objectContaining({ id: 'conn-1' }),
+        'system.vcs.poll-issues',
+      );
+    });
+
+    it('AC-30: an import that fails to record stops the batch at that issue', async () => {
+      repo.findVcsConnectionById.mockResolvedValue(connection());
+      fetchIssues.mockResolvedValue({ issues: [issue(1), issue(2)], cursor: null, capped: false });
+      sync.syncIssue.mockRejectedValueOnce(new Error('audit down'));
+      service.schedulePolling(connection());
+
+      await tick();
+
+      expect(sync.syncIssue).toHaveBeenCalledTimes(1);
+      expect(sync.syncIssue).toHaveBeenCalledWith(
+        expect.anything(), expect.objectContaining({ number: 1 }), 'polling', expect.anything(), 'system.vcs.poll-issues',
+      );
+    });
+
+    it('AC-31/AC-32/AC-33: logs the failure, keeps the cursor and skips the PR sync', async () => {
+      repo.findVcsConnectionById.mockResolvedValue(connection());
+      fetchIssues.mockResolvedValue({
+        issues: [issue(1)], cursor: new Date('2026-09-22T00:00:00Z'), capped: false,
+      });
+      sync.syncIssue.mockRejectedValueOnce(new Error('audit down'));
+      service.schedulePolling(connection());
+
+      await tick();
+
+      const logged = loggerError.mock.calls.map((call) => String(call[0])).join('\n');
+      expect(logged).toContain('Polling failed for connection');
+      expect(logged).toContain('conn-1');
+      expect(logged).toContain('audit down');
+      expect(repo.updateVcsConnectionLastSynced).not.toHaveBeenCalled();
+      expect(prSync.syncPrStatus).not.toHaveBeenCalled();
+    });
   });
 });

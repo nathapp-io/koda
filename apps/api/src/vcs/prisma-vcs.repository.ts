@@ -15,6 +15,7 @@ import {
   IVcsRepository,
   MergedPrTransitionInput,
   OutboxDedupQuery,
+  OnTicketCreated,
   PrStateWriteResult,
   TicketLinkData,
   UpdateVcsConnectionData,
@@ -170,11 +171,14 @@ export class PrismaVcsRepository implements IVcsRepository {
   /**
    * Create a ticket from a VCS issue inside a transaction.
    * Allocates ticket number as MAX(number)+1 scoped to the project; retried on a concurrent-number conflict (M6).
+   * `onCreated` runs inside the same attempt, after the insert, so a failure in it rolls the ticket back
+   * and is not retried as a number conflict (Permissions P2 US-002).
    */
   async createTicketFromIssue(
     project: { id: string },
     issue: VcsIssue,
     externalVcsId: string,
+    onCreated?: OnTicketCreated,
   ): Promise<CreateTicketFromIssueResult> {
     return runWithTicketNumberRetry(this.txManager, async () => {
       const lastTicket = await this.db.ticket.findFirst({
@@ -198,6 +202,8 @@ export class PrismaVcsRepository implements IVcsRepository {
           vcsSyncedAt: new Date(),
         },
       });
+
+      if (onCreated) await onCreated({ id: ticket.id, number: ticket.number });
 
       return {
         id: ticket.id,

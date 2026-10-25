@@ -6,6 +6,8 @@ import { decryptToken } from '../common/utils/encryption.util';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { externalVcsIdFor, VcsRepoRef } from './external-vcs-id';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import type { VcsIssueAuditKey } from './vcs-audit';
 
 /**
  * Result of syncing a single issue
@@ -22,17 +24,22 @@ export interface SyncIssueResult {
 export class VcsSyncService {
   constructor(
     @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
+    private readonly audit: AuditRecorder,
     @Optional() @Inject(VCS_CFG) private readonly vcsConfig?: IVcsConfig,
   ) {}
 
   /**
-   * Sync a single issue into a ticket
+   * Sync a single issue into a ticket.
+   *
+   * Permissions P2 US-002: `auditKey` is the entry point that ran this (a sync route, the poller or the
+   * webhook intake), so an import's entry names where the outside write came from.
    */
   async syncIssue(
     project: { id: string },
     issue: VcsIssue,
     syncMode: 'manual' | 'polling' | 'webhook',
     repo: VcsRepoRef,
+    auditKey: VcsIssueAuditKey,
   ): Promise<SyncIssueResult> {
     const externalVcsId = externalVcsIdFor(repo, issue.number);
 
@@ -46,8 +53,18 @@ export class VcsSyncService {
       };
     }
 
-    // Allocate ticket number in transaction and create ticket
-    const result = await this.vcsRepo.createTicketFromIssue(project, issue, externalVcsId);
+    // Allocate ticket number in transaction and create ticket. The entry is recorded inside that
+    // attempt's transaction through the callback: wrapping the call in `audited` would start an outer
+    // transaction, and `runWithTicketNumberRetry` refuses to retry inside one.
+    const result = await this.vcsRepo.createTicketFromIssue(project, issue, externalVcsId, async (ticket) => {
+      await this.audit.record({
+        key: auditKey,
+        resourceType: 'ticket',
+        resourceId: ticket.id,
+        projectId: project.id,
+        summary: `imported issue #${issue.number}`,
+      });
+    });
 
     return {
       action: 'created',
@@ -111,7 +128,7 @@ export class VcsSyncService {
       // Sync each issue
       for (const issue of filteredIssues) {
         try {
-          const result = await this.syncIssue(project, issue, 'manual', connection);
+          const result = await this.syncIssue(project, issue, 'manual', connection, 'vcs.sync.all');
           if (result.action === 'created') {
             issuesSynced++;
             if (result.ticketId && result.ticketNumber) {
