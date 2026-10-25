@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-vcs-ci",
   "branchName": "feat/permissions-p2-audit-vcs-ci",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T13:38:57.763Z",
+  "updatedAt": "2026-10-25T13:55:50.349Z",
   "userStories": [
     {
       "id": "US-001",
@@ -280,14 +280,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Four existing source files gain standard audited wrappers, key forwarding and a nested 404 catch using US-002's helper; existing HMAC verification, authorization and replay rules are not modified."
+        "reasoning": "Four existing source files gain standard audited wrappers, key forwarding and a nested 404 catch using US-002's helper; existing HMAC verification, authorization and replay rules are not modified.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/vcs/vcs-pr-sync.service.ts",
@@ -349,7 +352,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c80cb3dfdd883141a30e02ffe7d60dc64cfaffb0"
     },
     {
       "id": "US-004",
