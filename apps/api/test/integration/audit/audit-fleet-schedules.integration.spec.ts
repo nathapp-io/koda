@@ -4,7 +4,7 @@ import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp, data } from '../../helpers/http-app';
+import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { fixtureDb } from '../../helpers/action-context';
 
@@ -16,6 +16,7 @@ describeIntegration('fleet schedule audit rows (PG)', () => {
   let server: ReturnType<NathApplication['getHttpServer']>;
   let prisma: PrismaClient;
   let world: FleetHttpWorld;
+  let dev2: string;
   let n = 0;
   const BASE = '/api/projects/web/fleet/schedules';
   const auth = (who: keyof FleetHttpWorld['tokens']) => ({ Authorization: `Bearer ${world.tokens[who]}` });
@@ -24,7 +25,8 @@ describeIntegration('fleet schedule audit rows (PG)', () => {
       name, repoId: world.repoId, feature: `audit${n}`, cron: '0 9 * * 1-5', timezone: 'UTC', maxCostUsd: 5,
     }).expect(201),
   );
-  const entries = (id: string) => prisma.auditEntry.findMany({ where: { resourceId: id } });
+  const entries = (id: string, key?: string) => prisma.auditEntry.findMany({ where: { resourceId: id, ...(key ? { key } : {}) } });
+  const dev2Auth = () => ({ Authorization: `Bearer ${dev2}` });
 
   beforeAll(async () => {
     await resetDb();
@@ -32,6 +34,10 @@ describeIntegration('fleet schedule audit rows (PG)', () => {
     server = app.getHttpServer();
     prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
+    await request(server).post('/api/admin/users').set(auth('root')).send({ email: 'audit-schedule-dev2@koda.test', name: 'audit schedule dev2', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
+    await request(server).post('/api/projects/web/members').set(auth('root')).send({ email: 'audit-schedule-dev2@koda.test', roleKey: 'developer' }).expect(201);
+    resetThrottle(app);
+    dev2 = await loginToken(server, 'audit-schedule-dev2@koda.test');
   });
   afterAll(async () => { await app.close(); });
   beforeEach(async () => {
@@ -57,6 +63,55 @@ describeIntegration('fleet schedule audit rows (PG)', () => {
       name: 'refused', repoId: world.repoId, feature: `audit${++n}`, cron: '0 9 * * 1-5', timezone: 'UTC', maxCostUsd: 5,
     }).expect(403);
     expect(await prisma.auditEntry.findMany({ where: { key: 'fleet.schedule.create', actorId: world.ids.viewer } })).toHaveLength(0);
+  });
+
+  it('AC-5: owner patch records only the updated field names', async () => {
+    const row = await create();
+    await request(server).patch(`${BASE}/${row.id}`).set(auth('dev')).send({ cron: '0 6 * * *', timezone: 'UTC' }).expect(200);
+    const auditRows = await entries(row.id, 'fleet.schedule.update');
+    expect(auditRows).toHaveLength(1);
+    expect(auditRows[0]).toMatchObject({ resourceType: 'fleet-schedule', projectId: world.projectId, summary: 'fields: cron, timezone' });
+  });
+
+  it('AC-6: a second developer cannot update the owner schedule and records nothing', async () => {
+    const row = await create();
+    await request(server).patch(`${BASE}/${row.id}`).set(dev2Auth()).send({ cron: '0 6 * * *' }).expect(403);
+    expect(await entries(row.id, 'fleet.schedule.update')).toHaveLength(0);
+  });
+
+  it('AC-7–10: disable and enable audit only actual transitions', async () => {
+    const row = await create();
+    const disabled = data<{ enabled: boolean; disabledReason: string | null; nextFireAt: string | null }>(
+      await request(server).post(`${BASE}/${row.id}/disable`).set(auth('dev')).expect(200),
+    );
+    expect(disabled).toMatchObject({ enabled: false, disabledReason: 'manual', nextFireAt: null });
+    const disableEntries = await entries(row.id, 'fleet.schedule.update');
+    expect(disableEntries).toHaveLength(1);
+    expect(disableEntries[0].summary).toBe('disabled');
+
+    const disabledAgain = data<typeof disabled>(await request(server).post(`${BASE}/${row.id}/disable`).set(auth('dev')).expect(200));
+    expect(disabledAgain).toEqual(disabled);
+    expect(await entries(row.id, 'fleet.schedule.update')).toHaveLength(1);
+
+    const enabled = data<typeof disabled>(await request(server).post(`${BASE}/${row.id}/enable`).set(auth('dev')).expect(200));
+    expect(enabled.enabled).toBe(true);
+    const enableEntries = await entries(row.id, 'fleet.schedule.update');
+    expect(enableEntries).toHaveLength(2);
+    expect(enableEntries.filter((entry) => entry.summary === 'enabled')).toHaveLength(1);
+
+    const enabledAgain = data<typeof disabled>(await request(server).post(`${BASE}/${row.id}/enable`).set(auth('dev')).expect(200));
+    expect(enabledAgain).toEqual(enabled);
+    expect(await entries(row.id, 'fleet.schedule.update')).toHaveLength(2);
+  });
+
+  it('AC-11: owner delete records the committed deletion', async () => {
+    const row = await create();
+    await request(server).delete(`${BASE}/${row.id}`).set(auth('dev')).expect(204);
+    const auditRows = await entries(row.id, 'fleet.schedule.delete');
+    expect(auditRows).toHaveLength(1);
+    expect(auditRows[0]).toMatchObject({
+      resourceType: 'fleet-schedule', projectId: world.projectId, summary: 'deleted',
+    });
   });
 
   it('AC-4: recorder failure rolls back the schedule transaction', async () => {
