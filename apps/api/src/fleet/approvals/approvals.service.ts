@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { AppException, ForbiddenAppException, NotFoundAppException, ValidationAppException, type IPageOption } from '@nathapp/nestjs-common';
 import { IPageResult, ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { remapPage } from '../../common/dto/koda-page.query';
@@ -75,6 +76,7 @@ export class ApprovalsService {
     private readonly notifier: RunnerNotifier,
     private readonly assistantActions: AssistantActionPort,
     private readonly permissions: PermissionService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async list(route: ApprovalRoute, q: { status?: ApprovalStatus; type?: ApprovalType; jobId?: string }, page: IPageOption): Promise<IPageResult<FleetApprovalDto>> {
@@ -112,6 +114,7 @@ export class ApprovalsService {
       if (!policy) throw new ConflictAppException({}, 'fleet.approvalNotPending');
       if (dto.decision === 'keep_paused') {
         const decided = await this.repo.resolve(id, { status: 'rejected', resolvedBy: 'user', decidedAt: now, decision: 'keep_paused', decidedById: caller.id, comment: dto.comment ?? null });
+        await this.audit.record({ key: 'fleet.approval.decide.budget', resourceType: 'fleet-approval', resourceId: decided.id, projectId: decided.projectId, summary: 'decision: keep_paused' });
         return { approval: decided, live: await this.closer.recordResolved(decided, userActor(caller.id)), requeue: [] as RequeueCandidate[] };
       }
       if (dto.amountUsd === undefined) invalid('amountUsd is required to raise and resume');
@@ -126,6 +129,7 @@ export class ApprovalsService {
         status: 'approved', resolvedBy: 'user', decidedAt: now, decision: 'raise_budget_and_resume', decidedById: caller.id,
         comment: dto.comment ?? null, outcome: { resumedAmountUsd: resumed.amountUsd, requeueResults: [] },
       });
+      await this.audit.record({ key: 'fleet.approval.decide.budget', resourceType: 'fleet-approval', resourceId: decided.id, projectId: decided.projectId, summary: 'decision: raise_budget_and_resume' });
       return { approval: decided, live: await this.closer.recordResolved(decided, userActor(caller.id)), requeue: selected };
     });
     this.live.publish(t1.live);
@@ -179,6 +183,7 @@ export class ApprovalsService {
         runnerId: job.runnerId, jobId: job.id, type: FleetCommandType.APPROVAL_ANSWER, leaseEpoch: job.leaseEpoch,
         payload: { approvalId: decided.id, naxAskId: decided.naxAskId, choice: checked.choice },
       });
+      await this.audit.record({ key: 'fleet.approval.decide.bash', resourceType: 'fleet-approval', resourceId: decided.id, projectId: decided.projectId, summary: `decision: ${dto.decision}` });
       return { kind: 'decided', approval: decided, live: await this.closer.recordResolved(decided, userActor(caller.id)), runnerId: job.runnerId };
     });
     // Plan D265: the expiry or job-end close above has committed; only now refuse the decide.

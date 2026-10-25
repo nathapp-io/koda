@@ -1,3 +1,4 @@
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaChatThreadRepository } from './prisma-chat-thread.repository';
 
@@ -54,6 +55,7 @@ function discardRepo(opts: Opts = {}) {
   const repo = new PrismaChatThreadRepository(
     prisma as never, jobs as never, txManager as never, activity as never, placement as never, notifier as never, budgets as never,
     { threadsEnabled: opts.threadsEnabled ?? true, runnerOfflineSec: 90 } as never,
+    mockAuditRecorder,
   );
   return { repo, prisma, jobs, created, placement, notifier };
 }

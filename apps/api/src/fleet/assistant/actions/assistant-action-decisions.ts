@@ -3,6 +3,7 @@ import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-c
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { randomUUID } from 'crypto';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
+import { AuditRecorder } from '../../../audit/audit-recorder.service';
 import { FLEET_CFG, IFleetConfig } from '../../../config/fleet.config';
 import type { LiveFleetApprovalEvent } from '../../../live/live-event';
 import { ThreadEventBus } from '../../../live/thread-event-bus';
@@ -57,6 +58,7 @@ export class AssistantActionDecisions implements OnModuleInit, AssistantActionDe
     @Inject(FLEET_CFG) private readonly cfg: Pick<IFleetConfig, 'threadsEnabled'>,
     private readonly port: AssistantActionPort,
     private readonly executor: AssistantToolExecutor,
+    private readonly audit: AuditRecorder,
   ) {}
 
   onModuleInit(): void {
@@ -129,6 +131,13 @@ export class AssistantActionDecisions implements OnModuleInit, AssistantActionDe
       status: 'approved', resolvedBy: 'user', decidedAt: now, decision: 'approve', decidedById: caller.id, comment: dto.comment ?? null,
     });
     const approved = await this.actions.resolve(action.id, { status: 'APPROVED', approverId: caller.id, decidedAt: now });
+    await this.audit.record({
+      key: 'fleet.approval.decide.assistant',
+      resourceType: 'fleet-approval',
+      resourceId: approval.id,
+      projectId: approval.projectId,
+      summary: 'decision: approve',
+    });
     return { approval: decided, live: await this.closer.recordResolved(decided, userActor(caller.id)), action: approved };
   }
 
@@ -158,6 +167,13 @@ export class AssistantActionDecisions implements OnModuleInit, AssistantActionDe
       status: 'rejected', resolvedBy: 'user', decidedAt: now, decision: 'reject', decidedById: caller.id, comment: dto.comment ?? null,
     });
     const rejected = await this.actions.resolve(action.id, { status: 'REJECTED', approverId: caller.id, decidedAt: now });
+    await this.audit.record({
+      key: 'fleet.approval.decide.assistant',
+      resourceType: 'fleet-approval',
+      resourceId: approval.id,
+      projectId: approval.projectId,
+      summary: 'decision: reject',
+    });
     const live = await this.closer.recordResolved(decided, userActor(caller.id));
     return { approval: decided, live, noteId: await this.actions.insertSystemNote(action.threadId, outcomeNote(rejected)) };
   }

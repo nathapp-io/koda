@@ -3,6 +3,7 @@ import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-com
 import type { IPageOption } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { IPageResult } from '@nathapp/nestjs-data';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetCommandType, FleetJobState } from '../../common/enums';
@@ -59,10 +60,11 @@ export class FleetJobsService {
     private readonly fleetTickets: FleetTicketsService,
     private readonly ticketEffects: FleetJobTicketEffects,
     @Inject(CONFIG_EDIT_REPOSITORY) private readonly configEdits: Pick<IConfigEditRepository, 'findByJobId'>,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /** Spec §5.1: validate, insert QUEUED (409 on an active duplicate), record, place. */
-  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string } = {}): Promise<DispatchResultDto> {
+  async dispatch(actorId: string, projectId: string, dto: DispatchFleetJobDto, opts: { scheduleId?: string; ticketActor?: TicketActor; threadId?: string; auditKey?: 'fleet.job.dispatch' | 'thread.plan' | 'thread.run' } = {}): Promise<DispatchResultDto> {
     const repo = await this.repo.findRepo(dto.repoId);
     if (!repo || repo.projectId !== projectId) throw new NotFoundAppException({}, 'fleet.repos');
     const input = normalizeDispatch(dto, repo.defaultBranch);
@@ -107,6 +109,10 @@ export class FleetJobsService {
             ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),
             ...(tickets.length > 0 ? { ticketRefs: tickets.map((t) => t.ref) } : {}),
           },
+        });
+        await this.audit.record({
+          key: opts.auditKey ?? 'fleet.job.dispatch', resourceType: 'fleet-job', resourceId: created.id, projectId: created.projectId,
+          summary: `${created.command} on repo ${created.repoId}${created.threadId ? `, thread ${created.threadId}` : ''}${created.scheduleId ? `, schedule ${created.scheduleId}` : ''}`,
         });
         return created;
       });
@@ -156,12 +162,14 @@ export class FleetJobsService {
 
       if (current.state === FleetJobState.QUEUED) {
         const r = await this.transitions.apply({ job: current, to: 'CANCELLED', by: 'server', now, actor, reason: 'cancelled before assignment' });
+        await this.audit.record({ key: 'fleet.job.cancel', resourceType: 'fleet-job', resourceId: current.id, projectId: current.projectId, summary: `cancelled from ${current.state}` });
         return { ...r, wake: null };
       }
       if (current.state === FleetJobState.ASSIGNED) {
         const unacked = await this.repo.findPendingCommand({ jobId, type: FleetCommandType.ASSIGN, leaseEpoch: current.leaseEpoch });
         if (unacked) {
           const r = await this.transitions.apply({ job: current, to: 'CANCELLED', by: 'server', now, actor, reason: 'cancelled before the runner took it' });
+          await this.audit.record({ key: 'fleet.job.cancel', resourceType: 'fleet-job', resourceId: current.id, projectId: current.projectId, summary: `cancelled from ${current.state}` });
           return { ...r, wake: null };
         }
       }
@@ -177,6 +185,7 @@ export class FleetJobsService {
         actorType: 'USER', actorId, action: 'job.cancel_requested', entityType: 'job', entityId: jobId, jobId,
         projectId, responsibleUserId: responsibleUserOf(current), payload: { state: current.state },
       });
+      await this.audit.record({ key: 'fleet.job.cancel', resourceType: 'fleet-job', resourceId: current.id, projectId: current.projectId, summary: `cancel requested in ${current.state}` });
       return { job: updated, live: this.live.event(updated), wake: current.runnerId };
     });
     if (live) this.live.publish([live]);
@@ -262,7 +271,7 @@ export class FleetJobsService {
         // can no longer ack them, and so the next sync sees no orphan ASSIGN/CANCEL.
         // ABANDON rows are deliberately preserved (they are server-issued).
         await this.repo.withdrawPendingCommands(jobId, now);
-        return this.transitions.apply({
+        const result = await this.transitions.apply({
           job: current, to: 'QUEUED', by: 'server', now, actor: { type: 'USER', id: actorId }, reason: 'requeued',
           extra: {
             runnerId: null, runnerBootId: null, assignedAt: null, startedAt: null, finishedAt: null, cancelRequestedAt: null,
@@ -274,6 +283,8 @@ export class FleetJobsService {
             configResult: null, ackedRunnerSeq: 0, bumpEpoch: true,
           },
         });
+        await this.audit.record({ key: 'fleet.job.requeue', resourceType: 'fleet-job', resourceId: current.id, projectId: current.projectId, summary: `requeued from ${current.state}` });
+        return result;
       });
       queued = r.job;
       liveEvent = r.live;

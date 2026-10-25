@@ -334,11 +334,23 @@ export class AgentsService {
       return rankB - rankA;
     });
 
-    await this.recordAgentAction(
-      agent.id,
-      'TICKET_SUGGESTED',
-      { ticketId: scored[0].ticket.id, ticketNumber: scored[0].ticket.number },
-      project.id,
+    await this.audit.audited(
+      async () => {
+        await this.recordAgentAction(
+          agent.id,
+          'TICKET_SUGGESTED',
+          { ticketId: scored[0].ticket.id, ticketNumber: scored[0].ticket.number },
+          project.id,
+        );
+        return scored[0];
+      },
+      (suggestion) => ({
+        key: 'agent.pickup',
+        resourceType: 'ticket',
+        resourceId: suggestion.ticket.id,
+        projectId: project.id,
+        summary: `suggested ${project.key}-${suggestion.ticket.number} to ${agent.slug}`,
+      }),
     );
 
     return scored[0];

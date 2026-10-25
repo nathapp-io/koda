@@ -1,3 +1,4 @@
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { PrismaChatThreadRepository } from './prisma-chat-thread.repository';
 import type { ThreadScope } from './domain/chat-thread.domain';
 
@@ -15,6 +16,7 @@ function fixture() {
   const repo = new PrismaChatThreadRepository(
     { client } as never, {} as never, { run: (fn: () => Promise<unknown>) => fn() } as never,
     {} as never, {} as never, {} as never, {} as never, {} as never,
+    mockAuditRecorder,
   );
   return { repo, client };
 }

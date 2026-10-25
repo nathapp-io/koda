@@ -1,3 +1,4 @@
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { FleetJobsService } from './fleet-jobs.service';
 
 describe('FleetJobsService thread handoff dispatch', () => {
@@ -16,6 +17,7 @@ describe('FleetJobsService thread handoff dispatch', () => {
       { resolveForDispatch: vi.fn().mockResolvedValue([]) } as never,
       {} as never,
       {} as never,
+      mockAuditRecorder,
     );
 
     await expect(service.dispatch('u1', 'p1', {

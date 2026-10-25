@@ -29,6 +29,8 @@ import { DELIVERABLE_STATUSES, MAX_DELIVERED_NOTES, deliveryText } from '../assi
 import { outcomeNote } from '../assistant/actions/outcome-note';
 import type { ChatThreadKind, ThreadAction, ThreadBackend } from '../common/thread-jobs';
 import { THREAD_LIMITS } from '../common/thread-jobs';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { threadAuditKey } from './thread-audit';
 
 /** The states a thread's current job is no longer live in (job-state.ts owns these). Prisma's `notIn` wants a mutable list. */
 const TERMINAL_JOB_STATES: string[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'CRASHED', 'ESCALATED'];
@@ -58,10 +60,12 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     private readonly notifier: RunnerNotifier,
     private readonly budgets: BudgetGate,
     @Inject(FLEET_CFG) private readonly config: ConfigType<typeof fleetConfig>,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async create(input: { kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord> {
-    const row = await this.prisma.client.chatThread.create({ data: {
+    const row = await this.audit.audited(
+      () => this.prisma.client.chatThread.create({ data: {
       kind: input.kind,
       projectId: input.projectId,
       repoId: input.repoId,
@@ -78,7 +82,15 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       // and no spec.
       specPath: input.kind === 'PROJECT' || input.feature === null ? null : `.nax/features/${input.feature}/spec.md`,
       maxCostUsd: input.maxCostUsd,
-    } });
+      } }),
+      (created) => ({
+        key: threadAuditKey('create', input.kind === 'WORKSPACE'),
+        resourceType: 'thread',
+        resourceId: created.id,
+        projectId: created.projectId,
+        summary: `created ${input.kind}`,
+      }),
+    );
     return this.mapThread(row, null);
   }
 
@@ -170,6 +182,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
       if (!canOperate && thread.createdById !== userId) throw new ForbiddenAppException({}, 'permissions');
       const row = await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { maxCostUsd } });
+      await this.audit.record({ key: threadAuditKey('cap', scope.kind === 'workspace'), resourceType: 'thread', resourceId: row.id, projectId: row.projectId, summary: 'fields: maxCostUsd' });
       return this.mapThread(row, job);
     });
     return updated;
@@ -204,6 +217,13 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       // Permissions P1 US-002: an answer steers the live turn, so only the turn's requester may send it.
       if (type === FleetCommandType.THREAD_ANSWER) this.assertOwnLiveSession(job, userId);
       await this.jobs.createCommand({ runnerId: job.runnerId, jobId: job.id, type: type as FleetCommandType, leaseEpoch: job.leaseEpoch, payload });
+      const action = type === FleetCommandType.THREAD_STOP_TURN ? 'stop'
+        : type === FleetCommandType.THREAD_CLOSE ? 'end-session'
+          : type === FleetCommandType.THREAD_ANSWER ? 'answer' : null;
+      if (action) await this.audit.record({
+        key: threadAuditKey(action, scope.kind === 'workspace'), resourceType: 'thread', resourceId: thread.id,
+        projectId: thread.projectId, summary: action === 'stop' ? 'stop requested' : action === 'end-session' ? 'end requested' : 'answered',
+      });
       runnerId = job.runnerId;
     });
     if (runnerId) this.notifier.notify(runnerId);
@@ -221,7 +241,8 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       const thread = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, ...scopeWhere(scope) } });
       if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
       if (thread.status === 'ARCHIVED') return null;
-      await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { status: 'ARCHIVED', archivedAt: new Date() } });
+      const archived = await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { status: 'ARCHIVED', archivedAt: new Date() } });
+      await this.audit.record({ key: threadAuditKey('archive', scope.kind === 'workspace'), resourceType: 'thread', resourceId: archived.id, projectId: archived.projectId, summary: 'archived' });
       // A send that took the locks first may have created a job the pre-lock read never saw, so
       // the cancel target is read again under the thread row lock.
       return (await this.currentThreadJob(threadId))?.id ?? null;
@@ -265,6 +286,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         // Permissions P1 US-002: publishing into a live turn steers it, so only the turn's requester may do it.
         this.assertOwnLiveSession(active, userId);
         await this.jobs.createCommand({ runnerId: active.runnerId, jobId: active.id, type: FleetCommandType.THREAD_PUBLISH, leaseEpoch: active.leaseEpoch, payload: {} });
+        await this.audit.record({ key: threadAuditKey('publish', false), resourceType: 'thread', resourceId: thread.id, projectId: thread.projectId, summary: `publish into session ${active.id}` });
         notifyRunnerId = active.runnerId;
         return { jobId: null };
       }
@@ -273,6 +295,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       const job = await this.createThreadJob(thread, 'PUBLISH', undefined, undefined, { id: userId, type: actorTypeFor(userId) });
       await this.jobs.appendEvent(job.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
       await this.activity.record({ actorType: 'USER', actorId: userId, action: 'job.dispatched', entityType: 'job', entityId: job.id, jobId: job.id, projectId: thread.projectId, responsibleUserId: userId, payload: { repoId: repoFields.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: repoFields.baseRef } });
+      await this.audit.record({ key: threadAuditKey('publish', false), resourceType: 'thread', resourceId: thread.id, projectId: thread.projectId, summary: `publish job ${job.id}` });
       placeJobId = job.id;
       return { jobId: job.id };
     });
@@ -314,6 +337,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       const job = await this.createThreadJob(thread, 'DISCARD', undefined, undefined, { id: userId, type: actorTypeFor(userId) });
       await this.jobs.appendEvent(job.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
       await this.activity.record({ actorType: 'USER', actorId: userId, action: 'job.dispatched', entityType: 'job', entityId: job.id, jobId: job.id, projectId: thread.projectId, responsibleUserId: userId, payload: { repoId: repoFields.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: repoFields.baseRef } });
+      await this.audit.record({ key: threadAuditKey('discard', false), resourceType: 'thread', resourceId: thread.id, projectId: thread.projectId, summary: `discard job ${job.id}` });
       placeJobId = job.id;
       return { jobId: job.id };
     });
@@ -372,6 +396,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         // The refusal gate passed, so a RUNNING job here is a live session with no turn in flight.
         if (currentAfterLock?.state === 'RUNNING' && currentAfterLock.runnerId) {
           await this.jobs.createCommand({ runnerId: currentAfterLock.runnerId, jobId: currentAfterLock.id, type: FleetCommandType.THREAD_INPUT, leaseEpoch: currentAfterLock.leaseEpoch, payload: { messageId: message.id, text: handoffText } });
+          await this.audit.record({ key: threadAuditKey('message', input.scope.kind === 'workspace'), resourceType: 'thread', resourceId: thread.id, projectId: thread.projectId, summary: `message ${message.id}` });
           return { kind: 'done' as const, result: { message, jobId: null, deduplicated: false }, notifyRunnerId: currentAfterLock.runnerId };
         }
 
@@ -382,6 +407,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         // The job names where it runs: a PROJECT thread's job carries the anchor repo, not the thread's null repo fields.
         await this.activity.record({ actorType: 'USER', actorId: input.userId, action: 'job.dispatched', entityType: 'job', entityId: job.id, jobId: job.id,
           projectId: thread.projectId, responsibleUserId: input.userId, payload: { repoId: job.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: job.ref } });
+        await this.audit.record({ key: threadAuditKey('message', input.scope.kind === 'workspace'), resourceType: 'thread', resourceId: thread.id, projectId: thread.projectId, summary: `message ${message.id}, job ${job.id}` });
         return { kind: 'done' as const, result: { message: linkedMessage, jobId: job.id, deduplicated: false }, placeJobId: job.id };
       });
       if (outcome.kind === 'retry') continue;
