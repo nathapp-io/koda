@@ -2,6 +2,7 @@ import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import type { FleetJobEventRecord, FleetJobPatch, FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import type { JobReport } from '../common/protocol';
 import { JobReportProcessor } from './job-report.processor';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 
 const NOW = new Date('2026-10-03T10:00:00.000Z');
 
@@ -57,7 +58,7 @@ function makeProcessor(repo: ReturnType<typeof makeRepo>) {
   const live = { event: vi.fn(() => ({ id: 'job-live', type: 'fleet_job', projectId: 'p1', jobId: 'job-1', state: 'RUNNING', at: NOW.toISOString() })) };
   const tx = { run: (fn: () => unknown) => fn() };
   const closer = { openBash: vi.fn().mockResolvedValue({ approval: { id: 'a1' }, live: [APPROVAL_LIVE] }) };
-  const processor = new JobReportProcessor(repo as never, {} as never, live as never, fence as never, activity as never, budgets as never, closer as never, tx as never);
+  const processor = new JobReportProcessor(repo as never, {} as never, live as never, fence as never, activity as never, budgets as never, closer as never, tx as never, mockAuditRecorder);
   return { processor, closer, activity };
 }
 
@@ -132,7 +133,7 @@ describe('JobReportProcessor config job end (fleet S3 D476: UPLOADING with no bu
     const fence = { holds: () => true, abandon: vi.fn() };
     const live = { event: vi.fn(() => ({ id: 'job-live', type: 'fleet_job', projectId: 'p1', jobId: 'job-1', state: 'RUNNING', at: NOW.toISOString() })) };
     const processor = new JobReportProcessor(repo as never, transitions as never, live as never, fence as never, { record: vi.fn() } as never,
-      { signal: vi.fn() } as never, { openBash: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never);
+      { signal: vi.fn() } as never, { openBash: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder);
     const configResult = { outcome: 'ok', files: ['.nax/context.md', 'AGENTS.md'] };
 
     const out = await processor.process('r1', {

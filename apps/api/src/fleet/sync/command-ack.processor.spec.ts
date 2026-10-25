@@ -1,6 +1,7 @@
 import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
 import type { FleetCommandRecord, FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import { CommandAckProcessor } from './command-ack.processor';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 
 const NOW = new Date('2026-10-03T10:00:00.000Z');
 
@@ -37,7 +38,7 @@ function makeProcessor(commandRecord: FleetCommandRecord) {
   const activity = { record: vi.fn() };
   const approvals = { lockById: vi.fn(), setOutcome: vi.fn() };
   const tx = { run: (fn: () => unknown) => fn() };
-  const processor = new CommandAckProcessor(repo as never, transitions as never, fence as never, activity as never, approvals as never, tx as never);
+  const processor = new CommandAckProcessor(repo as never, transitions as never, fence as never, activity as never, approvals as never, tx as never, mockAuditRecorder);
   const seedCommand = (c: FleetCommandRecord) => { cmd = c; };
   const seedJob = (j: FleetJobRecord) => { job = j; };
   return { processor, repo, transitions, fence, approvals, seedCommand, seedJob };
@@ -69,7 +70,7 @@ describe('THREAD_PUBLISH acks (US-004)', () => {
     const { repo } = makeProcessor(threadPublishCommand());
     const threadEffects = { onInputAck: vi.fn(async () => undefined) };
     const withThreads = new CommandAckProcessor(repo as never, { apply: vi.fn() } as never, { holds: () => true, abandon: vi.fn() } as never,
-      { record: vi.fn() } as never, { lockById: vi.fn(), setOutcome: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never, threadEffects as never);
+      { record: vi.fn() } as never, { lockById: vi.fn(), setOutcome: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder, threadEffects as never);
     await withThreads.process('r1', 'boot-1', [publishAck('cmd-p', 'rejected', 'turn_running')], NOW);
     expect(threadEffects.onInputAck).toHaveBeenCalledWith(expect.objectContaining({ type: 'THREAD_PUBLISH' }), 'rejected', 'turn_running');
   });
@@ -84,7 +85,7 @@ describe('THREAD_PUBLISH acks (US-004)', () => {
     const { repo } = makeProcessor(threadPublishCommand());
     const threadEffects = { onInputAck: vi.fn(async () => undefined) };
     const withThreads = new CommandAckProcessor(repo as never, { apply: vi.fn() } as never, { holds: () => true, abandon: vi.fn() } as never,
-      { record: vi.fn() } as never, { lockById: vi.fn(), setOutcome: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never, threadEffects as never);
+      { record: vi.fn() } as never, { lockById: vi.fn(), setOutcome: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder, threadEffects as never);
     const result = await withThreads.process('r1', 'boot-1', [publishAck('cmd-p', 'ok')], NOW);
     expect(threadEffects.onInputAck).toHaveBeenCalledWith(expect.objectContaining({ type: 'THREAD_PUBLISH' }), 'ok', '');
     expect(result).toEqual({ live: [], approvalLive: [] });

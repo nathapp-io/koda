@@ -3,6 +3,7 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FleetCommandAckResult, FleetCommandType, FleetJobState } from '../../common/enums';
 import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { APPROVAL_REPOSITORY, type IApprovalRepository } from '../approvals/domain/approval.domain';
 import type { CommandAck } from '../common/protocol';
 import { canTransition } from '../jobs/job-state';
@@ -27,6 +28,7 @@ export class CommandAckProcessor {
     private readonly activity: FleetActivityService,
     @Inject(APPROVAL_REPOSITORY) private readonly approvals: Pick<IApprovalRepository, 'lockById' | 'setOutcome'>,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly audit: AuditRecorder,
     private readonly threadEffects?: ThreadJobEffects,
   ) {}
 
@@ -88,18 +90,25 @@ export class CommandAckProcessor {
         return NO_CHANGE;
       }
       const r = await this.transitions.apply({ job, to: FleetJobState.CRASHED, by: 'server', now, actor, reason: `readopt rejected: ${detail}` });
+      await this.recordTransition(job, r.job);
       return { live: r.live, approvalLive: r.approvalLive };
     }
     if (ack.result === 'ok') return NO_CHANGE;
     if (command.type === FleetCommandType.ASSIGN && canTransition(job.state, FleetJobState.FAILED, 'runner')) {
       const r = await this.transitions.apply({ job, to: FleetJobState.FAILED, by: 'runner', now, actor, reason: `assign rejected: ${detail}` });
+      await this.recordTransition(job, r.job);
       return { live: r.live, approvalLive: r.approvalLive };
     }
     if (command.type === FleetCommandType.CANCEL && canTransition(job.state, FleetJobState.CANCELLED, 'runner')) {
       const r = await this.transitions.apply({ job, to: FleetJobState.CANCELLED, by: 'runner', now, actor, reason: 'cancel: runner does not hold job' });
+      await this.recordTransition(job, r.job);
       return { live: r.live, approvalLive: r.approvalLive };
     }
     return NO_CHANGE;
+  }
+
+  private recordTransition(before: { id: string; projectId: string; state: FleetJobState }, after: { state: FleetJobState }): Promise<void> {
+    return this.audit.record({ key: 'runner.sync', resourceType: 'fleet-job', resourceId: before.id, projectId: before.projectId, summary: `${before.state} -> ${after.state}` });
   }
 
   /**
@@ -127,6 +136,10 @@ export class CommandAckProcessor {
         await this.activity.record({
           actorType: 'RUNNER', actorId: runnerId, action: 'runner.rebooted', entityType: 'runner', entityId: runnerId,
           payload: { readopts: queued, at: now.toISOString() },
+        });
+        await this.audit.record({
+          key: 'runner.sync', resourceType: 'fleet-runner', resourceId: runnerId, projectId: null,
+          summary: `${rebooted ? 'rebooted, ' : ''}${queued} readopts queued`,
         });
       }
       return queued;
