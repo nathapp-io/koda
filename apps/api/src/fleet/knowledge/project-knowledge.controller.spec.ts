@@ -26,6 +26,7 @@ import { ProjectMembershipGuard } from '../../projects/project-membership.guard'
 import type { ProjectContext } from '../../projects/project-context';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
 import { KnowledgeStoreUnavailableError } from './knowledge-chunk-store';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import type { KnowledgeIndexState, KnowledgeProjectState, KnowledgeRepoRef } from './knowledge-index.domain';
 import { KnowledgeIndexService } from './knowledge-index.service';
 import { KnowledgeIndexQueue } from './knowledge-index.queue';
@@ -85,14 +86,16 @@ function harness(overrides: {
     }),
   };
   const queue = { enqueue: vi.fn() };
+  const audit = { record: vi.fn(async () => undefined), audited: vi.fn(async <T>(fn: () => Promise<T>) => fn()) };
   const config = { knowledgeIndexEnabled: overrides.enabled ?? true };
   const controller = new ProjectKnowledgeController(
     search as unknown as KnowledgeSearchService,
     index as unknown as KnowledgeIndexService,
     config as unknown as ConfigType<typeof fleetConfig>,
     queue as unknown as KnowledgeIndexQueue,
+    audit as unknown as AuditRecorder,
   );
-  return { controller, search, index, queue, config };
+  return { controller, search, index, queue, config, audit };
 }
 
 /** The error a call throws, so a test can assert on the exception the route would map to a status. */
@@ -322,6 +325,16 @@ describe('ProjectKnowledgeController repos (US-005, 1c-c-D12)', () => {
 });
 
 describe('ProjectKnowledgeController reindex (US-005, 1c-c-D12)', () => {
+  it('US-004 AC-13: records before enqueue and does not enqueue when audited rejects', async () => {
+    const { controller, queue, audit } = harness();
+    audit.audited.mockRejectedValue(new Error('audit failed'));
+
+    await expect(controller.reindex('repo-1', PROJECT)).rejects.toThrow('audit failed');
+
+    expect(audit.audited).toHaveBeenCalledTimes(1);
+    expect(queue.enqueue).not.toHaveBeenCalled();
+  });
+
   it('AC-11: queues an admin pass for one of the project repositories', async () => {
     const { controller, queue, index } = harness();
 
@@ -491,6 +504,7 @@ describe('POST /projects/:slug/knowledge/search', () => {
         { provide: KnowledgeIndexService, useValue: index },
         { provide: FLEET_CFG, useValue: config },
         { provide: KnowledgeIndexQueue, useValue: queue },
+        { provide: AuditRecorder, useValue: { record: vi.fn(), audited: vi.fn(async (fn: () => Promise<unknown>) => fn()) } },
         // US-007: `RequiresGuard` resolves the global PermissionService when the route's guards are instantiated.
         { provide: PermissionService, useValue: permissions },
       ],

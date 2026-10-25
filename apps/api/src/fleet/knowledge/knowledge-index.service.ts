@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import {
   IKnowledgeIndexRepository, KNOWLEDGE_INDEX_REPOSITORY, KnowledgeJobInfo, KnowledgeProjectState, KnowledgeRepoRef,
 } from './knowledge-index.domain';
@@ -17,7 +18,10 @@ export interface KnowledgePatterns {
 /** The module's public face over the state repository: controllers and other modules never inject the repository. */
 @Injectable()
 export class KnowledgeIndexService {
-  constructor(@Inject(KNOWLEDGE_INDEX_REPOSITORY) private readonly repository: IKnowledgeIndexRepository) {}
+  constructor(
+    @Inject(KNOWLEDGE_INDEX_REPOSITORY) private readonly repository: IKnowledgeIndexRepository,
+    private readonly audit: AuditRecorder,
+  ) {}
 
   /** The repository only when it is one of the project's repositories; null for any other. */
   async resolveProjectRepo(projectId: string, ref: KnowledgeRepoSelector): Promise<KnowledgeRepoRef | null> {
@@ -56,7 +60,13 @@ export class KnowledgeIndexService {
    * returned as stored, so a caller never re-reads what it just wrote.
    */
   async savePatterns(projectId: string, patterns: string[] | null): Promise<KnowledgePatterns> {
-    await this.repository.saveProjectPatterns(projectId, patterns);
+    await this.audit.audited(
+      () => this.repository.saveProjectPatterns(projectId, patterns),
+      () => ({
+        key: 'fleet.knowledge.patterns.update', resourceType: 'project', resourceId: projectId,
+        projectId, summary: patterns === null ? 'default patterns' : 'custom patterns',
+      }),
+    );
     return patterns === null ? defaultPatterns() : { patterns: [...patterns], custom: true };
   }
 }

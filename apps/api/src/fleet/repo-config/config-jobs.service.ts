@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
@@ -39,6 +40,7 @@ export class ConfigJobsService {
     private readonly placement: PlacementService,
     private readonly fence: FenceService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async listFiles(projectId: string, repoId: string): Promise<NaxFileList> {
@@ -134,6 +136,11 @@ export class ConfigJobsService {
           actorType: 'USER', actorId, action: 'job.dispatched', entityType: 'job', entityId: created.id, jobId: created.id,
           projectId: repo.projectId, responsibleUserId: actorId,
           payload: { repoId: repo.id, feature: CONFIG_JOB_FEATURE, command, ref: repo.defaultBranch, mode, files: edits.map((e) => e.path) },
+        });
+        await this.audit.record({
+          key: mode === 'drift' ? 'fleet.repo.drift.check' : 'fleet.job.config.edit',
+          resourceType: 'fleet-job', resourceId: created.id, projectId: repo.projectId,
+          summary: `${mode} on repo ${repo.id}`,
         });
         return { job: created, edit: row };
       }));
