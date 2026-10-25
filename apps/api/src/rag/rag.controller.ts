@@ -28,6 +28,7 @@ import { ListKbDocumentsQuery } from './dto/list-kb-documents.query';
 import { parseQuery } from '../common/dto/koda-page.query';
 import { PrismaRagRepository } from './prisma-rag.repository';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { KbCreator } from './kb-creator';
 
 /** The KB creator an authenticated principal writes: trusted token data, never the request body. */
@@ -66,6 +67,7 @@ export class RagController {
     private readonly hybridRetrieverService: HybridRetrieverService,
     private readonly ragRepository: PrismaRagRepository,
     private readonly permissions: PermissionService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   private async resolveProject(slug: string) {
@@ -134,6 +136,13 @@ export class RagController {
       createdBy: creator,
     });
     if (id === null) return JsonResponse.Ok({ indexed: false, sourceId: dto.sourceId });
+    await this.audit.audited(async () => undefined, () => ({
+      key: 'kb.document.add',
+      resourceType: 'kb-document',
+      resourceId: `${dto.source}:${dto.sourceId}`,
+      projectId: project.id,
+      summary: `added ${dto.source} document`,
+    }));
     return JsonResponse.Ok({ indexed: true, id, sourceId: dto.sourceId });
   }
 
@@ -186,8 +195,18 @@ export class RagController {
         .map((createdBy) => this.assertMayDeleteRow(principal, project.id, createdBy)),
     );
 
-    for (const source of sources) {
+    for (const [index, source] of sources.entries()) {
       await this.ragService.deleteBySource(project.id, source, sourceId);
+      const creators = creatorsBySource[index] ?? [];
+      if (creators.length > 0) {
+        await this.audit.audited(async () => undefined, () => ({
+          key: 'kb.document.delete',
+          resourceType: 'kb-document',
+          resourceId: `${source}:${sourceId}`,
+          projectId: project.id,
+          summary: `deleted ${creators.length} ${source} rows`,
+        }));
+      }
     }
     return JsonResponse.Ok({ deleted: true });
   }
@@ -245,6 +264,13 @@ export class RagController {
     if (dto.nodes.length === 0) return JsonResponse.Ok({ imported: 0, cleared: 0 });
 
     const importResult = await this.ragService.importGraphify(project.id, dto.nodes, dto.links ?? []);
+    await this.audit.audited(async () => undefined, () => ({
+      key: 'kb.graphify.import',
+      resourceType: 'project',
+      resourceId: project.id,
+      projectId: project.id,
+      summary: `imported ${importResult.imported} nodes, cleared ${importResult.cleared}`,
+    }));
 
     return JsonResponse.Ok(importResult);
   }
@@ -260,6 +286,13 @@ export class RagController {
   async optimizeTable(@Param('slug') slug: string) {
     const project = await this.resolveProject(slug);
     await this.ragService.optimizeTable(project.id);
+    await this.audit.audited(async () => undefined, () => ({
+      key: 'kb.optimize',
+      resourceType: 'project',
+      resourceId: project.id,
+      projectId: project.id,
+      summary: 'kb table optimized',
+    }));
     return JsonResponse.Ok({ optimized: true });
   }
 }

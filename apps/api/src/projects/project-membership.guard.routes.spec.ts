@@ -24,6 +24,8 @@ import { PrismaProjectRepository } from './prisma-project.repository';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { AgentsService } from '../agents/agents.service';
 import { RagController } from '../rag/rag.controller';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import { RagService } from '../rag/rag.service';
 import { HybridRetrieverService } from '../rag/hybrid-retriever.service';
 import { PrismaRagRepository } from '../rag/prisma-rag.repository';
@@ -202,6 +204,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
         // test/integration/rag/permissions-kb-routes.integration.spec.ts, so the stub allows every key except
         // the ones a case marks as refused (`refusedKeys`).
         { provide: PermissionService, useValue: { can } },
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         // Permissions P1 US-004: the membership guard builds no ability; it resolves the project identity only.
       ],
     }).compile();

@@ -2,6 +2,7 @@ import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { RagController } from './rag.controller';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import { RagService } from './rag.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
 import { PrismaRagRepository } from './prisma-rag.repository';
@@ -57,6 +58,11 @@ describe('RagController', () => {
   let ragService: Mocked<RagService>;
   let hybridRetrieverService: Mocked<HybridRetrieverService>;
   let can: Mock;
+  const audit = { audited: vi.fn(async (fn: () => Promise<unknown>, entriesOf: (result: unknown) => unknown) => {
+    const result = await fn();
+    entriesOf(result);
+    return result;
+  }), record: vi.fn() };
 
   const mockFindProjectBySlug = vi.fn();
   const mockUpdateGraphifyLastImportedAt = vi.fn();
@@ -97,6 +103,7 @@ describe('RagController', () => {
         // ProjectAccessService (membership) and PermissionService (keys) dependencies must resolve.
         { provide: ProjectAccessService, useValue: {} },
         { provide: PermissionService, useValue: { can } },
+        { provide: AuditRecorder, useValue: audit },
       ],
     }).compile();
 
@@ -108,6 +115,17 @@ describe('RagController', () => {
   });
 
   describe('addDocument', () => {
+    it('returns indexed false and records nothing when the store indexes no row', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.indexDocument.mockResolvedValue(null);
+
+      const result = await controller.addDocument('alpha', { source: 'manual', sourceId: 'empty', content: 'x' }, devUser);
+
+      expect((result as any).data).toEqual({ indexed: false, sourceId: 'empty' });
+      expect(audit.audited).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
     it('indexes only via ragService (single LanceDB write path — H7)', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.indexDocument.mockResolvedValue('doc-record-1');
@@ -126,6 +144,10 @@ describe('RagController', () => {
       expect(ragService.indexDocument).toHaveBeenCalledTimes(1);
       expect(ragService.indexDocument).toHaveBeenCalledWith('proj-1', expect.objectContaining({ sourceId: 'doc-1' }));
       // H7: HybridRetriever must NOT receive a second, duplicate index write.
+      expect(audit.audited).toHaveBeenCalledWith(expect.any(Function), expect.any(Function));
+      expect(audit.audited.mock.calls[0]?.[1]('doc-record-1')).toEqual({
+        key: 'kb.document.add', resourceType: 'kb-document', resourceId: 'doc:doc-1', projectId: 'proj-1', summary: 'added doc document',
+      });
       expect(hybridRetrieverService.indexDocument).not.toHaveBeenCalled();
       expect((result as any).data).toEqual({ indexed: true, id: 'doc-record-1', sourceId: 'doc-1' });
     });

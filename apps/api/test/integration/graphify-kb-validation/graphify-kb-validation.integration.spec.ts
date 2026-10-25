@@ -9,6 +9,8 @@ import { ProjectResponseDto } from '../../../src/projects/dto/project-response.d
 import { UpdateProjectDto } from '../../../src/projects/dto/update-project.dto';
 import type { IndexDocumentInput } from '../../../src/rag/rag.service';
 import { RagController } from '../../../src/rag/rag.controller';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 import { RagService } from '../../../src/rag/rag.service';
 import { HybridRetrieverService } from '../../../src/rag/hybrid-retriever.service';
 import { EvaluationService } from '../../../src/retrieval/evaluation.service';
@@ -544,6 +546,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
           { provide: ProjectAccessService, useValue: {} },
           // US-007: the KB routes carry permission keys; these cases exercise the graphify handler itself.
           { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
+          { provide: AuditRecorder, useValue: mockAuditRecorder },
         ],
       }).compile();
 
