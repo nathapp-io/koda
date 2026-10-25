@@ -208,6 +208,22 @@ describe('CodeCommitOutboxHandler', () => {
       })).rejects.toThrow('API rate limit exceeded');
     });
 
+    it('forwards the supplied onIndexed callback as indexCommit argument five', async () => {
+      const sourceFiles: SourceFile[] = [{ path: 'src/a.ts', content: 'export const x = 1;' }];
+      mockProvider = createMockVcsProvider({ fetchCommitFiles: vi.fn().mockResolvedValue(sourceFiles) });
+      (createVcsProvider as Mock).mockReturnValue(mockProvider);
+      mockAstIndex = createMockAstIndexService();
+      handler = new CodeCommitOutboxHandler(
+        createMockCodeIntelRepository(defaultConnection), mockAstIndex, createMockVcsConfig('enc-key'),
+      );
+      const onIndexed = vi.fn(async () => undefined);
+      await handler.process({
+        repoId: 'repo-1', commitHash: 'abc123', ref: 'refs/heads/main',
+        changedFiles: ['src/a.ts'], projectId: 'proj-1',
+      }, onIndexed);
+      expect(mockAstIndex.indexCommit).toHaveBeenCalledWith('repo-1', 'abc123', sourceFiles, 'proj-1', onIndexed);
+    });
+
     it('happy path: should fetch files and call AstIndexService.indexCommit', async () => {
       const sourceFiles: SourceFile[] = [
         { path: 'src/a.ts', content: 'export const x = 1;' },
