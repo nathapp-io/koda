@@ -117,7 +117,15 @@
       },
       "column": { "time": "Time", "key": "Key", "actor": "Actor", "project": "Project", "resource": "Resource", "summary": "Summary" },
       "actorType": { "USER": "User", "AGENT": "Agent", "RUNNER": "Runner", "SYSTEM": "System" },
-      "onBehalfOf": "on behalf of {name}"
+      "onBehalfOf": "on behalf of {name}",
+      "chip": {
+        "actor": "Actor",
+        "approver": "Approver",
+        "project": "Project",
+        "resource": "Resource",
+        "correlation": "Correlation",
+        "remove": "Remove filter: {filter}"
+      }
     },
     "roles": {
       "title": "Roles",
