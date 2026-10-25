@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { ESCALATED_FROM_AUDIT } from '../ingest/ingest-corrections';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { foldSeries } from './analytics-fold';
@@ -25,6 +26,7 @@ export class AnalyticsService {
     @Inject(FLEET_JOB_REPOSITORY) private readonly jobRepo: Pick<IFleetJobRepository, 'findById'>,
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /** Spec §4.2 spend; `projectId: null` is the admin route across projects. */
@@ -147,6 +149,12 @@ export class AnalyticsService {
         actorType: 'USER', actorId, action: 'analytics.deleted', entityType: 'analytics', entityId: projectId ?? 'all', projectId,
         responsibleUserId: actorId, payload: { before: before.toISOString(), ...deleted },
       });
+      if (Object.values(deleted).some((count) => count > 0)) {
+        await this.audit.record({
+          key: 'fleet.analytics.delete', resourceType: 'fleet-analytics', resourceId: projectId ?? 'all', projectId,
+          summary: `deleted ${deleted.costEvents} cost events, ${deleted.stories} stories, ${deleted.reviews} reviews, ${deleted.ingestRowsMarked} ingest rows marked`,
+        });
+      }
       return deleted;
     });
     return { projectId, before: before.toISOString(), ...counts };

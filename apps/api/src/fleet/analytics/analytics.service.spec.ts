@@ -38,7 +38,8 @@ describe('AnalyticsService', () => {
   const jobs = { findById: vi.fn() };
   const activity = { record: vi.fn() };
   const txManager = { run: vi.fn((fn: () => Promise<unknown>) => fn()) };
-  const make = (repo: IAnalyticsRepository) => new AnalyticsService(repo, jobs as never, activity as never, txManager as never);
+  const audit = { record: vi.fn() };
+  const make = (repo: IAnalyticsRepository) => new AnalyticsService(repo, jobs as never, activity as never, txManager as never, audit as never);
 
   afterEach(() => vi.clearAllMocks());
 
@@ -181,6 +182,20 @@ describe('AnalyticsService', () => {
 
     await svc.deleteRows('u1', { before: '2026-10-01T00:00:00Z', confirm: 'ALL' }, now);
     expect(activity.record).toHaveBeenLastCalledWith(expect.objectContaining({ entityId: 'all', projectId: null }));
+  });
+
+  it('audits analytics deletion only when at least one row changed (US-005 AC-12)', async () => {
+    const zeroRepo = fakeRepo({ deleteRows: vi.fn().mockResolvedValue({ costEvents: 0, stories: 0, reviews: 0, ingestRowsMarked: 0 }) });
+    await make(zeroRepo).deleteRows('u1', { before: '2026-10-01T00:00:00Z', projectId: 'p1', confirm: 'web' }, now);
+    expect(audit.record).not.toHaveBeenCalled();
+
+    const repo = fakeRepo({ deleteRows: vi.fn().mockResolvedValue({ costEvents: 1, stories: 0, reviews: 0, ingestRowsMarked: 0 }) });
+    await make(repo).deleteRows('u1', { before: '2026-10-01T00:00:00Z', projectId: 'p1', confirm: 'web' }, now);
+    expect(audit.record).toHaveBeenCalledTimes(1);
+    expect(audit.record).toHaveBeenCalledWith({
+      key: 'fleet.analytics.delete', resourceType: 'fleet-analytics', resourceId: 'p1', projectId: 'p1',
+      summary: 'deleted 1 cost events, 0 stories, 0 reviews, 0 ingest rows marked',
+    });
   });
 
   it('counts unfinished and failed ingests of jobs finished in the window (D388)', async () => {
