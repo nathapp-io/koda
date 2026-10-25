@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-vcs-ci",
   "branchName": "feat/permissions-p2-audit-vcs-ci",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T13:55:50.349Z",
+  "updatedAt": "2026-10-25T14:21:24.430Z",
   "userStories": [
     {
       "id": "US-001",
@@ -397,14 +397,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "The shared merge must preserve CAS ownership and two distinct commit boundaries across webhook, manual, polling and fleet callers; three sessions isolate concurrency and rollback checks without changing any authentication or access-control mechanism."
+        "reasoning": "The shared merge must preserve CAS ownership and two distinct commit boundaries across webhook, manual, polling and fleet callers; three sessions isolate concurrency and rollback checks without changing any authentication or access-control mechanism.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/vcs/vcs-pr-sync.service.ts",
@@ -430,7 +433,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "649ff72dafa43aef6b542242deb64854b735550b"
     },
     {
       "id": "US-005",
