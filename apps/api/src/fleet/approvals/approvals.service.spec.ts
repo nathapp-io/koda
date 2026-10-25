@@ -4,6 +4,12 @@ import { ConflictAppException } from '../../common/exceptions/conflict-app.excep
 import { ApprovalCloser } from './approval-closer';
 import { ApprovalsService, type ApprovalCaller } from './approvals.service';
 import { MAX_REQUEUE_CANDIDATES, type FleetApprovalRecord } from './domain/approval.domain';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
+
+afterEach(() => {
+  mockAuditRecorder.record.mockReset();
+  mockAuditRecorder.record.mockImplementation(async () => undefined);
+});
 
 const NOW = new Date('2026-10-02T10:00:00.000Z');
 const pendingBudget = (over: Partial<FleetApprovalRecord> = {}): FleetApprovalRecord => ({
@@ -69,8 +75,8 @@ function build(approval: FleetApprovalRecord | null, policyScope: 'project' | 'p
   const notifier = { notify: vi.fn() };
   const assistantActions = { decide: vi.fn() };
   const permissions = allowAllPermissions();
-  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, tx as never, jobRepo as never, notifier as never, assistantActions as never, permissions as never);
-  return { service, repo, budgets, jobs, budgetRepo, jobRepo, notifier, assistantActions, permissions };
+  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, tx as never, jobRepo as never, notifier as never, assistantActions as never, permissions as never, mockAuditRecorder);
+  return { service, repo, budgets, jobs, budgetRepo, jobRepo, notifier, assistantActions, permissions, tx };
 }
 
 /**
@@ -108,7 +114,7 @@ function buildBash() {
   const notifier = { notify: vi.fn() };
   const assistantActions = { decide: vi.fn() };
   const permissions = allowAllPermissions();
-  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, tx as never, jobRepo as never, notifier as never, assistantActions as never, permissions as never);
+  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, tx as never, jobRepo as never, notifier as never, assistantActions as never, permissions as never, mockAuditRecorder);
   // Defaults the brief's row literals leave out but the service/DTO touch (e.g. requestedAt).
   const seed = (a: Record<string, unknown> & { id: string }) => {
     rows.set(a.id, {
@@ -127,6 +133,20 @@ const PROJECT_ADMIN = { kind: 'project' as const, projectId: 'p1' };
 const PROJECT_DEV = { kind: 'project' as const, projectId: 'p1' };
 
 describe('ApprovalsService.decide (budget)', () => {
+  it('records the budget decision inside the transaction after resolving it (AC-10)', async () => {
+    const { service, repo, tx } = build(pendingBudget());
+    let inRun = false;
+    tx.run.mockImplementation(async (fn: () => Promise<unknown>) => { inRun = true; try { return await fn(); } finally { inRun = false; } });
+    mockAuditRecorder.record.mockClear();
+    mockAuditRecorder.record.mockImplementation(async () => {
+      expect(inRun).toBe(true);
+      expect(repo.resolve).toHaveBeenCalledTimes(1);
+      expect(repo.resolve.mock.invocationCallOrder[0]).toBeLessThan(mockAuditRecorder.record.mock.invocationCallOrder[0]);
+    });
+    await service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'keep_paused' }, NOW);
+    expect(mockAuditRecorder.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ key: 'fleet.approval.decide.budget' }));
+  });
+
   it('keep_paused rejects the approval without resuming', async () => {
     const { service, budgets } = build(pendingBudget());
     const dto = await service.decide(ADMIN_CALLER, PROJECT_ADMIN, 'a1', { decision: 'keep_paused', comment: 'later' }, NOW);
