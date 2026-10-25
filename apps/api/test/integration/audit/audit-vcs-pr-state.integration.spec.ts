@@ -1,5 +1,7 @@
 import { createHmac } from 'node:crypto';
 import request from 'supertest';
+import { Logger } from '@nestjs/common';
+import { VCS_REPOSITORY, type IVcsRepository } from '../../../src/vcs/domain/vcs.repository';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
@@ -138,6 +140,19 @@ describeIntegration('VCS PR-state audit entries', () => {
     expect(await rows(link.id)).toHaveLength(0);
   });
 
+  it('AC-3: a successful provider-404 close stores the state and audits draft -> closed', async () => {
+    const { link } = await newLink('draft');
+    provider.getPullRequestStatus.mockRejectedValue(new NotFoundAppException({}, 'vcs'));
+
+    const response = await request(server).post(`${BASE}/sync-pr`).set(auth()).expect(201);
+    expect(data<{ updated: number }>(response).updated).toBe(1);
+    expect((await db.ticketLink.findUniqueOrThrow({ where: { id: link.id } })).prState).toBe('closed');
+    expect(await rows(link.id)).toMatchObject([{
+      key: describeKey, resourceType: 'ticket-link', resourceId: link.id,
+      projectId, actorType: 'USER', actorId: rootId, summary: 'pr draft -> closed',
+    }]);
+  });
+
   it('AC-4: poller key is recorded with SYSTEM/vcs actor', async () => {
     const { link } = await newLink('draft');
     provider.getPullRequestStatus.mockResolvedValue(prStatus(prNumberOf(link.prNumber), 'open'));
@@ -210,6 +225,25 @@ describeIntegration('VCS PR-state audit entries', () => {
     expect(await rows(terminal.link.id)).toHaveLength(0);
   });
 
+  it('AC-29: a link deleted after selection returns not-found without an audit entry', async () => {
+    const { link } = await newLink('draft');
+    provider.getPullRequestStatus.mockResolvedValue(prStatus(prNumberOf(link.prNumber), 'open'));
+    const repo = app.get<IVcsRepository>(VCS_REPOSITORY);
+    const write = repo.updateTicketLinkWithPrState.bind(repo);
+    const race = vi.spyOn(repo, 'updateTicketLinkWithPrState').mockImplementation(async (id, state) => {
+      await db.ticketLink.delete({ where: { id } });
+      return write(id, state);
+    });
+    const project = await db.project.findUniqueOrThrow({ where: { id: projectId } });
+    const connection = await db.vcsConnection.findUniqueOrThrow({ where: { projectId } });
+    const result = await withTestActor({ type: 'SYSTEM', id: 'vcs' }, () =>
+      app.get(VcsPrSyncService).syncPrStatus(project, connection, 'ab'.repeat(32), describeKey));
+    race.mockRestore();
+    expect(result).toEqual({ updated: 0, skipped: 0 });
+    expect(await db.ticketLink.findUnique({ where: { id: link.id } })).toBeNull();
+    expect(await rows(link.id)).toHaveLength(0);
+  });
+
   it('AC-25/AC-26/AC-27: rejected audit on a provider-404 close counts one skipped and continues', async () => {
     const first = await newLink('draft');
     const second = await newLink('draft');
@@ -221,12 +255,15 @@ describeIntegration('VCS PR-state audit entries', () => {
       if (input.resourceId === first.link.id) throw new Error('audit down');
       await original(input);
     });
+    const warning = vi.mocked(Logger.prototype.warn);
+    warning.mockClear();
     const project = await db.project.findUniqueOrThrow({ where: { id: projectId } });
     const connection = await db.vcsConnection.findUniqueOrThrow({ where: { projectId } });
     const result = await withTestActor({ type: 'SYSTEM', id: 'vcs' }, () =>
       app.get(VcsPrSyncService).syncPrStatus(project, connection, 'ab'.repeat(32), describeKey));
     spy.mockRestore();
     expect(result.skipped).toBe(1);
+    expect(warning.mock.calls.map(([message]) => String(message)).join(' ')).toContain('audit down');
     expect((await db.ticketLink.findUniqueOrThrow({ where: { id: first.link.id } })).prState).toBe('draft');
     expect((await db.ticketLink.findUniqueOrThrow({ where: { id: second.link.id } })).prState).toBe('open');
   });

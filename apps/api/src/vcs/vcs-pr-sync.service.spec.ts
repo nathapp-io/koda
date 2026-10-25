@@ -189,6 +189,8 @@ describe('VcsPrSyncService', () => {
       const result = await service.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
 
       expect(result).toEqual({ updated: 0, skipped: 0 });
+      expect(mockRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith(link.id, 'closed');
+      expect(mockAuditRecorder.audited).toHaveBeenCalledTimes(1);
       expect(mockAuditRecorder.record).not.toHaveBeenCalled();
     });
 
