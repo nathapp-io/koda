@@ -94,6 +94,22 @@ describe('parseAuditRoute (spec §3.5 URL filters)', () => {
   test('null and undefined values are empty, never the string "null"', () => {
     expect(parseAuditRoute({ key: null, actorId: undefined, from: null })).toEqual(EMPTY_AUDIT_FILTERS)
   })
+
+  // F1 (fix round 1): a well-shaped but impossible date would reach the API and answer 400.
+  test('an impossible calendar date is dropped instead of being sent to the API', () => {
+    expect(parseAuditRoute({ from: '2026-99-99', to: '2026-02-30' })).toEqual(EMPTY_AUDIT_FILTERS)
+    expect(parseAuditRoute({ from: '2026-13-01' }).from).toBe('')
+    expect(parseAuditRoute({ from: '2026-00-10' }).from).toBe('')
+    expect(parseAuditRoute({ from: '2026-04-31' }).from).toBe('')
+    expect(parseAuditRoute({ from: '2026-01-00' }).from).toBe('')
+    expect(parseAuditRoute({ to: '2026-02-29' }).to).toBe('')
+  })
+
+  test('a real leap day keeps the filter, and so does a legitimate month end', () => {
+    expect(parseAuditRoute({ from: '2024-02-29' }).from).toBe('2024-02-29')
+    expect(parseAuditRoute({ to: '2000-02-29' }).to).toBe('2000-02-29')
+    expect(parseAuditRoute({ to: '2026-01-31' }).to).toBe('2026-01-31')
+  })
 })
 
 describe('auditRouteQuery', () => {

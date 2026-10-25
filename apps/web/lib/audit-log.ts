@@ -34,7 +34,28 @@ export const AUDIT_PAGE_SIZE = 50
 /** The API caps every string filter at 128 characters (`ListAuditQuery`). */
 const MAX_FIELD = 128
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/
+
+const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+}
+
+/**
+ * A real UTC calendar day: right shape *and* an existing date. `2026-99-99` or `2026-02-30` match the
+ * shape but the API's strict ISO-8601 validation refuses them, so sending one would answer 400.
+ */
+function isCalendarDate(value: string): boolean {
+  const match = DATE_RE.exec(value)
+  if (!match) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (month < 1 || month > 12) return false
+  const lastDay = month === 2 && isLeapYear(year) ? 29 : MONTH_DAYS[month - 1]
+  return day >= 1 && day <= lastDay
+}
 
 /** The filter fields, in the order the selects and chips read them. */
 const FILTER_FIELDS = [
@@ -83,10 +104,10 @@ function isActorType(value: string): value is AuditActorType {
   return (AUDIT_ACTOR_TYPES as readonly string[]).includes(value)
 }
 
-/** A date filter the API would refuse (`@Matches(YYYY-MM-DD)`) simply is not set. */
+/** A date filter the API would refuse (`@IsISO8601` + `@Matches(YYYY-MM-DD)`) simply is not set. */
 function dateOf(value: QueryValue): string {
   const raw = first(value)
-  return DATE_RE.test(raw) ? raw : ''
+  return isCalendarDate(raw) ? raw : ''
 }
 
 function pageOf(value: QueryValue): number {
