@@ -134,7 +134,7 @@ export class KnowledgeRepoIndexer {
           files.set(entry.path, next);
         }
         mutated = true;
-        changedCount += 1;
+        if (!existing || existing.blobSha !== entry.sha || file === null) changedCount += 1;
       }
       for (const path of files.keys()) {
         if (kept.has(path)) continue;

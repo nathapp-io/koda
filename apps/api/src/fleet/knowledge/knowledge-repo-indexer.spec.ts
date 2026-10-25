@@ -197,6 +197,13 @@ describe('KnowledgeRepoIndexer', () => {
     expect(f.state.finish).toHaveBeenCalledWith('r1', expect.objectContaining({ status: 'idle', indexedSha: 'head' }));
   });
 
+  it('US-008: retrying an unchanged blob with unembedded chunks is not counted as changed', async () => {
+    const f = fixture();
+    f.state.listFiles.mockResolvedValue([stored('docs/a.md', 2)]);
+    await f.indexer.indexRepo('r1', now);
+    expect(f.audit.audited.mock.calls[0]?.[1]({ status: 'indexed' })).toEqual([expect.objectContaining({ summary: 'indexed 0 changed, 0 removed' })]);
+  });
+
   it('US-008 AC-11: unchanged state does not audit', async () => {
     const f = fixture();
     f.state.listStates.mockResolvedValue([{ repoId: 'r1', indexedSha: 'head', patternsKey: 'default', fileCount: 0, chunkCount: 0, unembeddedCount: 0 }]);
