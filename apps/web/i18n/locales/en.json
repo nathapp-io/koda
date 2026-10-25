@@ -101,6 +101,24 @@
     "toggleTheme": "Toggle light/dark theme"
   },
   "admin": {
+    "audit": {
+      "title": "Audit log",
+      "subtitle": "Every write the API recorded, with the actor, project and resource it touched.",
+      "filter": {
+        "key": "Key",
+        "allKeys": "All keys",
+        "actorType": "Actor type",
+        "allActorTypes": "All actor types",
+        "from": "From (UTC)",
+        "to": "To (UTC)",
+        "byActor": "Filter by this actor",
+        "byProject": "Filter by this project",
+        "byResource": "Filter by this resource"
+      },
+      "column": { "time": "Time", "key": "Key", "actor": "Actor", "project": "Project", "resource": "Resource", "summary": "Summary" },
+      "actorType": { "USER": "User", "AGENT": "Agent", "RUNNER": "Runner", "SYSTEM": "System" },
+      "onBehalfOf": "on behalf of {name}"
+    },
     "roles": {
       "title": "Roles",
       "subtitle": "Create roles and choose which permissions each one grants.",

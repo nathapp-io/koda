@@ -101,6 +101,24 @@
     "toggleTheme": "切换浅色/深色主题"
   },
   "admin": {
+    "audit": {
+      "title": "审计日志",
+      "subtitle": "API 记录的每一次写入，以及涉及的执行者、项目和资源。",
+      "filter": {
+        "key": "操作键",
+        "allKeys": "全部操作键",
+        "actorType": "执行者类型",
+        "allActorTypes": "全部执行者类型",
+        "from": "开始日期（UTC）",
+        "to": "结束日期（UTC）",
+        "byActor": "按该执行者筛选",
+        "byProject": "按该项目筛选",
+        "byResource": "按该资源筛选"
+      },
+      "column": { "time": "时间", "key": "操作键", "actor": "执行者", "project": "项目", "resource": "资源", "summary": "摘要" },
+      "actorType": { "USER": "用户", "AGENT": "智能体", "RUNNER": "运行器", "SYSTEM": "系统" },
+      "onBehalfOf": "代表 {name}"
+    },
     "roles": {
       "title": "角色",
       "subtitle": "创建角色并选择每个角色授予的权限。",
