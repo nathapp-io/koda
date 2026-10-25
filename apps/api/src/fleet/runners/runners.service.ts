@@ -10,6 +10,8 @@ import { IRunnerRepository, RUNNER_REPOSITORY, RunnerPatch } from './domain/runn
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { RunnerDto, RunnerView } from './dto/runner.dto';
 import { RunnerSummaryDto } from './dto/runner-summary.dto';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { fieldsSummary } from '../../audit/audit-summary';
 
 @Injectable()
 export class RunnersService {
@@ -18,6 +20,7 @@ export class RunnersService {
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'runnerOfflineSec'>,
+    private readonly audit: AuditRecorder,
   ) {}
 
   private view(now: Date): RunnerView {
@@ -52,6 +55,7 @@ export class RunnersService {
       if (!(await this.repo.findRunnerById(id))) throw new NotFoundAppException({}, 'fleet.runners');
       const updated = await this.repo.updateRunner(id, clean);
       await this.activity.record({ actorType: 'USER', actorId, action: 'runner.updated', entityType: 'runner', entityId: id, payload: { ...clean } });
+      await this.audit.record({ key: 'fleet.runner.update', resourceType: 'fleet-runner', resourceId: id, projectId: null, summary: fieldsSummary(clean) });
       return RunnerDto.from(updated, this.view(new Date()));
     });
   }
@@ -69,6 +73,7 @@ export class RunnersService {
       if ((await this.repo.countUnfinishedJobs(id)) > 0) throw new ConflictAppException({}, 'fleet.runnerBusy');
       await this.repo.deleteRunner(id);
       await this.activity.record({ actorType: 'USER', actorId, action: 'runner.deleted', entityType: 'runner', entityId: id, payload: { name: runner.name } });
+      await this.audit.record({ key: 'fleet.runner.delete', resourceType: 'fleet-runner', resourceId: id, projectId: null, summary: 'deleted' });
     });
   }
 }

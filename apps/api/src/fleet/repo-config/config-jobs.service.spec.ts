@@ -3,6 +3,7 @@ import { DuplicateActiveJobError, FleetJobRecord, FleetRepoRef } from '../jobs/d
 import { FleetFenceException } from '../artifacts/bundle.exceptions';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { CONFIG_JOB_FEATURE, ConfigJobsService } from './config-jobs.service';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { ConfigJobActiveException } from './repo-config.exceptions';
 
 const NOW = new Date('2026-10-08T09:00:00.000Z');
@@ -39,7 +40,7 @@ function setup() {
   const placement = { placeJob: vi.fn(async () => ({ assigned: false, runnerId: null, leaseEpoch: null, misfits: [] })) };
   const fence = { holds: vi.fn((j: FleetJobRecord, r: string, e: number) => j.runnerId === r && j.leaseEpoch === e), abandon: vi.fn() };
   const tx = { run: (fn: () => unknown) => fn() };
-  const svc = new ConfigJobsService(jobs as never, edits as never, reader as never, activity as never, live as never, placement as never, fence as never, tx as never);
+  const svc = new ConfigJobsService(jobs as never, edits as never, reader as never, activity as never, live as never, placement as never, fence as never, tx as never, mockAuditRecorder);
   return { svc, jobs, edits, reader, activity, placement, fence };
 }
 

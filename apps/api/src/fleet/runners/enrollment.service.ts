@@ -14,6 +14,7 @@ import { IRunnerRepository, RUNNER_REPOSITORY } from './domain/runner.domain';
 import { EnrollDto } from './dto/enroll.dto';
 import { EnrollmentCreatedDto, EnrollmentDto } from './dto/enrollment.dto';
 import { ProtocolVersionException } from './protocol-version.exception';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 
 const uniqueSorted = (labels: string[]) => [...new Set(labels)].sort();
 
@@ -25,6 +26,7 @@ export class EnrollmentService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(AUTH_CFG) private readonly authConfig: IAuthConfig,
     @Inject(FLEET_CFG) private readonly fleetConfig: IFleetConfig,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async create(actorId: string, labels: string[]): Promise<EnrollmentCreatedDto> {
@@ -34,6 +36,7 @@ export class EnrollmentService {
     const enrollment = await this.txManager.run(async () => {
       const row = await this.repo.createEnrollment({ tokenHash: hash, labels: cleanLabels, expiresAt, createdById: actorId });
       await this.activity.record({ actorType: 'USER', actorId, action: 'enrollment.created', entityType: 'enrollment', entityId: row.id, payload: { labels: cleanLabels } });
+      await this.audit.record({ key: 'fleet.enrollment.create', resourceType: 'fleet-enrollment', resourceId: row.id, projectId: null, summary: 'created' });
       return row;
     });
     return EnrollmentCreatedDto.from(enrollment, raw);

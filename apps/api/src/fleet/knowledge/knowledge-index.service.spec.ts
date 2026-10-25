@@ -6,13 +6,14 @@
 import type { IKnowledgeIndexRepository } from './knowledge-index.domain';
 import { KnowledgeIndexService } from './knowledge-index.service';
 import { DEFAULT_KNOWLEDGE_PATTERNS } from './knowledge-patterns';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 
 function harness(stored: string[] | null = null) {
   const repository = {
     findProjectPatterns: vi.fn(async () => stored),
     saveProjectPatterns: vi.fn(async (_projectId: string, _patterns: string[] | null) => undefined),
   };
-  const service = new KnowledgeIndexService(repository as unknown as IKnowledgeIndexRepository);
+  const service = new KnowledgeIndexService(repository as unknown as IKnowledgeIndexRepository, mockAuditRecorder);
   return { service, repository };
 }
 

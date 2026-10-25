@@ -11,6 +11,7 @@ import { ProjectMembershipGuard } from '../../projects/project-membership.guard'
 import { CurrentProject } from '../../projects/current-project.decorator';
 import type { ProjectContext } from '../../projects/project-context';
 import { KnowledgeStoreUnavailableError } from './knowledge-chunk-store';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { KnowledgeIndexService } from './knowledge-index.service';
 import { KnowledgeIndexQueue } from './knowledge-index.queue';
 import { DEFAULT_KNOWLEDGE_PATTERNS, parseKnowledgePatterns } from './knowledge-patterns';
@@ -87,6 +88,7 @@ export class ProjectKnowledgeController {
     private readonly index: KnowledgeIndexService,
     @Inject(FLEET_CFG) private readonly config: ConfigType<typeof fleetConfig>,
     private readonly queue: KnowledgeIndexQueue,
+    private readonly audit: AuditRecorder,
   ) {}
 
   @Get('repos')
@@ -158,6 +160,10 @@ export class ProjectKnowledgeController {
     if (!this.config.knowledgeIndexEnabled) throw new ConflictAppException({}, 'knowledge.disabled');
     const repo = await this.index.resolveProjectRepo(project.project.id, { repoId });
     if (!repo) throw new NotFoundAppException({}, 'knowledge.repoNotFound');
+    await this.audit.audited(async () => undefined, () => ({
+      key: 'fleet.knowledge.repo.reindex', resourceType: 'fleet-repo', resourceId: repo.id,
+      projectId: project.project.id, summary: 'reindex queued',
+    }));
     this.queue.enqueue(repo.id, 'admin');
     return JsonResponse.Ok<KnowledgeReindexResultDto>({ queued: true });
   }

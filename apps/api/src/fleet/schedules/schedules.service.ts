@@ -18,6 +18,8 @@ import type { CreateScheduleDto } from './dto/create-schedule.dto';
 import { ScheduleDto } from './dto/schedule.dto';
 import type { UpdateScheduleDto } from './dto/update-schedule.dto';
 import { schedulePayload } from './schedule-payloads';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { fieldsSummary } from '../../audit/audit-summary';
 import { mayDispatch } from './schedule-access';
 
 const ZERO_USD = '0.0000';
@@ -73,6 +75,7 @@ export class SchedulesService {
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly permissions: PermissionService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async list(projectId: string): Promise<ScheduleDto[]> {
@@ -98,6 +101,10 @@ export class SchedulesService {
         createdByType: actorTypeFor(actorId), // US-002: an agent owns the schedule it created
       });
       await this.record(actorId, 'schedule.created', schedule);
+      await this.audit.record({
+        key: 'fleet.schedule.create', resourceType: 'fleet-schedule', resourceId: schedule.id,
+        projectId: schedule.projectId, summary: `created on repo ${schedule.repoId}`,
+      });
       return schedule;
     });
     return this.toDto(created);
@@ -125,6 +132,10 @@ export class SchedulesService {
         updatedById: actorId,
       });
       await this.record(actorId, 'schedule.updated', after);
+      await this.audit.record({
+        key: 'fleet.schedule.update', resourceType: 'fleet-schedule', resourceId: after.id,
+        projectId: after.projectId, summary: fieldsSummary(dto),
+      });
       return after;
     });
     return this.toDto(updated);
@@ -136,6 +147,10 @@ export class SchedulesService {
       const current = this.assertManaged(await this.repo.findById(id), projectId, actorId, canAdminister);
       await this.repo.delete(id);
       await this.record(actorId, 'schedule.deleted', current);
+      await this.audit.record({
+        key: 'fleet.schedule.delete', resourceType: 'fleet-schedule', resourceId: current.id,
+        projectId: current.projectId, summary: 'deleted',
+      });
     });
   }
 
@@ -156,6 +171,10 @@ export class SchedulesService {
         enabled: true, disabledReason: null, noProgressTicks: 0, nextFireAt: nextFireAfter(current.cron, current.timezone, now), updatedById: actorId,
       });
       await this.record(actorId, 'schedule.enabled', after, { previousReason: current.disabledReason });
+      await this.audit.record({
+        key: 'fleet.schedule.update', resourceType: 'fleet-schedule', resourceId: after.id,
+        projectId: after.projectId, summary: 'enabled',
+      });
       return after;
     });
     return this.toDto(result);
@@ -167,6 +186,10 @@ export class SchedulesService {
       if (!current.enabled) return current;
       const after = await this.repo.update(id, { enabled: false, disabledReason: 'manual', updatedById: actorId });
       await this.record(actorId, 'schedule.disabled', after, { reason: 'manual' });
+      await this.audit.record({
+        key: 'fleet.schedule.update', resourceType: 'fleet-schedule', resourceId: after.id,
+        projectId: after.projectId, summary: 'disabled',
+      });
       return after;
     });
     return this.toDto(result);

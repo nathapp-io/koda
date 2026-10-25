@@ -1,5 +1,6 @@
 import { AuthException } from '@nathapp/nestjs-common';
 import { EnrollmentService } from './enrollment.service';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { ProtocolVersionException } from './protocol-version.exception';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 
@@ -22,7 +23,7 @@ describe('EnrollmentService', () => {
   const tx = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
   const service = new EnrollmentService(
     repo as never, activity as never, tx as never,
-    { apiKeySecret: 's3cret' } as never, testFleetConfig({ enrollmentTtlSec: 3600 }),
+    { apiKeySecret: 's3cret' } as never, testFleetConfig({ enrollmentTtlSec: 3600 }), mockAuditRecorder,
   );
 
   beforeEach(() => vi.clearAllMocks());
@@ -35,6 +36,7 @@ describe('EnrollmentService', () => {
     const stored = repo.createEnrollment.mock.calls[0][0];
     expect(stored.tokenHash).not.toContain(created.token);
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'enrollment.created', entityId: 'e1', payload: { labels: ['gpu', 'linux'] } }));
+    expect(mockAuditRecorder.record).toHaveBeenCalledWith({ key: 'fleet.enrollment.create', resourceType: 'fleet-enrollment', resourceId: 'e1', projectId: null, summary: 'created' });
   });
 
   it('rejects an unsupported protocol version before touching the token', async () => {

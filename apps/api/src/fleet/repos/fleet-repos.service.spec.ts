@@ -2,6 +2,7 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
 import { FleetReposService } from './fleet-repos.service';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 
 describe('FleetReposService', () => {
   const repo = { findProject: vi.fn(), create: vi.fn(), findById: vi.fn(), findPage: vi.fn(), delete: vi.fn(), lockForDelete: vi.fn(), countUnfinishedJobs: vi.fn() };
@@ -10,7 +11,7 @@ describe('FleetReposService', () => {
   const gitlabTokens = { resolve: vi.fn() };
   const activity = { record: vi.fn() };
   const tx = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
-  const make = () => new FleetReposService(repo as never, github as never, gitlab as never, gitlabTokens as never, activity as never, tx as never);
+  const make = () => new FleetReposService(repo as never, github as never, gitlab as never, gitlabTokens as never, activity as never, tx as never, mockAuditRecorder);
 
   const created = (over = {}) => ({
     id: 'fr1', projectId: 'p1', provider: 'github', owner: 'acme', name: 'app', defaultBranch: 'trunk',
@@ -29,6 +30,7 @@ describe('FleetReposService', () => {
     expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ owner: 'acme', name: 'app', defaultBranch: 'trunk', githubInstallationId: BigInt(77) }));
     expect(dto.githubInstallationId).toBe('77');
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'repo.created', entityId: 'fr1' }));
+    expect(mockAuditRecorder.record).toHaveBeenCalledWith({ key: 'fleet.repo.create', resourceType: 'fleet-repo', resourceId: 'fr1', projectId: 'p1', summary: 'registered github' });
   });
 
   it('404s an unknown project before calling the forge', async () => {
@@ -53,6 +55,7 @@ describe('FleetReposService', () => {
     expect(repo.lockForDelete).toHaveBeenCalledWith('fr1');
     expect(repo.delete).toHaveBeenCalledWith('fr1');
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'repo.deleted', entityId: 'fr1' }));
+    expect(mockAuditRecorder.record).toHaveBeenCalledWith({ key: 'fleet.repo.delete', resourceType: 'fleet-repo', resourceId: 'fr1', projectId: 'p1', summary: 'deleted' });
   });
 
   it('409s a repo with unfinished jobs', async () => {
