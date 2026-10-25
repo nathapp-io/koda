@@ -204,14 +204,14 @@ export class ExtractionService {
   /**
    * Records one `DECISION` and answers what it wrote. The replacement of the requester's previous decision on the
    * same topic is *not* done here: `repository.upsert` supersedes the active row inside the same transaction that
-   * inserts the new one (its serializable `$transaction`), so the two either both happen or neither does. A
+   * inserts the new one (its serializable transaction), so the two either both happen or neither does. A
    * separately committed pre-update left the topic with no active decision at all whenever the insert failed
    * (fleet S5b 2b1 branch review B1).
    *
    * Permissions P1 US-008: `input.ownerType` is stored on the item (a decision recorded as the caller is a USER or
    * AGENT row; one attributed to another actor is neither known, so it is null), and `options` is passed straight
-   * through to `upsert` — the caller's replace check rides in it. A system caller (the outbox subscriber) passes
-   * neither and keeps the one-argument `upsert` it always made.
+   * through to `upsert` — the caller's replace check and its audit hook (permissions P2 US-002) ride in it. A
+   * system caller (the outbox subscriber) passes neither and keeps the one-argument `upsert` it always made.
    */
   async recordDecision(
     input: {

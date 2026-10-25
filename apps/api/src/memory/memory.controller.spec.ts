@@ -9,6 +9,8 @@ import { PermissionService } from '../permissions/permission.service';
 import { MemoryReplaceRefusedError, MemoryWriteGuard } from './memory-write.guard';
 import { MemoryKind, ActorRole } from '../common/enums';
 import { MemoryItem } from './memory-item-repository';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import type { MemoryWritten } from './memory-audit';
 import type { KodaPrincipal, UserPrincipal, AgentPrincipal } from '../auth/principal/koda-principal.types';
 
 // Fixed timestamps: two independent makeMemoryItem() calls (e.g. the mock's
@@ -81,6 +83,8 @@ describe('MemoryController', () => {
   let repository: Mocked<Partial<PrismaMemoryItemRepository>>;
   let projectAccess: Mocked<Partial<ProjectAccessService>>;
   let can: Mock;
+  /** Permissions P2 US-002: the recorder every write route's `onWritten` hook records through. */
+  let audit: { record: Mock };
 
   /**
    * Permissions P1 US-008 fixture: every project-scoped key is allowed, and the one global check the
@@ -116,6 +120,9 @@ describe('MemoryController', () => {
 
     const permissions = { can } as unknown as PermissionService;
 
+    // Permissions P2 US-002: a recorder whose `record` the write routes call through their `onWritten` hook.
+    audit = { record: vi.fn(async () => undefined) };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MemoryController,
@@ -123,6 +130,7 @@ describe('MemoryController', () => {
         { provide: PrismaMemoryItemRepository, useValue: repository },
         { provide: ProjectAccessService, useValue: projectAccess },
         { provide: PermissionService, useValue: permissions },
+        { provide: AuditRecorder, useValue: audit },
         // The real guard over the two mocks, so the cases exercise its decision rather than a stub.
         { provide: MemoryWriteGuard, useValue: new MemoryWriteGuard(permissions, repository as PrismaMemoryItemRepository) },
       ],
@@ -398,7 +406,7 @@ describe('MemoryController', () => {
       expect(repository.upsert).toHaveBeenCalledTimes(1);
       expect(repository.upsert).toHaveBeenCalledWith(
         expect.objectContaining({ kind: MemoryKind.FACT, ownerId: 'user-1', ownerType: 'USER' }),
-        expect.objectContaining({ beforeSupersede: expect.any(Function) }),
+        expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }),
       );
     });
 
@@ -502,7 +510,7 @@ describe('MemoryController', () => {
           ownerType: 'USER',
         },
         repository,
-        { beforeSupersede: expect.any(Function) },
+        expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }),
       );
       expect(result).toEqual(writeResult);
     });
@@ -559,7 +567,7 @@ describe('MemoryController', () => {
       expect(extractionService.recordDecision).toHaveBeenCalledWith(
         expect.objectContaining({ actorId: 'user-1', ownerType: 'USER' }),
         repository,
-        { beforeSupersede: expect.any(Function) },
+        expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }),
       );
     });
 
@@ -577,7 +585,7 @@ describe('MemoryController', () => {
       expect(extractionService.recordDecision).toHaveBeenCalledWith(
         expect.objectContaining({ actorId: 'attributed-actor', ownerType: null }),
         repository,
-        { beforeSupersede: expect.any(Function) },
+        expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }),
       );
     });
 
@@ -620,7 +628,7 @@ describe('MemoryController', () => {
           ownerId: 'user-1',
           ownerType: 'USER',
         }),
-        { beforeSupersede: expect.any(Function) },
+        expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }),
       );
       expect(result).toEqual(created);
     });
@@ -877,6 +885,142 @@ describe('MemoryController', () => {
         .rejects.toBeInstanceOf(MemoryReplaceRefusedError);
       await expect(options.beforeSupersede(makeMemoryItem({ ownerType: 'USER', ownerId: 'user-1' })))
         .resolves.toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Permissions P2 US-002 — every write route hands the upsert an audit hook
+  // -------------------------------------------------------------------------
+
+  describe('audit entries (US-002)', () => {
+    interface UpsertOptions { onWritten?: (written: MemoryWritten) => Promise<void> }
+
+    /** Largest `upsert` mock: it answers the created item, and runs the caller's `onWritten` like the repository. */
+    const upsertRunningHook = (): void => {
+      (repository.upsert as Mock).mockImplementation(
+        async (_input: unknown, options?: UpsertOptions): Promise<MemoryItem> => {
+          const item = makeMemoryItem({ id: 'mem-created' });
+          await options?.onWritten?.({ item, superseded: null });
+          return item;
+        },
+      );
+    };
+
+    const extractedFact = {
+      projectId: 'project-123',
+      kind: MemoryKind.FACT,
+      subject: 'ticket:1',
+      predicate: 'status',
+      object: 'active',
+      sourceType: 'ticket_event',
+      sourceId: 'evt-1',
+      confidence: 0.9,
+    };
+
+    const extractedDecision = {
+      projectId: 'project-123',
+      kind: MemoryKind.DECISION,
+      subject: 'agent:victim',
+      predicate: 'decision',
+      object: 'use microservices',
+      sourceType: 'decision_event',
+      sourceId: 'evt-9',
+      confidence: 1.0,
+    };
+
+    it('AC-14: answers no items when extraction yields only DECISION items', async () => {
+      const principal = makeUserPrincipal(ActorRole.ADMIN);
+      (extractionService.extractFromEvent as Mock).mockReturnValue([extractedDecision]);
+
+      const result = await controller.extractFromEvent(
+        { projectId: 'project-123', type: 'decision_event', action: 'decided', data: {}, agentId: 'victim' },
+        principal,
+      );
+
+      expect(result.items).toEqual([]);
+    });
+
+    it('AC-15: a DECISION-only extraction neither upserts nor records, while a FACT extraction records one entry', async () => {
+      const principal = makeUserPrincipal(ActorRole.ADMIN);
+      (extractionService.extractFromEvent as Mock).mockReturnValue([extractedFact]);
+      upsertRunningHook();
+
+      await controller.extractFromEvent(
+        { projectId: 'project-123', type: 'ticket_event', id: 'evt-1', action: 'status_changed', data: {} },
+        principal,
+      );
+
+      // The positive control: the extract route records under its own key, on the item it wrote.
+      expect(audit.record).toHaveBeenCalledWith({
+        key: 'memory.extract',
+        resourceType: 'memory-item',
+        resourceId: 'mem-created',
+        projectId: 'project-123',
+        summary: 'created FACT',
+      });
+
+      (repository.upsert as Mock).mockClear();
+      audit.record.mockClear();
+      (extractionService.extractFromEvent as Mock).mockReturnValue([extractedDecision]);
+
+      const result = await controller.extractFromEvent(
+        { projectId: 'project-123', type: 'decision_event', id: 'evt-9', action: 'decided', data: {}, agentId: 'victim' },
+        principal,
+      );
+
+      expect(result.items).toEqual([]);
+      expect(repository.upsert).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('createMemory records under memory.create', async () => {
+      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
+      upsertRunningHook();
+
+      await controller.createMemory(
+        { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status' },
+        principal,
+      );
+
+      expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ key: 'memory.create', resourceId: 'mem-created' }));
+    });
+
+    it('extractFromEvent hands the upsert the beforeSupersede and onWritten hooks', async () => {
+      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
+      (extractionService.extractFromEvent as Mock).mockReturnValue([extractedFact]);
+      (repository.upsert as Mock).mockResolvedValue(makeMemoryItem());
+
+      await controller.extractFromEvent(
+        { projectId: 'project-123', type: 'ticket_event', id: 'evt-1', action: 'status_changed', data: {} },
+        principal,
+      );
+
+      expect(repository.upsert).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }),
+      );
+    });
+
+    it('recordDecision hands its options to the service, whose key is memory.decision.record', async () => {
+      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
+      (extractionService.recordDecision as Mock).mockResolvedValue({ canonicalId: 'src-1', memoryId: 'mem-1' });
+
+      await controller.recordDecision({ projectId: 'project-123', topic: 't', decision: 'd' }, principal);
+
+      expect(extractionService.recordDecision).toHaveBeenCalledWith(
+        expect.anything(),
+        repository,
+        expect.objectContaining({ beforeSupersede: expect.any(Function), onWritten: expect.any(Function) }),
+      );
+
+      const options = (extractionService.recordDecision as Mock).mock.calls[0][2] as UpsertOptions & {
+        onWritten: (written: MemoryWritten) => Promise<void>;
+      };
+      await options.onWritten({ item: makeMemoryItem({ id: 'mem-2', kind: MemoryKind.DECISION }), superseded: null });
+
+      expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
+        key: 'memory.decision.record', resourceId: 'mem-2', summary: 'created DECISION',
+      }));
     });
   });
 });

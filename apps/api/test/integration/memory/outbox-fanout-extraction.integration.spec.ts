@@ -30,6 +30,9 @@ describe('AC8: FanOutPublisher dispatches to ExtractionService', () => {
 
     mockPrismaService = {
       client: mockPrismaClient,
+      // Permissions P2 US-002: `upsert` runs on the transaction manager, so the mocked service enters its
+      // callback with the same client the `$transaction` mock hands out.
+      withTransaction: vi.fn().mockImplementation((fn: (client: unknown) => Promise<unknown>) => fn(mockPrismaClient)),
     };
 
     const module: TestingModule = await Test.createTestingModule({
