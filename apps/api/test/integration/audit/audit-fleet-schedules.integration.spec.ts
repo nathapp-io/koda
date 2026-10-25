@@ -7,6 +7,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { fixtureDb } from '../../helpers/action-context';
+import { PermissionService } from '../../../src/permissions/permission.service';
+import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers/permission-fixtures';
 
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
@@ -49,7 +51,9 @@ describeIntegration('fleet schedule audit rows (PG)', () => {
 
   it('AC-1/2: records create attribution and omits request values', async () => {
     const row = await create('dev', 'secret-name');
-    const [entry] = await entries(row.id);
+    const auditRows = await entries(row.id);
+    expect(auditRows).toHaveLength(1);
+    const [entry] = auditRows;
     expect(entry).toMatchObject({
       key: 'fleet.schedule.create', resourceType: 'fleet-schedule', resourceId: row.id,
       projectId: world.projectId, actorType: 'USER', actorId: world.ids.dev, origin: 'rest',
@@ -74,6 +78,13 @@ describeIntegration('fleet schedule audit rows (PG)', () => {
   });
 
   it('AC-6: a second developer cannot update the owner schedule and records nothing', async () => {
+    const dev2User = await prisma.user.findUniqueOrThrow({ where: { email: 'audit-schedule-dev2@koda.test' } });
+    const principal = { type: 'USER' as const, id: dev2User.id };
+    await expectBindingOnlyFixtures(prisma, [principal]);
+    const keys = await app.get(PermissionService).effectiveKeys(principal, { projectId: world.projectId });
+    expect(keys.has('project.read')).toBe(true);
+    expect(keys.has('fleet.schedule.update.own')).toBe(true);
+    expect(keys.has('fleet.schedule.update')).toBe(false);
     const row = await create();
     await request(server).patch(`${BASE}/${row.id}`).set(dev2Auth()).send({ cron: '0 6 * * *' }).expect(403);
     expect(await entries(row.id, 'fleet.schedule.update')).toHaveLength(0);

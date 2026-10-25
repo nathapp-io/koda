@@ -9,6 +9,7 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { insertAnalyticsJob, insertCostEvent, insertIngestRow } from '../../helpers/fleet-analytics-fixtures';
 import { fixtureDb } from '../../helpers/action-context';
+import enFleet from '../../../src/i18n/en/fleet.json';
 
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
@@ -38,6 +39,7 @@ describeIntegration('fleet ingest and analytics audit (PG)', () => {
     world = await seedFleetHttpWorld(server, prisma);
   });
   afterAll(async () => { await app.close(); });
+  afterEach(() => vi.restoreAllMocks());
   beforeEach(async () => {
     await prisma.auditEntry.deleteMany();
     await prisma.fleetActivity.deleteMany();
@@ -83,9 +85,9 @@ describeIntegration('fleet ingest and analytics audit (PG)', () => {
     await request(server).post(`/api/fleet/ingest/jobs/${j.id}/rerun`).set(auth('root')).expect(500);
     expect(await prisma.fleetBundleIngest.findMany({ where: { jobId: j.id }, select: { status: true } })).toEqual([{ status: 'done' }]);
     expect(await entries('fleet.ingest.rerun', j.id)).toHaveLength(0);
-    vi.restoreAllMocks();
 
-    await request(server).post('/api/fleet/ingest/jobs/unknown-job/rerun').set(auth('root')).expect(404);
+    const unknown = await request(server).post('/api/fleet/ingest/jobs/unknown-job/rerun').set(auth('root')).expect(404);
+    expect(unknown.body).toMatchObject({ ret: 404, message: enFleet.jobs['404'] });
     expect(await entries('fleet.ingest.rerun', 'unknown-job')).toHaveLength(0);
   });
 
@@ -122,7 +124,8 @@ describeIntegration('fleet ingest and analytics audit (PG)', () => {
     expect(await entries('fleet.analytics.delete', 'all')).toMatchObject([{ resourceType: 'fleet-analytics', resourceId: 'all', projectId: null }]);
 
     await prisma.auditEntry.deleteMany({ where: { key: 'fleet.analytics.delete', projectId: world.projectId } });
-    await request(server).delete(`/api/fleet/analytics?before=${cutoff}&projectId=${world.projectId}`).set(auth('root')).send({ confirm: 'wrong' }).expect(400);
+    const refused = await request(server).delete(`/api/fleet/analytics?before=${cutoff}&projectId=${world.projectId}`).set(auth('root')).send({ confirm: 'wrong' }).expect(400);
+    expect(refused.body).toMatchObject({ ret: -2, message: enFleet.analyticsDelete['-2'].replace('{expected}', 'web') });
     expect(await entries('fleet.analytics.delete', world.projectId)).toHaveLength(0);
     const empty = await request(server).delete(`/api/fleet/analytics?before=2026-10-20T00:00:00Z&projectId=${world.projectId}`).set(auth('root')).send({ confirm: 'web' }).expect(200);
     expect(data(empty)).toMatchObject({ costEvents: 0, stories: 0, reviews: 0, ingestRowsMarked: 0 });

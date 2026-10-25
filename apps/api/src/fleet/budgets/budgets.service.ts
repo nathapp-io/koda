@@ -91,7 +91,11 @@ export class BudgetsService {
       await this.record(actorId, 'budget.updated', after, {
         before: { amountUsd: before.amountUsd, warnPercent: before.warnPercent, hardStop: before.hardStop, runningJobs: before.runningJobs },
       });
-      await this.audit.record({ key: 'fleet.budget.update', resourceType: 'fleet-budget', resourceId: after.id, projectId: after.projectId, summary: fieldsSummary(dto) });
+      // Summarize only the persisted client fields, not unknown request keys or server-owned metadata.
+      await this.audit.record({
+        key: 'fleet.budget.update', resourceType: 'fleet-budget', resourceId: after.id, projectId: after.projectId,
+        summary: fieldsSummary({ amountUsd: patch.amountUsd, warnPercent: patch.warnPercent, hardStop: patch.hardStop, runningJobs: patch.runningJobs }),
+      });
       return after;
     });
     this.evaluator.signal([updated.scopeKey]); // plan D165

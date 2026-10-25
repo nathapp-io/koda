@@ -7,7 +7,7 @@ import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { KnowledgeIndexQueue } from '../../../src/fleet/knowledge/knowledge-index.queue';
 import { FLEET_REPO_FILES_READER, FleetRepoFilesReader } from '../../../src/fleet/repo-config/fleet-repo-files.reader';
 import { resetDb } from '../../helpers/reset-db';
-import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http-app';
+import { bootHttpApp, data } from '../../helpers/http-app';
 import { fixtureDb } from '../../helpers/action-context';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 

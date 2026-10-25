@@ -12,6 +12,7 @@ import { bootHttpApp, data } from '../../helpers/http-app';
 import { fixtureDb } from '../../helpers/action-context';
 import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { FakeForge, startFakeForge } from '../../helpers/fake-forge';
+import enFleet from '../../../src/i18n/en/fleet.json';
 
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const ENC_KEY = 'b'.repeat(64);
@@ -61,6 +62,7 @@ describeIntegration('fleet runner and repo audit rows (PG)', () => {
   });
 
   beforeEach(async () => { await prisma.auditEntry.deleteMany(); });
+  afterEach(() => vi.restoreAllMocks());
 
   it('AC-1/2/3: enrollment audit records only successful creates, and recorder failure rolls the insert back', async () => {
     const countBefore = await prisma.runnerEnrollment.count();
@@ -71,9 +73,8 @@ describeIntegration('fleet runner and repo audit rows (PG)', () => {
 
     const audit = app.get(AuditRecorder);
     const entryCount = await prisma.auditEntry.count({ where: { key: 'fleet.enrollment.create' } });
-    const spy = vi.spyOn(audit, 'record').mockRejectedValueOnce(new Error('audit unavailable'));
+    vi.spyOn(audit, 'record').mockRejectedValueOnce(new Error('audit unavailable'));
     await request(server).post('/api/fleet/enrollments').set(tok('root')).send({ labels: [] }).expect(500);
-    spy.mockRestore();
     expect(await prisma.runnerEnrollment.count()).toBe(countBefore + 1);
     expect(await prisma.auditEntry.count({ where: { key: 'fleet.enrollment.create' } })).toBe(entryCount);
   });
@@ -89,7 +90,8 @@ describeIntegration('fleet runner and repo audit rows (PG)', () => {
 
     const busy = await insertRunner(prisma, { createdById: world.ids.root });
     await prisma.fleetJob.create({ data: { projectId: world.projectId, repoId: world.repoId, runnerId: busy.id, leaseEpoch: 1, ref: 'main', command: 'RUN', feature: `audit-runner-${++sequence}`, profiles: [], maxCostUsd: new Prisma.Decimal(5), selectorLabels: [], requestedById: world.ids.root, state: 'RUNNING', firstStartedAt: new Date() } });
-    await request(server).delete(`/api/fleet/runners/${busy.id}`).set(tok('root')).expect(409);
+    const refused = await request(server).delete(`/api/fleet/runners/${busy.id}`).set(tok('root')).expect(409);
+    expect(refused.body).toMatchObject({ ret: 409, message: enFleet.runnerBusy['409'] });
     expect(await entries(busy.id, 'fleet.runner.delete')).toHaveLength(0);
   });
 
@@ -106,7 +108,8 @@ describeIntegration('fleet runner and repo audit rows (PG)', () => {
 
     const busy = await prisma.fleetRepo.create({ data: { projectId: world.projectId, provider: 'github', owner: 'acme', name: 'busy', defaultBranch: 'main', githubInstallationId: BigInt(77), createdById: world.ids.root } });
     await prisma.fleetJob.create({ data: { projectId: world.projectId, repoId: busy.id, ref: 'main', command: 'RUN', feature: `audit-repo-${++sequence}`, profiles: [], maxCostUsd: new Prisma.Decimal(5), selectorLabels: [], requestedById: world.ids.root, state: 'QUEUED' } });
-    await request(server).delete(`/api/fleet/repos/${busy.id}`).set(tok('root')).expect(409);
+    const refused = await request(server).delete(`/api/fleet/repos/${busy.id}`).set(tok('root')).expect(409);
+    expect(refused.body).toMatchObject({ ret: 409, message: enFleet.repoBusy['409'] });
     expect(await entries(busy.id, 'fleet.repo.delete')).toHaveLength(0);
 
     const check = await prisma.fleetRepo.create({ data: { projectId: world.projectId, provider: 'github', owner: 'acme', name: 'check', defaultBranch: 'main', githubInstallationId: BigInt(77), createdById: world.ids.root } });
