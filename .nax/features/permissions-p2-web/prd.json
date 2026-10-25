@@ -3,7 +3,7 @@
   "feature": "permissions-p2-web",
   "branchName": "feat/permissions-p2-web",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T10:30:34.278Z",
+  "updatedAt": "2026-10-25T10:40:49.280Z",
   "userStories": [
     {
       "id": "US-001",
@@ -212,14 +212,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Four additive files implement deterministic query helpers and a standard update-on-success composable, with no new dependencies or access-control enforcement."
+        "reasoning": "Four additive files implement deterministic query helpers and a standard update-on-success composable, with no new dependencies or access-control enforcement.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/web/lib/fleet-log-query.ts",
@@ -236,7 +239,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "6f8d90f1b380964e8fcd8a2a32d0121a633241a2"
     },
     {
       "id": "US-004",
