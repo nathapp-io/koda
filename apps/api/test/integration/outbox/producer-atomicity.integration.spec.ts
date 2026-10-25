@@ -11,6 +11,8 @@ import { outboxConfig } from '../../../src/config/outbox.config';
 import { OutboxModule } from '../../../src/outbox/outbox.module';
 import { PrismaOutboxStore } from '../../../src/outbox/prisma-outbox.store';
 import { TicketsService } from '../../../src/tickets/tickets.service';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
@@ -64,6 +66,7 @@ describeIntegration('producers record outbox rows atomically', () => {
       ],
       providers: [
         TicketsService,
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         TicketTransitionsService,
         // Permissions P1 (US-003): TicketTransitionsService's required third dependency. The
         // transitions these tests drive are their own subject, so the edge check allows them. The

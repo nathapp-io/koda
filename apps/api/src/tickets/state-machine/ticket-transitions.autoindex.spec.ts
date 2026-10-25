@@ -1,3 +1,4 @@
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { TicketTransitionsService } from './ticket-transitions.service';
 
 const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
@@ -5,13 +6,13 @@ const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve
 function build(ticketRow: Record<string, unknown> | null) {
   const repo = { findTicketWithComments: vi.fn().mockResolvedValue(ticketRow) };
   const ragService = { indexDocument: vi.fn().mockResolvedValue('doc-1') };
-  // Permissions P1 (US-003): PermissionService is the required third argument, so ragService moves
-  // to the fourth.
+  // Required permission and audit collaborators precede optional indexing.
   const permissions = { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) };
   const service = new TicketTransitionsService(
     repo as never,
     { run: vi.fn() } as never,
     permissions as never,
+    mockAuditRecorder as never,
     ragService as never,
   );
   const autoIndex = (service as unknown as {

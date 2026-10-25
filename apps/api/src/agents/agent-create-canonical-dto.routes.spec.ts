@@ -1,3 +1,5 @@
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import type { Mock } from 'vitest';
 /**
  * US-005 — AC3: POST /api/agents with a valid body still returns 201 after the
@@ -80,6 +82,7 @@ describe('POST /api/agents with the canonical CreateAgentDto (US-005 AC3)', () =
       controllers: [AgentsController],
       providers: [
         AgentsService,
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         { provide: PrismaAgentRepository, useValue: agentRepo },
         { provide: TRANSACTION_MANAGER, useValue: txManager },
         { provide: AUTH_CFG, useValue: authConfig },

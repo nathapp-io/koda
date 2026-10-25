@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { IPageOption } from '@nathapp/nestjs-common';
 import { IPageResult, ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
@@ -33,6 +34,7 @@ export class ProjectMembersService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly membership: MembershipService,
     private readonly roles: RoleAdminService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /**
@@ -79,10 +81,14 @@ export class ProjectMembersService {
     return this.membership.afterCommit(() => this.txManager.run(async () => {
       await this.membersRepo.lockMembers(projectId);
       if (await this.membersRepo.findMember(projectId, user.id)) throw new ConflictAppException({}, 'members');
-      await this.membership.createBinding(
+      const binding = await this.membership.createBinding(
         { principal: { type: 'USER', id: user.id }, projectId, roleKey },
         { type: 'USER', id: principal.id },
       );
+      await this.audit.record({
+        key: 'member.add', resourceType: 'role-binding', resourceId: binding.id, projectId,
+        summary: `${binding.roleKey} to ${binding.principalType} ${binding.principalId}`,
+      });
       return ProjectMemberDto.from(await this.findRequiredMember(projectId, user.id));
     }));
   }

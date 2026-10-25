@@ -11,6 +11,7 @@ import {
 } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { IProjectRepository } from './domain/project.domain';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 
 /** The rejection of `promise`, or undefined when it resolved. */
 async function rejectionOf(promise: Promise<unknown>): Promise<HttpException | undefined> {
@@ -29,8 +30,22 @@ describe('ProjectsService', () => {
   let mockProjectRepo: any;
   let can: Mock;
   let permissions: PermissionService;
+  const recordedEntries: unknown[] = [];
+  const mockAudit = {
+    audited: vi.fn(async (fn: () => Promise<unknown>, entriesOf: (result: unknown) => unknown) => {
+      const result = await fn();
+      recordedEntries.push(entriesOf(result));
+      return result;
+    }),
+  };
 
   beforeEach(() => {
+    recordedEntries.length = 0;
+    mockAudit.audited.mockReset().mockImplementation(async (fn, entriesOf) => {
+      const result = await fn();
+      recordedEntries.push(entriesOf(result));
+      return result;
+    });
     mockProjectRepo = {
       findBySlug: vi.fn(),
       findByKey: vi.fn(),
@@ -44,6 +59,7 @@ describe('ProjectsService', () => {
 
     ragService = {
       deleteAllBySourceType: vi.fn(),
+      clearProjectCaches: vi.fn(),
     } as any;
 
     // US-001: project access is `project.read`; each case below answers it through this double.
@@ -54,7 +70,8 @@ describe('ProjectsService', () => {
       mockProjectRepo as any,
       ragService,
       undefined,
-      new ProjectAccessService(mockProjectRepo as any, permissions)
+      new ProjectAccessService(mockProjectRepo as any, permissions),
+      mockAudit as unknown as AuditRecorder,
     );
   });
 
@@ -79,6 +96,41 @@ describe('ProjectsService', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
+
+    it('records an update entry without a summary for an empty patch', async () => {
+      mockProjectRepo.findBySlug.mockResolvedValue(mockProject);
+      mockProjectRepo.updateBySlug.mockResolvedValue(mockProject);
+
+      await service.update('test-project', {});
+
+      expect(recordedEntries).toEqual([{
+        key: 'project.update', resourceType: 'project', resourceId: 'project-1', projectId: 'project-1', summary: undefined,
+      }]);
+    });
+
+    it('records sorted field names without project values', async () => {
+      mockProjectRepo.findBySlug.mockResolvedValue(mockProject);
+      mockProjectRepo.updateBySlug.mockResolvedValue({ ...mockProject, name: 'Renamed', description: 'd' });
+
+      await service.update('test-project', { name: 'Renamed', description: 'd' });
+
+      expect(recordedEntries).toEqual([{
+        key: 'project.update', resourceType: 'project', resourceId: 'project-1', projectId: 'project-1', summary: 'fields: description, name',
+      }]);
+      expect(JSON.stringify(recordedEntries)).not.toContain('Renamed');
+    });
+
+    it('summarizes CI token patches by field name only', async () => {
+      mockProjectRepo.findBySlug.mockResolvedValue(mockProject);
+      mockProjectRepo.updateBySlug.mockResolvedValue({ ...mockProject, ciWebhookToken: 'random-secret-token' });
+
+      await service.update('test-project', { ciWebhookToken: 'random-secret-token' });
+
+      expect(recordedEntries[0]).toMatchObject({
+        key: 'project.update', resourceType: 'project', resourceId: 'project-1', projectId: 'project-1', summary: 'fields: ciWebhookToken',
+      });
+      expect(JSON.stringify(recordedEntries)).not.toContain('random-secret-token');
+    });
 
     it('should call deleteAllBySourceType when graphifyEnabled changes from true to false', async () => {
       mockProjectRepo.findBySlug.mockResolvedValueOnce(mockProject);
@@ -198,6 +250,32 @@ describe('ProjectsService', () => {
       const [, data] = mockProjectRepo.updateBySlug.mock.calls[0];
       expect(data.brief).toBeUndefined();
       expect(result.brief).toBe('kept');
+    });
+  });
+
+  describe('softDelete audit timing', () => {
+    it('clears project caches only after audited resolves', async () => {
+      const project = { id: 'project-1', slug: 'test-project', key: 'TP', deletedAt: null };
+      const deleted = { ...project, deletedAt: new Date() };
+      mockProjectRepo.findBySlug.mockResolvedValue(project);
+      mockProjectRepo.updateBySlug.mockResolvedValue(deleted);
+      const clear = vi.fn();
+      ragService.clearProjectCaches = clear as unknown as typeof ragService.clearProjectCaches;
+      let auditResolved = false;
+      mockAudit.audited.mockImplementation(async (fn, entriesOf) => {
+        const result = await fn();
+        entriesOf(result);
+        auditResolved = true;
+        return result;
+      });
+      clear.mockImplementation(() => {
+        expect(auditResolved).toBe(true);
+      });
+
+      await service.softDelete('test-project');
+
+      expect(mockAudit.audited).toHaveBeenCalledTimes(1);
+      expect(clear).toHaveBeenCalledWith('project-1');
     });
   });
 

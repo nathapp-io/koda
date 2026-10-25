@@ -1,3 +1,5 @@
+import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import type { Mock } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -154,6 +156,7 @@ describe('TicketTransitionsService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         TicketTransitionsService,
         {
           provide: TICKET_REPOSITORY,
@@ -1071,6 +1074,7 @@ describe('TicketTransitionsService (H13: outbox emission)', () => {
       ticketRepo as never,
       txManager as never,
       { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
+      mockAuditRecorder as never,
       undefined,
       webhookDispatcher as never,
       undefined,
@@ -1253,6 +1257,7 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
       ticketRepo as never,
       txManager as never,
       { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
+      mockAuditRecorder as never,
       undefined,
       undefined,
       vcsConnectionService as never,
@@ -1308,6 +1313,7 @@ describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNu
       ticketRepo as never,
       txManager as never,
       { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } as never,
+      mockAuditRecorder as never,
       undefined,
       undefined,
       vcsConnectionService as never,

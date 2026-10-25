@@ -12,6 +12,7 @@ import { PrismaLabelRepository } from '../../../src/labels/prisma-label.reposito
 import { LABEL_REPOSITORY } from '../../../src/labels/domain/label.domain';
 import { CreateLabelDto } from '../../../src/labels/dto/create-label.dto';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
 
 describe('LabelsService — agent permissions', () => {
   let service: LabelsService;
@@ -48,6 +49,7 @@ describe('LabelsService — agent permissions', () => {
       providers: [
         LabelsService,
         PrismaLabelRepository,
+        { provide: AuditRecorder, useValue: { record: vi.fn(), audited: vi.fn((fn: () => Promise<unknown>) => fn()) } },
         { provide: LABEL_REPOSITORY, useExisting: PrismaLabelRepository },
         { provide: PrismaService, useValue: mockPrisma },
         {

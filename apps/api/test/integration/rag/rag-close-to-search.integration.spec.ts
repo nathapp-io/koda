@@ -1,3 +1,5 @@
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 /**
  * Phase 2 — E2E integration test: ticket close → KB auto-index → search finds it.
  *
@@ -74,6 +76,7 @@ describe('RAG close-to-search integration', () => {
 
     module = await Test.createTestingModule({
       providers: [
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         {
           provide: PrismaService,
           useFactory: () => {

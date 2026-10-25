@@ -1,3 +1,4 @@
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import type { Mock } from 'vitest';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { ProjectMembersService } from './project-members.service';
@@ -46,7 +47,7 @@ describe('ProjectMembersService', () => {
     const txManager = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
     membership = {
       afterCommit: vi.fn(fn => fn()),
-      createBinding: vi.fn(),
+      createBinding: vi.fn().mockResolvedValue({ id: 'bind-u1', roleKey: 'viewer', principalType: 'USER', principalId: 'u1' }),
     };
     roles = { assertMayGrant: vi.fn(async (): Promise<{ key: string }> => ({ key: 'viewer' })) };
     // US-006: the service no longer depends on PermissionService — `member.add` is the route's key and
@@ -57,6 +58,7 @@ describe('ProjectMembersService', () => {
       txManager as never,
       membership as never,
       roles as never,
+      mockAuditRecorder,
     );
   });
 

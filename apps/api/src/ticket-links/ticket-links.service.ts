@@ -9,6 +9,7 @@ import { TicketLinkDomain } from './domain/ticket-link.domain';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { PermissionService } from '../permissions/permission.service';
 import type { PrincipalRef } from '../permissions/permissions.types';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 
 export interface CreateTicketLinkResult {
   status: 200 | 201;
@@ -23,12 +24,13 @@ export class TicketLinksService {
   constructor(
     private readonly repo: PrismaTicketLinkRepository,
     private readonly permissions: PermissionService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   private async resolveTicket(
     slug: string,
     ref: string,
-  ): Promise<{ id: string; projectId: string }> {
+  ): Promise<{ id: string; projectId: string; ref: string }> {
     const project = await this.repo.findProjectBySlug(slug);
 
     if (!project) {
@@ -40,13 +42,13 @@ export class TicketLinksService {
     // when the project happens to own the same ticket number. CUID refs are
     // already project-scoped by findTicketById.
     const parsed = parseTicketRef(ref);
-    let ticket: { id: string } | null;
+    let ticket: { id: string; number: number } | null;
 
     if (parsed) {
-      ticket =
-        parsed.prefix === project.key
-          ? await this.repo.findTicketByNumber(project.id, parsed.number)
-          : null;
+      const found = parsed.prefix === project.key
+        ? await this.repo.findTicketByNumber(project.id, parsed.number)
+        : null;
+      ticket = found ? { ...found, number: parsed.number } : null;
     } else {
       ticket = await this.repo.findTicketById(ref, project.id);
     }
@@ -55,7 +57,11 @@ export class TicketLinksService {
       throw new NotFoundAppException({}, 'ticket-links');
     }
 
-    return { id: ticket.id, projectId: project.id };
+    return {
+      id: ticket.id,
+      projectId: project.id,
+      ref: `${project.key}-${parsed?.number ?? ticket.number}`,
+    };
   }
 
   private inferLinkType(url: string, explicitLinkType?: string): string {
@@ -98,15 +104,21 @@ export class TicketLinksService {
 
     const { provider, externalRef } = detectProvider(dto.url);
 
-    const link = await this.repo.createLink({
-      ticketId: ticket.id,
-      url: dto.url,
-      provider,
-      externalRef,
-      linkType: this.inferLinkType(dto.url, dto.linkType),
-      createdByUserId: createdBy?.type === 'USER' ? createdBy.id : null,
-      createdByAgentId: createdBy?.type === 'AGENT' ? createdBy.id : null,
-    });
+    const link = await this.audit.audited(
+      () => this.repo.createLink({
+        ticketId: ticket.id,
+        url: dto.url,
+        provider,
+        externalRef,
+        linkType: this.inferLinkType(dto.url, dto.linkType),
+        createdByUserId: createdBy?.type === 'USER' ? createdBy.id : null,
+        createdByAgentId: createdBy?.type === 'AGENT' ? createdBy.id : null,
+      }),
+      (created) => ({
+        key: 'ticket.link.add', resourceType: 'ticket-link', resourceId: created.id,
+        projectId: ticket.projectId, summary: `on ${ticket.ref}`,
+      }),
+    );
 
     return { status: 201, link: TicketLinkResponseDto.from(link) };
   }
@@ -164,7 +176,16 @@ export class TicketLinksService {
       throw new ForbiddenAppException({}, 'permissions');
     }
 
-    await this.repo.deleteLink(linkId);
+    await this.audit.audited(
+      async () => {
+        await this.repo.deleteLink(linkId);
+        return linkId;
+      },
+      (id) => ({
+        key: 'ticket.link.remove', resourceType: 'ticket-link', resourceId: id,
+        projectId: ticket.projectId, summary: `from ${ticket.ref}`,
+      }),
+    );
   }
 }
 

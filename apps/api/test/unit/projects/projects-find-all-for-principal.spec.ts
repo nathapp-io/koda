@@ -217,6 +217,7 @@ describe('ProjectsService.findAllForPrincipal (US-002)', () => {
       } as unknown as RagService,
       undefined,
       new ProjectAccessService(repo as unknown as PrismaProjectRepository, permissions),
+      { audited: vi.fn(async (fn: () => Promise<unknown>) => fn()) } as never,
     );
   });
 

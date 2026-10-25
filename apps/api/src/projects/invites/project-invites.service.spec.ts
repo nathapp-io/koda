@@ -1,3 +1,4 @@
+import type { AuditEntriesOf } from '../../audit/audit-recorder.service';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { legacyRoleForRoleKey } from '../../permissions/legacy-project-roles';
@@ -7,7 +8,7 @@ import type { ProjectInviteRecord } from './domain/project-invite.domain';
 
 /**
  * S4b US-004: `ProjectInvitesService` is constructed with, in order —
- * `(invitesRepo, membersRepo, access, mailer, emailSchedule, emailAvailability, txManager, membership, roles)`.
+ * `(invitesRepo, membersRepo, access, mailer, emailSchedule, emailAvailability, txManager, membership, roles, audit)`.
  */
 
 const NOW = new Date('2026-10-10T10:00:00Z');
@@ -109,15 +110,20 @@ function setup(opts: SetupOptions = {}) {
   const mailer = { sendInvite: vi.fn(async (_input: unknown) => true) };
   const schedule = { scheduleMemberAdded: vi.fn(async () => undefined) };
   const email = { configured: opts.configured ?? true, config: () => ({ inviteTtlDays: 7 }) };
+  let inTransaction = false;
   const txManager = {
-    run: <T>(fn: () => Promise<T>) => fn(),
+    run: async <T>(fn: () => Promise<T>) => {
+      const previous = inTransaction;
+      inTransaction = true;
+      try { return await fn(); } finally { inTransaction = previous; }
+    },
     getClient: vi.fn(),
-    isInTransaction: vi.fn(() => false),
+    isInTransaction: vi.fn(() => inTransaction),
   };
 
   const membership = {
     afterCommit: vi.fn(fn => fn()),
-    createBinding: vi.fn(async () => ({ createdAt: NOW })),
+    createBinding: vi.fn(async () => ({ id: 'binding-1', createdAt: NOW })),
   };
   const roles = {
     assertMayGrant: vi.fn(async (_principal: unknown, target: { roleKey: string }) => ({
@@ -125,6 +131,15 @@ function setup(opts: SetupOptions = {}) {
       key: target.roleKey,
       name: `Name of ${target.roleKey}`,
     })),
+  };
+  const entriesOfCalled = vi.fn();
+  const mockAuditRecorder = {
+    record: vi.fn(async (_input: unknown) => { expect(inTransaction).toBe(true); }),
+    audited: vi.fn(async <T>(fn: () => Promise<T>, entriesOf: AuditEntriesOf<T>) => {
+      const result = await fn();
+      entriesOfCalled(entriesOf(result));
+      return result;
+    }),
   };
   const service = new ProjectInvitesService(
     invites as never,
@@ -136,6 +151,7 @@ function setup(opts: SetupOptions = {}) {
     txManager as never,
     membership as never,
     roles as never,
+    mockAuditRecorder as never,
   );
 
   const seed = (over: Partial<ProjectInviteRecord> = {}) => {
@@ -159,7 +175,7 @@ function setup(opts: SetupOptions = {}) {
     return record;
   };
 
-  return { service, invites, membership, members, access, roles, mailer, schedule, email, store, seed };
+  return { service, audit: mockAuditRecorder, entriesOfCalled, invites, membership, members, access, roles, mailer, schedule, email, store, seed };
 }
 
 describe('ProjectInvitesService.create (S4b US-004)', () => {
@@ -511,5 +527,37 @@ describe('ProjectInvitesService legacy admin gate removal (US-008)', () => {
     await expect(service.cancel('p', 'i1', admin)).resolves.toBeUndefined();
 
     expect(access.findProjectIdBySlug).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('invite audit contract', () => {
+  it('AC-2/3: new-address create records only the role key and invite id', async () => {
+    const { service, audit } = setup({ configured: false });
+    const result = await service.create('p', { email: 'secret@x.io', roleKey: 'viewer' }, admin, 'en');
+    expect(audit.record).toHaveBeenCalledExactlyOnceWith({ key: 'invite.create', resourceType: 'project-invite', resourceId: result.invite?.id, projectId: 'p1', summary: 'viewer invited' });
+  });
+  it('AC-4: existing-user create records only the action, against the binding id', async () => {
+    const { service, audit } = setup({ existingUser: { id: 'u9', disabled: false }, configured: false });
+    await service.create('p', { email: 'b@x.io', roleKey: 'viewer' }, admin, 'en');
+    expect(audit.record).toHaveBeenCalledExactlyOnceWith({ key: 'invite.create', resourceType: 'role-binding', resourceId: 'binding-1', projectId: 'p1', summary: 'viewer to USER u9' });
+  });
+  it.each(['resend', 'cancel'] as const)('AC-7/8: %s loses its write race inside audited, never evaluating entriesOf', async method => {
+    const { service, invites, audit, seed, entriesOfCalled } = setup({ configured: false });
+    invites.findByIdForProject.mockResolvedValue(seed());
+    invites.rotate.mockResolvedValue(null);
+    invites.cancel.mockResolvedValue(false);
+    await expect(method === 'resend' ? service.resend('p', 'i-seed', admin, 'en') : service.cancel('p', 'i-seed', admin)).rejects.toMatchObject({ httpStatus: 409 });
+    expect(audit.audited).toHaveBeenCalledTimes(1);
+    expect(entriesOfCalled).not.toHaveBeenCalled();
+  });
+  it.each(['resend', 'cancel'] as const)('AC-5/6: %s emits the invite entry after a successful write', async method => {
+    const { service, invites, seed, entriesOfCalled } = setup({ configured: false });
+    const row = seed();
+    invites.findByIdForProject.mockResolvedValue(row);
+    invites.rotate.mockResolvedValue(row);
+    invites.cancel.mockResolvedValue(true);
+    if (method === 'resend') await service.resend('p', row.id, admin, 'en');
+    else await service.cancel('p', row.id, admin);
+    expect(entriesOfCalled).toHaveBeenCalledExactlyOnceWith({ key: `invite.${method}`, resourceType: 'project-invite', resourceId: row.id, projectId: 'p1', summary: method === 'resend' ? 'resent' : 'cancelled' });
   });
 });

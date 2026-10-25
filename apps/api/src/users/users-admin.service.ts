@@ -4,6 +4,8 @@ import type { IPageOption } from '@nathapp/nestjs-common';
 import { IPageResult, ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { CacheManager } from '@nathapp/nestjs-cache';
 import * as bcrypt from 'bcrypt';
+import { fieldsSummary } from '../audit/audit-summary';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { remapPage } from '../common/dto/koda-page.query';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
@@ -27,6 +29,7 @@ export class UsersAdminService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly cache: CacheManager,
     private readonly membership: MembershipService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async list(filters: UserListFilters, page: IPageOption): Promise<IPageResult<UserAdminDto>> {
@@ -56,6 +59,10 @@ export class UsersAdminService {
           });
           // Permissions P1a (US-004): every user starts at the member baseline, and stays there.
           await this.membership.bindBaseline({ type: 'USER', id: created.id });
+          await this.audit.record({
+            key: 'user.create', resourceType: 'user', resourceId: created.id,
+            projectId: null, summary: 'created',
+          });
           return created;
         }),
       );
@@ -93,10 +100,15 @@ export class UsersAdminService {
 
         // Permissions P1l (US-005): `update` never grants or removes a binding. Granting the global
         // admin is `POST /role-bindings` (roleKey `admin`, no project); demoting is its `DELETE`.
-        return this.usersRepo.updateUser(userId, {
+        const written = await this.usersRepo.updateUser(userId, {
           disabled: patch.disabled,
           bumpTokenVersion: newlyDisabled,
         });
+        await this.audit.record({
+          key: 'user.update', resourceType: 'user', resourceId: userId,
+          projectId: null, summary: fieldsSummary(patch),
+        });
+        return written;
       }),
     );
 
