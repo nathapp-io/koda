@@ -29,6 +29,7 @@ function build(current: ScheduleRecord | null = schedule()) {
   const placement = { evaluatePinned: vi.fn(async (): Promise<string | null> => null) };
   const activity = { record: vi.fn(async () => undefined) };
   const txManager = { run: vi.fn(async <T>(fn: () => Promise<T>) => fn()) };
+  const audit = { record: vi.fn(async () => undefined) };
   // US-005: `enable` rechecks the owner's dispatch key through the real PermissionService, so the
   // double answers the owner's effective keys. The default owner holds it. The service itself makes no
   // route decision (`canAdminister` is the controller's), so `can` is deliberately absent.
@@ -36,9 +37,9 @@ function build(current: ScheduleRecord | null = schedule()) {
     effectiveKeys: vi.fn(async () => new Set(['fleet.job.dispatch', 'fleet.schedule.read', 'fleet.schedule.update.own'])),
   };
   const svc = new SchedulesService(
-    repo as never, jobsRepo as never, placement as never, activity as never, txManager as never, permissions as never,
+    repo as never, jobsRepo as never, placement as never, activity as never, txManager as never, permissions as never, audit as never,
   );
-  return { repo, jobsRepo, placement, activity, permissions, svc };
+  return { repo, jobsRepo, placement, activity, permissions, audit, svc };
 }
 const input = (over: Record<string, unknown> = {}) => ({
   name: ' nightly ', repoId: 'r1', feature: 'login', cron: ' 0  9 * * * ', timezone: 'asia/singapore', maxCostUsd: 5, ...over,
@@ -55,6 +56,7 @@ describe('SchedulesService.create', () => {
       createdByType: 'USER', // US-002: no action context in a unit test, so the creator is a user's
     });
     expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'schedule.created', entityType: 'schedule', actorType: 'USER', actorId: 'u9', projectId: 'p1' }));
+    expect(h.audit.record).toHaveBeenCalledWith({ key: 'fleet.schedule.create', resourceType: 'fleet-schedule', resourceId: 'new', projectId: 'p1', summary: 'created on repo r1' });
   });
 
   it.each([
@@ -100,6 +102,7 @@ describe('SchedulesService.update', () => {
   it('lets the owner change the template; a cron change recomputes nextFireAt from now on an enabled schedule', async () => {
     const h = build();
     await h.svc.update('owner', 'p1', 's1', { cron: '0 6 * * *' } as never, false, NOW);
+    expect(h.audit.record).toHaveBeenCalledWith({ key: 'fleet.schedule.update', resourceType: 'fleet-schedule', resourceId: 's1', projectId: 'p1', summary: 'fields: cron' });
     expect(h.repo.update).toHaveBeenCalledWith('s1', expect.objectContaining({ cron: '0 6 * * *', nextFireAt: new Date('2026-10-02T06:00:00.000Z'), updatedById: 'owner' }));
   });
 
@@ -147,6 +150,7 @@ describe('SchedulesService.enable and disable', () => {
     expect(h.repo.update).toHaveBeenCalledWith('s1', { enabled: true, disabledReason: null, noProgressTicks: 0, nextFireAt: new Date('2026-10-02T09:00:00.000Z'), updatedById: 'owner' });
     expect(dto.lastPassedCount).toBe(4);
     expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'schedule.enabled' }));
+    expect(h.audit.record).toHaveBeenCalledWith({ key: 'fleet.schedule.update', resourceType: 'fleet-schedule', resourceId: 's1', projectId: 'p1', summary: 'enabled' });
   });
 
   it('checks the owner\'s own dispatch key: the stored owner ref and its effective keys in this project (US-005)', async () => {
@@ -211,6 +215,7 @@ describe('SchedulesService.enable and disable', () => {
     expect(h.permissions.effectiveKeys).not.toHaveBeenCalled();
     expect(h.repo.update).not.toHaveBeenCalled();
     expect(h.activity.record).not.toHaveBeenCalled();
+    expect(h.audit.record).not.toHaveBeenCalled();
   });
 
   it('disable records a manual reason and a user activity row, and is idempotent', async () => {
@@ -219,9 +224,11 @@ describe('SchedulesService.enable and disable', () => {
     expect(h.repo.update).toHaveBeenCalledWith('s1', { enabled: false, disabledReason: 'manual', updatedById: 'owner' });
     expect(dto).toEqual(expect.objectContaining({ enabled: false, disabledReason: 'manual', nextFireAt: null }));
     expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'schedule.disabled', actorType: 'USER' }));
+    expect(h.audit.record).toHaveBeenCalledWith({ key: 'fleet.schedule.update', resourceType: 'fleet-schedule', resourceId: 's1', projectId: 'p1', summary: 'disabled' });
     const off = build(schedule({ enabled: false, disabledReason: 'completed' }));
     await off.svc.disable('owner', 'p1', 's1', false);
     expect(off.repo.update).not.toHaveBeenCalled();
+    expect(off.audit.record).not.toHaveBeenCalled();
   });
 
   it('refuses a developer who is not the owner', async () => {
@@ -238,6 +245,7 @@ describe('SchedulesService.remove, list and get', () => {
     expect(h.repo.lockById).not.toHaveBeenCalled();
     expect(h.repo.delete).toHaveBeenCalledWith('s1');
     expect(h.activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'schedule.deleted' }));
+    expect(h.audit.record).toHaveBeenCalledWith({ key: 'fleet.schedule.delete', resourceType: 'fleet-schedule', resourceId: 's1', projectId: 'p1', summary: 'deleted' });
     await expect(h.svc.remove('other', 'p1', 's1', false)).rejects.toBeInstanceOf(ForbiddenAppException);
   });
 
