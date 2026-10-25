@@ -51,7 +51,11 @@ describeIntegration('audit runner enrollment and bundle upload (PG)', () => {
   });
   afterAll(async () => {
     await app.close();
-    for (const k of ENV) if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]!;
+    for (const k of ENV) {
+      const value = saved[k];
+      if (value === undefined) delete process.env[k];
+      else process.env[k] = value;
+    }
   });
 
   it('AC-1: attributes enrollment to the created runner', async () => {
