@@ -15,6 +15,7 @@ import { EnrollDto } from './dto/enroll.dto';
 import { EnrollmentCreatedDto, EnrollmentDto } from './dto/enrollment.dto';
 import { ProtocolVersionException } from './protocol-version.exception';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { runWithActionContext } from '../../action-context/action-context';
 
 const uniqueSorted = (labels: string[]) => [...new Set(labels)].sort();
 
@@ -78,6 +79,12 @@ export class EnrollmentService {
         actorType: 'RUNNER', actorId: created.id, action: 'runner.enrolled', entityType: 'runner', entityId: created.id,
         responsibleUserId: enrollment.createdById, payload: { name: created.name, labels: created.labels, enrollmentId: enrollment.id },
       });
+      await runWithActionContext({ actor: { type: 'RUNNER', id: created.id }, origin: 'runner' }, () =>
+        this.audit.record({
+          key: 'runner.enroll', resourceType: 'fleet-runner', resourceId: created.id, projectId: null,
+          summary: `enrolled from enrollment ${enrollment.id}`,
+        }),
+      );
       return created;
     });
     return { runnerId: runner.id, apiKey };
