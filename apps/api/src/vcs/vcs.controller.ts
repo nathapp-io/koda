@@ -201,6 +201,7 @@ export class VcsController {
    */
   @Post('/sync/:issueNumber')
   @Requires('vcs.sync.issue')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Manually sync a specific issue by number' })
   @ApiResponse({ status: 200, description: 'Issue synced successfully', type: SyncResultDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -262,6 +263,7 @@ export class VcsController {
    */
   @Post('/sync')
   @Requires('vcs.sync.all')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Trigger a full sync of all issues from the VCS provider' })
   @ApiResponse({ status: 200, description: 'Full sync completed', type: SyncResultDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })

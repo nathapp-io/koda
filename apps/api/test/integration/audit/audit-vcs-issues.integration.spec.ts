@@ -149,9 +149,8 @@ describeIntegration('VCS issue import audit (real AppModule)', () => {
   it('AC-1/AC-2/AC-3: the one-issue route imports issue 7 and audits it without its title or body', async () => {
     provider.fetchIssue.mockResolvedValue(issue(7, 'Private title', 'Private body'));
 
-    // The route answers Nest's POST default 201 (it declares no @HttpCode); openapi.json documents 200,
-    // and a route's status codes are outside this story, so the AC's "200" is read as "a success".
-    const response = await request(server).post(`${BASE}/sync/7`).set(auth()).expect(201);
+    // AC-1's stated contract, which openapi.json already documents for this route.
+    const response = await request(server).post(`${BASE}/sync/7`).set(auth()).expect(200);
     const body = data<{ issuesSynced: number; issuesSkipped: number; tickets: Array<{ ref: string; title: string }> }>(response);
     expect(body.issuesSynced).toBe(1);
     expect(body.issuesSkipped).toBe(0);
@@ -196,7 +195,7 @@ describeIntegration('VCS issue import audit (real AppModule)', () => {
   it('AC-6: the full-sync route audits each import with vcs.sync.all and its own issue number', async () => {
     provider.fetchIssues.mockResolvedValue({ issues: [issue(8), issue(9)], cursor: null, capped: false });
 
-    const response = await request(server).post(`${BASE}/sync`).set(auth()).expect(201);
+    const response = await request(server).post(`${BASE}/sync`).set(auth()).expect(200);
     const body = data<{ issuesSynced: number; tickets: unknown[] }>(response);
     expect(body.issuesSynced).toBe(2);
 
@@ -273,7 +272,7 @@ describeIntegration('VCS issue import audit (real AppModule)', () => {
     provider.fetchIssues.mockResolvedValue({ issues: [issue(13)], cursor: null, capped: false });
     rejectRecordingOf('vcs.sync.all');
 
-    const response = await request(server).post(`${BASE}/sync`).set(auth()).expect(201);
+    const response = await request(server).post(`${BASE}/sync`).set(auth()).expect(200);
     const body = data<{ issuesSynced: number; issuesSkipped: number; tickets: unknown[] }>(response);
 
     expect(body.issuesSynced).toBe(0);
