@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-vcs-ci",
   "branchName": "feat/permissions-p2-audit-vcs-ci",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T13:11:20.357Z",
+  "updatedAt": "2026-10-25T13:38:57.763Z",
   "userStories": [
     {
       "id": "US-001",
@@ -148,14 +148,17 @@
         "webhook"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "The new in-attempt callback and required entry-point key span the repository, manual routes, polling and webhook intake, so isolated integration TDD is useful; token encryption, authentication and authorization behavior are unchanged."
+        "reasoning": "The new in-attempt callback and required entry-point key span the repository, manual routes, polling and webhook intake, so isolated integration TDD is useful; token encryption, authentication and authorization behavior are unchanged.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/vcs/vcs-sync.service.ts",
@@ -229,7 +232,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "32cfbe39ddab63b3a27c786e0d980a837089779f"
     },
     {
       "id": "US-003",
