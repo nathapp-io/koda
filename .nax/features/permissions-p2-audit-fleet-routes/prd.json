@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-fleet-routes",
   "branchName": "feat/permissions-p2-audit-fleet-routes",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T02:59:31.537Z",
+  "updatedAt": "2026-10-25T03:04:31.977Z",
   "userStories": [
     {
       "id": "US-001",
@@ -263,14 +263,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two existing writers gain recorder calls and dispatch-key options, reusing US-001/002 interfaces and preserving the current retry loop; session ownership and actor attribution keep the mandatory security TDD strategy."
+        "reasoning": "Two existing writers gain recorder calls and dispatch-key options, reusing US-001/002 interfaces and preserving the current retry loop; session ownership and actor attribution keep the mandatory security TDD strategy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
@@ -300,7 +303,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "686b940d8cc00dc30c6361e473e2ea9eb9f9a9f7"
     },
     {
       "id": "US-005",
