@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-fleet-ops",
   "branchName": "feat/permissions-p2-audit-fleet-ops",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T04:37:47.151Z",
+  "updatedAt": "2026-10-25T04:49:33.245Z",
   "userStories": [
     {
       "id": "US-001",
@@ -92,14 +92,17 @@
         "schedules"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Additive instrumentation of five existing transactions and a direct-constructor test update; own-row authorization and permission-gated admin actions require strict isolated TDD."
+        "reasoning": "Additive instrumentation of five existing transactions and a direct-constructor test update; own-row authorization and permission-gated admin actions require strict isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/schedules/schedules.service.ts",
@@ -125,7 +128,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e15d927edb856d7a30ea0796ad453f66955b7f56"
     },
     {
       "id": "US-003",
