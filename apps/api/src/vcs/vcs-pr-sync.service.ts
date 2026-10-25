@@ -15,6 +15,8 @@ import type { VcsTicketDomain } from './domain/vcs.domain';
 import { IVcsRepository, TicketLinkData, PrStateWriteResult, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 import { mapPrState } from './pr-state';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { prStateSummary, type VcsPrStateAuditKey } from './vcs-audit';
 
 export interface SyncPrStatusResult {
   updated: number;
@@ -28,6 +30,7 @@ export class VcsPrSyncService {
 
   constructor(
     @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
+    private readonly audit: AuditRecorder,
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
     @Optional() @Inject(VCS_CFG) private readonly vcsConfig?: IVcsConfig,
   ) {}
@@ -61,6 +64,7 @@ export class VcsPrSyncService {
     project: { id: string; key: string },
     connection: VcsConnectionDomain,
     encryptionKey: string,
+    auditKey: VcsPrStateAuditKey,
   ): Promise<SyncPrStatusResult> {
     // Decrypt the token
     const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
@@ -95,7 +99,7 @@ export class VcsPrSyncService {
           if (!terminal) {
             const outcome = newPrState === 'merged'
               ? await this.applyMergedPr(link, prStatus)
-              : await this.vcsRepo.updateTicketLinkWithPrState(link.id, newPrState);
+              : await this.writePrState(link.id, newPrState, link.prState, project.id, auditKey);
             if (outcome === 'updated') {
               updated++;
             }
@@ -127,9 +131,14 @@ export class VcsPrSyncService {
         }
       } catch (error) {
         if (error instanceof NotFoundAppException) {
-          // 404: mark as closed
-          if ((await this.vcsRepo.updateTicketLinkWithPrState(link.id, 'closed')) === 'updated') {
-            updated++;
+          // 404: mark as closed. Keep a failed write isolated to this link.
+          try {
+            if ((await this.writePrState(link.id, 'closed', link.prState, project.id, auditKey)) === 'updated') {
+              updated++;
+            }
+          } catch (writeError) {
+            skipped++;
+            this.logger.warn(`[vcs-pr-sync] Failed to close missing PR for link ${link.id}: ${writeError instanceof Error ? writeError.message : String(writeError)}`);
           }
         } else {
           // General API error: skip this PR
@@ -139,6 +148,21 @@ export class VcsPrSyncService {
     }
 
     return { updated, skipped };
+  }
+
+  private writePrState(
+    linkId: string,
+    nextState: string,
+    previousState: string | null,
+    projectId: string,
+    auditKey: VcsPrStateAuditKey,
+  ): Promise<PrStateWriteResult> {
+    return this.audit.audited(
+      () => this.vcsRepo.updateTicketLinkWithPrState(linkId, nextState),
+      (outcome) => outcome === 'updated'
+        ? { key: auditKey, resourceType: 'ticket-link', resourceId: linkId, projectId, summary: prStateSummary(previousState, nextState) }
+        : [],
+    );
   }
 
   /**

@@ -325,7 +325,7 @@ export class VcsController {
     const connection = await this.vcsService.getFullByProject(project.id);
 
     // Run PR sync
-    const result = await this.prSyncService.syncPrStatus(project, connection, encryptionKey);
+    const result = await this.prSyncService.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
 
     return JsonResponse.Ok({ updated: result.updated });
   }

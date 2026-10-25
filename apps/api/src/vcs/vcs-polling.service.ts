@@ -197,6 +197,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
         connection.project,
         connection,
         encryptionKey,
+        'system.vcs.poll-issues',
       );
       this.logger.debug(
         `PR sync complete for connection ${connection.id}: updated=${prResult.updated}, skipped=${prResult.skipped}`,

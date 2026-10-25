@@ -1,3 +1,4 @@
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { currentContext, runWithActionContext, type ActionContext } from '../action-context/action-context';
@@ -157,6 +158,7 @@ function buildTestingModule(
       { provide: VcsPrSyncService, useValue: createMockPrSyncService() },
       { provide: NathappOutboxService, useValue: createMockOutboxService(recordMock) },
       { provide: VCS_CFG, useValue: { encryptionKey: 'test-key', defaultPollingIntervalMs: 600000, githubApiUrl: 'https://api.github.com' } },
+      { provide: AuditRecorder, useValue: { audited: async (fn: () => Promise<unknown>, entriesOf: (result: unknown) => unknown) => { const result = await fn(); entriesOf(result); return result; }, record: vi.fn() } },
       { provide: VcsLinkExtractorService, useValue: { extractLinksFromPr: vi.fn() } },
     ],
   }).compile();

@@ -10,6 +10,8 @@ import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 import { runAsSystemWriter } from '../action-context/action-context';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { prStateSummary } from './vcs-audit';
 
 /**
  * GitHub webhook event payload (issues)
@@ -111,6 +113,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     private readonly syncService: VcsSyncService,
     private readonly prSyncService: VcsPrSyncService,
     @Inject(VCS_CFG) private readonly vcsConfig: IVcsConfig,
+    private readonly audit: AuditRecorder,
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
     @Optional() private readonly outboxService?: NathappOutboxService,
   ) {
@@ -312,6 +315,20 @@ export class VcsWebhookService implements OnModuleDestroy {
     }
   }
 
+  private updatePrState(
+    connection: VcsConnectionWithProjectDomain,
+    ticketLink: { id: string; prState: string | null },
+    nextState: string,
+  ) {
+    return this.audit.audited(
+      () => this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, nextState),
+      (outcome) => outcome === 'updated' && ticketLink.prState !== nextState
+        ? { key: 'system.vcs.webhook-intake', resourceType: 'ticket-link', resourceId: ticketLink.id,
+          projectId: connection.projectId, summary: prStateSummary(ticketLink.prState, nextState) }
+        : [],
+    );
+  }
+
   /**
    * Handle pull_request opened action
    * AC2: sets prState to 'draft' if draft=true, otherwise 'open'
@@ -336,7 +353,7 @@ export class VcsWebhookService implements OnModuleDestroy {
 
     const newPrState = pr.draft ? 'draft' : 'open';
 
-    const outcome = await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, newPrState);
+    const outcome = await this.updatePrState(connection, ticketLink, newPrState);
     if (outcome !== 'updated') {
       return VcsWebhookService.ignoredWrite(outcome);
     }
@@ -421,7 +438,7 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    const outcome = await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'closed');
+    const outcome = await this.updatePrState(connection, ticketLink, 'closed');
     if (outcome !== 'updated') {
       return VcsWebhookService.ignoredWrite(outcome);
     }
@@ -456,7 +473,7 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    const outcome = await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'open');
+    const outcome = await this.updatePrState(connection, ticketLink, 'open');
     if (outcome !== 'updated') {
       return VcsWebhookService.ignoredWrite(outcome);
     }
@@ -488,7 +505,7 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    const outcome = await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'open');
+    const outcome = await this.updatePrState(connection, ticketLink, 'open');
     if (outcome !== 'updated') {
       return VcsWebhookService.ignoredWrite(outcome);
     }
@@ -517,7 +534,7 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    const outcome = await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'draft');
+    const outcome = await this.updatePrState(connection, ticketLink, 'draft');
     if (outcome !== 'updated') {
       return VcsWebhookService.ignoredWrite(outcome);
     }

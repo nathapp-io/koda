@@ -159,7 +159,22 @@ describe('VcsPollingService tick (M10)', () => {
     expect(unhandled).not.toHaveBeenCalled();
   });
 
-  describe('Permissions P2 US-002: the poll entry point audit key', () => {
+  describe('Permissions P2 US-003: the poll entry point audit key', () => {
+    it('passes system.vcs.poll-issues as the fourth syncPrStatus argument', async () => {
+      repo.findVcsConnectionById.mockResolvedValue(connection());
+      service.schedulePolling(connection());
+
+      await tick();
+
+      expect(prSync.syncPrStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'proj-1' }),
+        expect.objectContaining({ id: 'conn-1' }),
+        expect.any(String),
+        'system.vcs.poll-issues',
+      );
+    });
+
+
     it('AC-20: passes system.vcs.poll-issues to syncIssue', async () => {
       const fetched = issue(11);
       repo.findVcsConnectionById.mockResolvedValue(connection());
