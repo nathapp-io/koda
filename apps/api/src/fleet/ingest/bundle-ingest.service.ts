@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { runAsSystem } from '../../action-context/action-context';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { responsibleUserOf } from '../common/responsible-user';
@@ -42,6 +43,7 @@ export class BundleIngestService {
     private readonly outcomes: FleetJobOutcomeRecorder,
     /** S5b 3c-2-D8 (US-004): carries `KNOWLEDGE_RUN_INGESTED`; the ingest is the outcome pass's only trigger. */
     private readonly events: EventEmitter2,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /**
@@ -112,6 +114,10 @@ export class BundleIngestService {
       }
       await this.repo.markOutcome(claim.id, {
         kind: parsed.partial ? 'partial' : 'done', files: parsed.files, liveCostUsd: correction.liveCostUsd, ledgerCostUsd: parsed.ledgerCostUsd, ingestedAt: now,
+      });
+      await this.audit.record({
+        key: 'system.ingest.drain', resourceType: 'fleet-job', resourceId: job.id, projectId: job.projectId,
+        summary: parsed.partial ? 'ingested partial' : 'ingested done',
       });
       // `isRun` travels with the commit result for the post-commit outcome-index hook (S5b 3c-2-D8, US-004).
       return { event: this.live.event(updated), spendKeys: correction.costRaised ? jobSpendKeys(updated) : [], prFilled, isRun };
