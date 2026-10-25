@@ -85,7 +85,7 @@ function createMockRepo(): Mocked<IVcsRepository> {
   return {
     findActiveTicketLinksWithPrs: vi.fn().mockResolvedValue([]),
     findTicketLinkForConnectionPr: vi.fn().mockResolvedValue(null),
-    updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated'),
+    updateTicketLinkWithPrState: vi.fn().mockResolvedValue({ result: 'updated', previousState: null }),
     applyMergedPrTransition: vi.fn().mockResolvedValue(undefined),
     findTicketWithProject: vi.fn().mockResolvedValue(null),
     findProjectById: vi.fn().mockResolvedValue(null),
@@ -185,7 +185,7 @@ describe('VcsPrSyncService', () => {
       const link = makeTicketLink({ prState: 'open' });
       mockRepo.findActiveTicketLinksWithPrs.mockResolvedValue([link]);
       mockProvider.getPullRequestStatus.mockResolvedValue(makePrStatus({ state: 'closed', merged: false }));
-      mockRepo.updateTicketLinkWithPrState.mockResolvedValueOnce('already-merged');
+      mockRepo.updateTicketLinkWithPrState.mockResolvedValueOnce({ result: 'already-merged', previousState: 'merged' });
 
       const result = await service.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
 
@@ -367,7 +367,7 @@ describe('VcsPrSyncService', () => {
     });
 
     it.each(['already-merged', 'not-found'] as const)('does not transition when the write returned %s', async (outcome) => {
-      mockRepo.updateTicketLinkWithPrState.mockResolvedValueOnce(outcome);
+      mockRepo.updateTicketLinkWithPrState.mockResolvedValueOnce({ result: outcome, previousState: null });
       await expect(service.applyMergedPr(makeTicketLink(), merged)).resolves.toBe(outcome);
       expect(mockRepo.applyMergedPrTransition).not.toHaveBeenCalled();
     });

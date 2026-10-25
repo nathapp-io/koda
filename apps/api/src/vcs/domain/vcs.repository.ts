@@ -89,6 +89,19 @@ export interface OutboxDedupQuery {
  */
 export type PrStateWriteResult = 'updated' | 'already-merged' | 'not-found';
 
+/**
+ * Review B1: the outcome of that write. `previousState` is the state the write actually replaced,
+ * read under the row lock inside the write's own transaction — never the caller's pre-transaction
+ * snapshot. Change detection and the audit summary use it, so a change another writer interleaved
+ * between the lookup and the write is still recorded once, and a state another writer already stored
+ * is not recorded a second time.
+ */
+export interface PrStateWriteOutcome {
+  result: PrStateWriteResult;
+  /** The stored `prState` before this write; `null` when the link had none or no longer exists. */
+  previousState: string | null;
+}
+
 export interface IVcsRepository {
   // Ticket + Issue operations
   findExistingTicketByExternalId(projectId: string, externalVcsId: string): Promise<VcsTicketDomain | null>;
@@ -108,8 +121,11 @@ export interface IVcsRepository {
    * M12: the only TicketLink.prState write. `merged` is terminal: a link already
    * merged is left unchanged. Resolves `updated` when the row changed,
    * `already-merged` when it was skipped, and `not-found` when no such link exists.
+   *
+   * Review B1: the stored state is read under the row lock in the same transaction as the write, so
+   * the outcome's `previousState` is authoritative for both change detection and the audit summary.
    */
-  updateTicketLinkWithPrState(id: string, prState: string): Promise<PrStateWriteResult>;
+  updateTicketLinkWithPrState(id: string, prState: string): Promise<PrStateWriteOutcome>;
 
   // Merged PR auto-transition
   applyMergedPrTransition(input: MergedPrTransitionInput): Promise<void>;

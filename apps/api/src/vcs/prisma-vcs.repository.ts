@@ -16,7 +16,7 @@ import {
   MergedPrTransitionInput,
   OutboxDedupQuery,
   OnTicketCreated,
-  PrStateWriteResult,
+  PrStateWriteOutcome,
   TicketLinkData,
   UpdateVcsConnectionData,
 } from './domain/vcs.repository';
@@ -283,22 +283,27 @@ export class PrismaVcsRepository implements IVcsRepository {
   /**
    * M12: the only TicketLink.prState write. A late or replayed event (fresh
    * delivery id, so replay protection lets it through) must not regress a merged
-   * PR, so the write skips rows already `merged`. NULL is matched explicitly:
-   * `prState <> 'merged'` alone is NULL, not true, for a NULL row.
+   * PR, so the write skips rows already `merged`.
    *
-   * `count === 0` is ambiguous (already merged vs deleted), so the miss is
-   * disambiguated with one existence read; callers must not report a vanished
-   * link as already merged.
+   * Review B1: the stored state is read under the row lock (`SELECT … FOR UPDATE`) in the same
+   * transaction as the write, so `previousState` is the state this write really replaced instead of
+   * a snapshot taken before the transaction. Two writers that both read `open` cannot both report a
+   * change, and a change another writer interleaved between the caller's lookup and this write is
+   * not lost. `count === 0` used to be ambiguous (already merged vs deleted); the locked read answers
+   * it, so a vanished link is never reported as already merged.
    */
-  async updateTicketLinkWithPrState(id: string, prState: string): Promise<PrStateWriteResult> {
-    const { count } = await this.db.ticketLink.updateMany({
-      where: { id, OR: [{ prState: null }, { prState: { not: 'merged' } }] },
-      data: { prState, prUpdatedAt: new Date() },
-    });
-    if (count === 1) return 'updated';
+  async updateTicketLinkWithPrState(id: string, prState: string): Promise<PrStateWriteOutcome> {
+    return this.txManager.run(async () => {
+      const rows = await this.db.$queryRaw<Array<{ prState: string | null }>>`
+        SELECT "prState" FROM "TicketLink" WHERE "id" = ${id} FOR UPDATE`;
+      if (rows.length === 0) return { result: 'not-found' as const, previousState: null };
 
-    const existing = await this.db.ticketLink.findUnique({ where: { id }, select: { id: true } });
-    return existing ? 'already-merged' : 'not-found';
+      const previousState = rows[0].prState;
+      if (previousState === 'merged') return { result: 'already-merged' as const, previousState };
+
+      await this.db.ticketLink.update({ where: { id }, data: { prState, prUpdatedAt: new Date() } });
+      return { result: 'updated' as const, previousState };
+    });
   }
 
   /**

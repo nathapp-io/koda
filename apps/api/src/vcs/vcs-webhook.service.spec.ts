@@ -11,7 +11,7 @@ import { VCS_CFG } from '../config/vcs.config';
 import type { VcsConnectionWithProjectDomain } from './domain/vcs.domain';
 import type { OutboxEventDomain } from '../outbox/domain/outbox-event.domain';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
-import type { OutboxDedupQuery } from './domain/vcs.repository';
+import type { OutboxDedupQuery, PrStateWriteOutcome } from './domain/vcs.repository';
 
 interface SharedEnqueuedEvent {
   type: string;
@@ -38,7 +38,7 @@ function createMockVcsRepository(sharedEnqueuedEvents?: SharedEnqueuedEvent[]): 
     findTicketWithProject: vi.fn().mockResolvedValue(null),
     findActiveTicketLinksWithPrs: vi.fn().mockResolvedValue([]),
     findTicketLinkForConnectionPr: vi.fn().mockResolvedValue(null),
-    updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated'),
+    updateTicketLinkWithPrState: vi.fn().mockResolvedValue({ result: 'updated', previousState: null }),
     applyMergedPrTransition: vi.fn(),
     findPendingOutboxEvents: vi.fn().mockImplementation((query: OutboxDedupQuery) => {
       if (!sharedEnqueuedEvents) return Promise.resolve([]);
@@ -501,7 +501,7 @@ describe('VcsWebhookService — the intake runs as SYSTEM/vcs (P2 US-005)', () =
     const seen: Array<ActionContext | undefined> = [];
     repo.updateTicketLinkWithPrState.mockImplementation(async () => {
       seen.push(currentContext());
-      return 'updated';
+      return { result: 'updated', previousState: null };
     });
     const record = vi.fn<(...args: [OutboxEventInput]) => Promise<OutboxEventDomain>>().mockResolvedValue(resolveOutboxEvent());
     const module = await buildTestingModule(record, undefined, repo);
@@ -515,5 +515,101 @@ describe('VcsWebhookService — the intake runs as SYSTEM/vcs (P2 US-005)', () =
 
     expect(seen).toHaveLength(1);
     expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'vcs' });
+  });
+});
+
+/**
+ * Review B1: the intake's audit decision reads the state the write replaced under its row lock, never
+ * the snapshot each handler looks up before the transaction. A state another writer already stored adds
+ * no entry; a change interleaved since the lookup is recorded once, with the state it replaced.
+ */
+describe('VcsWebhookService — prState change detection (review B1)', () => {
+  const snapshot = (prState: string | null) => ({
+    id: 'link-1',
+    ticketId: 't-1',
+    prNumber: 7,
+    prState,
+    url: 'https://github.com/owner/repo/pull/7',
+    externalRef: null,
+    ticket: { id: 't-1', status: 'CREATED', projectId: 'project-1', number: 42, externalVcsId: null },
+  });
+
+  const pullRequest = (action: string): GitHubWebhookPayload => ({
+    action,
+    pull_request: {
+      number: 7,
+      title: 'feat: a change',
+      body: null,
+      user: { login: 'dev' },
+      html_url: 'https://github.com/owner/repo/pull/7',
+      state: 'open',
+      draft: false,
+      merged: false,
+      merged_at: null,
+      merged_by: null,
+      base: { ref: 'main', repo: { full_name: 'owner/repo' } },
+      head: { ref: 'feat/a-change', repo: { full_name: 'owner/repo' } },
+    },
+  });
+
+  /** The handler's snapshot says `open`; the write reports whatever the test tells it it replaced. */
+  async function handle(write: PrStateWriteOutcome) {
+    const repo = createMockVcsRepository();
+    repo.findTicketLinkForConnectionPr.mockResolvedValue(snapshot('open') as never);
+    repo.updateTicketLinkWithPrState.mockResolvedValue(write);
+    const record = vi.fn().mockResolvedValue(undefined);
+    const module = await Test.createTestingModule({
+      providers: [
+        VcsWebhookService,
+        { provide: VCS_REPOSITORY, useValue: repo },
+        { provide: VcsSyncService, useValue: createMockSyncService() },
+        { provide: VcsPrSyncService, useValue: createMockPrSyncService() },
+        { provide: NathappOutboxService, useValue: createMockOutboxService(vi.fn()) },
+        { provide: VCS_CFG, useValue: { encryptionKey: 'test-key', defaultPollingIntervalMs: 600000, githubApiUrl: 'https://api.github.com' } },
+        {
+          provide: AuditRecorder,
+          useValue: {
+            audited: async (fn: () => Promise<unknown>, entriesOf: (result: unknown) => unknown) => {
+              const result = await fn();
+              const entries = entriesOf(result);
+              for (const entry of Array.isArray(entries) ? entries : entries ? [entries] : []) await record(entry);
+              return result;
+            },
+            record,
+          },
+        },
+        { provide: VcsLinkExtractorService, useValue: { extractLinksFromPr: vi.fn() } },
+      ],
+    }).compile();
+    return { service: module.get(VcsWebhookService), record, module };
+  }
+
+  it('records the state the write replaced, not the snapshot the handler looked up', async () => {
+    const { service, record, module } = await handle({ result: 'updated', previousState: 'draft' });
+
+    try {
+      await service.handleWebhook(createMockConnection(), 'pull_request', pullRequest('reopened'));
+    } finally {
+      await module.close();
+    }
+
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      key: 'system.vcs.webhook-intake',
+      resourceId: 'link-1',
+      summary: 'pr draft -> open',
+    }));
+  });
+
+  it('records nothing when the write replaced the state it targeted', async () => {
+    const { service, record, module } = await handle({ result: 'updated', previousState: 'closed' });
+
+    try {
+      await service.handleWebhook(createMockConnection(), 'pull_request', pullRequest('closed'));
+    } finally {
+      await module.close();
+    }
+
+    expect(record).not.toHaveBeenCalled();
   });
 });

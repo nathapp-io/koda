@@ -8,6 +8,7 @@ import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { VcsIssue } from './types';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
+import type { PrStateWriteResult } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 import { runAsSystemWriter } from '../action-context/action-context';
 import { AuditRecorder } from '../audit/audit-recorder.service';
@@ -315,18 +316,24 @@ export class VcsWebhookService implements OnModuleDestroy {
     }
   }
 
-  private updatePrState(
+  /**
+   * Review B1: the change is decided by the state the write actually replaced (`previousState`, read
+   * under the row lock), never by the snapshot the handler looked up before its transaction: a state
+   * another writer already stored records nothing, a change interleaved since the lookup records once.
+   */
+  private async updatePrState(
     connection: VcsConnectionWithProjectDomain,
     ticketLink: { id: string; prState: string | null },
     nextState: string,
-  ) {
-    return this.audit.audited(
+  ): Promise<PrStateWriteResult> {
+    const outcome = await this.audit.audited(
       () => this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, nextState),
-      (outcome) => outcome === 'updated' && ticketLink.prState !== nextState
+      (written) => written.result === 'updated' && written.previousState !== nextState
         ? { key: 'system.vcs.webhook-intake', resourceType: 'ticket-link', resourceId: ticketLink.id,
-          projectId: connection.projectId, summary: prStateSummary(ticketLink.prState, nextState) }
+          projectId: connection.projectId, summary: prStateSummary(written.previousState, nextState) }
         : [],
     );
+    return outcome.result;
   }
 
   /**

@@ -304,6 +304,7 @@ export class VcsController {
    */
   @Post('/sync-pr')
   @Requires('vcs.sync.pr')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Manually sync PR status for all active pull requests' })
   @ApiResponse({ status: 200, description: 'PR sync completed', type: Object })
   @ApiResponse({ status: 401, description: 'Unauthorized' })

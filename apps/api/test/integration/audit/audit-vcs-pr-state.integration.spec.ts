@@ -117,7 +117,7 @@ describeIntegration('VCS PR-state audit entries', () => {
   it('AC-1/AC-2: manual PR sync records the state change only, for the request actor', async () => {
     const { link } = await newLink('open');
     provider.getPullRequestStatus.mockResolvedValue(prStatus(prNumberOf(link.prNumber), 'closed'));
-    await request(server).post(`${BASE}/sync-pr`).set(auth()).expect(201);
+    await request(server).post(`${BASE}/sync-pr`).set(auth()).expect(200);
     expect(await rows(link.id)).toHaveLength(1);
     expect(await rows(link.id)).toMatchObject([{
       key: describeKey, resourceType: 'ticket-link', resourceId: link.id, projectId,
@@ -126,7 +126,7 @@ describeIntegration('VCS PR-state audit entries', () => {
 
     const unchanged = await newLink('open');
     provider.getPullRequestStatus.mockResolvedValue(prStatus(prNumberOf(unchanged.link.prNumber), 'open'));
-    await request(server).post(`${BASE}/sync-pr`).set(auth()).expect(201);
+    await request(server).post(`${BASE}/sync-pr`).set(auth()).expect(200);
     expect(await rows(unchanged.link.id)).toHaveLength(0);
   });
 
@@ -134,7 +134,7 @@ describeIntegration('VCS PR-state audit entries', () => {
     const { link } = await newLink('draft');
     provider.getPullRequestStatus.mockRejectedValue(new NotFoundAppException({}, 'vcs'));
     rejectRecord(describeKey);
-    const response = await request(server).post(`${BASE}/sync-pr`).set(auth()).expect(201);
+    const response = await request(server).post(`${BASE}/sync-pr`).set(auth()).expect(200);
     expect(data<{ updated: number }>(response).updated).toBe(0);
     expect((await db.ticketLink.findUniqueOrThrow({ where: { id: link.id } })).prState).toBe('draft');
     expect(await rows(link.id)).toHaveLength(0);
@@ -144,7 +144,7 @@ describeIntegration('VCS PR-state audit entries', () => {
     const { link } = await newLink('draft');
     provider.getPullRequestStatus.mockRejectedValue(new NotFoundAppException({}, 'vcs'));
 
-    const response = await request(server).post(`${BASE}/sync-pr`).set(auth()).expect(201);
+    const response = await request(server).post(`${BASE}/sync-pr`).set(auth()).expect(200);
     expect(data<{ updated: number }>(response).updated).toBe(1);
     expect((await db.ticketLink.findUniqueOrThrow({ where: { id: link.id } })).prState).toBe('closed');
     expect(await rows(link.id)).toMatchObject([{
@@ -266,6 +266,45 @@ describeIntegration('VCS PR-state audit entries', () => {
     expect(warning.mock.calls.map(([message]) => String(message)).join(' ')).toContain('audit down');
     expect((await db.ticketLink.findUniqueOrThrow({ where: { id: first.link.id } })).prState).toBe('draft');
     expect((await db.ticketLink.findUniqueOrThrow({ where: { id: second.link.id } })).prState).toBe('open');
+  });
+
+  /**
+   * Review B1: the audited change is the state the write replaced under its row lock, not the snapshot
+   * the handler looked up before its transaction. The interleaving is made deterministic by committing
+   * another writer's change between this request's lookup and its write.
+   */
+  const interleaveAfterLookup = (prState: string) => {
+    const repo = app.get<IVcsRepository>(VCS_REPOSITORY);
+    const lookup = repo.findTicketLinkForConnectionPr.bind(repo);
+    return vi.spyOn(repo, 'findTicketLinkForConnectionPr').mockImplementation(async (project, repoArg, number) => {
+      const snapshot = await lookup(project, repoArg, number);
+      if (snapshot) await db.ticketLink.update({ where: { id: snapshot.id }, data: { prState } });
+      return snapshot;
+    });
+  };
+
+  it('review B1: a change another writer committed after the lookup is still audited once', async () => {
+    const { link } = await newLink('open');
+    // This request's snapshot says 'open', so it targets 'open' again; the row is 'draft' by the time its
+    // write takes the lock, so the write really moves draft -> open and must record that change.
+    const race = interleaveAfterLookup('draft');
+    await deliver(prNumberOf(link.prNumber), 'reopened').expect(200);
+    race.mockRestore();
+
+    expect((await db.ticketLink.findUniqueOrThrow({ where: { id: link.id } })).prState).toBe('open');
+    expect(await rows(link.id)).toMatchObject([{
+      key: 'system.vcs.webhook-intake', summary: 'pr draft -> open',
+    }]);
+  });
+
+  it('review B1: a state another writer already stored is not audited a second time', async () => {
+    const { link } = await newLink('open');
+    const race = interleaveAfterLookup('closed');
+    await deliver(prNumberOf(link.prNumber), 'closed').expect(200);
+    race.mockRestore();
+
+    // The row was already 'closed' when this write ran, so this request changed no state and adds no entry.
+    expect(await rows(link.id)).toHaveLength(0);
   });
 
   it('AC-10/AC-11/AC-12/AC-13: merged and missing links are ignored without audit', async () => {

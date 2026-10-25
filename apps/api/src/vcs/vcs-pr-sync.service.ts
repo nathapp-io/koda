@@ -110,7 +110,7 @@ export class VcsPrSyncService {
           if (!terminal) {
             const outcome = newPrState === 'merged'
               ? await this.applyMergedPr(link, prStatus)
-              : await this.writePrState(link.id, newPrState, link.prState, project.id, auditKey);
+              : await this.writePrState(link.id, newPrState, project.id, auditKey);
             if (outcome === 'updated') {
               updated++;
             }
@@ -144,7 +144,7 @@ export class VcsPrSyncService {
         if (error instanceof NotFoundAppException) {
           // 404: mark as closed. Keep a failed write isolated to this link.
           try {
-            if ((await this.writePrState(link.id, 'closed', link.prState, project.id, auditKey)) === 'updated') {
+            if ((await this.writePrState(link.id, 'closed', project.id, auditKey)) === 'updated') {
               updated++;
             }
           } catch (writeError) {
@@ -161,19 +161,24 @@ export class VcsPrSyncService {
     return { updated, skipped };
   }
 
-  private writePrState(
+  /**
+   * Review B1: the change is what the write actually replaced (`previousState`, read under the row
+   * lock), never the caller's snapshot, so a state another writer already stored is not recorded
+   * again and a change interleaved since the lookup is not missed.
+   */
+  private async writePrState(
     linkId: string,
     nextState: string,
-    previousState: string | null,
     projectId: string,
     auditKey: VcsPrStateAuditKey,
   ): Promise<PrStateWriteResult> {
-    return this.audit.audited(
+    const outcome = await this.audit.audited(
       () => this.vcsRepo.updateTicketLinkWithPrState(linkId, nextState),
-      (outcome) => outcome === 'updated'
-        ? { key: auditKey, resourceType: 'ticket-link', resourceId: linkId, projectId, summary: prStateSummary(previousState, nextState) }
+      (written) => written.result === 'updated' && written.previousState !== nextState
+        ? { key: auditKey, resourceType: 'ticket-link', resourceId: linkId, projectId, summary: prStateSummary(written.previousState, nextState) }
         : [],
     );
+    return outcome.result;
   }
 
   /**
@@ -191,18 +196,18 @@ export class VcsPrSyncService {
     return runAsSystemWriter(this, async () => {
       const outcome = await this.audit.audited(
         () => this.vcsRepo.updateTicketLinkWithPrState(link.id, 'merged'),
-        (result) => result === 'updated'
+        (written) => written.result === 'updated' && written.previousState !== 'merged'
           ? {
             key: MERGE_AUDIT_KEY,
             resourceType: 'ticket-link',
             resourceId: link.id,
             projectId: link.ticket?.projectId ?? null,
-            summary: prStateSummary(link.prState, 'merged'),
+            summary: prStateSummary(written.previousState, 'merged'),
           }
           : [],
       );
-      if (outcome === 'updated') await this.handleMergedPrAutoTransition(link, prStatus);
-      return outcome;
+      if (outcome.result === 'updated') await this.handleMergedPrAutoTransition(link, prStatus);
+      return outcome.result;
     });
   }
 
