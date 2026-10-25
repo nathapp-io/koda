@@ -14,6 +14,7 @@ describe('PrismaVcsRepository', () => {
   const mockUpdate = vi.fn();
   const mockCommentCreate = vi.fn();
   const mockActivityCreate = vi.fn();
+  const mockQueryRaw = vi.fn();
 
   const mockPrisma = {
     client: {
@@ -21,6 +22,7 @@ describe('PrismaVcsRepository', () => {
       ticketLink: { findMany: mockFindMany, update: mockUpdate },
       comment: { create: mockCommentCreate },
       ticketActivity: { create: mockActivityCreate },
+      $queryRaw: mockQueryRaw,
     },
   };
 
@@ -53,6 +55,43 @@ describe('PrismaVcsRepository', () => {
       }),
     );
     expect(result).toEqual({ id: 't1', number: 8, title: 'Issue title' });
+  });
+
+  it('createTicketFromIssue awaits onCreated after the insert, inside the attempt', async () => {
+    mockFindFirst.mockResolvedValue(null);
+    mockCreate.mockResolvedValue({ id: 't1', number: 1, title: 'Issue title' });
+    const onCreated = vi.fn(async () => undefined);
+
+    const result = await repo.createTicketFromIssue(
+      { id: 'p1' } as never,
+      { number: 99, title: 'Issue title', body: null, url: 'http://gh/issue/99' } as never,
+      'acme/widgets#99',
+      onCreated,
+    );
+
+    expect(onCreated).toHaveBeenCalledWith({ id: 't1', number: 1 });
+    expect(onCreated.mock.invocationCallOrder[0]).toBeGreaterThan(mockCreate.mock.invocationCallOrder[0]);
+    expect(result).toEqual({ id: 't1', number: 1, title: 'Issue title' });
+  });
+
+  it('AC-28: a rejecting onCreated propagates without being retried as a number conflict', async () => {
+    mockFindFirst.mockResolvedValue(null);
+    mockCreate.mockResolvedValue({ id: 't1', number: 1, title: 'Issue title' });
+    const onCreated = vi.fn(async () => {
+      throw new Error('audit down');
+    });
+
+    await expect(
+      repo.createTicketFromIssue(
+        { id: 'p1' } as never,
+        { number: 99, title: 'Issue title', body: null, url: 'http://gh/issue/99' } as never,
+        'acme/widgets#99',
+        onCreated,
+      ),
+    ).rejects.toThrow('audit down');
+
+    expect(mockRun).toHaveBeenCalledTimes(1);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
   });
 
   it('findActiveTicketLinksWithPrs filters merged/closed and null deleted tickets', async () => {
@@ -105,6 +144,41 @@ describe('PrismaVcsRepository', () => {
   it('findTicketLinkForConnectionPr returns null when only another repo has that number', async () => {
     mockFindMany.mockResolvedValue([{ id: 'other', externalRef: 'other/lib#5', prNumber: 5, source: 'fleet' }]);
     await expect(repo.findTicketLinkForConnectionPr('p1', { repoOwner: 'acme', repoName: 'app' }, 5)).resolves.toBeNull();
+  });
+
+  describe('updateTicketLinkWithPrState (review B1)', () => {
+    const lockedSql = () => String((mockQueryRaw.mock.calls[0][0] as TemplateStringsArray).join('?'));
+
+    it('reports the state its locked read returned, not a state from before the transaction', async () => {
+      mockQueryRaw.mockResolvedValue([{ prState: 'draft' }]);
+
+      await expect(repo.updateTicketLinkWithPrState('link-1', 'open'))
+        .resolves.toEqual({ result: 'updated', previousState: 'draft' });
+
+      expect(lockedSql()).toContain('FOR UPDATE');
+      expect(mockRun).toHaveBeenCalledTimes(1);
+      expect(mockQueryRaw.mock.invocationCallOrder[0]).toBeLessThan(mockUpdate.mock.invocationCallOrder[0]);
+      expect(mockUpdate).toHaveBeenCalledWith({
+        where: { id: 'link-1' },
+        data: { prState: 'open', prUpdatedAt: expect.any(Date) },
+      });
+    });
+
+    it('reports a state it will not overwrite, and merged stays terminal', async () => {
+      mockQueryRaw.mockResolvedValue([{ prState: 'merged' }]);
+
+      await expect(repo.updateTicketLinkWithPrState('link-1', 'open'))
+        .resolves.toEqual({ result: 'already-merged', previousState: 'merged' });
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+
+    it('reports a vanished link as not-found with no previous state and no write', async () => {
+      mockQueryRaw.mockResolvedValue([]);
+
+      await expect(repo.updateTicketLinkWithPrState('gone', 'open'))
+        .resolves.toEqual({ result: 'not-found', previousState: null });
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
   });
 
   it('applyMergedPrTransition writes ticket, comment and activity in txManager.run', async () => {

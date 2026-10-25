@@ -5,6 +5,8 @@ import { IVcsRepository, TicketLinkData, VCS_REPOSITORY } from './domain/vcs.rep
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
 import { VcsPrStatus } from './types';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { currentContext, runWithActor } from '../action-context/action-context';
 
 vi.mock('./factory', () => ({
   createVcsProvider: vi.fn(),
@@ -83,7 +85,7 @@ function createMockRepo(): Mocked<IVcsRepository> {
   return {
     findActiveTicketLinksWithPrs: vi.fn().mockResolvedValue([]),
     findTicketLinkForConnectionPr: vi.fn().mockResolvedValue(null),
-    updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated'),
+    updateTicketLinkWithPrState: vi.fn().mockResolvedValue({ result: 'updated', previousState: null }),
     applyMergedPrTransition: vi.fn().mockResolvedValue(undefined),
     findTicketWithProject: vi.fn().mockResolvedValue(null),
     findProjectById: vi.fn().mockResolvedValue(null),
@@ -105,6 +107,7 @@ function createMockRepo(): Mocked<IVcsRepository> {
 describe('VcsPrSyncService', () => {
   let service: VcsPrSyncService;
   let mockRepo: Mocked<IVcsRepository>;
+  let mockAuditRecorder: { audited: Mock; record: Mock };
   let mockProvider: {
     getPullRequestStatus: Mock;
     listPrCommits: Mock;
@@ -119,6 +122,17 @@ describe('VcsPrSyncService', () => {
 
   beforeEach(async () => {
     mockRepo = createMockRepo();
+    mockAuditRecorder = {
+      audited: vi.fn(async (fn: () => Promise<unknown>, entriesOf: (result: unknown) => unknown) => {
+        const result = await fn();
+        const entries = entriesOf(result);
+        for (const entry of Array.isArray(entries) ? entries : entries ? [entries] : []) {
+          mockAuditRecorder.record(entry);
+        }
+        return result;
+      }),
+      record: vi.fn(),
+    };
 
     mockProvider = {
       getPullRequestStatus: vi.fn().mockResolvedValue(makePrStatus()),
@@ -134,6 +148,7 @@ describe('VcsPrSyncService', () => {
       providers: [
         VcsPrSyncService,
         { provide: VCS_REPOSITORY, useValue: mockRepo },
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
       ],
     }).compile();
 
@@ -148,7 +163,7 @@ describe('VcsPrSyncService', () => {
     it('should return updated=0 and skipped=0 when there are no active PR ticket links', async () => {
       mockRepo.findActiveTicketLinksWithPrs.mockResolvedValue([]);
 
-      const result = await service.syncPrStatus(project, connection, encryptionKey);
+      const result = await service.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
 
       expect(result.updated).toBe(0);
       expect(result.skipped).toBe(0);
@@ -159,11 +174,25 @@ describe('VcsPrSyncService', () => {
       mockRepo.findActiveTicketLinksWithPrs.mockResolvedValue([link]);
       mockProvider.getPullRequestStatus.mockResolvedValue(makePrStatus({ state: 'closed', merged: false }));
 
-      const result = await service.syncPrStatus(project, connection, encryptionKey);
+      const result = await service.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
 
       expect(mockRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith(link.id, 'closed');
       expect(result.updated).toBe(1);
       expect(result.skipped).toBe(0);
+    });
+
+    it('AC-19: records no audit entry when the PR-state write returns already-merged', async () => {
+      const link = makeTicketLink({ prState: 'open' });
+      mockRepo.findActiveTicketLinksWithPrs.mockResolvedValue([link]);
+      mockProvider.getPullRequestStatus.mockResolvedValue(makePrStatus({ state: 'closed', merged: false }));
+      mockRepo.updateTicketLinkWithPrState.mockResolvedValueOnce({ result: 'already-merged', previousState: 'merged' });
+
+      const result = await service.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
+
+      expect(result).toEqual({ updated: 0, skipped: 0 });
+      expect(mockRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith(link.id, 'closed');
+      expect(mockAuditRecorder.audited).toHaveBeenCalledTimes(1);
+      expect(mockAuditRecorder.record).not.toHaveBeenCalled();
     });
 
     it('should not update prState when it has not changed', async () => {
@@ -171,7 +200,7 @@ describe('VcsPrSyncService', () => {
       mockRepo.findActiveTicketLinksWithPrs.mockResolvedValue([link]);
       mockProvider.getPullRequestStatus.mockResolvedValue(makePrStatus({ state: 'open', merged: false }));
 
-      const result = await service.syncPrStatus(project, connection, encryptionKey);
+      const result = await service.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
 
       expect(mockRepo.updateTicketLinkWithPrState).not.toHaveBeenCalled();
       expect(result.updated).toBe(0);
@@ -182,7 +211,7 @@ describe('VcsPrSyncService', () => {
       mockRepo.findActiveTicketLinksWithPrs.mockResolvedValue([link]);
       mockProvider.getPullRequestStatus.mockRejectedValue(new NotFoundAppException({}, 'vcs'));
 
-      const result = await service.syncPrStatus(project, connection, encryptionKey);
+      const result = await service.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
 
       expect(mockRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith(link.id, 'closed');
       expect(result.updated).toBe(1);
@@ -193,7 +222,7 @@ describe('VcsPrSyncService', () => {
       mockRepo.findActiveTicketLinksWithPrs.mockResolvedValue([link]);
       mockProvider.getPullRequestStatus.mockRejectedValue(new Error('API rate limit'));
 
-      const result = await service.syncPrStatus(project, connection, encryptionKey);
+      const result = await service.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
 
       expect(mockRepo.updateTicketLinkWithPrState).not.toHaveBeenCalled();
       expect(result.skipped).toBe(1);
@@ -216,7 +245,7 @@ describe('VcsPrSyncService', () => {
         makePrStatus({ merged: true, mergedBy: 'alice', mergeSha: 'sha123' }),
       );
 
-      await service.syncPrStatus(project, connection, encryptionKey);
+      await service.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
 
       expect(mockRepo.applyMergedPrTransition).toHaveBeenCalledWith(
         expect.objectContaining({ ticketId: 'ticket-1' }),
@@ -239,7 +268,7 @@ describe('VcsPrSyncService', () => {
       mockProvider.getPullRequestStatus.mockResolvedValue(makePrStatus({ merged: true }));
       mockRepo.applyMergedPrTransition.mockRejectedValue(new Error('DB error'));
 
-      const result = await service.syncPrStatus(project, connection, encryptionKey);
+      const result = await service.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
 
       expect(mockRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith(link.id, 'merged');
       expect(result.updated).toBe(1);
@@ -252,7 +281,7 @@ describe('VcsPrSyncService', () => {
         makePrStatus({ state: 'open', draft: true, merged: false }),
       );
 
-      await service.syncPrStatus(project, connection, encryptionKey);
+      await service.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
 
       expect(mockRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith(link.id, 'draft');
     });
@@ -265,7 +294,7 @@ describe('VcsPrSyncService', () => {
         .mockRejectedValueOnce(new Error('API error for PR 7'))
         .mockResolvedValueOnce(makePrStatus({ number: 8, state: 'closed' }));
 
-      const result = await service.syncPrStatus(project, connection, encryptionKey);
+      const result = await service.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
 
       expect(result.skipped).toBe(1);
       expect(result.updated).toBe(1);
@@ -338,7 +367,7 @@ describe('VcsPrSyncService', () => {
     });
 
     it.each(['already-merged', 'not-found'] as const)('does not transition when the write returned %s', async (outcome) => {
-      mockRepo.updateTicketLinkWithPrState.mockResolvedValueOnce(outcome);
+      mockRepo.updateTicketLinkWithPrState.mockResolvedValueOnce({ result: outcome, previousState: null });
       await expect(service.applyMergedPr(makeTicketLink(), merged)).resolves.toBe(outcome);
       expect(mockRepo.applyMergedPrTransition).not.toHaveBeenCalled();
     });
@@ -347,6 +376,27 @@ describe('VcsPrSyncService', () => {
       const link = makeTicketLink({ ticket: { id: 'ticket-1', status: 'CREATED', projectId: 'proj-1', number: 42, externalVcsId: null } });
       await expect(service.applyMergedPr(link, merged)).resolves.toBe('updated');
       expect(mockRepo.applyMergedPrTransition).not.toHaveBeenCalled();
+    });
+
+    it('AC-22: both audited calls run as SYSTEM/vcs, whoever the merge was seen by', async () => {
+      const captured: unknown[] = [];
+      mockAuditRecorder.audited.mockImplementation(async (
+        fn: () => Promise<unknown>,
+        entriesOf: (result: unknown) => unknown,
+      ) => {
+        captured.push(currentContext()?.actor);
+        const result = await fn();
+        const entries = entriesOf(result);
+        for (const entry of Array.isArray(entries) ? entries : entries ? [entries] : []) mockAuditRecorder.record(entry);
+        return result;
+      });
+
+      await runWithActor({ type: 'USER', id: 'u-1' }, async () => {
+        await service.applyMergedPr(makeTicketLink(), merged);
+      });
+
+      expect(captured).toEqual([{ type: 'SYSTEM', id: 'vcs' }, { type: 'SYSTEM', id: 'vcs' }]);
+      expect(mockAuditRecorder.audited).toHaveBeenCalledTimes(2);
     });
   });
 });

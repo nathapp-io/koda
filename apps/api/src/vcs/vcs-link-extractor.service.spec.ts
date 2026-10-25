@@ -2,6 +2,8 @@ import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { PrismaVcsRepository } from './prisma-vcs.repository';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import type { VcsConnectionDomain, VcsTicketDomain } from './domain/vcs.domain';
 
 vi.mock('./factory', () => ({
@@ -74,7 +76,9 @@ describe('VcsLinkExtractorService', () => {
   const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
   beforeEach(async () => {
-    mockVcsRepo = { upsertTicketLink: vi.fn().mockResolvedValue(undefined) };
+    mockVcsRepo = { upsertTicketLink: vi.fn().mockResolvedValue('link-1') };
+    vi.mocked(mockAuditRecorder.record).mockReset();
+    vi.mocked(mockAuditRecorder.audited).mockReset().mockImplementation(<T>(fn: () => Promise<T>) => fn());
 
     mockProvider = {
       getPullRequestStatus: vi.fn().mockResolvedValue({
@@ -102,6 +106,7 @@ describe('VcsLinkExtractorService', () => {
       providers: [
         VcsLinkExtractorService,
         { provide: PrismaVcsRepository, useValue: mockVcsRepo },
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
       ],
     }).compile();
 
@@ -196,6 +201,89 @@ describe('VcsLinkExtractorService', () => {
 
       // Only the branch link
       expect(mockVcsRepo.upsertTicketLink).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * Permissions P2 US-005: a created link is audited under `ticket.link.add`; the update branch of
+   * `upsertTicketLink` (which now answers `null`) is bookkeeping and records nothing. The recorder here
+   * runs `entriesOf`, so "record was not called" means the extractor described no entry for the result.
+   */
+  describe('audit entries (Permissions P2 US-005)', () => {
+    const ticket = makeTicket({ number: 42 });
+
+    function recordingRecorder() {
+      const record = vi.fn(async (_entry: unknown) => undefined);
+      const audited = vi.fn(async (
+        fn: () => Promise<unknown>,
+        entriesOf: (result: unknown) => unknown,
+      ): Promise<unknown> => {
+        const result = await fn();
+        const entries = entriesOf(result);
+        for (const entry of Array.isArray(entries) ? entries : [entries]) await record(entry);
+        return result;
+      });
+      return { record, audited };
+    }
+
+    const extractorWith = (repo: { upsertTicketLink: Mock }, recorder: object) =>
+      new VcsLinkExtractorService(repo as unknown as PrismaVcsRepository, recorder as never);
+
+    it('AC-17: records nothing when upsertTicketLink resolved null (the link already existed)', async () => {
+      const repo = { upsertTicketLink: vi.fn().mockResolvedValue(null) };
+      const recorder = recordingRecorder();
+
+      await extractorWith(repo, recorder).extractLinksFromPr(
+        project, ticket, connection, encryptionKey, 'feature/branch', 5,
+      );
+
+      expect(repo.upsertTicketLink).toHaveBeenCalledTimes(1);
+      expect(recorder.audited).toHaveBeenCalledTimes(1);
+      expect(recorder.record).not.toHaveBeenCalled();
+    });
+
+    it('records ticket.link.add for a created branch link, with the project and the ticket ref', async () => {
+      const repo = { upsertTicketLink: vi.fn().mockResolvedValue('link-branch') };
+      const recorder = recordingRecorder();
+
+      await extractorWith(repo, recorder).extractLinksFromPr(
+        project, ticket, connection, encryptionKey, 'feature/branch', 5,
+      );
+
+      expect(recorder.record.mock.calls).toEqual([[{
+        key: 'ticket.link.add', resourceType: 'ticket-link', resourceId: 'link-branch',
+        projectId: 'proj-1', summary: 'on TEST-42',
+      }]]);
+    });
+
+    it('records one entry per created link and skips a commit link that already existed', async () => {
+      const repo = {
+        upsertTicketLink: vi.fn().mockResolvedValueOnce('link-branch').mockResolvedValueOnce(null),
+      };
+      const recorder = recordingRecorder();
+      mockProvider.listPrCommits.mockResolvedValue([makeCommit('abc123', 'TEST-42 fix')]);
+      (containsTicketRef as Mock).mockReturnValue(true);
+
+      await extractorWith(repo, recorder).extractLinksFromPr(
+        project, ticket, connection, encryptionKey, 'feature/branch', 5,
+      );
+
+      expect(repo.upsertTicketLink).toHaveBeenCalledTimes(2);
+      expect(recorder.record.mock.calls).toEqual([[{
+        key: 'ticket.link.add', resourceType: 'ticket-link', resourceId: 'link-branch',
+        projectId: 'proj-1', summary: 'on TEST-42',
+      }]]);
+    });
+
+    it('runs every upsert inside audited, which the injected recorder receives', async () => {
+      mockProvider.listPrCommits.mockResolvedValue([makeCommit('abc123', 'TEST-42 fix')]);
+      (containsTicketRef as Mock).mockReturnValue(true);
+
+      await service.extractLinksFromPr(project, ticket, connection, encryptionKey, 'feature/branch', 5);
+
+      expect(vi.mocked(mockAuditRecorder.audited)).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(mockAuditRecorder.audited).mock.calls[0][0]).toBeInstanceOf(Function);
+      expect(vi.mocked(mockAuditRecorder.audited).mock.calls[0][1]).toBeInstanceOf(Function);
     });
   });
 });

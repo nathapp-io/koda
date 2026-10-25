@@ -18,6 +18,8 @@ import { VcsSyncService, SyncIssueResult } from '../../../src/vcs/vcs-sync.servi
 import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 import { VcsIssue } from '../../../src/vcs/types';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 
 describe('VcsSyncService.syncIssue', () => {
   let service: VcsSyncService;
@@ -68,6 +70,7 @@ describe('VcsSyncService.syncIssue', () => {
             applyMergedPrTransition: vi.fn(),
           },
         },
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
       ],
     }).compile();
 
@@ -88,9 +91,9 @@ describe('VcsSyncService.syncIssue', () => {
         title: mockVcsIssue.title,
       });
 
-      const result = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef);
+      const result = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef, 'vcs.sync.issue');
 
-      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue, 'owner/repo#42');
+      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue, 'owner/repo#42', expect.any(Function));
       expect(result.action).toBe('created');
     });
 
@@ -105,10 +108,10 @@ describe('VcsSyncService.syncIssue', () => {
           title: mockVcsIssue.title,
         });
 
-        const result = await service.syncIssue(mockProject as any, mockVcsIssue, source, repoRef);
+        const result = await service.syncIssue(mockProject as any, mockVcsIssue, source, repoRef, 'vcs.sync.issue');
 
         expect(result.action).toBe('created');
-        expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue, 'owner/repo#42');
+        expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue, 'owner/repo#42', expect.any(Function));
       }
     });
   });
@@ -125,7 +128,7 @@ describe('VcsSyncService.syncIssue', () => {
         title: mockVcsIssue.title,
       });
 
-      const result: SyncIssueResult = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef);
+      const result: SyncIssueResult = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef, 'vcs.sync.issue');
 
       expect(result).toEqual({
         action: 'created',
@@ -148,7 +151,7 @@ describe('VcsSyncService.syncIssue', () => {
         title: mockVcsIssue.title,
       });
 
-      const result: SyncIssueResult = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef);
+      const result: SyncIssueResult = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef, 'vcs.sync.issue');
 
       expect(result.ticketNumber).toBe(ticketNumber);
     });
@@ -175,7 +178,7 @@ describe('VcsSyncService.syncIssue', () => {
 
       vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(existingTicket);
 
-      const result: SyncIssueResult = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef);
+      const result: SyncIssueResult = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef, 'vcs.sync.issue');
 
       expect(result).toEqual({
         action: 'skipped',
@@ -193,7 +196,7 @@ describe('VcsSyncService.syncIssue', () => {
         title: mockVcsIssue.title,
       });
 
-      await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef);
+      await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef, 'vcs.sync.issue');
 
       expect(vcsRepo.findExistingTicketByExternalId).toHaveBeenCalledWith(projectId, 'owner/repo#42');
     });
@@ -207,7 +210,7 @@ describe('VcsSyncService.syncIssue', () => {
         title: mockVcsIssue.title,
       });
 
-      const result: SyncIssueResult = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef);
+      const result: SyncIssueResult = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef, 'vcs.sync.issue');
 
       // Should create (not skip) because existing ticket is in different project
       expect(result.action).toBe('created');
@@ -233,7 +236,7 @@ describe('VcsSyncService.syncIssue', () => {
 
       vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(softDeletedTicket);
 
-      const result: SyncIssueResult = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef);
+      const result: SyncIssueResult = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef, 'vcs.sync.issue');
 
       expect(result.action).toBe('skipped');
     });
@@ -248,9 +251,9 @@ describe('VcsSyncService.syncIssue', () => {
         title: mockVcsIssue.title,
       });
 
-      await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef);
+      await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef, 'vcs.sync.issue');
 
-      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue, 'owner/repo#42');
+      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue, 'owner/repo#42', expect.any(Function));
     });
 
     it('should handle null issue.body (passed through to repository)', async () => {
@@ -266,10 +269,10 @@ describe('VcsSyncService.syncIssue', () => {
         title: issueWithoutDescription.title,
       });
 
-      const result = await service.syncIssue(mockProject as any, issueWithoutDescription, 'manual', repoRef);
+      const result = await service.syncIssue(mockProject as any, issueWithoutDescription, 'manual', repoRef, 'vcs.sync.issue');
 
       expect(result.action).toBe('created');
-      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, issueWithoutDescription, 'owner/repo#42');
+      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, issueWithoutDescription, 'owner/repo#42', expect.any(Function));
     });
   });
 
@@ -282,9 +285,9 @@ describe('VcsSyncService.syncIssue', () => {
         title: mockVcsIssue.title,
       });
 
-      const result = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef);
+      const result = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef, 'vcs.sync.issue');
 
-      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue, 'owner/repo#42');
+      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue, 'owner/repo#42', expect.any(Function));
       expect(result.ticketNumber).toBe(6);
     });
 
@@ -296,7 +299,7 @@ describe('VcsSyncService.syncIssue', () => {
         title: mockVcsIssue.title,
       });
 
-      const result = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef);
+      const result = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef, 'vcs.sync.issue');
 
       expect(result.ticketNumber).toBe(1);
     });
@@ -305,7 +308,7 @@ describe('VcsSyncService.syncIssue', () => {
       vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(null);
       vcsRepo.createTicketFromIssue.mockRejectedValueOnce(new Error('Transaction failed'));
 
-      await expect(service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef)).rejects.toThrow(
+      await expect(service.syncIssue(mockProject as any, mockVcsIssue, 'manual', repoRef, 'vcs.sync.issue')).rejects.toThrow(
         'Transaction failed',
       );
     });
@@ -330,7 +333,7 @@ describe('VcsSyncService.syncIssue', () => {
           title: issue.title,
         });
 
-        await service.syncIssue(mockProject as any, issue, 'manual', repoRef);
+        await service.syncIssue(mockProject as any, issue, 'manual', repoRef, 'vcs.sync.issue');
 
         expect(vcsRepo.findExistingTicketByExternalId).toHaveBeenCalledWith(
           projectId,
@@ -361,7 +364,7 @@ describe('VcsSyncService.syncIssue', () => {
           title,
         });
 
-        const result = await service.syncIssue(mockProject as any, issue, 'manual', repoRef);
+        const result = await service.syncIssue(mockProject as any, issue, 'manual', repoRef, 'vcs.sync.issue');
 
         expect(result.ticketTitle).toBe(title);
       }

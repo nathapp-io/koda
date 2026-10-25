@@ -56,7 +56,7 @@ function createMockRepo(): Mocked<IVcsRepository> {
     createTicketFromIssue: vi.fn(),
     findActiveTicketLinksWithPrs: vi.fn().mockResolvedValue([]),
     findTicketLinkForConnectionPr: vi.fn().mockResolvedValue(null),
-    updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated'),
+    updateTicketLinkWithPrState: vi.fn().mockResolvedValue({ result: 'updated', previousState: null }),
     applyMergedPrTransition: vi.fn().mockResolvedValue(undefined),
     findTicketWithProject: vi.fn().mockResolvedValue(null),
     findPendingOutboxEvents: vi.fn().mockResolvedValue([]),

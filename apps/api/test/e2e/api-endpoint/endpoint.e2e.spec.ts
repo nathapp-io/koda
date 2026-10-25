@@ -2484,6 +2484,31 @@ describeIntegration('API Integration Tests', () => {
       expect(data.message).toBeTruthy();
     });
 
+    it('POST /api/projects/:slug/ci-webhook — accepts pipeline_succeeded and creates no ticket (P2 US-006)', async () => {
+      const prisma = fixtureDb(app);
+      const project = await prisma.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const ticketsBefore = await prisma.ticket.count({ where: { projectId: project.id } });
+      const payload = {
+        event: 'pipeline_succeeded',
+        pipeline: { id: '12349', url: 'https://github.com/org/repo/actions/runs/12349' },
+        commit: { sha: 'abc123def460', message: 'feat: green build' },
+        failures: [],
+      };
+      const signature = `sha256=${createHmac('sha256', ciWebhookSecret).update(JSON.stringify(payload)).digest('hex')}`;
+
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/ci-webhook`)
+        .set('x-ci-signature', signature)
+        .set('x-ci-delivery', 'e2e-ci-delivery-succeeded')
+        .send(payload)
+        .expect(200);
+
+      const responseBody = body<{ success: boolean; message: string }>(res);
+      expect(responseBody.success).toBe(true);
+      expect(responseBody.message).toContain('ignored');
+      expect(await prisma.ticket.count({ where: { projectId: project.id } })).toBe(ticketsBefore);
+    });
+
     it('POST /api/projects/:slug/ci-webhook — rejects a replayed delivery with 409 (SEC-1)', async () => {
       const payload = {
         event: 'pipeline_failed',

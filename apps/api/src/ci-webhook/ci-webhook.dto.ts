@@ -45,7 +45,7 @@ export class CiFailureDto {
 export class CiWebhookPayloadDto {
   @ApiProperty({ description: 'CI event type', example: 'pipeline_failed' })
   @IsString()
-  @IsIn(['pipeline_failed', 'pipeline_success'])
+  @IsIn(['pipeline_failed', 'pipeline_success', 'pipeline_succeeded'])
   event!: string;
 
   @ApiProperty({ description: 'Pipeline information', type: CiPipelineDto })

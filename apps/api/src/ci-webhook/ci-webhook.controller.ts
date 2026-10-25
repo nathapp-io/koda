@@ -5,6 +5,7 @@ import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
 import { CiWebhookService } from './ci-webhook.service';
 import { CiWebhookPayloadDto, CiWebhookResponseDto } from './ci-webhook.dto';
 import { WebhookReplayGuard } from '../webhook-security/webhook-replay.guard';
+import { runAsSystem } from '../action-context/action-context';
 import { Requires } from '../permissions/requires.decorator';
 import { RequiresGuard } from '../permissions/requires.guard';
 import {
@@ -51,14 +52,20 @@ export class CiWebhookController {
     const payload = await parseInboundPayload(CiWebhookPayloadDto, request.body);
 
     // SEC-1: reject replayed deliveries; forget on failure so the sender's
-    // retry with the same delivery id is accepted.
-    await this.replayGuard.assertFresh({ projectId: target.projectId, source: 'ci', deliveryId, dateHeader });
+    // retry with the same delivery id is accepted. Both rows are the CI
+    // component's own bookkeeping, so they are written as SYSTEM/ci rather
+    // than as the public route's SYSTEM/anonymous (Permissions P2 US-006).
+    await runAsSystem('ci', async () => {
+      await this.replayGuard.assertFresh({ projectId: target.projectId, source: 'ci', deliveryId, dateHeader });
+    });
 
     try {
       const result = await this.ciWebhookService.processCiWebhook(slug, payload);
       return JsonResponse.Ok(result);
     } catch (err) {
-      await this.replayGuard.forget({ projectId: target.projectId, source: 'ci', deliveryId });
+      await runAsSystem('ci', async () => {
+        await this.replayGuard.forget({ projectId: target.projectId, source: 'ci', deliveryId });
+      });
       throw err;
     }
   }

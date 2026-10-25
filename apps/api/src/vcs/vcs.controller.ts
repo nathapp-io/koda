@@ -201,6 +201,7 @@ export class VcsController {
    */
   @Post('/sync/:issueNumber')
   @Requires('vcs.sync.issue')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Manually sync a specific issue by number' })
   @ApiResponse({ status: 200, description: 'Issue synced successfully', type: SyncResultDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -231,7 +232,7 @@ export class VcsController {
     const issue = await provider.fetchIssue(parseInt(issueNumber, 10));
 
     // Sync the issue (regardless of allowedAuthors per AC)
-    const result = await this.syncService.syncIssue(project, issue, 'manual', connection);
+    const result = await this.syncService.syncIssue(project, issue, 'manual', connection, 'vcs.sync.issue');
 
     // Return HTTP 409 if issue is already synced
     if (result.action === 'skipped') {
@@ -262,6 +263,7 @@ export class VcsController {
    */
   @Post('/sync')
   @Requires('vcs.sync.all')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Trigger a full sync of all issues from the VCS provider' })
   @ApiResponse({ status: 200, description: 'Full sync completed', type: SyncResultDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -302,6 +304,7 @@ export class VcsController {
    */
   @Post('/sync-pr')
   @Requires('vcs.sync.pr')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Manually sync PR status for all active pull requests' })
   @ApiResponse({ status: 200, description: 'PR sync completed', type: Object })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -323,7 +326,7 @@ export class VcsController {
     const connection = await this.vcsService.getFullByProject(project.id);
 
     // Run PR sync
-    const result = await this.prSyncService.syncPrStatus(project, connection, encryptionKey);
+    const result = await this.prSyncService.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
 
     return JsonResponse.Ok({ updated: result.updated });
   }

@@ -163,7 +163,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
       let issuesSkipped = 0;
 
       for (const issue of filteredIssues) {
-        const result = await this.syncService.syncIssue(connection.project, issue, 'polling', connection);
+        const result = await this.syncService.syncIssue(connection.project, issue, 'polling', connection, 'system.vcs.poll-issues');
         if (result.action === 'created') {
           issuesSynced++;
         } else {
@@ -197,6 +197,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
         connection.project,
         connection,
         encryptionKey,
+        'system.vcs.poll-issues',
       );
       this.logger.debug(
         `PR sync complete for connection ${connection.id}: updated=${prResult.updated}, skipped=${prResult.skipped}`,

@@ -31,7 +31,7 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
     github = { mintInstallationToken: vi.fn().mockResolvedValue({ token: 'ghs', expiresAt: new Date() }), getPullRequest: vi.fn().mockResolvedValue(pr()) };
     gitlab = { getMergeRequest: vi.fn().mockResolvedValue(pr()) };
     gitlabTokens = { resolve: vi.fn().mockResolvedValue('glpat') };
-    vcsRepo = { updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated') };
+    vcsRepo = { updateTicketLinkWithPrState: vi.fn().mockResolvedValue({ result: 'updated', previousState: null }) };
     prSync = { applyMergedPr: vi.fn().mockResolvedValue('updated') };
     events = { emit: vi.fn() };
     refresher = new FleetPrStateRefresher(
@@ -180,7 +180,7 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
     github.getPullRequest.mockResolvedValue(null);
     vcsRepo.updateTicketLinkWithPrState.mockImplementationOnce(async () => {
       seen.push(currentContext());
-      return 'updated';
+      return { result: 'updated', previousState: null };
     });
     const on = new FleetPrStateRefresher(
       repo as never, github as never, gitlab as never, gitlabTokens as never, vcsRepo as never, prSync as never,

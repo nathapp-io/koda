@@ -1,3 +1,4 @@
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Mock } from 'vitest';
 /**
  * M12: a late pull_request delivery (fresh delivery id, so replay protection
@@ -75,6 +76,7 @@ describe('VcsWebhookService — merged is terminal (M12)', () => {
       {} as VcsSyncService,
       prSync as unknown as VcsPrSyncService,
       { encryptionKey: undefined, defaultPollingIntervalMs: 600000, githubApiUrl: 'https://api.github.com' } as IVcsConfig,
+      { audited: async (fn: () => Promise<unknown>, entriesOf: (result: unknown) => unknown) => { const result = await fn(); entriesOf(result); return result; }, record: vi.fn() } as unknown as AuditRecorder,
     );
   });
 
@@ -88,7 +90,7 @@ describe('VcsWebhookService — merged is terminal (M12)', () => {
     ['converted_to_draft', { draft: true }, 'draft'],
   ])('a late %s delivery on a merged link is ignored', async (action, pr, attempted) => {
     repo.findTicketLinkForConnectionPr.mockResolvedValue(link('merged'));
-    repo.updateTicketLinkWithPrState.mockResolvedValue('already-merged');
+    repo.updateTicketLinkWithPrState.mockResolvedValue({ result: 'already-merged', previousState: 'merged' });
 
     const result = await service.handleWebhook(connection, 'pull_request', payload(action, pr));
 
@@ -98,7 +100,7 @@ describe('VcsWebhookService — merged is terminal (M12)', () => {
 
   it('reports a vanished link as missing, not as already merged', async () => {
     repo.findTicketLinkForConnectionPr.mockResolvedValue(link('open'));
-    repo.updateTicketLinkWithPrState.mockResolvedValue('not-found');
+    repo.updateTicketLinkWithPrState.mockResolvedValue({ result: 'not-found', previousState: null });
 
     const result = await service.handleWebhook(connection, 'pull_request', payload('closed', { state: 'closed' }));
 

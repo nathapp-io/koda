@@ -94,6 +94,24 @@ describe('ciWebhookCommand', () => {
       expect(mockTrigger).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ event: 'pipeline_success' })}));
     });
 
+    /** Review M1: the API accepts `pipeline_succeeded` too, so the help and the payload must know it. */
+    it('documents and forwards pipeline_succeeded', async () => {
+      mockTrigger.mockResolvedValue({ ret: 0, data: {} });
+      const trigger = program.commands.find((c) => c.name() === 'ci-webhook')?.commands.find((c) => c.name() === 'trigger');
+
+      expect(trigger?.options.find((o) => o.long === '--event')?.description)
+        .toContain('pipeline_failed | pipeline_success | pipeline_succeeded');
+
+      await program.parseAsync([
+        'node', 'koda', 'ci-webhook', 'trigger',
+        '--event', 'pipeline_succeeded',
+        '--pipeline-id', 'pipe-3',
+        '--commit-sha', 'aaa111',
+      ]);
+
+      expect(mockTrigger).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ event: 'pipeline_succeeded' })}));
+    });
+
     it('passes optional commit message', async () => {
       mockTrigger.mockResolvedValue({ ret: 0, data: {} });
 

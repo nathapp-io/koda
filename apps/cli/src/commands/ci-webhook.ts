@@ -4,6 +4,9 @@ import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
 
+/** The events the API's CI webhook accepts (`apps/api/src/ci-webhook/ci-webhook.dto.ts`). */
+type CiEvent = 'pipeline_failed' | 'pipeline_success' | 'pipeline_succeeded';
+
 export function ciWebhookCommand(program: Command): void {
   const ciWebhook = program.command('ci-webhook');
   ciWebhook.description('Inbound CI event integration');
@@ -12,7 +15,7 @@ export function ciWebhookCommand(program: Command): void {
     .command('trigger')
     .description('Send a CI event payload to the Koda CI webhook endpoint')
     .option('--project <slug>', 'Project slug')
-    .requiredOption('--event <type>', 'CI event type: pipeline_failed | pipeline_success')
+    .requiredOption('--event <type>', 'CI event type: pipeline_failed | pipeline_success | pipeline_succeeded')
     .requiredOption('--pipeline-id <id>', 'Pipeline identifier')
     .option('--pipeline-url <url>', 'URL of the pipeline run')
     .requiredOption('--commit-sha <sha>', 'Commit SHA')
@@ -43,7 +46,7 @@ export function ciWebhookCommand(program: Command): void {
             date: new Date().toUTCString(),
           },
           body: {
-            event: options.event as 'pipeline_failed' | 'pipeline_success',
+            event: options.event as CiEvent,
             pipeline: { id: options.pipelineId, url: options.pipelineUrl },
             commit: { sha: options.commitSha, message: options.commitMessage },
             failures,

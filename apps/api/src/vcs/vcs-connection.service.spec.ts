@@ -7,6 +7,8 @@ import { VcsConnectionService } from './vcs-connection.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VcsPollingService } from './vcs-polling.service';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 
 // TDD type-level compile test: VcsConnectionDomain has no @prisma/client dependency
 it('findVcsConnection result has no @prisma/client type — plain object shape', () => {
@@ -70,7 +72,7 @@ function createMockRepo(): Mocked<IVcsRepository> {
     createTicketFromIssue: vi.fn(),
     findActiveTicketLinksWithPrs: vi.fn().mockResolvedValue([]),
     findTicketLinkForConnectionPr: vi.fn().mockResolvedValue(null),
-    updateTicketLinkWithPrState: vi.fn().mockResolvedValue('updated'),
+    updateTicketLinkWithPrState: vi.fn().mockResolvedValue({ result: 'updated', previousState: null }),
     applyMergedPrTransition: vi.fn().mockResolvedValue(undefined),
     findTicketWithProject: vi.fn().mockResolvedValue(null),
     findPendingOutboxEvents: vi.fn().mockResolvedValue([]),
@@ -100,6 +102,7 @@ describe('VcsConnectionService', () => {
         { provide: VCS_REPOSITORY, useValue: mockRepo },
         { provide: VcsPollingService, useValue: mockPolling },
         { provide: VCS_CFG, useValue: { encryptionKey: undefined, defaultPollingIntervalMs: 600000, githubApiUrl: 'https://api.github.com' } },
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
       ],
     }).compile();
 
@@ -149,6 +152,18 @@ describe('VcsConnectionService', () => {
       expect(mockPolling.refreshConnectionSchedule).toHaveBeenCalledWith('conn-1');
       expect(result).toBeDefined();
       expect(result.id).toBe('conn-1');
+    });
+
+    it('audits the created connection with a secret-free summary', async () => {
+      mockAuditRecorder.audited = vi.fn(async (fn: () => Promise<unknown>) => fn()) as typeof mockAuditRecorder.audited;
+      mockRepo.createVcsConnection.mockResolvedValue(makeConnection({ syncMode: 'webhook', repoOwner: 'owner', repoName: 'repo' }));
+
+      await service.create('proj-1', ENCRYPTION_KEY, { ...dto, syncMode: 'webhook' } as CreateVcsConnectionDto);
+
+      expect(mockAuditRecorder.audited).toHaveBeenCalledWith(expect.any(Function), expect.any(Function));
+      const entries = (mockAuditRecorder.audited as Mock).mock.calls[0][1](makeConnection({ syncMode: 'webhook' }));
+      expect(entries).toMatchObject({ key: 'vcs.connection.create', resourceType: 'vcs-connection', resourceId: 'conn-1', projectId: 'proj-1', summary: 'github owner/repo, sync webhook' });
+      expect(JSON.stringify(entries)).not.toContain('webhookSecret');
     });
 
     it('should throw NotFoundAppException when project does not exist', async () => {
@@ -274,6 +289,7 @@ describe('VcsConnectionService', () => {
     });
 
     it('should return existing DTO without calling updateVcsConnection when no fields changed', async () => {
+      (mockAuditRecorder.audited as Mock).mockClear();
       const existing = makeConnection();
       mockRepo.findVcsConnectionByProjectId.mockResolvedValue(existing);
 
@@ -281,6 +297,7 @@ describe('VcsConnectionService', () => {
       await service.update('proj-1', ENCRYPTION_KEY, emptyDto);
 
       expect(mockRepo.updateVcsConnection).not.toHaveBeenCalled();
+      expect(mockAuditRecorder.audited).not.toHaveBeenCalled();
     });
 
     it('should throw NotFoundAppException when no connection exists', async () => {

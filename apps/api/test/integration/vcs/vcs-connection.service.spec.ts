@@ -25,6 +25,8 @@ import { VcsConnectionResponseDto } from '../../../src/vcs/dto/vcs-connection-re
 import { encryptToken, decryptToken } from '../../../src/common/utils/encryption.util';
 import * as vcsFactory from '../../../src/vcs/factory';
 import { IVcsProvider } from '../../../src/vcs/vcs-provider';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 
 describe('VcsConnectionService', () => {
   let service: VcsConnectionService;
@@ -85,6 +87,7 @@ describe('VcsConnectionService', () => {
           },
         },
         { provide: VCS_CFG, useValue: mockVcsConfig },
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         {
           provide: VcsPollingService,
           useValue: {

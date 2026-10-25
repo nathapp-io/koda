@@ -149,19 +149,21 @@ export class PrismaFleetTicketsRepository {
 
   /**
    * D455: insert the fleet PR link, or point the existing (ticketId, url) link at this job
-   * (a vcs link keeps source=vcs; plan P4: latest job wins). True only when a row was created.
+   * (a vcs link keeps source=vcs; plan P4: latest job wins). Answers the created row's id, or
+   * `null` when the link already existed (Permissions P2 US-005: only a creation is audited).
    * Never writes prState on an existing row (M12; see vcs/pr-state-write-sites.spec.ts).
    * Call inside txManager.run.
    */
-  async upsertFleetPrLink(input: FleetPrLinkInput): Promise<boolean> {
+  async upsertFleetPrLink(input: FleetPrLinkInput): Promise<string | null> {
     const { ticketId, jobId, url, provider, prNumber, externalRef, now } = input;
-    const { count } = await this.db.ticketLink.createMany({
+    const [created] = await this.db.ticketLink.createManyAndReturn({
       data: [{ ticketId, url, provider, linkType: 'pr', source: TicketLinkSource.FLEET, jobId, prNumber, externalRef, prState: 'open', prUpdatedAt: now }],
       skipDuplicates: true,
+      select: { id: true },
     });
-    if (count === 1) return true;
+    if (created) return created.id;
     await this.db.ticketLink.updateMany({ where: { ticketId, url }, data: { jobId } });
-    return false;
+    return null;
   }
 
   async findJobsForTicket(ticketId: string, limit: number): Promise<TicketJobRow[]> {

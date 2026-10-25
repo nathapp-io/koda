@@ -67,7 +67,8 @@ describeIntegration('PrismaVcsRepository.updateTicketLinkWithPrState (M12)', () 
   it.each(['open', 'draft', 'closed'])('refuses to move a merged link to %s', async (next) => {
     const merged = await makeLink('merged');
 
-    await expect(repo.updateTicketLinkWithPrState(merged.id, next)).resolves.toBe('already-merged');
+    await expect(repo.updateTicketLinkWithPrState(merged.id, next))
+      .resolves.toEqual({ result: 'already-merged', previousState: 'merged' });
 
     const row = await prisma.ticketLink.findUniqueOrThrow({ where: { id: merged.id } });
     expect(row.prState).toBe('merged');
@@ -77,7 +78,8 @@ describeIntegration('PrismaVcsRepository.updateTicketLinkWithPrState (M12)', () 
   it('writes a link whose prState is NULL', async () => {
     const bare = await makeLink(null);
 
-    await expect(repo.updateTicketLinkWithPrState(bare.id, 'open')).resolves.toBe('updated');
+    await expect(repo.updateTicketLinkWithPrState(bare.id, 'open'))
+      .resolves.toEqual({ result: 'updated', previousState: null });
 
     expect((await prisma.ticketLink.findUniqueOrThrow({ where: { id: bare.id } })).prState).toBe('open');
   });
@@ -85,8 +87,10 @@ describeIntegration('PrismaVcsRepository.updateTicketLinkWithPrState (M12)', () 
   it('moves open to merged, then refuses to move it back', async () => {
     const open = await makeLink('open');
 
-    await expect(repo.updateTicketLinkWithPrState(open.id, 'merged')).resolves.toBe('updated');
-    await expect(repo.updateTicketLinkWithPrState(open.id, 'open')).resolves.toBe('already-merged');
+    await expect(repo.updateTicketLinkWithPrState(open.id, 'merged'))
+      .resolves.toEqual({ result: 'updated', previousState: 'open' });
+    await expect(repo.updateTicketLinkWithPrState(open.id, 'open'))
+      .resolves.toEqual({ result: 'already-merged', previousState: 'merged' });
 
     expect((await prisma.ticketLink.findUniqueOrThrow({ where: { id: open.id } })).prState).toBe('merged');
   });
@@ -94,10 +98,12 @@ describeIntegration('PrismaVcsRepository.updateTicketLinkWithPrState (M12)', () 
   it('a closed link can be reopened (closed is not terminal for webhooks)', async () => {
     const closed = await makeLink('closed');
 
-    await expect(repo.updateTicketLinkWithPrState(closed.id, 'open')).resolves.toBe('updated');
+    await expect(repo.updateTicketLinkWithPrState(closed.id, 'open'))
+      .resolves.toEqual({ result: 'updated', previousState: 'closed' });
   });
 
   it('reports a missing link as not-found, never as already merged', async () => {
-    await expect(repo.updateTicketLinkWithPrState('does-not-exist', 'open')).resolves.toBe('not-found');
+    await expect(repo.updateTicketLinkWithPrState('does-not-exist', 'open'))
+      .resolves.toEqual({ result: 'not-found', previousState: null });
   });
 });

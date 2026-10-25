@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { currentContext, runWithActionContext, type ActionContext } from '../action-context/action-context';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import { CiWebhookService } from './ci-webhook.service';
 import { PrismaCiWebhookRepository } from './prisma-ci-webhook.repository';
 import { CiWebhookPayloadDto } from './ci-webhook.dto';
@@ -33,11 +34,18 @@ describe('CiWebhookService', () => {
     createTicket: vi.fn(),
   };
 
+  const mockRecorder = {
+    record: vi.fn(),
+  };
+
   beforeEach(async () => {
+    mockRecorder.record.mockReset().mockResolvedValue(undefined);
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CiWebhookService,
         { provide: PrismaCiWebhookRepository, useValue: mockRepo },
+        { provide: AuditRecorder, useValue: mockRecorder },
       ],
     }).compile();
 
@@ -133,6 +141,7 @@ describe('CiWebhookService', () => {
           priority: 'HIGH',
           status: 'CREATED',
         }),
+        expect.any(Function),
       );
     });
 
@@ -150,6 +159,7 @@ describe('CiWebhookService', () => {
           gitRefFile: 'apps/api/src/auth/auth.service.ts',
           gitRefLine: 87,
         }),
+        expect.any(Function),
       );
     });
 
@@ -194,6 +204,7 @@ describe('CiWebhookService', () => {
         expect.objectContaining({
           title: expect.stringContaining('AuthService.validateToken'),
         }),
+        expect.any(Function),
       );
     });
 
@@ -219,6 +230,7 @@ describe('CiWebhookService', () => {
           gitRefFile: null,
           gitRefLine: null,
         }),
+        expect.any(Function),
       );
     });
 
@@ -254,6 +266,66 @@ describe('CiWebhookService', () => {
 
       expect(seen).toHaveLength(1);
       expect(seen[0]?.actor).toEqual({ type: 'SYSTEM', id: 'ci' });
+    });
+
+    /**
+     * Permissions P2 US-006 AC-14: the repository runs `onCreated` inside the ticket-number attempt's
+     * transaction, so the entry commits or rolls back with the insert. The service supplies the callback
+     * and the summary carries the ticket ref only.
+     */
+    it('AC-14: records one system.ci.ticket-create entry for the created ticket', async () => {
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, key: 'CIK' });
+      mockRepo.createTicket.mockImplementation(
+        async (_projectId: string, _data: unknown, onCreated?: (ticket: { id: string; number: number }) => Promise<void>) => {
+          await onCreated?.({ id: 't-1', number: 4 });
+          return { ...mockTicket, id: 't-1', number: 4 };
+        },
+      );
+
+      const result = await service.processCiWebhook('koda', validPayload);
+
+      expect(result.ticketRef).toBe('CIK-4');
+      expect(mockRecorder.record).toHaveBeenCalledTimes(1);
+      expect(mockRecorder.record).toHaveBeenCalledWith({
+        key: 'system.ci.ticket-create',
+        resourceType: 'ticket',
+        resourceId: 't-1',
+        projectId: 'proj-123',
+        summary: 'created CIK-4',
+      });
+    });
+
+    /** Permissions P2 US-006 AC-15: the callback runs inside `runAsSystemWriter`, so it records as `SYSTEM/ci`. */
+    it('AC-15: the ticket callback records as SYSTEM/ci', async () => {
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, key: 'CIK' });
+      const captured: Array<ActionContext | undefined> = [];
+      mockRecorder.record.mockImplementation(async () => {
+        captured.push(currentContext());
+      });
+      mockRepo.createTicket.mockImplementation(
+        async (_projectId: string, _data: unknown, onCreated?: (ticket: { id: string; number: number }) => Promise<void>) => {
+          await onCreated?.({ id: 't-1', number: 4 });
+          return { ...mockTicket, id: 't-1', number: 4 };
+        },
+      );
+
+      await runWithActionContext(
+        { actor: { type: 'SYSTEM', id: 'anonymous' }, origin: 'rest' },
+        () => service.processCiWebhook('koda', validPayload),
+      );
+
+      expect(captured).toHaveLength(1);
+      expect(captured[0]?.actor).toEqual({ type: 'SYSTEM', id: 'ci' });
+    });
+
+    /** No entry when no ticket is created: an ignored event never reaches the repository. */
+    it('records nothing when the event is not pipeline_failed', async () => {
+      mockRepo.findProjectBySlug.mockResolvedValue(mockProject);
+
+      await service.processCiWebhook('koda', { ...validPayload, event: 'pipeline_success' });
+
+      expect(mockRepo.createTicket).not.toHaveBeenCalled();
+      expect(mockRecorder.record).not.toHaveBeenCalled();
     });
   });
 });

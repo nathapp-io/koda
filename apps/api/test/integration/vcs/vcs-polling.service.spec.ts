@@ -25,6 +25,8 @@ import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { VcsIssue } from '../../../src/vcs/types';
 import { VCS_CFG, IVcsConfig } from '../../../src/config/vcs.config';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 
 describe('VcsPollingService', () => {
   let service: VcsPollingService;
@@ -189,6 +191,7 @@ describe('VcsPollingService', () => {
           provide: ConfigService,
           useValue: { get: vi.fn().mockReturnValue('test-encryption-key') },
         },
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         { provide: VCS_CFG, useValue: mockVcsConfig },
       ],
     }).compile();

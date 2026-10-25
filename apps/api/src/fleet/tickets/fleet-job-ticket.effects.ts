@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { TicketStatus } from '../../common/enums';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { TicketTransitionsService } from '../../tickets/state-machine/ticket-transitions.service';
 import { prNumberFor } from '../sync/pr-attribution.service';
 import type { DispatchTicket, TicketActor } from './fleet-tickets.service';
@@ -30,6 +31,7 @@ export class FleetJobTicketEffects {
     private readonly repo: PrismaFleetTicketsRepository,
     private readonly events: FleetTicketEventRecorder,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /**
@@ -90,14 +92,20 @@ export class FleetJobTicketEffects {
     const url = job.resultPrUrl as string;
     try {
       await this.txManager.run(async () => {
-        const created = await this.repo.upsertFleetPrLink({
+        const linkId = await this.repo.upsertFleetPrLink({
           ticketId: ticket.ticketId, jobId: job.id, url, provider: job.repo.provider, prNumber,
           externalRef: `${job.repo.owner}/${job.repo.name}#${prNumber}`, now: new Date(),
         });
-        if (!created) return;
+        if (linkId === null) return;
         await this.events.record({
           projectId: job.projectId, ticketId: ticket.ticketId, action: 'TICKET_UPDATED', actorId: job.requestedById,
           ...agentTypeOf(job), data: { fleetPrLinked: url, jobId: job.id },
+        });
+        // Permissions P2 US-005: a link the fleet created is a derived write; the update branch
+        // (an existing link gaining the job id) is bookkeeping and records nothing.
+        await this.audit.record({
+          key: 'ticket.link.add', resourceType: 'ticket-link', resourceId: linkId,
+          projectId: job.projectId, summary: `on ${ticket.ref}`,
         });
       });
     } catch (error) {
@@ -113,6 +121,11 @@ export class FleetJobTicketEffects {
         await this.events.record({
           projectId: job.projectId, ticketId: ticket.ticketId, action: 'COMMENT_ADDED', actorId: job.requestedById,
           ...agentTypeOf(job), data: { commentId: comment.id },
+        });
+        // Permissions P2 US-005: the failure comment is a write an outside system caused.
+        await this.audit.record({
+          key: 'comment.create', resourceType: 'comment', resourceId: comment.id,
+          projectId: job.projectId, summary: `on ${ticket.ref}`,
         });
       });
     } catch (error) {

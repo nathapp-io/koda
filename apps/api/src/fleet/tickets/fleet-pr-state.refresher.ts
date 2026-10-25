@@ -5,6 +5,7 @@ import { runAsSystemWriter } from '../../action-context/action-context';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { IVcsRepository, VCS_REPOSITORY } from '../../vcs/domain/vcs.repository';
+import type { PrStateWriteResult } from '../../vcs/domain/vcs.repository';
 import { mapPrState } from '../../vcs/pr-state';
 import type { VcsPrStatus } from '../../vcs/types';
 import { VcsPrSyncService } from '../../vcs/vcs-pr-sync.service';
@@ -139,18 +140,19 @@ export class FleetPrStateRefresher implements OnModuleInit, OnModuleDestroy {
     const next = pr === null ? 'closed' : mapPrState(pr);
     if (next === link.prState) return false;
     const merged = pr !== null && next === 'merged';
-    const outcome = merged
+    const outcome: PrStateWriteResult = merged
       ? await this.prSync.applyMergedPr(link, pr)
-      : await this.audit.audited(
+      : (await this.audit.audited(
         () => this.vcsRepo.updateTicketLinkWithPrState(link.id, next),
-        (result) => result !== 'updated' ? [] : [{
+        // Review B1: the summary names the state the write replaced, read under the row lock.
+        (written) => written.result !== 'updated' || written.previousState === next ? [] : [{
           key: 'system.ticket-link.pr-refresh',
           resourceType: 'ticket-link',
           resourceId: link.id,
           projectId: link.ticket.projectId,
-          summary: `pr ${link.prState ?? 'none'} -> ${next}`,
+          summary: `pr ${written.previousState ?? 'none'} -> ${next}`,
         }],
-      );
+      )).result;
     if (outcome !== 'updated') return false;
     if (merged) this.events.emit(KNOWLEDGE_REPO_MERGED, { repoId: link.repo.id } satisfies KnowledgeRepoMergedEvent);
     return true;

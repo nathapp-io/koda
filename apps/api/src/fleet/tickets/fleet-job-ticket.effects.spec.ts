@@ -1,5 +1,8 @@
 import type { Mock } from 'vitest';
 import { FleetJobTicketEffects } from './fleet-job-ticket.effects';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
+
+const auditRecord = mockAuditRecorder.record as unknown as Mock;
 
 describe('FleetJobTicketEffects.onRunDispatched (C9 §3.1, D452)', () => {
   const principal = { actorType: 'user', id: 'u1', role: 'MEMBER', email: 'u@koda.test' } as never;
@@ -9,8 +12,10 @@ describe('FleetJobTicketEffects.onRunDispatched (C9 §3.1, D452)', () => {
   let effects: FleetJobTicketEffects;
 
   beforeEach(() => {
+    auditRecord.mockReset();
+    auditRecord.mockImplementation(async () => undefined);
     transitions = { startForDispatch: vi.fn().mockResolvedValue({}) };
-    effects = new FleetJobTicketEffects(transitions as never, {} as never, {} as never, {} as never);
+    effects = new FleetJobTicketEffects(transitions as never, {} as never, {} as never, {} as never, mockAuditRecorder);
   });
 
   it('starts CREATED and VERIFIED tickets only, as the requester, through the dispatch-only start', async () => {
@@ -36,16 +41,18 @@ describe('FleetJobTicketEffects.onTerminal (C9 §3.2, D453)', () => {
   let effects: FleetJobTicketEffects;
 
   beforeEach(() => {
+    auditRecord.mockReset();
+    auditRecord.mockImplementation(async () => undefined);
     repo = {
       findJobForEffects: vi.fn(),
       findTicketsForJob: vi.fn().mockResolvedValue([linked('t1'), linked('t2')]),
       claimNotified: vi.fn().mockResolvedValue(true),
       createSystemComment: vi.fn().mockImplementation(async (ticketId: string) => ({ id: `c-${ticketId}` })),
       findJobForPrLinks: vi.fn().mockResolvedValue(null),
-      upsertFleetPrLink: vi.fn().mockResolvedValue(true),
+      upsertFleetPrLink: vi.fn().mockResolvedValue('l-t1'),
     };
     events = { record: vi.fn() };
-    effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never);
+    effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder);
   });
 
   it.each(['FAILED', 'ESCALATED', 'CRASHED'])('comments on every linked ticket for %s and records COMMENT_ADDED', async (state) => {
@@ -60,6 +67,24 @@ describe('FleetJobTicketEffects.onTerminal (C9 §3.2, D453)', () => {
     repo.findJobForEffects.mockResolvedValue(effectJob(state));
     await effects.onTerminal(['j1']);
     expect(repo.createSystemComment).not.toHaveBeenCalled();
+  });
+
+  it('records comment.create for every new comment, under the job project and the ticket ref', async () => {
+    repo.findJobForEffects.mockResolvedValue(effectJob('FAILED'));
+    await effects.onTerminal(['j1']);
+    expect(auditRecord.mock.calls).toEqual([
+      [{ key: 'comment.create', resourceType: 'comment', resourceId: 'c-t1', projectId: 'p', summary: 'on t1' }],
+      [{ key: 'comment.create', resourceType: 'comment', resourceId: 'c-t2', projectId: 'p', summary: 'on t2' }],
+    ]);
+  });
+
+  it('records no comment entry for a ticket whose claim is lost', async () => {
+    repo.findJobForEffects.mockResolvedValue(effectJob('FAILED'));
+    repo.claimNotified.mockResolvedValueOnce(false);
+    await effects.onTerminal(['j1']);
+    expect(auditRecord.mock.calls).toEqual([
+      [{ key: 'comment.create', resourceType: 'comment', resourceId: 'c-t2', projectId: 'p', summary: 'on t2' }],
+    ]);
   });
 
   it('skips a ticket whose claim is lost (already commented this attempt)', async () => {
@@ -93,18 +118,20 @@ describe('FleetJobTicketEffects.upsertPrLinks (C9 §3.3, D455)', () => {
   let effects: FleetJobTicketEffects;
 
   beforeEach(() => {
+    auditRecord.mockReset();
+    auditRecord.mockImplementation(async () => undefined);
     repo = {
       findJobForEffects: vi.fn().mockResolvedValue(null),
       findJobForPrLinks: vi.fn().mockResolvedValue(prJob('https://github.com/acme/app/pull/9')),
       findTicketsForJob: vi.fn().mockResolvedValue([linked('t1'), linked('t2')]),
-      upsertFleetPrLink: vi.fn().mockResolvedValue(true),
+      upsertFleetPrLink: vi.fn().mockResolvedValue('l-t1'),
     };
     events = { record: vi.fn() };
-    effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never);
+    effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder);
   });
 
   it('links the PR on every linked ticket and records TICKET_UPDATED for each created row', async () => {
-    repo.upsertFleetPrLink.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    repo.upsertFleetPrLink.mockResolvedValueOnce('l-t1').mockResolvedValueOnce(null);
     await effects.upsertPrLinks('j1');
     expect(repo.upsertFleetPrLink).toHaveBeenCalledWith({
       ticketId: 't1', jobId: 'j1', url: 'https://github.com/acme/app/pull/9', provider: 'github', prNumber: 9, externalRef: 'acme/app#9', now: expect.any(Date),
@@ -112,6 +139,31 @@ describe('FleetJobTicketEffects.upsertPrLinks (C9 §3.3, D455)', () => {
     expect(events.record.mock.calls).toEqual([[{
       projectId: 'p', ticketId: 't1', action: 'TICKET_UPDATED', actorId: 'u1', data: { fleetPrLinked: 'https://github.com/acme/app/pull/9', jobId: 'j1' },
     }]]);
+  });
+
+  it('records ticket.link.add for a created link, with the job project and the ticket ref', async () => {
+    await effects.upsertPrLinks('j1');
+    expect(auditRecord.mock.calls).toEqual([
+      [{ key: 'ticket.link.add', resourceType: 'ticket-link', resourceId: 'l-t1', projectId: 'p', summary: 'on t1' }],
+      [{ key: 'ticket.link.add', resourceType: 'ticket-link', resourceId: 'l-t1', projectId: 'p', summary: 'on t2' }],
+    ]);
+  });
+
+  it('AC-18: records nothing when upsertFleetPrLink answered null', async () => {
+    // Control first: a created link does record, so the silence below is the null branch and not a path
+    // that never records at all.
+    repo.upsertFleetPrLink.mockResolvedValueOnce('l-t1').mockResolvedValue(null);
+    await effects.upsertPrLinks('j1');
+    expect(auditRecord.mock.calls).toEqual([
+      [{ key: 'ticket.link.add', resourceType: 'ticket-link', resourceId: 'l-t1', projectId: 'p', summary: 'on t1' }],
+    ]);
+
+    // AC-18: both links already existed, so neither upsert answers an id.
+    auditRecord.mockClear();
+    repo.upsertFleetPrLink.mockResolvedValue(null);
+    await effects.upsertPrLinks('j1');
+    expect(repo.upsertFleetPrLink).toHaveBeenCalledTimes(4);
+    expect(auditRecord).not.toHaveBeenCalled();
   });
 
   it('does nothing without a resultPrUrl', async () => {
