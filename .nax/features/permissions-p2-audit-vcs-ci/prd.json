@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-vcs-ci",
   "branchName": "feat/permissions-p2-audit-vcs-ci",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T14:21:24.430Z",
+  "updatedAt": "2026-10-25T14:52:25.627Z",
   "userStories": [
     {
       "id": "US-001",
@@ -477,14 +477,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Created-id return contracts span two repositories and VCS/fleet effects, with async extraction, transactional idempotency and per-ticket failure isolation; authentication, authorization and token handling remain unchanged."
+        "reasoning": "Created-id return contracts span two repositories and VCS/fleet effects, with async extraction, transactional idempotency and per-ticket failure isolation; authentication, authorization and token handling remain unchanged.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/vcs/vcs-link-extractor.service.ts",
@@ -539,7 +542,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "ed21b8cc93248527ec07ec4cb063e24789869856"
     },
     {
       "id": "US-006",
