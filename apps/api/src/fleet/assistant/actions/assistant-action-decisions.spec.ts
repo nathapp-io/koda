@@ -9,6 +9,7 @@
 import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
 import { testFleetConfig } from '../../../common/test-helpers/fleet-config';
+import { mockAuditRecorder } from '../../../common/test-helpers/global-stubs.module';
 import type { PermissionService } from '../../../permissions/permission.service';
 import type { FleetApprovalRecord } from '../../approvals/domain/approval.domain';
 import { AssistantToolExecutor, type ActionOutcome } from '../assistant-tool.executor';
@@ -52,6 +53,9 @@ function build(opts: { stored?: PendingActionRecord | null; threadsEnabled?: boo
   const closer = { recordResolved: vi.fn(async () => [{ id: 'live1' }]) };
   const live = { publish: vi.fn() };
   const threads = { publish: vi.fn() };
+  const auditOrder: string[] = [];
+  const audit = mockAuditRecorder;
+  vi.spyOn(audit, 'record').mockReset().mockImplementation(async () => { auditOrder.push('record'); });
   const tx = { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) };
   const port = { register: vi.fn() };
   const cfg = testFleetConfig({ threadsEnabled: opts.threadsEnabled ?? true });
@@ -59,8 +63,8 @@ function build(opts: { stored?: PendingActionRecord | null; threadsEnabled?: boo
     checkAction: vi.fn(async () => opts.check ?? 'ok'),
     executeAction: vi.fn(async (): Promise<ActionOutcome> => opts.outcome ?? { ok: true, text: 'comment c1 added to KODA-1 /web/tickets/KODA-1' }),
   };
-  const service = new AssistantActionDecisions(tx as never, actions as never, approvals as never, closer as never, live as never, threads as never, cfg as never, port as never, executor as never);
-  return { service, actions, approvals, closer, live, threads, tx, port, order, executor };
+  const service = new AssistantActionDecisions(tx as never, actions as never, approvals as never, closer as never, live as never, threads as never, cfg as never, port as never, executor as never, audit as never);
+  return { service, actions, approvals, closer, live, threads, tx, port, order, executor, audit, auditOrder };
 }
 
 /**
@@ -247,6 +251,29 @@ describe('AssistantActionDecisions expiry on decide (2a-D10)', () => {
 });
 
 describe('AssistantActionDecisions approve (2a-D8 step 8)', () => {
+  it('AC-10: records the approval decision inside settle before executing the action', async () => {
+    const { service, audit, auditOrder, tx, executor } = build();
+    let inTransaction = false;
+    tx.run.mockImplementation(async (fn: () => Promise<unknown>) => {
+      inTransaction = true;
+      try { return await fn(); } finally { inTransaction = false; }
+    });
+    audit.record.mockImplementation(async (input: unknown) => {
+      expect(inTransaction).toBe(true);
+      expect(input).toMatchObject({ key: 'fleet.approval.decide.assistant', resourceType: 'fleet-approval', resourceId: 'ap1', projectId: 'p1', summary: 'decision: approve' });
+      auditOrder.push('record');
+    });
+    executor.executeAction.mockImplementation(async () => {
+      auditOrder.push('execute');
+      return { ok: true, text: 'done' };
+    });
+
+    await service.decide(CALLER, approval(), dto('approve'), NOW);
+
+    expect(audit.record).toHaveBeenCalledTimes(1);
+    expect(auditOrder).toEqual(['record', 'execute']);
+  });
+
   it('AC-14: a forbidden checkAction answers 403 projects and writes nothing', async () => {
     const { service, actions, approvals, tx, executor, threads } = build({ check: 'forbidden' });
 
