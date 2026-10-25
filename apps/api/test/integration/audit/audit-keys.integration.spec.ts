@@ -1,7 +1,11 @@
 import request from 'supertest';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
-import type { PrismaClient } from '../../../src/generated/prisma/client';
+import type { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '../../../src/generated/prisma/client';
+import { createPgAdapter } from '../../../src/prisma/pg-adapter';
+import { PrismaAuditEntryRepository } from '../../../src/audit/prisma-audit-entry.repository';
+import { testDatabaseUrl } from '../../helpers/test-prisma';
 import { runWithActionContext } from '../../../src/action-context/action-context';
 import { AuditRecorder, type AuditRecordInput } from '../../../src/audit/audit-recorder.service';
 import type { AuditEntryDto } from '../../../src/audit/dto/audit-entry.dto';
@@ -75,9 +79,26 @@ describeIntegration('GET /api/audit?correlationId and GET /api/audit/keys (PG, r
 
   it('AC-3: many repeated writes still yield one row per key, aggregated by the database', async () => {
     for (let i = 0; i < 30; i += 1) await record({ key: i % 2 === 0 ? 'ticket.create' : 'comment.create', resourceId: `r-${i}` });
+    expect(await db.auditEntry.count()).toBe(30);
 
-    const rows = await db.auditEntry.count();
-    expect(rows).toBe(30);
+    // A real client on the same database whose query log is captured: the repository must send a
+    // database-side aggregate, never a plain row read that the application deduplicates.
+    const probe = new PrismaClient({ adapter: createPgAdapter(testDatabaseUrl()), log: [{ emit: 'event', level: 'query' }] });
+    const sql: string[] = [];
+    (probe as unknown as { $on: (event: 'query', cb: (e: { query: string }) => void) => void }).$on('query', (e) => sql.push(e.query));
+    try {
+      const repo = new PrismaAuditEntryRepository(
+        app.get<ITransactionManager>(TRANSACTION_MANAGER),
+        { client: probe } as unknown as PrismaService<PrismaClient>,
+      );
+      expect(await repo.findDistinctKeys()).toEqual(['comment.create', 'ticket.create']);
+    } finally {
+      await probe.$disconnect();
+    }
+
+    const selects = sql.filter((q) => /^\s*SELECT/i.test(q));
+    expect(selects).toHaveLength(1);
+    expect(selects[0]).toMatch(/GROUP BY|DISTINCT/i);
     const res = await keys().expect(200);
     expect(data(res)).toEqual({ keys: ['comment.create', 'ticket.create'] });
   });
