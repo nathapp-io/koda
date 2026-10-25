@@ -13909,7 +13909,8 @@
             "type": "string",
             "enum": [
               "pipeline_failed",
-              "pipeline_success"
+              "pipeline_success",
+              "pipeline_succeeded"
             ],
             "description": "CI event type",
             "example": "pipeline_failed"

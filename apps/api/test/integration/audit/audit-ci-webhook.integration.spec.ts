@@ -6,11 +6,10 @@
  * `fixtureDb(app)`. Each assertion reads the stored `AuditEntry` rows, so the spec proves the writer
  * reaches the recorder rather than a stub.
  *
- * Note on the "accepted non-failed event" AC: the payload DTO accepts `pipeline_failed` and
- * `pipeline_success` (`ci-webhook.dto.ts`, and the same enum is in `openapi.json`). The spec's AC4 names
- * `pipeline_succeeded`, which the API rejects as a validation error — this story must not change payload
- * validation or `openapi.json`, so the AC is exercised with the accepted non-failed event, which is the
- * behaviour the AC describes ("a CI event other than pipeline_failed ... no ticket; no entry").
+ * The "accepted non-failed event" AC names `pipeline_succeeded`, which the payload DTO accepts alongside
+ * `pipeline_failed` and `pipeline_success` (`ci-webhook.dto.ts`, mirrored in `openapi.json` and the
+ * generated CLI client). Only `pipeline_failed` creates a ticket, so the other two answer the "ignored"
+ * 200 and record nothing.
  */
 import { createHmac } from 'node:crypto';
 import request from 'supertest';
@@ -167,18 +166,22 @@ describeIntegration('CI webhook ticket audit (real AppModule)', () => {
     expect(await entryCount()).toBe(entriesBefore);
   });
 
-  it('AC-6/AC-7: an accepted non-failed event answers 200 and records no ticket entry', async () => {
+  it('AC-6/AC-7: a signed pipeline_succeeded event answers 200 and records no ticket entry', async () => {
     const entriesBefore = await entryCount();
     const ticketsBefore = await ticketCount();
 
+    // The literal event AC4 names. It is an accepted event that only pipeline_failed creates a ticket
+    // for, so the response is the "ignored" 200 with no entry for it.
     const response = await deliver({
-      event: 'pipeline_success',
+      event: 'pipeline_succeeded',
       pipeline: { id: 'pl-1003', url: 'https://ci.example.test/pl-1003' },
       commit,
       failures: [],
     }).expect(200);
 
-    expect(response.body).toMatchObject({ ret: 0 });
+    const body = data<{ success: boolean; message: string }>(response);
+    expect(body.success).toBe(true);
+    expect(body.message).toContain('ignored');
     expect(await entryCount()).toBe(entriesBefore);
     expect(await ticketCount()).toBe(ticketsBefore);
   });

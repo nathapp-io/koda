@@ -206,6 +206,24 @@ describe('CiWebhookController', () => {
       expect(mockCiWebhookService.processCiWebhook).not.toHaveBeenCalled();
       expect(mockReplayGuard.assertFresh).not.toHaveBeenCalled();
     });
+
+    /**
+     * Permissions P2 US-006 AC-6: `pipeline_succeeded` is one of the events the endpoint accepts. It is
+     * not a better-ticket event, so the service answers the "ignored" branch — but the delivery is
+     * validated, recorded as a delivery and processed, not refused as a bad payload.
+     */
+    it.each(['pipeline_success', 'pipeline_succeeded'])('a signed %s event is accepted, not a 400', async (event) => {
+      const body = { ...validPayload, event, failures: [] };
+      const raw = JSON.stringify(body);
+
+      await controller.handleCiWebhook('koda', requestOf(body, raw), sign(raw), `delivery-${event}`);
+
+      expect(mockCiWebhookService.processCiWebhook).toHaveBeenCalledTimes(1);
+      const forwarded = mockCiWebhookService.processCiWebhook.mock.calls[0][1];
+      expect(forwarded).toBeInstanceOf(CiWebhookPayloadDto);
+      expect(forwarded.event).toBe(event);
+      expect(mockReplayGuard.assertFresh).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('replay protection (SEC-1)', () => {
