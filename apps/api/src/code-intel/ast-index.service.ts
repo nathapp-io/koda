@@ -51,6 +51,7 @@ export class AstIndexService {
     commitHash: string,
     files: SourceFile[],
     projectId: string,
+    onIndexed?: (result: { symbolsIndexed: number; filesIndexed: number }) => Promise<void>,
   ): Promise<SymbolIndexResult> {
     const startTime = Date.now();
     const fileErrors: Array<{ path: string; error: string }> = [];
@@ -121,6 +122,10 @@ export class AstIndexService {
 
         await this.symbolStore.upsertSymbol(symbolData);
         symbolsIndexed++;
+      }
+
+      if (files.length > 0 && onIndexed) {
+        await onIndexed({ symbolsIndexed, filesIndexed });
       }
     });
 

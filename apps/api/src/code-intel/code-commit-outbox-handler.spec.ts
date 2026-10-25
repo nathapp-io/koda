@@ -244,6 +244,7 @@ describe('CodeCommitOutboxHandler', () => {
         'abc123',
         sourceFiles,
         'proj-1',
+        undefined,
       );
     });
   });

@@ -26,6 +26,7 @@ import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { ProjectSlugFrom } from '../projects/project-slug-from.decorator';
 import { CurrentProject } from '../projects/current-project.decorator';
 import { ProjectContext } from '../projects/project-context';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 
 @ApiTags('code-intel')
 @ApiBearerAuth()
@@ -33,7 +34,10 @@ import { ProjectContext } from '../projects/project-context';
 export class CodeIntelController {
   private readonly logger = new Logger(CodeIntelController.name);
 
-  constructor(private readonly astIndexService: AstIndexService) {}
+  constructor(
+    private readonly astIndexService: AstIndexService,
+    private readonly audit: AuditRecorder,
+  ) {}
 
   @Post('index')
   @HttpCode(201)
@@ -52,6 +56,13 @@ export class CodeIntelController {
       dto.commitHash,
       dto.files,
       ctx.project.id,
+      (indexed) => this.audit.record({
+        key: 'codeintel.index.write',
+        resourceType: 'code-repo',
+        resourceId: dto.repoId,
+        projectId: ctx.project.id,
+        summary: `indexed ${indexed.symbolsIndexed} symbols in ${indexed.filesIndexed} files`,
+      }),
     );
 
     return JsonResponse.Ok(result);
