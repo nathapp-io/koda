@@ -1,4 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { runAsSystem } from '../../action-context/action-context';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
 import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
@@ -47,6 +49,7 @@ export class BudgetEvaluator implements OnModuleDestroy {
     private readonly approvals: ApprovalCloser,
     private readonly approvalLive: ApprovalLivePublisher,
     private readonly incidents: BudgetIncidentRecorder,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /** Never throws; a failed evaluation is logged and the sweep retries it. */
@@ -98,6 +101,7 @@ export class BudgetEvaluator implements OnModuleDestroy {
     if (!inserted) return false;
     await this.incidents.record(policy, 'warn', start, spent); // S4a §2.4: same transaction, under the policy lock
     await this.record('budget.warn', policy, { spentUsd: spent });
+    await runAsSystem('budget', () => this.audit.record({ key: 'system.budget.window-reset', resourceType: 'fleet-budget', resourceId: policy.id, projectId: policy.projectId, summary: 'warn incident' }));
     if (policy.projectId) await this.webhooks.dispatch(policy.projectId, 'fleet.budget.warn', budgetWebhookPayload(policy, spent, start));
     return true;
   }
@@ -116,6 +120,7 @@ export class BudgetEvaluator implements OnModuleDestroy {
     const held = policy.runningJobs === 'cancel' ? await this.repo.findHeldJobIds(policy) : [];
     const cancel = await this.jobs.cancelForBudget([...queued, ...held], { id: policy.id, responsibleUserId: policy.updatedById }, now);
     await this.record('budget.hard_stop', policy, { spentUsd: spent, cancelledJobIds: cancel.cancelled, cancelRequestedJobIds: cancel.requested, approvalId });
+    await runAsSystem('budget', () => this.audit.record({ key: 'system.budget.window-reset', resourceType: 'fleet-budget', resourceId: policy.id, projectId: policy.projectId, summary: `hard stop: ${cancel.cancelled.length} cancelled, ${cancel.requested.length} cancel requested` }));
     if (inserted && policy.projectId) await this.webhooks.dispatch(policy.projectId, 'fleet.budget.hard_stop', budgetWebhookPayload(policy, spent, start));
     return { live: cancel.live, approvalLive: opened.live, wake: cancel.wake };
   }

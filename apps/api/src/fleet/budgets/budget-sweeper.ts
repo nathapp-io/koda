@@ -1,4 +1,5 @@
 import { SystemWriter } from '../../permissions/system-writer.decorator';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
@@ -40,6 +41,7 @@ export class BudgetSweeper implements OnModuleInit, OnModuleDestroy {
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'sweepEnabled'>,
     private readonly approvals: ApprovalCloser,
     private readonly approvalLive: ApprovalLivePublisher,
+    private readonly audit: AuditRecorder,
   ) {}
 
   onModuleInit(): void {
@@ -89,6 +91,7 @@ export class BudgetSweeper implements OnModuleInit, OnModuleDestroy {
       const closed = await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'policy_deleted', actor: systemActor(policy) }, now);
       await this.repo.delete(id);
       await this.record('budget.deleted', policy, { reason: 'scope_gone' });
+      await this.audit.record({ key: 'system.budget.window-reset', resourceType: 'fleet-budget', resourceId: policy.id, projectId: policy.projectId, summary: 'deleted: scope gone' });
       return { deleted: true, live: closed.live };
     });
     this.approvalLive.publish(live);
@@ -107,6 +110,7 @@ export class BudgetSweeper implements OnModuleInit, OnModuleDestroy {
       await this.repo.update(id, { pausedAt: null, pausedWindowStart: null });
       await this.repo.insertIncident({ policyId: id, kind: 'window_reset', windowStart: start, spentUsd: spent, amountUsd: policy.amountUsd, actorId: null, approvalId: closed.approval?.id ?? null });
       await this.record('budget.window_reset', policy, { spentUsd: spent, windowStart: start.toISOString() });
+      await this.audit.record({ key: 'system.budget.window-reset', resourceType: 'fleet-budget', resourceId: policy.id, projectId: policy.projectId, summary: 'window reset' });
       return { reset: true, live: closed.live };
     });
     this.approvalLive.publish(live);
