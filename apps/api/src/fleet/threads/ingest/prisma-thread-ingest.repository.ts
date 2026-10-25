@@ -1,5 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { AuditRecorder } from '../../../audit/audit-recorder.service';
+import { runAsSystem } from '../../../action-context/action-context';
 import type { ThreadLiveEvent } from '../../../live/thread-event-bus';
 import { Prisma, PrismaClient } from '../../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -42,6 +44,7 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
     private readonly prisma: PrismaService<PrismaClient>,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly budgets: BudgetEvaluator,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /** Startup catch-up candidates (US-007): a THREAD attempt whose stream holds bytes past its cursor, at most 200. */
@@ -147,6 +150,12 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
             if (line.type === 'turn_end') costChanged = await this.foldTurnEnd(batch, job, threadId, line) || costChanged;
             const skipped = await this.foldAssistantLine(batch, threadId, line);
             skippedLines += skipped;
+            if (!skipped && line.type === 'turn_end') {
+              await runAsSystem('thread', () => this.audit.record({
+                key: 'system.thread.ingest', resourceType: 'thread', resourceId: threadId,
+                projectId: job.projectId, summary: `turn ended ${line.status}`,
+              }));
+            }
             if (!skipped && 'turnId' in line) {
               if (line.type === 'turn_end') threadChanged = true;
               changedTurns.add(line.turnId);

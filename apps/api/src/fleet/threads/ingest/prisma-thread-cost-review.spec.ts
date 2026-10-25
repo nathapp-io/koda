@@ -25,6 +25,7 @@ function makeRepository(options: { hasMessage: boolean }) {
     { client } as never,
     { run: (fn: () => Promise<unknown>) => fn() } as never,
     budgets as never,
+    { record: vi.fn().mockResolvedValue(undefined) } as never,
   );
   return { repository, client, budgets };
 }
