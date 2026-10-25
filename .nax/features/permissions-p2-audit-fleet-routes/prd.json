@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-fleet-routes",
   "branchName": "feat/permissions-p2-audit-fleet-routes",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T03:11:45.341Z",
+  "updatedAt": "2026-10-25T03:18:01.961Z",
   "userStories": [
     {
       "id": "US-001",
@@ -404,14 +404,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Only approve/reject gain recorder calls: executor context, tool delegation and post-commit execution already exist, so no new cross-module mechanism is needed; creator-only authorization and approval attribution require strict security TDD."
+        "reasoning": "Only approve/reject gain recorder calls: executor context, tool delegation and post-commit execution already exist, so no new cross-module mechanism is needed; creator-only authorization and approval attribution require strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/actions/assistant-action-decisions.ts",
@@ -437,7 +440,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "79019ec58dd0a9c99676f64b25353514d0d1546f"
     },
     {
       "id": "US-007",
