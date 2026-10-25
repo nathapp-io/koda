@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-fleet-system",
   "branchName": "feat/permissions-p2-audit-fleet-system",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T07:21:45.441Z",
+  "updatedAt": "2026-10-25T07:21:48.913Z",
   "userStories": [
     {
       "id": "US-001",
@@ -189,7 +189,10 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Three existing writer classes add the same recorder pattern after existing mutations; transaction owners, placement locks and ingest retries already exist, and no authentication or authorization logic changes."
+        "reasoning": "Three existing writer classes add the same recorder pattern after existing mutations; transaction owners, placement locks and ingest retries already exist, and no authentication or authorization logic changes.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/sync/fleet-sweeper.ts",
@@ -258,7 +261,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7bec55aa714772a4dfad9cb9e943d74bf3618df1"
     },
     {
       "id": "US-004",
