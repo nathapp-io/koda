@@ -7,6 +7,8 @@ import { AstIndexService } from '../../../src/code-intel/ast-index.service';
 import { SymbolStore } from '../../../src/code-intel/symbol-store';
 import { CodeGraphService } from '../../../src/code-intel/code-graph.service';
 import { CodeIntelOutboxSubscriber } from '../../../src/code-intel/code-intel-outbox.subscriber';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 
 describe('code_commit outbox handler', () => {
   let registry: FanOutPublisher;
@@ -42,6 +44,7 @@ describe('code_commit outbox handler', () => {
         FanOutPublisher,
         { provide: PrismaOutboxRepository, useValue: noopLastErrors },
         CodeIntelOutboxSubscriber,
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         { provide: AstIndexService, useValue: mockAstIndexService },
         { provide: SymbolStore, useValue: mockSymbolStore },
         { provide: CodeGraphService, useValue: mockCodeGraph },
@@ -99,6 +102,7 @@ describe('code_commit outbox handler', () => {
         commitHash,
         files,
         projectId,
+        expect.any(Function),
       );
       expect(mockAstIndexService.indexCommit).toHaveBeenCalledTimes(1);
     });
@@ -134,6 +138,7 @@ describe('code_commit outbox handler', () => {
         commitHash,
         expect.not.objectContaining({ files: expect.any(Array) }),
         projectId,
+        expect.any(Function),
       );
     });
   });
