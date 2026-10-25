@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-fleet-system",
   "branchName": "feat/permissions-p2-audit-fleet-system",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T07:32:55.088Z",
+  "updatedAt": "2026-10-25T07:38:05.870Z",
   "userStories": [
     {
       "id": "US-001",
@@ -289,8 +289,8 @@
         "system-writers"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
