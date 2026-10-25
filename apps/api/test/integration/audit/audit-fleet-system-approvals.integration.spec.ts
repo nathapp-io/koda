@@ -118,7 +118,7 @@ describeIntegration('fleet system approval audit (PG)', () => {
     const { approval } = await openAsk();
     await prisma.fleetApproval.update({ where: { id: approval.id }, data: { expiresAt: new Date(Date.now() - 1_000) } });
     const sweeper = app.get(ApprovalExpirySweeper);
-    await sweeper.tick(new Date());
+    expect(await sweeper.tick(new Date())).toEqual({ expired: 1, failed: 0 });
     expect(await auditRows(approval.id, 'system.approval.expire')).toMatchObject([{ actorType: 'SYSTEM', actorId: 'approval', origin: 'system', summary: 'expired' }]);
     await sweeper.tick(new Date());
     expect(await auditRows(approval.id, 'system.approval.expire')).toHaveLength(1);
