@@ -1,0 +1,617 @@
+{
+  "project": "koda",
+  "feature": "permissions-p2-audit-vcs-ci",
+  "branchName": "feat/permissions-p2-audit-vcs-ci",
+  "createdAt": "2026-10-25T00:00:00.000Z",
+  "updatedAt": "2026-10-25T12:41:12.148Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "VCS connection writes are audited",
+      "description": "**Goal** \u2014 Couple VCS connection create, update, delete and webhook-secret rotation to a safe AuditEntry in each write's transaction.\n\n**Motivation** \u2014 Every human route and every fleet writer now leaves an entry, but a ticket imported from a GitHub issue, a PR merge that moves a ticket to `VERIFY_FIX`, a VCS connection whose token was replaced and a ticket a CI pipeline opened leave none.\n\n**Approach** \u2014 The command layer writes `AuditEntry` in the domain write's transaction. The package's `AuditInterceptor` and `@Audit` decorator are not used.\n\nA connection summary never carries a token, a secret or an author list. Create records the provider, the repo and the sync mode. Update records the changed field names through `fieldsSummary`, never values: it is called on `updateData` with `encryptedToken` renamed `token`, so the names are `token`, `syncMode`, `allowedAuthors`, `pollingIntervalMs` and `webhookSecret` (present only when the update generated a secret). Rotation records a fixed text. An issue import names the issue number only, never its title or body. A PR-state entry names the states only, never the PR URL, title or merge author.\n\n`apps/api/src/vcs/vcs-connection.service.ts` \u2014 injects AuditRecorder as the last constructor parameter and runs create's, update's, delete's and rotateWebhookSecret's repository write inside audit.audited with the contract's entry; validation, the 409 and 404 paths, the no-change return and the polling refresh are unchanged.\n\nContract:\n| Write | Key | resourceType | resourceId | projectId | summary |\n| VCS connection created | `vcs.connection.create` | `vcs-connection` | connection id | the project | `<provider> <owner>/<name>, sync <mode>` (e.g. `github acme/app, sync webhook`) |\n| VCS connection updated | `vcs.connection.update` | `vcs-connection` | connection id | the project | `fieldsSummary` of `updateData` with `encryptedToken` renamed `token` (e.g. `fields: syncMode, token`) |\n| VCS connection deleted | `vcs.connection.delete` | `vcs-connection` | connection id | the project | `deleted <provider> <owner>/<name>` |\n| webhook secret rotated | `vcs.webhook-secret.rotate` | `vcs-connection` | connection id | the project | `webhook secret rotated` |\n\nThe connection routes and the three manual sync routes record as the request's actor, origin `rest`. No entry in this feature sets `onBehalfOf`. `projectId` is the row's project. A failed record rolls back its mutation; create must not schedule polling on failure. Leave scheduler refresh/unschedule after successful commit. An empty patch returns the stored connection with no write or entry.\n\nPreserve existing assertions while adding `{ provide: AuditRecorder, useValue: mockAuditRecorder }` to vcs-connection.service.spec.ts testing modules in src and test/integration/vcs, and pass mockAuditRecorder last to direct constructors in vcs-connection.webhook-secret.spec.ts and vcs-connection.gitlab.spec.ts. The global audit module already supplies the production dependency. Create the named integration spec using the shared real-AppModule fixture and failure-spy protocol in analysis.\n\n**Scope** \u2014 In: four connection mutation boundaries, safe summaries, rollback behavior and affected constructor consumers. Out: US-002 issue imports/helper types; US-003 PR states; US-004 merges; US-005 derived links/effects; US-006 CI/replay attribution. `POST /projects/:slug/vcs/test` (`vcs.connection.test`) writes no row and records nothing.\n\n**Interface** \u2014 Existing recorder contract (read-only): `AuditRecorder.record(input)` and `AuditRecorder.audited(fn, entriesOf)` (`entriesOf` may return `[]`), `AuditRecordInput { key; resourceType; resourceId; projectId?; summary? }`. `fieldsSummary(patch)` \u2014 sorted field names of the defined values, `undefined` for none. Public connection methods/DTOs/routes do not change.",
+      "acceptanceCriteria": [
+        "[integration; spec AC1] When root POSTs /api/projects/vcs-audit/vcs with { provider: 'github', repoOwner: 'acme', repoName: 'app', token: 'ghp_audit_token', syncMode: 'webhook' }, then the route returns 201.",
+        "[integration; spec AC1] Given that successful create in project VAU, when AuditEntry is read for the returned connection id, then exactly one row matches { key: 'vcs.connection.create', resourceType: 'vcs-connection', projectId: project.id, actorType: 'USER', actorId: root.id, origin: 'rest', summary: 'github acme/app, sync webhook' }.",
+        "[integration; spec AC2] When every AuditEntry row's summary is inspected after connection creation, then no summary contains ghp_audit_token or the webhookSecret returned by create.",
+        "[integration; spec AC3] Given an existing connection, when root POSTs a second connection for vcs-audit, then the route returns 409.",
+        "[integration; spec AC3] Given an existing connection, when the second POST returns 409, then the count of vcs.connection.create entries is unchanged.",
+        "[integration; spec AC4] When root PATCHes /api/projects/vcs-audit/vcs with { token: 'ghp_rotated', syncMode: 'polling' }, then the route returns 200.",
+        "[integration; spec AC4] When that patch commits, then the connection has exactly one vcs.connection.update entry with summary 'fields: syncMode, token'.",
+        "[integration; spec AC5] Given the connection's webhookSecret was set to null directly, when root PATCHes /api/projects/vcs-audit/vcs with { syncMode: 'webhook' }, then the route returns 200.",
+        "[integration; spec AC5] Given that legacy-secret patch commits, when its audit row is read, then the connection has exactly one vcs.connection.update entry with summary 'fields: syncMode, webhookSecret'.",
+        "[integration; spec AC6] When root PATCHes /api/projects/vcs-audit/vcs with {}, then the route returns 200 with the stored connection.",
+        "[integration; spec AC6] When the empty patch completes, then the count of vcs.connection.update entries for the connection is unchanged.",
+        "[failure table] Given an empty update DTO {} so updateData has no defined fields, when VcsConnectionService.update runs, then updateVcsConnection is not called, preserving the existing no-write return.",
+        "[integration; spec AC7] When root POSTs /api/projects/vcs-audit/vcs/webhook-secret/rotate, then the route returns 200.",
+        "[integration; spec AC7] When rotation commits, then the connection has exactly one vcs.webhook-secret.rotate entry with summary 'webhook secret rotated'.",
+        "[integration; spec AC7] When every AuditEntry row's summary is inspected after webhook-secret rotation, then no summary contains the webhookSecret returned by that rotation.",
+        "[integration; spec AC8] When viewer PATCHes /api/projects/vcs-audit/vcs, then the route returns 403.",
+        "[integration; spec AC8] When viewer's patch is refused, then the count of vcs.connection.update entries for the connection is unchanged.",
+        "[integration; spec AC9] When root DELETEs /api/projects/vcs-audit/vcs, then the route returns 204.",
+        "[integration; spec AC9] When delete commits, then the deleted connection id has exactly one vcs.connection.delete entry with summary 'deleted github acme/app'.",
+        "[integration; spec AC10] Given the connection was deleted, when root DELETEs it again, then the route returns 404.",
+        "[integration; spec AC10] When the second delete returns 404, then the count of vcs.connection.delete entries is unchanged.",
+        "[integration; spec AC11] When root POSTs the connection fixture while AuditRecorder.record rejects its vcs.connection.create call with Error('audit down'), then the route returns an error status.",
+        "[integration; spec AC11] When audit recording rejects during create, then no VcsConnection row remains for the project.",
+        "[integration; spec AC12] When root rotates the secret while AuditRecorder.record rejects its vcs.webhook-secret.rotate call, then the route returns an error status.",
+        "[integration; spec AC12] When audit recording rejects during rotation, then the stored webhookSecret is unchanged.",
+        "[failure table] When audit recording rejects during connection create, then refreshConnectionSchedule is not called.",
+        "[failure table] When audit recording rejects during a connection update, then the route returns an error status.",
+        "[failure table] When audit recording rejects during a connection update, then the stored connection fields are unchanged.",
+        "[failure table] When audit recording rejects during connection delete, then the route returns an error status.",
+        "[failure table] When audit recording rejects during connection delete, then the connection still exists.",
+        "[failure table] Given no connection exists, when root rotates its webhook secret, then the route returns 404.",
+        "[failure table] Given no connection exists, when root attempts webhook-secret rotation, then the count of vcs.webhook-secret.rotate entries is unchanged."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "vcs",
+        "credentials"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Four standard recorder boundaries in one service plus existing constructor consumers; credential replacement and webhook-secret rotation trigger strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-connection.service.ts",
+        "apps/api/src/vcs/vcs.controller.ts",
+        "apps/api/src/audit/audit-recorder.service.ts",
+        "apps/api/src/audit/audit-summary.ts",
+        "apps/api/test/integration/vcs/vcs-webhook-secret.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-vcs-connections.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/vcs/vcs-connection.service.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter and runs create's, update's, delete's and rotateWebhookSecret's repository write inside audit.audited with the contract's entry; validation, the 409 and 404 paths, the no-change return and the polling refresh are unchanged."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-connection.service.spec.ts",
+          "reason": "its testing module's providers gain { provide: AuditRecorder, useValue: mockAuditRecorder } (from global-stubs.module.ts) so the real VcsConnectionService resolves; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-connection.webhook-secret.spec.ts",
+          "reason": "its direct new VcsConnectionService(...) passes mockAuditRecorder as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-connection.gitlab.spec.ts",
+          "reason": "its direct new VcsConnectionService(...) passes mockAuditRecorder as the new last argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-connection.service.spec.ts",
+          "reason": "its testing module's providers gain { provide: AuditRecorder, useValue: mockAuditRecorder }; the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "VCS issue imports are audited",
+      "description": "**Goal** \u2014 Audit each imported issue ticket inside its number-allocation attempt using the caller's entry-point key and add the shared VCS audit contract.\n\n**Motivation** \u2014 Those are writes an outside system caused, and the Audit log is the only place that would show which integration made them and when.\n\n**Approach** \u2014 An entry names the entry point, not the shared helper. `syncIssue` and the PR-state writes are shared by a route, the poller and the webhook intake. The caller passes the key: `vcs.sync.issue` (one-issue route), `vcs.sync.all` (full-sync route), `vcs.sync.pr` (PR-sync route), `system.vcs.poll-issues` (the poller, issues and PR states alike) or `system.vcs.webhook-intake` (the webhook). The inventory rows are per entry point, so the walker in audit-coverage can match them.\n\nTicket creation records inside the ticket-number retry. `createTicketFromIssue` and `PrismaCiWebhookRepository.createTicket` run in `runWithTicketNumberRetry`, which starts a fresh transaction per attempt and refuses to retry inside an outer one (`ticket-number-retry.ts:38`). Wrapping them in `audited` would turn every number conflict into a 409. Both gain an optional last parameter `onCreated: (ticket) => Promise<void>`, run inside the attempt's transaction after the insert, and the services pass a callback that calls `record`. This is the `MembershipService.createBinding(\u2026, onWritten)` pattern from audit-core.\n\nThe issues webhook keeps swallowing its errors. `handleIssueOpened` catches every error and answers 200 `success: false` (`vcs-webhook.service.ts:250`), so the controller does not forget the delivery id and GitHub's redelivery is refused as a replay. A rejected `record` therefore loses that import, as any database error does today. Changing the intake's error contract is out of scope; AC13 of US-002 pins the behaviour so the coverage or delivery feature can revisit it.\n\n`apps/api/src/vcs/vcs-sync.service.ts` \u2014 injects AuditRecorder right after vcsRepo (before the optional vcsConfig); syncIssue gains the required auditKey parameter and passes createTicketFromIssue an onCreated callback that records it on the new ticket; fullSync passes 'vcs.sync.all'; dedup and author filtering are unchanged.\n`apps/api/src/vcs/domain/vcs.repository.ts` \u2014 createTicketFromIssue gains the optional last onCreated parameter.\n`apps/api/src/vcs/prisma-vcs.repository.ts` \u2014 createTicketFromIssue awaits onCreated with the inserted ticket inside the retry attempt's transaction, after ticket.create; number allocation and the retry are unchanged.\n`apps/api/src/vcs/vcs.controller.ts` \u2014 the one-issue sync route passes 'vcs.sync.issue' to syncIssue; responses are unchanged.\n`apps/api/src/vcs/vcs-polling.service.ts` \u2014 poll passes 'system.vcs.poll-issues' to syncIssue; scheduling, the cursor and the sync log are unchanged.\n`apps/api/src/vcs/vcs-webhook.service.ts` \u2014 handleIssueOpened passes 'system.vcs.webhook-intake' to syncIssue; its result mapping is unchanged.\n\nContract: issue imported | the caller's `VcsIssueAuditKey` | `resourceType` `ticket` | `resourceId` the new ticket's id | `projectId` the project | `summary` `imported issue #<n>`. `<n>` is the VCS issue number. An issue import names the issue number only, never its title or body. The connection routes and the three manual sync routes record as the request's actor, origin `rest`. The poller and the webhook intake record as `SYSTEM/vcs` (`runAsSystemWriter` in `VcsPollingService.tick` and `VcsWebhookService.handleWebhook`, unchanged), origin `system`. No entry in this feature sets `onBehalfOf`.\n\nDedup includes soft-deleted externalVcsId matches and records nothing. record failure is not a number conflict and is not retried. One-issue HTTP propagates an error; fullSync counts the issue skipped and lists its error; the poller's single try stops at that issue, logs, keeps its cursor and skips PR sync, leaving later issues for a later tick; issue webhook preserves its 200 success:false/replay behavior. Update all required-key call sites and repository callback assertions without weakening existing tests. Add mockAuditRecorder providers to the affected src/integration sync and polling specs listed in analysis; direct VcsSyncService constructors receive it second. Add fake-timer forwarding assertion in vcs-polling.tick.spec.ts and callback-to-record assertion in vcs-sync.service.spec.ts.\n\n**Scope** \u2014 In: issue imports at four entry points, repository callback seam, shared vcs-audit.ts types/helper and regression consumers. Out: US-001 connection mutations; US-003 PR-state wiring consumes this helper afterward; US-004 merge ownership; US-005 extractor upsert return changes; US-006 implements the separate CI callback and replay attribution. The runtime coverage guard and the walker test over write surfaces are out of scope (feature `permissions-p2-audit-coverage`). The Bookkeeping table is its input. Recording the update branches of `upsertTicketLink` and `upsertFleetPrLink`, a same-state webhook PR write, the poller's `VcsSyncLog` rows and cursor, the replay rows and a push's `code_commit` outbox rows is out of scope (the Bookkeeping table). Changing the ticket-number allocation, `runWithTicketNumberRetry`, the replay guard's rules, the dedup of pushes or any route's status codes, response bodies or `@Requires` keys is out of scope; `openapi.json` does not change.\n\n**Interface** \u2014 Create `src/vcs/vcs-audit.ts` with:\n```typescript\n/** The key an issue import records: the entry point that ran syncIssue. */\nexport type VcsIssueAuditKey = 'vcs.sync.issue' | 'vcs.sync.all' | 'system.vcs.poll-issues' | 'system.vcs.webhook-intake';\n\n/** The key a PR-state write records: the entry point that saw the state. */\nexport type VcsPrStateAuditKey = 'vcs.sync.pr' | 'system.vcs.poll-issues' | 'system.vcs.webhook-intake';\n\n/** `pr <before> -> <after>`; `before` is `none` for a link with no stored state. */\nexport function prStateSummary(before: string | null, after: string): string;\n```\n`VcsSyncService.syncIssue(project, issue, syncMode, repo)` \u2192 `syncIssue(project, issue, syncMode, repo, auditKey: VcsIssueAuditKey)`.\n`IVcsRepository.createTicketFromIssue(project, issue, externalVcsId)` gains an optional last `onCreated: (ticket: { id: string; number: number }) => Promise<void>`. Preserve CreateTicketFromIssueResult including its title. Implement the helper body, not just a declaration.",
+      "acceptanceCriteria": [
+        "[integration; spec AC1] Given fetchIssue returns issue 7 with title 'Private title' and body 'Private body', when root POSTs /api/projects/:slug/vcs/sync/7, then the response is 200 with issuesSynced 1 and exactly one tickets item.",
+        "[integration; spec AC1] When that one-issue import commits, then the new ticket has exactly one AuditEntry matching { key: 'vcs.sync.issue', resourceType: 'ticket', projectId: project.id, actorType: 'USER', actorId: root.id, origin: 'rest', summary: 'imported issue #7' }.",
+        "[integration; spec AC2] When issue 7's audit summary is inspected, then it contains neither 'Private title' nor 'Private body'.",
+        "[integration; spec AC3] Given issue 7 was imported, when root repeats POST /api/projects/:slug/vcs/sync/7, then the route returns 409.",
+        "[integration; spec AC3] When issue 7's duplicate request returns 409, then the count of vcs.sync.issue entries is unchanged.",
+        "[integration; spec AC4] Given fetchIssues returns issues 8 and 9, when root POSTs /api/projects/:slug/vcs/sync, then each new ticket has exactly one vcs.sync.all entry with its corresponding summary 'imported issue #8' or 'imported issue #9'.",
+        "[integration; spec AC5] When a signed issues webhook submits action opened for issue 10 with user.login octo, html_url, labels [] and an ISO created_at, then the route returns 200.",
+        "[integration; spec AC5] When issue 10's webhook import commits, then the new ticket has exactly one entry matching { key: 'system.vcs.webhook-intake', actorType: 'SYSTEM', actorId: 'vcs', origin: 'system', summary: 'imported issue #10' }.",
+        "[integration; spec AC6] When app.get(VcsSyncService).syncIssue(project, issue11, 'polling', connection, 'system.vcs.poll-issues') runs inside withTestActor({ type: 'SYSTEM', id: 'vcs' }), then it returns action created.",
+        "[integration; spec AC6] When that direct poller-key import commits, then its new ticket has exactly one entry with key system.vcs.poll-issues, actorType SYSTEM and actorId vcs.",
+        "[integration; spec AC7] When root POSTs /api/projects/:slug/vcs/sync/12 while AuditRecorder.record rejects its vcs.sync.issue call, then the route returns an error status.",
+        "[integration; spec AC7] When recording issue 12's import fails, then no project ticket has externalVcsId ending in #12.",
+        "[integration; spec AC8] Given fetchIssues returns issue 13 and record rejects vcs.sync.all, when root POSTs /api/projects/:slug/vcs/sync, then the response is 200 with issuesSynced 0, issuesSkipped 1 and tickets [].",
+        "[integration; spec AC8] When recording issue 13's full-sync import fails, then no project ticket has externalVcsId ending in #13.",
+        "[integration; spec AC9] When ten concurrent syncIssue calls import issues 20 through 29 with key system.vcs.poll-issues inside withTestActor({ type: 'SYSTEM', id: 'vcs' }), then all ten return action created.",
+        "[integration; spec AC9] When those ten concurrent imports finish, then their tickets have ten distinct numbers, matching the N=10 ticket-number-allocation.integration.spec.ts precedent.",
+        "[integration; spec AC9] When those ten concurrent imports finish, then there are exactly ten system.vcs.poll-issues entries, one per new ticket.",
+        "[unit; spec AC10] prStateSummary(null, 'open') returns 'pr none -> open'.",
+        "[unit; spec AC10] prStateSummary('open', 'closed') returns 'pr open -> closed'.",
+        "[unit; spec AC11] Given VcsPollingService collaborators stubbed as in vcs-polling.tick.spec.ts and fetchIssues returning one issue, when schedulePolling(connection) runs for one fake-time interval, then sync.syncIssue receives 'system.vcs.poll-issues' as its fifth argument.",
+        "[unit; spec AC12] Given issue.number is 7 and createTicketFromIssue invokes onCreated({ id: 't-1', number: 3 }), when VcsSyncService.syncIssue runs with an auditKey and a stub recorder, then recorder.record is called once with that key, resourceType ticket, resourceId t-1 and summary 'imported issue #7', using the VCS issue number rather than the allocated ticket number.",
+        "[integration; spec AC13] When the signed opened-issue webhook submits issue 14 while record rejects system.vcs.webhook-intake, then the response is 200 with success false.",
+        "[integration; spec AC13] When recording issue 14's webhook import fails, then no project ticket has externalVcsId ending in #14.",
+        "[integration; spec AC13] Given that failed issue 14 webhook kept its delivery id, when it is resent with the same x-github-delivery, then the request is refused as a replay.",
+        "[failure table] Given any matching externalVcsId ticket, including a soft-deleted ticket, when syncIssue is called, then it returns action skipped.",
+        "[failure table] Given any matching externalVcsId ticket, including a soft-deleted ticket, when syncIssue is called, then the project's ticket count is unchanged.",
+        "[failure table] Given any matching externalVcsId ticket, including a soft-deleted ticket, when syncIssue is called, then the matching issue-import AuditEntry count is unchanged.",
+        "[failure table] When onCreated rejects with Error('audit down'), then createTicketFromIssue rejects without retrying the insert as a ticket-number conflict.",
+        "[failure table] Given fullSync receives issue 13 and its record call rejects with Error('audit down'), when fullSync returns, then its errors list contains 'Issue 13: audit down'.",
+        "[failure table] Given a polling batch of multiple issues, when the first issue's audit recording rejects, then later issues are not passed to syncIssue during that tick, preserving the existing single-try polling behavior.",
+        "[failure table] When an issue import's record rejects during polling with Error('audit down'), then VcsPollingService logs at error level a message containing 'Polling failed for connection', the connection id and 'audit down'.",
+        "[failure table] When an issue import's record rejects during polling, then lastSyncedAt is unchanged.",
+        "[failure table] When an issue import's record rejects during polling, then that tick does not call syncPrStatus."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "vcs",
+        "transactions",
+        "webhook"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "The new in-attempt callback and required entry-point key span the repository, manual routes, polling and webhook intake, so isolated integration TDD is useful; token encryption, authentication and authorization behavior are unchanged."
+      },
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-sync.service.ts",
+        "apps/api/src/vcs/prisma-vcs.repository.ts",
+        "apps/api/src/vcs/domain/vcs.repository.ts",
+        "apps/api/src/vcs/vcs-polling.service.ts",
+        "apps/api/src/vcs/vcs-webhook.service.ts",
+        "apps/api/test/integration/vcs/vcs-manual-sync.spec.ts",
+        "apps/api/test/integration/vcs/vcs-permissions.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/vcs/vcs-audit.ts",
+        "apps/api/src/vcs/vcs-audit.spec.ts",
+        "apps/api/test/integration/audit/audit-vcs-issues.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/vcs/vcs-sync.service.ts",
+          "reason": "injects AuditRecorder right after vcsRepo (before the optional vcsConfig); syncIssue gains the required auditKey parameter and passes createTicketFromIssue an onCreated callback that records it on the new ticket; fullSync passes 'vcs.sync.all'; dedup and author filtering are unchanged."
+        },
+        {
+          "path": "apps/api/src/vcs/domain/vcs.repository.ts",
+          "reason": "createTicketFromIssue gains the optional last onCreated parameter."
+        },
+        {
+          "path": "apps/api/src/vcs/prisma-vcs.repository.ts",
+          "reason": "createTicketFromIssue awaits onCreated with the inserted ticket inside the retry attempt's transaction, after ticket.create; number allocation and the retry are unchanged."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs.controller.ts",
+          "reason": "the one-issue sync route passes 'vcs.sync.issue' to syncIssue; responses are unchanged."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-polling.service.ts",
+          "reason": "poll passes 'system.vcs.poll-issues' to syncIssue; scheduling, the cursor and the sync log are unchanged."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-webhook.service.ts",
+          "reason": "handleIssueOpened passes 'system.vcs.webhook-intake' to syncIssue; its result mapping is unchanged."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-sync.service.spec.ts",
+          "reason": "its testing module's providers gain { provide: AuditRecorder, useValue: mockAuditRecorder }, its direct new VcsSyncService(...) passes mockAuditRecorder as the second argument, syncIssue calls pass a key, assertions on createTicketFromIssue's arguments accept the added onCreated callback, and it gains the US-002 AC-12 case; the rest are kept."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-sync.service.spec.ts",
+          "reason": "its testing module's providers gain { provide: AuditRecorder, useValue: mockAuditRecorder }, syncIssue calls pass a key, and assertions on createTicketFromIssue's arguments accept the added onCreated callback; the rest are kept."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-manual-sync.spec.ts",
+          "reason": "assertions on syncIssue's arguments expect the added 'vcs.sync.issue' or 'vcs.sync.all' key; the rest are kept."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-polling.service.spec.ts",
+          "reason": "its testing module's providers gain { provide: AuditRecorder, useValue: mockAuditRecorder } so the real VcsSyncService and VcsPrSyncService resolve; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-polling-comprehensive.spec.ts",
+          "reason": "its testing module's providers gain { provide: AuditRecorder, useValue: mockAuditRecorder }; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-polling-pr-sync.integration.spec.ts",
+          "reason": "its testing module's providers gain { provide: AuditRecorder, useValue: mockAuditRecorder }; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-polling.tick.spec.ts",
+          "reason": "gains the US-002 AC-11 case (the poller passes 'system.vcs.poll-issues' to syncIssue); the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "VCS PR-state writes are audited",
+      "description": "**Goal** \u2014 Audit non-merge PR-state mutations from manual sync, polling and the five webhook handlers without recording same-state or unsuccessful writes.\n\n**Motivation** \u2014 Those are writes an outside system caused, and the Audit log is the only place that would show which integration made them and when.\n\n**Approach** \u2014 An entry names the entry point, not the shared helper. `syncIssue` and the PR-state writes are shared by a route, the poller and the webhook intake. The caller passes the key: `vcs.sync.issue` (one-issue route), `vcs.sync.all` (full-sync route), `vcs.sync.pr` (PR-sync route), `system.vcs.poll-issues` (the poller, issues and PR states alike) or `system.vcs.webhook-intake` (the webhook). The inventory rows are per entry point, so the walker in audit-coverage can match them.\n\nA webhook PR-state write records only when the stored state changes. `updateTicketLinkWithPrState` returns `'updated'` for a same-state write too (it bumps `prUpdatedAt`). The webhook records when the outcome is `'updated'` and the link's state before the write differs from the new one. The poller and the PR-sync route already write only when the state differs (`vcs-pr-sync.service.ts:93`).\n\nThe extractor's entries can land after `syncPrStatus` resolves. `syncPrStatus` starts `extractLinksFromPr` without awaiting it (`vcs-pr-sync.service.ts:111`) when the PR status has a `branchName` and the link has a ticket, so in the PR-sync route and the poller its `ticket.link.add` entries are written asynchronously, still under the caller's context. That is unchanged; tests of `syncPrStatus` stub a status without `branchName`.\n\nThe 404 close catches its own failure. In `syncPrStatus` the 404 close runs inside the per-link `catch` (`vcs-pr-sync.service.ts:131`), so a rejection there would escape the loop and abort the rest of the sync, and through the poller the whole poll. It gets its own `try`/`catch` that logs and counts the link skipped, like the main write.\n\n`apps/api/src/vcs/vcs-pr-sync.service.ts` \u2014 injects AuditRecorder right after vcsRepo (before the optional parameters); syncPrStatus gains the required auditKey parameter and runs each non-merge prState write, including the 404 close, inside audit.audited, recording the key when the write returned 'updated', and wraps the 404 close in its own try/catch that logs and counts the link skipped; the merge branch and the link extraction are unchanged in this story.\n`apps/api/src/vcs/vcs-webhook.service.ts` \u2014 injects AuditRecorder right after vcsConfig (before the two optional parameters) and runs the five non-merge PR handlers' prState write inside audit.audited, recording system.vcs.webhook-intake when it returned 'updated' and the stored state changed; outcomes and ignore reasons are unchanged.\n`apps/api/src/vcs/vcs.controller.ts` \u2014 the PR sync route passes 'vcs.sync.pr' to syncPrStatus; responses are unchanged.\n`apps/api/src/vcs/vcs-polling.service.ts` \u2014 poll passes 'system.vcs.poll-issues' to syncPrStatus.\n\nContract: PR state changed (not merged) | the caller's `VcsPrStateAuditKey` | `resourceType` `ticket-link` | `resourceId` link id | `projectId` the project | `summary` `prStateSummary(<before>, <after>)` (e.g. `pr open -> closed`). A PR-state entry uses the synced `project.id` (`syncPrStatus`) or `connection.projectId` (the webhook). A PR-state entry names the states only, never the PR URL, title or merge author. Manual sync retains request actor/origin rest; poller/webhook retain SYSTEM/vcs and origin system. No entry in this feature sets `onBehalfOf`.\n\nThe five handlers are handlePullRequestOpened, handlePullRequestClosed (non-merged), handlePullRequestReadyForReview, handlePullRequestReopened and handlePullRequestConvertedToDraft. Preserve terminal checks, already-merged/not-found result mapping and ignored webhook responses. A record rejection rolls back the state; syncPrStatus counts that link skipped and continues (including failed 404-close writes); webhook throws into controller forget/retry behavior. Wire mockAuditRecorder into affected test providers/direct constructors and add required keys to ALL syncPrStatus calls without removing existing assertions (specific consumers in analysis). Use a local recorder stub that evaluates entriesOf for the zero-record unit case; global mockAuditRecorder intentionally does not.\n\n**Scope** \u2014 In: non-merge PR-state audits, key forwarding and isolated 404 failure handling. Out: US-002 issue-import callbacks/shared helper creation; US-004 will change applyMergedPr and its actor/transition audits; US-005 owns derived-link audit behavior; US-006 wraps replay guard calls. Recording the update branches of `upsertTicketLink` and `upsertFleetPrLink`, a same-state webhook PR write, the poller's `VcsSyncLog` rows and cursor, the replay rows and a push's `code_commit` outbox rows is out of scope (the Bookkeeping table). Adding catalog keys (one per webhook event or per merge entry) is out of scope; each write records under its existing key and the summary names the event.\n\n**Interface** \u2014 `VcsPrSyncService.syncPrStatus(project, connection, encryptionKey)` \u2192 `syncPrStatus(project, connection, encryptionKey, auditKey: VcsPrStateAuditKey)`. Import the upstream helper declarations unchanged:\n```typescript\n/** The key a PR-state write records: the entry point that saw the state. */\nexport type VcsPrStateAuditKey = 'vcs.sync.pr' | 'system.vcs.poll-issues' | 'system.vcs.webhook-intake';\n\n/** `pr <before> -> <after>`; `before` is `none` for a link with no stored state. */\nexport function prStateSummary(before: string | null, after: string): string;\n```\nExisting write outcomes remain `'updated' | 'already-merged' | 'not-found'`; `AuditRecorder.audited(fn, entriesOf)` records an empty array for skipped or same-state writes.",
+      "acceptanceCriteria": [
+        "[integration; spec AC1] Given an open PR link whose provider reports closed and not merged, when root POSTs /api/projects/:slug/vcs/sync-pr, then exactly one entry for the link matches { key: 'vcs.sync.pr', resourceType: 'ticket-link', projectId: project.id, actorType: 'USER', actorId: root.id, summary: 'pr open -> closed' }.",
+        "[integration; spec AC2] Given an open PR link whose provider still reports open, when root POSTs /api/projects/:slug/vcs/sync-pr, then no entry is recorded for the link.",
+        "[integration; spec AC3] Given a draft PR link whose provider rejects with NotFoundAppException, when root POSTs /api/projects/:slug/vcs/sync-pr, then exactly one entry for the link has key vcs.sync.pr and summary 'pr draft -> closed'.",
+        "[integration; spec AC4] Given a draft PR link reported open, when app.get(VcsPrSyncService).syncPrStatus(project, connection, key, 'system.vcs.poll-issues') runs inside withTestActor({ type: 'SYSTEM', id: 'vcs' }), then exactly one entry for the link has key system.vcs.poll-issues, actorId vcs and summary 'pr draft -> open', using draft because findActiveTicketLinksWithPrs excludes null state.",
+        "[integration; spec AC5] Given a PR link with null prState, when a signed pull_request webhook sends action closed with merged false, then the response is 200.",
+        "[integration; spec AC5] When that null-state close commits, then exactly one entry for the link matches { key: 'system.vcs.webhook-intake', actorType: 'SYSTEM', actorId: 'vcs', summary: 'pr none -> closed' }.",
+        "[integration; spec AC6] Given an open PR link, when a signed pull_request webhook sends action converted_to_draft, then exactly one entry for the link has summary 'pr open -> draft'.",
+        "[integration; spec AC7] Given an open PR link, when a signed pull_request webhook sends action reopened, then the response is 200.",
+        "[integration; spec AC7] Given an open PR link, when its reopened webhook completes, then no entry is recorded for the link.",
+        "[integration; spec AC8] Given a merged PR link, when a signed pull_request webhook sends action closed with merged false, then no entry is recorded for the link.",
+        "[integration; spec AC8] Given a merged PR link, when its non-merge closed webhook completes, then its stored prState remains merged.",
+        "[integration; spec AC9] When a signed pull_request webhook names a PR number with no matching link, then the response is 200 with ignored true.",
+        "[integration; spec AC9] When a signed pull_request webhook has no matching link, then the count of system.vcs.webhook-intake entries is unchanged.",
+        "[integration; spec AC10] Given AC5's null-state close webhook and record rejecting system.vcs.webhook-intake, when the webhook is submitted, then the route returns an error status.",
+        "[integration; spec AC10] When that close's audit record rejects, then the stored prState remains null.",
+        "[integration; spec AC10] Given that failed close and the restored recorder, when the webhook is resent with the same x-github-delivery, then the route returns 200, preserving the controller's forget-on-thrown-error behavior.",
+        "[integration; spec AC10] When that same-delivery retry commits, then the link has the 'pr none -> closed' entry.",
+        "[unit; spec AC11] Given VcsPollingService collaborators stubbed as in vcs-polling.tick.spec.ts, when schedulePolling(connection) runs for one fake-time interval, then prSync.syncPrStatus receives 'system.vcs.poll-issues' as its fourth argument.",
+        "[unit; spec AC12] Given updateTicketLinkWithPrState returns 'already-merged' and the recorder's audited stub executes fn and records entriesOf's entries, when VcsPrSyncService.syncPrStatus runs, then recorder.record is called zero times.",
+        "[integration; spec AC13] Given AC3's provider-404 draft link and record rejecting vcs.sync.pr, when root submits the sync-pr request, then the response is 200 with updated 0.",
+        "[integration; spec AC13] When the 404 close's audit recording rejects, then the link's stored prState remains draft.",
+        "[failure table] Given multiple PR links, when record rejects a normal non-merge state write during syncPrStatus, then that link's stored prState is unchanged.",
+        "[failure table] Given one draft PR link reported open and record rejecting its vcs.sync.pr write with Error('audit down'), when syncPrStatus returns, then its numeric skipped field equals 1.",
+        "[failure table] Given two draft PR links reported open, when record rejects only the first link's non-merge write during syncPrStatus, then the second link's stored prState becomes open, preserving per-link continuation.",
+        "[failure table] Given a draft link whose provider rejects with NotFoundAppException and whose close record rejects with Error('audit down'), when syncPrStatus returns, then a failure log contains the audit down error message.",
+        "[failure table] Given one draft link whose provider rejects with NotFoundAppException and whose close record rejects, when syncPrStatus returns, then its numeric skipped field equals 1.",
+        "[failure table] Given a first draft link whose provider rejects with NotFoundAppException and a second draft link reported open, when record rejects only the first link's 404 close during syncPrStatus, then the second link's stored prState becomes open, preserving per-link continuation.",
+        "[failure table] Given a link already closed or merged before syncPrStatus, when the sync runs, then it records no entry for that link.",
+        "[failure table] Given a link vanishes before updateTicketLinkWithPrState returns 'not-found', when its non-merge state write is attempted, then no AuditEntry is recorded for the link."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "vcs",
+        "webhook",
+        "pr-state"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Four existing source files gain standard audited wrappers, key forwarding and a nested 404 catch using US-002's helper; existing HMAC verification, authorization and replay rules are not modified."
+      },
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-pr-sync.service.ts",
+        "apps/api/src/vcs/vcs-webhook.service.ts",
+        "apps/api/src/vcs/vcs-polling.service.ts",
+        "apps/api/src/vcs/vcs-polling.tick.spec.ts",
+        "apps/api/src/vcs/vcs-audit.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-vcs-pr-state.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/vcs/vcs-pr-sync.service.ts",
+          "reason": "injects AuditRecorder right after vcsRepo (before the optional parameters); syncPrStatus gains the required auditKey parameter and runs each non-merge prState write, including the 404 close, inside audit.audited, recording the key when the write returned 'updated', and wraps the 404 close in its own try/catch that logs and counts the link skipped; the merge branch and the link extraction are unchanged in this story."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-webhook.service.ts",
+          "reason": "injects AuditRecorder right after vcsConfig (before the two optional parameters) and runs the five non-merge PR handlers' prState write inside audit.audited, recording system.vcs.webhook-intake when it returned 'updated' and the stored state changed; outcomes and ignore reasons are unchanged."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs.controller.ts",
+          "reason": "the PR sync route passes 'vcs.sync.pr' to syncPrStatus; responses are unchanged."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-polling.service.ts",
+          "reason": "poll passes 'system.vcs.poll-issues' to syncPrStatus."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-pr-sync.service.spec.ts",
+          "reason": "its testing module's providers gain { provide: AuditRecorder, useValue: mockAuditRecorder }, syncPrStatus calls pass a key, and it gains the US-003 AC-12 case; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-webhook.service.spec.ts",
+          "reason": "its testing module's providers gain { provide: AuditRecorder, useValue: mockAuditRecorder } so the real VcsWebhookService resolves; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-webhook.merged-terminal.spec.ts",
+          "reason": "its direct new VcsWebhookService(...) passes mockAuditRecorder as the fifth argument (after the config); the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-pr-sync.service.spec.ts",
+          "reason": "its testing module's providers gain { provide: AuditRecorder, useValue: mockAuditRecorder } and syncPrStatus calls pass a key; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-pr-sync-auto-transition.spec.ts",
+          "reason": "its testing module's providers gain { provide: AuditRecorder, useValue: mockAuditRecorder } and syncPrStatus calls pass a key; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-merged-pr.integration.spec.ts",
+          "reason": "its direct new VcsPrSyncService(repo) passes mockAuditRecorder as the second argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-polling.tick.spec.ts",
+          "reason": "gains the US-003 AC-11 case (the poller passes 'system.vcs.poll-issues' to syncPrStatus); the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "The PR merge step is audited",
+      "description": "**Goal** \u2014 Make the shared PR merge step record its winning link write and eligible auto-transition as SYSTEM/vcs in their respective transactions.\n\n**Motivation** \u2014 Every human route and every fleet writer now leaves an entry, but a ticket imported from a GitHub issue, a PR merge that moves a ticket to `VERIFY_FIX`, a VCS connection whose token was replaced and a ticket a CI pipeline opened leave none.\n\n**Approach** \u2014 The merge step always records `system.vcs.pr-merge-transition`, as `SYSTEM/vcs`. `VcsPrSyncService` is the `@SystemWriter('system.vcs.pr-merge-transition')` class and `applyMergedPr` is \"the one merge step\" for every path (`vcs-pr-sync.service.ts:143`). It runs its writes inside `runAsSystemWriter(this, \u2026)`, so a merge seen by the manual PR sync or by the fleet PR refresher (`SYSTEM/ticket-link`) is still recorded as `SYSTEM/vcs`. `runAsSystem` inherits the enclosing `correlationId`, so the entry still joins the request or tick that saw the merge. This follows audit-fleet-system's call \"an entry under a `system.*` key always carries that component's actor\".\n\nA merge records two entries. One on the link (`pr <before> -> merged`), committed by the link write, and one on the ticket (`status: IN_PROGRESS -> VERIFY_FIX`), committed with the auto-transition. The FIX_REPORT comment and the `VCS_PR_MERGED` activity row are in the transition's transaction and covered by its entry, as audit-core's transition entries cover their comment.\n\n`apps/api/src/vcs/vcs-pr-sync.service.ts` \u2014 applyMergedPr runs inside runAsSystemWriter(this, \u2026), its link write inside audit.audited (recorded when 'updated'), and handleMergedPrAutoTransition runs applyMergedPrTransition inside audit.audited, recorded on the ticket; the conditional write, the IN_PROGRESS check and the logged-not-thrown transition failure are unchanged.\n\n`projectId` is the row's project. A connection's, an imported ticket's, a fleet job's, the CI project's. A PR-state entry uses the synced `project.id` (`syncPrStatus`) or `connection.projectId` (the webhook). The merge step has only the link, so it uses `link.ticket?.projectId ?? null` (`TicketLinkData.ticket` is optional; every production caller loads it).\n\nContract:\n| Write | Key | resourceType | resourceId | projectId | summary |\n| PR merged: the link | `system.vcs.pr-merge-transition` | `ticket-link` | link id | `link.ticket?.projectId ?? null` | `prStateSummary(<before>, 'merged')` |\n| PR merged: the auto-transition | `system.vcs.pr-merge-transition` | `ticket` | ticket id | `link.ticket?.projectId ?? null` | `status: IN_PROGRESS -> VERIFY_FIX` |\n\nThe merge step's two entries are always `SYSTEM/vcs`. No entry in this feature sets `onBehalfOf`. Do not include PR URL/title, merge author/SHA or comment contents in summaries. Two competing paths are gated by the existing conditional link update: only outcome updated records and attempts the transition. A non-IN_PROGRESS/missing ticket has only the link entry. Record failure on the link rolls it back and rejects to the caller's existing error path. Record failure on the transition rolls back ticket, FIX_REPORT and activity and is logged internally; the already committed link and entry stay merged. Keep separate audited calls; wrapping the entire merge in one transaction would violate AC9.\n\n`FleetPrStateRefresher.apply` calls `applyMergedPr` for a merged PR (`fleet-pr-state.refresher.ts`); unchanged, it gets the merge entries through US-004. Keep its existing non-merge audit and knowledge event behavior; do not record an extra system.ticket-link.pr-refresh entry on a merge. Add the currentContext capture unit case to vcs-pr-sync.service.spec.ts; exercise direct SYSTEM/USER calls, the signed webhook and real app.get(FleetPrStateRefresher).refresh in the new real-AppModule integration spec.\n\n**Scope** \u2014 In: shared merge link/transition auditing, SYSTEM/vcs boundary and concurrency/partial-failure behavior. Out: US-003 non-merge state handling; US-005 derived links and fleet terminal effects; US-006 intake replay attribution. Recording the merge step's FIX_REPORT comment or `VCS_PR_MERGED` activity row as entries of their own is out of scope; the transition's entry covers its transaction. An `onBehalfOf` on the merge step's entries when a user's PR sync or the fleet refresher saw the merge is out of scope; the shared `correlationId` joins them.\n\n**Interface** \u2014 Preserve existing public signatures and outcome types:\n```typescript\nasync applyMergedPr(link: TicketLinkData, prStatus: VcsPrStatus): Promise<PrStateWriteResult>\nasync handleMergedPrAutoTransition(link: TicketLinkData, prStatus: VcsPrStatus): Promise<void>\n```\nUse read-only `runAsSystemWriter(writer, fn)`, `AuditRecorder.audited(fn, entriesOf)` and upstream `prStateSummary(before: string | null, after: string): string`. Required recorder injection was added by US-003; no additional constructor change is needed.",
+      "acceptanceCriteria": [
+        "[integration; spec AC1] Given an open PR link on an IN_PROGRESS ticket as in vcs-merge-step.integration.spec.ts, when app.get(VcsPrSyncService).applyMergedPr(link, mergedStatus) runs inside withTestActor({ type: 'SYSTEM', id: 'vcs' }), then it returns updated.",
+        "[integration; spec AC1] When that merge's link write commits, then exactly one entry for the link matches { key: 'system.vcs.pr-merge-transition', resourceType: 'ticket-link', actorType: 'SYSTEM', actorId: 'vcs', origin: 'system', summary: 'pr open -> merged' }.",
+        "[integration; spec AC1] When that merge's auto-transition commits, then exactly one entry for the ticket has key system.vcs.pr-merge-transition, resourceType ticket and summary 'status: IN_PROGRESS -> VERIFY_FIX'.",
+        "[integration; spec AC2] Given AC1's fixture, when applyMergedPr runs inside withTestActor({ type: 'USER', id: root.id }), then both merge entries have actorType SYSTEM and actorId vcs.",
+        "[integration; spec AC3] When two applyMergedPr calls concurrently observe one open PR link on an IN_PROGRESS ticket, then exactly one system.vcs.pr-merge-transition link entry and one system.vcs.pr-merge-transition ticket entry are stored.",
+        "[integration; spec AC4] Given a fleet PR link open on an IN_PROGRESS ticket and a GitHub client reporting it merged as in fleet-pr-refresher.integration.spec.ts, when app.get(FleetPrStateRefresher).refresh() runs, then exactly one link entry and one ticket entry have key system.vcs.pr-merge-transition and actorId vcs.",
+        "[integration; spec AC4] When the fleet refresher sees that merge, then no system.ticket-link.pr-refresh entry is stored for the link.",
+        "[integration; spec AC5] Given an open PR link on an IN_PROGRESS ticket, when a signed closed pull_request webhook reports merged true, merged_by.login octo and merge_commit_sha abc, then both the merge link entry and ticket entry are stored.",
+        "[integration; spec AC5] When those webhook merge summaries are inspected, then neither contains octo or abc.",
+        "[integration; spec AC6] Given an open PR link on a CREATED ticket, when applyMergedPr runs, then it returns updated.",
+        "[integration; spec AC6] Given an open PR link on a CREATED ticket, when applyMergedPr commits, then the link has its merge entry.",
+        "[integration; spec AC6] Given an open PR link on a CREATED ticket, when applyMergedPr commits, then the ticket has no system.vcs.pr-merge-transition entry.",
+        "[integration; spec AC7] Given a link already merged, when applyMergedPr runs, then it returns already-merged.",
+        "[integration; spec AC7] Given a link already merged, when applyMergedPr runs, then no entry is added for either its link or ticket.",
+        "[integration; spec AC8] Given AC1's fixture and record rejecting its first system.vcs.pr-merge-transition call, when applyMergedPr runs, then it rejects.",
+        "[integration; spec AC8] When the merge link's record rejects, then the link's prState remains open.",
+        "[integration; spec AC8] When the merge link's record rejects, then the ticket remains IN_PROGRESS.",
+        "[integration; spec AC9] Given AC1's fixture and record rejecting only resourceType ticket, when applyMergedPr runs, then it returns updated.",
+        "[integration; spec AC9] When only the merge ticket record rejects, then the link remains merged with its committed merge entry.",
+        "[integration; spec AC9] When only the merge ticket record rejects, then the ticket remains IN_PROGRESS.",
+        "[integration; spec AC9] When only the merge ticket record rejects, then the ticket has no FIX_REPORT comment.",
+        "[unit; spec AC10] Given a repository stub and an audited stub that captures currentContext(), when VcsPrSyncService.applyMergedPr runs for an eligible ticket inside runWithActor({ type: 'USER', id: 'u-1' }, ...), then both audited calls capture actor { type: 'SYSTEM', id: 'vcs' }.",
+        "[failure table] Given a merged PR whose ticket is not IN_PROGRESS, when applyMergedPr runs, then the ticket status is unchanged.",
+        "[failure table] When a merge auto-transition's audit record rejects with Error('audit down'), then the auto-transition handler logs at error level a message containing 'Auto-transition failed for ticket', the ticket id and 'audit down', preserving its existing logged-not-thrown failure behavior.",
+        "[failure table] When a merge auto-transition's audit record rejects, then no transition AuditEntry is stored for the ticket."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "vcs",
+        "fleet",
+        "transactions",
+        "actor-context"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "The shared merge must preserve CAS ownership and two distinct commit boundaries across webhook, manual, polling and fleet callers; three sessions isolate concurrency and rollback checks without changing any authentication or access-control mechanism."
+      },
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-pr-sync.service.ts",
+        "apps/api/src/vcs/prisma-vcs.repository.ts",
+        "apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts",
+        "apps/api/test/integration/vcs/vcs-merge-step.integration.spec.ts",
+        "apps/api/test/integration/fleet/fleet-pr-refresher.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-vcs-merge.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/vcs/vcs-pr-sync.service.ts",
+          "reason": "applyMergedPr runs inside runAsSystemWriter(this, \u2026), its link write inside audit.audited (recorded when 'updated'), and handleMergedPrAutoTransition runs applyMergedPrTransition inside audit.audited, recorded on the ticket; the conditional write, the IN_PROGRESS check and the logged-not-thrown transition failure are unchanged."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-pr-sync.service.spec.ts",
+          "reason": "gains the US-004 AC-10 case; the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Extracted links and fleet ticket effects are audited",
+      "description": "**Goal** \u2014 Audit newly extracted branch/commit links and fleet terminal comments/PR links under their domain keys while preserving current actor and idempotent bookkeeping.\n\n**Motivation** \u2014 Those are writes an outside system caused, and the Audit log is the only place that would show which integration made them and when.\n\n**Approach** \u2014 Derived writes record under their domain key, as the current actor. A branch or commit link created by `VcsLinkExtractorService`, and the failure comment and PR link `FleetJobTicketEffects` writes, have no system key of their own: the extractor runs inside whichever entry point synced the PR, and the effects run after a job ends, as the runner (`RUNNER/<id>`), the sweeper (`SYSTEM/job`) or the ingest drain (`SYSTEM/ingest`). They record `ticket.link.add` and `comment.create`, the keys audit-core records for the same rows through the REST routes, and the entry's actor is whatever context is current.\n\nOnly a created link records. `upsertTicketLink` and `upsertFleetPrLink` each have an update branch for a link that already exists (the extractor refreshes `linkType` and `externalRef`; the fleet effect sets `jobId`). Those are bookkeeping. Both methods now return the created link's id, or `null` when the link existed, so the caller can record the new row.\n\nThe extractor's entries can land after `syncPrStatus` resolves. `syncPrStatus` starts `extractLinksFromPr` without awaiting it (`vcs-pr-sync.service.ts:111`) when the PR status has a `branchName` and the link has a ticket, so in the PR-sync route and the poller its `ticket.link.add` entries are written asynchronously, still under the caller's context. That is unchanged; tests of `syncPrStatus` stub a status without `branchName`.\n\n`apps/api/src/vcs/vcs-link-extractor.service.ts` \u2014 injects AuditRecorder right after vcsRepo (before the optional vcsConfig) and runs each upsertTicketLink inside audit.audited, recording ticket.link.add when it returned a string (a stub resolving undefined records nothing); the provider calls and the ref matching are unchanged.\n`apps/api/src/vcs/prisma-vcs.repository.ts` \u2014 upsertTicketLink returns the created link's id, or null when a link for (ticketId, url) existed and was updated; the writes are unchanged.\n`apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts` \u2014 injects AuditRecorder as the last constructor parameter, records comment.create in commentOnce after createSystemComment, and records ticket.link.add in linkPr when upsertFleetPrLink returned an id; the claim, the events and the per-ticket catch are unchanged.\n`apps/api/src/fleet/tickets/prisma-fleet-tickets.repository.ts` \u2014 upsertFleetPrLink uses createManyAndReturn({ skipDuplicates }) and returns the created row's id, or null after updating the existing link's jobId.\n\nContract:\n| Write | Key | resourceType | resourceId | projectId | summary |\n| branch or commit link created by the extractor | `ticket.link.add` | `ticket-link` | the new link's id | the project | `on <KEY>-<number>` |\n| fleet failure comment | `comment.create` | `comment` | comment id | the job's project | `on <ticket ref>` |\n| fleet PR link created | `ticket.link.add` | `ticket-link` | the new link's id | the job's project | `on <ticket ref>` |\n\n`<KEY>-<number>` and `<ticket ref>` are the ticket's ref, as audit-core's comment and link entries write it. The extractor's and the fleet effects' entries carry the current context's actor. No entry in this feature sets `onBehalfOf`. Summaries never contain URLs, titles, branch/commit messages or payload contents. Thread the project and ticket ref to the extractor's private helper as needed; keep its public extractLinksFromPr signature and provider/ref behavior. record rejects must roll back just that link or comment transaction (including fleet notification claim and event/outbox), then follow existing logging/error paths. Direct extraction can reject; its asynchronous production caller logs. Fleet per-ticket catches must keep the next ticket and next job running (D451).\n\nAdd mockAuditRecorder DI/direct arguments in vcs-link-extractor.service.spec.ts, vcs-link-extractor.pr-number.spec.ts and test/integration/vcs/vcs-link-extractor.service.spec.ts. In fleet-job-ticket.effects.spec.ts and bundle-ingest.workflow.spec.ts pass recorder last and replace true/false link stubs with ids/null; preserve existing assertions. Local audited stubs must evaluate entriesOf for zero-record assertions. Use real AppModule integration entry points and fixture precedents listed in analysis.\n\n**Scope** \u2014 In: extractor and fleet ticket-side creation audits and repository created-id return seams. Out: US-002 import callbacks; US-003 PR-state changes; US-004 merges; US-006 CI/replay attribution. `FleetJobTicketEffects.onRunDispatched` is out of scope: it starts tickets through `TicketTransitionsService.startForDispatch`, which audit-core already records. Recording the update branches of `upsertTicketLink` and `upsertFleetPrLink`, a same-state webhook PR write, the poller's `VcsSyncLog` rows and cursor, the replay rows and a push's `code_commit` outbox rows is out of scope (the Bookkeeping table).\n\n**Interface** \u2014 `PrismaVcsRepository.upsertTicketLink(\u2026)`: `Promise<void>` \u2192 `Promise<string | null>`. `PrismaFleetTicketsRepository.upsertFleetPrLink(input)`: `Promise<boolean>` \u2192 `Promise<string | null>`. Preserve the extraction entry point:\n```typescript\nasync extractLinksFromPr(\n  project: { id: string; key: string },\n  ticket: VcsTicketDomain,\n  connection: VcsConnectionDomain,\n  encryptionKey: string,\n  branchName: string,\n  prNumber: number,\n): Promise<void>\n```\nExisting FleetJobTicketEffects entry points remain `onTerminal(jobIds: readonly string[]): Promise<void>` and `upsertPrLinks(jobId: string): Promise<void>`. Use `AuditRecorder.audited` for each extractor upsert, `AuditRecorder.record` inside the fleet methods' existing txManager.run.",
+      "acceptanceCriteria": [
+        "[integration; spec AC1] Given the provider reports PR n and one commit naming the ticket ref, when app.get(VcsLinkExtractorService).extractLinksFromPr(project, ticket, connection, key, 'feat/x', n) runs inside withTestActor({ type: 'USER', id: root.id }), then exactly two ticket.link.add entries match { projectId: project.id, actorType: 'USER', actorId: root.id, summary: 'on <ticket ref>' }, one for the branch link id and one for the commit link id.",
+        "[integration; spec AC2] Given AC1's extraction already completed, when the same call is repeated, then the count of ticket.link.add entries for the ticket's links is unchanged.",
+        "[integration; spec AC3] Given another ticket, when AC1's extraction runs inside withTestActor({ type: 'SYSTEM', id: 'vcs' }), then its entries have actorType SYSTEM and actorId vcs.",
+        "[integration; spec AC4] Given another ticket and record rejecting ticket.link.add, when AC1's extraction runs, then it rejects.",
+        "[integration; spec AC4] When the extracted branch link's audit record rejects, then no TicketLink exists for that ticket's branch URL.",
+        "[integration; spec AC5] Given a FAILED job linked to one ticket as in fleet-tickets-terminal.integration.spec.ts, when app.get(FleetJobTicketEffects).onTerminal([jobId]) runs inside withTestActor({ type: 'RUNNER', id: runner.id }), then exactly one entry for the new comment matches { key: 'comment.create', resourceType: 'comment', projectId: job.projectId, actorType: 'RUNNER', actorId: runner.id, summary: 'on <ticket ref>' }.",
+        "[integration; spec AC6] Given AC5's job has been processed, when onTerminal([jobId]) runs again, then the count of comment.create entries on that ticket's comments is unchanged.",
+        "[integration; spec AC7] Given another FAILED linked job, when onTerminal([jobId]) runs inside withTestActor({ type: 'SYSTEM', id: 'job' }), then its comment entry has actorType SYSTEM and actorId job.",
+        "[integration; spec AC8] Given a COMPLETED linked job with no resultPrUrl, when onTerminal([jobId]) runs, then no entry is recorded for that ticket's comments or links.",
+        "[integration; spec AC9] Given a COMPLETED linked job with resultPrUrl on its repo as in fleet-pr-links.integration.spec.ts, when app.get(FleetJobTicketEffects).upsertPrLinks(jobId) runs inside withTestActor({ type: 'RUNNER', id: runner.id }), then exactly one entry for the new link has key ticket.link.add, resourceType ticket-link and summary 'on <ticket ref>'.",
+        "[integration; spec AC10] Given AC9's link has been created, when upsertPrLinks(jobId) runs again, then the count of ticket.link.add entries for the link is unchanged.",
+        "[integration; spec AC11] Given a job's ticket already has a vcs link with the same URL, when upsertPrLinks(jobId) runs, then that existing link's jobId is set to the job id.",
+        "[integration; spec AC11] Given that pre-existing vcs link, when upsertPrLinks(jobId) completes, then no ticket.link.add entry is recorded for the link.",
+        "[integration; spec AC12] Given FAILED jobA and jobB each linked to its own ticket and record rejecting the first comment.create call for jobA, when onTerminal([jobA, jobB]) runs, then it resolves.",
+        "[integration; spec AC12] When that first job's comment audit fails, then jobA's ticket has no comment.",
+        "[integration; spec AC12] When jobA's comment audit fails, then jobB's ticket still receives exactly one comment with its comment.create entry.",
+        "[unit; spec AC13] Given upsertTicketLink returns null for the branch URL and the audited stub runs fn and records entriesOf's entries, when VcsLinkExtractorService.extractLinksFromPr runs, then recorder.record is called zero times for that URL.",
+        "[unit; spec AC14] Given upsertFleetPrLink resolves null, when FleetJobTicketEffects.upsertPrLinks runs, then recorder.record is not called.",
+        "[failure table] Given multiple linked tickets on a failed job, when the first ticket's failure-comment record rejects, then the next ticket still receives its failure comment and audit entry.",
+        "[failure table] When a fleet failure-comment record rejects with Error('audit down'), then FleetJobTicketEffects logs at warn level a message containing 'comment on ticket', that ticket's ref and 'audit down'.",
+        "[failure table] When a fleet PR link's record rejects, then no new PR link remains for that ticket.",
+        "[failure table] When a fleet PR link's record rejects with Error('audit down'), then FleetJobTicketEffects logs at warn level a message containing 'PR link on ticket', that ticket's ref and 'audit down'.",
+        "[failure table] Given multiple linked tickets on a job, when the first ticket's new PR link record rejects, then the next ticket still receives its PR link and audit entry.",
+        "[failure table] Given multiple terminal jobs, when the first job's new PR link record rejects, then a later job's PR link and audit entry are still created."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "vcs",
+        "fleet",
+        "idempotency",
+        "actor-context"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Created-id return contracts span two repositories and VCS/fleet effects, with async extraction, transactional idempotency and per-ticket failure isolation; authentication, authorization and token handling remain unchanged."
+      },
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-link-extractor.service.ts",
+        "apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts",
+        "apps/api/src/fleet/tickets/prisma-fleet-tickets.repository.ts",
+        "apps/api/test/integration/fleet/fleet-tickets-terminal.integration.spec.ts",
+        "apps/api/test/integration/fleet/fleet-pr-links.integration.spec.ts",
+        "apps/api/src/vcs/prisma-vcs.repository.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-vcs-derived-links.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/vcs/vcs-link-extractor.service.ts",
+          "reason": "injects AuditRecorder right after vcsRepo (before the optional vcsConfig) and runs each upsertTicketLink inside audit.audited, recording ticket.link.add when it returned a string (a stub resolving undefined records nothing); the provider calls and the ref matching are unchanged."
+        },
+        {
+          "path": "apps/api/src/vcs/prisma-vcs.repository.ts",
+          "reason": "upsertTicketLink returns the created link's id, or null when a link for (ticketId, url) existed and was updated; the writes are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter, records comment.create in commentOnce after createSystemComment, and records ticket.link.add in linkPr when upsertFleetPrLink returned an id; the claim, the events and the per-ticket catch are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/prisma-fleet-tickets.repository.ts",
+          "reason": "upsertFleetPrLink uses createManyAndReturn({ skipDuplicates }) and returns the created row's id, or null after updating the existing link's jobId."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-link-extractor.service.spec.ts",
+          "reason": "its testing module's providers gain { provide: AuditRecorder, useValue: mockAuditRecorder }, and it gains the US-005 AC-13 case; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-link-extractor.pr-number.spec.ts",
+          "reason": "its direct new VcsLinkExtractorService(...) passes mockAuditRecorder as the second argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/test/integration/vcs/vcs-link-extractor.service.spec.ts",
+          "reason": "its direct new VcsLinkExtractorService(repo) calls pass mockAuditRecorder as the second argument; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/fleet-job-ticket.effects.spec.ts",
+          "reason": "its direct new FleetJobTicketEffects(...) calls pass mockAuditRecorder as the new last argument, its upsertFleetPrLink stubs resolve a link id instead of true and null instead of false, and it gains the US-005 AC-14 case; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.workflow.spec.ts",
+          "reason": "its direct new FleetJobTicketEffects(...) passes mockAuditRecorder as the new last argument and its upsertFleetPrLink stub resolves a link id; the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "CI ticket creation is audited and replay rows get the component actor",
+      "description": "**Goal** \u2014 Record each failed-pipeline ticket inside its allocation attempt as SYSTEM/ci and attribute both public intake replay guards to their components without extra audit entries.\n\n**Motivation** \u2014 Those are writes an outside system caused, and the Audit log is the only place that would show which integration made them and when.\n\n**Approach** \u2014 Ticket creation records inside the ticket-number retry. `createTicketFromIssue` and `PrismaCiWebhookRepository.createTicket` run in `runWithTicketNumberRetry`, which starts a fresh transaction per attempt and refuses to retry inside an outer one (`ticket-number-retry.ts:38`). Wrapping them in `audited` would turn every number conflict into a 409. Both gain an optional last parameter `onCreated: (ticket) => Promise<void>`, run inside the attempt's transaction after the insert, and the services pass a callback that calls `record`. This is the `MembershipService.createBinding(\u2026, onWritten)` pattern from audit-core.\n\nThe replay guard's rows are bookkeeping, written as the component. `WebhookReplayGuard.assertFresh` and `forget` write `WebhookDelivery` rows before the intake service runs, so today they run as `SYSTEM/anonymous` (`permissions-p2-context` left the `ci` id to this feature). `CiWebhookController` wraps both calls in `runAsSystem('ci', \u2026)` and `VcsWebhookController` in `runAsSystem('vcs', \u2026)`. They record no entry.\n\n`apps/api/src/ci-webhook/ci-webhook.service.ts` \u2014 injects AuditRecorder as the last constructor parameter; the private createTicket takes the project's key as well, for the summary, and passes repo.createTicket an onCreated callback that records system.ci.ticket-create on the ticket; event filtering and the response are unchanged.\n`apps/api/src/ci-webhook/prisma-ci-webhook.repository.ts` \u2014 createTicket gains the optional last onCreated parameter, awaited inside the retry attempt's transaction after ticket.create.\n`apps/api/src/ci-webhook/ci-webhook.controller.ts` \u2014 replayGuard.assertFresh and forget run inside runAsSystem('ci', \u2026), awaiting inside the callback; the signature check, validation order and responses are unchanged.\n`apps/api/src/vcs/vcs-webhook.controller.ts` \u2014 replayGuard.assertFresh and forget run inside runAsSystem('vcs', \u2026), awaiting inside the callback; the signature check, the ignore rule and responses are unchanged.\n\nContract: CI ticket created | `system.ci.ticket-create` | `resourceType` `ticket` | `resourceId` ticket id | `projectId` the project | `summary` `created <KEY>-<number>`. The CI ticket is `SYSTEM/ci` (`runAsSystemWriter` in `CiWebhookService.processCiWebhook`, unchanged). No entry in this feature sets `onBehalfOf`. The summary must contain no pipeline id, test name/file, commit SHA or failure payload. Keep ticket titles/descriptions/responses as before.\n\nUse the repository callback instead of audited around ticket-number creation: callback rejection rolls back the insert, propagates through intake, makes the controller forget the delivery id and returns an error status. A retry with the same delivery id then succeeds. Successful/non-failed/replayed deliveries preserve current response/replay behavior and create no extra entries. Keep HMAC validation, secret handling, payload validation, mode ignoring and @Requires keys unchanged. runAsSystem callbacks must be async and await the lazy Prisma/replay operation INSIDE them; merely returning a Prisma promise risks execution after context exit. Components ci/vcs already exist in SYSTEM_ACTOR_IDS.\n\nUpdate ci-webhook.service.spec.ts DI with mockAuditRecorder, accept the optional onCreated argument in repository assertions and add callback/currentContext assertion. Add replay-context unit assertions to ci-webhook.controller.spec.ts (both assertFresh and failing-intake forget) and vcs-webhook.controller.spec.ts (assertFresh), keeping existing assertions. Integration uses real AppModule and the signed CI request precedent in test/e2e/api-endpoint/endpoint.e2e.spec.ts; ten concurrent distinct-delivery webhooks must retain number allocation retries.\n\n**Scope** \u2014 In: CI ticket callback/recording, CI/VCS controller replay attribution and affected tests. Out: US-001 connections; US-002 VCS ticket callback/key plumbing; US-003 PR state audits; US-004 merges; US-005 derived links/effects. Changing the ticket-number allocation, `runWithTicketNumberRetry`, the replay guard's rules, the dedup of pushes or any route's status codes, response bodies or `@Requires` keys is out of scope; `openapi.json` does not change. Recording the update branches of `upsertTicketLink` and `upsertFleetPrLink`, a same-state webhook PR write, the poller's `VcsSyncLog` rows and cursor, the replay rows and a push's `code_commit` outbox rows is out of scope (the Bookkeeping table). The issues webhook's swallowed-error contract is pinned by US-002, not repaired here.\n\n**Interface** \u2014 `PrismaCiWebhookRepository.createTicket(projectId, data)` gains an optional last `onCreated: (ticket: { id: string; number: number }) => Promise<void>`. Return CiTicketDomain as before. Existing action-context functions (read-only): `runAsSystem(component, fn, opts?)`, `runAsSystemWriter(writer, fn)`, `currentContext()`. Required AuditRecorder is the last CiWebhookService constructor dependency. Controllers keep all public signatures/DTOs; wrap each call as `runAsSystem('ci', async () => { await \u2026 })` or `runAsSystem('vcs', async () => { await \u2026 })`.",
+      "acceptanceCriteria": [
+        "[integration; spec AC1] Given the project ciWebhookToken is set through fixtureDb(app), when a validly signed POST /api/projects/:slug/ci-webhook submits event pipeline_failed with one failure as in endpoint.e2e.spec.ts, then the response is 200 with a ticketRef.",
+        "[integration; spec AC1] When that failed-pipeline ticket commits, then exactly one entry for the new ticket matches { key: 'system.ci.ticket-create', resourceType: 'ticket', projectId: project.id, actorType: 'SYSTEM', actorId: 'ci', origin: 'system', summary: 'created <ticketRef>' }.",
+        "[integration; spec AC2] When the CI ticket's audit summary is inspected, then it contains neither the failure test name, its file, the pipeline id nor the commit SHA.",
+        "[integration; spec AC3] Given AC1's delivery already succeeded, when the request is resent with the same x-ci-delivery, then it is refused as a replay.",
+        "[integration; spec AC3] When that CI delivery replay is refused, then the count of system.ci.ticket-create entries is unchanged.",
+        "[integration; spec AC4] When a signed CI webhook submits event pipeline_succeeded, then the response is 200.",
+        "[integration; spec AC4] When the signed pipeline_succeeded event completes, then the count of system.ci.ticket-create entries is unchanged.",
+        "[integration; spec AC5] When a signed pipeline_failed event is submitted while record rejects system.ci.ticket-create, then the route returns an error status.",
+        "[integration; spec AC5] When the CI ticket audit record rejects, then the project's ticket count is unchanged.",
+        "[integration; spec AC5] Given that failed CI delivery and the restored recorder, when it is resent with the same x-ci-delivery, then the response is 200 with a ticketRef.",
+        "[integration; spec AC6] When ten concurrent signed CI pipeline_failed webhooks use distinct x-ci-delivery ids, then all ten return 200.",
+        "[integration; spec AC6] When those ten concurrent CI webhooks finish, then the new tickets have ten distinct numbers.",
+        "[integration; spec AC6] When those ten concurrent CI webhooks finish, then exactly ten system.ci.ticket-create entries exist for the new tickets.",
+        "[unit; spec AC7] Given repository.createTicket invokes onCreated({ id: 't-1', number: 4 }) for project key CIK, when CiWebhookService.processCiWebhook handles a failed pipeline, then recorder.record is called once with key system.ci.ticket-create, resourceId t-1 and summary 'created CIK-4'.",
+        "[unit; spec AC7] Given that callback recorder captures currentContext(), when processCiWebhook executes its ticket callback, then the captured actor is { type: 'SYSTEM', id: 'ci' }.",
+        "[unit; spec AC8] Given a validly signed body and a stub replay guard, when CiWebhookController.handleCiWebhook runs inside runWithActionContext({ actor: { type: 'SYSTEM', id: 'anonymous' }, origin: 'rest' }, ...), then assertFresh captures actor { type: 'SYSTEM', id: 'ci' }.",
+        "[unit; spec AC8] Given a validly signed body whose CI intake throws, when handleCiWebhook runs inside that SYSTEM/anonymous rest context, then replayGuard.forget captures actor { type: 'SYSTEM', id: 'ci' }.",
+        "[unit; spec AC9] Given a webhook-mode connection, a valid signature and a stub replay guard, when VcsWebhookController.handleWebhook runs inside runWithActionContext({ actor: { type: 'SYSTEM', id: 'anonymous' }, origin: 'rest' }, ...), then assertFresh captures actor { type: 'SYSTEM', id: 'vcs' }.",
+        "[failure table] When a CI event other than pipeline_failed is accepted, then the project's ticket count is unchanged.",
+        "[failure table] When a CI delivery is refused as a replay, then the project's ticket count is unchanged."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "ci",
+        "vcs",
+        "webhook",
+        "security",
+        "transactions"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "CI retry transactions and two public HMAC-authenticated replay boundaries span modules; webhook credentials, replay security and actor context require strict isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/ci-webhook/ci-webhook.service.ts",
+        "apps/api/src/ci-webhook/prisma-ci-webhook.repository.ts",
+        "apps/api/src/ci-webhook/ci-webhook.controller.ts",
+        "apps/api/src/vcs/vcs-webhook.controller.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-ci-webhook.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/ci-webhook/ci-webhook.service.ts",
+          "reason": "injects AuditRecorder as the last constructor parameter; the private createTicket takes the project's key as well, for the summary, and passes repo.createTicket an onCreated callback that records system.ci.ticket-create on the ticket; event filtering and the response are unchanged."
+        },
+        {
+          "path": "apps/api/src/ci-webhook/prisma-ci-webhook.repository.ts",
+          "reason": "createTicket gains the optional last onCreated parameter, awaited inside the retry attempt's transaction after ticket.create."
+        },
+        {
+          "path": "apps/api/src/ci-webhook/ci-webhook.controller.ts",
+          "reason": "replayGuard.assertFresh and forget run inside runAsSystem('ci', \u2026), awaiting inside the callback; the signature check, validation order and responses are unchanged."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-webhook.controller.ts",
+          "reason": "replayGuard.assertFresh and forget run inside runAsSystem('vcs', \u2026), awaiting inside the callback; the signature check, the ignore rule and responses are unchanged."
+        },
+        {
+          "path": "apps/api/src/ci-webhook/ci-webhook.service.spec.ts",
+          "reason": "its testing module's providers gain { provide: AuditRecorder, useValue: mockAuditRecorder }, assertions on createTicket's arguments accept the added onCreated callback, and it gains the US-006 AC-7 case; the rest are kept."
+        },
+        {
+          "path": "apps/api/src/ci-webhook/ci-webhook.controller.spec.ts",
+          "reason": "gains the US-006 AC-8 case; the existing assertions are kept."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-webhook.controller.spec.ts",
+          "reason": "gains the US-006 AC-9 case; the existing assertions are kept."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "GOAL AND ARCHITECTURE\nThis is an enhancement to existing API integrations, not greenfield work. Done means committed VCS connection mutations, imported issue tickets, PR-state changes, the shared merge step, newly extracted links, fleet failure comments/PR links and CI-created tickets have transactionally coupled AuditEntry rows with the specified entry-point keys, actors and non-sensitive summaries. Replay bookkeeping must run as its component without recording an entry. All six binding stories are one capability and one PR. Work is confined to apps/api; no CLI, runner, web, database schema, catalog or OpenAPI changes are needed. The detected Express/Next.js stack labels are not authoritative: apps/api/src/main.ts:11 uses AppFactory.createFastifyApp, and .nax/mono/apps/api/context.md:22 identifies NestJS 12/Fastify, Prisma 7 and Vitest. The web stack is Nuxt but is irrelevant to this feature. Read the nathapp-nestjs-patterns skill before implementing NestJS code. Follow repository source-of-truth context rather than editing generated AGENTS.md.\n\nDISCOVERY AND VERIFIED FOUNDATION\nThe codebase-memory MCP is not exposed in this session, so discovery used direct file reads and text searches rooted at the supplied execution repository. Citations below refer to the inspected checkout, not the historical baseline. AuditRecorder.audited wraps fn and entriesOf in txManager.run and accepts an empty entries array (apps/api/src/audit/audit-recorder.service.ts:31). record rejects unknown catalog keys and calls outside a transaction, reads currentContext and persists actor, origin, onBehalfOf, approval and correlationId through storage (same file:41-67). These are existing read-only interfaces; do not use package AuditInterceptor or @Audit. fieldsSummary includes only sorted, defined field names, never values (apps/api/src/audit/audit-summary.ts:2). AuditLogModule is global and exports AuditRecorder (apps/api/src/audit/audit-log.module.ts:10-21); AppModule imports it (apps/api/src/app.module.ts:147). No feature-module import changes are required. GlobalStubsModule already supplies mockAuditRecorder; its audited stub only executes fn, and does NOT evaluate entriesOf (apps/api/src/common/test-helpers/global-stubs.module.ts:42-45). Tests asserting recorder calls through audited need a local behavioral stub that evaluates entriesOf, not that global no-op recorder.\nActionContext uses AsyncLocalStorage (apps/api/src/action-context/action-context.ts:83); runAsSystem sets actor SYSTEM/component and origin system, and runAsSystemWriter derives the component from the existing class decorator (same file:132-160). Nested contexts inherit correlationId through resolveCorrelationId (same file:116-124) but do not implicitly preserve onBehalfOf. SYSTEM_ACTOR_IDS derives the components from existing system catalog keys (same file:78-81); ci and vcs need no new ids or keys. Never set onBehalfOf in this feature. Await lazy Prisma promises INSIDE each runAsSystem callback, not after returning them. Fixture helpers explicitly document that hazard (apps/api/test/helpers/action-context.ts:15-18).\n\nUS-001 IMPACT\nVcsConnectionService currently injects repository/config/poller only (apps/api/src/vcs/vcs-connection.service.ts:23-27). create writes at :79 and refreshes polling only afterward (:92); update builds a selective patch, generates a legacy webhook secret when necessary, returns early for an empty patch (:165), writes at :171 and refreshes afterward; delete writes at :189 before unscheduling; rotate writes at :206. Add required AuditRecorder LAST and audit only the repository mutation in each method. Preserve validation, token encryption, generated-secret response behavior, no-op return and post-commit scheduler effects. Derive create/delete summaries from provider and owner/name; use fieldsSummary with encryptedToken renamed token for update; rotate uses fixed text. Never expose token, encrypted token, secret or allowed-author values in summaries. Existing constructor/module consumers requiring mockAuditRecorder: src/vcs/vcs-connection.service.spec.ts, vcs-connection.webhook-secret.spec.ts, vcs-connection.gitlab.spec.ts and test/integration/vcs/vcs-connection.service.spec.ts (all under apps/api). HTTP and permission precedent: apps/api/test/integration/vcs/vcs-webhook-secret.integration.spec.ts:34-80 sets encryption before boot, registers root first and grants bindings; :90-104 isolates connection fixtures. New output: test/integration/audit/audit-vcs-connections.integration.spec.ts.\n\nUS-002 IMPACT AND RETRY SEAM\nVcsSyncService.syncIssue deduplicates by project/externalVcsId before create and explicitly includes soft-deleted imports (apps/api/src/vcs/vcs-sync.service.ts:31-50). fullSync catches per-issue errors into errors/skipped and keeps the ticket list limited to successful creates (same file:112-131). PrismaVcsRepository.createTicketFromIssue already performs insert inside runWithTicketNumberRetry (apps/api/src/vcs/prisma-vcs.repository.ts:174-212); IVcsRepository declares the boundary at apps/api/src/vcs/domain/vcs.repository.ts:89. Add optional onCreated(ticket: { id: string; number: number }) => Promise<void> to both declarations, await it after insert inside each attempt, and pass an AuditRecorder.record callback from the service. Do NOT wrap ticket creation in audited: runWithTicketNumberRetry checks isInTransaction and reduces attempts to one inside an outer transaction (apps/api/src/common/utils/ticket-number-retry.ts:38-43), turning a recoverable concurrent number conflict into 409. It retries only number uniqueness conflicts (:46-52); audit errors must propagate without retry. Retain MAX(number)+1 and all soft-delete semantics.\nAdd required auditKey as fifth syncIssue argument and inject AuditRecorder immediately after repository, before optional config. Update fullSync to vcs.sync.all, VcsController one-issue route to vcs.sync.issue (apps/api/src/vcs/vcs.controller.ts:234), polling to system.vcs.poll-issues (apps/api/src/vcs/vcs-polling.service.ts:166), webhook to system.vcs.webhook-intake (apps/api/src/vcs/vcs-webhook.service.ts:243). Create src/vcs/vcs-audit.ts with the two exact key unions and prStateSummary, plus its unit spec. The poller already wraps tick as SYSTEM/vcs (:116), but has one catch around the complete poll (:135-224), so a failed import stops later issues, does not advance cursor and skips PR sync. The issue webhook intentionally catches errors and returns success:false (apps/api/src/vcs/vcs-webhook.service.ts:250-255), retaining replay protection and refusing redelivery. Do not silently repair this asymmetry.\nExisting tests needing DI/call expectation updates: apps/api/src/vcs/vcs-sync.service.spec.ts (including direct new at :147); apps/api/test/integration/vcs/vcs-sync.service.spec.ts, vcs-manual-sync.spec.ts, vcs-polling.service.spec.ts, vcs-polling-comprehensive.spec.ts and vcs-polling-pr-sync.integration.spec.ts. Keep all existing assertions while accepting the callback/key parameters. apps/api/src/vcs/vcs-polling.tick.spec.ts:39-70 supplies a fake-timer scheduler setup; add the forwarding AC there. Search all syncIssue consumers, including src/vcs/vcs.controller.spec.ts and test/integration/vcs/vcs-controller.spec.ts and vcs-webhook.integration.spec.ts, for argument assertions affected by the new required key. New audit integration output: test/integration/audit/audit-vcs-issues.integration.spec.ts.\n\nUS-003 IMPACT\nVcsPrSyncService.syncPrStatus currently skips unchanged and terminal states, routes merges to applyMergedPr and updates non-merges directly (apps/api/src/vcs/vcs-pr-sync.service.ts:60-101). Its 404 close sits inside the catch at :128-135 and currently has no catch of its own; an audit failure there would abort the remaining loop unless a nested try/catch logs and increments skipped. Give each non-merge state write an audited boundary with entries only for outcome updated; use the passed fourth auditKey and project.id. Preserve extraction's fire-and-forget promise and caller context (same file:111-124); branchName must be absent from US-003 provider fixtures to avoid unrelated async writes. The repository returns updated even for a same-state write because it updates prUpdatedAt; its conditional update protects merged rows and distinguishes already-merged/not-found (apps/api/src/vcs/prisma-vcs.repository.ts:290-301). The poller query excludes null prState via notIn (same file:250-254), so the direct poll-state fixture starts draft, not null.\nFive VcsWebhookService handlers write non-merge states at apps/api/src/vcs/vcs-webhook.service.ts:333, :418, :453, :485 and :514. Wrap each with audited and record system.vcs.webhook-intake only if outcome is updated AND stored state differs from new state; same-state timestamps remain bookkeeping. Keep ignoredWrite response distinctions (:102) and merged-state protection. Inject AuditRecorder after vcsConfig and before optional extractor/outbox. Inject it after repository and before optionals in VcsPrSyncService. Update VcsController :326 and polling :196 to pass vcs.sync.pr and system.vcs.poll-issues.\nUpdate src/vcs/vcs-pr-sync.service.spec.ts, vcs-webhook.service.spec.ts and vcs-webhook.merged-terminal.spec.ts; test/integration/vcs/vcs-pr-sync.service.spec.ts, vcs-pr-sync-auto-transition.spec.ts and vcs-merged-pr.integration.spec.ts; polling.tick.spec.ts forwarding assertions; every direct syncPrStatus invocation in those tests now requires a key. Existing VcsPrSyncService(repo) and VcsWebhookService direct constructors need new positional recorder arguments without shifting optional collaborators incorrectly. New output: test/integration/audit/audit-vcs-pr-state.integration.spec.ts.\n\nUS-004 MERGE OWNERSHIP AND PARTIAL-COMMIT CONTRACT\napplyMergedPr is the single shared merge step (apps/api/src/vcs/vcs-pr-sync.service.ts:143-153); it conditionally moves link to merged first and only its winning writer invokes handleMergedPrAutoTransition. The helper checks ticket IN_PROGRESS before validation and logs rather than throws transition failure (:172-204). PrismaVcsRepository.applyMergedPrTransition already groups ticket, FIX_REPORT comment and VCS_PR_MERGED activity in txManager.run (apps/api/src/vcs/prisma-vcs.repository.ts:309-346). Wrap applyMergedPr's extent in runAsSystemWriter(this), audit the conditional link write, then audit the transition separately. Do not make the two commits atomic together: transition audit failure must roll back ticket/comment/activity while retaining the committed merged link and its entry. The two entries always use system.vcs.pr-merge-transition and SYSTEM/vcs even from a USER manual sync or SYSTEM/ticket-link refresher; use link.ticket?.projectId ?? null and inherit correlationId. Existing conditional update ensures concurrent merge paths produce one winning link write, one transition and no duplicate FIX_REPORT.\nFleetPrStateRefresher already audits its non-merge branch but delegates merged state to VcsPrSyncService (apps/api/src/fleet/tickets/fleet-pr-state.refresher.ts:136-157); leave it unchanged and avoid a second system.ticket-link.pr-refresh merge entry. Preserve its post-merge knowledge event. Existing concurrency precedent: apps/api/test/integration/vcs/vcs-merge-step.integration.spec.ts:38-62; refresher regression covers shared concurrent paths at apps/api/test/integration/fleet/fleet-pr-refresher.integration.spec.ts:96. Add currentContext unit assertion in src/vcs/vcs-pr-sync.service.spec.ts. New output: test/integration/audit/audit-vcs-merge.integration.spec.ts.\n\nUS-005 DERIVED LINKS AND FLEET EFFECTS\nVcsLinkExtractorService uses the concrete PrismaVcsRepository, not IVcsRepository (apps/api/src/vcs/vcs-link-extractor.service.ts:22-25). It creates a branch before listing commits (:57), catches provider commit-list errors (:61-69), matches/deduplicates commit URLs (:72-83) and writes each through its private helper (:91-100). Pass project/ref context into that helper as needed without altering public extraction signature, wrap each upsert in audited and record ticket.link.add only for a returned string id (undefined from older stubs also means no entry). Change PrismaVcsRepository.upsertTicketLink Promise<void> to Promise<string | null>: return new id only after creation, null after existing link metadata refresh (apps/api/src/vcs/prisma-vcs.repository.ts:353-382). Preserve branch/commit matching, provider behavior and existing writes. Audit actor stays current; never run this helper as SYSTEM merely because it is derived.\nFleetJobTicketEffects already catches errors per ticket and job and uses txManager.run in linkPr/commentOnce (apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts:89-121). Add required recorder last and call record inside those transactions: after createSystemComment and on a newly created PR link. Keep epoch claim, event/outbox writes and per-ticket catches unchanged so audit failure rolls back claim and domain row and next ticket/job still runs (D451). Summary is on ticket.ref, projectId is job.projectId, actor comes from current runner/job/ingest context rather than requestedById. PrismaFleetTicketsRepository.upsertFleetPrLink currently returns a boolean from createMany and then updates jobId on duplicates (apps/api/src/fleet/tickets/prisma-fleet-tickets.repository.ts:156-165); use createManyAndReturn({ skipDuplicates }) to return new id or null, preserving source, existing prState and latest-job behavior.\nExisting regressions needing recorder constructor/DI and id/null stubs: apps/api/src/vcs/vcs-link-extractor.service.spec.ts, vcs-link-extractor.pr-number.spec.ts; apps/api/test/integration/vcs/vcs-link-extractor.service.spec.ts; apps/api/src/fleet/tickets/fleet-job-ticket.effects.spec.ts and apps/api/src/fleet/ingest/bundle-ingest.workflow.spec.ts:114-118. Existing DB precedent asserts once-per-epoch comments/event outbox at apps/api/test/integration/fleet/fleet-tickets-terminal.integration.spec.ts:57-85 and new-link versus existing-vcs-link behavior at apps/api/test/integration/fleet/fleet-pr-links.integration.spec.ts:66-95. New output: test/integration/audit/audit-vcs-derived-links.integration.spec.ts.\n\nUS-006 CI AND REPLAY ATTRIBUTION\nCiWebhookService already wraps intake in runAsSystemWriter(this), filters non-failed events and formats ticketRef with project.key (apps/api/src/ci-webhook/ci-webhook.service.ts:36-68). Add recorder last, carry project key into private createTicket and pass onCreated to repository.createTicket (:83). PrismaCiWebhookRepository creates through the same number retry as VCS (apps/api/src/ci-webhook/prisma-ci-webhook.repository.ts:27-50); await the optional callback after insert inside each attempt, never add an outer audited transaction. Summary is only created KEY-number, not test/file/pipeline/commit data.\nCiWebhookController checks signature, then validates payload, then asserts replay freshness before invoking service and forgets on thrown intake failure (apps/api/src/ci-webhook/ci-webhook.controller.ts:43-63). VcsWebhookController checks signature and mode before asserting replay freshness and forgets only thrown errors (apps/api/src/vcs/vcs-webhook.controller.ts:44-75). Wrap BOTH assertFresh and forget individually with runAsSystem('ci' or 'vcs', async () => { await ... }), preserving validation/signature/ignore ordering, response envelopes and replay rules. No AuditEntry for WebhookDelivery. Update src/ci-webhook/ci-webhook.service.spec.ts, ci-webhook.controller.spec.ts and src/vcs/vcs-webhook.controller.spec.ts. Signed CI request precedent is apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts (CI Webhooks). New output: test/integration/audit/audit-ci-webhook.integration.spec.ts.\n\nSHARED TEST EXECUTION AND FIXTURES\nIntegration criteria use real AppModule via bootHttpApp({ registrationEnabled: false }); set VCS_ENCRYPTION_KEY to 'ab'.repeat(32) BEFORE boot and restore its prior state in afterAll. Register root first as Owner; create viewer via POST /api/admin/users, then project membership roleKey viewer. Each spec owns its project; US-001 uses slug vcs-audit/key VAU. Reset throttles in beforeEach. Read audit rows via fixtureDb(app).auditEntry.findMany({ where: { resourceId } }) and retain active action-context guard using expectGuardActive(app); fixtureDb is for setup/inspection, never an audit-bypassing replacement for executing the writer. Create connections through root's POST /api/projects/:slug/vcs with github/acme/app, token ghp_audit_token, syncMode webhook; keep returned secret and resolve full connection using app.get(VcsConnectionService).getFullByProject(projectId). Use project { id, key, slug }. Sign VCS JSON with HMAC-SHA256 using returned secret, x-hub-signature-256 sha256=<hex>, x-github-event and a fresh x-github-delivery. CI uses project's ciWebhookToken, x-ci-signature and x-ci-delivery. PR fixtures use https://github.com/acme/app/pull/n, provider github, linkType pr, prNumber n and externalRef acme/app#n, with ticket loaded for merges. Partially mock src/vcs/factory preserving exports such as parseRepoPath: vi.mock('../../../src/vcs/factory', async (orig) => ({ ...(await orig()), createVcsProvider: vi.fn() })). Configure fetchIssue/fetchIssues/getPullRequestStatus/listPrCommits per criterion. Omit branchName from PR status fixtures in US-003 to avoid asynchronous extractor work. Failure injection spies on app.get(AuditRecorder).record, rejects the FIRST matching key or named resourceType with Error('audit down'), delegates all other calls to the bound original, and restores the spy after each case. Concurrency criteria use N=10, unique issues/delivery ids and real retry transactions. Unit key-forwarding criteria drive schedulePolling with fake timers; direct SYSTEM/vcs service calls alone do not prove poller forwarding.\nAll new DB specs use canRunDbTests(). Unit and DI tests belong beside src and must run without DB; do not relocate pre-existing suites or weaken their assertions. apps/api/package.json:11-20 defines unit exclusions and scoped DB execution. Execute new integration files using bun run test:scoped outside NAX_SANDBOXED=1; KODA_DB_TESTS=1 is required for explicit Vitest DB/acceptance runs. Missing Postgres outside sandbox is an error, not a skip. Follow .nax/mono/apps/api/context.md: the test harness selects explicit test URL, compose Postgres on 5433 or Testcontainers and resets test DB; never overlap runs on the same DB; second checkouts set KODA_TEST_DB_CONTAINER=1. Generated acceptance file is apps/api/.nax/features/permissions-p2-audit-vcs-ci/.nax-acceptance.test.ts, read-only and run with vitest.nax.config.ts filtered to story AC ids; never create/copy/edit it. Tests were inspected, not executed during PRD drafting.\n\nDEPENDENCIES, RISKS AND MIGRATION\nBinding execution graph is US-001 independent; US-002 independent; US-003 after US-002; US-004 after US-003; US-005 after US-002; US-006 independent. US-003 consumes US-002's vcs-audit.ts and shares controller/poller/webhook files; US-004 changes the same PR service afterward; US-005 follows US-002's repository callback edit. US-001/US-006 are dependency-independent but their connection and intake files/specs overlap other stories: integrate patches without adding binding dependencies. Source changes are additive recorder wiring with intentional internal signature changes; update ALL callers, direct constructors, DI providers and argument matchers together. Avoid retaining old boolean return stubs after fleet link change. No external contract/schema migration or historical audit backfill; rolling forward starts producing entries for new committed writes only. Keep AuditRecorder/action-context/retry/catalog/read helpers read-only. Main risks are transaction nesting breaking allocation retries; auditing bookkeeping or duplicate/no-op writes; recording wrong current actor versus requester; duplicate merge recording in refresher; inadvertently making both merge phases one transaction; leaking sensitive integration payloads into summary; lazy Prisma context escape; forgetting a replay id on an issue webhook's intentionally swallowed failure; failing to forget it on thrown PR/CI errors; escaping the 404 per-link catch and aborting poll; async extractor assertions racing teardown. Preserve existing auth, soft delete, replay validation and state machine constraints; this feature does not introduce the audit coverage guard or walker. AC provenance labels retain all original story ACs, splitting compound observable outcomes where needed; additional required criteria derive only from the spec's Failure Handling table, while optional hardening belongs in suggestedCriteria.\n\nREFINE-PASS SELF-AUDIT\nEnumerated and cross-checked every original criterion: US-001 AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, AC11, AC12; US-002 AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, AC11, AC12, AC13; US-003 AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, AC11, AC12, AC13; US-004 AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10; US-005 AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, AC11, AC12, AC13, AC14; US-006 AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9. All 71 remain labeled in their original story; compound observations are split without dropping regression qualifiers (unchanged counts/state, existing collaborator/fixture precedents, null-state exclusion, same N, already-merged behavior). Restored US-001 AC2/AC7's all-AuditEntry summary scans rather than narrowing those assertions to connection-created/rotation rows. All 11 feature exclusions remain verbatim at top level; adjacent scopes also echo their relevant exclusions. No binding workdir, id or dependency changed. Each story already includes several failure/no-op/refused cases.\nCorrected a real interface error in the draft: SyncPrStatusResult.skipped is a number, not a collection of failed links (apps/api/src/vcs/vcs-pr-sync.service.ts:19-22); failure criteria now expect numeric skipped=1 and inspect a later link's stored state instead of saying it is processed. Exception scenarios require provider rejection with NotFoundAppException, not returning an exception value. Grounded log expectations in actual logger calls (apps/api/src/vcs/vcs-polling.service.ts:207; apps/api/src/vcs/vcs-pr-sync.service.ts:119 and :200; apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts:104 and :119). The new 404-close catch's required log is observable without inventing an unspecified log level. Connection no-write means an empty DTO/patch, not equality comparison against supplied values: current updateData population does not compare same-value fields (apps/api/src/vcs/vcs-connection.service.ts:140-165). The actual controller method for /vcs/sync-pr is VcsController.syncPr, not a new syncPrStatus controller method (apps/api/src/vcs/vcs.controller.ts:307); VcsPrSyncService owns syncPrStatus.\nUS-005 contextFiles now contains all five spec-recommended files, including fleet-tickets-terminal.integration.spec.ts; its PrismaVcsRepository implementation remains an additional required read/modification described above, not a sixth contextFiles item. Other stories retain the most critical spec-recommended sources up to the five-file cap, and no story output is listed as its own context. US-005's asynchronous failure-log criterion uses the stable manual PR-sync HTTP route so it can run after US-002 without requiring US-003's future fourth service argument; only that explicit extractor criterion supplies branchName, while all US-003 fixtures omit it. Await its observable log before teardown.\nRouting is proportional to the changes: US-001 keeps strict security TDD for token/secret mutations; US-006 keeps strict security TDD for replay-protection actor boundaries. US-002/US-004/US-005 use complex three-session-tdd-lite for multi-entry-point retry, merge commit/concurrency and cross-domain idempotency respectively, without calling unchanged authentication/cryptography security work. US-003 is medium tdd-simple for four existing source files using established helpers and transaction wrappers. No tests or source code were changed or executed by this PRD-only audit. In summaries, angle-bracket terms are interpolated fixture values, never literal text: on <ticket ref> means 'on ' + ticket.ref, created <ticketRef> means 'created ' + the returned ticketRef, and issue numbers come from VcsIssue.number, not the newly allocated ticket number.",
+  "outOfScope": [
+    "The other integrations (KB and RAG, memory, entity graph, code intel, knowledge poll; outbound webhooks and delivery, skills, notifications and ticket watch, outbox, email, fleet health, the assistant action finalize, the role seeder, the remaining assistant tools) are out of scope (features `permissions-p2-audit-knowledge` and `permissions-p2-audit-delivery`).",
+    "The runtime coverage guard and the walker test over write surfaces are out of scope (feature `permissions-p2-audit-coverage`). The Bookkeeping table is its input.",
+    "`POST /projects/:slug/vcs/test` (`vcs.connection.test`) writes no row and records nothing.",
+    "`FleetJobTicketEffects.onRunDispatched` is out of scope: it starts tickets through `TicketTransitionsService.startForDispatch`, which audit-core already records.",
+    "Recording the merge step's FIX_REPORT comment or `VCS_PR_MERGED` activity row as entries of their own is out of scope; the transition's entry covers its transaction.",
+    "Recording the update branches of `upsertTicketLink` and `upsertFleetPrLink`, a same-state webhook PR write, the poller's `VcsSyncLog` rows and cursor, the replay rows and a push's `code_commit` outbox rows is out of scope (the Bookkeeping table).",
+    "An `onBehalfOf` on the merge step's entries when a user's PR sync or the fleet refresher saw the merge is out of scope; the shared `correlationId` joins them.",
+    "Adding catalog keys (one per webhook event or per merge entry) is out of scope; each write records under its existing key and the summary names the event.",
+    "Changing the ticket-number allocation, `runWithTicketNumberRetry`, the replay guard's rules, the dedup of pushes or any route's status codes, response bodies or `@Requires` keys is out of scope; `openapi.json` does not change.",
+    "Recording refused or failed attempts (401, 403, 404, 409, validation errors, ignored webhook events) is out of scope; only committed writes are recorded.",
+    "A before/after diff of values in `AuditEntry` is out of scope."
+  ],
+  "routingProfile": "native-codex-ds"
+}
