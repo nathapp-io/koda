@@ -217,6 +217,13 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       // Permissions P1 US-002: an answer steers the live turn, so only the turn's requester may send it.
       if (type === FleetCommandType.THREAD_ANSWER) this.assertOwnLiveSession(job, userId);
       await this.jobs.createCommand({ runnerId: job.runnerId, jobId: job.id, type: type as FleetCommandType, leaseEpoch: job.leaseEpoch, payload });
+      const action = type === FleetCommandType.THREAD_STOP_TURN ? 'stop'
+        : type === FleetCommandType.THREAD_CLOSE ? 'end-session'
+          : type === FleetCommandType.THREAD_ANSWER ? 'answer' : null;
+      if (action) await this.audit.record({
+        key: threadAuditKey(action, scope.kind === 'workspace'), resourceType: 'thread', resourceId: thread.id,
+        projectId: thread.projectId, summary: action === 'stop' ? 'stop requested' : action === 'end-session' ? 'end requested' : 'answered',
+      });
       runnerId = job.runnerId;
     });
     if (runnerId) this.notifier.notify(runnerId);
@@ -279,6 +286,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
         // Permissions P1 US-002: publishing into a live turn steers it, so only the turn's requester may do it.
         this.assertOwnLiveSession(active, userId);
         await this.jobs.createCommand({ runnerId: active.runnerId, jobId: active.id, type: FleetCommandType.THREAD_PUBLISH, leaseEpoch: active.leaseEpoch, payload: {} });
+        await this.audit.record({ key: threadAuditKey('publish', false), resourceType: 'thread', resourceId: thread.id, projectId: thread.projectId, summary: `publish into session ${active.id}` });
         notifyRunnerId = active.runnerId;
         return { jobId: null };
       }
@@ -287,6 +295,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       const job = await this.createThreadJob(thread, 'PUBLISH', undefined, undefined, { id: userId, type: actorTypeFor(userId) });
       await this.jobs.appendEvent(job.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
       await this.activity.record({ actorType: 'USER', actorId: userId, action: 'job.dispatched', entityType: 'job', entityId: job.id, jobId: job.id, projectId: thread.projectId, responsibleUserId: userId, payload: { repoId: repoFields.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: repoFields.baseRef } });
+      await this.audit.record({ key: threadAuditKey('publish', false), resourceType: 'thread', resourceId: thread.id, projectId: thread.projectId, summary: `publish job ${job.id}` });
       placeJobId = job.id;
       return { jobId: job.id };
     });
@@ -328,6 +337,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       const job = await this.createThreadJob(thread, 'DISCARD', undefined, undefined, { id: userId, type: actorTypeFor(userId) });
       await this.jobs.appendEvent(job.id, { leaseEpoch: 0, runnerSeq: null, type: 'state', payload: { from: null, to: 'QUEUED', by: 'server', reason: null } });
       await this.activity.record({ actorType: 'USER', actorId: userId, action: 'job.dispatched', entityType: 'job', entityId: job.id, jobId: job.id, projectId: thread.projectId, responsibleUserId: userId, payload: { repoId: repoFields.repoId, feature: `thread-${thread.id}`, command: 'THREAD', ref: repoFields.baseRef } });
+      await this.audit.record({ key: threadAuditKey('discard', false), resourceType: 'thread', resourceId: thread.id, projectId: thread.projectId, summary: `discard job ${job.id}` });
       placeJobId = job.id;
       return { jobId: job.id };
     });
