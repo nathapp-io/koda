@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-fleet-routes",
   "branchName": "feat/permissions-p2-audit-fleet-routes",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T02:55:35.684Z",
+  "updatedAt": "2026-10-25T02:59:31.537Z",
   "userStories": [
     {
       "id": "US-001",
@@ -199,14 +199,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Adds recorder calls to existing command/publish/discard branches in one repository without changing locks or command algorithms; live-session requester security and input privacy still require strict isolated TDD."
+        "reasoning": "Adds recorder calls to existing command/publish/discard branches in one repository without changing locks or command algorithms; live-session requester security and input privacy still require strict isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
@@ -228,7 +231,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0aaef7d11bbe69568cbc17d714acccbdaa5aad18"
     },
     {
       "id": "US-004",
