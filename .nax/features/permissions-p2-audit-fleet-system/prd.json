@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-fleet-system",
   "branchName": "feat/permissions-p2-audit-fleet-system",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T07:59:12.166Z",
+  "updatedAt": "2026-10-25T08:06:27.587Z",
   "userStories": [
     {
       "id": "US-001",
@@ -524,14 +524,17 @@
         "system-writers"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three existing processors gain standard record/audited calls without a new deletion or PR-refresh algorithm; touching spent enrollment-token records retains the security override despite the additive scope."
+        "reasoning": "Three existing processors gain standard record/audited calls without a new deletion or PR-refresh algorithm; touching spent enrollment-token records retains the security override despite the additive scope.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/logs/fleet-log-retention.processor.ts",
@@ -573,7 +576,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "065715beaed477aac5b05ece3bfbf0df7943acb2"
     },
     {
       "id": "US-008",
