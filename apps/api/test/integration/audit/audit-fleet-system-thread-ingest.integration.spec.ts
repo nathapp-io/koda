@@ -43,7 +43,10 @@ describeDb('US-008 system thread and knowledge audit integration (PG)', () => {
 
   afterAll(async () => {
     try { await app?.close(); } finally {
-      for (const key of envKeys) saved[key] === undefined ? delete process.env[key] : process.env[key] = saved[key] as string;
+      for (const key of envKeys) {
+        if (saved[key] === undefined) delete process.env[key];
+        else process.env[key] = saved[key] as string;
+      }
       if (artifactDir) rmSync(artifactDir, { recursive: true, force: true });
     }
   });
