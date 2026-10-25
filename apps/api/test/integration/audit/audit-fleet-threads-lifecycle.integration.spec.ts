@@ -55,6 +55,21 @@ describeDb('fleet thread lifecycle audit HTTP', () => {
     expect(await db.auditEntry.count({ where: { key: 'thread.create', projectId: world.projectId } })).toBe(before + 1);
   });
 
+  it('AC-14: concurrent repo-feature creates leave only the winner audited and translate the loser conflict', async () => {
+    const feature = `audit-race-${++seq}`;
+    const before = await db.auditEntry.count({ where: { key: 'thread.create', projectId: world.projectId } });
+    const responses = await Promise.all([
+      projectCreate('race-first', feature),
+      projectCreate('race-second', feature),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
+    const winner = data<{ id: string }>(responses.find((response) => response.status === 201)!);
+    const loser = responses.find((response) => response.status === 409)!;
+    expect(loser.body.message).toBe(`An active thread already uses feature ${feature}`);
+    expect(await entries('thread.create', winner.id)).toEqual([expect.objectContaining({ key: 'thread.create', resourceType: 'thread', projectId: world.projectId, summary: 'created REPO' })]);
+    expect(await db.auditEntry.count({ where: { key: 'thread.create', projectId: world.projectId } })).toBe(before + 1);
+  });
+
   it('AC-5: audits workspace creation against its home project', async () => {
     const thread = data<{ id: string; homeProject: { slug: string } }>(await createWorkspace().expect(201));
     const row = await entries('thread.workspace.create', thread.id);
