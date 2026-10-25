@@ -895,7 +895,7 @@ describe('MemoryController', () => {
   describe('audit entries (US-002)', () => {
     interface UpsertOptions { onWritten?: (written: MemoryWritten) => Promise<void> }
 
-    /** Largest `upsert` mock: it answers the created item, and runs the caller's `onWritten` like the repository. */
+    /** The `upsert` mock: it answers the created item, and runs the caller's `onWritten` like the repository. */
     const upsertRunningHook = (): void => {
       (repository.upsert as Mock).mockImplementation(
         async (_input: unknown, options?: UpsertOptions): Promise<MemoryItem> => {
