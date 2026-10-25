@@ -1,3 +1,4 @@
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import type { Mock } from 'vitest';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { FleetTicketsService } from './fleet-tickets.service';
@@ -10,7 +11,7 @@ describe('FleetTicketsService.resolveForDispatch (C9 D450)', () => {
 
   beforeEach(() => {
     repo = { findProject: vi.fn().mockResolvedValue({ key: 'WEB', slug: 'web' }), findTicketsByNumbers: vi.fn() };
-    service = new FleetTicketsService(repo as never, { run: (fn: () => unknown) => fn() } as never, {} as never);
+    service = new FleetTicketsService(repo as never, { run: (fn: () => unknown) => fn() } as never, {} as never, mockAuditRecorder);
   });
 
   it('returns [] without touching the DB when no refs are given', async () => {
@@ -58,7 +59,7 @@ describe('FleetTicketsService list and unlink (C9 §2.2-§2.3)', () => {
       unlink: vi.fn().mockResolvedValue(true),
     };
     events = { record: vi.fn() };
-    service = new FleetTicketsService(repo as never, { run: (fn: () => unknown) => fn() } as never, events as never);
+    service = new FleetTicketsService(repo as never, { run: (fn: () => unknown) => fn() } as never, events as never, mockAuditRecorder);
   });
 
   it('lists up to 50 jobs with the summed cost', async () => {

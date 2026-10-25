@@ -1,3 +1,4 @@
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import type { Mock } from 'vitest';
 import { FleetJobsService } from './fleet-jobs.service';
 import type { FleetJobRecord } from './domain/fleet-job.domain';
@@ -44,6 +45,7 @@ describe('fleet jobs service approvals count (S1.5 2a D272)', () => {
       fleetTickets as never,
       {} as never,
       configEdits as never,
+      mockAuditRecorder,
     );
   });
 
@@ -106,6 +108,7 @@ describe('fleet jobs service dispatch open-PR guard (#231)', () => {
       fleetTickets as never,
       {} as never,
       { findByJobId: vi.fn() } as never,
+      mockAuditRecorder,
     );
   };
 

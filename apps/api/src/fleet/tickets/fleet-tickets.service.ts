@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { TicketStatus } from '../../common/enums';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { FleetJobTicketDto } from './dto/ticket-fleet-job.dto';
@@ -36,6 +37,7 @@ export class FleetTicketsService {
     private readonly repo: PrismaFleetTicketsRepository,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly events: FleetTicketEventRecorder,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /** D450: validated before the dispatch transaction; throws 400 naming the first bad ref. */
@@ -81,6 +83,7 @@ export class FleetTicketsService {
     await this.txManager.run(async () => {
       if (!(await this.repo.unlink(jobId, ticketId))) throw new NotFoundAppException({}, 'fleet.ticketJobs');
       await this.events.record({ projectId, ticketId, action: 'TICKET_UPDATED', actorId, data: { fleetJobUnlinked: jobId } });
+      await this.audit.record({ key: 'fleet.ticket-job.unlink', resourceType: 'ticket', resourceId: ticketId, projectId, summary: `job ${jobId} unlinked` });
     });
   }
 

@@ -1,3 +1,4 @@
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FleetJobsService } from './fleet-jobs.service';
 import type { FleetJobRecord } from './domain/fleet-job.domain';
@@ -38,6 +39,7 @@ describe('fleet jobs service requeue of a config job (US-003)', () => {
     const service = new FleetJobsService(
       repo as never, placement as never, {} as never, { publish: vi.fn() } as never, transitions as never, {} as never,
       budgets as never, txManager as never, { countPendingByJob: vi.fn().mockResolvedValue(new Map()) } as never, { forJob: vi.fn().mockResolvedValue([]) } as never, {} as never, configEdits as never,
+      mockAuditRecorder,
     );
     return { service, repo, transitions, budgets, placement, configEdits };
   };
