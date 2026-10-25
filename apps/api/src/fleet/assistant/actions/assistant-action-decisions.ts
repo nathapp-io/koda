@@ -4,6 +4,7 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { randomUUID } from 'crypto';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
 import { AuditRecorder } from '../../../audit/audit-recorder.service';
+import { runAsSystem } from '../../../action-context/action-context';
 import { FLEET_CFG, IFleetConfig } from '../../../config/fleet.config';
 import type { LiveFleetApprovalEvent } from '../../../live/live-event';
 import { ThreadEventBus } from '../../../live/thread-event-bus';
@@ -105,6 +106,7 @@ export class AssistantActionDecisions implements OnModuleInit, AssistantActionDe
   async expireLocked(action: PendingActionRecord, approval: FleetApprovalRecord, now: Date): Promise<SettledAction> {
     const expiredAction = await this.actions.resolve(action.id, { status: 'EXPIRED', decidedAt: now });
     const expired = await this.approvals.resolve(approval.id, { status: 'expired', resolvedBy: 'timeout', decidedAt: now });
+    await runAsSystem('assistant-action', () => this.audit.record({ key: 'system.assistant-action.expire', resourceType: 'fleet-approval', resourceId: expired.id, projectId: expired.projectId, summary: 'expired' }));
     const actor: ApprovalActor = { type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId: action.actorId };
     const live = await this.closer.recordResolved(expired, actor);
     return { approval: expired, live, noteId: await this.actions.insertSystemNote(action.threadId, outcomeNote(expiredAction)) };

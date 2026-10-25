@@ -1,4 +1,5 @@
 import { ApprovalCloser } from './approval-closer';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { approvalWebhookPayload } from './approval-payloads';
 import type { FleetApprovalRecord, NewFleetApproval } from './domain/approval.domain';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
@@ -37,7 +38,9 @@ function fakes() {
   const webhooks = { dispatch: vi.fn(async () => undefined) };
   const live = { event: vi.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
   const outbox = { record: vi.fn(async (e: { type: string; payload?: Record<string, unknown> }) => ({ id: 'ob1', ...e })) };
-  const closer = new ApprovalCloser(repo as never, activity as never, webhooks as never, live as never, outbox as never);
+  mockAuditRecorder.record.mockReset();
+  mockAuditRecorder.record.mockImplementation(async () => undefined);
+  const closer = new ApprovalCloser(repo as never, activity as never, webhooks as never, live as never, outbox as never, mockAuditRecorder);
   return { closer, repo, activity, webhooks, outbox, rows };
 }
 
@@ -130,6 +133,7 @@ describe('bash (S1.5 2a)', () => {
       policyId: null, expiresAt: new Date(NOW.getTime() + 300_000),
     }));
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ actorType: 'RUNNER', actorId: 'r1', responsibleUserId: 'u9', action: 'approval.requested' }));
+    expect(mockAuditRecorder.record).toHaveBeenCalledWith({ key: 'runner.sync', resourceType: 'fleet-approval', resourceId: approval?.id, projectId: 'p1', summary: 'bash ask opened, pending' });
     expect(webhooks.dispatch).toHaveBeenCalledWith('p1', 'fleet.approval.requested', expect.anything());
     expect(live).toHaveLength(1);
   });
@@ -151,6 +155,17 @@ describe('bash (S1.5 2a)', () => {
   it('caps expiresAt at requestedAt + approvalTimeoutSec', async () => {
     const { approval } = await closer.openBash({ ...job, approvalTimeoutSec: 60 }, ask(), 'r1', NOW);
     expect(approval?.expiresAt).toEqual(new Date(NOW.getTime() + 60_000));
+  });
+
+  it('AC-14: returns an existing ask unchanged without recording audit', async () => {
+    const { closer, repo } = fakes();
+    const existing = { id: 'existing', type: 'nax_bash_escalate', status: 'pending', projectId: 'p1' } as FleetApprovalRecord;
+    repo.findByAsk.mockResolvedValue(existing);
+
+    const result = await closer.openBash(job, ask(), 'r1', NOW);
+
+    expect(result).toEqual({ approval: existing, live: [] });
+    expect(mockAuditRecorder.record).not.toHaveBeenCalled();
   });
 
   it('is idempotent on (jobId, leaseEpoch, naxAskId)', async () => {
@@ -176,6 +191,7 @@ describe('bash (S1.5 2a)', () => {
     const { approval } = await closer.openBash(job, ask({ deadlineAt: new Date(NOW.getTime() - 1) }), 'r1', NOW);
     expect(approval).toEqual(expect.objectContaining({ status: 'expired', resolvedBy: 'timeout' }));
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'approval.expired' }));
+    expect(mockAuditRecorder.record).toHaveBeenCalledWith({ key: 'runner.sync', resourceType: 'fleet-approval', resourceId: approval?.id, projectId: 'p1', summary: 'bash ask opened, expired' });
   });
 
   it('closeForJob cancels every pending ask of the job with job_ended and a resolved webhook', async () => {
