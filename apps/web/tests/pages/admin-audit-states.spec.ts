@@ -257,6 +257,38 @@ describe('admin audit page paging, refresh and states (Permissions P2 US-006)', 
   // Edges the ACs imply
   // ───────────────────────────────────────────────────────────────────────────
 
+  test('AC-10 (edge): a first load that failed is not an empty log', async () => {
+    const err = new ApiError(500, 'audit unavailable')
+    const p = mountPage(reference({ audit: [err] }))
+    await p.settle()
+    expect(p.toast.error).toHaveBeenCalledWith(extractApiError(err))
+    expect(p.byId('audit-empty')).toHaveLength(0)
+    expect(p.byId('audit-row')).toHaveLength(0)
+    p.app.unmount()
+  })
+
+  test('AC-10 (edge): a key list that finished does not make a failed entry load look empty', async () => {
+    // loadKeys() clears the composable's shared `pending`, so an audit failure must not be read as
+    // "the load finished and there was nothing".
+    const err = new ApiError(500, 'audit unavailable')
+    const p = mountPage(reference({ audit: [err], keys: { keys: ['comment.create'] } }))
+    await p.settle()
+    expect(p.byId('audit-empty')).toHaveLength(0)
+    p.app.unmount()
+  })
+
+  test('AC-10 (guard): a filter change that answers no entries still shows the empty state', async () => {
+    // The failed-load rule must not make the log un-emptiable: a successful empty answer is empty.
+    const p = mountPage(reference({ audit: [pageOf([ENTRY]), pageOf([])] }))
+    await p.settle()
+    expect(p.byId('audit-row')).toHaveLength(1)
+    p.route.query = { key: 'comment.create' }
+    await p.settle()
+    expect(p.byId('audit-empty')).toHaveLength(1)
+    expect(p.byId('audit-row')).toHaveLength(0)
+    p.app.unmount()
+  })
+
   test('a refusal after a successful load hides the table the reader was studying', async () => {
     const p = mountPage(reference({ audit: [pageOf([ENTRY], true), new ApiError(40003, 'Forbidden')] }))
     await p.settle()

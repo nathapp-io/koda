@@ -24,6 +24,13 @@ const { entries, keys, hasNext, pending, load, loadKeys } = useAuditLog()
 /** Set when the API refuses `GET /audit` with a permission error: the page is admin-only. */
 const adminOnly = ref(false)
 
+/**
+ * True once a `GET /audit` request has answered successfully. The composable's `pending` is shared
+ * with the key list (and clears on a failure too), so it cannot say whether the log was read: only
+ * this flag lets the page call the log empty, and a failed request never does.
+ */
+const loaded = ref(false)
+
 /** The URL query is the only filter state. */
 const filters = computed(() => parseAuditRoute(route.query))
 
@@ -189,6 +196,7 @@ async function reload(): Promise<void> {
   try {
     await load(filters.value)
     adminOnly.value = false
+    loaded.value = true
   } catch (err: unknown) {
     if (isForbidden(err)) {
       adminOnly.value = true
@@ -223,8 +231,11 @@ function setPage(page: number): void {
   void router.replace({ query: auditRouteQuery({ ...filters.value, page: Math.max(1, page) }) })
 }
 
-/** Nothing loaded yet is not an empty page: only a finished load can say the log is empty. */
-const isEmpty = computed(() => !pending.value && entries.value.length === 0)
+/**
+ * An empty log is a *successful* read with no records: `loaded` gates it, so a failed request is
+ * only ever the error toast, never a claim that nothing was written.
+ */
+const isEmpty = computed(() => loaded.value && !pending.value && entries.value.length === 0)
 
 onMounted(() => {
   void reload()
