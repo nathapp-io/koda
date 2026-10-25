@@ -147,11 +147,11 @@ export class KnowledgeRepoIndexer {
       }
       await this.audit.audited(async () => {
         await finish({ status: 'idle', indexedSha: head, lastError: selection.capMessage, patternsKey });
-        finishedIdle = true;
-        if (mutated) await this.rag.optimizeTable(repo.projectId);
         return { status: 'indexed' as const };
       }, () => [{ key: 'system.knowledge.index', resourceType: 'fleet-repo', resourceId: repo.id, projectId: repo.projectId,
         summary: `indexed ${changedCount} changed, ${removedCount} removed` }]);
+      finishedIdle = true;
+      if (mutated) await this.rag.optimizeTable(repo.projectId);
       return { status: 'indexed' };
     } catch (error) {
       const message = error instanceof RepoCheckException ? error.reason : error instanceof Error ? error.message : String(error);

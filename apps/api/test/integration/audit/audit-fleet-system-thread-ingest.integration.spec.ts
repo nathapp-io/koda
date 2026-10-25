@@ -11,6 +11,7 @@ import { enrollRunner, FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/
 import { putThreadLines, seedThreadJobFor } from '../../helpers/thread-fixtures';
 import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
 import { KnowledgeRepoIndexer } from '../../../src/fleet/knowledge/knowledge-repo-indexer';
+import { ThreadIngestor } from '../../../src/fleet/threads/ingest/thread-ingestor';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { withTestActor, fixtureDb } from '../../helpers/action-context';
 
@@ -85,14 +86,21 @@ describeDb('US-008 system thread and knowledge audit integration (PG)', () => {
 
   it('AC-5: audit rejection prevents completion even through line retry', async () => {
     const s = await seed('audit-thread-ac5');
-    await upload(s, [start('t6')]);
-    const before = await auditRows(s.threadId);
+    const beforeOffset = await upload(s, [start('t6')]);
     const record = vi.spyOn(app.get(AuditRecorder), 'record').mockRejectedValue(new Error('audit down'));
-    await upload(s, [end('t6')]);
-    const message = await prisma.chatMessage.findFirstOrThrow({ where: { threadId: s.threadId, turnId: 't6', role: 'assistant' } });
-    expect(await auditRows(s.threadId)).toHaveLength(before.length);
-    expect(message.status).not.toBe('complete');
-    record.mockRestore();
+    try {
+      await upload(s, [{ ...end('t6'), costUsd: 2 }]);
+      const message = await prisma.chatMessage.findFirstOrThrow({ where: { threadId: s.threadId, turnId: 't6', role: 'assistant' } });
+      expect(await auditRows(s.threadId)).toHaveLength(0);
+      expect(message.status).not.toBe('complete');
+      expect((await prisma.threadIngestCursor.findUniqueOrThrow({ where: { jobId_leaseEpoch: { jobId: s.jobId, leaseEpoch: 1 } } })).offset).toBe(BigInt(beforeOffset));
+    } finally { record.mockRestore(); }
+    const ingestor = app.get(ThreadIngestor);
+    await ingestor.catchUp(s.jobId, 1);
+    await ingestor.catchUp(s.jobId, 1);
+    expect(await prisma.chatMessage.findFirstOrThrow({ where: { threadId: s.threadId, turnId: 't6', role: 'assistant' } })).toMatchObject({ status: 'complete', content: 'Done' });
+    expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: s.jobId } })).costSpentUsd.toString()).toBe('2');
+    expect(await auditRows(s.threadId)).toHaveLength(1);
   });
 
   it('AC-6: stale lease rejects upload and adds no audit entry', async () => {

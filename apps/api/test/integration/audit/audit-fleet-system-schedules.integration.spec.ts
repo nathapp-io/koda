@@ -147,15 +147,15 @@ describeDb('fleet system schedule audit (PG)', () => {
     const s = await schedule();
     const previous = process.env.FLEET_TEST_HOOKS;
     process.env.FLEET_TEST_HOOKS = 'false';
+    // Config is cached at application boot; restore it even when the request/assertion fails.
+    const config = app.get<IFleetConfig>(FLEET_CFG);
+    const wasEnabled = config.testHooksEnabled;
     try {
-      // Config is cached at application boot, so invoke the controller's same registered config value.
-      const config = app.get<IFleetConfig>(FLEET_CFG);
-      const wasEnabled = config.testHooksEnabled;
       config.testHooksEnabled = false;
       await request(server).post(`/api/fleet/test-hooks/schedules/${s.id}/fire`).set(auth('root')).expect(404);
       expect(await rows(s.id, 'testhook.schedule.fire')).toHaveLength(0);
-      config.testHooksEnabled = wasEnabled;
     } finally {
+      config.testHooksEnabled = wasEnabled;
       if (previous === undefined) delete process.env.FLEET_TEST_HOOKS;
       else process.env.FLEET_TEST_HOOKS = previous;
     }
@@ -165,7 +165,7 @@ describeDb('fleet system schedule audit (PG)', () => {
     const response = await request(server).post('/api/projects/web/fleet/jobs').set(auth('dev')).send({
       repoId: world.repoId, command: 'RUN', feature: `manual-audit-${++n}`, ref: 'main', profiles: [], maxCostUsd: 5,
     }).expect(201);
-    const job = data<{ id: string }>(response).job;
+    const job = data<{ job: { id: string } }>(response).job;
     expect(await rows(job.id, 'fleet.job.dispatch')).toHaveLength(1);
     expect(await rows(job.id, 'system.schedule.dispatch')).toHaveLength(0);
   });

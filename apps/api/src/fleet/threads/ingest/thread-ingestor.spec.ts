@@ -22,12 +22,10 @@ describe('ThreadIngestor (US-002)', () => {
         if (batch.lines.some(({ line }) => line.messageId === 'm2') && batch.lines.length > 1) {
           throw new Error('batch contains m2');
         }
-        if (batch.lines[0]?.line.messageId === 'm2' && batch.badLines === 0) {
-          throw new Error('m2 rejected');
-        }
         const firstLine = batch.lines[0]?.line;
         if (firstLine && !('bad' in firstLine) && firstLine.messageId !== 'm2') folded.push(firstLine.messageId);
-        const skipped = batch.lines.filter(({ line }) => 'bad' in line).length;
+        // Domain-invalid lines are reported as skipped, not storage exceptions.
+        const skipped = batch.lines.filter(({ line }) => 'bad' in line || line.messageId === 'm2').length;
         cursor = { offset: batch.endOffset, skippedLines: cursor.skippedLines + batch.badLines + skipped };
         return { costChanged: false, events: [] };
       }),
@@ -37,6 +35,44 @@ describe('ThreadIngestor (US-002)', () => {
 
     expect(folded).toEqual(['m1', 'm3']);
     expect(cursor).toEqual({ offset: source.length, skippedLines: 1 });
+  });
+
+  it('preserves a failed turn_end cursor and replays completion exactly once after recovery', async () => {
+    const prefix = JSON.stringify({ type: 'turn_start', turnId: 't1' }) + '\n';
+    const source = Buffer.from(prefix + JSON.stringify({ type: 'turn_end', turnId: 't1', status: 'completed', output: 'Done', costUsd: 2, usage: { inputTokens: 1, outputTokens: 1 } }) + '\n');
+    const store = {
+      size: vi.fn().mockResolvedValue(source.length),
+      read: vi.fn(async (_key: string, from: number, to: number) => source.subarray(from, to)),
+      withLock: vi.fn(async (_key: string, fn: () => Promise<unknown>) => fn()),
+    } as unknown as LogStore;
+    let offset = 0;
+    let unavailable = true;
+    const completions: object[] = [];
+    const audits: string[] = [];
+    const repository: ThreadIngestRepository = {
+      readCursor: vi.fn(async () => ({ offset, skippedLines: 0 })),
+      fold: vi.fn(async batch => {
+        const end = batch.lines.find(({ line }) => line.type === 'turn_end');
+        if (end && unavailable) throw new Error('audit down');
+        if (end) {
+          completions.push(end.line);
+          audits.push('turn ended completed');
+        }
+        offset = batch.endOffset;
+        return { costChanged: !!end, events: [] };
+      }),
+    };
+    const ingestor = new ThreadIngestor(store, repository, 65_536);
+    await expect(ingestor.catchUp('job-1', 1)).rejects.toThrow('audit down');
+    expect(offset).toBe(Buffer.byteLength(prefix));
+    expect(completions).toEqual([]);
+    expect(audits).toEqual([]);
+    unavailable = false;
+    await ingestor.catchUp('job-1', 1);
+    await ingestor.catchUp('job-1', 1);
+    expect(offset).toBe(source.length);
+    expect(completions).toEqual([expect.objectContaining({ status: 'completed', output: 'Done', costUsd: 2 })]);
+    expect(audits).toEqual(['turn ended completed']);
   });
 
   it('#271: folds a published line, whose own ignored field is not the ignored-type sentinel', async () => {

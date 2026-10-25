@@ -91,11 +91,10 @@ export class ThreadIngestor {
                 pendingBadLines = 0;
               } catch (error) {
                 this.logger.error(`Failed to fold thread line for job ${jobId} at ${entry.endOffset}`, error);
-                await this.foldAndPublish({
-                  jobId, leaseEpoch, lines: [{ line: { bad: true }, endOffset: entry.endOffset }],
-                  endOffset: entry.endOffset, badLines: pendingBadLines,
-                });
-                pendingBadLines = 0;
+                // Invalid input is classified by the parser or returned as skipped by the
+                // fold. A thrown storage/audit error is not evidence of an invalid line:
+                // leave its cursor uncommitted so a later catch-up can retry it.
+                throw error;
               }
             }
           }

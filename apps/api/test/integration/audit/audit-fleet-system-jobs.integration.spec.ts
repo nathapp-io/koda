@@ -1,6 +1,9 @@
 import { canRunDbTests } from '../../helpers/test-environment';
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { tarGz } from '../../helpers/tar-gz';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
@@ -23,6 +26,8 @@ describeDb('system fleet job audit writes (PG)', () => {
   let prisma: PrismaClient;
   let base: Awaited<ReturnType<typeof seedFleetBase>>;
   let runnerId: string;
+  let artifactDir: string;
+  const previousArtifactDir = process.env.FLEET_ARTIFACT_DIR;
   let n = 0;
   const now = new Date('2026-10-01T12:00:00.000Z');
   const job = (over: Partial<Prisma.FleetJobUncheckedCreateInput> = {}) => prisma.fleetJob.create({
@@ -31,13 +36,21 @@ describeDb('system fleet job audit writes (PG)', () => {
   const auditRows = (id: string, key: string) => prisma.auditEntry.findMany({ where: { resourceType: 'fleet-job', resourceId: id, key } });
 
   beforeAll(async () => {
+    artifactDir = mkdtempSync(join(tmpdir(), 'koda-audit-system-jobs-'));
+    process.env.FLEET_ARTIFACT_DIR = artifactDir;
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     prisma = fixtureDb(app);
     base = await seedFleetBase(prisma);
     runnerId = (await insertRunner(prisma, { lastSeenAt: new Date(now.getTime() - 301_000) })).id;
   });
-  afterAll(async () => { await app.close(); });
+  afterAll(async () => {
+    try { await app?.close(); } finally {
+      if (previousArtifactDir === undefined) delete process.env.FLEET_ARTIFACT_DIR;
+      else process.env.FLEET_ARTIFACT_DIR = previousArtifactDir;
+      if (artifactDir) rmSync(artifactDir, { recursive: true, force: true });
+    }
+  });
   beforeEach(async () => {
     await prisma.auditEntry.deleteMany();
     await prisma.budgetPolicy.deleteMany();

@@ -80,6 +80,7 @@ out/
 apps/web/playwright-report/
 apps/web/test-results/
 apps/api/lancedb/
+apps/api/data/fleet-artifacts/
 lancedb/
 
 ## cli test will create .koda on apps/cli

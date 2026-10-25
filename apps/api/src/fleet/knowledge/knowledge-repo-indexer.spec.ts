@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { KnowledgeRepoIndexer } from './knowledge-repo-indexer';
 import { KnowledgeStoreUnavailableError } from './knowledge-chunk-store';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
@@ -239,11 +240,25 @@ describe('KnowledgeRepoIndexer', () => {
   it('optimizes after finishing idle, and restores the prior SHA if optimization fails', async () => {
     const f = fixture();
     f.state.listStates.mockResolvedValue([{ repoId: 'r1', indexedSha: 'old-head' }]);
-    f.rag.optimizeTable.mockRejectedValue(new KnowledgeStoreUnavailableError());
+    const committedEntries: unknown[] = [];
+    let inAudit = false;
+    f.audit.audited.mockImplementation(async (fn, entriesOf) => {
+      inAudit = true;
+      try {
+        const result = await fn();
+        committedEntries.push(...entriesOf(result));
+        return result;
+      } finally { inAudit = false; }
+    });
+    f.rag.optimizeTable.mockImplementation(async () => {
+      expect(inAudit).toBe(false);
+      throw new KnowledgeStoreUnavailableError();
+    });
     expect(await f.indexer.indexRepo('r1', now)).toEqual({ status: 'failed', reason: new KnowledgeStoreUnavailableError().message });
     expect(f.state.finish.mock.calls[0][1]).toMatchObject({ status: 'idle', indexedSha: 'head' });
     expect(f.state.finish.mock.invocationCallOrder[0]).toBeLessThan(f.rag.optimizeTable.mock.invocationCallOrder[0]);
     expect(f.state.finish.mock.calls[1][1]).toMatchObject({ status: 'failed', indexedSha: 'old-head' });
+    expect(committedEntries).toEqual([expect.objectContaining({ key: 'system.knowledge.index', summary: 'indexed 1 changed, 0 removed' })]);
   });
 
   it('never persists a minted token included in a collaborator error', async () => {
@@ -574,7 +589,7 @@ describe('KnowledgeRepoIndexer outcome passes (S5b US-004)', () => {
       mintReadOnlyToken: vi.fn(), getBranchHead: vi.fn(), getTree: vi.fn(), getFile: vi.fn(),
     };
     const indexer = new KnowledgeRepoIndexer(state as unknown as IKnowledgeIndexRepository, github as unknown as GitHubAppClient,
-      store as unknown as KnowledgeChunkStore, embeddings as unknown as EmbeddingService, rag as unknown as RagService, () => now.getTime());
+      store as unknown as KnowledgeChunkStore, embeddings as unknown as EmbeddingService, rag as unknown as RagService, mockAuditRecorder, () => now.getTime());
     return { indexer, state, store, embeddings, rag, github, job, fake };
   }
 
