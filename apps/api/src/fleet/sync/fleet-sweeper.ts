@@ -1,4 +1,5 @@
 import { SystemWriter } from '../../permissions/system-writer.decorator';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { runAsSystemWriter } from '../../action-context/action-context';
@@ -33,6 +34,7 @@ export class FleetSweeper implements OnModuleInit, OnModuleDestroy {
     private readonly attribution: PrAttributionService,
     private readonly approvalLive: ApprovalLivePublisher,
     private readonly ticketEffects: FleetJobTicketEffects,
+    private readonly audit: AuditRecorder,
   ) {}
 
   onModuleInit(): void {
@@ -62,7 +64,9 @@ export class FleetSweeper implements OnModuleInit, OnModuleDestroy {
         if (!job || !(RUNNER_HELD_STATES as readonly string[]).includes(job.state) || !job.runnerId) return null;
         const [runner] = await this.repo.findPlacementRunners([job.runnerId]);
         if (runner && runner.lastSeenAt.getTime() >= cutoff.getTime()) return null;
-        return this.transitions.apply({ job, to: FleetJobState.CRASHED, by: 'server', now, actor: SYSTEM_ACTOR, reason: 'runner silent' });
+        const result = await this.transitions.apply({ job, to: FleetJobState.CRASHED, by: 'server', now, actor: SYSTEM_ACTOR, reason: 'runner silent' });
+        await this.audit.record({ key: 'system.job.crash-silent-runner', resourceType: 'fleet-job', resourceId: job.id, projectId: job.projectId, summary: `${job.state} -> CRASHED` });
+        return result;
       });
       if (result) {
         this.live.publish([result.live]);

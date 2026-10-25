@@ -1,5 +1,6 @@
 import { AuthException } from '@nathapp/nestjs-common';
 import { EnrollmentService } from './enrollment.service';
+import { currentActor } from '../../action-context/action-context';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { ProtocolVersionException } from './protocol-version.exception';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
@@ -56,6 +57,21 @@ describe('EnrollmentService', () => {
     repo.consumeEnrollment.mockResolvedValue(null);
     await expect(service.enroll(body as never)).rejects.toBeInstanceOf(AuthException);
     expect(repo.createRunner).not.toHaveBeenCalled();
+  });
+
+  it('records runner.enroll as the newly created runner inside the enrollment transaction', async () => {
+    repo.consumeEnrollment.mockResolvedValue({ id: 'e1', labels: [], createdById: 'u1' });
+    repo.createRunner.mockImplementation(async (d) => ({ id: 'r1', ...d }));
+    let capturedActor: ReturnType<typeof currentActor>;
+    mockAuditRecorder.record.mockImplementation(async () => { capturedActor = currentActor(); });
+
+    await service.enroll(body as never);
+
+    expect(mockAuditRecorder.record).toHaveBeenCalledWith({
+      key: 'runner.enroll', resourceType: 'fleet-runner', resourceId: 'r1', projectId: null,
+      summary: 'enrolled from enrollment e1',
+    });
+    expect(capturedActor).toEqual({ type: 'RUNNER', id: 'r1' });
   });
 
   it('creates the runner with merged labels and returns a kr_ key once', async () => {

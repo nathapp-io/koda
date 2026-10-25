@@ -104,7 +104,7 @@ function buildBash() {
   const webhooks = { dispatch: vi.fn(async () => undefined) };
   const closerLive = { event: vi.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
   const closerOutbox = { record: vi.fn(async (e: { type: string }) => ({ id: 'ob', ...e })) };
-  const closer = new ApprovalCloser(repo as never, activity as never, webhooks as never, closerLive as never, closerOutbox as never);
+  const closer = new ApprovalCloser(repo as never, activity as never, webhooks as never, closerLive as never, closerOutbox as never, mockAuditRecorder);
   const live = { publish: vi.fn() };
   const budgetRepo = { lockById: vi.fn() };
   const budgets = { resume: vi.fn() };
@@ -313,6 +313,7 @@ describe('bash decide (S1.5 §2.3, plan D265-D267)', () => {
     seed({ ...pending, expiresAt: new Date(NOW.getTime() - 1) }); jobRepo.lockById.mockResolvedValue(running);
     await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'allow' }, NOW)).rejects.toThrow(ConflictAppException);
     expect(rows.get('a1')).toEqual(expect.objectContaining({ status: 'expired', resolvedBy: 'timeout' }));
+    expect(mockAuditRecorder.record).toHaveBeenCalledWith({ key: 'system.approval.expire', resourceType: 'fleet-approval', resourceId: 'a1', projectId: 'p1', summary: 'expired' });
     expect(jobRepo.createCommand).not.toHaveBeenCalled();
   });
 
@@ -321,6 +322,7 @@ describe('bash decide (S1.5 §2.3, plan D265-D267)', () => {
     seed(pending); jobRepo.lockById.mockResolvedValue({ ...running, state: 'UPLOADING' });
     await expect(service.decide(DEV_CALLER, dev, 'a1', { decision: 'allow' }, NOW)).rejects.toThrow(ConflictAppException);
     expect(rows.get('a1')).toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'job_ended' }));
+    expect(mockAuditRecorder.record).toHaveBeenCalledWith({ key: 'system.approval.expire', resourceType: 'fleet-approval', resourceId: 'a1', projectId: 'p1', summary: 'closed: job ended' });
   });
 
   it('a second decide gets 409', async () => {

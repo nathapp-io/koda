@@ -1,5 +1,6 @@
 import type { MockInstance } from 'vitest';
 import { Logger } from '@nestjs/common';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { BudgetEvaluator } from './budget-evaluator';
 
 describe('BudgetEvaluator.signal (S1b §2.2, B7)', () => {
@@ -8,7 +9,7 @@ describe('BudgetEvaluator.signal (S1b §2.2, B7)', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    evaluator = new BudgetEvaluator({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    evaluator = new BudgetEvaluator({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder);
     evaluateScope = vi.spyOn(evaluator, 'evaluateScope').mockResolvedValue(undefined);
   });
   afterEach(() => {

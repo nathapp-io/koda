@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { EmbeddingService } from '../../rag/embedding.service';
 import { RagService } from '../../rag/rag.service';
 import { LanceRecord, OUTCOME_SOURCE } from '../../rag/lance-table-manager';
@@ -56,6 +57,7 @@ export class KnowledgeRepoIndexer {
     private readonly store: KnowledgeChunkStore,
     private readonly embeddings: EmbeddingService,
     private readonly rag: RagService,
+    private readonly audit: AuditRecorder,
     @Inject(KNOWLEDGE_INDEX_CLOCK) private readonly clock: () => number = Date.now,
   ) {}
 
@@ -110,6 +112,8 @@ export class KnowledgeRepoIndexer {
       skippedCount = selection.skipped;
       const kept = new Set(selection.kept.map(entry => entry.path));
       let mutated = false;
+      let changedCount = 0;
+      let removedCount = 0;
       // One fetch at a time (within the four-fetch ceiling) bounds memory and guarantees that a lost
       // renewal cannot leave background tasks writing rows or producing unhandled rejections.
       for (const entry of selection.kept) {
@@ -130,6 +134,7 @@ export class KnowledgeRepoIndexer {
           files.set(entry.path, next);
         }
         mutated = true;
+        if (!existing || existing.blobSha !== entry.sha || file === null) changedCount += 1;
       }
       for (const path of files.keys()) {
         if (kept.has(path)) continue;
@@ -138,8 +143,13 @@ export class KnowledgeRepoIndexer {
         await this.state.deleteFile(repoId, path);
         files.delete(path);
         mutated = true;
+        removedCount += 1;
       }
-      await finish({ status: 'idle', indexedSha: head, lastError: selection.capMessage, patternsKey });
+      await this.audit.audited(async () => {
+        await finish({ status: 'idle', indexedSha: head, lastError: selection.capMessage, patternsKey });
+        return { status: 'indexed' as const };
+      }, () => [{ key: 'system.knowledge.index', resourceType: 'fleet-repo', resourceId: repo.id, projectId: repo.projectId,
+        summary: `indexed ${changedCount} changed, ${removedCount} removed` }]);
       finishedIdle = true;
       if (mutated) await this.rag.optimizeTable(repo.projectId);
       return { status: 'indexed' };

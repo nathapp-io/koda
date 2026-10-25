@@ -1,4 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { runAsSystem } from '../../action-context/action-context';
 import { OutboxService } from '@nathapp/nestjs-outbox';
 import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
@@ -77,6 +79,7 @@ export class ApprovalCloser {
     private readonly webhooks: WebhookDispatcherService,
     private readonly livePublisher: ApprovalLivePublisher,
     private readonly outbox: OutboxService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async openBudget(policy: BudgetPolicyRecord, at: { windowStart: Date; spentUsd: string }, now: Date): Promise<ApprovalChange> {
@@ -131,12 +134,14 @@ export class ApprovalCloser {
       : expiresAt.getTime() <= now.getTime() ? { status: 'expired' as const, resolvedBy: 'timeout' as const } : null;
     if (!born) {
       await this.record(created, actor, 'approval.requested');
+      await this.audit.record({ key: 'runner.sync', resourceType: 'fleet-approval', resourceId: created.id, projectId: created.projectId, summary: 'bash ask opened, pending' });
       await this.dispatch(created, 'fleet.approval.requested');
       await this.enqueueRequested(created);
       return { approval: created, live: this.livePublisher.event(created) };
     }
     const closed = await this.repo.resolve(created.id, { ...born, decidedAt: now });
     await this.record(closed, actor, closedAction(closed));
+    await this.audit.record({ key: 'runner.sync', resourceType: 'fleet-approval', resourceId: closed.id, projectId: closed.projectId, summary: `bash ask opened, ${closed.status}` });
     return { approval: closed, live: this.livePublisher.event(closed) };
   }
 
@@ -173,6 +178,7 @@ export class ApprovalCloser {
   /** Spec §2.4: nax has already denied by its own timeout. The caller re-checked `pending` under the lock. */
   async expire(approval: FleetApprovalRecord, job: Pick<FleetJobRecord, 'requestedById' | 'requestedByType'>, now: Date): Promise<ApprovalChange> {
     const expired = await this.repo.resolve(approval.id, { status: 'expired', resolvedBy: 'timeout', decidedAt: now });
+    await runAsSystem('approval', () => this.audit.record({ key: 'system.approval.expire', resourceType: 'fleet-approval', resourceId: expired.id, projectId: expired.projectId, summary: 'expired' }));
     return { approval: expired, live: await this.recordResolved(expired, jobSystemActor(job)) };
   }
 

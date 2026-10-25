@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { KnowledgeRepoIndexer } from './knowledge-repo-indexer';
 import { KnowledgeStoreUnavailableError } from './knowledge-chunk-store';
 import { RepoCheckException } from '../git-broker/repo-check.exception';
@@ -47,9 +48,10 @@ function fixture(paths = ['docs/a.md'], fileText = text) {
   };
   const rag = { optimizeTable: vi.fn().mockResolvedValue(undefined) };
   const clock = vi.fn(() => now.getTime() + 1000);
+  const audit = { audited: vi.fn(async <T>(fn: () => Promise<T>, entriesOf: (result: T) => unknown[]) => { const result = await fn(); entriesOf(result); return result; }), record: vi.fn() };
   const indexer = new KnowledgeRepoIndexer(state as unknown as IKnowledgeIndexRepository, github as unknown as GitHubAppClient,
-    store as unknown as KnowledgeChunkStore, embeddings as unknown as EmbeddingService, rag as unknown as RagService, clock);
-  return { indexer, state, github, store, embeddings, rag, repo, clock, fake };
+    store as unknown as KnowledgeChunkStore, embeddings as unknown as EmbeddingService, rag as unknown as RagService, audit as never, clock);
+  return { indexer, state, github, store, embeddings, rag, repo, clock, fake, audit };
 }
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
@@ -184,6 +186,51 @@ describe('KnowledgeRepoIndexer', () => {
     expect(f.state.finish).toHaveBeenCalledWith('r1', expect.objectContaining({ status: 'idle', indexedSha: 'head', fileCount: 1, chunkCount: 3, unembeddedCount: 0, skippedCount: 0, lastError: null, leaseUntil: null, finishedAt: expect.any(Date) }));
   });
 
+  it('US-008 AC-10: audits changed and removed files at the successful checkpoint', async () => {
+    const f = fixture(['docs/a.md', 'docs/b.md']);
+    f.state.listStates.mockResolvedValue([{ repoId: 'r1', indexedSha: 'old' }]);
+    f.state.listFiles.mockResolvedValue([{ ...stored('docs/a.md'), blobSha: 'old-a' }, { ...stored('docs/b.md'), blobSha: 'old-b' }, stored('docs/old.md')]);
+    await f.indexer.indexRepo('r1', now);
+    expect(f.audit.audited).toHaveBeenCalledTimes(1);
+    expect(f.audit.audited.mock.calls[0]?.[1]({ status: 'indexed' })).toEqual([{
+      key: 'system.knowledge.index', resourceType: 'fleet-repo', resourceId: 'r1', projectId: 'p1', summary: 'indexed 2 changed, 1 removed',
+    }]);
+    expect(f.state.finish).toHaveBeenCalledWith('r1', expect.objectContaining({ status: 'idle', indexedSha: 'head' }));
+  });
+
+  it('US-008: retrying an unchanged blob with unembedded chunks is not counted as changed', async () => {
+    const f = fixture();
+    f.state.listFiles.mockResolvedValue([stored('docs/a.md', 2)]);
+    await f.indexer.indexRepo('r1', now);
+    expect(f.audit.audited.mock.calls[0]?.[1]({ status: 'indexed' })).toEqual([expect.objectContaining({ summary: 'indexed 0 changed, 0 removed' })]);
+  });
+
+  it('US-008 AC-11: unchanged state does not audit', async () => {
+    const f = fixture();
+    f.state.listStates.mockResolvedValue([{ repoId: 'r1', indexedSha: 'head', patternsKey: 'default', fileCount: 0, chunkCount: 0, unembeddedCount: 0 }]);
+    expect(await f.indexer.indexRepo('r1', now)).toEqual({ status: 'unchanged' });
+    expect(f.audit.audited).not.toHaveBeenCalled();
+  });
+
+  it('US-008 AC-12: skipped repositories do not audit', async () => {
+    const f = fixture(); f.state.findRepo.mockResolvedValue({ ...f.repo, provider: 'gitlab' });
+    expect((await f.indexer.indexRepo('r1', now)).status).toBe('skipped');
+    expect(f.audit.audited).not.toHaveBeenCalled();
+  });
+
+  it('US-008 AC-13: busy repositories do not audit', async () => {
+    const f = fixture(); f.state.claim.mockResolvedValue(false);
+    expect((await f.indexer.indexRepo('r1', now)).status).toBe('busy');
+    expect(f.audit.audited).not.toHaveBeenCalled();
+  });
+
+  it('US-008 AC-14: failed audit returns failed and records failed finish', async () => {
+    const f = fixture();
+    f.audit.audited.mockRejectedValue(new Error('audit down'));
+    expect((await f.indexer.indexRepo('r1', now)).status).toBe('failed');
+    expect(f.state.finish).toHaveBeenCalledWith('r1', expect.objectContaining({ status: 'failed' }));
+  });
+
   it('AC-14: unknown repo never writes state', async () => {
     const f = fixture(); f.state.findRepo.mockResolvedValue(null);
     expect(await f.indexer.indexRepo('unknown', now)).toEqual({ status: 'failed', reason: 'unknown repo' });
@@ -193,11 +240,25 @@ describe('KnowledgeRepoIndexer', () => {
   it('optimizes after finishing idle, and restores the prior SHA if optimization fails', async () => {
     const f = fixture();
     f.state.listStates.mockResolvedValue([{ repoId: 'r1', indexedSha: 'old-head' }]);
-    f.rag.optimizeTable.mockRejectedValue(new KnowledgeStoreUnavailableError());
+    const committedEntries: unknown[] = [];
+    let inAudit = false;
+    f.audit.audited.mockImplementation(async (fn, entriesOf) => {
+      inAudit = true;
+      try {
+        const result = await fn();
+        committedEntries.push(...entriesOf(result));
+        return result;
+      } finally { inAudit = false; }
+    });
+    f.rag.optimizeTable.mockImplementation(async () => {
+      expect(inAudit).toBe(false);
+      throw new KnowledgeStoreUnavailableError();
+    });
     expect(await f.indexer.indexRepo('r1', now)).toEqual({ status: 'failed', reason: new KnowledgeStoreUnavailableError().message });
     expect(f.state.finish.mock.calls[0][1]).toMatchObject({ status: 'idle', indexedSha: 'head' });
     expect(f.state.finish.mock.invocationCallOrder[0]).toBeLessThan(f.rag.optimizeTable.mock.invocationCallOrder[0]);
     expect(f.state.finish.mock.calls[1][1]).toMatchObject({ status: 'failed', indexedSha: 'old-head' });
+    expect(committedEntries).toEqual([expect.objectContaining({ key: 'system.knowledge.index', summary: 'indexed 1 changed, 0 removed' })]);
   });
 
   it('never persists a minted token included in a collaborator error', async () => {
@@ -528,7 +589,7 @@ describe('KnowledgeRepoIndexer outcome passes (S5b US-004)', () => {
       mintReadOnlyToken: vi.fn(), getBranchHead: vi.fn(), getTree: vi.fn(), getFile: vi.fn(),
     };
     const indexer = new KnowledgeRepoIndexer(state as unknown as IKnowledgeIndexRepository, github as unknown as GitHubAppClient,
-      store as unknown as KnowledgeChunkStore, embeddings as unknown as EmbeddingService, rag as unknown as RagService, () => now.getTime());
+      store as unknown as KnowledgeChunkStore, embeddings as unknown as EmbeddingService, rag as unknown as RagService, mockAuditRecorder, () => now.getTime());
     return { indexer, state, store, embeddings, rag, github, job, fake };
   }
 

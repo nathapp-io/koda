@@ -1,4 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { runAsSystem } from '../../action-context/action-context';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FleetCommandType, FleetJobState } from '../../common/enums';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
@@ -43,6 +45,7 @@ export class PlacementService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly fleetConfig: IFleetConfig,
     @Inject(VCS_CFG) private readonly vcsConfig: Pick<IVcsConfig, 'githubApiUrl' | 'gitlabApiUrl'>,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /**
@@ -184,6 +187,10 @@ export class PlacementService {
   private async cancelForPause(job: FleetJobRecord, policyId: string, now: Date): Promise<LiveFleetJobEvent> {
     const reason = budgetReason(policyId);
     const r = await this.transitions.apply({ job, to: FleetJobState.CANCELLED, by: 'server', now, actor: SYSTEM_ACTOR, reason, extra: { cancelReason: reason } });
+    await runAsSystem('budget', () => this.audit.record({
+      key: 'system.budget.window-reset', resourceType: 'fleet-job', resourceId: job.id, projectId: job.projectId,
+      summary: `QUEUED -> CANCELLED: budget ${policyId} paused`,
+    }));
     return r.live;
   }
 

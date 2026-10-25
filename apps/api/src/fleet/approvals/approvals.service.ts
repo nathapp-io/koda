@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { runAsSystem } from '../../action-context/action-context';
 import { AppException, ForbiddenAppException, NotFoundAppException, ValidationAppException, type IPageOption } from '@nathapp/nestjs-common';
 import { IPageResult, ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { remapPage } from '../../common/dto/koda-page.query';
@@ -170,6 +171,7 @@ export class ApprovalsService {
       if (job.state !== 'RUNNING' || job.leaseEpoch !== approval.leaseEpoch || job.runnerId === null) {
         // nax has exited or is exiting. Close only THIS ask: on an epoch mismatch the job's other asks belong to a newer lease.
         const ended = await this.repo.resolve(approval.id, { status: 'cancelled', resolvedBy: 'job_ended', decidedAt: now });
+        await runAsSystem('approval', () => this.audit.record({ key: 'system.approval.expire', resourceType: 'fleet-approval', resourceId: ended.id, projectId: ended.projectId, summary: 'closed: job ended' }));
         return { kind: 'closed', live: await this.closer.recordResolved(ended, jobSystemActor(job)) };
       }
       if (approval.expiresAt && approval.expiresAt.getTime() <= now.getTime()) {

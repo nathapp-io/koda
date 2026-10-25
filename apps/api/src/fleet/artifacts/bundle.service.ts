@@ -15,6 +15,7 @@ import { BUNDLE_INGEST_REPOSITORY, IBundleIngestRepository, INGEST_PARSER_VERSIO
 import { FenceService } from '../sync/fence.service';
 import { ARTIFACT_STORE, ArtifactHashMismatchError, ArtifactStore, ArtifactTooLargeError } from './artifact-store';
 import { FleetBundleException, FleetFenceException } from './bundle.exceptions';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 
 const UPLOAD_STATES: readonly string[] = [FleetJobState.RUNNING, FleetJobState.UPLOADING];
 const SHA256_RE = /^[0-9a-f]{64}$/i;
@@ -43,6 +44,7 @@ export class BundleService {
     private readonly fallback: LogFallbackService,
     @Inject(BUNDLE_INGEST_REPOSITORY) private readonly ingestRepo: Pick<IBundleIngestRepository, 'enqueue'>,
     @Inject(BundleIngestService) private readonly ingest: Pick<BundleIngestService, 'kick'>,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /** Spec §3.3: fenced, RUNNING (partial bundle on cancel) or UPLOADING only, streamed, hash-checked. */
@@ -82,6 +84,10 @@ export class BundleService {
       await this.activity.record({
         actorType: 'RUNNER', actorId: u.runnerId, action: 'job.bundle_uploaded', entityType: 'job', entityId: job.id, jobId: job.id,
         projectId: job.projectId, responsibleUserId: responsibleUserOf(job), payload: { leaseEpoch, sizeBytes: stored.sizeBytes, sha256: stored.sha256 },
+      });
+      await this.audit.record({
+        key: 'runner.bundle.upload', resourceType: 'fleet-job', resourceId: job.id, projectId: job.projectId,
+        summary: `bundle ${previous ? 'replaced' : 'uploaded'} at epoch ${leaseEpoch}`,
       });
       return { ok: true as const, replacedKey: previous?.storageKey ?? null };
     });

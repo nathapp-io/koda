@@ -1,5 +1,6 @@
 import { Readable } from 'stream';
 import { BundleService } from './bundle.service';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 
 /** HTTP status of a rejected call (AppException extends HttpException). */
 const statusOf = (p: Promise<unknown>) => p.then(() => 0, (e: { getStatus(): number }) => e.getStatus());
@@ -9,7 +10,7 @@ describe('BundleService.download (S2a D341)', () => {
   const artifact = (leaseEpoch: number, expiredAt: Date | null) => ({ id: `a${leaseEpoch}`, jobId: 'j1', leaseEpoch, kind: 'bundle', storageKey: `jobs/j1/${leaseEpoch}/x.tar.gz`, sizeBytes: 3n, sha256: 'x', createdAt: new Date(0), expiredAt });
   const repo = { findById: vi.fn(async () => job), findLatestArtifact: vi.fn() };
   const store = { get: vi.fn(async () => Readable.from([Buffer.from('tgz')])) };
-  const svc = new BundleService(repo as never, store as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+  const svc = new BundleService(repo as never, store as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder);
   afterEach(() => vi.clearAllMocks());
 
   it('streams the newest unexpired bundle', async () => {

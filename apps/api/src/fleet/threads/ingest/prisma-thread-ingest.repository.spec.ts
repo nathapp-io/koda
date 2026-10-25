@@ -99,10 +99,10 @@ function fakeClient(opts: { command?: string; threadId?: string | null; nextSeq?
   return { client, messages, thread };
 }
 
-function repoWith(client: unknown): PrismaThreadIngestRepository {
+function repoWith(client: unknown, audit = { record: vi.fn().mockResolvedValue(undefined) }): PrismaThreadIngestRepository {
   const prisma = { client } as never;
   const txManager = { run: (fn: () => Promise<unknown>) => fn() } as never;
-  return new PrismaThreadIngestRepository(prisma, txManager, { signal: vi.fn() } as never);
+  return new PrismaThreadIngestRepository(prisma, txManager, { signal: vi.fn() } as never, audit as never);
 }
 
 function batch(lines: ThreadLine[], overrides: Partial<ThreadIngestBatch> = {}): ThreadIngestBatch {
@@ -163,6 +163,19 @@ describe('PrismaThreadIngestRepository.fold (US-003)', () => {
     const { client, messages } = fakeClient({ nextSeq: 2 });
     await repoWith(client).fold(batch([start('t1'), delta('one '), delta('two', 2), reset(2), delta('TWO', 2)]));
     expect(messages[0]?.content).toBe('one TWO');
+  });
+
+  it('US-008: audits each folded turn_end and skips a turn_end without its assistant message', async () => {
+    const { client } = fakeClient({ nextSeq: 2 });
+    const audit = { record: vi.fn().mockResolvedValue(undefined) };
+    const repo = repoWith(client, audit);
+    await repo.fold(batch([start('t1'), end(), start('t2'), end({ turnId: 't2', status: 'cancelled' })]));
+    expect(audit.record).toHaveBeenCalledTimes(2);
+    expect(audit.record).toHaveBeenNthCalledWith(1, { key: 'system.thread.ingest', resourceType: 'thread', resourceId: 'T', projectId: undefined, summary: 'turn ended completed' });
+    const { client: noMessageClient } = fakeClient();
+    const noMessageAudit = { record: vi.fn().mockResolvedValue(undefined) };
+    await repoWith(noMessageClient, noMessageAudit).fold(batch([end({ turnId: 'missing' })]));
+    expect(noMessageAudit.record).not.toHaveBeenCalled();
   });
 
   it('US-003 AC5: a completed turn_end with output replaces the content and sets status complete', async () => {

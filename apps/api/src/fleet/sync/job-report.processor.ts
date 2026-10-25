@@ -3,6 +3,7 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { Prisma } from '../../generated/prisma/client';
 import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { responsibleUserOf } from '../common/responsible-user';
 import type { BashAsk } from '../approvals/approval-closer';
 // Value import (not `import type`): Nest reads the class from emitDecoratorMetadata to resolve the token.
@@ -60,6 +61,7 @@ export class JobReportProcessor {
     private readonly budgets: BudgetEvaluator,
     private readonly approvals: ApprovalCloser,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async process(runnerId: string, report: JobReport, now: Date): Promise<ReportOutcome> {
@@ -127,6 +129,7 @@ export class JobReportProcessor {
         job, to: effect.to, by: 'runner', now, actor: { type: 'RUNNER', id: runnerId }, reason: cancelReasonFor(job, effect.to, effect.reason),
         extra: effect.exitCode === null ? {} : { exitCode: effect.exitCode },
       });
+      await this.audit.record({ key: 'runner.sync', resourceType: 'fleet-job', resourceId: job.id, projectId: job.projectId, summary: `${job.state} -> ${r.job.state}` });
       return { job: r.job, live: r.live, approvalLive: r.approvalLive, mirrored: false };
     }
     const reason = effect.kind === 'invalid' ? effect.reason : `transition ${job.state} -> ${effect.to}`;

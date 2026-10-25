@@ -1,4 +1,5 @@
 import { SystemWriter } from '../../permissions/system-writer.decorator';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -64,6 +65,7 @@ export class ScheduleTicker implements OnModuleInit, OnModuleDestroy {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'sweepEnabled'>,
     private readonly permissions: PermissionService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   onModuleInit(): void {
@@ -127,11 +129,15 @@ export class ScheduleTicker implements OnModuleInit, OnModuleDestroy {
         await this.record(s, 'schedule.tick_skipped', { reason: 'job_active', jobId: active.id, state: active.state });
         return 'skipped';
       }
-      const absorbed = await this.repo.coalesceIntoQueued(s.id);
-      if (absorbed) {
-        await this.record(s, 'schedule.tick_coalesced', { jobId: absorbed });
-        return 'coalesced';
-      }
+      const absorbed = await this.txManager.run(async () => {
+        const jobId = await this.repo.coalesceIntoQueued(s.id);
+        if (jobId) {
+          await this.record(s, 'schedule.tick_coalesced', { jobId });
+          await this.withScheduleAudit(s, { key: 'system.schedule.dispatch', resourceType: 'fleet-schedule', resourceId: s.id, projectId: s.projectId, summary: `coalesced into job ${jobId}` });
+        }
+        return jobId;
+      });
+      if (absorbed) return 'coalesced';
     }
     await this.record(s, 'schedule.tick_skipped', { reason: 'busy' });
     return 'skipped';
@@ -156,7 +162,7 @@ export class ScheduleTicker implements OnModuleInit, OnModuleDestroy {
       // answers the owner's type and the job's `requestedByType` and activity rows name it.
       jobId = (await runAsSystem(
         'schedule',
-        () => this.jobs.dispatch(s.createdById, s.projectId, toDispatchDto(s), { scheduleId: s.id }),
+        () => this.jobs.dispatch(s.createdById, s.projectId, toDispatchDto(s), { scheduleId: s.id, auditKey: 'system.schedule.dispatch' }),
         { onBehalfOf: owner },
       )).job.id;
     } catch (error) {
@@ -202,8 +208,21 @@ export class ScheduleTicker implements OnModuleInit, OnModuleDestroy {
   }
 
   private async disable(s: ScheduleRecord, reason: AutoDisableReason, detail?: string): Promise<void> {
-    await this.txManager.run(() => this.progress.disable(s.id, reason));
+    await this.txManager.run(async () => {
+      const disabled = await this.progress.disable(s.id, reason);
+      if (disabled) {
+        await this.withScheduleAudit(s, {
+          key: 'system.schedule.dispatch', resourceType: 'fleet-schedule', resourceId: s.id, projectId: s.projectId,
+          summary: `disabled: ${reason}`,
+        });
+      }
+    });
     if (detail) this.logger.warn(`Schedule ${s.id} disabled (${reason}): ${detail}`);
+  }
+
+  private withScheduleAudit(s: ScheduleRecord, entry: Parameters<AuditRecorder['record']>[0]): Promise<void> {
+    const owner: PrincipalRef = { type: s.createdByType ?? 'USER', id: s.createdById };
+    return runAsSystem('schedule', () => this.audit.record(entry), { onBehalfOf: owner });
   }
 
   private record(s: ScheduleRecord, action: string, extra: Record<string, unknown>): Promise<void> {

@@ -47,16 +47,17 @@ function build(due: ScheduleRecord[] = [schedule()], opts: { sweepEnabled?: bool
   };
   const progress = { disable: vi.fn(async () => true) };
   const activity = { record: vi.fn(async () => undefined) };
+  const audit = { record: vi.fn(async () => undefined) };
   const txManager = { run: vi.fn(async <T>(fn: () => Promise<T>) => fn()) };
   // US-005: the owner's dispatch permission is its effective keys, read through the real service.
   const permissions = { effectiveKeys: vi.fn(async () => DISPATCH_KEYS) };
   const ticker = new ScheduleTicker(
     repo as never, jobs as never, progress as never, activity as never, txManager as never,
-    { sweepEnabled: opts.sweepEnabled ?? false }, permissions as never,
+    { sweepEnabled: opts.sweepEnabled ?? false }, permissions as never, audit as never,
   );
   const actions = () => activity.record.mock.calls.map((c) => (c as unknown as [{ action: string; payload: Record<string, unknown>; actorType: string }])[0]);
   return {
-    repo, jobs, progress, activity, permissions, ticker, actions,
+    repo, jobs, progress, activity, audit, permissions, ticker, actions,
     contextSeenByDispatch: () => dispatchContext,
     contextSeenByFindDue: () => findDueContext,
   };
@@ -68,10 +69,11 @@ describe('ScheduleTicker.tick', () => {
     expect(await h.ticker.tick(NOW)).toEqual({ claimed: 1, dispatched: 1, coalesced: 0, skipped: 0, disabled: 0, failed: 0 });
     expect(h.repo.claimFire).toHaveBeenCalledWith('s1', DUE, NEXT, NOW);
     expect(h.jobs.dispatch).toHaveBeenCalledWith(
-      'u1', 'p1', { repoId: 'r1', command: 'RUN', feature: 'login', ref: 'main', profiles: ['fast'], maxCostUsd: 5, selectorLabels: [], bashMode: 'raw', approvalTimeoutSec: 600 }, { scheduleId: 's1' },
+      'u1', 'p1', { repoId: 'r1', command: 'RUN', feature: 'login', ref: 'main', profiles: ['fast'], maxCostUsd: 5, selectorLabels: [], bashMode: 'raw', approvalTimeoutSec: 600 }, { scheduleId: 's1', auditKey: 'system.schedule.dispatch' },
     );
     expect(h.repo.update).toHaveBeenCalledWith('s1', { lastJobId: 'job-1' });
     expect(h.actions().map((a) => a.action)).toEqual(['schedule.tick_dispatched']);
+    expect(h.audit.record).not.toHaveBeenCalled(); // FleetJobsService owns the dispatch entry.
   });
 
   it('collapses missed fires: one claim straight to the next fire after now, one dispatch', async () => {
@@ -142,7 +144,7 @@ describe('ScheduleTicker.tick', () => {
     // The fire runs as the scheduler, so `actorTypeFor` inside dispatch still names the agent's type.
     expect(h.contextSeenByDispatch()?.actor).toEqual({ type: 'SYSTEM', id: 'schedule' });
     expect(h.contextSeenByDispatch()?.onBehalfOf).toEqual({ type: 'AGENT', id: 'a1' });
-    expect(h.jobs.dispatch).toHaveBeenCalledWith('a1', 'p1', expect.objectContaining({ feature: 'login' }), { scheduleId: 's1' });
+    expect(h.jobs.dispatch).toHaveBeenCalledWith('a1', 'p1', expect.objectContaining({ feature: 'login' }), { scheduleId: 's1', auditKey: 'system.schedule.dispatch' });
     // The ticker's own row is never relabelled: it is a SYSTEM entry, not the current actor's.
     expect(h.actions()).toEqual([expect.objectContaining({ action: 'schedule.tick_dispatched', actorType: 'SYSTEM' })]);
   });

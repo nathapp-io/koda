@@ -2,6 +2,7 @@ import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { runAsSystemWriter } from '../../action-context/action-context';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { IRunnerRepository, RUNNER_REPOSITORY } from './domain/runner.domain';
 
@@ -20,6 +21,7 @@ export class EnrollmentRetentionProcessor {
   constructor(
     @Inject(RUNNER_REPOSITORY) private readonly repo: Pick<IRunnerRepository, 'deleteSpentEnrollmentsBefore'>,
     @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'enrollmentRetentionDays'>,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /** Permissions P2 US-004: the cron method is the background entry; the purge runs as `enrollment`. */
@@ -33,7 +35,16 @@ export class EnrollmentRetentionProcessor {
     if (days === null || days <= 0) return;
     const before = new Date(Date.now() - days * EnrollmentRetentionProcessor.DAY_MS);
     try {
-      const deleted = await this.repo.deleteSpentEnrollmentsBefore(before);
+      const deleted = await this.audit.audited(
+        () => this.repo.deleteSpentEnrollmentsBefore(before),
+        (count) => count === 0 ? [] : [{
+          key: 'system.enrollment.retention',
+          resourceType: 'fleet-enrollment',
+          resourceId: 'all',
+          projectId: null,
+          summary: `purged ${count} spent enrollments`,
+        }],
+      );
       this.logger.log(`Purged ${deleted} spent runner enrollment(s) older than ${before.toISOString()}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

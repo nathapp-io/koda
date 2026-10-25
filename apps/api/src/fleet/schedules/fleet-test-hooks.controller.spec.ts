@@ -8,8 +8,9 @@ const RESULT = { claimed: 1, dispatched: 1, coalesced: 0, skipped: 0, disabled: 
 function build(hooksEnabled: boolean, found = true, scheduleEnabled = true) {
   const ticker = { tick: vi.fn(async () => RESULT) };
   const repo = { findById: vi.fn(async () => (found ? { id: 's1', nextFireAt: DUE, enabled: scheduleEnabled } : null)) };
-  const controller = new FleetTestHooksController(ticker as never, repo as never, { testHooksEnabled: hooksEnabled });
-  return { ticker, repo, controller };
+  const audit = { audited: vi.fn(async <T>(fn: () => Promise<T>, entriesOf: (result: T) => unknown) => { const result = await fn(); entriesOf(result); return result; }) };
+  const controller = new FleetTestHooksController(ticker as never, repo as never, { testHooksEnabled: hooksEnabled }, audit as never);
+  return { ticker, repo, audit, controller };
 }
 
 describe('FleetTestHooksController (3b D213)', () => {
@@ -32,6 +33,10 @@ describe('FleetTestHooksController (3b D213)', () => {
     expect(h.repo.findById).toHaveBeenCalledWith('s1');
     expect(h.ticker.tick).toHaveBeenCalledWith(DUE);
     expect(res).toEqual(JsonResponse.Ok({ firedAt: DUE.toISOString(), result: RESULT }));
+    expect(h.audit.audited).toHaveBeenCalledTimes(1);
+    expect(h.audit.audited.mock.calls[0][1](undefined)).toEqual({
+      key: 'testhook.schedule.fire', resourceType: 'fleet-schedule', resourceId: 's1', projectId: undefined, summary: 'fired',
+    });
   });
 
   it('refuses a disabled schedule with 409 and runs no ticker round', async () => {
