@@ -347,6 +347,14 @@ describeIntegration('API Integration Tests', () => {
     it('GET /api/audit without credentials returns 401', async () => {
       await request(httpServer).get('/api/audit').expect(401);
     });
+    it('AC-16: GET /api/audit/keys with the admin token returns 200', async () => {
+      const res = await request(httpServer).get('/api/audit/keys')
+        .set('Authorization', `Bearer ${userAccessToken}`).expect(200);
+      expect(body<{ keys: string[] }>(res).keys).toEqual(expect.any(Array));
+    });
+    it('GET /api/audit/keys without credentials returns 401', async () => {
+      await request(httpServer).get('/api/audit/keys').expect(401);
+    });
   });
 
   describe('2. Agent Registration & Auth', () => {

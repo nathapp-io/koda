@@ -15,6 +15,8 @@ export interface AuditListQuery {
   projectId?: string;
   resourceType?: string;
   resourceId?: string;
+  /** Exact match on the action context's correlation id (Permissions P2 US-002). */
+  correlationId?: string;
   from?: string;
   to?: string;
 }
@@ -98,6 +100,7 @@ export class AuditLogService {
       ...(query.projectId !== undefined ? { projectId: query.projectId } : {}),
       ...(query.resourceType !== undefined ? { resourceType: query.resourceType } : {}),
       ...(query.resourceId !== undefined ? { resourceId: query.resourceId } : {}),
+      ...(query.correlationId !== undefined ? { correlationId: query.correlationId } : {}),
       ...(from !== undefined ? { from } : {}),
       ...(to !== undefined ? { to } : {}),
     };
@@ -106,5 +109,14 @@ export class AuditLogService {
     // One label batch per page — and none at all for an empty page or one that names no row.
     const names = isEmpty(ids) ? noNames() : await this.repo.findDisplayNames(ids);
     return remapPage(result, (record) => AuditEntryDto.from(record, displayFor(record, names)));
+  }
+
+  /**
+   * Every key that occurs in the log, sorted ascending (Permissions P2 US-002). The set is small —
+   * the catalog's keys plus the `thread.*`, `runner.*` and `system.*` ones — so the page filter reads
+   * it whole; the permission catalog cannot answer it, because it does not list every key a write uses.
+   */
+  async keys(): Promise<string[]> {
+    return this.repo.findDistinctKeys();
   }
 }

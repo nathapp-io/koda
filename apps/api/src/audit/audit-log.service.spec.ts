@@ -25,8 +25,9 @@ function setup(records: AuditEntryRecord[] = [record], names: AuditDisplayNames 
     ...page, total: records.length, records,
   }));
   const findDisplayNames = vi.fn(async (_ids: AuditDisplayIds) => names);
-  const service = new AuditLogService({ findPage, findDisplayNames } as unknown as PrismaAuditEntryRepository);
-  return { service, findPage, findDisplayNames };
+  const findDistinctKeys = vi.fn(async (): Promise<string[]> => ['comment.create', 'ticket.create']);
+  const service = new AuditLogService({ findPage, findDisplayNames, findDistinctKeys } as unknown as PrismaAuditEntryRepository);
+  return { service, findPage, findDisplayNames, findDistinctKeys };
 }
 
 describe('AuditLogService.list', () => {
@@ -134,5 +135,40 @@ describe('AuditLogService.list', () => {
     ]);
     await service.list({}, pageOption);
     expect(findDisplayNames).toHaveBeenCalledWith({ userIds: ['u2'], agentIds: ['a2'], runnerIds: ['r1'], projectIds: ['p2'] });
+  });
+
+  it('US-002 AC-2: passes correlationId through to findPage unchanged', async () => {
+    const { service, findPage } = setup();
+    await service.list({ correlationId: 'c-1' }, pageOption);
+    expect(findPage).toHaveBeenCalledWith({ correlationId: 'c-1' }, pageOption);
+  });
+
+  it('US-002: keeps correlationId out of the filters when the query has none', async () => {
+    const { service, findPage } = setup();
+    await service.list({ key: 'ticket.create' }, pageOption);
+    expect(findPage).toHaveBeenCalledWith({ key: 'ticket.create' }, pageOption);
+    expect(findPage.mock.calls[0][0]).not.toHaveProperty('correlationId');
+  });
+});
+
+describe('AuditLogService.keys', () => {
+  it('US-002: returns the repository distinct keys unchanged', async () => {
+    const { service, findDistinctKeys } = setup();
+    await expect(service.keys()).resolves.toEqual(['comment.create', 'ticket.create']);
+    expect(findDistinctKeys).toHaveBeenCalledTimes(1);
+    expect(findDistinctKeys).toHaveBeenCalledWith();
+  });
+
+  it('US-002: returns an empty list when the repository knows no key', async () => {
+    const { service, findDistinctKeys } = setup();
+    findDistinctKeys.mockResolvedValue([]);
+    await expect(service.keys()).resolves.toEqual([]);
+  });
+
+  it('US-002: rejects with the original error when the key lookup fails', async () => {
+    const { service, findDistinctKeys } = setup();
+    const error = new Error('key lookup unavailable');
+    findDistinctKeys.mockRejectedValue(error);
+    await expect(service.keys()).rejects.toBe(error);
   });
 });

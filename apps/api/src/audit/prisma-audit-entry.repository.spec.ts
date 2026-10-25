@@ -99,3 +99,12 @@ describe('PrismaAuditEntryRepository.findDisplayNames', () => {
     await expect(repo.findDisplayNames({ userIds: ['u1'], agentIds: [], runnerIds: [], projectIds: [] })).rejects.toBe(error);
   });
 });
+
+describe('PrismaAuditEntryRepository.findDistinctKeys', () => {
+  it('US-002: reads only the key column, distinct and ascending, and returns the values', async () => {
+    const { repo, calls } = fakePrismaClient({ auditEntry: [{ key: 'comment.create' }, { key: 'ticket.create' }] });
+    await expect(repo.findDistinctKeys()).resolves.toEqual(['comment.create', 'ticket.create']);
+    expect(calls.map((call) => `${call.model}.${call.method}`)).toEqual(['auditEntry.findMany']);
+    expect(calls[0].args).toEqual({ distinct: ['key'], select: { key: true }, orderBy: { key: 'asc' } });
+  });
+});

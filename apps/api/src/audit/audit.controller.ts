@@ -24,4 +24,15 @@ export class AuditController {
     const { current, size, ...query } = parseQuery(ListAuditQuery, rawQuery);
     return JsonResponse.Ok(toPageResult(await this.audit.list(query, { current, size })));
   }
+
+  @Get('keys')
+  @UseGuards(RequiresGuard)
+  @Requires('audit.read')
+  @ApiOperation({ summary: 'Every audit key that occurs, sorted ascending; needs the global key audit.read' })
+  @ApiResponse({ status: 200, description: 'Distinct audit keys, unprefixed: { keys: string[] }' })
+  @ApiResponse({ status: 401, description: 'Missing or invalid credentials' })
+  @ApiResponse({ status: 403, description: 'Caller does not hold audit.read' })
+  async keys() {
+    return JsonResponse.Ok({ keys: await this.audit.keys() });
+  }
 }

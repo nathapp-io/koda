@@ -47,6 +47,7 @@ export class PrismaAuditEntryRepository extends AbstractPrismaRepository<AuditEn
       ...(filters.projectId !== undefined ? { projectId: filters.projectId } : {}),
       ...(filters.resourceType !== undefined ? { resourceType: filters.resourceType } : {}),
       ...(filters.resourceId !== undefined ? { resourceId: filters.resourceId } : {}),
+      ...(filters.correlationId !== undefined ? { correlationId: filters.correlationId } : {}),
       ...((filters.from !== undefined || filters.to !== undefined) ? { createdAt: {
         ...(filters.from !== undefined ? { gte: filters.from } : {}),
         ...(filters.to !== undefined ? { lte: filters.to } : {}),
@@ -54,6 +55,20 @@ export class PrismaAuditEntryRepository extends AbstractPrismaRepository<AuditEn
     };
     const rows = await Paginate(this.prisma.client.auditEntry, page, { where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
     return rows.remap((m: AuditEntryModel) => this.toDomain(m));
+  }
+
+  /**
+   * Every `key` that occurs in the log, one row per distinct value, sorted ascending (Permissions P2
+   * US-002). Not an `IRepository` method: the log's key set is small and unpaged, so this projects one
+   * column and nothing else.
+   */
+  async findDistinctKeys(): Promise<string[]> {
+    const rows = await this.prisma.client.auditEntry.findMany({
+      distinct: ['key'],
+      select: { key: true },
+      orderBy: { key: 'asc' },
+    });
+    return rows.map((row) => row.key);
   }
 
   /**

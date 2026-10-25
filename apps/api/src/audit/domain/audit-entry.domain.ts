@@ -34,6 +34,8 @@ export interface AuditEntryFilters {
   projectId?: string;
   resourceType?: string;
   resourceId?: string;
+  /** Exact match on the action context's correlation id: every write of one request or run. */
+  correlationId?: string;
   from?: Date;
   to?: Date;
 }
