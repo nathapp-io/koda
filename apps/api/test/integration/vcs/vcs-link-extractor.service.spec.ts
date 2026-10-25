@@ -29,6 +29,7 @@ vi.mock('../../../src/common/utils/encryption.util', () => ({
 // Import after mocks are set up
 import { VcsLinkExtractorService } from '../../../src/vcs/vcs-link-extractor.service';
 import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 
 // Test data
 const mockProject = {
@@ -163,7 +164,7 @@ describe('VcsLinkExtractorService', () => {
 
     const mockTxManager = { run: vi.fn(), getClient: vi.fn(), isInTransaction: vi.fn(() => false) };
     const repo = new PrismaVcsRepository(mockTxManager as any, mockPrismaService as any);
-    service = new VcsLinkExtractorService(repo);
+    service = new VcsLinkExtractorService(repo, mockAuditRecorder);
   });
 
   afterEach(() => {

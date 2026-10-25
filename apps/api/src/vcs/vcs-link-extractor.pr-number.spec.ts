@@ -4,6 +4,7 @@ vi.mock('../common/utils/encryption.util', () => ({ decryptToken: vi.fn().mockRe
 
 import { createVcsProvider } from './factory';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import type { PrismaVcsRepository } from './prisma-vcs.repository';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
 
@@ -11,7 +12,10 @@ describe('VcsLinkExtractorService PR number (VCS LOW)', () => {
   it('asks the provider for the PR it was given, never /pulls/0', async () => {
     const getPullRequestStatus = vi.fn().mockResolvedValue({ number: 12 });
     (createVcsProvider as Mock).mockReturnValue({ getPullRequestStatus, listPrCommits: vi.fn().mockResolvedValue([]) });
-    const service = new VcsLinkExtractorService({ upsertTicketLink: vi.fn() } as unknown as PrismaVcsRepository);
+    const service = new VcsLinkExtractorService(
+      { upsertTicketLink: vi.fn() } as unknown as PrismaVcsRepository,
+      mockAuditRecorder,
+    );
 
     await service.extractLinksFromPr(
       { id: 'p1', key: 'P' },

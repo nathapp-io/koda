@@ -111,11 +111,12 @@ describe('BundleIngestService workflow draft correction (US-005 AC-13/AC-14)', (
         repo: { provider: 'github' as const, owner: 'o', name: 'r' },
       })),
       findTicketsForJob: vi.fn(async () => [{ ticketId: 't1', ref: 'T-1', title: 'T-1', status: 'IN_PROGRESS', notifiedEpoch: null }]),
-      upsertFleetPrLink: vi.fn(async () => true),
+      upsertFleetPrLink: vi.fn(async () => 'l-t1'),
     };
     const events = { record: vi.fn() };
     const txManager = { run: (fn: () => unknown) => fn() };
-    const realEffects = new FleetJobTicketEffects({} as never, effectRepo as never, events as never, txManager as never);
+    const audit = { record: vi.fn(async () => undefined) };
+    const realEffects = new FleetJobTicketEffects({} as never, effectRepo as never, events as never, txManager as never, audit as never);
     const svc = new BundleIngestService(
       ingestRepo as never, store as never, jobs as never, live as never, activity as never, { signal: vi.fn() } as never,
       txManager as never, realEffects as never, outcomes as never, { emit: vi.fn() } as never, { record: vi.fn(async () => undefined) } as never,

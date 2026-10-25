@@ -10,6 +10,7 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import type { VcsConnectionDomain, VcsTicketDomain } from './domain/vcs.domain';
 import { PrismaVcsRepository } from './prisma-vcs.repository';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import { decryptToken } from '../common/utils/encryption.util';
 import { providerForConnection, branchWebUrl } from './provider-for-connection';
 import { containsTicketRef } from './ticket-ref-matcher.util';
@@ -21,6 +22,7 @@ export class VcsLinkExtractorService {
 
   constructor(
     private readonly vcsRepo: PrismaVcsRepository,
+    private readonly audit: AuditRecorder,
     @Optional() @Inject(VCS_CFG) private readonly vcsConfig?: IVcsConfig,
   ) {}
 
@@ -55,7 +57,7 @@ export class VcsLinkExtractorService {
     const branchUrl = branchWebUrl(connection, branchName, this.vcsConfig);
 
     // Upsert branch link
-    await this.upsertTicketLink(ticket.id, branchUrl, connection.provider, 'branch', branchName);
+    await this.upsertTicketLink(project, ticket, branchUrl, connection.provider, 'branch', branchName);
 
     // Try to list commits and create commit links
     let commits: { sha: string; message: string; authorLogin: string; url: string; date: Date }[] = [];
@@ -84,18 +86,32 @@ export class VcsLinkExtractorService {
 
     // Create commit links for matching commits
     for (const commit of uniqueCommits) {
-      await this.upsertTicketLink(ticket.id, commit.url, connection.provider, 'commit', commit.message, commit.date);
+      await this.upsertTicketLink(project, ticket, commit.url, connection.provider, 'commit', commit.message, commit.date);
     }
   }
 
+  /**
+   * Permissions P2 US-005: a link this extractor creates is a write an outside system caused, so it
+   * records `ticket.link.add` — the key audit-core records the same row under through the REST route —
+   * as the current actor. The update branch (`null`) is bookkeeping and records nothing.
+   */
   private async upsertTicketLink(
-    ticketId: string,
+    project: { id: string; key: string },
+    ticket: VcsTicketDomain,
     url: string,
     provider: string,
     linkType: string,
     externalRef?: string,
     createdAt?: Date,
   ): Promise<void> {
-    await this.vcsRepo.upsertTicketLink(ticketId, url, provider, linkType, externalRef, createdAt);
+    await this.audit.audited(
+      () => this.vcsRepo.upsertTicketLink(ticket.id, url, provider, linkType, externalRef, createdAt),
+      (linkId) => (linkId
+        ? {
+            key: 'ticket.link.add', resourceType: 'ticket-link', resourceId: linkId,
+            projectId: project.id, summary: `on ${project.key}-${ticket.number}`,
+          }
+        : []),
+    );
   }
 }

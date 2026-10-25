@@ -347,6 +347,11 @@ export class PrismaVcsRepository implements IVcsRepository {
   // TicketLink upsert (used by VcsLinkExtractorService)
   // ---------------------------------------------------------------------------
 
+  /**
+   * Insert the link, or refresh the one already stored for (ticketId, url).
+   * Answers the created link's id, or `null` when a link existed and only the
+   * update branch ran: the extractor audits exactly the creation (Permissions P2 US-005).
+   */
   async upsertTicketLink(
     ticketId: string,
     url: string,
@@ -354,7 +359,7 @@ export class PrismaVcsRepository implements IVcsRepository {
     linkType: string,
     externalRef?: string,
     createdAt?: Date,
-  ): Promise<void> {
+  ): Promise<string | null> {
     const existing = await this.db.ticketLink.findFirst({ where: { ticketId, url } });
 
     if (existing) {
@@ -373,18 +378,21 @@ export class PrismaVcsRepository implements IVcsRepository {
           externalRef: externalRef ?? null,
         },
       });
-    } else {
-      await this.db.ticketLink.create({
-        data: {
-          ticketId,
-          url,
-          provider,
-          linkType,
-          externalRef: externalRef ?? null,
-          ...(createdAt ? { createdAt } : {}),
-        },
-      });
+      return null;
     }
+
+    const created = await this.db.ticketLink.create({
+      data: {
+        ticketId,
+        url,
+        provider,
+        linkType,
+        externalRef: externalRef ?? null,
+        ...(createdAt ? { createdAt } : {}),
+      },
+      select: { id: true },
+    });
+    return created.id;
   }
 
   // ---------------------------------------------------------------------------
