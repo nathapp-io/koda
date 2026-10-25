@@ -1,4 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { fieldsSummary } from '../../audit/audit-summary';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
@@ -42,6 +44,7 @@ export class BudgetsService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly approvals: ApprovalCloser,
     private readonly approvalLive: ApprovalLivePublisher,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /** Admin: every policy. Project: the global ones plus the project's project and repo policies. */
@@ -63,6 +66,7 @@ export class BudgetsService {
           hardStop: dto.hardStop ?? true, runningJobs: dto.runningJobs ?? 'finish', createdById: actorId,
         });
         await this.record(actorId, 'budget.created', policy);
+        await this.audit.record({ key: 'fleet.budget.create', resourceType: 'fleet-budget', resourceId: policy.id, projectId: policy.projectId, summary: `created ${policy.scopeType} policy` });
         return policy;
       });
     } catch (error) {
@@ -87,6 +91,7 @@ export class BudgetsService {
       await this.record(actorId, 'budget.updated', after, {
         before: { amountUsd: before.amountUsd, warnPercent: before.warnPercent, hardStop: before.hardStop, runningJobs: before.runningJobs },
       });
+      await this.audit.record({ key: 'fleet.budget.update', resourceType: 'fleet-budget', resourceId: after.id, projectId: after.projectId, summary: fieldsSummary(dto) });
       return after;
     });
     this.evaluator.signal([updated.scopeKey]); // plan D165
@@ -100,6 +105,7 @@ export class BudgetsService {
       const closed = await this.approvals.closeForPolicy(id, { status: 'cancelled', resolvedBy: 'policy_deleted', actor: userActor(actorId) }, now);
       await this.repo.delete(id);
       await this.record(actorId, 'budget.deleted', policy, { wasPaused: policy.pausedAt !== null });
+      await this.audit.record({ key: 'fleet.budget.delete', resourceType: 'fleet-budget', resourceId: policy.id, projectId: policy.projectId, summary: policy.pausedAt !== null ? 'deleted while paused' : 'deleted' });
       return closed.live;
     });
     this.approvalLive.publish(live);
@@ -129,6 +135,7 @@ export class BudgetsService {
       const approvalId = opts.approvalId ?? closed.approval?.id ?? null;
       await this.repo.insertIncident({ policyId: id, kind: 'resumed', windowStart: windowStart(policy.windowKind, now), spentUsd: spent, amountUsd: amount, actorId, approvalId });
       await this.record(actorId, 'budget.resumed', after, { spentUsd: spent, previousAmountUsd: policy.amountUsd, approvalId });
+      if (!opts.approvalId) await this.audit.record({ key: 'fleet.budget.resume', resourceType: 'fleet-budget', resourceId: after.id, projectId: after.projectId, summary: 'resumed' });
       return { resumed: after, live: closed.live };
     });
     this.approvalLive.publish(live);
