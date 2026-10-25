@@ -96,8 +96,10 @@ describeDb('US-008 system thread and knowledge audit integration (PG)', () => {
       expect((await prisma.threadIngestCursor.findUniqueOrThrow({ where: { jobId_leaseEpoch: { jobId: s.jobId, leaseEpoch: 1 } } })).offset).toBe(BigInt(beforeOffset));
     } finally { record.mockRestore(); }
     const ingestor = app.get(ThreadIngestor);
-    await ingestor.catchUp(s.jobId, 1);
-    await ingestor.catchUp(s.jobId, 1);
+    await withTestActor({ type: 'RUNNER', id: runner.runnerId }, async () => {
+      await ingestor.catchUp(s.jobId, 1);
+      await ingestor.catchUp(s.jobId, 1);
+    });
     expect(await prisma.chatMessage.findFirstOrThrow({ where: { threadId: s.threadId, turnId: 't6', role: 'assistant' } })).toMatchObject({ status: 'complete', content: 'Done' });
     expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: s.jobId } })).costSpentUsd.toString()).toBe('2');
     expect(await auditRows(s.threadId)).toHaveLength(1);
