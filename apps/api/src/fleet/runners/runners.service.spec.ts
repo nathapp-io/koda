@@ -2,6 +2,7 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 import { RunnersService } from './runners.service';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 
 const row = (over = {}) => ({
   id: 'r1', name: 'box', os: 'linux', arch: 'x64', labels: ['linux'], capacity: 1, threadCapacity: 2, capabilities: {},
@@ -13,7 +14,7 @@ describe('RunnersService', () => {
   const repo = { findRunnerById: vi.fn(), findRunnerPage: vi.fn(), updateRunner: vi.fn(), deleteRunner: vi.fn(), lockForDelete: vi.fn(), countUnfinishedJobs: vi.fn() };
   const activity = { record: vi.fn() };
   const tx = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
-  const service = new RunnersService(repo as never, activity as never, tx as never, testFleetConfig({ runnerOfflineSec: 90 }));
+  const service = new RunnersService(repo as never, activity as never, tx as never, testFleetConfig({ runnerOfflineSec: 90 }), mockAuditRecorder);
 
   beforeEach(() => vi.clearAllMocks());
 
@@ -47,6 +48,7 @@ describe('RunnersService', () => {
     expect(repo.updateRunner).toHaveBeenCalledWith('r1', { enabled: false, labels: ['a', 'b'], capacity: 2 });
     expect(dto.enabled).toBe(false);
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ actorId: 'u9', action: 'runner.updated', entityId: 'r1', payload: { enabled: false, labels: ['a', 'b'], capacity: 2 } }));
+    expect(mockAuditRecorder.record).toHaveBeenCalledWith({ key: 'fleet.runner.update', resourceType: 'fleet-runner', resourceId: 'r1', projectId: null, summary: 'fields: capacity, enabled, labels' });
   });
 
   it('carries threadCapacity through update to the repository and the response (US-002 AC5)', async () => {
@@ -64,6 +66,7 @@ describe('RunnersService', () => {
     expect(repo.lockForDelete).toHaveBeenCalledWith('r1');
     expect(repo.deleteRunner).toHaveBeenCalledWith('r1');
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'runner.deleted', entityId: 'r1', payload: { name: 'box' } }));
+    expect(mockAuditRecorder.record).toHaveBeenCalledWith({ key: 'fleet.runner.delete', resourceType: 'fleet-runner', resourceId: 'r1', projectId: null, summary: 'deleted' });
   });
 
   it('409s a runner with unfinished or pinned jobs', async () => {

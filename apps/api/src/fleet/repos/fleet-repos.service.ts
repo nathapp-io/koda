@@ -14,6 +14,7 @@ import { FLEET_REPO_REPOSITORY, IFleetRepoRepository } from './domain/fleet-repo
 import { CreateFleetRepoDto } from './dto/create-fleet-repo.dto';
 import { FleetRepoDto } from './dto/fleet-repo.dto';
 import { RepoCheckResultDto } from './dto/repo-check-result.dto';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 
 @Injectable()
 export class FleetReposService {
@@ -24,6 +25,7 @@ export class FleetReposService {
     private readonly gitlabTokens: GitLabTokenSource,
     private readonly activity: FleetActivityService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async create(actorId: string, dto: CreateFleetRepoDto): Promise<FleetRepoDto> {
@@ -49,6 +51,7 @@ export class FleetReposService {
         actorType: 'USER', actorId, action: 'repo.created', entityType: 'repo', entityId: row.id,
         payload: { projectId: project.id, provider: row.provider, owner: row.owner, name: row.name },
       });
+      await this.audit.record({ key: 'fleet.repo.create', resourceType: 'fleet-repo', resourceId: row.id, projectId: row.projectId, summary: `registered ${row.provider}` });
       return FleetRepoDto.from(row);
     });
   }
@@ -76,6 +79,7 @@ export class FleetReposService {
         actorType: 'USER', actorId, action: 'repo.deleted', entityType: 'repo', entityId: id,
         payload: { provider: row.provider, owner: row.owner, name: row.name },
       });
+      await this.audit.record({ key: 'fleet.repo.delete', resourceType: 'fleet-repo', resourceId: id, projectId: row.projectId, summary: 'deleted' });
     });
   }
 
