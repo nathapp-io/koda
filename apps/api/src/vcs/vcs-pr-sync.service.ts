@@ -16,6 +16,7 @@ import { IVcsRepository, TicketLinkData, PrStateWriteResult, VCS_REPOSITORY } fr
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 import { mapPrState } from './pr-state';
 import { AuditRecorder } from '../audit/audit-recorder.service';
+import { runAsSystemWriter } from '../action-context/action-context';
 import { prStateSummary, type VcsPrStateAuditKey } from './vcs-audit';
 
 export interface SyncPrStatusResult {
@@ -23,8 +24,18 @@ export interface SyncPrStatusResult {
   skipped: number;
 }
 
+/**
+ * Permissions P2 US-004: the merge step's one key, on the link write and on the auto-transition.
+ * `runAsSystemWriter` derives the `vcs` component from it, and the entry is the same whoever saw the
+ * merge (the manual sync, the poller, the webhook or the fleet refresher).
+ */
+const MERGE_AUDIT_KEY = 'system.vcs.pr-merge-transition';
+
+/** The auto-transition's entry summary: the status pair it wrote, never the PR or its author. */
+const MERGE_TRANSITION_SUMMARY = `status: ${TicketStatus.IN_PROGRESS} -> ${TicketStatus.VERIFY_FIX}`;
+
 @Injectable()
-@SystemWriter('system.vcs.pr-merge-transition')
+@SystemWriter(MERGE_AUDIT_KEY)
 export class VcsPrSyncService {
   private readonly logger = new Logger(VcsPrSyncService.name);
 
@@ -170,11 +181,29 @@ export class VcsPrSyncService {
    * PR-state refresher. The conditional write runs first; only the writer that moved the link
    * to `merged` transitions the ticket, so two paths that see one merge yield one VERIFY_FIX
    * and one FIX_REPORT comment. Transition failures are logged inside and never undo the write.
+   *
+   * Permissions P2 US-004: the step runs as `SYSTEM/vcs`, whatever context saw the merge, and each
+   * write records its own entry in its own transaction — the link writes `pr <before> -> merged`, the
+   * auto-transition writes `status: IN_PROGRESS -> VERIFY_FIX` on the ticket. `runAsSystem` keeps the
+   * enclosing correlation id, so both entries still join the request or tick that saw the merge.
    */
   async applyMergedPr(link: TicketLinkData, prStatus: VcsPrStatus): Promise<PrStateWriteResult> {
-    const outcome = await this.vcsRepo.updateTicketLinkWithPrState(link.id, 'merged');
-    if (outcome === 'updated') await this.handleMergedPrAutoTransition(link, prStatus);
-    return outcome;
+    return runAsSystemWriter(this, async () => {
+      const outcome = await this.audit.audited(
+        () => this.vcsRepo.updateTicketLinkWithPrState(link.id, 'merged'),
+        (result) => result === 'updated'
+          ? {
+            key: MERGE_AUDIT_KEY,
+            resourceType: 'ticket-link',
+            resourceId: link.id,
+            projectId: link.ticket?.projectId ?? null,
+            summary: prStateSummary(link.prState, 'merged'),
+          }
+          : [],
+      );
+      if (outcome === 'updated') await this.handleMergedPrAutoTransition(link, prStatus);
+      return outcome;
+    });
   }
 
   /**
@@ -184,6 +213,9 @@ export class VcsPrSyncService {
    * - If the linked ticket is IN_PROGRESS, transition it to VERIFY_FIX,
    *   create a FIX_REPORT comment, and log VCS_PR_MERGED activity
    * - If the ticket is not IN_PROGRESS, no transition is attempted
+   *
+   * Permissions P2 US-004: the transition, the FIX_REPORT comment and the VCS_PR_MERGED activity share
+   * one transaction with the ticket's audit entry, so a rejected record rolls all three back.
    *
    * Note: Failures in this auto-transition do NOT prevent the caller
    * from updating prState - this method handles its own errors internally.
@@ -205,13 +237,22 @@ export class VcsPrSyncService {
         CommentType.FIX_REPORT,
       );
 
-      await this.vcsRepo.applyMergedPrTransition({
-        ticketId: link.ticketId,
-        externalRef: link.externalRef,
-        prUrl: prStatus.url,
-        mergedBy: prStatus.mergedBy ?? null,
-        mergeSha: prStatus.mergeSha ?? null,
-      });
+      await this.audit.audited(
+        () => this.vcsRepo.applyMergedPrTransition({
+          ticketId: link.ticketId,
+          externalRef: link.externalRef,
+          prUrl: prStatus.url,
+          mergedBy: prStatus.mergedBy ?? null,
+          mergeSha: prStatus.mergeSha ?? null,
+        }),
+        () => ({
+          key: MERGE_AUDIT_KEY,
+          resourceType: 'ticket',
+          resourceId: link.ticketId,
+          projectId: link.ticket?.projectId ?? null,
+          summary: MERGE_TRANSITION_SUMMARY,
+        }),
+      );
     } catch (error) {
       // Log the error but don't rethrow - auto-transition failure should not
       // prevent prState from being updated

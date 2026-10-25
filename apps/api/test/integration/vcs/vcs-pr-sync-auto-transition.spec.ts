@@ -33,6 +33,8 @@ vi.mock('../../../src/vcs/factory', () => ({
 
 // Import after mocks
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 
@@ -135,6 +137,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
     module = await Test.createTestingModule({
       providers: [
         VcsPrSyncService,
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         {
           provide: VCS_REPOSITORY,
           useValue: {

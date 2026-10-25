@@ -30,6 +30,7 @@ import type { IVcsProvider } from '../../../src/vcs/vcs-provider';
 import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { CommentType, TicketStatus } from '../../../src/common/enums';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 import { encryptToken } from '../../../src/common/utils/encryption.util';
 import type { VcsConnectionDomain } from '../../../src/vcs/domain/vcs.domain';
 import type { VcsPrStatus } from '../../../src/vcs/types';
@@ -96,7 +97,9 @@ describeIntegration('VCS merged-PR auto-transition (H6)', () => {
       isInTransaction: () => false,
     };
     repo = new PrismaVcsRepository(txManager, prismaService);
-    syncService = new VcsPrSyncService(repo);
+    // Permissions P2: the service records through AuditRecorder; this suite asserts the transition,
+    // so the global stub (its `audited` runs the write) stands in for the recorder.
+    syncService = new VcsPrSyncService(repo, mockAuditRecorder);
 
     // Seed: project + ticket (IN_PROGRESS) + ticket link with an open PR.
     const project = await prisma.project.create({
@@ -174,6 +177,7 @@ describeIntegration('VCS merged-PR auto-transition (H6)', () => {
       { id: projectId, key: 'H6' },
       connection,
       ENCRYPTION_KEY,
+      'vcs.sync.pr',
     );
 
     expect(result.updated).toBe(1);
@@ -223,6 +227,7 @@ describeIntegration('VCS merged-PR auto-transition (H6)', () => {
       { id: projectId, key: 'H6' },
       connection,
       ENCRYPTION_KEY,
+      'vcs.sync.pr',
     );
 
     // The terminal state must be respected: no update recorded...
@@ -257,6 +262,7 @@ describeIntegration('VCS merged-PR auto-transition (H6)', () => {
       { id: projectId, key: 'H6' },
       connection,
       ENCRYPTION_KEY,
+      'vcs.sync.pr',
     );
     expect(result.updated).toBe(0);
 

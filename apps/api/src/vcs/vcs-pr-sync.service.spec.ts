@@ -6,6 +6,7 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
 import { VcsPrStatus } from './types';
 import { AuditRecorder } from '../audit/audit-recorder.service';
+import { currentContext, runWithActor } from '../action-context/action-context';
 
 vi.mock('./factory', () => ({
   createVcsProvider: vi.fn(),
@@ -375,6 +376,27 @@ describe('VcsPrSyncService', () => {
       const link = makeTicketLink({ ticket: { id: 'ticket-1', status: 'CREATED', projectId: 'proj-1', number: 42, externalVcsId: null } });
       await expect(service.applyMergedPr(link, merged)).resolves.toBe('updated');
       expect(mockRepo.applyMergedPrTransition).not.toHaveBeenCalled();
+    });
+
+    it('AC-22: both audited calls run as SYSTEM/vcs, whoever the merge was seen by', async () => {
+      const captured: unknown[] = [];
+      mockAuditRecorder.audited.mockImplementation(async (
+        fn: () => Promise<unknown>,
+        entriesOf: (result: unknown) => unknown,
+      ) => {
+        captured.push(currentContext()?.actor);
+        const result = await fn();
+        const entries = entriesOf(result);
+        for (const entry of Array.isArray(entries) ? entries : entries ? [entries] : []) mockAuditRecorder.record(entry);
+        return result;
+      });
+
+      await runWithActor({ type: 'USER', id: 'u-1' }, async () => {
+        await service.applyMergedPr(makeTicketLink(), merged);
+      });
+
+      expect(captured).toEqual([{ type: 'SYSTEM', id: 'vcs' }, { type: 'SYSTEM', id: 'vcs' }]);
+      expect(mockAuditRecorder.audited).toHaveBeenCalledTimes(2);
     });
   });
 });

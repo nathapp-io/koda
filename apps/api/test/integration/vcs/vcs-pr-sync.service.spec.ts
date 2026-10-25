@@ -32,6 +32,8 @@ vi.mock('../../../src/vcs/factory', () => ({
 
 // Import the service - will fail to compile if service doesn't exist yet
 import { VcsPrSyncService, SyncPrStatusResult } from '../../../src/vcs/vcs-pr-sync.service';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 
@@ -132,6 +134,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
     module = await Test.createTestingModule({
       providers: [
         VcsPrSyncService,
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         {
           provide: VCS_REPOSITORY,
           useValue: {
