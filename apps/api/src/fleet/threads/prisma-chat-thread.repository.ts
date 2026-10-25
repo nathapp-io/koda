@@ -29,6 +29,8 @@ import { DELIVERABLE_STATUSES, MAX_DELIVERED_NOTES, deliveryText } from '../assi
 import { outcomeNote } from '../assistant/actions/outcome-note';
 import type { ChatThreadKind, ThreadAction, ThreadBackend } from '../common/thread-jobs';
 import { THREAD_LIMITS } from '../common/thread-jobs';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { threadAuditKey } from './thread-audit';
 
 /** The states a thread's current job is no longer live in (job-state.ts owns these). Prisma's `notIn` wants a mutable list. */
 const TERMINAL_JOB_STATES: string[] = ['COMPLETED', 'FAILED', 'CANCELLED', 'CRASHED', 'ESCALATED'];
@@ -58,10 +60,12 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
     private readonly notifier: RunnerNotifier,
     private readonly budgets: BudgetGate,
     @Inject(FLEET_CFG) private readonly config: ConfigType<typeof fleetConfig>,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async create(input: { kind: ChatThreadKind; projectId: string; repoId: string | null; baseRef: string | null; feature: string | null; title: string; createdById: string; backend: ThreadBackend; skills: ThreadSkillSource[]; maxCostUsd: string }): Promise<ChatThreadRecord> {
-    const row = await this.prisma.client.chatThread.create({ data: {
+    const row = await this.audit.audited(
+      () => this.prisma.client.chatThread.create({ data: {
       kind: input.kind,
       projectId: input.projectId,
       repoId: input.repoId,
@@ -78,7 +82,15 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       // and no spec.
       specPath: input.kind === 'PROJECT' || input.feature === null ? null : `.nax/features/${input.feature}/spec.md`,
       maxCostUsd: input.maxCostUsd,
-    } });
+      } }),
+      (created) => ({
+        key: threadAuditKey('create', input.kind === 'WORKSPACE'),
+        resourceType: 'thread',
+        resourceId: created.id,
+        projectId: created.projectId,
+        summary: `created ${input.kind}`,
+      }),
+    );
     return this.mapThread(row, null);
   }
 
@@ -170,6 +182,7 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
       if (!canOperate && thread.createdById !== userId) throw new ForbiddenAppException({}, 'permissions');
       const row = await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { maxCostUsd } });
+      await this.audit.record({ key: threadAuditKey('cap', scope.kind === 'workspace'), resourceType: 'thread', resourceId: row.id, projectId: row.projectId, summary: 'fields: maxCostUsd' });
       return this.mapThread(row, job);
     });
     return updated;
@@ -221,7 +234,8 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
       const thread = await this.prisma.client.chatThread.findFirst({ where: { id: threadId, ...scopeWhere(scope) } });
       if (!thread) throw new NotFoundAppException({}, 'threads.notFound');
       if (thread.status === 'ARCHIVED') return null;
-      await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { status: 'ARCHIVED', archivedAt: new Date() } });
+      const archived = await this.prisma.client.chatThread.update({ where: { id: threadId }, data: { status: 'ARCHIVED', archivedAt: new Date() } });
+      await this.audit.record({ key: threadAuditKey('archive', scope.kind === 'workspace'), resourceType: 'thread', resourceId: archived.id, projectId: archived.projectId, summary: 'archived' });
       // A send that took the locks first may have created a job the pre-lock read never saw, so
       // the cancel target is read again under the thread row lock.
       return (await this.currentThreadJob(threadId))?.id ?? null;
