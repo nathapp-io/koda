@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-fleet-ops",
   "branchName": "feat/permissions-p2-audit-fleet-ops",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T04:58:31.606Z",
+  "updatedAt": "2026-10-25T05:11:37.166Z",
   "userStories": [
     {
       "id": "US-001",
@@ -240,14 +240,17 @@
         "knowledge"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three existing injection sites reuse record/audited with established config-dispatch and queue fixtures rather than introducing an integration or abstraction; audit-before-enqueue needs behavioral assertions, and permission-gated admin/developer actions retain the mandatory security TDD override."
+        "reasoning": "Three existing injection sites reuse record/audited with established config-dispatch and queue fixtures rather than introducing an integration or abstraction; audit-before-enqueue needs behavioral assertions, and permission-gated admin/developer actions retain the mandatory security TDD override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/repo-config/config-jobs.service.ts",
@@ -289,7 +292,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4d46e1a73858aac703724495ebe0b4a2068db341"
     },
     {
       "id": "US-005",
