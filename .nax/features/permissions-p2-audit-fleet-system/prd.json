@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-fleet-system",
   "branchName": "feat/permissions-p2-audit-fleet-system",
   "createdAt": "2026-10-25T00:00:00.000Z",
-  "updatedAt": "2026-10-25T07:32:51.767Z",
+  "updatedAt": "2026-10-25T07:32:55.088Z",
   "userStories": [
     {
       "id": "US-001",
@@ -296,7 +296,10 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Two existing budget writers add established recorder calls with explicit context and result-derived summaries; no new authorization, financial computation or abstraction is introduced."
+        "reasoning": "Two existing budget writers add established recorder calls with explicit context and result-derived summaries; no new authorization, financial computation or abstraction is introduced.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/budgets/budget-sweeper.ts",
@@ -333,7 +336,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "313f8882e329925fde839207943ea3fbae13c297"
     },
     {
       "id": "US-005",
