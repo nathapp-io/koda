@@ -94,16 +94,19 @@ describeDb('fleet system schedule audit (PG)', () => {
   });
 
   it('AC-7/14: audit failure rolls back disable and coalesce state; ticker catches and continues', async () => {
-    const s = await schedule({ cron: 'not a cron' });
+    const owner = await prisma.user.create({ data: { email: `refused-owner-${++n}@koda.test`, passwordHash: 'x' } });
+    const s = await schedule({ createdById: owner.id });
     const recorder = vi.spyOn(app.get(AuditRecorder), 'record').mockRejectedValueOnce(new Error('audit unavailable'));
     expect((await tick()).failed).toBe(1);
     recorder.mockRestore();
     expect((await prisma.jobSchedule.findUniqueOrThrow({ where: { id: s.id } })).enabled).toBe(true);
     expect(await rows(s.id, 'system.schedule.dispatch')).toHaveLength(0);
+    await prisma.jobSchedule.delete({ where: { id: s.id } });
 
     const queued = await schedule();
     await tick();
     const job = await prisma.fleetJob.findFirstOrThrow({ where: { scheduleId: queued.id } });
+    expect(job.coalescedCount).toBe(0);
     await prisma.jobSchedule.update({ where: { id: queued.id }, data: { nextFireAt: NEXT } });
     const failCoalesce = vi.spyOn(app.get(AuditRecorder), 'record').mockRejectedValueOnce(new Error('audit unavailable'));
     const result = await withTestActor({ type: 'SYSTEM', id: 'schedule' }, () => app.get(ScheduleTicker).tick(new Date('2026-10-02T04:00:30.000Z')));
