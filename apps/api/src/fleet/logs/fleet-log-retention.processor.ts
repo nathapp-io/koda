@@ -3,6 +3,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { runAsSystemWriter } from '../../action-context/action-context';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { ARTIFACT_STORE, ArtifactStore } from '../artifacts/artifact-store';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
@@ -29,6 +30,7 @@ export class FleetLogRetentionProcessor {
     @Inject(LOG_STORE) private readonly logStore: Pick<LogStore, 'deletePrefix'>,
     @Inject(ARTIFACT_STORE) private readonly artifacts: Pick<ArtifactStore, 'delete'>,
     @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'logRetentionDays'>,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /** Permissions P2 US-004: the cron method is the background entry; the purge runs as `log`. */
@@ -82,8 +84,16 @@ export class FleetLogRetentionProcessor {
       await this.artifacts.delete(key);
     }
     await this.txManager.run(async () => {
-      if (!(await this.jobs.lockById(c.id))) return;
+      const job = await this.jobs.lockById(c.id);
+      if (!job) return;
       await this.repo.expireRows(c.id, c.leaseEpoch, now);
+      await this.audit.record({
+        key: 'system.log.retention',
+        resourceType: 'fleet-job',
+        resourceId: c.id,
+        projectId: job.projectId,
+        summary: `logs expired through epoch ${c.leaseEpoch}`,
+      });
     });
   }
 }

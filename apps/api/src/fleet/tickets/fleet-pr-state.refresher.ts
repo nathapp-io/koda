@@ -2,6 +2,7 @@ import { SystemWriter } from '../../permissions/system-writer.decorator';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { runAsSystemWriter } from '../../action-context/action-context';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { IVcsRepository, VCS_REPOSITORY } from '../../vcs/domain/vcs.repository';
 import { mapPrState } from '../../vcs/pr-state';
@@ -50,6 +51,7 @@ export class FleetPrStateRefresher implements OnModuleInit, OnModuleDestroy {
     private readonly prSync: VcsPrSyncService,
     @Inject(FLEET_CFG) private readonly config: Pick<IFleetConfig, 'sweepEnabled' | 'prRefreshMs'>,
     private readonly events: EventEmitter2,
+    private readonly audit: AuditRecorder,
   ) {}
 
   onModuleInit(): void {
@@ -139,7 +141,16 @@ export class FleetPrStateRefresher implements OnModuleInit, OnModuleDestroy {
     const merged = pr !== null && next === 'merged';
     const outcome = merged
       ? await this.prSync.applyMergedPr(link, pr)
-      : await this.vcsRepo.updateTicketLinkWithPrState(link.id, next);
+      : await this.audit.audited(
+        () => this.vcsRepo.updateTicketLinkWithPrState(link.id, next),
+        (result) => result !== 'updated' ? [] : [{
+          key: 'system.ticket-link.pr-refresh',
+          resourceType: 'ticket-link',
+          resourceId: link.id,
+          projectId: link.ticket.projectId,
+          summary: `pr ${link.prState ?? 'none'} -> ${next}`,
+        }],
+      );
     if (outcome !== 'updated') return false;
     if (merged) this.events.emit(KNOWLEDGE_REPO_MERGED, { repoId: link.repo.id } satisfies KnowledgeRepoMergedEvent);
     return true;

@@ -1,4 +1,5 @@
 import type { Mock } from 'vitest';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { currentContext, type ActionContext } from '../../action-context/action-context';
 import { KNOWLEDGE_REPO_MERGED } from '../common/knowledge-events';
 import { FleetPrStateRefresher } from './fleet-pr-state.refresher';
@@ -35,7 +36,7 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
     events = { emit: vi.fn() };
     refresher = new FleetPrStateRefresher(
       repo as never, github as never, gitlab as never, gitlabTokens as never, vcsRepo as never, prSync as never,
-      testFleetConfig(), events as never,
+      testFleetConfig(), events as never, mockAuditRecorder,
     );
   });
 
@@ -183,7 +184,7 @@ describe('FleetPrStateRefresher (C9 §3.4, D456)', () => {
     });
     const on = new FleetPrStateRefresher(
       repo as never, github as never, gitlab as never, gitlabTokens as never, vcsRepo as never, prSync as never,
-      testFleetConfig({ sweepEnabled: true }), events as never,
+      testFleetConfig({ sweepEnabled: true }), events as never, mockAuditRecorder,
     );
 
     on.onModuleInit();

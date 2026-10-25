@@ -1,4 +1,5 @@
 import { Reflector } from '@nestjs/core';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { currentContext, type ActionContext } from '../../action-context/action-context';
 import { testFleetConfig } from '../../common/test-helpers/fleet-config';
 import { FleetLogRetentionProcessor, RETENTION_BATCH } from './fleet-log-retention.processor';
@@ -21,7 +22,7 @@ describe('FleetLogRetentionProcessor (S2a §5)', () => {
   const logStore = { deletePrefix: vi.fn(async (p: string) => { calls.push(`rm:${p}`); }) };
   const artifacts = { delete: vi.fn(async (k: string) => { calls.push(`rm:${k}`); }) };
   const make = (days: number | null = 30) =>
-    new FleetLogRetentionProcessor(repo as never, jobs as never, tx as never, logStore, artifacts, testFleetConfig({ logRetentionDays: days }));
+    new FleetLogRetentionProcessor(repo as never, jobs as never, tx as never, logStore, artifacts, testFleetConfig({ logRetentionDays: days }), mockAuditRecorder);
   const candidate = (id: string, leaseEpoch = 1) => ({ id, leaseEpoch, finishedAt: new Date('2026-08-01T00:00:00.000Z') });
 
   afterEach(() => {
