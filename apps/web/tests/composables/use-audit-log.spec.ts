@@ -85,6 +85,31 @@ describe('useAuditLog', () => {
     expect(log.pending.value).toBe(false)
   })
 
+  test('a superseded load never writes its page, and pending follows the latest request', async () => {
+    const releases: Array<(value: unknown) => void> = []
+    const get = jest.fn(() => new Promise((resolve: (value: unknown) => void) => { releases.push(resolve) }))
+    install({ get })
+    const { useAuditLog } = await import(composablePath)
+    const log = useAuditLog()
+
+    const first = log.load(filters())
+    const second = log.load(filters({ projectId: 'p1' }))
+    expect(log.pending.value).toBe(true)
+
+    // The newer request answers first: it owns the page and the pending flag.
+    releases[1](page([entry('b')]))
+    await second
+    expect(log.entries.value.map((e) => e.id)).toEqual(['b'])
+    expect(log.pending.value).toBe(false)
+
+    // The older request finishing later changes neither.
+    releases[0](page([entry('a')]))
+    await first
+    expect(log.entries.value.map((e) => e.id)).toEqual(['b'])
+    expect(log.total.value).toBe(1)
+    expect(log.pending.value).toBe(false)
+  })
+
   // AC-13
   test('loadKeys reads GET /audit/keys once and stores the keys', async () => {
     const get = jest.fn(async () => ({ keys: ['comment.create'] }))

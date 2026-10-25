@@ -80,17 +80,25 @@ export function useAuditLog() {
   const hasNext = ref(false)
   const pending = ref(false)
   const keys = ref<string[]>([])
+  /**
+   * The id of the newest load. A load answers asynchronously, so two quick URL changes can finish
+   * out of order; only the newest one may write the page (or clear `pending`), so a slow earlier
+   * answer can never put stale rows under the filters the URL now shows.
+   */
+  let latestLoadId = 0
 
   async function load(filters: AuditFilters): Promise<void> {
+    const loadId = ++latestLoadId
     pending.value = true
     try {
       const res = await $api.get<AuditPage>('/audit', { query: auditApiQuery(filters) })
+      if (loadId !== latestLoadId) return
       entries.value = res.records ?? []
       total.value = res.total ?? 0
       hasNext.value = res.hasNext === true
     }
     finally {
-      pending.value = false
+      if (loadId === latestLoadId) pending.value = false
     }
   }
 

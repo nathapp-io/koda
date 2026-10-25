@@ -46,6 +46,16 @@ function reference(records: readonly unknown[] = [ENTRY], keys: readonly string[
   }) as Get
 }
 
+/** A $api.get whose `/audit` answers the test resolves itself, so it can finish them out of order. */
+function deferredReference(keys: readonly string[] = ['comment.create']) {
+  const calls: Array<{ query: Query; resolve: (value: unknown) => void }> = []
+  const get = jest.fn((path: string, opts?: { query?: Query }) => {
+    if (path === '/audit/keys') return Promise.resolve({ keys: [...keys] })
+    return new Promise((resolve: (value: unknown) => void) => { calls.push({ query: opts?.query ?? {}, resolve }) })
+  }) as Get
+  return { get, calls }
+}
+
 /** FilterBar is not part of uiStubs; the page only needs it to render its slot. */
 const FilterBar = {
   name: 'StubFilterBar',
@@ -159,6 +169,33 @@ describe('admin audit page (Permissions P2 US-004)', () => {
       { current: '1', size: '50' },
       { projectId: 'p1', current: '1', size: '50' },
     ])
+    p.app.unmount()
+  })
+
+  test('F1: a slow earlier load never overwrites the rows of a newer one', async () => {
+    const { get, calls } = deferredReference()
+    const p = mountPage(get)
+    await p.settle()
+    expect(calls.map((call) => call.query)).toEqual([{ current: '1', size: '50' }])
+
+    p.route.query = { projectId: 'p1' }
+    await p.settle()
+    expect(calls.map((call) => call.query)).toEqual([
+      { current: '1', size: '50' },
+      { projectId: 'p1', current: '1', size: '50' },
+    ])
+
+    // The newer request answers first and paints the comment row…
+    const newer = { ...ENTRY, id: 'e2', key: 'comment.create', summary: 'commented' }
+    calls[1].resolve({ records: [newer], total: 1, current: 1, size: 50, hasNext: false, hasPrev: false })
+    await p.settle()
+    expect(p.rowText()).toContain('comment.create')
+
+    // …then the older one finishes: its stale page must not replace what the URL now shows.
+    calls[0].resolve({ records: [ENTRY], total: 1, current: 1, size: 50, hasNext: false, hasPrev: false })
+    await p.settle()
+    expect(p.rowText()).toContain('comment.create')
+    expect(p.rowText()).not.toContain('ticket.create')
     p.app.unmount()
   })
 
