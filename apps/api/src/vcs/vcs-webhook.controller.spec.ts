@@ -2,6 +2,7 @@ import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException } from '@nestjs/common';
 import { AuthException } from '@nathapp/nestjs-common';
+import { currentContext, runWithActionContext, type ActionContext } from '../action-context/action-context';
 import { PermissionService } from '../permissions/permission.service';
 import { VcsWebhookController } from './vcs-webhook.controller';
 import { VcsConnectionService } from './vcs-connection.service';
@@ -329,6 +330,27 @@ describe('VcsWebhookController', () => {
         source: 'github',
         deliveryId: 'delivery-retry-1',
       });
+    });
+
+    /**
+     * Permissions P2 US-006 AC-18: the replay row is the VCS component's own bookkeeping. The route is
+     * public, so the request enters as `SYSTEM/anonymous`; `assertFresh` must run as `SYSTEM/vcs`.
+     */
+    it('AC-18: assertFresh runs as SYSTEM/vcs even when the request entered as SYSTEM/anonymous', async () => {
+      const captured: Array<ActionContext | undefined> = [];
+      mockReplayGuard.assertFresh.mockImplementation(async () => {
+        captured.push(currentContext());
+      });
+
+      await runWithActionContext(
+        { actor: { type: 'SYSTEM', id: 'anonymous' }, origin: 'rest' },
+        () => controller.handleWebhook(
+          'test-project', 'sha256=sig', makeRequest(makePushPayload()), 'push', 'delivery-vcs-actor',
+        ),
+      );
+
+      expect(captured).toHaveLength(1);
+      expect(captured[0]?.actor).toEqual({ type: 'SYSTEM', id: 'vcs' });
     });
   });
 });

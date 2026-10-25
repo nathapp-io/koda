@@ -7,6 +7,7 @@ import { RequiresGuard } from '../permissions/requires.guard';
 import { PermissionService } from '../permissions/permission.service';
 import { AuthException, ValidationAppException } from '@nathapp/nestjs-common';
 import { createHmac } from 'node:crypto';
+import { currentContext, runWithActionContext, type ActionContext } from '../action-context/action-context';
 import { CiWebhookController } from './ci-webhook.controller';
 import { CiWebhookService } from './ci-webhook.service';
 import { CiWebhookPayloadDto } from './ci-webhook.dto';
@@ -248,6 +249,47 @@ describe('CiWebhookController', () => {
         source: 'ci',
         deliveryId: 'delivery-retry-1',
       });
+    });
+
+    /**
+     * Permissions P2 US-006 AC-16/AC-17: the replay rows are the CI component's own bookkeeping. The
+     * route is public, so the request enters as `SYSTEM/anonymous`; both guard calls must run as
+     * `SYSTEM/ci` inside that context.
+     */
+    const captureActorDuring = (method: 'assertFresh' | 'forget'): Array<ActionContext | undefined> => {
+      const captured: Array<ActionContext | undefined> = [];
+      mockReplayGuard[method].mockImplementation(async () => {
+        captured.push(currentContext());
+      });
+      return captured;
+    };
+
+    const anonymousRestContext = { actor: { type: 'SYSTEM' as const, id: 'anonymous' }, origin: 'rest' as const };
+
+    it('AC-16: assertFresh runs as SYSTEM/ci even when the request entered as SYSTEM/anonymous', async () => {
+      const captured = captureActorDuring('assertFresh');
+      const request = requestOf(validPayload);
+      const rawBytes = request.rawBody ?? Buffer.alloc(0);
+
+      await runWithActionContext(anonymousRestContext, () =>
+        controller.handleCiWebhook('koda', request, sign(rawBytes.toString('utf8')), 'delivery-ci-actor'));
+
+      expect(captured).toHaveLength(1);
+      expect(captured[0]?.actor).toEqual({ type: 'SYSTEM', id: 'ci' });
+    });
+
+    it('AC-17: forget runs as SYSTEM/ci when the intake throws', async () => {
+      mockCiWebhookService.processCiWebhook.mockRejectedValueOnce(new Error('boom'));
+      const captured = captureActorDuring('forget');
+      const request = requestOf(validPayload);
+      const rawBytes = request.rawBody ?? Buffer.alloc(0);
+
+      await expect(runWithActionContext(anonymousRestContext, () =>
+        controller.handleCiWebhook('koda', request, sign(rawBytes.toString('utf8')), 'delivery-ci-forget'),
+      )).rejects.toThrow('boom');
+
+      expect(captured).toHaveLength(1);
+      expect(captured[0]?.actor).toEqual({ type: 'SYSTEM', id: 'ci' });
     });
   });
 });

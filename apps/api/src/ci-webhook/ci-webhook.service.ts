@@ -6,11 +6,15 @@ import { buildGitUrl } from '../common/utils/git-url.util';
 import { CiWebhookPayloadDto, CiFailureDto } from './ci-webhook.dto';
 import { PrismaCiWebhookRepository } from './prisma-ci-webhook.repository';
 import { runAsSystemWriter } from '../action-context/action-context';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 
 @Injectable()
 @SystemWriter('system.ci.ticket-create')
 export class CiWebhookService {
-  constructor(private readonly repo: PrismaCiWebhookRepository) {}
+  constructor(
+    private readonly repo: PrismaCiWebhookRepository,
+    private readonly audit: AuditRecorder,
+  ) {}
 
   /**
    * The project id and HMAC secret for an inbound CI webhook, or null when the
@@ -69,8 +73,14 @@ export class CiWebhookService {
     };
   }
 
+  /**
+   * Creates the failed-pipeline ticket and records `system.ci.ticket-create` for it (Permissions P2
+   * US-006). The entry is written by the repository's `onCreated`, inside the ticket-number attempt's
+   * transaction, so a rejected record leaves no ticket and the controller forgets the delivery id.
+   * `project` carries the key for the summary: `created <KEY>-<number>`, never the payload.
+   */
   private async createTicket(
-    project: { id: string },
+    project: { id: string; key: string },
     failure: CiFailureDto,
     payload: CiWebhookPayloadDto,
   ) {
@@ -80,16 +90,28 @@ export class CiWebhookService {
     // Build description with details
     const description = this.buildDescription(failure, payload);
 
-    return this.repo.createTicket(project.id, {
-      type: TicketType.BUG,
-      title,
-      description,
-      status: 'CREATED',
-      priority: Priority.HIGH,
-      gitRefVersion: payload.commit.sha,
-      gitRefFile: failure.file || null,
-      gitRefLine: failure.line || null,
-    });
+    return this.repo.createTicket(
+      project.id,
+      {
+        type: TicketType.BUG,
+        title,
+        description,
+        status: 'CREATED',
+        priority: Priority.HIGH,
+        gitRefVersion: payload.commit.sha,
+        gitRefFile: failure.file || null,
+        gitRefLine: failure.line || null,
+      },
+      async (ticket) => {
+        await this.audit.record({
+          key: 'system.ci.ticket-create',
+          resourceType: 'ticket',
+          resourceId: ticket.id,
+          projectId: project.id,
+          summary: `created ${project.key}-${ticket.number}`,
+        });
+      },
+    );
   }
 
   private buildDescription(_failure: CiFailureDto, payload: CiWebhookPayloadDto): string {

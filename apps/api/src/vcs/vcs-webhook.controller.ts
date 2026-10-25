@@ -8,6 +8,7 @@ import { VcsConnectionService } from './vcs-connection.service';
 import { VcsWebhookService, GitHubWebhookPayload, WebhookHandleResult } from './vcs-webhook.service';
 import { WebhookReplayGuard } from '../webhook-security/webhook-replay.guard';
 import { InboundWebhookRequest, signedBytesOf } from '../webhook-security/inbound-webhook-request';
+import { runAsSystem } from '../action-context/action-context';
 import type { VcsConnectionWithProjectDomain } from './domain/vcs.domain';
 
 @ApiTags('vcs')
@@ -59,8 +60,12 @@ export class VcsWebhookController {
     const payload = (request.body !== null && typeof request.body === 'object' ? request.body : {}) as GitHubWebhookPayload;
 
     // SEC-1: reject replayed deliveries; forget on failure so GitHub's retry
-    // with the same X-GitHub-Delivery id is accepted.
-    await this.replayGuard.assertFresh({ projectId: connection.projectId, source: 'github', deliveryId, dateHeader });
+    // with the same X-GitHub-Delivery id is accepted. Both rows are the VCS
+    // component's own bookkeeping, so they are written as SYSTEM/vcs rather
+    // than as the public route's SYSTEM/anonymous (Permissions P2 US-006).
+    await runAsSystem('vcs', async () => {
+      await this.replayGuard.assertFresh({ projectId: connection.projectId, source: 'github', deliveryId, dateHeader });
+    });
 
     const eventType = githubEvent
       || (payload.pull_request ? 'pull_request' : payload.issue ? 'issues' : 'unknown');
@@ -71,7 +76,9 @@ export class VcsWebhookController {
     try {
       return await this.webhookService.handleWebhook(connection, event, payload);
     } catch (err) {
-      await this.replayGuard.forget({ projectId: connection.projectId, source: 'github', deliveryId });
+      await runAsSystem('vcs', async () => {
+        await this.replayGuard.forget({ projectId: connection.projectId, source: 'github', deliveryId });
+      });
       throw err;
     }
   }
