@@ -73,6 +73,7 @@
     "slos": "SLO 指标",
     "users": "用户",
     "roles": "角色",
+    "audit": "审计日志",
     "fleetRunners": "执行机",
     "fleetRepos": "仓库",
     "fleetJobs": "Fleet 任务",
@@ -101,6 +102,52 @@
     "toggleTheme": "切换浅色/深色主题"
   },
   "admin": {
+    "audit": {
+      "title": "审计日志",
+      "subtitle": "API 记录的每一次写入，以及涉及的执行者、项目和资源。",
+      "filter": {
+        "key": "操作键",
+        "allKeys": "全部操作键",
+        "actorType": "执行者类型",
+        "allActorTypes": "全部执行者类型",
+        "from": "开始日期（UTC）",
+        "to": "结束日期（UTC）",
+        "byActor": "按该执行者筛选",
+        "byProject": "按该项目筛选",
+        "byApprover": "按该审批人筛选",
+        "byResource": "按该资源筛选"
+      },
+      "column": { "time": "时间", "key": "操作键", "actor": "执行者", "project": "项目", "resource": "资源", "summary": "摘要" },
+      "actorType": { "USER": "用户", "AGENT": "智能体", "RUNNER": "运行器", "SYSTEM": "系统" },
+      "origin": { "rest": "REST", "mcp": "MCP", "thread": "线程", "runner": "运行器", "system": "系统" },
+      "approvalMode": { "none": "无需审批", "self": "本人", "agent": "智能体", "human": "人工" },
+      "onBehalfOf": "代表 {name}",
+      "refresh": "刷新",
+      "prev": "上一页",
+      "next": "下一页",
+      "adminOnly": "审计日志仅对管理员开放。",
+      "empty": "没有符合这些筛选条件的审计记录。",
+      "expand": "展开详情",
+      "detail": {
+        "origin": "来源",
+        "correlationId": "关联 ID",
+        "showRelated": "查看相关记录",
+        "requiredMode": "所需审批",
+        "satisfiedBy": "满足方式",
+        "approver": "审批人",
+        "requestId": "审批请求",
+        "onBehalfOf": "代表",
+        "createdAt": "创建时间"
+      },
+      "chip": {
+        "actor": "执行者",
+        "approver": "审批人",
+        "project": "项目",
+        "resource": "资源",
+        "correlation": "关联 ID",
+        "remove": "移除筛选条件：{filter}"
+      }
+    },
     "roles": {
       "title": "角色",
       "subtitle": "创建角色并选择每个角色授予的权限。",

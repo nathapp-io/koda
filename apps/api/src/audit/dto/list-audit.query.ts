@@ -26,6 +26,9 @@ export class ListAuditQuery extends KodaPageQuery {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(128)
   resourceId?: string;
 
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(128)
+  correlationId?: string;
+
   @ApiPropertyOptional() @IsOptional() @IsISO8601({ strict: true })
   @Matches(/^\d{4}-\d{2}-\d{2}(T[0-9:.]+Z)?$/, { message: 'use a date (YYYY-MM-DD) or a UTC instant ending in Z' })
   from?: string;

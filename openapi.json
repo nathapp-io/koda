@@ -11678,6 +11678,14 @@
             }
           },
           {
+            "name": "correlationId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "from",
             "required": false,
             "in": "query",
@@ -11711,6 +11719,32 @@
           }
         ],
         "summary": "Audit entries, newest first; needs the global key audit.read",
+        "tags": [
+          "audit"
+        ]
+      }
+    },
+    "/api/audit/keys": {
+      "get": {
+        "operationId": "AuditController_keys",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Distinct audit keys, unprefixed: { keys: string[] }"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Caller does not hold audit.read"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every audit key that occurs, sorted ascending; needs the global key audit.read",
         "tags": [
           "audit"
         ]

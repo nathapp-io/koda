@@ -4,7 +4,18 @@ import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult, ITransactionManager } from '@nathapp/nestjs-data';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AuditEntry as AuditEntryModel, Prisma, PrismaClient } from '../generated/prisma/client';
-import type { AuditEntryFilters, AuditEntryRecord } from './domain/audit-entry.domain';
+import type { AuditDisplayIds, AuditDisplayNames, AuditEntryFilters, AuditEntryRecord } from './domain/audit-entry.domain';
+
+/** A user's label: the name it chose, or its email when the name is missing or blank. */
+function userLabel(name: string | null, email: string): string {
+  const trimmed = name?.trim() ?? '';
+  return trimmed === '' ? email : trimmed;
+}
+
+/** Reads one kind's label rows, or nothing at all when the page named no id of that kind. */
+function rowsFor<T>(ids: string[], load: () => Promise<T[]>): Promise<T[]> {
+  return ids.length === 0 ? Promise.resolve([]) : load();
+}
 
 @Injectable()
 export class PrismaAuditEntryRepository extends AbstractPrismaRepository<AuditEntryRecord, AuditEntryModel, string> {
@@ -36,6 +47,7 @@ export class PrismaAuditEntryRepository extends AbstractPrismaRepository<AuditEn
       ...(filters.projectId !== undefined ? { projectId: filters.projectId } : {}),
       ...(filters.resourceType !== undefined ? { resourceType: filters.resourceType } : {}),
       ...(filters.resourceId !== undefined ? { resourceId: filters.resourceId } : {}),
+      ...(filters.correlationId !== undefined ? { correlationId: filters.correlationId } : {}),
       ...((filters.from !== undefined || filters.to !== undefined) ? { createdAt: {
         ...(filters.from !== undefined ? { gte: filters.from } : {}),
         ...(filters.to !== undefined ? { lte: filters.to } : {}),
@@ -43,5 +55,58 @@ export class PrismaAuditEntryRepository extends AbstractPrismaRepository<AuditEn
     };
     const rows = await Paginate(this.prisma.client.auditEntry, page, { where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
     return rows.remap((m: AuditEntryModel) => this.toDomain(m));
+  }
+
+  /**
+   * Every `key` that occurs in the log, one row per distinct value, sorted ascending (Permissions P2
+   * US-002). Not an `IRepository` method: the log's key set is small and unpaged. The log is append-only
+   * and grows with every audited write, so the deduplication happens in PostgreSQL (`GROUP BY key`,
+   * served by the `key` index): only one row per distinct key leaves the database. Prisma's
+   * `findMany({ distinct })` would instead read every row and deduplicate in the application.
+   */
+  async findDistinctKeys(): Promise<string[]> {
+    const rows = await this.prisma.client.auditEntry.groupBy({
+      by: ['key'],
+      orderBy: { key: 'asc' },
+    });
+    return rows.map((row) => row.key);
+  }
+
+  /**
+   * One page's display labels, in at most one `findMany` per non-empty kind (Permissions P2 US-001).
+   *
+   * Designer's call: this reads the label columns of `User`, `Agent`, `Runner` and `Project` from the
+   * audit repository instead of the owning modules' services — no module exports a by-ids label
+   * lookup, and wiring four domain modules into the global `AuditLogModule` would couple it to all of
+   * them for one read-only projection. Only `id` and the label columns are selected, and nothing is
+   * written. Each list is bounded by one page's ids (at most 100 entries per kind).
+   */
+  async findDisplayNames(ids: AuditDisplayIds): Promise<AuditDisplayNames> {
+    const [users, agents, runners, projects] = await Promise.all([
+      rowsFor(ids.userIds, () => this.prisma.client.user.findMany({
+        where: { id: { in: ids.userIds } },
+        select: { id: true, name: true, email: true },
+      })),
+      rowsFor(ids.agentIds, () => this.prisma.client.agent.findMany({
+        where: { id: { in: ids.agentIds } },
+        select: { id: true, name: true },
+      })),
+      rowsFor(ids.runnerIds, () => this.prisma.client.runner.findMany({
+        where: { id: { in: ids.runnerIds } },
+        select: { id: true, name: true },
+      })),
+      // No `deletedAt` filter: a soft-deleted project still resolves, the audit log is history.
+      rowsFor(ids.projectIds, () => this.prisma.client.project.findMany({
+        where: { id: { in: ids.projectIds } },
+        select: { id: true, slug: true, name: true },
+      })),
+    ]);
+
+    return {
+      users: new Map(users.map((row) => [row.id, userLabel(row.name, row.email)])),
+      agents: new Map(agents.map((row) => [row.id, row.name])),
+      runners: new Map(runners.map((row) => [row.id, row.name])),
+      projects: new Map(projects.map((row) => [row.id, { slug: row.slug, name: row.name }])),
+    };
   }
 }

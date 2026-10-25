@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search, LayoutDashboard, Bot, Activity, Kanban, Tag, BookOpen, Clock, Brain, Code2, Rocket, Gauge, BarChart3, Settings, FolderKanban, SunMoon, Sparkles, ShieldCheck, MessagesSquare } from 'lucide-vue-next'
+import { Search, LayoutDashboard, Bot, Activity, Kanban, Tag, BookOpen, Clock, Brain, Code2, Rocket, Gauge, BarChart3, Settings, FolderKanban, SunMoon, Sparkles, ShieldCheck, MessagesSquare, ScrollText } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
 interface Project { id: number; name: string; slug: string }
@@ -17,6 +17,8 @@ const { permissions: globalPermissions } = useGlobalPermissions()
 const canReadSkills = computed(() => globalPermissions.value.has('skill.source.read'))
 // US-010: Roles is a top-level destination too, so it is offered here on the key its page needs.
 const canReadRoles = computed(() => globalPermissions.value.has('role.read'))
+// US-007: Admin -> Audit log is a top-level destination, gated on the key `GET /audit` needs.
+const canReadAudit = computed(() => globalPermissions.value.has('audit.read'))
 
 const query = ref('')
 const active = ref(0)
@@ -36,6 +38,9 @@ const commands = computed<Command[]>(() => {
   ]
   if (canReadRoles.value) {
     list.push({ id: 'roles', label: t('nav.roles'), icon: ShieldCheck, run: go('/admin/roles') })
+  }
+  if (canReadAudit.value) {
+    list.push({ id: 'audit', label: t('nav.audit'), icon: ScrollText, run: go('/admin/audit') })
   }
   if (canReadSkills.value) {
     list.push({ id: 'skills', label: t('nav.skills'), icon: Sparkles, run: go('/admin/skills') })

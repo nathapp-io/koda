@@ -851,6 +851,8 @@ model AuditEntry {
   @@index([createdAt])
   @@index([projectId, createdAt])
   @@index([actorId, createdAt])
+  // Permissions P2 US-002: the exact correlation filter reads a whole run newest-first through this index.
+  @@index([correlationId, createdAt])
   @@index([actorType])
   @@index([approverId])
   @@index([key])

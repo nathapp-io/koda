@@ -73,6 +73,7 @@
     "slos": "SLOs",
     "users": "Users",
     "roles": "Roles",
+    "audit": "Audit log",
     "fleetRunners": "Runners",
     "fleetRepos": "Repos",
     "fleetJobs": "Fleet jobs",
@@ -101,6 +102,52 @@
     "toggleTheme": "Toggle light/dark theme"
   },
   "admin": {
+    "audit": {
+      "title": "Audit log",
+      "subtitle": "Every write the API recorded, with the actor, project and resource it touched.",
+      "filter": {
+        "key": "Key",
+        "allKeys": "All keys",
+        "actorType": "Actor type",
+        "allActorTypes": "All actor types",
+        "from": "From (UTC)",
+        "to": "To (UTC)",
+        "byActor": "Filter by this actor",
+        "byProject": "Filter by this project",
+        "byApprover": "Filter by this approver",
+        "byResource": "Filter by this resource"
+      },
+      "column": { "time": "Time", "key": "Key", "actor": "Actor", "project": "Project", "resource": "Resource", "summary": "Summary" },
+      "actorType": { "USER": "User", "AGENT": "Agent", "RUNNER": "Runner", "SYSTEM": "System" },
+      "origin": { "rest": "REST", "mcp": "MCP", "thread": "Thread", "runner": "Runner", "system": "System" },
+      "approvalMode": { "none": "None", "self": "Self", "agent": "Agent", "human": "Human" },
+      "onBehalfOf": "on behalf of {name}",
+      "refresh": "Refresh",
+      "prev": "Previous",
+      "next": "Next",
+      "adminOnly": "The audit log is available to administrators only.",
+      "empty": "No audit entries match these filters.",
+      "expand": "Show details",
+      "detail": {
+        "origin": "Origin",
+        "correlationId": "Correlation",
+        "showRelated": "Show related",
+        "requiredMode": "Requires",
+        "satisfiedBy": "Satisfied by",
+        "approver": "Approver",
+        "requestId": "Approval request",
+        "onBehalfOf": "On behalf of",
+        "createdAt": "Created"
+      },
+      "chip": {
+        "actor": "Actor",
+        "approver": "Approver",
+        "project": "Project",
+        "resource": "Resource",
+        "correlation": "Correlation",
+        "remove": "Remove filter: {filter}"
+      }
+    },
     "roles": {
       "title": "Roles",
       "subtitle": "Create roles and choose which permissions each one grants.",
