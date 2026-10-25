@@ -65,6 +65,7 @@ export function fakeAsyncData<T>(
 export const ADMIN_NAV_KEYS = [
   'user.read',
   'role.read',
+  'audit.read',
   'fleet.dashboard.read',
   'fleet.runner.read',
   'fleet.repo.read',
@@ -110,6 +111,7 @@ export function adminNavFlags(keys: readonly string[]): Record<string, boolean> 
   const flags = {
     canReadUsers: held.has('user.read'),
     canReadRoles: held.has('role.read'),
+    canReadAudit: held.has('audit.read'),
     canReadFleetDashboard: held.has('fleet.dashboard.read'),
     canReadFleetRunners: held.has('fleet.runner.read'),
     canReadFleetRepos: held.has('fleet.repo.read'),

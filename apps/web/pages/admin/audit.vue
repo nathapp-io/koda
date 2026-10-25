@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { RefreshCw, X } from 'lucide-vue-next'
+import { ChevronDown, ChevronRight, RefreshCw, X } from 'lucide-vue-next'
+import AuditEntryDetail from '~/components/audit/AuditEntryDetail.vue'
 import { useAuditLog } from '~/composables/useAuditLog'
 import type { AuditEntry } from '~/composables/useAuditLog'
 import { ApiError, extractApiError } from '~/composables/useApi'
-import { AUDIT_ACTOR_TYPES, auditRouteQuery, parseAuditRoute, principalLabel, withFilter } from '~/lib/audit-log'
+import { AUDIT_ACTOR_TYPES, auditRouteQuery, parseAuditRoute, principalLabel, relatedFilters, withFilter } from '~/lib/audit-log'
 import type { AuditFilters } from '~/lib/audit-log'
 
 definePageMeta({ layout: 'default' })
@@ -175,6 +176,26 @@ function filterByResource(entry: AuditEntry): void {
 }
 
 /**
+ * The row whose detail block is open (US-007). One at a time: an audit reader compares one write's
+ * provenance at a time, and the table is already dense. The id is not reset on a reload, so a
+ * Refresh — which returns the same rows — leaves the block the reader opened open.
+ */
+const expandedEntryId = ref<string | null>(null)
+
+function toggleDetail(entry: AuditEntry): void {
+  expandedEntryId.value = expandedEntryId.value === entry.id ? null : entry.id
+}
+
+/**
+ * "Show related" is a jump, not a narrowing: every write of one request or run is the question, so
+ * the URL becomes that correlation filter alone (`relatedFilters` drops the other filters and the
+ * page number), and the query watcher does the single load that follows.
+ */
+function showRelated(correlationId: string): void {
+  void router.replace({ query: auditRouteQuery(relatedFilters(correlationId)) })
+}
+
+/**
  * A failed load rethrows so the caller knows the page is stale: the table keeps its last good rows
  * (the `useAdminUsers` pattern) and the refusal, error and empty states render around it.
  *
@@ -309,6 +330,7 @@ watch(filterKey, () => { void reload() })
       <Table v-else data-testid="audit-table">
         <TableHeader>
           <TableRow>
+            <TableHead class="w-8" />
             <TableHead>{{ t('admin.audit.column.time') }}</TableHead>
             <TableHead>{{ t('admin.audit.column.key') }}</TableHead>
             <TableHead>{{ t('admin.audit.column.actor') }}</TableHead>
@@ -318,28 +340,52 @@ watch(filterKey, () => { void reload() })
           </TableRow>
         </TableHeader>
         <TableBody>
-          <TableRow v-for="entry in entries" :key="entry.id" data-testid="audit-row">
-            <TableCell class="whitespace-nowrap text-xs text-muted-foreground">{{ localTime(entry.createdAt) }}</TableCell>
-            <TableCell><code class="text-xs">{{ entry.key }}</code></TableCell>
-            <TableCell>
-              <button type="button" class="flex flex-wrap items-center gap-1.5 text-left hover:underline" data-testid="audit-actor" :title="t('admin.audit.filter.byActor')" @click="filterByActor(entry)">
-                <span>{{ actorLabel(entry) }}</span>
-                <Badge variant="secondary">{{ t(`admin.audit.actorType.${entry.actor.type}`) }}</Badge>
-                <span v-if="entry.onBehalfOf" class="text-xs text-muted-foreground">{{ t('admin.audit.onBehalfOf', { name: onBehalfLabel(entry) }) }}</span>
-              </button>
-            </TableCell>
-            <TableCell>
-              <button v-if="entry.projectId" type="button" class="text-left hover:underline" data-testid="audit-project" :title="t('admin.audit.filter.byProject')" @click="filterByProject(entry)">{{ projectLabel(entry) }}</button>
-              <span v-else class="text-muted-foreground">{{ projectLabel(entry) }}</span>
-            </TableCell>
-            <TableCell>
-              <button type="button" class="flex flex-wrap items-center gap-1 text-left hover:underline" data-testid="audit-resource" :title="t('admin.audit.filter.byResource')" @click="filterByResource(entry)">
-                <code class="text-xs">{{ entry.resourceType }}</code>
-                <code class="text-xs text-muted-foreground">{{ entry.resourceId }}</code>
-              </button>
-            </TableCell>
-            <TableCell class="text-sm">{{ entry.summary ?? '' }}</TableCell>
-          </TableRow>
+          <template v-for="entry in entries" :key="entry.id">
+            <TableRow data-testid="audit-row">
+              <TableCell class="w-8 align-top">
+                <button
+                  type="button"
+                  class="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                  data-testid="audit-expand"
+                  :aria-expanded="expandedEntryId === entry.id ? 'true' : 'false'"
+                  :aria-label="t('admin.audit.expand')"
+                  :title="t('admin.audit.expand')"
+                  @click="toggleDetail(entry)"
+                >
+                  <ChevronDown v-if="expandedEntryId === entry.id" class="h-4 w-4" />
+                  <ChevronRight v-else class="h-4 w-4" />
+                </button>
+              </TableCell>
+              <TableCell class="whitespace-nowrap text-xs text-muted-foreground">{{ localTime(entry.createdAt) }}</TableCell>
+              <TableCell><code class="text-xs">{{ entry.key }}</code></TableCell>
+              <TableCell>
+                <button type="button" class="flex flex-wrap items-center gap-1.5 text-left hover:underline" data-testid="audit-actor" :title="t('admin.audit.filter.byActor')" @click="filterByActor(entry)">
+                  <span>{{ actorLabel(entry) }}</span>
+                  <Badge variant="secondary">{{ t(`admin.audit.actorType.${entry.actor.type}`) }}</Badge>
+                  <span v-if="entry.onBehalfOf" class="text-xs text-muted-foreground">{{ t('admin.audit.onBehalfOf', { name: onBehalfLabel(entry) }) }}</span>
+                </button>
+              </TableCell>
+              <TableCell>
+                <button v-if="entry.projectId" type="button" class="text-left hover:underline" data-testid="audit-project" :title="t('admin.audit.filter.byProject')" @click="filterByProject(entry)">{{ projectLabel(entry) }}</button>
+                <span v-else class="text-muted-foreground">{{ projectLabel(entry) }}</span>
+              </TableCell>
+              <TableCell>
+                <button type="button" class="flex flex-wrap items-center gap-1 text-left hover:underline" data-testid="audit-resource" :title="t('admin.audit.filter.byResource')" @click="filterByResource(entry)">
+                  <code class="text-xs">{{ entry.resourceType }}</code>
+                  <code class="text-xs text-muted-foreground">{{ entry.resourceId }}</code>
+                </button>
+              </TableCell>
+              <TableCell class="text-sm">{{ entry.summary ?? '' }}</TableCell>
+            </TableRow>
+            <!-- The provenance and approval block. `AuditEntryDetail` is imported here on purpose: the
+                 harness injects a fixed auto-import list, so only an explicit import proves this is the
+                 real component (`roles.vue` imports `RoleEditorDialog` the same way). -->
+            <TableRow v-if="expandedEntryId === entry.id" :data-entry="entry.id">
+              <TableCell colspan="7" class="bg-muted/40">
+                <AuditEntryDetail :entry="entry" @related="showRelated" />
+              </TableCell>
+            </TableRow>
+          </template>
         </TableBody>
       </Table>
 

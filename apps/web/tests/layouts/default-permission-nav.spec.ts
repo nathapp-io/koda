@@ -24,6 +24,7 @@ const layoutTemplate = layoutSource.match(/<template>([\s\S]*)<\/template>/)?.[1
 const ADMIN_LINKS: ReadonlyArray<readonly [href: string, key: string]> = [
   ['/admin/users', 'user.read'],
   ['/admin/roles', 'role.read'],
+  ['/admin/audit', 'audit.read'],
   ['/admin/fleet', 'fleet.dashboard.read'],
   ['/admin/fleet/runners', 'fleet.runner.read'],
   ['/admin/fleet/repos', 'fleet.repo.read'],
@@ -263,5 +264,47 @@ describe('US-010 AC-12: /admin/roles follows the global role.read key', () => {
 
     expect(nav.indexOf('href="/admin/users"')).toBeLessThan(nav.indexOf('href="/admin/roles"'))
     expect(nav.indexOf('href="/admin/roles"')).toBeLessThan(nav.indexOf('href="/admin/fleet"'))
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// US-007 AC-8/AC-9 — the audit log link follows the global audit.read key
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('US-007 AC-8/AC-9: /admin/audit follows the global audit.read key', () => {
+  test('AC-8: audit.read alone renders /admin/audit and the Admin section label', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ['audit.read'] }))
+
+    expect(hasLink(nav, '/admin/audit')).toBe(true)
+    expect(nav).toContain('nav.sectionAdmin')
+    for (const [href] of ADMIN_LINKS) if (href !== '/admin/audit') expect(hasLink(nav, href)).toBe(false)
+  })
+
+  test('AC-8: the link is labelled with the nav.audit key', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ['audit.read'] }))
+
+    const link = /<a href="\/admin\/audit"[^>]*>([\s\S]*?)<\/a>/.exec(nav)?.[0]
+    expect(link).toBeDefined()
+    expect(link).toContain('nav.audit')
+  })
+
+  test('AC-9: role.read without audit.read renders no /admin/audit link', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ['role.read'] }))
+
+    expect(hasLink(nav, '/admin/roles')).toBe(true)
+    expect(hasLink(nav, '/admin/audit')).toBe(false)
+  })
+
+  test('a pending permission fetch hides the link like every other admin link', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ['audit.read'], pending: true }))
+
+    expect(hasLink(nav, '/admin/audit')).toBe(false)
+  })
+
+  test('the Audit link stays inline in the Admin block, after Roles and before the fleet links', async () => {
+    const nav = primaryNav(await renderLayout({ keys: ALL_ADMIN_KEYS }))
+
+    expect(nav.indexOf('href="/admin/roles"')).toBeLessThan(nav.indexOf('href="/admin/audit"'))
+    expect(nav.indexOf('href="/admin/audit"')).toBeLessThan(nav.indexOf('href="/admin/fleet"'))
   })
 })
