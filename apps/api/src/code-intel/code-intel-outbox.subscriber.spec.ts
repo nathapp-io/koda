@@ -36,6 +36,19 @@ describe('CodeIntelOutboxSubscriber', () => {
     });
   });
 
+  it('rejects an indexed push with missing audit resource context', async () => {
+    const registry = new FanOutPublisher(noopLastErrors);
+    const handler = {
+      process: vi.fn(async (_payload: unknown, onIndexed: (counts: { symbolsIndexed: number; filesIndexed: number }) => Promise<void>) => {
+        await onIndexed({ symbolsIndexed: 1, filesIndexed: 1 });
+      }),
+    } as unknown as CodeCommitOutboxHandler;
+    const record = vi.fn().mockResolvedValue(undefined);
+    new CodeIntelOutboxSubscriber(registry, { record } as never, handler).onModuleInit();
+    await expect(registry.publish(outboxRecord('code_commit', { changedFiles: ['x.ts'] }))).rejects.toThrow();
+    expect(record).not.toHaveBeenCalled();
+  });
+
   it('falls back to AstIndexService.indexCommit when no CodeCommitOutboxHandler', async () => {
     const registry = new FanOutPublisher(noopLastErrors);
     const ast = { indexCommit: vi.fn().mockResolvedValue(undefined) } as unknown as AstIndexService;

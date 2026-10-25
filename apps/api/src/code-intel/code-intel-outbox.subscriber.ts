@@ -38,14 +38,18 @@ export class CodeIntelOutboxSubscriber implements OnModuleInit {
     const changedFiles = (p.changedFiles as SourceFile[] | undefined)
       ?? (p.files as SourceFile[] | undefined);
 
-    const onIndexed = (indexed: { symbolsIndexed: number; filesIndexed: number }) =>
-      this.audit.record({
+    const onIndexed = async (indexed: { symbolsIndexed: number; filesIndexed: number }): Promise<void> => {
+      if (!repoId || !projectId) {
+        throw new Error('code_commit: missing repoId or projectId for index audit');
+      }
+      await this.audit.record({
         key: 'system.codeintel.index-commit',
         resourceType: 'code-repo',
-        resourceId: repoId!,
-        projectId: projectId!,
+        resourceId: repoId,
+        projectId,
         summary: `indexed ${indexed.symbolsIndexed} symbols in ${indexed.filesIndexed} files`,
       });
+    };
 
     if (this.codeCommitHandler) {
       this.logger.debug('code_commit: delegating to CodeCommitOutboxHandler');
