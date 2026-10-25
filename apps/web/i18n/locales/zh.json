@@ -114,6 +114,7 @@
         "to": "结束日期（UTC）",
         "byActor": "按该执行者筛选",
         "byProject": "按该项目筛选",
+        "byApprover": "按该审批人筛选",
         "byResource": "按该资源筛选"
       },
       "column": { "time": "时间", "key": "操作键", "actor": "执行者", "project": "项目", "resource": "资源", "summary": "摘要" },

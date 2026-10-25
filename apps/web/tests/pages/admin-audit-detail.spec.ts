@@ -173,6 +173,24 @@ describe('admin audit page row detail (Permissions P2 US-007)', () => {
     p.app.unmount()
   })
 
+  test('B1: clicking the approver writes approverId to the URL and the next load sends it to the API', async () => {
+    const get = reference()
+    const p = mountPage(get, { key: 'ticket.create', page: '2' })
+    await p.settle()
+    p.expand(0)
+    await p.settle()
+
+    p.byId('audit-approver')[0].props.onClick()
+    await p.settle()
+
+    // page restarts at 1 (absent), the other filters stay.
+    expect(p.replace).toHaveBeenCalledWith({ query: { key: 'ticket.create', approverId: 'u2' } })
+    const auditCalls = get.mock.calls.filter(([path]) => path === '/audit')
+    const last = auditCalls[auditCalls.length - 1]
+    expect(last[1]?.query).toEqual(expect.objectContaining({ approverId: 'u2', key: 'ticket.create' }))
+    p.app.unmount()
+  })
+
   test('AC-7: the related view is a fresh page 1 with no other filter carried over', async () => {
     const p = mountPage(reference(), { key: 'ticket.create', page: '2', actorType: 'AGENT', actorId: 'a1' })
     await p.settle()

@@ -73,6 +73,15 @@ describeIntegration('GET /api/audit?correlationId and GET /api/audit/keys (PG, r
     expect(data(res)).toEqual({ keys: ['comment.create', 'ticket.create'] });
   });
 
+  it('AC-3: many repeated writes still yield one row per key, aggregated by the database', async () => {
+    for (let i = 0; i < 30; i += 1) await record({ key: i % 2 === 0 ? 'ticket.create' : 'comment.create', resourceId: `r-${i}` });
+
+    const rows = await db.auditEntry.count();
+    expect(rows).toBe(30);
+    const res = await keys().expect(200);
+    expect(data(res)).toEqual({ keys: ['comment.create', 'ticket.create'] });
+  });
+
   it('AC-4: keys is empty when the log holds no entry', async () => {
     const res = await keys().expect(200);
     expect(data(res)).toEqual({ keys: [] });

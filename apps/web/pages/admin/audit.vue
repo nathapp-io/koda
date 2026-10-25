@@ -171,6 +171,10 @@ function filterByProject(entry: AuditEntry): void {
   if (projectId !== '') apply({ projectId })
 }
 
+function filterByApprover(approverId: string): void {
+  if (approverId !== '') apply({ approverId })
+}
+
 function filterByResource(entry: AuditEntry): void {
   apply({ resourceType: entry.resourceType, resourceId: entry.resourceId })
 }
@@ -382,7 +386,7 @@ watch(filterKey, () => { void reload() })
                  real component (`roles.vue` imports `RoleEditorDialog` the same way). -->
             <TableRow v-if="expandedEntryId === entry.id" :data-entry="entry.id">
               <TableCell colspan="7" class="bg-muted/40">
-                <AuditEntryDetail :entry="entry" @related="showRelated" />
+                <AuditEntryDetail :entry="entry" @related="showRelated" @approver="filterByApprover" />
               </TableCell>
             </TableRow>
           </template>

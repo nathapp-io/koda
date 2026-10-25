@@ -59,13 +59,14 @@ export class PrismaAuditEntryRepository extends AbstractPrismaRepository<AuditEn
 
   /**
    * Every `key` that occurs in the log, one row per distinct value, sorted ascending (Permissions P2
-   * US-002). Not an `IRepository` method: the log's key set is small and unpaged, so this projects one
-   * column and nothing else.
+   * US-002). Not an `IRepository` method: the log's key set is small and unpaged. The log is append-only
+   * and grows with every audited write, so the deduplication happens in PostgreSQL (`GROUP BY key`,
+   * served by the `key` index): only one row per distinct key leaves the database. Prisma's
+   * `findMany({ distinct })` would instead read every row and deduplicate in the application.
    */
   async findDistinctKeys(): Promise<string[]> {
-    const rows = await this.prisma.client.auditEntry.findMany({
-      distinct: ['key'],
-      select: { key: true },
+    const rows = await this.prisma.client.auditEntry.groupBy({
+      by: ['key'],
       orderBy: { key: 'asc' },
     });
     return rows.map((row) => row.key);

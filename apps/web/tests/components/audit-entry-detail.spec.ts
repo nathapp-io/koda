@@ -64,6 +64,18 @@ describe('AuditEntryDetail (Permissions P2 US-007)', () => {
     m.app.unmount()
   })
 
+  test('B1: clicking the approver emits its id', () => {
+    const m = mount({
+      approval: { requiredMode: 'human', satisfiedBy: 'human', approverType: 'USER', approverId: 'u2', requestId: 'pa1' },
+      display: { ...ENTRY.display, approver: 'Bea' },
+    })
+    const button = m.app.find('[data-testid="audit-approver"]')[0]
+    expect(m.app.textOf(button)).toContain('Bea')
+    button.props.onClick()
+    expect(m.app.emitted('approver')).toEqual([['u2']])
+    m.app.unmount()
+  })
+
   test('AC-3: no approval shows neither an approver nor a request id, even when the API sends one', () => {
     const m = mount({
       approval: { requiredMode: 'none', satisfiedBy: 'none', approverType: null, approverId: null, requestId: 'pa9' },

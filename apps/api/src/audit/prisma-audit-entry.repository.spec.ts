@@ -101,10 +101,11 @@ describe('PrismaAuditEntryRepository.findDisplayNames', () => {
 });
 
 describe('PrismaAuditEntryRepository.findDistinctKeys', () => {
-  it('US-002: reads only the key column, distinct and ascending, and returns the values', async () => {
+  it('US-002: groups by the key column in the database, ascending, and returns the values', async () => {
     const { repo, calls } = fakePrismaClient({ auditEntry: [{ key: 'comment.create' }, { key: 'ticket.create' }] });
     await expect(repo.findDistinctKeys()).resolves.toEqual(['comment.create', 'ticket.create']);
-    expect(calls.map((call) => `${call.model}.${call.method}`)).toEqual(['auditEntry.findMany']);
-    expect(calls[0].args).toEqual({ distinct: ['key'], select: { key: true }, orderBy: { key: 'asc' } });
+    // groupBy, never a findMany: a findMany (even with `distinct`) reads every row of the append-only log.
+    expect(calls.map((call) => `${call.model}.${call.method}`)).toEqual(['auditEntry.groupBy']);
+    expect(calls[0].args).toEqual({ by: ['key'], orderBy: { key: 'asc' } });
   });
 });

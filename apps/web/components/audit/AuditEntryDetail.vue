@@ -11,7 +11,10 @@ import { principalLabel } from '~/lib/audit-log'
  * never claims a detail the record does not carry.
  */
 const props = defineProps<{ entry: AuditEntry }>()
-const emit = defineEmits<{ (e: 'related', correlationId: string): void }>()
+const emit = defineEmits<{
+  (e: 'related', correlationId: string): void
+  (e: 'approver', approverId: string): void
+}>()
 
 const { t } = useI18n()
 
@@ -88,7 +91,15 @@ const requestId = computed(() => {
 
     <div v-if="approverLabel" class="flex flex-col gap-0.5" data-field="approver">
       <span class="text-xs font-medium text-muted-foreground">{{ t('admin.audit.detail.approver') }}</span>
-      <span>{{ approverLabel }}</span>
+      <button
+        type="button"
+        class="w-fit text-left hover:underline"
+        data-testid="audit-approver"
+        :title="t('admin.audit.filter.byApprover')"
+        @click="emit('approver', entry.approval.approverId as string)"
+      >
+        {{ approverLabel }}
+      </button>
     </div>
 
     <div v-if="requestId" class="flex flex-col gap-0.5" data-field="requestId">
