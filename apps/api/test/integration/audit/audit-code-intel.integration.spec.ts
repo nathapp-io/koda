@@ -27,6 +27,7 @@ describeIntegration('code-intel indexing audit (real AppModule)', () => {
   let db: PrismaClient;
   let server: Parameters<typeof request>[0];
   let projectId: string;
+  let rootUserId: string;
   let rootToken: string;
   let viewerToken: string;
   let restoreRecord: (() => void) | undefined;
@@ -47,6 +48,7 @@ describeIntegration('code-intel indexing audit (real AppModule)', () => {
       email: 'audit-code-intel-root@koda.test', name: 'Root', password: TEST_PASSWORD,
     }).expect(201);
     rootToken = data<{ accessToken: string }>(root).accessToken;
+    rootUserId = (await db.user.findUniqueOrThrow({ where: { email: 'audit-code-intel-root@koda.test' }, select: { id: true } })).id;
     await request(server).post('/api/projects').set(auth(rootToken)).send({ name: 'Code Intel Audit', slug: SLUG, key: 'CIA' }).expect(201);
     projectId = (await db.project.findUniqueOrThrow({ where: { slug: SLUG }, select: { id: true } })).id;
     await db.vcsConnection.create({ data: {
@@ -83,7 +85,7 @@ describeIntegration('code-intel indexing audit (real AppModule)', () => {
     const result = data<{ symbolsIndexed: number; filesIndexed: number }>(response);
     const rows = await db.auditEntry.findMany({ where: { key: 'codeintel.index.write', resourceId: REPO } });
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ resourceType: 'code-repo', projectId, actorType: 'USER', origin: 'rest' });
+    expect(rows[0]).toMatchObject({ resourceType: 'code-repo', projectId, actorType: 'USER', actorId: rootUserId, origin: 'rest' });
     expect(rows[0].summary).toBe(`indexed ${result.symbolsIndexed} symbols in 1 files`);
     expect(rows[0].summary).not.toMatch(/src\/private\.ts|alpha|c1/);
   });
