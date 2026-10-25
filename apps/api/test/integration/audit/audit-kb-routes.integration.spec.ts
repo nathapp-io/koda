@@ -61,7 +61,8 @@ describeIntegration('US-001 audited KB routes', () => {
   beforeEach(() => resetThrottle(app));
 
   it('AC-1/2/3: add records actor, project, source identity and a content-free summary', async () => {
-    await add(devToken, 'manual', 'runbook').expect(201);
+    const added = await add(devToken, 'manual', 'runbook').expect(201);
+    expect(data<{ indexed: boolean }>(added).indexed).toBe(true);
     const row = await entries('kb.document.add', 'manual:runbook');
     expect(row).toHaveLength(1);
     expect(row[0]).toMatchObject({ key: 'kb.document.add', resourceType: 'kb-document', projectId, actorType: 'USER', actorId: devId, origin: 'rest', summary: 'added manual document' });
@@ -113,7 +114,8 @@ describeIntegration('US-001 audited KB routes', () => {
     expect(row).toHaveLength(1);
     expect(row[0]).toMatchObject({ resourceType: 'project', summary: `imported 2 nodes, cleared ${result.cleared}` });
     expect(row[0]?.summary).not.toContain('Private label');
-    await request(server).post(kb('/import/graphify')).set(auth(rootToken)).send({ nodes: [], links: [] }).expect(200);
+    const emptyImport = await request(server).post(kb('/import/graphify')).set(auth(rootToken)).send({ nodes: [], links: [] }).expect(200);
+    expect(data<{ imported: number; cleared: number }>(emptyImport)).toEqual({ imported: 0, cleared: 0 });
     expect(await entries('kb.graphify.import', projectId)).toHaveLength(1);
     await db.project.update({ where: { id: projectId }, data: { graphifyEnabled: false } });
     await request(server).post(kb('/import/graphify')).set(auth(rootToken)).send({ nodes: [{ id: 'n3', label: 'x' }], links: [] }).expect(400);
