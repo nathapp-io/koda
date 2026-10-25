@@ -106,6 +106,7 @@ function createMockRepo(): Mocked<IVcsRepository> {
 describe('VcsPrSyncService', () => {
   let service: VcsPrSyncService;
   let mockRepo: Mocked<IVcsRepository>;
+  let mockAuditRecorder: { audited: Mock; record: Mock };
   let mockProvider: {
     getPullRequestStatus: Mock;
     listPrCommits: Mock;
@@ -120,6 +121,17 @@ describe('VcsPrSyncService', () => {
 
   beforeEach(async () => {
     mockRepo = createMockRepo();
+    mockAuditRecorder = {
+      audited: vi.fn(async (fn: () => Promise<unknown>, entriesOf: (result: unknown) => unknown) => {
+        const result = await fn();
+        const entries = entriesOf(result);
+        for (const entry of Array.isArray(entries) ? entries : entries ? [entries] : []) {
+          mockAuditRecorder.record(entry);
+        }
+        return result;
+      }),
+      record: vi.fn(),
+    };
 
     mockProvider = {
       getPullRequestStatus: vi.fn().mockResolvedValue(makePrStatus()),
@@ -135,7 +147,7 @@ describe('VcsPrSyncService', () => {
       providers: [
         VcsPrSyncService,
         { provide: VCS_REPOSITORY, useValue: mockRepo },
-        { provide: AuditRecorder, useValue: { audited: async (fn: () => Promise<unknown>, entriesOf: (result: unknown) => unknown) => { const result = await fn(); entriesOf(result); return result; }, record: vi.fn() } },
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
       ],
     }).compile();
 
@@ -166,6 +178,18 @@ describe('VcsPrSyncService', () => {
       expect(mockRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith(link.id, 'closed');
       expect(result.updated).toBe(1);
       expect(result.skipped).toBe(0);
+    });
+
+    it('AC-19: records no audit entry when the PR-state write returns already-merged', async () => {
+      const link = makeTicketLink({ prState: 'open' });
+      mockRepo.findActiveTicketLinksWithPrs.mockResolvedValue([link]);
+      mockProvider.getPullRequestStatus.mockResolvedValue(makePrStatus({ state: 'closed', merged: false }));
+      mockRepo.updateTicketLinkWithPrState.mockResolvedValueOnce('already-merged');
+
+      const result = await service.syncPrStatus(project, connection, encryptionKey, 'vcs.sync.pr');
+
+      expect(result).toEqual({ updated: 0, skipped: 0 });
+      expect(mockAuditRecorder.record).not.toHaveBeenCalled();
     });
 
     it('should not update prState when it has not changed', async () => {
