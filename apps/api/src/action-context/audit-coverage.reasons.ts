@@ -17,6 +17,8 @@ export const BOOKKEEPING_REASONS = {
   'fleet.log-chunk': 'The stream metadata of an uploaded log chunk.',
   'thread.transcript': "The thread transcript folded from a runner's stream, and the ingest cursor; a `turn_end` records `system.thread.ingest` itself.",
   'fleet.ingest-queue': 'A bundle ingest claim, retry or failure mark.',
+  'fleet.ingest-progress': 'The activity row reporting how many bundles a backfill or rerun queued, including zero.',
+  'fleet.analytics-progress': 'The activity row reporting analytics deletion counts, including a deletion that found no rows.',
   'fleet.schedule-bookkeeping': "A schedule's fire claim, a skip or coalesce activity row, and the last dispatched job link.",
   'assistant.tool-call-ledger': 'The tool-call ledger row every assistant tool call stores, read or write.',
   'assistant.action-proposal': "A write tool's proposal: the pending action, its approval, the approval's activity and outbox rows, and the approval id link; the decide records `fleet.approval.decide.assistant`.",

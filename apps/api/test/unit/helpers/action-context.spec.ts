@@ -8,6 +8,7 @@
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { currentContext, type ActionContext } from '../../../src/action-context/action-context';
+import { currentAuditScope, noteAuditWrite } from '../../../src/action-context/audit-coverage';
 import { asTestActor, fixtureDb, withTestActor, type PrismaAppContext } from '../../helpers/action-context';
 
 /** A thenable that records `currentContext()` only when it is awaited — a lazy Prisma promise. */
@@ -38,6 +39,17 @@ function actorSeenBy(fn: () => void): { actor?: ActionContext['actor']; origin?:
 }
 
 describe('withTestActor', () => {
+  it('coverage AC-5: awaits a SYSTEM fixture without an audit scope', async () => {
+    const lazy: PromiseLike<number> = {
+      then(resolve, reject) {
+        expect(currentContext()).toMatchObject({ actor: { type: 'SYSTEM', id: 'seed' }, origin: 'system' });
+        expect(currentAuditScope()).toBeUndefined();
+        noteAuditWrite('User.create');
+        return Promise.resolve(42).then(resolve, reject);
+      },
+    };
+    await expect(withTestActor({ type: 'SYSTEM', id: 'seed' }, () => lazy)).resolves.toBe(42);
+  });
   it('AC-1: runs fn with the USER actor in the context', async () => {
     let seen: ReturnType<typeof actorSeenBy> | undefined;
 
@@ -110,6 +122,20 @@ describe('withTestActor', () => {
 });
 
 describe('fixtureDb', () => {
+  it('coverage AC-7: keeps lazy fixture writes scope-free and attributed to seed', async () => {
+    const row = { id: 'fixture-user', email: 'fixture@koda.test' };
+    const lazy: PromiseLike<typeof row> = {
+      then(resolve, reject) {
+        expect(currentContext()).toMatchObject({ actor: { type: 'SYSTEM', id: 'seed' }, origin: 'system' });
+        expect(currentAuditScope()).toBeUndefined();
+        noteAuditWrite('User.create');
+        return Promise.resolve(row).then(resolve, reject);
+      },
+    };
+    const client = { user: { create: () => lazy } };
+    const app: PrismaAppContext = { get: () => ({ client }) as never };
+    await expect(fixtureDb(app).user.create({ data: { email: row.email, passwordHash: 'x' } })).resolves.toBe(row);
+  });
   /**
    * Stands in for what `@nathapp/nestjs-prisma` installs on `PrismaService.client`
    * (`patchWithTransactionProxy`): a client whose properties resolve from the async-local transaction

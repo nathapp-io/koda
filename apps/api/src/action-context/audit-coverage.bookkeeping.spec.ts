@@ -38,6 +38,8 @@ const EXPECTED_REASON_IDS = [
   'vcs.pr-same-state',
   'vcs.link-refresh',
   'context.query-metric',
+  'fleet.ingest-progress',
+  'fleet.analytics-progress',
 ] as const;
 
 const EXPECTED_UNAUDITED_SURFACES = [
@@ -120,7 +122,7 @@ describe('audit coverage bookkeeping', () => {
     expect(entries).toBe(1);
   });
 
-  it('AC-9: contains exactly the 26 catalogue reason ids', () => {
+  it('AC-9: contains exactly the 26 initial and two explicit progress reason ids', () => {
     expect(Object.keys(BOOKKEEPING_REASONS).sort()).toEqual([...EXPECTED_REASON_IDS].sort());
   });
 

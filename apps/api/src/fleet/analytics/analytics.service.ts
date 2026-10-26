@@ -3,6 +3,7 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { bookkeeping } from '../../action-context/audit-coverage';
 import { ESCALATED_FROM_AUDIT } from '../ingest/ingest-corrections';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { foldSeries } from './analytics-fold';
@@ -145,10 +146,10 @@ export class AnalyticsService {
     if (q.confirm !== expected) throw new ValidationAppException({ expected }, 'fleet.analyticsDelete');
     const counts = await this.txManager.run(async () => {
       const deleted = await this.repo.deleteRows({ projectId, before, now });
-      await this.activity.record({
+      await bookkeeping('fleet.analytics-progress', () => this.activity.record({
         actorType: 'USER', actorId, action: 'analytics.deleted', entityType: 'analytics', entityId: projectId ?? 'all', projectId,
         responsibleUserId: actorId, payload: { before: before.toISOString(), ...deleted },
-      });
+      }));
       if (Object.values(deleted).some((count) => count > 0)) {
         await this.audit.record({
           key: 'fleet.analytics.delete', resourceType: 'fleet-analytics', resourceId: projectId ?? 'all', projectId,

@@ -12,8 +12,8 @@ import { BOOKKEEPING_REASONS, type BookkeepingReason } from './audit-coverage.re
  * counts, or recorded at least one entry" — the check the context guard (`contextless-write.ts`)
  * leaves open, since it only refuses a write with no actor at all.
  *
- * Nothing opens a scope yet: `ActionContextInterceptor`, `runAsSystem` and `runAsSystemWriter` do
- * in US-010 and US-011, and the Prisma write guard counts into it in US-003.
+ * `ActionContextInterceptor`, `runAsSystem` and `runAsSystemWriter` open scopes; raw context and
+ * fixture helpers do not. The Prisma write guard counts successful row-changing writes into them.
  *
  * The scope lives in its own `AsyncLocalStorage`, separate from the action context's, so
  * `runWithActionContext` copies nothing. Every use of the `action-context.ts` ↔
