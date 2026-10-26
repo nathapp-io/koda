@@ -2,6 +2,9 @@ import { Command, InvalidArgumentError } from 'commander';
 import {
   approvalRequestsControllerCancel, approvalRequestsControllerDecide, approvalRequestsControllerGet,
   approvalRequestsControllerList, projectsControllerFindBySlug,
+  approvalPoliciesControllerList, approvalPoliciesControllerKeys, approvalPoliciesControllerCreate, approvalPoliciesControllerUpdate, approvalPoliciesControllerRemove,
+  projectApprovalPoliciesControllerList, projectApprovalPoliciesControllerKeys, projectApprovalPoliciesControllerCreate, projectApprovalPoliciesControllerUpdate, projectApprovalPoliciesControllerRemove,
+  agentsControllerFindBySlug,
   type ApprovalRequestsControllerListData,
 } from '../generated';
 import { unwrap } from '../utils/api';
@@ -104,7 +107,59 @@ function registerCancel(approval: Command): void {
     });
 }
 
+interface PolicyOptions { project?: string; pattern?: string; page: number; size: number; json?: boolean }
+function subjectLabel(r: RecordValue): string {
+  if (r.roleId) return `role:${String(r.roleId)}`;
+  if (r.principalId) return `${String(r.principalType ?? '')}:${String(r.principalId)}`;
+  if (r.principalType) return `type:${String(r.principalType)}`;
+  return 'all';
+}
+async function routeCall<T>(project: string | undefined, globalCall: (arg: never) => Promise<unknown>, projectCall: (arg: never) => Promise<unknown>, arg: Record<string, unknown>): Promise<T> {
+  const response = project === undefined ? await globalCall(arg as never) : await projectCall({ ...arg, path: { slug: project, ...(typeof arg.path === 'object' && arg.path !== null ? arg.path as Record<string, unknown> : {}) } } as never);
+  return unwrap<T>(response);
+}
+function registerPolicies(approval: Command): void {
+  const policy = approval.command('policy').description('Manage approval policies');
+  policy.command('list').option('--project <slug>').option('--pattern <pattern>').option('--page <n>', 'Page number', parsePositiveInt, 1).option('--size <n>', 'Page size', parsePageSize, 20).option('--json')
+    .action(async (options: PolicyOptions) => { try {
+      await context(); const query = { current: options.page, size: options.size, ...(options.pattern !== undefined ? { permissionPattern: options.pattern } : {}) };
+      const page = await routeCall<{ records: RecordValue[]; hasNext?: boolean; current?: number }>(options.project, approvalPoliciesControllerList as never, projectApprovalPoliciesControllerList as never, { query });
+      if (options.json) console.log(JSON.stringify(page, null, 2)); else { table(['ID', 'Pattern', 'Applies to', 'Mode', 'Project', 'Timeout'], page.records.map(r => [String(r.id ?? ''), String(r.permissionPattern ?? ''), subjectLabel(r), String(r.mode ?? ''), String(r.projectId ?? 'global'), String(r.timeoutSec ?? '')])); if (page.hasNext) console.log(`Next: --page ${(page.current ?? options.page) + 1}`); }
+      process.exit(0);
+    } catch (err: unknown) { handleApiError(err); } });
+  policy.command('keys').option('--project <slug>').option('--json').action(async (options: { project?: string; json?: boolean }) => { try {
+    await context(); const data = await routeCall<RecordValue>(options.project, approvalPoliciesControllerKeys as never, projectApprovalPoliciesControllerKeys as never, {}); const keys = Array.isArray(data.keys) ? data.keys : [];
+    if (options.json) console.log(JSON.stringify(data, null, 2)); else table(['Key', 'Scope', 'Risk', 'Floor', 'Default'], keys.map(k => { const r = record(k); return [String(r.key ?? ''), String(r.scope ?? ''), String(r.risk ?? ''), String(r.floor ?? ''), String(r.default ?? '')]; })); process.exit(0);
+  } catch (err: unknown) { handleApiError(err); } });
+  policy.command('set').requiredOption('--pattern <pattern>').requiredOption('--mode <mode>').option('--project <slug>').option('--type <type>').option('--role <roleId>').option('--user <userId>').option('--agent <agentSlug>').option('--timeout <sec>', 'Timeout in seconds', parsePositiveInt).option('--on-timeout <behavior>').option('--approver-need-not-hold').option('--distinct-approver').option('--json')
+    .action(async (options: Record<string, unknown>) => {
+      const selected = ['type', 'role', 'user', 'agent'].filter(k => options[k] !== undefined);
+      if (selected.length > 1) { handleApiError(new Error('Choose at most one of --type, --role, --user or --agent'), { validationError: true }); return; }
+      try {
+        await context(); let appliesTo: RecordValue = { kind: 'all' };
+        if (options.type) appliesTo = { kind: 'type', principalType: options.type };
+        if (options.role) appliesTo = { kind: 'role', roleId: options.role };
+        if (options.user) appliesTo = { kind: 'principal', principalType: 'USER', principalId: options.user };
+        if (options.agent) { const agent = unwrap<RecordValue>(await agentsControllerFindBySlug({ path: { slug: String(options.agent) } })); appliesTo = { kind: 'principal', principalType: 'AGENT', principalId: agent.id }; }
+        const body: RecordValue = { permissionPattern: options.pattern, mode: options.mode, appliesTo };
+        if (options.timeout !== undefined) body.timeoutSec = options.timeout;
+        if (options.onTimeout !== undefined) body.onTimeout = options.onTimeout;
+        if (options.approverNeedNotHold) body.approverMustHoldAction = false;
+        if (options.distinctApprover) body.requireDistinctApprover = true;
+        const result = await routeCall<RecordValue>(options.project as string | undefined, approvalPoliciesControllerCreate as never, projectApprovalPoliciesControllerCreate as never, { body });
+        if (options.json) console.log(JSON.stringify(result, null, 2)); else console.log(`Set policy ${String(result.id ?? '')}: ${String(options.pattern)} ${String(options.mode)}`); process.exit(0);
+      } catch (err: unknown) { handleApiError(err); }
+    });
+  policy.command('update <id>').option('--project <slug>').option('--mode <mode>').option('--timeout <sec>', 'Timeout in seconds', parsePositiveInt).option('--no-timeout').option('--on-timeout <behavior>').option('--json')
+    .action(async (id: string, options: Record<string, unknown>) => {
+      const body: RecordValue = {}; if (options.mode !== undefined) body.mode = options.mode; if (options.timeout === false) body.timeoutSec = null; else if (options.timeout !== undefined) body.timeoutSec = options.timeout; if (options.onTimeout !== undefined) body.onTimeout = options.onTimeout;
+      if (!Object.keys(body).length) { handleApiError(new Error('Nothing to update'), { validationError: true }); return; }
+      try { await context(); const result = await routeCall<RecordValue>(options.project as string | undefined, approvalPoliciesControllerUpdate as never, projectApprovalPoliciesControllerUpdate as never, { path: { id }, body }); if (options.json) console.log(JSON.stringify(result, null, 2)); else console.log(`Updated policy ${id}`); process.exit(0); } catch (err: unknown) { handleApiError(err); }
+    });
+  policy.command('delete <id>').option('--project <slug>').option('--json').action(async (id: string, options: { project?: string; json?: boolean }) => { try { await context(); await routeCall(options.project, approvalPoliciesControllerRemove as never, projectApprovalPoliciesControllerRemove as never, { path: { id } }); if (options.json) console.log(JSON.stringify({ deleted: id }, null, 2)); else console.log(`Deleted policy ${id}`); process.exit(0); } catch (err: unknown) { handleApiError(err); } });
+}
+
 export function approvalCommand(program: Command): void {
   const approval = program.command('approval').description('Manage approval requests');
-  registerList(approval); registerShow(approval); registerDecision(approval, 'approve'); registerDecision(approval, 'reject'); registerCancel(approval);
+  registerList(approval); registerShow(approval); registerDecision(approval, 'approve'); registerDecision(approval, 'reject'); registerCancel(approval); registerPolicies(approval);
 }
