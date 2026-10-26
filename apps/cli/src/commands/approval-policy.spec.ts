@@ -9,7 +9,9 @@ jest.mock('../config', () => ({ resolveContext: jest.fn() }));
 import { Command } from 'commander';
 import { approvalCommand } from './approval';
 import { resolveContext } from '../config';
-import { approvalPoliciesControllerCreate, approvalPoliciesControllerList, approvalPoliciesControllerUpdate, approvalPoliciesControllerRemove, projectApprovalPoliciesControllerCreate, projectApprovalPoliciesControllerList, projectApprovalPoliciesControllerRemove, approvalPoliciesControllerKeys, agentsControllerFindBySlug } from '../generated';
+import { approvalPoliciesControllerCreate, approvalPoliciesControllerList, approvalPoliciesControllerUpdate, approvalPoliciesControllerRemove, projectApprovalPoliciesControllerCreate, projectApprovalPoliciesControllerList, projectApprovalPoliciesControllerRemove, approvalPoliciesControllerKeys, projectApprovalPoliciesControllerKeys, projectApprovalPoliciesControllerUpdate, agentsControllerFindBySlug } from '../generated';
+
+const policyApiMocks = [approvalPoliciesControllerList, approvalPoliciesControllerKeys, approvalPoliciesControllerCreate, approvalPoliciesControllerUpdate, approvalPoliciesControllerRemove, projectApprovalPoliciesControllerList, projectApprovalPoliciesControllerKeys, projectApprovalPoliciesControllerCreate, projectApprovalPoliciesControllerUpdate, projectApprovalPoliciesControllerRemove, agentsControllerFindBySlug] as jest.Mock[];
 
 const ok = (data: unknown) => ({ ret: 0, data });
 describe('approval policy commands', () => {
@@ -52,15 +54,16 @@ describe('approval policy commands', () => {
   it('rejects conflicting selectors with exit 3 and no calls', async () => {
     await run('set', '--pattern', 'label.delete', '--mode', 'human', '--type', 'AGENT', '--role', 'r1');
     expect(process.exit).toHaveBeenCalledWith(3);
-    expect(approvalPoliciesControllerCreate).not.toHaveBeenCalled();
+    expect(policyApiMocks.every(mock => mock.mock.calls.length === 0)).toBe(true);
   });
   it('updates and refuses empty update', async () => {
     (approvalPoliciesControllerUpdate as jest.Mock).mockResolvedValue(ok({ id: 'p1' }));
     await run('update', 'p1', '--no-timeout');
     expect(approvalPoliciesControllerUpdate).toHaveBeenCalledWith({ path: { id: 'p1' }, body: { timeoutSec: null } });
+    const callsBeforeEmptyUpdate = policyApiMocks.map(mock => mock.mock.calls.length);
     await run('update', 'p1');
     expect(process.exit).toHaveBeenCalledWith(3);
-    expect(approvalPoliciesControllerUpdate).toHaveBeenCalledTimes(1);
+    expect(policyApiMocks.map(mock => mock.mock.calls.length)).toEqual(callsBeforeEmptyUpdate);
   });
   it('deletes through project route', async () => {
     (projectApprovalPoliciesControllerRemove as jest.Mock).mockResolvedValue(ok(undefined));
