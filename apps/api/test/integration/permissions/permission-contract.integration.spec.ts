@@ -12,12 +12,14 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import { ModulesContainer } from '@nestjs/core';
 import type { NathApplication } from '@nathapp/nestjs-app';
+import { AuthController } from '../../../src/auth/auth.controller';
 import { AssistantToolRegistry } from '../../../src/fleet/assistant/assistant-tool.registry';
 import {
   collectPermissionDeclarations,
   findContractViolations,
   type PermissionDeclarations,
 } from '../../../src/permissions/test-helpers/permission-contract';
+import { routeSurface } from '../../../src/permissions/route-surface';
 import { bootHttpApp } from '../../helpers/http-app';
 import { resetDb } from '../../helpers/reset-db';
 
@@ -79,5 +81,18 @@ describeIntegration('permission contract over the booted API (US-007)', () => {
       writer: 'CounterOptimizeStrategy',
       key: 'system.rag.optimize',
     });
+  });
+
+  // US-010 AC-3: one label function feeds both readers, so the walker's string and the request
+  // interceptor's audit-scope surface can never name one route two ways. `POST /auth/logout` is the
+  // proof because it is a live authenticated write route that records.
+  it('AC-3 (US-010): labels AuthController.logout as POST /auth/logout for both readers', () => {
+    const surface = routeSurface(AuthController, AuthController.prototype.logout);
+    const collected = declarations.routes.filter((route) => route.route === surface);
+
+    expect(surface).toBe('POST /auth/logout');
+    expect(collected).toHaveLength(1);
+    // The handler's own `@Requires`, so the collected label is bound to the method routeSurface read.
+    expect(collected[0]?.requires?.keys).toEqual(['session.logout']);
   });
 });

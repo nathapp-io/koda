@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient, Prisma } from '../generated/prisma/client';
+import { bookkeeping } from '../action-context/audit-coverage';
 
 export type WebhookSource = 'github' | 'ci';
 
@@ -68,9 +69,9 @@ export class WebhookReplayGuard {
         throw this.conflict();
       }
 
-      await this.prisma.client.webhookDelivery.create({
+      await bookkeeping('webhook.replay-record', () => this.prisma.client.webhookDelivery.create({
         data: { projectId, source, deliveryId },
-      });
+      }));
     } catch (err) {
       if (err instanceof HttpException) {
         throw err;
@@ -95,17 +96,19 @@ export class WebhookReplayGuard {
    */
   async forget(input: ReplayCheckInput): Promise<void> {
     const { projectId, source, deliveryId } = input;
-    if (!deliveryId) return;
+    await bookkeeping('webhook.replay-record', async () => {
+      if (!deliveryId) return;
 
-    this.recentDeliveries.delete(this.keyOf(input));
+      this.recentDeliveries.delete(this.keyOf(input));
 
-    try {
-      await this.prisma.client.webhookDelivery.deleteMany({
-        where: { projectId, source, deliveryId },
-      });
-    } catch (err) {
-      this.logger.warn(`Failed to forget webhook delivery ${projectId}:${source}:${deliveryId}`, err);
-    }
+      try {
+        await this.prisma.client.webhookDelivery.deleteMany({
+          where: { projectId, source, deliveryId },
+        });
+      } catch (err) {
+        this.logger.warn(`Failed to forget webhook delivery ${projectId}:${source}:${deliveryId}`, err);
+      }
+    });
   }
 
   private keyOf(input: ReplayCheckInput): string {

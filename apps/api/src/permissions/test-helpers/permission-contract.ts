@@ -1,8 +1,8 @@
-import { RequestMethod } from '@nestjs/common';
-import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
 import type { ModulesContainer } from '@nestjs/core';
 import { AssistantToolRegistry } from '../../fleet/assistant/assistant-tool.registry';
 import { PERMISSION_CATALOG, PENDING_SURFACE_KEYS, type PermissionCatalogEntry } from '../catalog';
+import { routeSurface } from '../route-surface';
 import { REQUIRES_METADATA, type RequiresMetadata } from '../requires.decorator';
 import { RequiresGuard } from '../requires.guard';
 import { SYSTEM_WRITER_METADATA } from '../system-writer.decorator';
@@ -61,22 +61,11 @@ function isRequiresGuard(guard: unknown): boolean {
   );
 }
 
-/** The controller path and the handler path, joined without duplicated separators. */
-function joinRoutePath(...parts: readonly (string | undefined)[]): string {
-  const segments = parts
-    .map((part) => (part ?? '').trim())
-    .map((part) => part.replace(/^\/+/, '').replace(/\/+$/, ''))
-    .filter((part) => part.length > 0);
-  return segments.length > 0 ? `/${segments.join('/')}` : '/';
-}
-
-/** `GET`, `POST`, ... for Nest's `RequestMethod` value. */
-function methodName(method: RequestMethod): string {
-  return RequestMethod[method] ?? 'UNKNOWN';
-}
-
 /**
  * One declaration per routed handler of a controller.
+ *
+ * The route label comes from `routeSurface`, the same function the request interceptor uses as its
+ * audit scope's surface, so the two can never print different strings for one route.
  *
  * The Requires metadata is read exactly as `RequiresGuard` reads it: the handler's own metadata
  * first, the controller's second. The guard flag is true when `RequiresGuard` is among the
@@ -86,7 +75,6 @@ function collectControllerRoutes(controller: Function): RouteDeclaration[] {
   const prototype = (controller as { prototype?: Record<string, unknown> }).prototype;
   if (!prototype) return [];
 
-  const classPath = Reflect.getMetadata(PATH_METADATA, controller) as string | undefined;
   const classGuards = Reflect.getMetadata(GUARDS_METADATA, controller) as unknown[] | undefined;
   const classRequires = Reflect.getMetadata(REQUIRES_METADATA, controller) as
     | RequiresMetadata
@@ -98,17 +86,16 @@ function collectControllerRoutes(controller: Function): RouteDeclaration[] {
     const handler = prototype[name];
     if (typeof handler !== 'function') continue;
 
-    const method = Reflect.getMetadata(METHOD_METADATA, handler) as RequestMethod | undefined;
-    if (method === undefined) continue;
+    const route = routeSurface(controller, handler);
+    if (route === undefined) continue;
 
-    const handlerPath = Reflect.getMetadata(PATH_METADATA, handler) as string | undefined;
     const handlerGuards = Reflect.getMetadata(GUARDS_METADATA, handler) as unknown[] | undefined;
     const handlerRequires = Reflect.getMetadata(REQUIRES_METADATA, handler) as
       | RequiresMetadata
       | undefined;
 
     routes.push({
-      route: `${methodName(method)} ${joinRoutePath(classPath, handlerPath)}`,
+      route,
       requires: handlerRequires !== undefined ? handlerRequires : classRequires,
       hasRequiresGuard: [...(classGuards ?? []), ...(handlerGuards ?? [])].some(isRequiresGuard),
     });

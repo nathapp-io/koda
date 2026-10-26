@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { Readable } from 'stream';
+import { bookkeeping } from '../../action-context/audit-coverage';
 import { FleetJobKind, FleetJobState } from '../../common/enums';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
@@ -109,34 +110,40 @@ export class LogUploadService {
     }
   }
 
-  private async write(jobId: string, key: string, p: Parsed, bytes: Buffer): Promise<LogUploadResult> {
-    try {
-      const row = await this.logs.findStream(jobId, p.leaseEpoch, p.stream);
-      const size = await this.store.size(key);
-      if (row?.complete) return { outcome: 'complete', size };
-      if (row?.truncated) return { outcome: 'stream_cap', size };
-      if (p.offset + bytes.length > this.cfg.logMaxBytes) {
-        const fit = bytes.subarray(0, Math.max(0, this.cfg.logMaxBytes - p.offset));
-        const r = fit.length > 0 ? await this.store.append(key, p.offset, fit) : { kind: p.offset <= size ? ('duplicate' as const) : ('conflict' as const), size };
+  /**
+   * Permissions P2 US-007: the `FleetJobLog` row an upload keeps is the stream's metadata, not a domain change, so
+   * the whole body is bookkeeping. The chunk's bytes on disk are the log itself and count nothing either way.
+   */
+  private write(jobId: string, key: string, p: Parsed, bytes: Buffer): Promise<LogUploadResult> {
+    return bookkeeping('fleet.log-chunk', async () => {
+      try {
+        const row = await this.logs.findStream(jobId, p.leaseEpoch, p.stream);
+        const size = await this.store.size(key);
+        if (row?.complete) return { outcome: 'complete', size };
+        if (row?.truncated) return { outcome: 'stream_cap', size };
+        if (p.offset + bytes.length > this.cfg.logMaxBytes) {
+          const fit = bytes.subarray(0, Math.max(0, this.cfg.logMaxBytes - p.offset));
+          const r = fit.length > 0 ? await this.store.append(key, p.offset, fit) : { kind: p.offset <= size ? ('duplicate' as const) : ('conflict' as const), size };
+          if (r.kind === 'conflict') return { outcome: 'offset', size: r.size };
+          await this.logs.upsertStream(jobId, p.leaseEpoch, p.stream, { sizeBytes: r.size, truncated: true });
+          return { outcome: 'stream_cap', size: r.size };
+        }
+        const r = bytes.length > 0 ? await this.store.append(key, p.offset, bytes) : { kind: p.offset === size ? ('duplicate' as const) : ('conflict' as const), size };
         if (r.kind === 'conflict') return { outcome: 'offset', size: r.size };
-        await this.logs.upsertStream(jobId, p.leaseEpoch, p.stream, { sizeBytes: r.size, truncated: true });
-        return { outcome: 'stream_cap', size: r.size };
+        if (p.final) {
+          if (r.size !== p.offset + bytes.length) return { outcome: 'offset', size: r.size };
+          await this.logs.upsertStream(jobId, p.leaseEpoch, p.stream, { sizeBytes: r.size, complete: true });
+          return { outcome: 'complete', size: r.size };
+        }
+        await this.logs.upsertStream(jobId, p.leaseEpoch, p.stream, { sizeBytes: r.size });
+        return { outcome: r.kind, size: r.size };
+      } catch (error) {
+        if (error instanceof FleetLogException) throw error;
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOSPC' || code === 'EDQUOT' || code === 'EIO' || code === 'EROFS') throw new FleetLogException(507);
+        throw error;
       }
-      const r = bytes.length > 0 ? await this.store.append(key, p.offset, bytes) : { kind: p.offset === size ? ('duplicate' as const) : ('conflict' as const), size };
-      if (r.kind === 'conflict') return { outcome: 'offset', size: r.size };
-      if (p.final) {
-        if (r.size !== p.offset + bytes.length) return { outcome: 'offset', size: r.size };
-        await this.logs.upsertStream(jobId, p.leaseEpoch, p.stream, { sizeBytes: r.size, complete: true });
-        return { outcome: 'complete', size: r.size };
-      }
-      await this.logs.upsertStream(jobId, p.leaseEpoch, p.stream, { sizeBytes: r.size });
-      return { outcome: r.kind, size: r.size };
-    } catch (error) {
-      if (error instanceof FleetLogException) throw error;
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOSPC' || code === 'EDQUOT' || code === 'EIO' || code === 'EROFS') throw new FleetLogException(507);
-      throw error;
-    }
+    });
   }
 
   private parse(u: LogUpload): Parsed {

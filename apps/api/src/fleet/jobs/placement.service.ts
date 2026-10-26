@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { bookkeeping } from '../../action-context/audit-coverage';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { runAsSystem } from '../../action-context/action-context';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -195,6 +196,7 @@ export class PlacementService {
   }
 
   private async assign(job: FleetJobRecord, repo: FleetRepoRef, runner: PlacementRunnerRow, now: Date): Promise<{ leaseEpoch: number; live: LiveFleetJobEvent } | null> {
+    return bookkeeping('fleet.placement', async () => {
     const thread = isThreadKind(job.command) ? await this.repo.findThreadAssign(job.id) : undefined;
     // The caller guarantees a thread job has its turn; a broken row is a no-op, never a 500.
     if (isThreadKind(job.command) && !thread) return null;
@@ -207,6 +209,7 @@ export class PlacementService {
     await this.repo.createCommand({ runnerId: runner.id, jobId: job.id, type: FleetCommandType.ASSIGN, leaseEpoch, payload });
     const live = await this.transitions.record({ before: job, after, by: 'server', now, actor: SYSTEM_ACTOR, reason: `assigned to ${runner.name}` });
     return { leaseEpoch, live };
+    });
   }
 
   /**

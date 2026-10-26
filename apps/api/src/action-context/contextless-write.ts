@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { currentContext, runAsSystem } from './action-context';
+import { noteAuditWrite } from './audit-coverage';
 
 export type WriteGuardMode = 'throw' | 'record';
 
@@ -37,12 +38,42 @@ export interface GuardedOperationParams {
   query: (args: unknown) => PromiseLike<unknown>;
 }
 
+function changedRows(operation: string, result: unknown): boolean {
+  if (operation === 'create' || operation === 'update' || operation === 'upsert' || operation === 'delete') {
+    return true;
+  }
+
+  if (operation === 'createManyAndReturn' || operation === 'updateManyAndReturn') {
+    return Array.isArray(result) && result.length > 0;
+  }
+
+  if (operation === '$executeRaw' || operation === '$executeRawUnsafe') {
+    return typeof result === 'number' && result > 0;
+  }
+
+  if (operation === 'createMany' || operation === 'updateMany' || operation === 'deleteMany') {
+    return typeof result === 'object' && result !== null &&
+      'count' in result && typeof result.count === 'number' && result.count > 0;
+  }
+
+  return false;
+}
+
 export function contextlessWriteHandler(mode: WriteGuardMode): (params: GuardedOperationParams) => Promise<unknown> {
   const logger = new Logger(ContextlessWriteError.name);
 
   return async ({ model, operation, args, query }) => {
-    if (!GUARDED_OPERATIONS.has(operation) || currentContext() !== undefined) {
+    const inActionContext = currentContext() !== undefined;
+    if (!GUARDED_OPERATIONS.has(operation)) {
       return await query(args);
+    }
+
+    if (inActionContext) {
+      const result = await query(args);
+      if (model !== 'AuditEntry' && changedRows(operation, result)) {
+        noteAuditWrite(model === undefined ? operation : `${model}.${operation}`);
+      }
+      return result;
     }
 
     if (mode === 'throw') {

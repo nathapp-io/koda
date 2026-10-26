@@ -3,6 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { AUDIT_STORAGE, type IAuditStorage } from '@nathapp/nestjs-audit';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { currentContext, NO_APPROVAL } from '../action-context/action-context';
+import { noteAuditEntry } from '../action-context/audit-coverage';
 import { findCatalogEntry } from '../permissions/catalog';
 import { AUDIT_SUMMARY_MAX, type KodaAuditMetadata } from './domain/audit-entry.domain';
 
@@ -65,5 +66,6 @@ export class AuditRecorder {
       timestamp: new Date(),
       metadata: { ...metadata },
     });
+    noteAuditEntry();
   }
 }

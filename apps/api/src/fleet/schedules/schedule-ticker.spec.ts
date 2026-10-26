@@ -1,5 +1,6 @@
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { currentActor, currentContext, type ActionContext } from '../../action-context/action-context';
+import { currentBookkeepingReason } from '../../action-context/audit-coverage';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { BudgetPausedException } from '../budgets/budget.exceptions';
 import { FleetDispatchException } from '../jobs/fleet-dispatch.exception';
@@ -314,5 +315,112 @@ describe('ScheduleTicker background context (US-004)', () => {
 
     expect(currentActor()).toBeUndefined();
     expect(currentContext()).toBeUndefined();
+  });
+});
+
+/**
+ * Permissions P2 US-007: a schedule's fire claim, its skip and coalesce activity rows and the last-job link are the
+ * scheduler's own bookkeeping. The dispatch they lead to is a job creation, so it stays counted.
+ */
+describe('ScheduleTicker audit coverage (permissions P2 US-007)', () => {
+  type Reason = ReturnType<typeof currentBookkeepingReason>;
+
+  /** Records the bookkeeping reason current at each call of a stub, then answers exactly as the stub did. */
+  function watching<T>(fn: T, seen: Reason[]): T {
+    const mock = fn as unknown as {
+      getMockImplementation(): ((...args: never[]) => unknown) | undefined;
+      mockImplementation(impl: (...args: never[]) => unknown): void;
+    };
+    const impl = mock.getMockImplementation();
+    mock.mockImplementation((...args: never[]) => {
+      seen.push(currentBookkeepingReason());
+      return impl?.(...args);
+    });
+    return fn;
+  }
+
+  it('AC-7: tick claims the fire of a due schedule while currentBookkeepingReason() answers fleet.schedule-bookkeeping', async () => {
+    const h = build();
+    const seen: Reason[] = [];
+    watching(h.repo.claimFire, seen);
+
+    await h.ticker.tick(NOW);
+
+    expect(h.repo.claimFire).toHaveBeenCalledWith('s1', DUE, NEXT, NOW);
+    expect(seen).toEqual(['fleet.schedule-bookkeeping']);
+  });
+
+  it('AC-8: the skip of a schedule whose job still runs records its activity row under fleet.schedule-bookkeeping', async () => {
+    const h = build();
+    h.repo.findActiveJob.mockResolvedValue({ id: 'j7', state: 'RUNNING' });
+    const seen: Reason[] = [];
+    watching(h.activity.record, seen);
+
+    expect((await h.ticker.tick(NOW)).skipped).toBe(1);
+
+    expect(h.activity.record).toHaveBeenCalledTimes(1);
+    expect(h.actions()).toEqual([expect.objectContaining({ action: 'schedule.tick_skipped', payload: expect.objectContaining({ reason: 'job_active' }) })]);
+    expect(seen).toEqual(['fleet.schedule-bookkeeping']);
+  });
+
+  it('AC-8: the coalesce activity row is bookkeeping too, and the coalesce of the queued job stays inside it', async () => {
+    const h = build();
+    h.repo.findActiveJob.mockResolvedValue({ id: 'j9', state: 'QUEUED' });
+    h.repo.coalesceIntoQueued.mockResolvedValue('j9');
+    const seen: Reason[] = [];
+    watching(h.activity.record, seen);
+
+    expect((await h.ticker.tick(NOW)).coalesced).toBe(1);
+
+    expect(h.actions()).toEqual([expect.objectContaining({ action: 'schedule.tick_coalesced' })]);
+    expect(seen).toEqual(['fleet.schedule-bookkeeping']);
+  });
+
+  it.each<[string, () => Error, string]>([
+    ['a budget pause', () => new BudgetPausedException({ id: 'b1', scopeType: 'global', scopeId: null, scopeKey: 'global' }), 'budget_paused'],
+    ['a manual job of the feature', () => new ConflictAppException({ activeJobId: 'm1' }, 'fleet.jobs'), 'active_job_elsewhere'],
+    ['any other error', () => new Error('db down'), 'error'],
+  ])('AC-8: the skip row of %s is recorded under fleet.schedule-bookkeeping', async (_name, error, reason) => {
+    const h = build();
+    h.jobs.dispatch.mockRejectedValue(error());
+    const seen: Reason[] = [];
+    watching(h.activity.record, seen);
+
+    await h.ticker.tick(NOW);
+
+    expect(h.actions()).toEqual([
+      expect.objectContaining({ action: 'schedule.tick_skipped', payload: expect.objectContaining({ reason }) }),
+    ]);
+    expect(seen).toEqual(['fleet.schedule-bookkeeping']);
+  });
+
+  it('AC-9: the dispatch of a due schedule runs while currentBookkeepingReason() answers undefined', async () => {
+    const h = build();
+    const seen: Reason[] = [];
+    watching(h.jobs.dispatch, seen);
+
+    expect((await h.ticker.tick(NOW)).dispatched).toBe(1);
+
+    expect(h.jobs.dispatch).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([undefined]);
+  });
+
+  it('AC-10: that dispatching tick then links the last job id under fleet.schedule-bookkeeping', async () => {
+    const h = build();
+    const seen: Reason[] = [];
+    watching(h.repo.update, seen);
+
+    expect((await h.ticker.tick(NOW)).dispatched).toBe(1);
+
+    expect(h.repo.update).toHaveBeenCalledWith('s1', { lastJobId: 'job-1' });
+    expect(seen).toEqual(['fleet.schedule-bookkeeping']);
+  });
+
+  it('leaves no reason current once the tick has resolved', async () => {
+    const h = build();
+
+    await h.ticker.tick(NOW);
+
+    expect(currentBookkeepingReason()).toBeUndefined();
   });
 });

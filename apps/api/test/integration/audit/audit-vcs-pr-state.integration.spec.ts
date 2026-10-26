@@ -1,10 +1,12 @@
 import { createHmac } from 'node:crypto';
+import { AsyncResource } from 'node:async_hooks';
 import request from 'supertest';
 import { Logger } from '@nestjs/common';
 import { VCS_REPOSITORY, type IVcsRepository } from '../../../src/vcs/domain/vcs.repository';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import type { PrismaClient } from '../../../src/generated/prisma/client';
 import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { currentAuditScope } from '../../../src/action-context/audit-coverage';
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { canRunDbTests } from '../../helpers/test-environment';
@@ -234,14 +236,17 @@ describeIntegration('VCS PR-state audit entries', () => {
       await db.ticketLink.delete({ where: { id } });
       return write(id, state);
     });
-    const project = await db.project.findUniqueOrThrow({ where: { id: projectId } });
-    const connection = await db.vcsConnection.findUniqueOrThrow({ where: { projectId } });
-    const result = await withTestActor({ type: 'SYSTEM', id: 'vcs' }, () =>
-      app.get(VcsPrSyncService).syncPrStatus(project, connection, 'ab'.repeat(32), describeKey));
-    race.mockRestore();
-    expect(result).toEqual({ updated: 0, skipped: 0 });
-    expect(await db.ticketLink.findUnique({ where: { id: link.id } })).toBeNull();
-    expect(await rows(link.id)).toHaveLength(0);
+    try {
+      const project = await db.project.findUniqueOrThrow({ where: { id: projectId } });
+      const connection = await db.vcsConnection.findUniqueOrThrow({ where: { projectId } });
+      const result = await withTestActor({ type: 'SYSTEM', id: 'vcs' }, () =>
+        app.get(VcsPrSyncService).syncPrStatus(project, connection, 'ab'.repeat(32), describeKey));
+      expect(result).toEqual({ updated: 0, skipped: 0 });
+      expect(await db.ticketLink.findUnique({ where: { id: link.id } })).toBeNull();
+      expect(await rows(link.id)).toHaveLength(0);
+    } finally {
+      race.mockRestore();
+    }
   });
 
   it('AC-25/AC-26/AC-27: rejected audit on a provider-404 close counts one skipped and continues', async () => {
@@ -276,9 +281,22 @@ describeIntegration('VCS PR-state audit entries', () => {
   const interleaveAfterLookup = (prState: string) => {
     const repo = app.get<IVcsRepository>(VCS_REPOSITORY);
     const lookup = repo.findTicketLinkForConnectionPr.bind(repo);
+    // Capture the test's context before HTTP starts: only this competing writer is external.
+    expect(currentAuditScope()).toBeUndefined();
+    const competingUpdate = AsyncResource.bind(async (id: string) => {
+      expect(currentAuditScope()).toBeUndefined();
+      await db.ticketLink.update({ where: { id }, data: { prState } });
+      expect(currentAuditScope()).toBeUndefined();
+    });
     return vi.spyOn(repo, 'findTicketLinkForConnectionPr').mockImplementation(async (project, repoArg, number) => {
+      const callerScope = currentAuditScope();
+      expect(callerScope).toBeDefined();
       const snapshot = await lookup(project, repoArg, number);
-      if (snapshot) await db.ticketLink.update({ where: { id: snapshot.id }, data: { prState } });
+      try {
+        if (snapshot) await competingUpdate(snapshot.id);
+      } finally {
+        expect(currentAuditScope()).toBe(callerScope);
+      }
       return snapshot;
     });
   };
@@ -288,8 +306,11 @@ describeIntegration('VCS PR-state audit entries', () => {
     // This request's snapshot says 'open', so it targets 'open' again; the row is 'draft' by the time its
     // write takes the lock, so the write really moves draft -> open and must record that change.
     const race = interleaveAfterLookup('draft');
-    await deliver(prNumberOf(link.prNumber), 'reopened').expect(200);
-    race.mockRestore();
+    try {
+      await deliver(prNumberOf(link.prNumber), 'reopened').expect(200);
+    } finally {
+      race.mockRestore();
+    }
 
     expect((await db.ticketLink.findUniqueOrThrow({ where: { id: link.id } })).prState).toBe('open');
     expect(await rows(link.id)).toMatchObject([{
@@ -300,8 +321,11 @@ describeIntegration('VCS PR-state audit entries', () => {
   it('review B1: a state another writer already stored is not audited a second time', async () => {
     const { link } = await newLink('open');
     const race = interleaveAfterLookup('closed');
-    await deliver(prNumberOf(link.prNumber), 'closed').expect(200);
-    race.mockRestore();
+    try {
+      await deliver(prNumberOf(link.prNumber), 'closed').expect(200);
+    } finally {
+      race.mockRestore();
+    }
 
     // The row was already 'closed' when this write ran, so this request changed no state and adds no entry.
     expect(await rows(link.id)).toHaveLength(0);

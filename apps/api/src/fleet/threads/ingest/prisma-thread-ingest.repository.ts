@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { AuditRecorder } from '../../../audit/audit-recorder.service';
 import { runAsSystem } from '../../../action-context/action-context';
+import { bookkeeping } from '../../../action-context/audit-coverage';
 import type { ThreadLiveEvent } from '../../../live/thread-event-bus';
 import { Prisma, PrismaClient } from '../../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -74,127 +75,130 @@ export class PrismaThreadIngestRepository implements ThreadIngestRepository {
 
   async fold(batch: ThreadIngestBatch): Promise<FoldResult> {
     let spendKeys: string[] = [];
-    const result = await this.txManager.run(async (): Promise<FoldResult> => {
-      const db = this.prisma.client;
-      await db.$queryRaw`SELECT "id" FROM "FleetJob" WHERE "id" = ${batch.jobId} FOR UPDATE`;
-      const job = await db.fleetJob.findUnique({ where: { id: batch.jobId }, select: {
-        id: true, command: true, threadId: true, leaseEpoch: true, projectId: true, repoId: true, runnerId: true, state: true,
-      } });
-      let threadId: string | null = null;
-      if (job) spendKeys = jobSpendKeys(job);
-      if (job?.command === 'THREAD' && job.threadId) {
-        await db.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${job.threadId} FOR UPDATE`;
-        threadId = job.threadId;
-      }
-      if (!threadId || !job) return { costChanged: false, events: [] };
-      let skippedLines = 0;
-      let costChanged = false;
-      const changedTurns = new Set<string>();
-      const messageEventTurns = new Set<string>();
-      const messageIds = new Set<string>();
-      const deltaText = new Map<string, string>();
-      const resetTurns = new Set<string>();
-      const questions: Array<{ requestId: string; text: string }> = [];
-      let threadChanged = false;
-      if (threadId && job) {
-        for (const { line } of batch.lines) {
-          if ('bad' in line) {
-            skippedLines += 1;
-            continue;
-          }
-          if (line.type === 'input_consumed') {
-            await this.foldInputConsumed(threadId, line.messageId);
-            messageIds.add(line.messageId);
-          }
-          else if (isToolLine(line)) {
-            const folded = await this.foldToolLine(threadId, line);
-            skippedLines += folded.skipped;
-            if ('turnId' in line && folded.messageId) {
-              changedTurns.add(line.turnId);
-              messageEventTurns.add(line.turnId);
-            } else if (folded.messageId) {
-              messageIds.add(folded.messageId);
+    // Permissions P2 US-007: the transcript, its cost mirror rows and the session fields *are* the domain rows a
+    // runner's stream produces, so the whole transaction body is bookkeeping. The `turn_end` entry still counts —
+    // bookkeeping drops writes only, never entries recorded through AuditRecorder.
+    const result = await this.txManager.run(() => bookkeeping('thread.transcript', async (): Promise<FoldResult> => {
+        const db = this.prisma.client;
+        await db.$queryRaw`SELECT "id" FROM "FleetJob" WHERE "id" = ${batch.jobId} FOR UPDATE`;
+        const job = await db.fleetJob.findUnique({ where: { id: batch.jobId }, select: {
+          id: true, command: true, threadId: true, leaseEpoch: true, projectId: true, repoId: true, runnerId: true, state: true,
+        } });
+        let threadId: string | null = null;
+        if (job) spendKeys = jobSpendKeys(job);
+        if (job?.command === 'THREAD' && job.threadId) {
+          await db.$queryRaw`SELECT "id" FROM "ChatThread" WHERE "id" = ${job.threadId} FOR UPDATE`;
+          threadId = job.threadId;
+        }
+        if (!threadId || !job) return { costChanged: false, events: [] };
+        let skippedLines = 0;
+        let costChanged = false;
+        const changedTurns = new Set<string>();
+        const messageEventTurns = new Set<string>();
+        const messageIds = new Set<string>();
+        const deltaText = new Map<string, string>();
+        const resetTurns = new Set<string>();
+        const questions: Array<{ requestId: string; text: string }> = [];
+        let threadChanged = false;
+        if (threadId && job) {
+          for (const { line } of batch.lines) {
+            if ('bad' in line) {
+              skippedLines += 1;
+              continue;
             }
-          }
-          else if (line.type === 'question') {
-            const skipped = await this.foldQuestion(threadId, line);
-            skippedLines += skipped;
-            if (!skipped) {
-              if (line.answerable) {
-                questions.push({ requestId: line.requestId, text: line.text });
-                threadChanged = true;
-              }
-              else {
+            if (line.type === 'input_consumed') {
+              await this.foldInputConsumed(threadId, line.messageId);
+              messageIds.add(line.messageId);
+            }
+            else if (isToolLine(line)) {
+              const folded = await this.foldToolLine(threadId, line);
+              skippedLines += folded.skipped;
+              if ('turnId' in line && folded.messageId) {
                 changedTurns.add(line.turnId);
                 messageEventTurns.add(line.turnId);
+              } else if (folded.messageId) {
+                messageIds.add(folded.messageId);
+              }
+            }
+            else if (line.type === 'question') {
+              const skipped = await this.foldQuestion(threadId, line);
+              skippedLines += skipped;
+              if (!skipped) {
+                if (line.answerable) {
+                  questions.push({ requestId: line.requestId, text: line.text });
+                  threadChanged = true;
+                }
+                else {
+                  changedTurns.add(line.turnId);
+                  messageEventTurns.add(line.turnId);
+                }
+              }
+            }
+            else if (isSessionLine(line)) {
+              const erroredIds = await this.foldSessionLine(batch, threadId, line, isTerminal(job.state) || batch.leaseEpoch !== job.leaseEpoch, job.runnerId);
+              for (const id of erroredIds) messageIds.add(id);
+              threadChanged = true;
+            }
+            else if (isWriteLine(line)) {
+              await this.foldWriteLine(batch, threadId, line);
+              threadChanged = true;
+            }
+            else if (line.type === 'usage') {
+              const folded = await this.foldUsage(batch, job, threadId, line);
+              skippedLines += Number(folded.skipped);
+              costChanged = folded.costChanged || costChanged;
+              threadChanged = folded.changed || threadChanged;
+              if (folded.changed) changedTurns.add(line.turnId);
+            }
+            else {
+              if (line.type === 'turn_end') costChanged = await this.foldTurnEnd(batch, job, threadId, line) || costChanged;
+              const skipped = await this.foldAssistantLine(batch, threadId, line);
+              skippedLines += skipped;
+              if (!skipped && line.type === 'turn_end') {
+                await runAsSystem('thread', () => this.audit.record({
+                  key: 'system.thread.ingest', resourceType: 'thread', resourceId: threadId,
+                  projectId: job.projectId, summary: `turn ended ${line.status}`,
+                }));
+              }
+              if (!skipped && 'turnId' in line) {
+                if (line.type === 'turn_end') threadChanged = true;
+                changedTurns.add(line.turnId);
+                if (line.type === 'text_delta') deltaText.set(line.turnId, (deltaText.get(line.turnId) ?? '') + line.text);
+                else messageEventTurns.add(line.turnId);
+                if (line.type === 'stream_reset') resetTurns.add(line.turnId);
               }
             }
           }
-          else if (isSessionLine(line)) {
-            const erroredIds = await this.foldSessionLine(batch, threadId, line, isTerminal(job.state) || batch.leaseEpoch !== job.leaseEpoch, job.runnerId);
-            for (const id of erroredIds) messageIds.add(id);
-            threadChanged = true;
-          }
-          else if (isWriteLine(line)) {
-            await this.foldWriteLine(batch, threadId, line);
-            threadChanged = true;
-          }
-          else if (line.type === 'usage') {
-            const folded = await this.foldUsage(batch, job, threadId, line);
-            skippedLines += Number(folded.skipped);
-            costChanged = folded.costChanged || costChanged;
-            threadChanged = folded.changed || threadChanged;
-            if (folded.changed) changedTurns.add(line.turnId);
-          }
-          else {
-            if (line.type === 'turn_end') costChanged = await this.foldTurnEnd(batch, job, threadId, line) || costChanged;
-            const skipped = await this.foldAssistantLine(batch, threadId, line);
-            skippedLines += skipped;
-            if (!skipped && line.type === 'turn_end') {
-              await runAsSystem('thread', () => this.audit.record({
-                key: 'system.thread.ingest', resourceType: 'thread', resourceId: threadId,
-                projectId: job.projectId, summary: `turn ended ${line.status}`,
-              }));
-            }
-            if (!skipped && 'turnId' in line) {
-              if (line.type === 'turn_end') threadChanged = true;
-              changedTurns.add(line.turnId);
-              if (line.type === 'text_delta') deltaText.set(line.turnId, (deltaText.get(line.turnId) ?? '') + line.text);
-              else messageEventTurns.add(line.turnId);
-              if (line.type === 'stream_reset') resetTurns.add(line.turnId);
+          if (costChanged) await this.rederiveCosts(batch, job, threadId, changedTurns);
+        }
+        await db.threadIngestCursor.upsert({
+          where: { jobId_leaseEpoch: { jobId: batch.jobId, leaseEpoch: batch.leaseEpoch } },
+          create: { jobId: batch.jobId, leaseEpoch: batch.leaseEpoch, offset: BigInt(batch.endOffset), skippedLines: batch.badLines + skippedLines },
+          update: { offset: BigInt(batch.endOffset), skippedLines: { increment: batch.badLines + skippedLines } },
+        });
+        const liveEvents: ThreadLiveEvent[] = [];
+        if (threadId) {
+          const turns = [...changedTurns];
+          const messages = turns.length ? await db.chatMessage.findMany({
+            where: { threadId, role: 'assistant', turnId: { in: turns } }, select: { id: true, turnId: true },
+          }) : [];
+          const at = new Date().toISOString();
+          const base = { id: randomUUID(), threadId, at };
+          for (const messageId of messageIds) liveEvents.push({ ...base, id: randomUUID(), type: 'message', messageId });
+          for (const message of messages) {
+            if (message.turnId && messageEventTurns.has(message.turnId)) {
+              liveEvents.push({ ...base, id: randomUUID(), type: 'message', messageId: message.id });
             }
           }
-        }
-        if (costChanged) await this.rederiveCosts(batch, job, threadId, changedTurns);
-      }
-      await db.threadIngestCursor.upsert({
-        where: { jobId_leaseEpoch: { jobId: batch.jobId, leaseEpoch: batch.leaseEpoch } },
-        create: { jobId: batch.jobId, leaseEpoch: batch.leaseEpoch, offset: BigInt(batch.endOffset), skippedLines: batch.badLines + skippedLines },
-        update: { offset: BigInt(batch.endOffset), skippedLines: { increment: batch.badLines + skippedLines } },
-      });
-      const liveEvents: ThreadLiveEvent[] = [];
-      if (threadId) {
-        const turns = [...changedTurns];
-        const messages = turns.length ? await db.chatMessage.findMany({
-          where: { threadId, role: 'assistant', turnId: { in: turns } }, select: { id: true, turnId: true },
-        }) : [];
-        const at = new Date().toISOString();
-        const base = { id: randomUUID(), threadId, at };
-        for (const messageId of messageIds) liveEvents.push({ ...base, id: randomUUID(), type: 'message', messageId });
-        for (const message of messages) {
-          if (message.turnId && messageEventTurns.has(message.turnId)) {
-            liveEvents.push({ ...base, id: randomUUID(), type: 'message', messageId: message.id });
+          for (const message of messages) {
+            const text = message.turnId ? deltaText.get(message.turnId) : undefined;
+            if (text && !resetTurns.has(message.turnId as string)) liveEvents.push({ ...base, id: randomUUID(), type: 'delta', messageId: message.id, text });
           }
+          for (const question of questions) liveEvents.push({ ...base, id: randomUUID(), type: 'question', ...question });
+          if (threadChanged) liveEvents.push({ ...base, id: randomUUID(), type: 'thread' });
         }
-        for (const message of messages) {
-          const text = message.turnId ? deltaText.get(message.turnId) : undefined;
-          if (text && !resetTurns.has(message.turnId as string)) liveEvents.push({ ...base, id: randomUUID(), type: 'delta', messageId: message.id, text });
-        }
-        for (const question of questions) liveEvents.push({ ...base, id: randomUUID(), type: 'question', ...question });
-        if (threadChanged) liveEvents.push({ ...base, id: randomUUID(), type: 'thread' });
-      }
-      return { costChanged, events: liveEvents };
-    });
+        return { costChanged, events: liveEvents };
+    }));
     if (result.costChanged) this.budgets.signal(spendKeys);
     return result;
   }

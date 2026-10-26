@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { runAsSystem } from '../../action-context/action-context';
+import { bookkeeping } from '../../action-context/audit-coverage';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { responsibleUserOf } from '../common/responsible-user';
 import { ARTIFACT_STORE, ArtifactStore } from '../artifacts/artifact-store';
@@ -73,12 +74,14 @@ export class BundleIngestService {
 
   /** One claimed row end to end. Returns false when nothing was claimable. Failures are recorded, never thrown. */
   async ingestOne(now: Date): Promise<boolean> {
-    const claim = await this.repo.claimNext(now);
+    // Permissions P2 US-007: the claim and the failure marks are the queue's own bookkeeping; the rows the bundle
+    // parses into stay counted, so `write` (replaceRows and its corrections) runs outside these markers.
+    const claim = await bookkeeping('fleet.ingest-queue', () => this.repo.claimNext(now));
     if (!claim) return false;
     try {
       const artifact = await this.repo.findArtifact(claim.artifactId);
       if (!artifact || artifact.expiredAt) {
-        await this.repo.markFailed(claim.id, claim.attempts + 1, 'bundle expired');
+        await bookkeeping('fleet.ingest-queue', () => this.repo.markFailed(claim.id, claim.attempts + 1, 'bundle expired'));
         return true;
       }
       const files = await readBundleFiles(await this.store.get(artifact.storageKey));
@@ -134,11 +137,14 @@ export class BundleIngestService {
     }
   }
 
-  private async recordFailure(claim: IngestClaim, error: unknown, now: Date): Promise<void> {
-    const attempts = claim.attempts + 1;
-    const message = trimError(error);
-    this.logger.warn(`bundle ingest ${claim.id} (job ${claim.jobId}) failed attempt ${attempts}: ${message}`);
-    if (attempts >= INGEST_MAX_ATTEMPTS) await this.repo.markFailed(claim.id, attempts, message);
-    else await this.repo.markRetry(claim.id, attempts, new Date(now.getTime() + INGEST_BACKOFF_MS[attempts - 1]), message);
+  /** Permissions P2 US-007: a retry or failure mark is queue bookkeeping, so its whole body is uncounted. */
+  private recordFailure(claim: IngestClaim, error: unknown, now: Date): Promise<void> {
+    return bookkeeping('fleet.ingest-queue', async () => {
+      const attempts = claim.attempts + 1;
+      const message = trimError(error);
+      this.logger.warn(`bundle ingest ${claim.id} (job ${claim.jobId}) failed attempt ${attempts}: ${message}`);
+      if (attempts >= INGEST_MAX_ATTEMPTS) await this.repo.markFailed(claim.id, attempts, message);
+      else await this.repo.markRetry(claim.id, attempts, new Date(now.getTime() + INGEST_BACKOFF_MS[attempts - 1]), message);
+    });
   }
 }

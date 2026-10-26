@@ -4,6 +4,7 @@ import {
 } from '@nathapp/nestjs-notify';
 import { KODA_TENANT_ID } from './koda-tenant';
 import { runAsSystem } from '../action-context/action-context';
+import { bookkeeping } from '../action-context/audit-coverage';
 import { EMAIL_LOCALES, EMAIL_TEMPLATE_CODES, EmailLocale, EmailTemplateCode, EmailTemplateText } from './templates/template-codes';
 import { EN_TEMPLATES } from './templates/en';
 import { ZH_TEMPLATES } from './templates/zh';
@@ -30,22 +31,29 @@ export class EmailTemplateSeeder implements OnApplicationBootstrap {
     if (changed > 0) this.logger.log(`Seeded ${changed} email template(s)`);
   }
 
-  /** Returns how many rows were created or updated. */
-  async seed(): Promise<number> {
-    let changed = 0;
-    for (const locale of EMAIL_LOCALES) {
-      for (const code of EMAIL_TEMPLATE_CODES) {
-        const text = BY_LOCALE[locale][code] ?? EN_TEMPLATES[code];
-        const current = await this.repo.findTemplate(code, locale, KODA_TENANT_ID, NotificationChannel.EMAIL);
-        if (!current) {
-          if (await this.createIfAbsent({ code, locale, text })) changed += 1;
-        } else if (current.subject !== text.subject || current.content !== text.html) {
-          await this.templates.update(current.id, KODA_TENANT_ID, { subject: text.subject, content: text.html });
-          changed += 1;
+  /**
+   * Returns how many rows were created or updated.
+   *
+   * Permissions P2 US-007: the built-in templates come from code (`src/email/templates`), so the seed writes no
+   * user-authored row — its whole body is bookkeeping.
+   */
+  seed(): Promise<number> {
+    return bookkeeping('email.template-seed', async () => {
+      let changed = 0;
+      for (const locale of EMAIL_LOCALES) {
+        for (const code of EMAIL_TEMPLATE_CODES) {
+          const text = BY_LOCALE[locale][code] ?? EN_TEMPLATES[code];
+          const current = await this.repo.findTemplate(code, locale, KODA_TENANT_ID, NotificationChannel.EMAIL);
+          if (!current) {
+            if (await this.createIfAbsent({ code, locale, text })) changed += 1;
+          } else if (current.subject !== text.subject || current.content !== text.html) {
+            await this.templates.update(current.id, KODA_TENANT_ID, { subject: text.subject, content: text.html });
+            changed += 1;
+          }
         }
       }
-    }
-    return changed;
+      return changed;
+    });
   }
 
   /** A concurrent boot may insert the same row first: its unique violation means "already seeded" (review I3). */

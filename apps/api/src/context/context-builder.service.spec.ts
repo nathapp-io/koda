@@ -12,6 +12,7 @@ import { ImpactAnalysisService, ChangeImpactResult } from '../code-intel/impact-
 import { SloDashboardService } from '../monitoring/slo-dashboard.service';
 import { CONTEXT_REPOSITORY, IContextRepository } from './domain/context.domain';
 import { MemoryItem } from '../memory/memory-item-repository';
+import { currentBookkeepingReason } from '../action-context/audit-coverage';
 
 const makeEvent = (overrides?: Partial<CanonicalEvent>): CanonicalEvent => ({
   id: 'event-1',
@@ -167,6 +168,19 @@ describe('ContextBuilderService', () => {
 
       await expect(service.getProjectContext(baseQuery)).resolves.toBeDefined();
     });
+  });
+
+  it('records the context query metric inside its bookkeeping reason', async () => {
+    setupDefaultStubs();
+    let reason: string | undefined;
+    sloDashboardService.recordQueryMetric.mockImplementation(async () => {
+      reason = currentBookkeepingReason();
+    });
+
+    await service.getProjectContext(baseQuery);
+    await Promise.resolve();
+
+    expect(reason).toBe('context.query-metric');
   });
 
   describe('response shape', () => {

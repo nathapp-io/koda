@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { bookkeeping } from '../../action-context/audit-coverage';
 import { FleetCommandType } from '../../common/enums';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { responsibleUserOf } from '../common/responsible-user';
@@ -20,6 +21,7 @@ export class FenceService {
 
   /** Inside txManager.run. Queues ABANDON unless one is already pending for (runner, job, epoch). */
   async abandon(runnerId: string, job: FleetJobRecord, leaseEpoch: number): Promise<boolean> {
+    return bookkeeping('runner.fence-abandon', async () => {
     if (await this.repo.findPendingCommand({ jobId: job.id, type: FleetCommandType.ABANDON, runnerId, leaseEpoch })) return false;
     // Only reached when the caller does not hold the lease, so the reason is always a stale lease.
     // (`job_terminal` stays in the protocol union for a later "job ended under you" signal.)
@@ -31,5 +33,6 @@ export class FenceService {
     });
     this.logger.warn(`Fenced runner ${runnerId} on job ${job.id}: holds epoch ${leaseEpoch}, current ${job.leaseEpoch}`);
     return true;
+    });
   }
 }

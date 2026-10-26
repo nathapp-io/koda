@@ -23,6 +23,14 @@ import {
   type ActionContext,
 } from './action-context';
 
+import {
+  currentAuditScope,
+  noteAuditEntry,
+  noteAuditWrite,
+  runInAuditScope,
+  UnauditedWriteError,
+} from './audit-coverage';
+
 const AGENT = { type: 'AGENT', id: 'a1' } as const;
 const USER = { type: 'USER', id: 'u1' } as const;
 
@@ -40,6 +48,86 @@ const contextNow = (): ActionContext => {
 class BudgetWindowResetWriter {}
 
 class Plain {}
+
+@SystemWriter('system.schedule.dispatch')
+class ScheduleTicker {}
+
+describe('system audit scopes', () => {
+  beforeEach(() => { vi.stubEnv('ENV_NAME', 'test'); });
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('coverage AC-1: opens system:budget and restores the enclosing scope', () => {
+    expect(runAsSystem('budget', () => currentAuditScope()?.surface)).toBe('system:budget');
+    expect(currentAuditScope()).toBeUndefined();
+  });
+
+  it('coverage AC-2: rejects successful async work that wrote without recording', async () => {
+    const result = runAsSystem('budget', async () => { noteAuditWrite('BudgetPause.create'); });
+    await expect(result).rejects.toBeInstanceOf(UnauditedWriteError);
+    await expect(result).rejects.toMatchObject({ surface: 'system:budget', writes: ['BudgetPause.create'] });
+  });
+
+  it('coverage AC-3: labels the writer scope and keeps its SYSTEM actor', () => {
+    expect(runAsSystemWriter(new ScheduleTicker(), () => ({
+      surface: currentAuditScope()?.surface, actor: currentActor(),
+    }))).toEqual({ surface: 'writer:ScheduleTicker', actor: { type: 'SYSTEM', id: 'schedule' } });
+  });
+
+  it('coverage AC-4: returns a plain value synchronously', () => {
+    expect(runAsSystem('budget', () => 7)).toBe(7);
+  });
+
+  it('counts nested record-only scopes in the enclosing system scope', () => {
+    runAsSystem('budget', () => {
+      const outer = currentAuditScope();
+      noteAuditWrite('BudgetPause.create');
+      runAsSystem('schedule', () => {
+        expect(currentAuditScope()?.parent).toBe(outer);
+        noteAuditEntry();
+        expect(currentAuditScope()?.writes).toEqual([]);
+      });
+      expect(currentAuditScope()).toBe(outer);
+      expect(outer?.entries).toBe(1);
+    });
+  });
+
+  it('does not let detached entries satisfy the enclosing scope', () => {
+    expect(() => runAsSystem('budget', () => {
+      noteAuditWrite('BudgetPause.create');
+      runInAuditScope('task:detached', () => noteAuditEntry(), { detached: true });
+    })).toThrow(UnauditedWriteError);
+  });
+
+  it('preserves original synchronous throws and async rejections without checking coverage', async () => {
+    const failure = new Error('original failure');
+    expect(() => runAsSystem('budget', () => {
+      noteAuditWrite('BudgetPause.create');
+      throw failure;
+    })).toThrow(failure);
+    await expect(runAsSystem('budget', async () => {
+      noteAuditWrite('BudgetPause.create');
+      throw failure;
+    })).rejects.toBe(failure);
+  });
+
+  it('awaits lazy thenables inside both the actor and the audit scope', async () => {
+    const lazy: PromiseLike<number> = {
+      then(resolve, reject) {
+        expect(currentActor()).toEqual({ type: 'SYSTEM', id: 'budget' });
+        expect(currentAuditScope()?.surface).toBe('system:budget');
+        noteAuditWrite('BudgetPause.create');
+        noteAuditEntry();
+        return Promise.resolve(9).then(resolve, reject);
+      },
+    };
+    await expect(runAsSystem('budget', () => lazy)).resolves.toBe(9);
+  });
+
+  it('does not open scopes through the raw action-context or compatibility helpers', () => {
+    expect(runWithActionContext({ actor: USER, origin: 'rest' }, currentAuditScope)).toBeUndefined();
+    expect(runWithActor(USER, currentAuditScope)).toBeUndefined();
+  });
+});
 
 describe('runWithActor / currentActor', () => {
   it('P1d AC-1: exposes the actor to the function it runs', () => {

@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
+import { bookkeeping } from '../../action-context/audit-coverage';
 import { AssistantToolCall as AssistantToolCallModel, PrismaClient } from '../../generated/prisma/client';
 import type {
   AssistantToolCallRecord, AssistantToolCallRepository, ProjectCounts, ProjectCountsReader, ToolCallContext, ToolCallCreator,
@@ -72,8 +73,9 @@ export class PrismaAssistantToolCallRepository
     return row ? this.toDomain(row) : null;
   }
 
+  /** Permissions P2 US-007: the ledger row is the audit trail of a tool call; its whole write is uncounted. */
   async record(row: AssistantToolCallRecord): Promise<void> {
-    await this.prisma.client.assistantToolCall.create({ data: this.toPersistenceCreate(row) });
+    await bookkeeping('assistant.tool-call-ledger', () => this.prisma.client.assistantToolCall.create({ data: this.toPersistenceCreate(row) }));
   }
 
   async findUserActor(userId: string): Promise<UserToolCallCreator | null> {

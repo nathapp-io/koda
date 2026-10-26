@@ -2,6 +2,7 @@ import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { randomUUID } from 'crypto';
+import { bookkeeping } from '../../../action-context/audit-coverage';
 import type { LiveFleetApprovalEvent } from '../../../live/live-event';
 import { ThreadEventBus } from '../../../live/thread-event-bus';
 import { ApprovalLivePublisher } from '../../approvals/approval-live.publisher';
@@ -60,7 +61,8 @@ export class AssistantActionService implements OnModuleInit, ActionProposer {
    * row ever exists for a direct action. Nothing is published on either bus and no `FleetApproval` is opened.
    */
   async recordDirect(input: DirectActionInput): Promise<{ actionId: string }> {
-    const { id } = await this.actions.insertDirect(input);
+    // Permissions P2 US-007: the ledger row of a direct write is the record of the tool call, not a domain change.
+    const { id } = await bookkeeping('assistant.direct-action-record', () => this.actions.insertDirect(input));
     return { actionId: id };
   }
 
@@ -74,14 +76,16 @@ export class AssistantActionService implements OnModuleInit, ActionProposer {
     const existing = await this.actions.findByCall(input.jobId, input.toolCallId);
     if (existing) return { kind: 'existing', actionId: existing.id };
     if ((await this.actions.countPending(input.threadId)) >= MAX_PENDING_ACTIONS) return { kind: 'refused' };
-    const action = await this.actions.insert({
+    // Permissions P2 US-007: the pending action, its approval and the approval id link are the proposal's own rows,
+    // written before the tool runs. The thread lock and the duplicate read above stay counted.
+    const action = await bookkeeping('assistant.action-proposal', () => this.actions.insert({
       projectId: input.projectId, threadId: input.threadId, jobId: input.jobId, toolCallId: input.toolCallId,
       tool: input.tool, input: input.input, preview: input.preview, actorId: input.actorId,
       expiresAt: new Date(input.now.getTime() + ACTION_TTL_MS),
-    });
+    }));
     const path = assistantThreadPath(input.threadId, input.threadKind, input.threadProjectSlug);
-    const { approval, live } = await this.approvals.openAssistant(action, path, input.now);
-    await this.actions.setApprovalId(action.id, approval.id);
+    const { approval, live } = await bookkeeping('assistant.action-proposal', () => this.approvals.openAssistant(action, path, input.now));
+    await bookkeeping('assistant.action-proposal', () => this.actions.setApprovalId(action.id, approval.id));
     return { kind: 'created', actionId: action.id, live };
   }
 }

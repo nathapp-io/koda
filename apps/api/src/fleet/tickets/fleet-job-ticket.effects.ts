@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { bookkeeping, runInAuditScope } from '../../action-context/audit-coverage';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { TicketStatus } from '../../common/enums';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
@@ -51,10 +52,12 @@ export class FleetJobTicketEffects {
 
   /** D453/D454/D455: after commit, from sync afterTerminal and the sweeper. Failure comment, then the PR link. */
   async onTerminal(jobIds: readonly string[]): Promise<void> {
-    for (const jobId of new Set(jobIds)) {
-      await this.commentOnFailure(jobId);
-      await this.upsertPrLinks(jobId);
-    }
+    return runInAuditScope('task:FleetJobTicketEffects.onTerminal', async () => {
+      for (const jobId of new Set(jobIds)) {
+        await this.commentOnFailure(jobId);
+        await this.upsertPrLinks(jobId);
+      }
+    }, { detached: true });
   }
 
   /** C9 §3.3 (D455): the job's PR as a `pr` link on each linked ticket. Also after ingest fills resultPrUrl. Never throws. */
@@ -116,7 +119,7 @@ export class FleetJobTicketEffects {
   private async commentOnce(job: EffectJob, ticket: LinkedTicket, body: string): Promise<void> {
     try {
       await this.txManager.run(async () => {
-        if (!(await this.repo.claimNotified(job.id, ticket.ticketId, job.leaseEpoch))) return;
+        if (!(await bookkeeping('fleet.ticket-comment-claim', () => this.repo.claimNotified(job.id, ticket.ticketId, job.leaseEpoch)))) return;
         const comment = await this.repo.createSystemComment(ticket.ticketId, body);
         await this.events.record({
           projectId: job.projectId, ticketId: ticket.ticketId, action: 'COMMENT_ADDED', actorId: job.requestedById,

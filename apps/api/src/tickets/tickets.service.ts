@@ -367,6 +367,8 @@ export class TicketsService {
     }
 
     const updateData = TicketsService.toUpdateData(updateTicketDto);
+    // An empty PATCH is a read, not a timestamp touch plus a synthetic update event/outbox row.
+    if (Object.keys(updateData).length === 0) return ticket;
     const project = await this.ticketRepo.findProjectBySlug(projectSlug);
     if (!project || project.deletedAt) {
       throw new NotFoundAppException({}, 'tickets');

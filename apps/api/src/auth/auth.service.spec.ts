@@ -22,7 +22,10 @@ describe('AuthService', () => {
   let authRepo: PrismaAuthRepository;
   let moduleRef: TestingModule;
 
-  const mockAuditRecorder = { record: vi.fn() };
+  const mockAuditRecorder = {
+    record: vi.fn(),
+    audited: vi.fn(async <T>(fn: () => Promise<T>) => fn()),
+  };
 
   const mockUser = {
     id: 'user-123',
@@ -82,6 +85,7 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     mockAuditRecorder.record.mockReset();
+    mockAuditRecorder.audited.mockReset().mockImplementation(async <T>(fn: () => Promise<T>) => fn());
     // Drop queued once-values and per-test implementations so test order cannot matter.
     Object.values(mockAuthRepository).forEach((m) => m.mockReset());
     mockConfigService.get.mockReset();
@@ -629,14 +633,35 @@ describe('AuthService', () => {
   });
 
   describe('logout', () => {
-    it('should bump the token version and invalidate the cached tokenVersion', async () => {
+    it('AC-1/2: audits the token-version bump with the logout entry', async () => {
       mockAuthRepository.bumpTokenVersion.mockResolvedValue(1);
 
       await service.logout(mockUser.id);
 
+      expect(mockAuditRecorder.audited).toHaveBeenCalledTimes(1);
+      const [work, entriesOf] = mockAuditRecorder.audited.mock.calls[0];
+      expect(await work()).toBe(1);
       expect(authRepo.bumpTokenVersion).toHaveBeenCalledWith(mockUser.id);
+      expect(entriesOf(1)).toEqual({
+        key: 'session.logout', resourceType: 'user', resourceId: mockUser.id,
+        projectId: null, summary: 'logged out',
+      });
+    });
+
+    it('AC-3: does not invalidate cache when audit recording rejects', async () => {
+      const error = new Error('audit failed');
+      mockAuditRecorder.audited.mockRejectedValueOnce(error);
+
+      await expect(service.logout(mockUser.id)).rejects.toBe(error);
+      expect(mockCacheManager.invalidate).not.toHaveBeenCalled();
+    });
+
+    it('AC-7/8: invalidates both token-version and auth-state caches after auditing', async () => {
+      mockAuthRepository.bumpTokenVersion.mockResolvedValue(1);
+
+      await service.logout(mockUser.id);
+
       expect(mockCacheManager.invalidate).toHaveBeenCalledWith(`USER:${mockUser.id}`, { mode: 'tag' });
-      // MEMORY-strategy fallback: the auth state is also evicted by its direct key.
       expect(mockCacheManager.invalidate).toHaveBeenCalledWith(['user-auth-state', mockUser.id]);
     });
   });

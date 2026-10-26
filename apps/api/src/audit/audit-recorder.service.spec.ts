@@ -1,6 +1,6 @@
-import { AUDIT_STORAGE, type IAuditStorage } from '@nathapp/nestjs-audit';
-import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { IAuditStorage } from '@nathapp/nestjs-audit';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { openAuditScope } from '../action-context/audit-coverage';
 import { runAsSystem, runWithActionContext, runWithActor } from '../action-context/action-context';
 import { AuditRecorder } from './audit-recorder.service';
 
@@ -11,7 +11,34 @@ describe('AuditRecorder', () => {
   const recorder = new AuditRecorder(storage, txManager as never);
   const input = { key: 'ticket.create', resourceType: 'ticket', resourceId: 't1' };
 
-  afterEach(() => record.mockClear());
+  beforeEach(() => {
+    record.mockReset();
+    record.mockResolvedValue(undefined);
+  });
+
+  it('coverage AC-5: counts an entry only after storage resolves', async () => {
+    let finish!: () => void;
+    record.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    await openAuditScope('POST /x', async (scope) => {
+      expect(scope.entries).toBe(0);
+      const pending = recorder.record(input);
+      expect(record).toHaveBeenCalledOnce();
+      expect(scope.entries).toBe(0);
+      finish();
+      await pending;
+      expect(scope.entries).toBe(1);
+    });
+  });
+
+  it('coverage AC-6: propagates storage failure without counting an entry', async () => {
+    const failure = new Error('storage failure');
+    record.mockRejectedValueOnce(failure);
+    await openAuditScope('POST /x', async (scope) => {
+      await expect(recorder.record(input)).rejects.toBe(failure);
+      expect(record).toHaveBeenCalledOnce();
+      expect(scope.entries).toBe(0);
+    });
+  });
 
   it('AC-1/2/3: maps current actor, resource and origin', async () => {
     await runWithActor({ type: 'USER', id: 'u1' }, () => recorder.record(input));

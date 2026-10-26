@@ -1,0 +1,874 @@
+{
+  "project": "koda",
+  "feature": "permissions-p2-audit-coverage",
+  "branchName": "feat/permissions-p2-audit-coverage",
+  "createdAt": "2026-10-26T00:00:00Z",
+  "updatedAt": "2026-10-26T08:16:45.866Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Audit scope core",
+      "description": "**Goal** — Add the inert entry-point audit scope core and reasoned surface allowlist.\n\n**Motivation** — Nothing stops the next route, tool or system writer from writing without an entry: the context guard (`permissions-p2-context-guard`) only refuses a write with no actor, and an audited actor that forgets `AuditRecorder.record` is silent.\n\n**Approach** — The unit of coverage is the entry-point scope, not the transaction. A scope passes when it wrote nothing it counts, or recorded at least one entry. Checking each write against an entry of its own would need every write mapped to a key; the earlier features record one entry per action, not per row (a ticket create writes the ticket, its event and outbox rows, and records one `ticket.create`). The guard therefore catches an entry point that forgot to record at all, which is the gap the context guard leaves; a scope that records one entry and also makes a second, unaudited domain write is out of scope.\n\nNested scopes. A scope opened inside another (a `runAsSystem('vcs', …)` inside the GitHub webhook request, a `runAsSystem('schedule', () => record(…))` inside the schedule tick) is a child. A counted write goes to the innermost open scope. A recorded entry counts in the innermost scope and in every enclosing scope. So a tick whose entry is recorded in a nested record-only scope passes, and the record-only scope itself wrote nothing. A detached scope (`{ detached: true }`) has no parent: its entries count only in itself, and nothing it records can satisfy the request or tick that started it.\n\nThe check runs when the scope's work succeeds. `runAsSystem` checks after its function's promise fulfils (immediately for a synchronous return); a rejection or a throw skips the check and propagates unchanged, because the transaction rolled back or the caller already sees an error. The interceptor checks once, when the handler's observable completes, before the completion is forwarded: Nest answers a route with the observable's last value only on completion, so an unaudited request answers 500 in development and test. A handler that errors skips the check. A server-sent-events route completes when the client disconnects; it is checked then, and its reads write nothing.\n\nThe guard's mode is the context guard's. `resolveWriteGuardMode({ ENV_NAME, NODE_ENV })` answers `record` in production and `throw` elsewhere. `throw` raises `UnauditedWriteError`; `record` logs `unaudited write: <surface> wrote <labels> and recorded no audit entry` through `new Logger(UnauditedWriteError.name).error` and returns. There is no switch to turn the guard off.\n\nThe module graph. `action-context.ts` imports `audit-coverage.ts`, which imports `resolveWriteGuardMode` from `contextless-write.ts`, which imports `action-context.ts`. Every use across that cycle is inside a function body, so module evaluation order does not matter; no top-level statement may read an import of the cycle.\n\nPrisma promises are lazy: the query runs when the promise is awaited, not when the call returns. So `bookkeeping` awaits `fn()` inside its own storage (`storage.run(reason, async () => await fn())`), and `runInAuditScope` awaits a thenable result inside the scope's storage before checking; a non-thenable result is checked at once and returned as is.\n\n`mode` defaults to `resolveWriteGuardMode({ ENV_NAME: process.env['ENV_NAME'], NODE_ENV: process.env['NODE_ENV'] })`, read at each call. The scope and the bookkeeping reason each live in their own `AsyncLocalStorage`, separate from the action context's, so `runWithActionContext` does not need to copy them. A write that reaches a scope after it closed is ignored.\n\nCreate `src/action-context/audit-coverage.allowlist.ts`, exporting `UNAUDITED_SURFACES: ReadonlyMap<string, string>` with these exact entries:\n- `POST /me/notifications/:id/read`: Marks one of the caller's own notifications read; inbox state, not a domain change.\n- `POST /me/notifications/read-all`: Marks the caller's own notifications read; inbox state, not a domain change.\n- `system:outbox`: Runs each outbox fan-out handler; the handlers that run here write delivery bookkeeping (notification rows and watchers, the KB ticket index, the entity graph projection, the webhook send, the handler's `lastError`), and the recording handlers open their own writer scope.\n- `writer:PrismaOutboxStore`: The outbox relay's published, retry and dead marks.\n- `writer:EmailDispatcher`: An email claimed, sent, skipped, failed or backed off, and abandoned invite sends closed.\n- `system:knowledge`: A knowledge index pass: claims, leases and per-file rows of a derived index; a successful pass also records `system.knowledge.index`.\n- `system:unknown`: The context guard's production fallback, which already logged `ContextlessWriteError`.\n\n**Scope** — In: core, allowlist and colocated core specs. Out: bookkeeping implementation/catalogue (US-002), query counting (US-003), transaction tally/recorder integration (US-004), activation at production entry points (US-010/US-011), per-write matching and post-close tracking. Nothing calls the module yet.\n\n**Interface** — Implement in `src/action-context/audit-coverage.ts`:\n```ts\nexport class UnauditedWriteError extends Error {\n  readonly name = 'UnauditedWriteError';\n  constructor(readonly surface: string, readonly writes: readonly string[]) {\n    super(`unaudited write: ${surface} wrote ${writes.join(', ')} and recorded no audit entry`);\n    Object.setPrototypeOf(this, new.target.prototype);\n  }\n}\n\n/** A read-only view of one entry point's tally; only audit-coverage.ts changes it, through noteAuditWrite / noteAuditEntry. */\nexport interface AuditScope {\n  readonly surface: string;\n  readonly parent: AuditScope | undefined;\n  /** Every counted write label, in order. */\n  readonly writes: readonly string[];\n  readonly entries: number;\n}\n\nexport function currentAuditScope(): AuditScope | undefined;\n/** Runs fn with a new child scope of the current one as current; does not check it. */\nexport function openAuditScope<T>(surface: string, fn: (scope: AuditScope) => T, opts?: { detached?: boolean }): T;\n/** openAuditScope, then assertAuditCoverage after fn's promise fulfils (immediately for a non-thenable). */\nexport function runInAuditScope<T>(surface: string, fn: () => T, opts?: { detached?: boolean }): T;\n/** Counts a write in the innermost scope; a no-op with no scope or inside bookkeeping(). */\nexport function noteAuditWrite(label: string): void;\n/** Counts an entry in the innermost scope and every enclosing one; a no-op with no scope. */\nexport function noteAuditEntry(): void;\n/** Throws UnauditedWriteError (mode 'throw') or logs it (mode 'record') when the scope's writes are not empty, its entries are 0 and it is not on UNAUDITED_SURFACES. */\nexport function assertAuditCoverage(scope: AuditScope, mode?: WriteGuardMode): void;\n```",
+      "acceptanceCriteria": [
+        "AC-1 [unit] In mode throw, runInAuditScope('POST /x', fn), where fn calls noteAuditWrite('Ticket.update') and resolves, rejects with an UnauditedWriteError.",
+        "AC-2 [unit] That UnauditedWriteError has surface 'POST /x' and writes ['Ticket.update'].",
+        "AC-3 [unit] That UnauditedWriteError's message is 'unaudited write: POST /x wrote Ticket.update and recorded no audit entry'.",
+        "AC-4 [unit] runInAuditScope('POST /x', fn), where fn calls noteAuditWrite('Ticket.update') and noteAuditEntry() and resolves to 42, resolves to 42.",
+        "AC-5 [unit] With ENV_NAME stubbed to production (restored after the test), runInAuditScope('POST /x', fn) whose fn notes one write, records nothing and resolves to 42 resolves to 42.",
+        "AC-6 [unit] In that production case, Logger.prototype.error is called exactly once, with 'unaudited write: POST /x wrote Ticket.update and recorded no audit entry'.",
+        "AC-7 [unit] When fn notes a write and then rejects with an error E, runInAuditScope('POST /x', fn) rejects with that same E.",
+        "AC-8 [unit] In mode throw, runInAuditScope('system:unknown', fn) whose fn notes a write and records nothing resolves to fn's value without logging.",
+        "AC-9 [unit] When fn notes a write and then throws E synchronously, runInAuditScope('POST /x', fn) throws that same E.",
+        "AC-10 [unit] A scope nested in runInAuditScope('writer:Ticker', outer), where outer notes a write and awaits runInAuditScope('system:schedule', inner) whose inner only calls noteAuditEntry(), lets outer's scope resolve.",
+        "AC-11 [unit] A write noted inside a nested runInAuditScope('system:vcs', inner) that records nothing makes that nested call reject with an UnauditedWriteError whose surface is system:vcs, and leaves the enclosing scope's writes empty.",
+        "AC-12 [unit] In mode throw, runInAuditScope('writer:Sweeper', outer), where outer notes a write and awaits runInAuditScope('task:T', inner, { detached: true }) whose inner calls noteAuditEntry(), rejects with an UnauditedWriteError whose surface is writer:Sweeper.",
+        "AC-13 [unit] noteAuditWrite('Ticket.update') and noteAuditEntry() called with no open scope return without throwing, and currentAuditScope() answers undefined."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "async-context"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Three additive files reuse the existing ALS pattern, but child/detached lifetimes and lazy thenable assimilation introduce a new abstraction requiring separate test, implementation and verification sessions.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/action-context/action-context.ts",
+        "apps/api/src/action-context/contextless-write.ts",
+        "apps/api/src/common/test-helpers/restore-env.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/action-context/audit-coverage.ts",
+        "apps/api/src/action-context/audit-coverage.allowlist.ts",
+        "apps/api/src/action-context/audit-coverage.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "runInAuditScope('POST /x', () => 42) returns 42 synchronously rather than a promise when the scope has no writes.",
+        "Two concurrent scopes retain independent write labels and audit entry counts.",
+        "When an inherited asynchronous callback notes a write after its scope closes, that scope's writes remain unchanged."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "20b0a3cf218dd445bbdf03fb9f5e54b68055b727"
+    },
+    {
+      "id": "US-002",
+      "title": "Bookkeeping marker and reason catalogue",
+      "description": "**Goal** — Add a narrowly scoped, typed bookkeeping marker and all 26 reason sentences.\n\n**Motivation** — Nothing stops the next route, tool or system writer from writing without an entry: the context guard (`permissions-p2-context-guard`) only refuses a write with no actor, and an audited actor that forgets `AuditRecorder.record` is silent.\n\n**Approach** — Bookkeeping is marked at the write, narrowly. `bookkeeping(reason, fn)` wraps the exact call that makes a bookkeeping write, never a method that also makes domain writes: a domain write inside a bookkeeping call is not counted, so a broad wrap would hide the next missing entry. The reason id is a key of `BOOKKEEPING_REASONS`, a code catalogue in `src/action-context/audit-coverage.reasons.ts` with one sentence per id, so the type checker refuses a typo and a reviewer reads the reason next to the id. Some rows wrap a whole method body (`FenceService.abandon`, `PlacementService.assign`, `LogUploadService.write`, `BundleIngestService.recordFailure`, `ScheduleTicker.linkDispatched`, `PrismaAssistantToolCallRepository.record`, `AssistantActionDecisions.finalize`, `EmailTemplateSeeder.seed`, `WebhookReplayGuard.forget`, and `PrismaThreadIngestRepository.fold`'s transaction body), each because every write in it is bookkeeping. Most make one or two writes. Three are broad by design: `fold` (the transcript, its cost mirror rows and session fields; the `turn_end` entry still counts, since only writes are uncounted), `assign` (the lease and ASSIGN of a job whose dispatch already recorded `fleet.job.dispatch`) and `seed` (built-in templates).\n\nPrisma promises are lazy: the query runs when the promise is awaited, not when the call returns. So `bookkeeping` awaits `fn()` inside its own storage (`storage.run(reason, async () => await fn())`), and `runInAuditScope` awaits a thenable result inside the scope's storage before checking; a non-thenable result is checked at once and returned as is.\n\n`src/action-context/audit-coverage.reasons.ts` exports `BOOKKEEPING_REASONS` (`as const`, id to one sentence) and `type BookkeepingReason = keyof typeof BOOKKEEPING_REASONS`. Catalogue values, verbatim:\n- `runner.heartbeat`: A runner's liveness, boot id, versions and capabilities from a sync.\n- `runner.command-delivery`: The delivered mark of a command handed to a runner.\n- `runner.command-ack`: A runner's ack of a command, and an approval answer's delivery outcome, that change no job.\n- `thread.input-ack`: A runner's ack of a thread input, answer or publish command: the message's error mark, the answered question cleared, the command payload trimmed.\n- `runner.event-log`: Runner event rows, the acked sequence, the job fields mirrored from the runner's reported run facts (cost, progress, `naxRunId`, result branch, sha and PR url, finish result, escalation reason, post-run, stories, config result), and a rejected event's activity row; the state transition that ends a run records its own entry.\n- `runner.fence-abandon`: The ABANDON command and activity row a fence queues for a stale holder.\n- `runner.boot-reconcile`: A pending ASSIGN's boot id moved to the runner's new boot.\n- `fleet.placement`: A job or thread assigned to a runner: the lease, the ASSIGN command, the thread pin and the assigned row.\n- `fleet.pr-link-job`: The job id refreshed on a PR link that already exists.\n- `fleet.ticket-comment-claim`: The once-per-job-epoch claim before a failure comment; the comment records `comment.create`.\n- `fleet.pr-attribution-claim`: The once-per-job claim before the attribution comment.\n- `fleet.log-chunk`: The stream metadata of an uploaded log chunk.\n- `thread.transcript`: The thread transcript folded from a runner's stream, and the ingest cursor; a `turn_end` records `system.thread.ingest` itself.\n- `fleet.ingest-queue`: A bundle ingest claim, retry or failure mark.\n- `fleet.schedule-bookkeeping`: A schedule's fire claim, a skip or coalesce activity row, and the last dispatched job link.\n- `assistant.tool-call-ledger`: The tool-call ledger row every assistant tool call stores, read or write.\n- `assistant.action-proposal`: A write tool's proposal: the pending action, its approval, the approval's activity and outbox rows, and the approval id link; the decide records `fleet.approval.decide.assistant`.\n- `assistant.direct-action-record`: The terminal ledger row of a direct-write tool call, failed calls included; the tool's own write records.\n- `assistant.action-finalize`: An approved assistant action's terminal status and outcome note; the decide and the tool recorded.\n- `email.template-seed`: The built-in email templates written from code at boot; the code is their source.\n- `vcs.poll-log`: A VCS poll's sync log row and cursor.\n- `webhook.replay-record`: A webhook delivery id kept or forgotten for replay protection.\n- `vcs.push-outbox`: The `code_commit` outbox rows a push enqueues; the code-intel subscriber records the index.\n- `vcs.pr-same-state`: A PR webhook that restates the stored state, touching only `prUpdatedAt`.\n- `vcs.link-refresh`: The extractor's refresh of a ticket link that already exists.\n- `context.query-metric`: A context query's latency and result metric row.\n\nThe memory restatement row of audit-knowledge's table is not here: `PrismaMemoryItemRepository.upsert` returns before any write on that path, so there is nothing to mark.\n\n**Scope** — In: extend audit-coverage.ts so noteAuditWrite skips while a reason is set, implement reason validation and lazy-await semantics, pin catalogue and seven allowlist entries in unit specs. Out: applying markers to callers (US-005 through US-008), transaction tally (US-004) and opening production entry-point scopes (US-010/US-011).\n\n**Interface** —\n```ts\nexport type BookkeepingReason = keyof typeof BOOKKEEPING_REASONS;\n/** Runs and awaits fn with writes uncounted; refuses an id outside BOOKKEEPING_REASONS before running fn. */\nexport function bookkeeping<T>(reason: BookkeepingReason, fn: () => T | PromiseLike<T>): Promise<T>;\nexport function currentBookkeepingReason(): BookkeepingReason | undefined;\n```\nUnknown reasons reject with `unknown bookkeeping reason: <id>` before fn runs. Entries still count inside bookkeeping.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] Inside bookkeeping('runner.heartbeat', fn), currentBookkeepingReason() answers runner.heartbeat.",
+        "AC-2 [unit] A noteAuditWrite('Runner.update') inside bookkeeping('runner.heartbeat', fn), inside an open scope, leaves the scope's writes empty.",
+        "AC-3 [unit] After bookkeeping('runner.heartbeat', fn) resolves, currentBookkeepingReason() answers undefined.",
+        "AC-4 [unit] bookkeeping called with an id that is not a key of BOOKKEEPING_REASONS rejects with 'unknown bookkeeping reason: <id>'.",
+        "AC-5 [unit] For that unknown id, fn is never called.",
+        "AC-6 [unit] When fn returns a lazy thenable that reads currentBookkeepingReason() only when its then is invoked, bookkeeping('runner.heartbeat', fn) makes it read runner.heartbeat.",
+        "AC-7 [unit] When fn returns a lazy thenable that reads currentAuditScope() only when its then is invoked, runInAuditScope('POST /x', fn) makes it read the scope whose surface is POST /x.",
+        "AC-8 [unit] A noteAuditEntry() inside bookkeeping('thread.transcript', fn), inside an open scope, raises the scope's entries to 1.",
+        "AC-9 [unit] The keys of BOOKKEEPING_REASONS are exactly the 26 ids of the Bookkeeping reasons table reproduced in this story's description.",
+        "AC-10 [unit] Every value of BOOKKEEPING_REASONS is a sentence that is non-empty after trimming.",
+        "AC-11 [unit] UNAUDITED_SURFACES holds exactly these seven surfaces: POST /me/notifications/:id/read, POST /me/notifications/read-all, system:outbox, writer:PrismaOutboxStore, writer:EmailDispatcher, system:knowledge and system:unknown.",
+        "AC-12 [unit] Every reason in UNAUDITED_SURFACES is non-empty after trimming."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "bookkeeping"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Typed fixed catalogue and an independent ALS marker extend the existing core with well-specified lazy-await and validation behavior.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/action-context/audit-coverage.ts",
+        "apps/api/src/action-context/audit-coverage.allowlist.ts",
+        "apps/api/src/action-context/action-context.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/action-context/audit-coverage.reasons.ts",
+        "apps/api/src/action-context/audit-coverage.bookkeeping.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When nested bookkeeping finishes, currentBookkeepingReason() again returns the enclosing reason.",
+        "When bookkeeping fn rejects with E, bookkeeping rejects with the same E and the caller's bookkeeping reason is restored."
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "c5307b06c73076599d072dd713fe23750437e68a"
+    },
+    {
+      "id": "US-003",
+      "title": "Count successful row-changing writes",
+      "description": "**Goal** — Connect successful in-context Prisma writes to audit scope counts without changing contextless enforcement.\n\n**Motivation** — Nothing stops the next route, tool or system writer from writing without an entry: the context guard (`permissions-p2-context-guard`) only refuses a write with no actor, and an audited actor that forgets `AuditRecorder.record` is silent.\n\n**Approach** — What counts as a write: an operation that changed a row. An operation in `GUARDED_OPERATIONS` (the context guard's set) on any model except `AuditEntry`, made while no `bookkeeping` call is running, counts once it resolves and only if it changed something: `create`, `update`, `upsert` and `delete` always; `createMany`, `updateMany` and `deleteMany` when the result's `count` is above 0; `createManyAndReturn` and `updateManyAndReturn` when the returned array is not empty; `$executeRaw` and `$executeRawUnsafe` when the returned number is above 0. The earlier features record nothing for a write that finds nothing to do (a purge of 0 rows, a claim that loses, an idempotent repeat), and a zero-row write changed nothing to audit. The label is `<Model>.<operation>`, or the operation alone for a raw execute. A write that rejects is not counted.\n\n`contextlessWriteHandler(mode)` — `src/action-context/contextless-write.ts`.\n- Baseline: an in-context guarded operation returns `await query(args)`.\n- Target: an in-context guarded operation awaits `query(args)`, then calls `noteAuditWrite(model === undefined ? operation : `${model}.${operation}`)` when `model` is not `'AuditEntry'` and the result changed a row (\"What counts as a write\"), then returns the result. The context-less paths are unchanged.\n\n**Scope** — In: modify the handler and add audit-coverage.counting.spec.ts, entering through the handler under both an action context and an open scope. Out: changing GUARDED_OPERATIONS or counting $queryRaw, recorder/tally wiring (US-004), markers (US-005 through US-008), entry-point activation (US-010/US-011). Still inert: no entry point opens a scope.\n\n**Interface** — Preserve `contextlessWriteHandler(mode: WriteGuardMode): (params: GuardedOperationParams) => Promise<unknown>` and use US-001's `export function noteAuditWrite(label: string): void;`. Failed queries propagate the same error and counted queries return their original result.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] contextlessWriteHandler('throw'), called inside an action context and an open scope, adds Ticket.update to the scope's writes for a resolved update on model Ticket.",
+        "AC-2 [unit] It adds Ticket.deleteMany for a resolved deleteMany on model Ticket whose result is { count: 2 }.",
+        "AC-3 [unit] It adds nothing for a resolved updateMany or deleteMany whose result is { count: 0 }.",
+        "AC-4 [unit] It adds nothing for a resolved createManyAndReturn whose result is [], and adds TicketLink.createManyAndReturn for one whose result holds one row.",
+        "AC-5 [unit] It adds $executeRaw for a raw execute with no model that resolves to 1, and nothing for one that resolves to 0.",
+        "AC-6 [unit] It adds nothing for a resolved create on model AuditEntry.",
+        "AC-7 [unit] It adds nothing for an update on model Ticket whose query rejects, and the rejection propagates unchanged.",
+        "AC-8 [unit] It returns the query's result unchanged for a counted write.",
+        "AC-9 [unit, regression] contextlessWriteHandler('throw') called outside an action context for Ticket.update rejects with ContextlessWriteError('update', 'Ticket') before query runs, preserving the existing context-less path."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "prisma",
+        "context-guard"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A bounded operation/result classification change modifies the actor-required write guard; strict isolation preserves its security-critical contextless enforcement paths.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/action-context/contextless-write.ts",
+        "apps/api/src/action-context/contextless-write.spec.ts",
+        "apps/api/src/action-context/audit-coverage.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/action-context/audit-coverage.counting.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "A resolved createMany on Ticket counts only when its result.count is greater than zero.",
+        "A resolved updateManyAndReturn on Ticket counts only when its returned array is non-empty.",
+        "A resolved $executeRawUnsafe with no model counts only when its returned number is greater than zero.",
+        "A resolved read operation leaves the scope's writes empty even when it returns rows."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/action-context/contextless-write.ts",
+          "reason": "an in-context guarded write notes its label after it resolves, by the \"What counts as a write\" rules; the context-less paths are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "73eab85a36ba8cab743053a29c8328a1a3e196fc"
+    },
+    {
+      "id": "US-004",
+      "title": "Transaction tally and audit recorder integration",
+      "description": "**Goal** — Buffer transactional writes and audit entries until callback success, dropping both on rollback, and connect AuditRecorder to coverage.\n\n**Motivation** — The design ends P2 with \"the coverage test walks the write rows so none are left\" (§5), and the scoping ruling makes that two checks.\n\n**Approach** — Adds `withTransactionTally` to `audit-coverage.ts`: it captures the scope current when it is called, holds the writes and entries noted while its function runs (including those of scopes opened and closed inside it), and on fulfilment adds them to that captured scope (entries also to its parents); on rejection it drops them. `KodaPrismaClient` returns `new Proxy(extended, { get })` whose `$transaction` property is a wrapper: a function first argument calls `Reflect.get(extended, '$transaction').call(extended, (tx) => withTransactionTally(() => fn(tx)), options)`; an array argument delegates unchanged; every other property is `Reflect.get(extended, property)`. `AuditRecorder.record` notes each entry after `storage.record` resolves.\n\n`AuditRecorder.record(input)` — `src/audit/audit-recorder.service.ts`.\n- Baseline: validates the key and the transaction, then `await this.storage.record(…)`.\n- Target: the same, then `noteAuditEntry()` after `storage.record` resolves.\n\n`noteAuditWrite` and `noteAuditEntry` add to the innermost open tally first. A scope opened and closed inside a tally must not fail before buffered work can be attributed to the captured scope. `PrismaTransactionManager.run` (`@nathapp/nestjs-prisma`) opens the outermost transaction with `$transaction(async (tx) => …)` on the API's client, and joins it for nested runs. The array form of `$transaction` passes through unchanged.\n\nA transaction whose callback resolves but whose commit then fails keeps its counts; the guard reads the callback's outcome only. This callback-level wrapper is authoritative; do not defer tally flushing to commit completion.\n\n**Scope** — In: extend audit-coverage.ts, wrap KodaPrismaClient's extended client, modify recorder and its existing specs, add tally unit specs and booted txManager rollback integration. Out: production entry-point scopes (US-010/US-011), commit-failure accounting, changing array transaction behavior or generated clients.\n\n**Interface** —\n```ts\n/** Holds the writes and entries noted while fn runs; adds them to the current scope when fn fulfils, drops them when it rejects. */\nexport function withTransactionTally<T>(fn: () => Promise<T>): Promise<T>;\n```\nKeep `AuditRecorder.record(input: AuditRecordInput): Promise<void>` and `KodaPrismaClient` constructor's public contract. The booted integration must enter through txManager.run, not a disconnected fake client.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] Inside an open scope, withTransactionTally(fn), where fn notes one write and resolves, leaves the scope's writes empty while fn runs, and holds that one label after withTransactionTally resolves.",
+        "AC-2 [unit] Inside an open scope, withTransactionTally(fn), where fn notes one write and then rejects with E, rejects with E and leaves the scope's writes empty.",
+        "AC-3 [unit] Inside an open scope, an entry noted inside a withTransactionTally(fn) whose fn rejects leaves the scope's entries at 0.",
+        "AC-4 [unit] An entry noted inside a withTransactionTally(fn) that resolves, inside a nested scope, counts in the nested scope and in its enclosing scope.",
+        "AC-5 [unit] AuditRecorder.record with a valid key, inside a transaction (txManager.isInTransaction() answering true) and an open scope, raises the scope's entries from 0 to 1 once storage.record resolves.",
+        "AC-6 [unit] When storage.record rejects, AuditRecorder.record rejects with the same error and the scope's entries stays 0.",
+        "AC-7 [integration] On the booted API, inside openAuditScope('POST /x', …) and an action context, a txManager.run that creates a Label row and then throws rejects, and the scope's writes is empty afterwards.",
+        "AC-8 [unit] A scope opened and closed inside a withTransactionTally(fn) callback, whose work notes one write and records nothing, resolves; after withTransactionTally resolves, that write is in the writes of the scope that was current when withTransactionTally was called.",
+        "AC-9 [unit, regression] The array form of KodaPrismaClient.$transaction returns the original delegated result with the original array and options forwarded unchanged."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "transactions",
+        "prisma"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module transaction proxying and nested ALS buffering must preserve rollback, scope closure and Prisma receiver semantics across the real transaction manager.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/src/action-context/audit-coverage.ts",
+        "apps/api/src/prisma/koda-prisma-client.ts",
+        "apps/api/src/audit/audit-recorder.service.ts",
+        "apps/api/src/audit/audit-recorder.service.spec.ts",
+        "apps/api/test/helpers/action-context.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/action-context/audit-coverage.tally.spec.ts",
+        "apps/api/test/integration/audit/audit-coverage-tally.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When nested tallies succeed, each write label and audit entry is applied once to the captured scope.",
+        "When an outer tally rejects after an inner tally succeeds, neither tally's writes or entries remain in the outer captured scope."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/audit/audit-recorder.service.ts",
+          "reason": "`record` calls `noteAuditEntry()` after `storage.record` resolves."
+        },
+        {
+          "path": "apps/api/src/prisma/koda-prisma-client.ts",
+          "reason": "the returned client's interactive `$transaction` runs its callback in `withTransactionTally`; the array form is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "178485c580ba463902d5ccbbd5a464ed41643ac2"
+    },
+    {
+      "id": "US-005",
+      "title": "Mark runner sync bookkeeping",
+      "description": "**Goal** — Mark only the documented runner sync and placement bookkeeping writes.\n\n**Motivation** — The eleven earlier P2 features made every domain writer record an `AuditEntry` (`permissions-p2-audit-delivery`, PR #336, deployed `4592d038` on 2026-10-26, was the last writer feature).\n\n**Approach** — Wraps the rows whose story is US-005 (`runner.heartbeat`, `runner.command-delivery`, `runner.command-ack`, `thread.input-ack`, `runner.event-log`, `runner.fence-abandon`, `runner.boot-reconcile`, `fleet.placement`) at exactly the named calls.\n\nBookkeeping is marked at the write, narrowly. `bookkeeping(reason, fn)` wraps the exact call that makes a bookkeeping write, never a method that also makes domain writes: a domain write inside a bookkeeping call is not counted, so a broad wrap would hide the next missing entry.\n\nWrapped at (line numbers locate the baseline, not the target):\n- `runner.heartbeat`: `SyncService.sync`, the `repo.recordRunnerSync` call (`sync.service.ts:61`).\n- `runner.command-delivery`: `SyncService.deliver`, the `markDelivered` call (`sync.service.ts:166`).\n- `runner.command-ack`: `CommandAckProcessor.processOne`: the three `ackCommand` calls (`:60`, `:65`, `:69`), `approvals.setOutcome` (`:82`), the READOPT-ok `repo.update` of `runnerBootId` (`:89`).\n- `thread.input-ack`: `CommandAckProcessor.processOne`, the `threadEffects.onInputAck` call (`command-ack.processor.ts:71`; `ThreadJobEffects.onInputAck` makes only these writes).\n- `runner.event-log`: `JobReportProcessor`: `repo.appendEvent` (`job-report.processor.ts:92`), the `ackedRunnerSeq` `repo.update` (`:113`), the mirror branch's `repo.update(effect.patch)` (`:121`), the reject branch's `activity.record` (`:137`).\n- `runner.fence-abandon`: `FenceService.abandon`, its whole body (`fence.service.ts:22-34`; it makes no other write).\n- `runner.boot-reconcile`: `CommandAckProcessor.reconcileBoot`, the pending-assign `repo.update` (`command-ack.processor.ts:128`).\n- `fleet.placement`: `PlacementService.assign`, its whole body (`placement.service.ts:197-210`; `cancelForPause` records and is not wrapped).\n\nMirrored run facts are bookkeeping. `JobReportProcessor` copies what the runner reports about its run onto the job (`mirror(p)`, `event-payloads.ts:98-120`), including the result PR url and finish result. They are facts the runner observed, not a decision anyone made; the transition that moves the job to its terminal state records `runner.sync`, and the job's outcome is read from those fields under that entry.\n\n**Scope** — In: modify sync.service.ts, command-ack.processor.ts, job-report.processor.ts, fence.service.ts and placement.service.ts and their colocated public-method specs; observe currentBookkeepingReason in collaborator stubs. Out: detached ticket/attribution work (US-006), ingest/schedule/assistant/seed (US-007), scope activation (US-010/US-011). US-005 only: wrapping `CommandAckProcessor.reconcileBoot`'s READOPT `createCommand` and `runner.rebooted` activity row is out of scope; that branch records an entry when it queues or detects a reboot. Leave job transitions and cancelForPause counted.\n\n**Interface** — Use `export function bookkeeping<T>(reason: BookkeepingReason, fn: () => T | PromiseLike<T>): Promise<T>;` and `export function currentBookkeepingReason(): BookkeepingReason | undefined;` without changing service public method signatures or existing business behavior.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] SyncService.sync for a known runner calls repo.recordRunnerSync while currentBookkeepingReason() answers runner.heartbeat.",
+        "AC-2 [unit] SyncService.sync for a runner with one pending command calls markDelivered while currentBookkeepingReason() answers runner.command-delivery.",
+        "AC-3 [unit] CommandAckProcessor.process with one ordinary command ack calls ackCommand while currentBookkeepingReason() answers runner.command-ack.",
+        "AC-4 [unit] CommandAckProcessor.process with one APPROVAL_ANSWER ack calls approvals.setOutcome while currentBookkeepingReason() answers runner.command-ack.",
+        "AC-5 [unit] CommandAckProcessor.process with one THREAD_INPUT ack calls threadEffects.onInputAck while currentBookkeepingReason() answers thread.input-ack.",
+        "AC-6 [unit] CommandAckProcessor.process with an ack that applies a job transition calls transitions.apply while currentBookkeepingReason() answers undefined.",
+        "AC-7 [unit] JobReportProcessor.process with one new contiguous event calls repo.appendEvent while currentBookkeepingReason() answers runner.event-log.",
+        "AC-8 [unit] JobReportProcessor.process with one new contiguous event calls the ackedRunnerSeq repo.update while currentBookkeepingReason() answers runner.event-log.",
+        "AC-9 [unit] JobReportProcessor.process with an event the transition rules reject calls activity.record with job.event_rejected while currentBookkeepingReason() answers runner.event-log.",
+        "AC-10 [unit] JobReportProcessor.process with an accepted transition event calls transitions.apply while currentBookkeepingReason() answers undefined.",
+        "AC-11 [unit] FenceService.abandon calls createCommand with an ABANDON command and activity.record with job.abandon_queued, both while currentBookkeepingReason() answers runner.fence-abandon.",
+        "AC-12 [unit] CommandAckProcessor.reconcileBoot for a job with a pending ASSIGN calls the runnerBootId repo.update while currentBookkeepingReason() answers runner.boot-reconcile.",
+        "AC-13 [unit] CommandAckProcessor.reconcileBoot after a reboot calls the READOPT createCommand while currentBookkeepingReason() answers undefined.",
+        "AC-14 [unit] PlacementService.fillRunner with one placeable job calls casAssign and the ASSIGN createCommand while currentBookkeepingReason() answers fleet.placement."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "fleet",
+        "bookkeeping"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The five source files only apply an existing marker at fixed sites, with no new abstraction; the stale-holder fence and runner ack/lease paths require the security override despite the bounded implementation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/sync/sync.service.ts",
+        "apps/api/src/fleet/sync/command-ack.processor.ts",
+        "apps/api/src/fleet/sync/job-report.processor.ts",
+        "apps/api/src/fleet/sync/fence.service.ts",
+        "apps/api/src/fleet/jobs/placement.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/sync/sync.service.spec.ts",
+        "apps/api/src/fleet/sync/fence.service.spec.ts",
+        "apps/api/src/fleet/jobs/placement.service.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/sync/sync.service.ts",
+          "reason": "wrap the `recordRunnerSync` and `markDelivered` calls."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/command-ack.processor.ts",
+          "reason": "wrap the `ackCommand`, `approvals.setOutcome`, READOPT-ok `repo.update`, `threadEffects.onInputAck` and pending-assign `repo.update` calls."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/job-report.processor.ts",
+          "reason": "wrap `appendEvent`, the `ackedRunnerSeq` update, the mirror update and the reject branch's `activity.record`."
+        },
+        {
+          "path": "apps/api/src/fleet/sync/fence.service.ts",
+          "reason": "wrap the body of `abandon`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/placement.service.ts",
+          "reason": "wrap the body of `assign`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e0eb59322d30f283e5d81342eb73f9208a372a28"
+    },
+    {
+      "id": "US-006",
+      "title": "Isolate detached fleet tasks and mark claims",
+      "description": "**Goal** — Give asynchronous attribution and terminal ticket effects detached coverage scopes and mark their bookkeeping claims/refreshes.\n\n**Motivation** — Nothing stops the next route, tool or system writer from writing without an entry: the context guard (`permissions-p2-context-guard`) only refuses a write with no actor, and an audited actor that forgets `AuditRecorder.record` is silent.\n\n**Approach** — `SyncService.afterTerminal` and `FleetSweeper` start `PrAttributionService.attribute(id)` and `FleetJobTicketEffects.onTerminal(ids)` without awaiting them. Their writes would land in the request's or the tick's scope at an unpredictable time: before it closes they count, after it they are lost, and a write counted before the close with its entry recorded after it fails the request at random. Both methods therefore run their body in their own scope: `attribute` in `runInAuditScope('task:PrAttributionService.attribute', …, { detached: true })` and `onTerminal` in `runInAuditScope('task:FleetJobTicketEffects.onTerminal', …, { detached: true })`. A detached scope has no parent, so the request or tick neither receives its entries nor waits for it. A `task:` scope is checked like any other and is never allowlisted. Each scope wraps the whole method body outside the method's own error handling, so in mode `throw` an `UnauditedWriteError` rejects the detached promise (an unhandled rejection, which fails the test run), and mode `record` never throws. A write that reaches a scope after it closed is ignored.\n\nWraps the rows whose story is US-006 (`fleet.pr-link-job`, `fleet.ticket-comment-claim`, `fleet.pr-attribution-claim`). Exact placements:\n- `fleet.pr-link-job`: `PrismaFleetTicketsRepository.upsertFleetPrLink`, the `ticketLink.updateMany` call (`prisma-fleet-tickets.repository.ts:165`).\n- `fleet.ticket-comment-claim`: `FleetJobTicketEffects.commentOnce`, the `repo.claimNotified` call (`fleet-job-ticket.effects.ts:119`).\n- `fleet.pr-attribution-claim`: `PrAttributionService.attribute`, the `repo.claimAttribution` call (`pr-attribution.service.ts:54`).\nThe existing-link refresh returns null; the creation path remains counted and audited. Preserve existing operational catches, transaction boundaries and normal return values; the new scope check is outside those catches.\n\n**Scope** — In: modify pr-attribution.service.ts, fleet-job-ticket.effects.ts and prisma-fleet-tickets.repository.ts with colocated unit assertions through public methods. Out: runner sync markers (US-005), request/system activation (US-010/US-011), allowlisting task labels (forbidden), and tracking post-close writes.\n\n**Interface** —\n```ts\nexport function runInAuditScope<T>(surface: string, fn: () => T, opts?: { detached?: boolean }): T;\nexport function bookkeeping<T>(reason: BookkeepingReason, fn: () => T | PromiseLike<T>): Promise<T>;\n```\nUse the exact task labels above; no change to the public contracts of attribute, onTerminal or upsertFleetPrLink.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] PrAttributionService.attribute(jobId) calls repo.claimAttribution while currentBookkeepingReason() answers fleet.pr-attribution-claim.",
+        "AC-2 [unit] PrAttributionService.attribute(jobId) calls repo.claimAttribution while currentAuditScope()?.surface answers task:PrAttributionService.attribute.",
+        "AC-3 [unit] FleetJobTicketEffects.onTerminal([jobId]) for a FAILED job with one linked ticket reads the job's tickets while currentAuditScope()?.surface answers task:FleetJobTicketEffects.onTerminal.",
+        "AC-4 [unit] Called inside runInAuditScope('POST /fleet/runner/sync', …), onTerminal's scope has parent undefined.",
+        "AC-5 [unit] In mode throw, FleetJobTicketEffects.onTerminal([jobId]) whose stubbed repository notes one write (noteAuditWrite('TicketLink.update')) and records nothing rejects with an UnauditedWriteError whose surface is task:FleetJobTicketEffects.onTerminal.",
+        "AC-6 [unit] FleetJobTicketEffects.onTerminal([jobId]) for a FAILED job with one linked ticket calls repo.claimNotified while currentBookkeepingReason() answers fleet.ticket-comment-claim.",
+        "AC-7 [unit] FleetJobTicketEffects.onTerminal([jobId]) for a job with an opened PR whose ticket link already exists calls ticketLink.updateMany (through PrismaFleetTicketsRepository.upsertFleetPrLink over a stubbed client whose createManyAndReturn answers []) while currentBookkeepingReason() answers fleet.pr-link-job.",
+        "AC-8 [unit] In that existing-link case, upsertFleetPrLink answers null."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "fleet",
+        "async-context"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Three existing files apply the upstream detached-scope helper and three narrow bookkeeping markers; colocated public-method tests can pin parent isolation, catch placement and the unchanged null refresh result without a new abstraction.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/sync/pr-attribution.service.ts",
+        "apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts",
+        "apps/api/src/fleet/tickets/prisma-fleet-tickets.repository.ts",
+        "apps/api/src/fleet/sync/sync.service.ts",
+        "apps/api/src/action-context/audit-coverage.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/sync/pr-attribution.service.ts",
+          "reason": "run `attribute`'s body in its detached scope and wrap the `claimAttribution` call."
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts",
+          "reason": "run `onTerminal`'s body in its detached scope and wrap the `claimNotified` call."
+        },
+        {
+          "path": "apps/api/src/fleet/tickets/prisma-fleet-tickets.repository.ts",
+          "reason": "wrap the existing-link `ticketLink.updateMany` call."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "de67fa6a1bd9d23d468b89fdbd231b98c04cfbd3"
+    },
+    {
+      "id": "US-007",
+      "title": "Mark ingest, schedule, assistant and seed bookkeeping",
+      "description": "**Goal** — Apply the documented bookkeeping markers to log/transcript ingest, queue/schedule progress, assistant ledgers and template bootstrap.\n\n**Motivation** — The eleven earlier P2 features made every domain writer record an `AuditEntry` (`permissions-p2-audit-delivery`, PR #336, deployed `4592d038` on 2026-10-26, was the last writer feature).\n\n**Approach** — Wraps the rows whose story is US-007 (`fleet.log-chunk`, `thread.transcript`, `fleet.ingest-queue`, `fleet.schedule-bookkeeping`, `assistant.tool-call-ledger`, `assistant.action-proposal`, `assistant.direct-action-record`, `assistant.action-finalize`, `email.template-seed`) at exactly the named calls.\n\nExact wrapped sites:\n- `fleet.log-chunk`: `LogUploadService.write`, its whole body (`log-upload.service.ts:112-140`).\n- `thread.transcript`: `PrismaThreadIngestRepository.fold`: every write in the fold except `this.audit.record` (`prisma-thread-ingest.repository.ts:75-200`), by wrapping the fold's transaction body in `bookkeeping` (the record still counts: only writes are uncounted).\n- `fleet.ingest-queue`: `BundleIngestService.ingestOne`, the `repo.claimNext` (`bundle-ingest.service.ts:76`) and `repo.markFailed` (`:81`) calls; `recordFailure`, its whole body (`:137-143`).\n- `fleet.schedule-bookkeeping`: `ScheduleTicker`: `repo.claimFire` (`schedule-ticker.ts:116`), the skip and coalesce `activity.record` calls (`:129`, `:135`, `:142`, `:186`, `:190`, `:206`), `linkDispatched`, its whole body (`:176-181`). The current implementation calls a local record helper for those activities; mark the named call sites, not all ticker work.\n- `assistant.tool-call-ledger`: `PrismaAssistantToolCallRepository.record`, its whole body (`prisma-assistant-tool-call.repository.ts:75-77`).\n- `assistant.action-proposal`: `AssistantActionService.open`, the `actions.insert`, `approvals.openAssistant` and `actions.setApprovalId` calls (`assistant-action.service.ts:77-84`).\n- `assistant.direct-action-record`: `AssistantActionService.recordDirect`, the `actions.insertDirect` call (`assistant-action.service.ts:62`).\n- `assistant.action-finalize`: `AssistantActionDecisions.finalize`, its whole body (`assistant-action-decisions.ts:151-165`).\n- `email.template-seed`: `EmailTemplateSeeder.seed`, its whole body (`email-template.seeder.ts`; it makes only template writes).\n\nBookkeeping is marked at the write, narrowly. `bookkeeping(reason, fn)` wraps the exact call that makes a bookkeeping write, never a method that also makes domain writes: a domain write inside a bookkeeping call is not counted, so a broad wrap would hide the next missing entry. Three are broad by design: `fold` (the transcript, its cost mirror rows and session fields; the `turn_end` entry still counts, since only writes are uncounted), `assign` (the lease and ASSIGN of a job whose dispatch already recorded `fleet.job.dispatch`) and `seed` (built-in templates). Only fold and seed are in this story.\n\n`BundleIngestService.kick` already runs `drain` in `runAsSystem('ingest', …)` and ends in `.catch(warn)`, so an `UnauditedWriteError` there is logged, not thrown; a spec reaches the check by calling `drain` through `runAsSystem('ingest', …)` itself.\n\n**Scope** — In: modify the eight service/repository files above and extend their colocated public-method specs, creating the missing tool-call repository spec. Out: transaction tally (US-004), placement wrapping (US-005), VCS markers (US-008), scope activation and suite-discovered writes (US-010/US-011). US-007 only: per-line conditions inside `PrismaThreadIngestRepository.fold` are out of scope; the whole fold body is bookkeeping and the `turn_end` entry still counts. Changing kick's catch is out of scope. Domain ingest replaceRows/corrections, jobs.dispatch, approval decisions and executor.executeAction stay outside markers.\n\n**Interface** — Use `export function bookkeeping<T>(reason: BookkeepingReason, fn: () => T | PromiseLike<T>): Promise<T>;` and observe `export function currentBookkeepingReason(): BookkeepingReason | undefined;` in stubs reached through upload, fold, ingestOne, tick, record, decide, seed and propose. Preserve service return values, locks, transaction and publication ordering. For AC-5 use a claim with attempts 0 and an existing, unexpired artifact whose store read throws, so the existing retry branch rather than the exhausted-attempt markFailed branch is exercised. For AC-13 observe the terminal resolve after executeAction, not the earlier APPROVED resolve, which must stay outside assistant.action-finalize.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] LogUploadService.upload of one log chunk calls logs.upsertStream while currentBookkeepingReason() answers fleet.log-chunk.",
+        "AC-2 [unit] PrismaThreadIngestRepository.fold of a batch holding one turn_start line, with a txManager stub that runs its callback, makes the turn create while currentBookkeepingReason() answers thread.transcript.",
+        "AC-3 [unit] That fold makes the threadIngestCursor.upsert while currentBookkeepingReason() answers thread.transcript.",
+        "AC-4 [unit] BundleIngestService.ingestOne calls repo.claimNext while currentBookkeepingReason() answers fleet.ingest-queue.",
+        "AC-5 [unit] BundleIngestService.ingestOne for a claim whose bundle read throws calls markRetry while currentBookkeepingReason() answers fleet.ingest-queue.",
+        "AC-6 [unit] BundleIngestService.ingestOne for a claim that ingests calls replaceRows while currentBookkeepingReason() answers undefined.",
+        "AC-7 [unit] ScheduleTicker.tick with one due schedule calls repo.claimFire while currentBookkeepingReason() answers fleet.schedule-bookkeeping.",
+        "AC-8 [unit] ScheduleTicker.tick with a due schedule whose previous job is still running calls activity.record for the skip while currentBookkeepingReason() answers fleet.schedule-bookkeeping.",
+        "AC-9 [unit] ScheduleTicker.tick with a due schedule that dispatches calls jobs.dispatch while currentBookkeepingReason() answers undefined.",
+        "AC-10 [unit] That dispatching tick then calls the lastJobId repo.update while currentBookkeepingReason() answers fleet.schedule-bookkeeping.",
+        "AC-11 [unit] PrismaAssistantToolCallRepository.record(row) calls assistantToolCall.create while currentBookkeepingReason() answers assistant.tool-call-ledger.",
+        "AC-12 [unit] AssistantActionDecisions.decide approving a pending assistant action calls executor.executeAction while currentBookkeepingReason() answers undefined.",
+        "AC-13 [unit] After that approval's executor.executeAction returns, finalize calls actions.resolve for the terminal EXECUTED or FAILED status and insertSystemNote while currentBookkeepingReason() answers assistant.action-finalize; the earlier APPROVED actions.resolve is not part of this assertion.",
+        "AC-14 [unit] EmailTemplateSeeder.seed() on a repository with no templates creates each template while currentBookkeepingReason() answers email.template-seed.",
+        "AC-15 [unit] AssistantActionService.propose for a new write-tool call calls actions.insert and approvals.openAssistant while currentBookkeepingReason() answers assistant.action-proposal."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "fleet",
+        "assistant",
+        "bookkeeping",
+        "approvals"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Eight modules with broad transcript/seed exceptions and branch-local ledger markers; assistant approval/action paths invoke the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/logs/log-upload.service.ts",
+        "apps/api/src/fleet/threads/ingest/prisma-thread-ingest.repository.ts",
+        "apps/api/src/fleet/ingest/bundle-ingest.service.ts",
+        "apps/api/src/fleet/schedules/schedule-ticker.ts",
+        "apps/api/src/fleet/assistant/actions/assistant-action-decisions.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/prisma-assistant-tool-call.repository.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "AssistantActionService.recordDirect calls actions.insertDirect while currentBookkeepingReason() answers assistant.direct-action-record.",
+        "A turn_end folded inside thread.transcript bookkeeping still contributes an audit entry to the enclosing scope.",
+        "BundleIngestService.ingestOne marks an expired bundle failed while currentBookkeepingReason() answers fleet.ingest-queue."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/logs/log-upload.service.ts",
+          "reason": "wrap the body of `write`."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/ingest/prisma-thread-ingest.repository.ts",
+          "reason": "wrap the fold's transaction body."
+        },
+        {
+          "path": "apps/api/src/fleet/ingest/bundle-ingest.service.ts",
+          "reason": "wrap `claimNext`, `markFailed` and the body of `recordFailure`."
+        },
+        {
+          "path": "apps/api/src/fleet/schedules/schedule-ticker.ts",
+          "reason": "wrap `claimFire`, the skip and coalesce activity rows, and the body of `linkDispatched`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/prisma-assistant-tool-call.repository.ts",
+          "reason": "wrap the body of `record`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/assistant-action-decisions.ts",
+          "reason": "wrap the body of `finalize`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/assistant-action.service.ts",
+          "reason": "wrap the three proposal writes in `open` and the `insertDirect` call in `recordDirect`."
+        },
+        {
+          "path": "apps/api/src/email/email-template.seeder.ts",
+          "reason": "wrap the body of `seed`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "974809f9f752524b2f1a62b35c51b3a5386fe0af"
+    },
+    {
+      "id": "US-008",
+      "title": "Mark VCS and context bookkeeping",
+      "description": "**Goal** — Exempt only documented VCS delivery/progress/refresh writes and context query metrics.\n\n**Motivation** — The eleven earlier P2 features made every domain writer record an `AuditEntry` (`permissions-p2-audit-delivery`, PR #336, deployed `4592d038` on 2026-10-26, was the last writer feature).\n\n**Approach** — Wraps the rows whose story is US-008 (`vcs.poll-log`, `webhook.replay-record`, `vcs.push-outbox`, `vcs.pr-same-state`, `vcs.link-refresh`, `context.query-metric`) at exactly the named calls.\n\nExact sites:\n- `vcs.poll-log`: `VcsPollingService.poll`, the `updateVcsConnectionLastSynced` call (`vcs-polling.service.ts:177`) and both `createVcsSyncLog` calls (`:181`, `:212`).\n- `webhook.replay-record`: `WebhookReplayGuard.assertFresh`, the delivery row `create` (`webhook-replay.guard.ts:71`); `forget`, its whole body (`:96-109`).\n- `vcs.push-outbox`: `VcsWebhookService.handlePush`, the `outboxService.record` call (`vcs-webhook.service.ts:710`).\n- `vcs.pr-same-state`: `PrismaVcsRepository.updateTicketLinkWithPrState`, the `ticketLink.update` call (`prisma-vcs.repository.ts:304`) only when `previousState === prState`.\n- `vcs.link-refresh`: `PrismaVcsRepository.upsertTicketLink`, the refresh branch's `ticketLink.upsert` (`prisma-vcs.repository.ts:371`).\n- `context.query-metric`: `ContextBuilderService.recordQueryMetricFireAndForget`, the `sloDashboardService.recordQueryMetric(metric)` call (`context-builder.service.ts:345`).\n\nBookkeeping is marked at the write, narrowly. `bookkeeping(reason, fn)` wraps the exact call that makes a bookkeeping write, never a method that also makes domain writes: a domain write inside a bookkeeping call is not counted, so a broad wrap would hide the next missing entry. The memory restatement row of audit-knowledge's table is not here: `PrismaMemoryItemRepository.upsert` returns before any write on that path, so there is nothing to mark.\n\n**Scope** — In: modify vcs-polling.service.ts, webhook-replay.guard.ts, vcs-webhook.service.ts, prisma-vcs.repository.ts and context-builder.service.ts and their existing colocated specs. Out: opening system scopes or resolving additional suite discoveries (US-011), extracting route labels (US-010), memory restatements and broad webhook/poll/domain-write exemptions. Preserve replay protection, merged-state monotonicity, existing null-on-refresh return values and fire-and-forget catch behavior.\n\n**Interface** — Use `export function bookkeeping<T>(reason: BookkeepingReason, fn: () => T | PromiseLike<T>): Promise<T>;`. For a PR state change `previousState !== prState`, invoke the original update without bookkeeping; only a restatement receives vcs.pr-same-state. Tests enter the public poll/webhook/repository/context methods and observe `currentBookkeepingReason()` in the named collaborators. For polling AC-1, use an active polling connection and a provider result with a cursor: poll only calls updateVcsConnectionLastSynced when that cursor exists. Preserve the existing no-cursor behavior rather than adding an unconditional cursor write to satisfy the fixture.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] A successful poll of a VCS connection calls updateVcsConnectionLastSynced while currentBookkeepingReason() answers vcs.poll-log.",
+        "AC-2 [unit] That poll calls createVcsSyncLog while currentBookkeepingReason() answers vcs.poll-log.",
+        "AC-3 [unit] A poll whose provider call throws calls the error-path createVcsSyncLog while currentBookkeepingReason() answers vcs.poll-log.",
+        "AC-4 [unit] WebhookReplayGuard.assertFresh for a delivery id never seen creates its delivery row while currentBookkeepingReason() answers webhook.replay-record.",
+        "AC-5 [unit] WebhookReplayGuard.forget deletes the delivery row while currentBookkeepingReason() answers webhook.replay-record.",
+        "AC-6 [unit] VcsWebhookService handling a push webhook with one commit calls outboxService.record while currentBookkeepingReason() answers vcs.push-outbox.",
+        "AC-7 [unit] PrismaVcsRepository.updateTicketLinkWithPrState(id, 'open') for a row whose stored prState is open calls ticketLink.update while currentBookkeepingReason() answers vcs.pr-same-state.",
+        "AC-8 [unit] PrismaVcsRepository.updateTicketLinkWithPrState(id, 'closed') for a row whose stored prState is open calls ticketLink.update while currentBookkeepingReason() answers undefined.",
+        "AC-9 [unit] PrismaVcsRepository.upsertTicketLink for a link that already exists calls the refresh branch's ticketLink.upsert while currentBookkeepingReason() answers vcs.link-refresh.",
+        "AC-10 [unit] PrismaVcsRepository.upsertTicketLink for a new link makes its create while currentBookkeepingReason() answers undefined.",
+        "AC-11 [unit] A context query through ContextBuilderService calls sloDashboardService.recordQueryMetric while currentBookkeepingReason() answers context.query-metric."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "vcs",
+        "webhook-security",
+        "bookkeeping"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Five existing files apply a standard marker at fixed calls and a same-state branch, without a new integration or abstraction; editing the persistent replay-protection guard invokes strict security isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-polling.service.ts",
+        "apps/api/src/webhook-security/webhook-replay.guard.ts",
+        "apps/api/src/vcs/prisma-vcs.repository.ts",
+        "apps/api/src/vcs/vcs-webhook.service.ts",
+        "apps/api/src/context/context-builder.service.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/vcs/vcs-polling.service.ts",
+          "reason": "wrap the cursor update and both sync log writes in `poll`."
+        },
+        {
+          "path": "apps/api/src/webhook-security/webhook-replay.guard.ts",
+          "reason": "wrap the delivery create in `assertFresh` and the body of `forget`."
+        },
+        {
+          "path": "apps/api/src/vcs/vcs-webhook.service.ts",
+          "reason": "wrap the `outboxService.record` call in `handlePush`."
+        },
+        {
+          "path": "apps/api/src/vcs/prisma-vcs.repository.ts",
+          "reason": "wrap the same-state `ticketLink.update` and the refresh-branch `ticketLink.upsert`."
+        },
+        {
+          "path": "apps/api/src/context/context-builder.service.ts",
+          "reason": "wrap the `recordQueryMetric` call."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "d18a7e05083ee32611df32b29567d829d9f75415"
+    },
+    {
+      "id": "US-009",
+      "title": "Audit logout atomically with session revocation",
+      "description": "**Goal** — Record the existing session.logout action in the tokenVersion revocation transaction.\n\n**Motivation** — Keep the design approach. The command layer writes `AuditEntry` in the domain write's transaction; the guard checks that, it does not replace it.\n\n**Approach** — Logout records; login and refresh do not. `AuthService.logout` bumps `User.tokenVersion`, a write that revokes every session of the caller. It records `session.logout` on `user` (the caller's id, `projectId` `null`, summary `logged out`) through `audited` around `bumpTokenVersion`; the cache invalidation stays after it. `login` and `refresh` only sign tokens and write no row, so the guard has nothing to check; auditing a sign-in, and a failed one, is a security-log concern out of scope.\n\n`AuthService.logout(userId)` — `src/auth/auth.service.ts`.\n- Baseline: `bumpTokenVersion(userId)`, then two cache invalidations.\n- Target: `this.audit.audited(() => this.authRepo.bumpTokenVersion(userId), () => ({ key: 'session.logout', resourceType: 'user', resourceId: userId, projectId: null, summary: 'logged out' }))`, then the same invalidations.\n\n`src/auth/auth.service.spec.ts` — the `logout` test's `mockAuditRecorder` has only `record`, and `logout` now calls `audited`; add an `audited` mock that runs its function and returns its result, so the existing assertions (`bumpTokenVersion` called with the user id, both cache invalidations) keep holding.\n\n`test/e2e/api-endpoint/endpoint.e2e.spec.ts` — the logout case gains one assertion: after the logout request answers 200, one `AuditEntry` with `action` `session.logout` exists for the user (the API testing rule keeps endpoint behaviour in this file). Its existing assertions stay unchanged. Persistence maps the package's action to AuditEntry.key; query key=session.logout in Prisma without changing the schema.\n\n**Scope** — In: AuthService and its unit mock/assertions, new audit-logout integration spec for success/actor/rollback, and the additional assertion in the existing endpoint logout case. Out: request/system scope activation (US-010/US-011), login/refresh/failed-sign-in auditing, new permission keys and route/DTO changes.\n\n**Interface** — Preserve `AuthService.logout(userId: string): Promise<void>` and `AuthController.logout`'s POST /auth/logout + @Requires('session.logout') contract. Use the existing `AuditRecorder.audited<T>(fn: () => Promise<T>, entriesOf: AuditEntriesOf<T>): Promise<T>`. A record rejection rolls back tokenVersion and prevents both cache invalidations.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] AuthService.logout(userId) calls audit.audited exactly once, and bumpTokenVersion(userId) runs inside the function it passes.",
+        "AC-2 [unit] The entriesOf that AuthService.logout(userId) passes to audited yields { key: 'session.logout', resourceType: 'user', resourceId: userId, projectId: null, summary: 'logged out' }.",
+        "AC-3 [unit] When audit.audited rejects, AuthService.logout(userId) rejects with the same error and calls cache.invalidate zero times.",
+        "AC-4 [integration] POST /auth/logout as a logged-in user answers 200 and writes exactly one AuditEntry whose recorded action is session.logout (persisted as key: 'session.logout') and whose resourceId is the user's id.",
+        "AC-5 [integration] That entry's actor is USER with the user's id, and its summary is 'logged out'.",
+        "AC-6 [integration] With AuditRecorder.record rejecting once, POST /auth/logout answers an error status and the user's tokenVersion is unchanged.",
+        "AC-7 [unit, regression] After audit.audited resolves successfully, AuthService.logout(userId) invalidates `USER:${userId}` with { mode: 'tag' }, preserving the existing token-version cache invalidation.",
+        "AC-8 [unit, regression] After audit.audited resolves successfully, AuthService.logout(userId) invalidates ['user-auth-state', userId], preserving the existing MEMORY-strategy direct-key eviction."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "auth",
+        "sessions",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing audited helper makes the change bounded, but session revocation, rollback and cache ordering are security-critical.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/auth/auth.service.ts",
+        "apps/api/src/auth/auth.service.spec.ts",
+        "apps/api/src/audit/audit-recorder.service.ts",
+        "apps/api/src/auth/auth.controller.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-logout.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/auth/auth.service.ts",
+          "reason": "`logout` records through `audited`."
+        },
+        {
+          "path": "apps/api/src/auth/auth.service.spec.ts",
+          "reason": "the `logout` test's `mockAuditRecorder` has only `record`, and `logout` now calls `audited`; add an `audited` mock that runs its function and returns its result, so the existing assertions (`bumpTokenVersion` called with the user id, both cache invalidations) keep holding."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the logout case gains one assertion: after the logout request answers 200, one `AuditEntry` with `action` `session.logout` exists for the user (the API testing rule keeps endpoint behaviour in this file). Its existing assertions stay unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "6aa7f549e75a1cf2ab4099e450e8ca6a4662ed2c"
+    },
+    {
+      "id": "US-010",
+      "title": "Activate HTTP request scopes with shared route labels",
+      "description": "**Goal** — Activate coverage at the global request interceptor and share route labels with the live permission collector.\n\n**Motivation** — Coverage is a runtime guard plus a walker test. The guard throws in development and test when a request, tool call or system run commits a domain write with no `AuditEntry`; the walker test proves every write surface is audited or on a reasoned allowlist.\n\n**Approach** — Adds `src/permissions/route-surface.ts` and moves `collectControllerRoutes` onto it. `ActionContextInterceptor` opens a scope labelled with the route surface, calls `next.handle()` inside it (Nest binds the handler to the async context at that call), and checks it once on completion. It depends on every marking story, so the HTTP suites reach only marked bookkeeping when it lands.\n\n`ActionContextInterceptor.intercept(ctx, next)` — `src/action-context/action-context.interceptor.ts`.\n- Baseline: `runWithActionContext({ actor, origin }, () => next.handle().subscribe(subscriber))`.\n- Target: computes `routeSurface(ctx.getClass(), ctx.getHandler())`; when it is `undefined`, behaves as the baseline; otherwise opens an audit scope with that label around the subscription, forwards every value and error unchanged, and runs `assertAuditCoverage(scope)` once when the handler completes, forwarding its `UnauditedWriteError` (mode `throw`) as the error instead of the completion.\n\n`collectControllerRoutes(controller)` — `src/permissions/test-helpers/permission-contract.ts`.\n- Baseline: builds `${methodName(method)} ${joinRoutePath(classPath, handlerPath)}` with file-local helpers.\n- Target: calls `routeSurface(controller, handler)` from `src/permissions/route-surface.ts`, which owns `joinRoutePath` and `methodName`; the printed strings are unchanged.\n\n`src/permissions/route-surface.ts` exports `routeSurface(controller: Function, handler: Function): string | undefined`: `undefined` when the handler has no `METHOD_METADATA`, else `\"<METHOD> /<controller path>/<handler path>\"` joined without duplicated separators.\n\nThe check runs when the scope's work succeeds. `runAsSystem` checks after its function's promise fulfils (immediately for a synchronous return); a rejection or a throw skips the check and propagates unchanged, because the transaction rolled back or the caller already sees an error. The interceptor checks once, when the handler's observable completes, before the completion is forwarded: Nest answers a route with the observable's last value only on completion, so an unaudited request answers 500 in development and test. A handler that errors skips the check. A server-sent-events route completes when the client disconnects; it is checked then, and its reads write nothing.\n\n`src/action-context/action-context.interceptor.spec.ts` — the `requestWith` fake `ExecutionContext` has no `getClass` or `getHandler`, which the interceptor now calls; add both (a controller class and a handler, with or without route metadata). Every existing assertion on the emitted context stays unchanged.\n\nKeep values unbuffered and forwarded; assert at completion even when there are zero emissions, and log once for a multi-value production stream. Use completion-observing unit subscriptions rather than firstValueFrom for these paths. Prove the booted collector and routeSurface both print POST /auth/logout by adding an assertion to the existing permission contract integration spec without changing existing assertions.\n\n**Scope** — In: route helper/spec, permission collector refactor, interceptor/spec and shared booted label assertion. Out: system scope activation and general suite-discovery source remediation (US-011), walker (US-012), controller-path arrays. US-010 only: an integration test through a test-only controller that writes without recording is out of scope; the interceptor's throw path is covered by unit specs.\n\n**Interface** —\n```ts\nexport function routeSurface(controller: Function, handler: Function): string | undefined;\nexport function openAuditScope<T>(surface: string, fn: (scope: AuditScope) => T, opts?: { detached?: boolean }): T;\nexport function assertAuditCoverage(scope: AuditScope, mode?: WriteGuardMode): void;\n```\nKeep intercept(ctx: ExecutionContext, next: CallHandler): Observable<unknown>, actor/origin mapping, context propagation and teardown behavior unchanged except for the defined coverage check.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] routeSurface for a controller decorated @Controller('me') and a handler decorated @Post('notifications/read-all') answers POST /me/notifications/read-all.",
+        "AC-2 [unit] routeSurface for a method with no route decorator answers undefined.",
+        "AC-3 [integration] On the booted API, the route that collectPermissionDeclarations reports for AuthController.logout equals routeSurface(AuthController, AuthController.prototype.logout), and both answer POST /auth/logout.",
+        "AC-4 [unit] In mode throw, ActionContextInterceptor.intercept for a POST /x route handler that notes one write, records nothing, emits ok and completes errors with an UnauditedWriteError whose surface is POST /x.",
+        "AC-5 [unit] In that case, the observable does not complete.",
+        "AC-6 [unit] ActionContextInterceptor.intercept for a POST /x route handler that notes one write, calls noteAuditEntry(), emits ok and completes emits ok and completes.",
+        "AC-7 [unit] ActionContextInterceptor.intercept for a handler routed POST /me/notifications/read-all that notes one write, records nothing, emits ok and completes emits ok and completes.",
+        "AC-8 [unit] With ENV_NAME stubbed to production, a POST /x handler that notes one write, records nothing and emits three values before completing makes Logger.prototype.error log exactly once.",
+        "AC-9 [unit] ActionContextInterceptor.intercept for a POST /x handler that completes without emitting, after noting one write and recording nothing, errors with an UnauditedWriteError in mode throw.",
+        "AC-10 [unit] ActionContextInterceptor.intercept for a handler with no route metadata emits the handler's value, and inside the handler currentAuditScope() answers undefined.",
+        "AC-11 [unit] ActionContextInterceptor.intercept for a POST /x handler whose observable errors with E errors with that same E."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "http",
+        "permissions",
+        "async-context"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-003",
+        "US-004",
+        "US-005",
+        "US-006",
+        "US-007",
+        "US-008",
+        "US-009"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two existing modules integrate the upstream scope API with global RxJS completion handling and shared route extraction; principal attribution and the global request boundary justify strict security isolation, not a new expert-level architecture.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/action-context/action-context.interceptor.ts",
+        "apps/api/src/action-context/action-context.interceptor.spec.ts",
+        "apps/api/src/permissions/test-helpers/permission-contract.ts",
+        "apps/api/src/action-context/audit-coverage.ts",
+        "apps/api/test/integration/permissions/permission-contract.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/permissions/route-surface.ts",
+        "apps/api/src/permissions/route-surface.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "routeSurface returns the same normalized label for controller/handler paths with leading and trailing slash separators.",
+        "The context visible synchronously inside next.handle() has the request's audit scope and action actor.",
+        "Unsubscribing the returned observable releases the underlying handler subscription."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/action-context/action-context.interceptor.ts",
+          "reason": "open the request scope and check it on completion."
+        },
+        {
+          "path": "apps/api/src/action-context/action-context.interceptor.spec.ts",
+          "reason": "the `requestWith` fake `ExecutionContext` has no `getClass` or `getHandler`, which the interceptor now calls; add both (a controller class and a handler, with or without route metadata). Every existing assertion on the emitted context stays unchanged."
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.ts",
+          "reason": "`collectControllerRoutes` builds the route string through `routeSurface`; the strings it prints, and every assertion of the permission contract integration spec, stay unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0a45df1a24f04f5de88584b2ce1ffe1ae3761364"
+    },
+    {
+      "id": "US-011",
+      "title": "Activate system scopes and resolve uncovered source writes",
+      "description": "**Goal** — Activate system/writer coverage, keep fixtures scope-free, and resolve source writes exposed by the existing integration/e2e entry points.\n\n**Motivation** — Strict in tests, never an outage in production. The same split as the context guard: throw in development and test, log an error in production.\n\n**Approach** — Three entry points open a scope; nothing else does. `ActionContextInterceptor` opens one per HTTP request, `runAsSystem` one per run, and `runAsSystemWriter` one per run (it calls `runAsSystem`). `runWithActionContext`, `runWithActor` and the test helper `withTestActor` open none, so a test that calls a service or a repository directly to build fixtures is not checked, and neither is any code that runs with no scope. The guard checks production entry points; the integration and e2e suites reach them through HTTP and through the ticks and subscribers they call.\n\n`runAsSystem(component, fn, opts?)` — `src/action-context/action-context.ts`.\n- Baseline: `opts?: { onBehalfOf?; correlationId? }`; runs `runWithActionContext(input, fn)`.\n- Target: `opts?: { onBehalfOf?; correlationId?; surface?: string }`; runs `runWithActionContext(input, () => runInAuditScope(opts?.surface ?? `system:${component}`, fn))`.\n\n`runAsSystemWriter(writer, fn)` — the same file.\n- Baseline: `runAsSystem(key.split('.')[1], fn)`.\n- Target: `runAsSystem(key.split('.')[1], fn, { surface: `writer:${writer.constructor.name}` })`.\n\n`withTestActor` stops opening a scope for a SYSTEM actor. It runs a SYSTEM actor through `runAsSystem` today, which would now check fixture writes. It keeps refusing an id outside `SYSTEM_ACTOR_IDS`, then runs `runWithActionContext({ actor, origin: 'system' }, fn)`. `withTestActor`'s SYSTEM branch and `fixtureDb`'s `asSeed` stop opening a scope: they validate the id against `SYSTEM_ACTOR_IDS`, then run `runWithActionContext({ actor: { type: 'SYSTEM', id }, origin: 'system' }, …)`. Preserve async awaits for lazy Prisma promises; invalid ids reject with `unknown system actor id: <id>` before fn runs. Fixture writes keep running as SYSTEM with the same id.\n\nNested scopes. A scope opened inside another (a `runAsSystem('vcs', …)` inside the GitHub webhook request, a `runAsSystem('schedule', () => record(…))` inside the schedule tick) is a child. A counted write goes to the innermost open scope. A recorded entry counts in the innermost scope and in every enclosing scope. So a tick whose entry is recorded in a nested record-only scope passes, and the record-only scope itself wrote nothing. A detached scope (`{ detached: true }`) has no parent: its entries count only in itself, and nothing it records can satisfy the request or tick that started it.\n\nThe context guard's production fallback is not checked again. In production a context-less write runs inside `runAsSystem('unknown', …)`, which now opens a scope; `system:unknown` is on `UNAUDITED_SURFACES`, because that write already logged `ContextlessWriteError`.\n\nThe outbox fan-out root is an unaudited surface. `FanOutPublisher.publish` runs each handler inside `runAsSystem('outbox', …)`. The handlers that write only bookkeeping (notification rows and watchers, the KB ticket index, the entity graph projection, the webhook send) run there with no scope of their own; the handlers that record (memory extraction, the code-intel index) open `runAsSystemWriter` scopes, which are checked. `system:outbox` is on the list with that reason. A future outbox handler that makes a domain write must open its own writer scope; that is a review rule, not a check.\n\nTimers inherit the scope. A timer started inside a scope (`BudgetEvaluator.signal`'s debounce, `budget-evaluator.ts:55-66`) runs in that scope's async context, after it may have closed. That is safe only where the timer's work commits its writes and its entry in one transaction, as the budget evaluation does; new timer work follows the detached-scope pattern.\n\nWrites the suite reveals: The tables are what the six audit features documented and the grounding confirmed. When US-010 and US-011 open the scopes, an integration or e2e spec that reaches an entry point making a write no table names fails with `UnauditedWriteError`, naming the surface and the write labels. US-011 resolves each one in source, never in the test:\n- a write that changes what a user, an agent or the system later sees or does gets an `AuditRecorder.record` (inside its transaction) or `audited` entry under the key its entry point's family already uses;\n- a write that only records delivery, progress or a derived index gets a new `BOOKKEEPING_REASONS` id with its sentence, wrapped at the exact call;\n- an entry point that only writes bookkeeping gets an `UNAUDITED_SURFACES` entry with its reason.\n\nEach resolution is listed in the story's commit message with the surface and the choice. A record uses a key the catalog already has (new keys are out of scope); a write that no existing key fits is bookkeeping or an unaudited surface, with its reason. A resolution edits source files only (any file the write lives in); it never changes an existing spec's assertion. Turning the guard off, catching `UnauditedWriteError`, or changing a spec to stop reaching the entry point is not a resolution. The initial exact catalogue/allowlist are pinned by US-002; any additional reasoned resolution must be explicit, not an excuse to weaken those regression anchors.\n\n**Scope** — In: action-context.ts, test helper SYSTEM/asSeed change, colocated context units, audit-coverage-scopes integration and source-only fixes revealed by existing HTTP/system suites. Out: HTTP interceptor implementation (US-010), allowlist walker (US-012), new catalog keys, testing previously unreached surfaces, policing future outbox handler scope declarations and changing BundleIngestService.kick's existing catch. No guard-disable flag or swallowing UnauditedWriteError is permitted.\n\n**Interface** —\n```ts\nexport function runAsSystem<T>(\n  component: string,\n  fn: () => T,\n  opts?: { onBehalfOf?: ActionContext['onBehalfOf']; correlationId?: string; surface?: string },\n): T;\nexport function runAsSystemWriter<T>(writer: object, fn: () => T): T;\n```\nPreserve id/metadata validation, actor attribution, onBehalfOf and correlation inheritance. A synchronous function returns its value synchronously. A successful async run checks after fulfilment; original rejection/throw bypasses checking. Exercise zero-row purges and swallowed record failures against the booted transaction path, outside the sandbox.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] Inside runAsSystem('budget', fn), currentAuditScope()?.surface answers system:budget.",
+        "AC-2 [unit] In mode throw, a fn that notes one write, records nothing and resolves makes runAsSystem('budget', fn) reject with an UnauditedWriteError whose surface is system:budget.",
+        "AC-3 [unit] Inside runAsSystemWriter(writer, fn) for an instance of a class decorated @SystemWriter('system.schedule.dispatch') and named ScheduleTicker, currentAuditScope()?.surface answers writer:ScheduleTicker and the actor is SYSTEM/schedule.",
+        "AC-4 [unit] runAsSystem('budget', () => 7) answers 7 synchronously, not a promise.",
+        "AC-5 [integration] Inside withTestActor({ type: 'SYSTEM', id: 'seed' }, fn), the actor is SYSTEM/seed with origin system, and currentAuditScope() answers undefined.",
+        "AC-6 [integration] withTestActor({ type: 'SYSTEM', id: 'nope' }, fn) rejects with 'unknown system actor id: nope', and fn is never called.",
+        "AC-7 [integration] fixtureDb(app).user.create(…) resolves to the created row on the booted app.",
+        "AC-8 [integration] POST /fleet/runner/sync from an enrolled runner whose boot id is unchanged since its last sync, with no jobs, no acks and no free slots, answers 200.",
+        "AC-9 [integration] POST /me/notifications/read-all as a user with one unread notification answers 200 and writes no AuditEntry.",
+        "AC-10 [integration] A second NotificationRetentionProcessor purge run, after the first one purged every eligible row, resolves without an UnauditedWriteError and writes no AuditEntry.",
+        "AC-11 [integration] An EnrollmentRetentionProcessor purge run with AuditRecorder.record rejecting once resolves without an UnauditedWriteError, and the enrollments it targeted still exist."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "system-writers",
+        "security",
+        "fixtures"
+      ],
+      "dependencies": [
+        "US-004",
+        "US-010"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Activates enforcement across all system writers and fixtures with unpredictable source-discovery blast radius; actor validation and security-critical existing paths require strict isolation.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/src/action-context/action-context.ts",
+        "apps/api/test/helpers/action-context.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+        "apps/api/test/integration/audit/audit-fleet-system-retention.integration.spec.ts",
+        "apps/api/src/action-context/audit-coverage.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/audit/audit-coverage-scopes.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "runAsSystem('budget', fn, { surface: 'writer:Custom' }) exposes writer:Custom as the current scope surface while retaining actor SYSTEM/budget.",
+        "When runAsSystem fn rejects with E after noting a write, runAsSystem rejects with the same E rather than UnauditedWriteError.",
+        "A successful entry in a nested system run satisfies an enclosing system writer's counted write without transferring child writes to the parent."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/action-context/action-context.ts",
+          "reason": "`runAsSystem` takes `opts.surface` and runs its work in `runInAuditScope`; `runAsSystemWriter` passes its `writer:` label."
+        },
+        {
+          "path": "apps/api/test/helpers/action-context.ts",
+          "reason": "`withTestActor`'s SYSTEM branch and `asSeed` call `runAsSystem`, which now opens a checked scope over fixture writes; they validate the id against `SYSTEM_ACTOR_IDS` (rejecting with `unknown system actor id: <id>`) and run `runWithActionContext({ actor: { type: 'SYSTEM', id }, origin: 'system' }, async () => await fn())` instead. Fixture writes keep running as SYSTEM with the same id."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b5d2225eed497e9fd9dca321169fc4874d3d9bde"
+    },
+    {
+      "id": "US-012",
+      "title": "Validate the coverage allowlist against live surfaces",
+      "description": "**Goal** — Implement the coverage contract checker and walk the initialized app's live routes, system writers and component ids.\n\n**Motivation** — The walker uses the live surfaces, not the inventory TSV. `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv` is stale; the walker reads the booted app, as the P1 permission contract test does.\n\n**Approach** — The walker checks the allowlist; the guard checks everything else. The walker cannot tell from metadata whether a route records. It checks what metadata can prove: every `UNAUDITED_SURFACES` label names a live write surface (a non-`GET` route, a system writer class, a system actor id), and every reason is a non-empty sentence. Every write surface not on the list is audited by default, and the guard fails any test that reaches it and finds no entry. A write surface no test reaches is out of scope.\n\nA `<METHOD> /<path>` label is live when a declaration has that `route`; a `GET` route label is `read-route-allowlisted`. A `writer:<Name>` label is live when a system writer declaration has `writer` `<Name>`. A `system:<id>` label is live when `systemIds` has `<id>`. Any other label is `stale-surface`. A reason that is empty after trimming is `empty-reason`.\n\nAdds `findCoverageViolations` in `src/action-context/test-helpers/audit-coverage-contract.ts` and `test/integration/audit/audit-coverage.integration.spec.ts`, which boots the API, collects the live surfaces with `collectPermissionDeclarations` and finds no violation. Mirror test/integration/permissions/permission-contract.integration.spec.ts: use canRunDbTests, resetDb, bootHttpApp, initialized ModulesContainer/AssistantToolRegistry, restore environment (including pinned FTS strategy if used), and close app. Preserve the >200 routes and >=30 system writers assertions as guards against a partial walk.\n\n**Scope** — In: pure coverage checker with unit cases and live booted integration walker; the binding spec explicitly retains this as its own story. Out: changing production scopes (US-010/US-011), auditing from metadata, inventory TSV reads/updates, adding tests for previously unreached write surfaces or allowlisting task scopes.\n\n**Interface** — `src/action-context/test-helpers/audit-coverage-contract.ts` exports:\n```ts\nexport type CoverageViolation =\n  | { kind: 'stale-surface'; surface: string }\n  | { kind: 'read-route-allowlisted'; surface: string }\n  | { kind: 'empty-reason'; surface: string };\n\nexport function findCoverageViolations(\n  declarations: PermissionDeclarations,\n  allowlist: ReadonlyMap<string, string> = UNAUDITED_SURFACES,\n  systemIds: ReadonlySet<string> = SYSTEM_ACTOR_IDS,\n): CoverageViolation[];\n```\nUse RouteDeclaration.route exactly as printed by the shared routeSurface helper and SystemWriterDeclaration.writer as class name, not permission key. Tools remain in PermissionDeclarations but have no independently allowlistable label in this checker.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] findCoverageViolations for an allowlist holding POST /gone, over declarations with no such route, answers [{ kind: 'stale-surface', surface: 'POST /gone' }].",
+        "AC-2 [unit] findCoverageViolations for an allowlist holding GET /me/notifications, over declarations with that GET route, answers [{ kind: 'read-route-allowlisted', surface: 'GET /me/notifications' }].",
+        "AC-3 [unit] findCoverageViolations answers [] for an allowlist holding writer:EmailDispatcher over declarations with a system writer named EmailDispatcher.",
+        "AC-4 [unit] findCoverageViolations answers [{ kind: 'stale-surface', surface: 'writer:Missing' }] for writer:Missing.",
+        "AC-5 [unit] findCoverageViolations answers [] for system:outbox when systemIds has outbox, and [{ kind: 'stale-surface', surface: 'system:nope' }] for system:nope.",
+        "AC-6 [unit] findCoverageViolations for an allowlist mapping POST /x to the reason '  ', over declarations containing that live POST /x route, answers [{ kind: 'empty-reason', surface: 'POST /x' }].",
+        "AC-7 [integration] On the booted API, findCoverageViolations over the collected declarations, UNAUDITED_SURFACES and SYSTEM_ACTOR_IDS answers [], with more than 200 routes and at least 30 system writers collected.",
+        "AC-8 [unit] findCoverageViolations for an allowlist holding task:PrAttributionService.attribute answers [{ kind: 'stale-surface', surface: 'task:PrAttributionService.attribute' }]."
+      ],
+      "tags": [
+        "api",
+        "audit",
+        "permissions",
+        "contract",
+        "live-surfaces"
+      ],
+      "dependencies": [
+        "US-011"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "A pure allowlist validator plus an established boot-and-collect integration pattern; story structure is explicitly binding despite its contract-validation focus.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/test/integration/permissions/permission-contract.integration.spec.ts",
+        "apps/api/src/permissions/test-helpers/permission-contract.ts",
+        "apps/api/src/action-context/audit-coverage.allowlist.ts",
+        "apps/api/src/action-context/action-context.ts",
+        "apps/api/test/helpers/http-app.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/action-context/test-helpers/audit-coverage-contract.ts",
+        "apps/api/src/action-context/test-helpers/audit-coverage-contract.spec.ts",
+        "apps/api/test/integration/audit/audit-coverage.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "92eef68d6560234af4969e2b8c7aa283fd53efe4"
+    }
+  ],
+  "analysis": "Repository discovery: codebase-memory MCP is unavailable in this session, so navigation used direct Read, Glob and Grep against the supplied execution root /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. No inventory TSV was read. This is an enhancement to an existing API, not greenfield. Read .nax/mono/apps/api/context.md; the detected Express/Next.js labels are not architectural authority: production API uses NestJS 12 + Fastify and Prisma 7, while bootHttpApp defaults to Express for HTTP tests and optionally supports Fastify (apps/api/test/helpers/http-app.ts:18-46). No web, CLI or runner changes are required. The nathapp-nestjs-patterns skill is not exposed by the available tools and no repository SKILL.md was found; implementers must read that skill when available before writing NestJS code. Follow Nathapp transaction, audit storage and envelope patterns rather than introducing parallel infrastructure.\n\nExisting entry points and impact: action context is module-level AsyncLocalStorage; runWithActionContext preserves actor/origin/approval/correlation semantics (apps/api/src/action-context/action-context.ts:81-105). SYSTEM_ACTOR_IDS derives catalog families plus keyless ids including outbox, seed and unknown (same file:70-79). runAsSystem validates ids, inherits correlation and currently only changes action context; runAsSystemWriter reads class metadata and derives the component (same file:122-151). These exports have a broad fan-out: fleet sweeper, schedule ticker, enrollment/log/budget/notification/outbox retention, VCS polling/webhooks/PR sync, email bootstrap/dispatch, knowledge queue, thread bootstrap, memory subscriber and code-intel subscriber all use them. Existing direct actor helpers must remain scope-free. ActionContextInterceptor maps absent principal to SYSTEM/anonymous/rest, runners to RUNNER/runner, and humans/agents to rest, and wraps next.handle().subscribe in action context (apps/api/src/action-context/action-context.interceptor.ts:20-35). It is global through APP_INTERCEPTOR (apps/api/src/action-context/action-context.module.ts:12-15), imported by AppModule (apps/api/src/app.module.ts:122). Adding request scopes therefore affects every route and cannot precede bookkeeping and logout changes. Its existing requestWith fake lacks getClass/getHandler and must be enriched without changing existing principal/context assertions (apps/api/src/action-context/action-context.interceptor.spec.ts:8-18). Tests for completion must subscribe through completion rather than firstValueFrom, which can unsubscribe after the first value.\n\nWrite interception: GUARDED_OPERATIONS is exactly model writes plus raw executes, excluding raw queries; resolveWriteGuardMode is record when ENV_NAME or NODE_ENV is production, throw otherwise (apps/api/src/action-context/contextless-write.ts:6-31). The handler currently conflates read and in-context pass-through; split only the in-context guarded path to count successful changed-row results, retaining the contextless production fallback and original errors (same file:40-54). Exclude AuditEntry, zero-count bulk operations, empty returning arrays and failed operations; preserve returned object identity. Existing contextless-write.spec.ts covers operation set, lazy thenables, unchanged query results and errors (apps/api/src/action-context/contextless-write.spec.ts:20-106). KodaPrismaClient returns an extended generated client, with the extension inherited by interactive tx clients (apps/api/src/prisma/koda-prisma-client.ts:17-30); AppModule injects that client (apps/api/src/app.module.ts:92). Wrap it with the specified Proxy, binding the original interactive $transaction to extended, preserving options, array form, and ordinary Reflect.get behavior. Do not modify generated Prisma output or import PrismaClient from @prisma/client. PrismaService's separate transaction proxy and fixture delegate caching make receiver/delegate identity important (apps/api/test/helpers/action-context.ts:98-139).\n\nAudit storage: audited already owns txManager.run and records entries derived from the result; record validates a catalog key and active transaction before translating current action context and awaiting storage.record (apps/api/src/audit/audit-recorder.service.ts:30-68). Add noteAuditEntry only after storage success; do not replace command-layer transactional auditing. The package's action is persisted as AuditEntry.key, resource as resourceType, and actor as actorType/actorId (apps/api/src/audit/prisma-audit.storage.ts:21-38). Logout acceptance wording uses action=session.logout; real Prisma queries must filter key=session.logout, while storage mocks assert action. AuthService already injects AuditRecorder and transaction manager. Its logout currently bumps tokenVersion then invalidates the tag and direct auth-state key (apps/api/src/auth/auth.service.ts:186-193). Wrap just the bump in audited; cache invalidations stay after successful commit. Existing mockAuditRecorder has record only (apps/api/src/auth/auth.service.spec.ts:25); add an audited mock that executes fn and preserves the old bump/cache assertions. AuthController.logout is already POST /auth/logout, @Requires('session.logout'), HTTP 200 (apps/api/src/auth/auth.controller.ts:112-125). Preserve revocation behavior in the existing endpoint replay case, adding the audit assertion without weakening old assertions (apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts:302-327). Login/refresh issue tokens without row writes; do not add security-log behavior or catalog keys. No DTO, route shape, database schema, migration or OpenAPI/client regeneration is anticipated.\n\nBookkeeping placement grounded in source: sync heartbeat/delivery are repo.recordRunnerSync and markDelivered (apps/api/src/fleet/sync/sync.service.ts:61-63,164-167). Command ack delivery, thread ack, approval delivery outcome and READOPT-ok boot update are separate from transitions; reboot reconciliation already records runner.sync when it queues or detects reboot (apps/api/src/fleet/sync/command-ack.processor.ts:59-105,118-147). Job reports append events, advance ack sequence, mirror runner facts and record rejection activities separately from audited transitions (apps/api/src/fleet/sync/job-report.processor.ts:91-93,112-140). FenceService.abandon makes only ABANDON and activity writes (apps/api/src/fleet/sync/fence.service.ts:22-34). PlacementService.assign does lease CAS, thread pin, ASSIGN and transition activity, whereas cancelForPause records a nested budget audit and must stay outside bookkeeping (apps/api/src/fleet/jobs/placement.service.ts:187-210). Broad placement wrapping is intentionally permitted, not permission to wrap fillRunner.\n\nDetached effects: sync starts attribute and onTerminal without waiting (apps/api/src/fleet/sync/sync.service.ts:154-161); their methods need detached task scopes outside existing catches so strict coverage errors reject rather than being swallowed. PrAttributionService currently catches operational failures and returns failed; only claimAttribution is bookkeeping (apps/api/src/fleet/sync/pr-attribution.service.ts:40-68). FleetJobTicketEffects.onTerminal invokes failure comments and links; each actual create already records within a transaction (apps/api/src/fleet/tickets/fleet-job-ticket.effects.ts:53-57,92-133). Existing-link upsertFleetPrLink uses createManyAndReturn then updateMany and returns null; wrap only updateMany (apps/api/src/fleet/tickets/prisma-fleet-tickets.repository.ts:157-166). Bundle ingest also fires upsertPrLinks after commit (apps/api/src/fleet/ingest/bundle-ingest.service.ts:127-128); if suites expose additional writes, resolve in source under US-011 rather than broadening detached-task scope speculatively.\n\nIngest/schedule/assistant/seed seams: LogUploadService.write owns stream metadata only; upload hooks run separately and must remain outside its marker (apps/api/src/fleet/logs/log-upload.service.ts:103-140). Thread fold's transaction body includes transcript, cost mirrors, session state and cursor; wrap the whole callback, not individual line branches. Its nested turn_end AuditRecorder call must still count (apps/api/src/fleet/threads/ingest/prisma-thread-ingest.repository.ts:75-200). Bundle ingest claims/expiry failure and recordFailure retries are bookkeeping; replaceRows/correction/outcome writes remain audited domain work (apps/api/src/fleet/ingest/bundle-ingest.service.ts:75-123,137-143). kick already creates a system run and catches/logs errors (same file:55-61); leave that catch. Schedule claim and skip/coalesce activity calls plus linkDispatched are bookkeeping, but jobs.dispatch, coalesce domain updates and disable audit remain counted (apps/api/src/fleet/schedules/schedule-ticker.ts:115-143,163-181,184-219). Assistant proposal marks must cover only actions.insert, approvals.openAssistant and setApprovalId, not tool execution (apps/api/src/fleet/assistant/actions/assistant-action.service.ts:61-85). finalize's transaction owns terminal ledger/note writes and may be broadly wrapped, while approval resolution and executor stay outside (apps/api/src/fleet/assistant/actions/assistant-action-decisions.ts:95-98,131-165). Tool-call ledger record is a single create (apps/api/src/fleet/assistant/prisma-assistant-tool-call.repository.ts:75-77). Email seed is a deliberate broad bookkeeping case; boot runs it as seed (apps/api/src/email/email-template.seeder.ts:24-46).\n\nVCS/context seams: poll cursor and success/error logs are distinct from issue/PR domain synchronization (apps/api/src/vcs/vcs-polling.service.ts:165-223). Replay guard's create and forget delete are delivery bookkeeping without changing persistent dedup/security error behavior (apps/api/src/webhook-security/webhook-replay.guard.ts:58-109). VCS PR state writer locks and reads previousState; same-state update alone is bookkeeping, state changes stay counted (apps/api/src/vcs/prisma-vcs.repository.ts:294-305). Existing-link refresh upsert returns null and only that branch is marked (same file:366-390). ContextBuilderService's fire-and-forget query metric has an existing catch to retain (apps/api/src/context/context-builder.service.ts:333-349). Wrap the push outbox record, not whole webhook processing.\n\nLive walker: collectPermissionDeclarations walks initialized ModulesContainer controllers/providers and registered assistant tools, deduplicates classes, and recognizes factory-built writers through instance constructors (apps/api/src/permissions/test-helpers/permission-contract.ts:124-179). Extract route normalization from the current local joinRoutePath/methodName and collectControllerRoutes logic without changing printed strings, guard metadata or declarations (same file:63-116). Coverage metadata cannot prove that an action records: only validate allowlist liveness and reasons, reject GET and task labels. Existing permission contract integration already boots with FTS_OPTIMIZE_STRATEGY=counter, restores it, and checks >200 routes and >=30 writers (apps/api/test/integration/permissions/permission-contract.integration.spec.ts:25-80); mirror this for US-012.\n\nRisks/decisions: coverage is one entry per entry-point scope, not per row or transaction. ALS for scopes, bookkeeping and transaction tallies must be independent from action context. Writes attach to innermost scope; entries propagate through parents; detached tasks never satisfy parent coverage. Capture lazy thenables and await within ALS. Closed scopes ignore late writes. The new import cycle action-context -> audit-coverage -> contextless-write -> action-context must not read cyclic imports at top level. Transaction tally must buffer both writes and entries, including work in nested scopes that close before the callback, and discard them on callback rejection; inner scopes must not fail while their counted work is deferred in a tally. Follow US-004's explicit callback wrapper and ACs over contradictory introductory prose suggesting commit-resolution flushing: a commit failure after a successful callback retains counts and is explicitly excluded. Joined nested txManager.run must not double-count. Keep synchronous runAsSystem return behavior and original error identity. Production logs once per unsuccessful coverage check and never changes the successful result; there is no disable flag. Timers inherit old scope context: budget debounce is safe only because writes and entry share a transaction (apps/api/src/fleet/budgets/budget-evaluator.ts:55-94); new timer work needs detached scopes. Allowlisting system:outbox intentionally trusts only-bookkeeping fanout handlers and separately scoped domain writers; a future handler must open its own writer scope by review. Narrow markers and the fixed reason catalogue prevent exemptions from accidentally swallowing neighboring domain writes.\n\nImplementation/migration order is the binding twelve-story graph: create inert core/catalogue/counting/tally, mark the five bookkeeping groups and add logout auditing, activate HTTP scopes only after all markings, activate system scopes and fix source-only suite discoveries, then walk the live allowlist. Fixtures must validate SYSTEM ids but use runWithActionContext instead of runAsSystem so they do not open checked scopes; preserve lazy awaits and transaction-delegate behavior (apps/api/test/helpers/action-context.ts:68-76,172-174). Existing specs cover command/report/attribution/ticket effects, log upload/thread fold/ingest/schedules/assistant/email, VCS/replay/context and core context/recorder/interceptor. Glob confirmed no sync.service.spec.ts, fence.service.spec.ts, placement.service.spec.ts or prisma-assistant-tool-call.repository.spec.ts; create them for the named public-method seams. Other units should extend existing colocated specs, never alter old assertions to avoid a scope. Retention integration already tests zero-row deletion and swallowed record rejection with preserved rows (apps/api/test/integration/audit/audit-fleet-system-retention.integration.spec.ts:58-109); keep those regression anchors. Run booted PG checks outside the sandbox using test:scoped or test:integration; unit tests are Vitest/SWC with vi, while test defaults exclude integration/e2e (apps/api/package.json:14-23; apps/api/vitest.config.ts:7-48). DB suites use canRunDbTests, KODA_DB_TESTS=1 outside NAX_SANDBOXED=1, test-only PostgreSQL, serial resets, and a private test container for another checkout. Skipped DB checks are not verification. Use restoreEnvAfterEach and preserve the logger-silencing spy rather than unsilencing shared tests. No commands were executed in this read/write-only planning session. Completion means runtime guards and exemptions behave as specified, logout records atomically, existing HTTP/system behavior survives without softened tests, source discoveries are reasoned in commit messages, and the live allowlist walker reports no violations.\n\nSecond-pass adversarial audit: re-read the API context and the existing scope, interceptor, Prisma client, recorder/storage, fixture proxy, runner ack/task, assistant decision, ingest, schedule, polling, replay and logout seams. All 125 enumerated spec ACs remain in their original stories. No criterion was removed for describing a capability not yet implemented. The following is the complete preservation ledger; labels are local to their story, not global acceptance ids.\nUS-001: AC-1 strict unaudited rejection; AC-2 surface and writes fields; AC-3 exact message; AC-4 audited result 42; AC-5 production result 42 with environment restored; AC-6 exactly one error log with exact message; AC-7 same asynchronous error E; AC-8 system:unknown result without logging; AC-9 same synchronous error E; AC-10 nested record-only scope satisfies outer; AC-11 nested write rejects under its own label and leaves outer writes empty; AC-12 detached entry cannot satisfy outer write; AC-13 no-scope notes are harmless and current scope is undefined.\nUS-002: AC-1 current reason inside marker; AC-2 marker suppresses write count; AC-3 reason restored to undefined; AC-4 exact unknown-reason rejection; AC-5 invalid reason never invokes fn; AC-6 lazy thenable sees bookkeeping reason; AC-7 lazy thenable sees audit scope; AC-8 entries still count inside bookkeeping; AC-9 exactly 26 reason ids; AC-10 every catalogue value is a nonempty sentence; AC-11 exactly seven initial allowlisted surfaces; AC-12 nonempty allowlist reasons.\nUS-003: AC-1 Ticket.update label; AC-2 positive deleteMany label; AC-3 zero-row updateMany/deleteMany are uncounted; AC-4 empty returning array uncounted and nonempty TicketLink array counted; AC-5 positive raw execute counted and zero uncounted; AC-6 AuditEntry writes excluded; AC-7 rejected query uncounted with original rejection unchanged; AC-8 counted query result unchanged.\nUS-004: AC-1 writes hidden during tally then applied on fulfilment; AC-2 rejected tally retains same E and no writes; AC-3 rejected tally drops entries; AC-4 successful tally entry reaches nested and enclosing scopes; AC-5 recorder counts after storage resolves under a valid key and active transaction; AC-6 storage error identity and zero entries; AC-7 real booted txManager Label rollback leaves writes empty; AC-8 scope closed inside callback defers its write to the captured scope without premature rejection.\nUS-005: AC-1 sync heartbeat reason; AC-2 command-delivery reason; AC-3 ordinary command-ack reason; AC-4 approval delivery outcome reason; AC-5 thread input-ack reason; AC-6 ack transition outside bookkeeping; AC-7 event append reason; AC-8 acked sequence update reason; AC-9 rejected event activity reason; AC-10 accepted transition outside bookkeeping; AC-11 ABANDON command and activity reason; AC-12 pending ASSIGN boot reconcile reason; AC-13 reboot READOPT command outside bookkeeping; AC-14 placeable job CAS and ASSIGN reason.\nUS-006: AC-1 attribution claim reason; AC-2 attribution task surface; AC-3 FAILED job ticket lookup in terminal task surface; AC-4 detached task has no parent inside sync request; AC-5 unexpected repository write causes terminal task rejection outside operational catches; AC-6 failure-comment claim reason; AC-7 existing-link update reason through the real repository over a stubbed client returning an empty createManyAndReturn array; AC-8 existing-link result remains null.\nUS-007: AC-1 uploaded chunk stream metadata reason; AC-2 turn_start create reason with callback-running transaction stub; AC-3 fold cursor reason; AC-4 ingest claim reason; AC-5 read-error retry reason; AC-6 domain replaceRows outside bookkeeping; AC-7 schedule claim reason; AC-8 active-job skip activity reason; AC-9 jobs.dispatch outside bookkeeping; AC-10 dispatched job link reason; AC-11 tool-call ledger reason; AC-12 approval executor outside bookkeeping; AC-13 post-execution terminal action resolve and note reason; AC-14 built-in template creates reason when no templates exist; AC-15 new proposal action and approval reason.\nUS-008: AC-1 successful poll cursor reason; AC-2 successful poll log reason; AC-3 provider-error poll log reason; AC-4 previously unseen webhook delivery create reason; AC-5 replay forget delete reason; AC-6 push commit outbox reason; AC-7 same open PR state update reason; AC-8 open-to-closed state change outside bookkeeping; AC-9 existing-link upsert refresh reason; AC-10 new-link create outside bookkeeping; AC-11 context metric reason.\nUS-009: AC-1 one audited call enclosing bumpTokenVersion; AC-2 exact session.logout entry input; AC-3 same audited error and zero cache invalidations; AC-4 HTTP 200 plus exactly one logout action for the user's resource id; AC-5 USER actor id and logged out summary; AC-6 record rejection produces error status and unchanged tokenVersion.\nUS-010: AC-1 normalized notifications POST label; AC-2 undefined for undecorated method; AC-3 booted collector and helper both print POST /auth/logout; AC-4 interceptor unaudited write becomes named error; AC-5 that observable never completes; AC-6 audited observable emits ok and completes; AC-7 allowlisted observable emits ok and completes; AC-8 exactly one production log after three values; AC-9 zero-emission completion still rejects unaudited work; AC-10 no metadata preserves emitted value and opens no scope; AC-11 original observable error identity.\nUS-011: AC-1 system:budget surface; AC-2 strict system scope rejection; AC-3 writer:ScheduleTicker surface and SYSTEM/schedule actor; AC-4 synchronous value stays synchronous; AC-5 fixture actor/origin preserved with no newly opened scope; AC-6 invalid SYSTEM fixture id rejects before fn; AC-7 booted fixture user create returns row; AC-8 runner sync succeeds with unchanged prior boot, no jobs, no acks and no free slots; AC-9 unread notification read-all succeeds without audit entries; AC-10 second already-empty purge succeeds without coverage error or entry; AC-11 rejected enrollment audit rolls back rows without a coverage error.\nUS-012: AC-1 stale route violation; AC-2 allowlisted live GET violation; AC-3 live EmailDispatcher writer accepted; AC-4 missing writer violation; AC-5 live outbox system accepted and unknown system rejected; AC-6 blank reason on a live route violation; AC-7 booted full walk is empty with >200 routes and >=30 writers; AC-8 task label rejected as stale.\n\nRegression qualifiers were retained, including original error/result identity, restored environment, empty enclosing writes, real collaborator/stub conditions, existing-link null behavior, unchanged runner boot id, prior purge having removed every eligible row, and targeted enrollment rows surviving audit rejection. There are no deprecated grep/file/verbatim tags. Clarified observable semantics without weakening assertions: US-002 AC-11 now names all seven surfaces instead of referring to another story's unavailable description; US-007 AC-13 explicitly selects finalize's terminal resolve, not approve's earlier APPROVED resolve (apps/api/src/fleet/assistant/actions/assistant-action-decisions.ts:136-165); US-009 AC-4 identifies persisted key=session.logout rather than inventing an AuditEntry.action column (apps/api/src/audit/prisma-audit.storage.ts:21-25); US-012 AC-6 uses concrete POST /x rather than a placeholder. Ingest retry fixtures must use attempts 0, an existing unexpired artifact and a throwing store read, since exhausted attempts call markFailed (apps/api/src/fleet/ingest/bundle-ingest.service.ts:75-86,137-143). Poll cursor fixtures must supply a cursor rather than changing the existing conditional write (apps/api/src/vcs/vcs-polling.service.ts:176-178).\n\nAll eleven failure-table rows are represented: strict scope rejection/HTTP 500 -> US-001 AC-1 and US-010 AC-4/AC-12; production log/result -> US-001 AC-5/AC-6; original fn throw/rejection -> US-001 AC-7/AC-9; unknown bookkeeping -> US-002 AC-4/AC-5; rejected write -> US-003 AC-7; rejected transaction callback -> US-004 AC-2/AC-3/AC-7; allowlisted scope -> US-001 AC-8; missing route metadata -> US-010 AC-10; handler observable error -> US-010 AC-11; invalid SYSTEM fixture -> US-011 AC-6; failed logout record rollback/error response -> US-009 AC-6. US-010 AC-12 derives from that table, not an invented write route, and does not authorize the excluded test-only controller integration. Each story already has a negative path: US-001 AC-1; US-002 AC-4; US-003 AC-7; US-004 AC-2; US-005 AC-9; US-006 AC-5; US-007 AC-5; US-008 AC-3; US-009 AC-3; US-010 AC-4; US-011 AC-6; US-012 AC-1. No unrelated failure behavior was added.\n\nRegression coverage is explicit for all changes: US-002 AC-8 preserves noteAuditEntry in marked work; US-003 AC-7/AC-8 preserve errors/results, with new AC-9 pinning unchanged contextless refusal; US-004 AC-6 preserves error identity, with new AC-9 pinning array transaction delegation already required by the design; US-005 AC-6/AC-10/AC-13 preserve unmarked transitions/reboot decisions; US-006 AC-8 preserves existing-link null; US-007 AC-6/AC-9/AC-12 preserve unmarked domain execution; US-008 AC-8/AC-10 preserve unmarked state changes/new links; US-009 adds AC-7/AC-8 to pin both successful cache invalidations explicitly required by the spec's Modifies block and existing auth unit test (apps/api/src/auth/auth.service.spec.ts:631-641); US-010 AC-3/AC-6/AC-11 protect existing route labels, values and errors; US-011 AC-3 through AC-8 retain actor attribution, synchronous return and fixture/runner compatibility. US-001 and US-012 add new code without replacing existing behavior. New regression ACs implement the refine request and explicit design-preservation requirements, not new product scope; remaining optional hardening remains in suggestedCriteria.\n\nContextFiles audit: US-001 contains all three spec recommendations; US-002 contains its upstream-created audit-coverage.ts; US-003 contains both handler and existing handler spec; US-004 includes all four named recommendations plus upstream coverage core; US-005 includes exactly its five named service files; US-006 includes all four named source recommendations plus upstream core; US-007 and US-008 each contain exactly the five recommendations; US-009 contains both named auth files plus recorder/controller/endpoint integration context; US-010 includes all three named recommendations plus coverage core and the real boot/collect integration; US-011 includes all four named recommendations plus coverage core; US-012 includes all four named recommendations plus bootHttpApp. Every list stays within five. No story output is listed as its own input; upstream inputs are reachable through the binding dependency graph. Existing/missing colocated spec names were rechecked; proposed new spec files are necessary outputs rather than invented existing helpers. No new dependency was introduced and all twelve workdirs/dependency arrays remain exactly the binding table, including US-010's activation barrier and US-012's explicit contract-test story exception.\n\nRouting audit: reduced US-001 and US-010 from expert to complex, US-005/US-006/US-008 from complex to medium because their existing helpers and fixed marker sites do not require new architecture. US-001 retains lite multi-session testing for its new ALS abstraction; US-006 uses ordinary TDD for three existing files and the upstream scope helper. Strict security isolation remains for contextless enforcement, runner fencing, replay protection, assistant decisions, logout and global principal-context handling. US-004 remains expert for transaction proxy/ALS rollback accounting; US-011 remains expert because activation can expose cross-domain production writers across the existing HTTP/system suites.\n\nOut-of-scope audit: all sixteen items from the pre-Stories Out of Scope section remain verbatim in the top-level array, including all three explicitly US-specific items because the spec places them before Stories rather than beneath a story's ACs. The boundaries are per-entry-point detection, unreached surfaces, sign-in logs, raw query writes, commit failures after successful callbacks, future outbox handler enforcement, the existing kick catch, no disable switch, no TSV, no new catalog keys, no late-write tracking, no controller path arrays, manual production-log observation, US-005 READOPT/reboot exclusions, US-007 per-line fold exclusions and US-010 test-only controller exclusion. The adjacent US-005/US-007/US-010 descriptions echo their exclusions. No scope block excludes a file, helper or test that the same story is required to author. No pre-existing test assertion may be softened to make guard activation pass.",
+  "outOfScope": [
+    "A scope that records at least one entry and also makes a second, unaudited domain write is not detected; the guard checks per entry point, not per write.",
+    "A write surface that no integration or e2e spec reaches is not checked; adding specs for unreached routes is out of scope.",
+    "Auditing `POST /auth/login`, `POST /auth/refresh` and failed sign-ins is out of scope; they write no row, and a sign-in log is a security-log concern.",
+    "Writes made through `$queryRaw` (the outbox relay's `claimBatch` `UPDATE … RETURNING`) are not counted, because the context guard's `GUARDED_OPERATIONS` does not include `$queryRaw`; widening that set is out of scope.",
+    "A transaction whose callback resolves but whose commit then fails keeps its counts; the guard reads the callback's outcome only.",
+    "A check that a new outbox handler with domain writes opens its own `runAsSystemWriter` scope is out of scope; it stays a review rule (see `system:outbox`).",
+    "An `UnauditedWriteError` inside `BundleIngestService.kick`'s background drain is logged by its existing `.catch`, not thrown; changing that catch is out of scope.",
+    "A switch or environment variable that turns the coverage guard off is out of scope.",
+    "Reading or updating `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv` is out of scope; the walker reads the live app.",
+    "New permission catalog keys are out of scope; logout records the existing `session.logout`.",
+    "A write that reaches a scope after the scope closed is ignored; tracking it is out of scope.",
+    "Controllers whose `@Controller` path is an array are out of scope for `routeSurface`, as they are for the existing permission contract walker; none exists at `4592d038`.",
+    "Watching koda-wk's production logs for `UnauditedWriteError` lines after the deploy is a manual step after merge, not story work.",
+    "US-005 only: wrapping `CommandAckProcessor.reconcileBoot`'s READOPT `createCommand` and `runner.rebooted` activity row is out of scope; that branch records an entry when it queues or detects a reboot.",
+    "US-007 only: per-line conditions inside `PrismaThreadIngestRepository.fold` are out of scope; the whole fold body is bookkeeping and the `turn_end` entry still counts.",
+    "US-010 only: an integration test through a test-only controller that writes without recording is out of scope; the interceptor's throw path is covered by unit specs."
+  ],
+  "routingProfile": "native-codex-ds"
+}

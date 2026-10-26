@@ -14,13 +14,13 @@
  *
  * **Prisma promises are lazy.** A Prisma call returns a `PrismaPromise` that runs its query when it is
  * awaited, in the async context of the *awaiter* — not where it was created. So every helper here
- * awaits the call inside its context (`runAsSystem('seed', async () => await …)`); returning the
+ * awaits the call inside its context (`runWithActionContext(…, async () => await …)`); returning the
  * promise out of the context would run the query with no context at all.
  */
 import type { INestApplicationContext } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import {
-  runAsSystem,
+  SYSTEM_ACTOR_IDS,
   runWithActionContext,
   type ActionActor,
   type ActionOrigin,
@@ -65,9 +65,11 @@ const ORIGIN_BY_ACTOR_TYPE: Readonly<Record<Exclude<ActionActor['type'], 'SYSTEM
 /** Runs `fn` inside a context with `actor` and awaits it there (Prisma promises are lazy). */
 export async function withTestActor<T>(actor: ActionActor, fn: () => T | PromiseLike<T>): Promise<T> {
   if (actor.type === 'SYSTEM') {
-    // `runAsSystem` refuses an id outside SYSTEM_ACTOR_IDS before it runs fn, so a typo names itself
-    // (thrown inside this async function, so the caller sees a rejection).
-    return await runAsSystem(actor.id, async () => await fn());
+    if (!SYSTEM_ACTOR_IDS.has(actor.id)) {
+      throw new Error(`unknown system actor id: ${actor.id}`);
+    }
+    // Fixtures carry attribution, but unlike a production system entry they open no audit scope.
+    return await runWithActionContext({ actor, origin: 'system' }, async () => await fn());
   }
 
   const origin = ORIGIN_BY_ACTOR_TYPE[actor.type];
@@ -90,7 +92,7 @@ export function asTestActor<T extends object>(target: T, actor: ActionActor): T 
 }
 
 /**
- * The app's Prisma client; every model and raw call is awaited inside `runAsSystem('seed', …)`.
+ * The app's Prisma client; every model and raw call is awaited as SYSTEM/seed, without opening a scope.
  *
  * The array form `$transaction([…])` is deliberately unsupported — the wrapped calls return started
  * promises rather than Prisma promises. The interactive form works, and its callback runs inside the
@@ -161,7 +163,7 @@ function prismaClientOf(app: PrismaAppContext): PrismaClient {
 
 /** Awaits `call` inside `SYSTEM/seed`, so the statement runs under that context. */
 function asSeed<T>(call: () => T | PromiseLike<T>): Promise<T> {
-  return runAsSystem(SEED_COMPONENT, async () => await call());
+  return withTestActor({ type: 'SYSTEM', id: SEED_COMPONENT }, call);
 }
 
 /** Wraps a function-valued property so its call happens inside `withTestActor(actor, …)`. */

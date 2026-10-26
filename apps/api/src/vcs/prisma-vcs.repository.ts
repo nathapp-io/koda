@@ -1,4 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
+import { bookkeeping } from '../action-context/audit-coverage';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '../generated/prisma/client';
 import type { Ticket, VcsSyncLog } from '../generated/prisma/client';
@@ -301,7 +302,9 @@ export class PrismaVcsRepository implements IVcsRepository {
       const previousState = rows[0].prState;
       if (previousState === 'merged') return { result: 'already-merged' as const, previousState };
 
-      await this.db.ticketLink.update({ where: { id }, data: { prState, prUpdatedAt: new Date() } });
+      const write = () => this.db.ticketLink.update({ where: { id }, data: { prState, prUpdatedAt: new Date() } });
+      if (previousState === prState) await bookkeeping('vcs.pr-same-state', write);
+      else await write();
       return { result: 'updated' as const, previousState };
     });
   }
@@ -368,7 +371,7 @@ export class PrismaVcsRepository implements IVcsRepository {
     const existing = await this.db.ticketLink.findFirst({ where: { ticketId, url } });
 
     if (existing) {
-      await this.db.ticketLink.upsert({
+      await bookkeeping('vcs.link-refresh', () => this.db.ticketLink.upsert({
         where: { ticketId_url: { ticketId, url } },
         create: {
           ticketId,
@@ -382,7 +385,7 @@ export class PrismaVcsRepository implements IVcsRepository {
           linkType,
           externalRef: externalRef ?? null,
         },
-      });
+      }));
       return null;
     }
 

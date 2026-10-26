@@ -9,6 +9,7 @@ import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
+import { bookkeeping } from '../../action-context/audit-coverage';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { BundleIngestService } from './bundle-ingest.service';
 import { BUNDLE_INGEST_REPOSITORY, IBundleIngestRepository, INGEST_PARSER_VERSION } from './domain/bundle-ingest.domain';
@@ -88,10 +89,10 @@ export class FleetIngestController {
   ): Promise<{ queued: number }> {
     const queued = await this.txManager.run(async () => {
       const n = await run();
-      await this.activity.record({
+      await bookkeeping('fleet.ingest-progress', () => this.activity.record({
         actorType: 'USER', actorId, action, entityType, entityId, jobId: entityType === 'job' ? entityId : null, projectId,
         responsibleUserId: actorId, payload: { queued: n, parserVersion: INGEST_PARSER_VERSION },
-      });
+      }));
       if (n > 0) {
         await this.audit.record({ key: auditKey, resourceType, resourceId, projectId, summary: auditSummary(n) });
       }

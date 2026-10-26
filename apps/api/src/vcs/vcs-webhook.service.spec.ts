@@ -12,6 +12,7 @@ import type { VcsConnectionWithProjectDomain } from './domain/vcs.domain';
 import type { OutboxEventDomain } from '../outbox/domain/outbox-event.domain';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import type { OutboxDedupQuery, PrStateWriteOutcome } from './domain/vcs.repository';
+import { currentBookkeepingReason } from '../action-context/audit-coverage';
 
 interface SharedEnqueuedEvent {
   type: string;
@@ -175,7 +176,12 @@ describe('VcsWebhookService', () => {
       service = module.get<VcsWebhookService>(VcsWebhookService);
     });
 
-    it('should record a code_commit outbox event for each commit in the push payload', async () => {
+    it('should record each code_commit outbox event inside its bookkeeping reason', async () => {
+      let reason: string | undefined;
+      mockRecord.mockImplementation(async () => {
+        reason = currentBookkeepingReason();
+        return resolveOutboxEvent();
+      });
       const connection = createMockConnection();
       const payload = createPushPayload({
         commits: [
@@ -187,6 +193,7 @@ describe('VcsWebhookService', () => {
       await service.handleWebhook(connection, 'push', payload);
 
       expect(mockRecord).toHaveBeenCalledTimes(2);
+      expect(reason).toBe('vcs.push-outbox');
       expect(mockRecord).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'code_commit',

@@ -4,6 +4,7 @@
  * both buses are mocks here, so every assertion is about what the service decides, not about SQL.
  */
 import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { currentBookkeepingReason } from '../../../action-context/audit-coverage';
 import type { LiveFleetApprovalEvent } from '../../../live/live-event';
 import { AssistantActionService } from './assistant-action.service';
 import { ACTION_TTL_MS, MAX_PENDING_ACTIONS, type DirectActionInput, type NewPendingAction, type PendingActionRecord, type ProposeInput } from './pending-action.domain';
@@ -203,5 +204,84 @@ describe('AssistantActionService.recordDirect (3-D14)', () => {
     repo.insertDirect.mockRejectedValueOnce(new Error('boom'));
 
     await expect(service.recordDirect(direct())).rejects.toThrow('boom');
+  });
+});
+
+/**
+ * Permissions P2 US-007: a proposal's rows — the pending action, its approval and the approval id link — are the
+ * record of an action that has not run yet, so those three writes are bookkeeping.
+ */
+describe('AssistantActionService audit coverage (permissions P2 US-007)', () => {
+  type Reason = ReturnType<typeof currentBookkeepingReason>;
+
+  /** Records the bookkeeping reason current at each call of a stub, then answers exactly as the stub did. */
+  function watching<T>(fn: T, seen: Reason[]): T {
+    const mock = fn as unknown as {
+      getMockImplementation(): ((...args: never[]) => unknown) | undefined;
+      mockImplementation(impl: (...args: never[]) => unknown): void;
+    };
+    const impl = mock.getMockImplementation();
+    mock.mockImplementation((...args: never[]) => {
+      seen.push(currentBookkeepingReason());
+      return impl?.(...args);
+    });
+    return fn;
+  }
+
+  it('AC-15: propose inserts the action and opens its approval under assistant.action-proposal', async () => {
+    const { service, repo, closer } = fakes();
+    const inserted: Reason[] = [];
+    const opened: Reason[] = [];
+    const linked: Reason[] = [];
+    watching(repo.insert, inserted);
+    watching(closer.openAssistant, opened);
+    watching(repo.setApprovalId, linked);
+
+    await expect(service.propose(ask())).resolves.toEqual({ actionId: 'act1' });
+
+    expect(inserted).toEqual(['assistant.action-proposal']);
+    expect(opened).toEqual(['assistant.action-proposal']);
+    expect(linked).toEqual(['assistant.action-proposal']);
+  });
+
+  it('keeps the thread lock and the duplicate read counted, outside the marker', async () => {
+    const { service, repo } = fakes();
+    const locks: Reason[] = [];
+    const reads: Reason[] = [];
+    watching(repo.lockThread, locks);
+    watching(repo.findByCall, reads);
+
+    await service.propose(ask());
+
+    expect(locks).toEqual([undefined]);
+    expect(reads).toEqual([undefined]);
+  });
+
+  it('leaves no reason current once the proposal has resolved', async () => {
+    const { service } = fakes();
+
+    await service.propose(ask());
+
+    expect(currentBookkeepingReason()).toBeUndefined();
+  });
+});
+
+/** 3-D14: the record of a direct write is the caller's own ledger row, so it is bookkeeping as a whole. */
+describe('AssistantActionService.recordDirect audit coverage (permissions P2 US-007)', () => {
+  type Reason = ReturnType<typeof currentBookkeepingReason>;
+
+  it('records the direct action under assistant.direct-action-record', async () => {
+    const { service, repo } = fakes();
+    const seen: Reason[] = [];
+    const impl = repo.insertDirect.getMockImplementation() as (input: DirectActionInput) => Promise<{ id: string }>;
+    repo.insertDirect.mockImplementation(async (input: DirectActionInput) => {
+      seen.push(currentBookkeepingReason());
+      return impl(input);
+    });
+
+    await expect(service.recordDirect(direct())).resolves.toEqual({ actionId: 'ad1' });
+
+    expect(seen).toEqual(['assistant.direct-action-record']);
+    expect(currentBookkeepingReason()).toBeUndefined();
   });
 });

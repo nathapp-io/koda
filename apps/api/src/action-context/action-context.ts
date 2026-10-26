@@ -4,6 +4,7 @@ import { LoggerContext } from '@nathapp/nestjs-logging';
 import type { FleetActorType } from '../common/enums';
 import { PERMISSION_CATALOG, type ApprovalMode } from '../permissions/catalog';
 import { SYSTEM_WRITER_METADATA } from '../permissions/system-writer.decorator';
+import { runInAuditScope } from './audit-coverage';
 
 /**
  * Permissions P1d US-001 introduced the action context as an early slice of P2's `ActionContext`;
@@ -122,7 +123,7 @@ function resolveCorrelationId(): string {
 export function runAsSystem<T>(
   component: string,
   fn: () => T,
-  opts?: { onBehalfOf?: ActionContext['onBehalfOf']; correlationId?: string },
+  opts?: { onBehalfOf?: ActionContext['onBehalfOf']; correlationId?: string; surface?: string },
 ): T {
   if (!SYSTEM_ACTOR_IDS.has(component)) {
     throw new Error(`unknown system actor id: ${component}`);
@@ -135,7 +136,7 @@ export function runAsSystem<T>(
     onBehalfOf: opts?.onBehalfOf,
   };
 
-  return runWithActionContext(input, fn);
+  return runWithActionContext(input, () => runInAuditScope(opts?.surface ?? `system:${component}`, fn));
 }
 
 /**
@@ -148,7 +149,7 @@ export function runAsSystemWriter<T>(writer: object, fn: () => T): T {
     throw new Error(`runAsSystemWriter needs a @SystemWriter class, got ${writer.constructor.name}`);
   }
 
-  return runAsSystem(key.split('.')[1], fn);
+  return runAsSystem(key.split('.')[1], fn, { surface: `writer:${writer.constructor.name}` });
 }
 
 /** Runs fn with actor as the current actor and origin `rest`; the compatibility helper of P1d US-001. */

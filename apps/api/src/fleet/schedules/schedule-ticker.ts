@@ -4,6 +4,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nest
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { runAsSystem, runAsSystemWriter } from '../../action-context/action-context';
+import { bookkeeping } from '../../action-context/audit-coverage';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import type { PrincipalRef } from '../../permissions/permissions.types';
@@ -113,7 +114,7 @@ export class ScheduleTicker implements OnModuleInit, OnModuleDestroy {
         await this.disable(due, 'template_invalid', `cron does not parse: ${messageOf(error)}`);
         return 'disabled';
       }
-      if (!(await this.repo.claimFire(due.id, due.nextFireAt, next, now))) return 'lost';
+      if (!(await bookkeeping('fleet.schedule-bookkeeping', () => this.repo.claimFire(due.id, due.nextFireAt, next, now)))) return 'lost';
       return await this.fire(due);
     } catch (error) {
       this.logger.error(`Schedule ${due.id} failed: ${messageOf(error)}`);
@@ -126,20 +127,20 @@ export class ScheduleTicker implements OnModuleInit, OnModuleDestroy {
       const active = await this.repo.findActiveJob(s.id);
       if (!active) return this.dispatchFresh(s);
       if (active.state !== 'QUEUED') {
-        await this.record(s, 'schedule.tick_skipped', { reason: 'job_active', jobId: active.id, state: active.state });
+        await bookkeeping('fleet.schedule-bookkeeping', () => this.record(s, 'schedule.tick_skipped', { reason: 'job_active', jobId: active.id, state: active.state }));
         return 'skipped';
       }
       const absorbed = await this.txManager.run(async () => {
         const jobId = await this.repo.coalesceIntoQueued(s.id);
         if (jobId) {
-          await this.record(s, 'schedule.tick_coalesced', { jobId });
+          await bookkeeping('fleet.schedule-bookkeeping', () => this.record(s, 'schedule.tick_coalesced', { jobId }));
           await this.withScheduleAudit(s, { key: 'system.schedule.dispatch', resourceType: 'fleet-schedule', resourceId: s.id, projectId: s.projectId, summary: `coalesced into job ${jobId}` });
         }
         return jobId;
       });
       if (absorbed) return 'coalesced';
     }
-    await this.record(s, 'schedule.tick_skipped', { reason: 'busy' });
+    await bookkeeping('fleet.schedule-bookkeeping', () => this.record(s, 'schedule.tick_skipped', { reason: 'busy' }));
     return 'skipped';
   }
 
@@ -172,22 +173,27 @@ export class ScheduleTicker implements OnModuleInit, OnModuleDestroy {
     return 'dispatched';
   }
 
-  /** Sets lastJobId and records the dispatch in one transaction. */
+  /**
+   * Sets lastJobId and records the dispatch in one transaction.
+   *
+   * Permissions P2 US-007: the last-job link and its activity row are the schedule's own bookkeeping, so the whole
+   * body is uncounted. The dispatch it follows is a job creation and stays counted.
+   */
   private linkDispatched(s: ScheduleRecord, jobId: string, extra: Record<string, unknown>): Promise<void> {
-    return this.txManager.run(async () => {
+    return this.txManager.run(() => bookkeeping('fleet.schedule-bookkeeping', async () => {
       await this.repo.update(s.id, { lastJobId: jobId });
       await this.record(s, 'schedule.tick_dispatched', { jobId, ...extra });
-    });
+    }));
   }
 
   /** Plan D199: most specific first; BudgetPausedException is a ConflictAppException. */
   private async onDispatchError(s: ScheduleRecord, error: unknown): Promise<Outcome> {
     if (error instanceof BudgetPausedException) {
-      await this.record(s, 'schedule.tick_skipped', { reason: 'budget_paused' });
+      await bookkeeping('fleet.schedule-bookkeeping', () => this.record(s, 'schedule.tick_skipped', { reason: 'budget_paused' }));
       return 'skipped';
     }
     if (error instanceof ConflictAppException) {
-      await this.record(s, 'schedule.tick_skipped', { reason: 'active_job_elsewhere' });
+      await bookkeeping('fleet.schedule-bookkeeping', () => this.record(s, 'schedule.tick_skipped', { reason: 'active_job_elsewhere' }));
       return 'skipped';
     }
     if (error instanceof NotFoundAppException || error instanceof FleetDispatchException || error instanceof ValidationAppException) {
@@ -203,7 +209,7 @@ export class ScheduleTicker implements OnModuleInit, OnModuleDestroy {
       await this.linkDispatched(s, created.id, { sideEffectFailed: true });
       return 'dispatched';
     }
-    await this.record(s, 'schedule.tick_skipped', { reason: 'error' });
+    await bookkeeping('fleet.schedule-bookkeeping', () => this.record(s, 'schedule.tick_skipped', { reason: 'error' }));
     return 'skipped';
   }
 

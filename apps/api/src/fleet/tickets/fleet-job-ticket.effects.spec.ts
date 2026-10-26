@@ -1,6 +1,8 @@
 import type { Mock } from 'vitest';
 import { FleetJobTicketEffects } from './fleet-job-ticket.effects';
+import { currentAuditScope, currentBookkeepingReason, noteAuditWrite, runInAuditScope, UnauditedWriteError } from '../../action-context/audit-coverage';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
+import { PrismaFleetTicketsRepository } from './prisma-fleet-tickets.repository';
 
 const auditRecord = mockAuditRecorder.record as unknown as Mock;
 
@@ -53,6 +55,59 @@ describe('FleetJobTicketEffects.onTerminal (C9 §3.2, D453)', () => {
     };
     events = { record: vi.fn() };
     effects = new FleetJobTicketEffects({} as never, repo as never, events as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder);
+  });
+
+  it('AC-3: loads failed-job linked tickets inside the task scope', async () => {
+    let observedSurface: string | undefined;
+    repo.findJobForEffects.mockResolvedValue(effectJob('FAILED'));
+    repo.findTicketsForJob.mockImplementation(async () => {
+      observedSurface = currentAuditScope()?.surface;
+      return [linked('t1')];
+    });
+    await effects.onTerminal(['j1']);
+    expect(repo.findTicketsForJob).toHaveBeenCalledWith('j1');
+    expect(observedSurface).toBe('task:FleetJobTicketEffects.onTerminal');
+  });
+
+  it('AC-4: detaches its task scope from a runner sync scope', async () => {
+    let observedSurface: string | undefined;
+    let observedParent: ReturnType<typeof currentAuditScope>;
+    repo.findJobForEffects.mockResolvedValue(effectJob('FAILED'));
+    repo.findTicketsForJob.mockImplementation(async () => {
+      observedSurface = currentAuditScope()?.surface;
+      observedParent = currentAuditScope()?.parent;
+      return [linked('t1')];
+    });
+    await runInAuditScope('POST /fleet/runner/sync', () => effects.onTerminal(['j1']));
+    expect(observedSurface).toBe('task:FleetJobTicketEffects.onTerminal');
+    expect(observedParent).toBeUndefined();
+  });
+
+  it('AC-5: rejects an unaudited write attributed to the detached task scope', async () => {
+    vi.stubEnv('ENV_NAME', 'test');
+    repo.findJobForEffects.mockResolvedValue(effectJob('FAILED'));
+    repo.findTicketsForJob.mockImplementation(async () => {
+      noteAuditWrite('TicketLink.update');
+      return [linked('t1')];
+    });
+    repo.claimNotified.mockResolvedValue(false);
+    const rejection = await effects.onTerminal(['j1']).catch((error: unknown) => error);
+    vi.unstubAllEnvs();
+    expect(rejection).toBeInstanceOf(UnauditedWriteError);
+    expect(rejection).toMatchObject({ surface: 'task:FleetJobTicketEffects.onTerminal' });
+  });
+
+  it('AC-6: claims failure comments under the ticket-comment bookkeeping reason', async () => {
+    let observedReason: ReturnType<typeof currentBookkeepingReason>;
+    repo.findJobForEffects.mockResolvedValue(effectJob('FAILED'));
+    repo.findTicketsForJob.mockResolvedValue([linked('t1')]);
+    repo.claimNotified.mockImplementation(async () => {
+      observedReason = currentBookkeepingReason();
+      return false;
+    });
+    await effects.onTerminal(['j1']);
+    expect(repo.claimNotified).toHaveBeenCalledWith('j1', 't1', 3);
+    expect(observedReason).toBe('fleet.ticket-comment-claim');
   });
 
   it.each(['FAILED', 'ESCALATED', 'CRASHED'])('comments on every linked ticket for %s and records COMMENT_ADDED', async (state) => {
@@ -184,6 +239,36 @@ describe('FleetJobTicketEffects.upsertPrLinks (C9 §3.3, D455)', () => {
     expect(repo.upsertFleetPrLink).toHaveBeenCalledTimes(2);
     repo.findJobForPrLinks.mockRejectedValueOnce(new Error('db down'));
     await expect(effects.upsertPrLinks('j1')).resolves.toBeUndefined();
+  });
+
+  it('AC-7/AC-8: marks an existing PR link refresh as bookkeeping and returns null', async () => {
+    let observedReason: ReturnType<typeof currentBookkeepingReason>;
+    const prisma = {
+      client: {
+        ticketLink: {
+          createManyAndReturn: vi.fn().mockResolvedValue([]),
+          updateMany: vi.fn().mockImplementation(async () => {
+            observedReason = currentBookkeepingReason();
+            return { count: 1 };
+          }),
+        },
+      },
+    };
+    const persistence = new PrismaFleetTicketsRepository(prisma as never);
+    repo.findJobForEffects.mockResolvedValue({ id: 'j1', projectId: 'p', projectSlug: 'web', command: 'RUN', state: 'COMPLETED', leaseEpoch: 1, stateReason: null, escalationReason: null, requestedById: 'u1' });
+    repo.findJobForPrLinks.mockResolvedValue(prJob('https://github.com/acme/app/pull/9'));
+    repo.findTicketsForJob.mockResolvedValue([linked('t1')]);
+    repo.upsertFleetPrLink.mockImplementation((input) => persistence.upsertFleetPrLink(input as never));
+
+    await effects.onTerminal(['j1']);
+    expect(prisma.client.ticketLink.updateMany).toHaveBeenCalledWith({
+      where: { ticketId: 't1', url: 'https://github.com/acme/app/pull/9' }, data: { jobId: 'j1' },
+    });
+    expect(observedReason).toBe('fleet.pr-link-job');
+    expect(await persistence.upsertFleetPrLink({
+      ticketId: 't1', jobId: 'j1', url: 'https://github.com/acme/app/pull/9', provider: 'github', prNumber: 9,
+      externalRef: 'acme/app#9', now: new Date(),
+    })).toBeNull();
   });
 
   it('runs from onTerminal for a COMPLETED job (no comment, PR linked)', async () => {

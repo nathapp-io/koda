@@ -3,6 +3,7 @@ import { HttpException } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma } from '../generated/prisma/client';
 import { WebhookReplayGuard } from './webhook-replay.guard';
+import { currentBookkeepingReason } from '../action-context/audit-coverage';
 
 function uniqueViolation(): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
@@ -54,8 +55,14 @@ describe('WebhookReplayGuard', () => {
     expect(findUniqueMock).not.toHaveBeenCalled();
   });
 
-  it('accepts a fresh delivery and persists it', async () => {
+  it('accepts a fresh delivery and persists it as replay bookkeeping', async () => {
+    let reason: string | undefined;
+    createMock.mockImplementation(async () => {
+      reason = currentBookkeepingReason();
+      return { id: 'delivery-row-1' };
+    });
     await guard.assertFresh({ projectId: 'p1', source: 'github', deliveryId: 'd1' });
+    expect(reason).toBe('webhook.replay-record');
 
     expect(findUniqueMock).toHaveBeenCalledWith({
       where: { projectId_source_deliveryId: { projectId: 'p1', source: 'github', deliveryId: 'd1' } },
@@ -141,9 +148,15 @@ describe('WebhookReplayGuard', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('forget removes the persisted delivery so retries are accepted', async () => {
+  it('forget removes the persisted delivery inside replay bookkeeping', async () => {
+    let reason: string | undefined;
+    deleteManyMock.mockImplementation(async () => {
+      reason = currentBookkeepingReason();
+      return { count: 1 };
+    });
     await guard.assertFresh({ projectId: 'p1', source: 'github', deliveryId: 'd6' });
     await guard.forget({ projectId: 'p1', source: 'github', deliveryId: 'd6' });
+    expect(reason).toBe('webhook.replay-record');
 
     expect(deleteManyMock).toHaveBeenCalledWith({
       where: { projectId: 'p1', source: 'github', deliveryId: 'd6' },
