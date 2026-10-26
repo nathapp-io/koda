@@ -6,6 +6,7 @@ import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
 import { isRunnerOnline } from '../../fleet/common/runner-online';
 import { readCapabilities } from '../../fleet/dashboard/dashboard-view';
 import { runAsSystemWriter } from '../../action-context/action-context';
+import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { FleetHealthAlertsRepository } from './fleet-health-alerts.repository';
 import { planHealthChanges } from './fleet-health-plan';
 import { FLEET_HEALTH_ALERT, FleetHealthAlertPayload } from './fleet-notification-events';
@@ -31,6 +32,7 @@ export class FleetHealthDetector implements OnModuleInit, OnModuleDestroy {
     private readonly outbox: OutboxService,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_CFG) private readonly cfg: HealthConfig,
+    private readonly audit: AuditRecorder,
   ) {}
 
   onModuleInit(): void {
@@ -71,11 +73,32 @@ export class FleetHealthDetector implements OnModuleInit, OnModuleDestroy {
         if (!alertId) return false;
         const payload: FleetHealthAlertPayload = { alertId, kind: req.kind, runner: req.runner, provider: req.provider, expiresAt: req.expiresAt };
         await this.outbox.record({ type: FLEET_HEALTH_ALERT, payload, metadata: { eventId: alertId } });
+        // Permissions P2 US-004: the entry belongs to the episode's own transaction, so a rejected
+        // record rolls the alert and its event back and detect rejects for the next tick to retry.
+        await this.audit.record({
+          key: 'system.health.detect',
+          resourceType: 'fleet-health-alert',
+          resourceId: alertId,
+          projectId: null,
+          summary: `opened ${req.kind}`,
+        });
         return true;
       });
       if (done) opened += 1;
     }
-    const closed = plan.close.length > 0 ? await this.repo.close(plan.close, now) : 0;
+    // Permissions P2 US-004: one entry per run that closed episodes, with the same rollback rule.
+    const closed = plan.close.length > 0
+      ? await this.audit.audited(
+        () => this.repo.close(plan.close, now),
+        (count) => count === 0 ? [] : [{
+          key: 'system.health.detect',
+          resourceType: 'fleet-health-alert',
+          resourceId: 'all',
+          projectId: null,
+          summary: `closed ${count}`,
+        }],
+      )
+      : 0;
     return { opened, closed };
   }
 }

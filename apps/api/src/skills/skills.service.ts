@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
-import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { parseGitHubUrl } from './github-url';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
@@ -13,7 +13,7 @@ export class SkillsService {
   constructor(
     @Inject(SKILL_CATALOG_REPOSITORY) private readonly catalog: SkillCatalogRepository,
     @Inject(SKILL_RESOLVER) private readonly resolver: SkillResolver,
-    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async createSource(input: { gitUrl: string; ref: string; path: string }, principal: KodaPrincipal): Promise<SkillSourceDomain> {
@@ -35,19 +35,26 @@ export class SkillsService {
       statusReason = formatSkillResolveReason(error.reason, error.detail);
     }
 
-    return this.txManager.run(() => this.catalog.createSource({
-      gitUrl: parsed.gitUrl,
-      owner: parsed.owner,
-      repo: parsed.repo,
-      ref: input.ref,
-      path: input.path,
-      resolvedSha: resolution?.sha ?? null,
-      resolvedAt: resolution ? new Date() : null,
-      status: resolution ? 'OK' : 'RESOLVE_FAILED',
-      statusReason,
-      createdById: principal.id,
-      skills: resolution?.skills ?? [],
-    }));
+    const created = await this.audit.audited(
+      () => this.catalog.createSource({
+        gitUrl: parsed.gitUrl,
+        owner: parsed.owner,
+        repo: parsed.repo,
+        ref: input.ref,
+        path: input.path,
+        resolvedSha: resolution?.sha ?? null,
+        resolvedAt: resolution ? new Date() : null,
+        status: resolution ? 'OK' : 'RESOLVE_FAILED',
+        statusReason,
+        createdById: principal.id,
+        skills: resolution?.skills ?? [],
+      }),
+      (source) => source ? {
+        key: 'skill.source.create', resourceType: 'skill-source', resourceId: source.id, projectId: null,
+        summary: `created, status ${source.status}, skills ${source.skills.length}`,
+      } : [],
+    );
+    return created;
   }
 
   async updateSource(id: string): Promise<SkillSourceDomain> {
@@ -60,7 +67,13 @@ export class SkillsService {
       if (resolution.skills.length === 0) throw new SkillResolveError('no_skills');
     } catch (error) {
       if (!(error instanceof SkillResolveError)) throw error;
-      const failed = await this.txManager.run(() => this.catalog.markResolveFailed(id, formatSkillResolveReason(error.reason, error.detail)));
+      const failed = await this.audit.audited(
+        () => this.catalog.markResolveFailed(id, formatSkillResolveReason(error.reason, error.detail)),
+        (source) => source ? {
+          key: 'skill.source.update', resourceType: 'skill-source', resourceId: source.id, projectId: null,
+          summary: `updated, status ${source.status}, skills ${source.skills.length}`,
+        } : [],
+      );
       if (!failed) throw new NotFoundAppException({}, 'skills.sourceNotFound');
       return failed;
     }
@@ -72,11 +85,17 @@ export class SkillsService {
     }
 
     try {
-      const updated = await this.txManager.run(() => this.catalog.replaceSourceSkills(id, {
-        resolvedSha: resolution.sha,
-        resolvedAt: new Date(),
-        skills: resolution.skills,
-      }));
+      const updated = await this.audit.audited(
+        () => this.catalog.replaceSourceSkills(id, {
+          resolvedSha: resolution.sha,
+          resolvedAt: new Date(),
+          skills: resolution.skills,
+        }),
+        (source) => source ? {
+          key: 'skill.source.update', resourceType: 'skill-source', resourceId: source.id, projectId: null,
+          summary: `updated, status ${source.status}, skills ${source.skills.length}`,
+        } : [],
+      );
       if (!updated) throw new NotFoundAppException({}, 'skills.sourceNotFound');
       return updated;
     } catch (error) {
@@ -89,7 +108,12 @@ export class SkillsService {
   }
 
   async deleteSource(id: string): Promise<void> {
-    const deleted = await this.txManager.run(() => this.catalog.deleteSource(id));
+    const deleted = await this.audit.audited(
+      () => this.catalog.deleteSource(id),
+      (didDelete) => didDelete ? {
+        key: 'skill.source.delete', resourceType: 'skill-source', resourceId: id, projectId: null, summary: 'deleted',
+      } : [],
+    );
     if (!deleted) throw new NotFoundAppException({}, 'skills.sourceNotFound');
   }
 
@@ -106,13 +130,24 @@ export class SkillsService {
   }
 
   async enableProjectSkill(projectId: string, skillId: string, userId: string) {
-    const skill = await this.catalog.enableProjectSkill(projectId, skillId, userId);
+    const skill = await this.audit.audited(
+      () => this.catalog.enableProjectSkill(projectId, skillId, userId),
+      (result) => result ? {
+        key: 'skill.project.enable', resourceType: 'skill', resourceId: skillId, projectId, summary: 'enabled',
+      } : [],
+    );
     if (!skill) throw new NotFoundAppException({}, 'skills.notFound');
     return skill;
   }
 
   async disableProjectSkill(projectId: string, skillId: string): Promise<void> {
-    if (!await this.catalog.disableProjectSkill(projectId, skillId)) {
+    const disabled = await this.audit.audited(
+      () => this.catalog.disableProjectSkill(projectId, skillId),
+      (didDisable) => didDisable ? {
+        key: 'skill.project.disable', resourceType: 'skill', resourceId: skillId, projectId, summary: 'disabled',
+      } : [],
+    );
+    if (!disabled) {
       throw new NotFoundAppException({}, 'skills.notFound');
     }
   }

@@ -8,7 +8,7 @@ function setup(ticketId: string | null = 't1') {
     unwatch: vi.fn().mockResolvedValue(undefined),
     state: vi.fn().mockResolvedValue({ watching: true, count: 2 }),
   };
-  return { repo, service: new TicketWatchService(repo as never) };
+  return { repo, service: new TicketWatchService(repo as never, { audited: vi.fn(async (fn: () => Promise<unknown>) => fn()), record: vi.fn() } as never) };
 }
 
 describe('TicketWatchService (S4a §3, D502)', () => {

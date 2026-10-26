@@ -4,6 +4,8 @@ import { ConfigService } from '@nestjs/config';
 import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
 import { OutboxStatus } from '@nathapp/nestjs-outbox';
 import { currentContext, type ActionContext } from '../action-context/action-context';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import { OutboxRetentionProcessor } from './outbox-retention.processor';
 import { PrismaOutboxRepository } from './prisma-outbox.repository';
 import { IOutboxConfig } from '../config/outbox.config';
@@ -42,6 +44,7 @@ describe('OutboxRetentionProcessor', () => {
         OutboxRetentionProcessor,
         { provide: PrismaOutboxRepository, useValue: mockRepository },
         { provide: ConfigService, useValue: createMockConfig(baseConfig(30)) },
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         SchedulerRegistry,
         Reflector,
       ],
@@ -81,6 +84,7 @@ describe('OutboxRetentionProcessor', () => {
         OutboxRetentionProcessor,
         { provide: PrismaOutboxRepository, useValue: mockRepository },
         { provide: ConfigService, useValue: createMockConfig(baseConfig(null)) },
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
         SchedulerRegistry,
         Reflector,
       ],

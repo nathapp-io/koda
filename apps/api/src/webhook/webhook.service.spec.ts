@@ -23,6 +23,16 @@ import { DnsResolver } from './outbound/dns-resolver';
 import { OutboundUrlGuard, OutboundUrlRejection } from './outbound/outbound-url-guard';
 import type { IWebhookConfig } from '../config/webhook.config';
 import type { WebhookDomain, WebhookListItem, WebhookView } from './domain/webhook.domain';
+import type { AuditRecorder } from '../audit/audit-recorder.service';
+
+const mockAuditRecorder = {
+  audited: vi.fn(async <T>(fn: () => Promise<T>, entriesOf: (result: T) => unknown) => {
+    const result = await fn();
+    entriesOf(result);
+    return result;
+  }),
+  record: vi.fn(),
+} as unknown as AuditRecorder;
 
 interface UrlGuardStub {
   checkUrl: Mock<(...args: [string]) => Promise<void>>;
@@ -107,7 +117,7 @@ describe('WebhookService', () => {
   beforeEach(() => {
     webhookRepo = makeWebhookRepo();
     urlGuard = makeUrlGuardStub();
-    service = new WebhookService(webhookRepo, urlGuard as unknown as OutboundUrlGuard);
+    service = new WebhookService(webhookRepo, urlGuard as unknown as OutboundUrlGuard, mockAuditRecorder);
   });
 
   afterEach(() => {
@@ -115,6 +125,22 @@ describe('WebhookService', () => {
   });
 
   describe('create', () => {
+    it('audits created webhook configuration without exposing values', async () => {
+      webhookRepo.createWebhook.mockResolvedValue(mockWebhook);
+
+      await service.create('proj-1', {
+        url: 'https://example.com/hook', events: ['ticket.created'], secret: 'sensitive',
+      });
+
+      expect(mockAuditRecorder.audited).toHaveBeenCalled();
+      const entriesOf = vi.mocked(mockAuditRecorder.audited).mock.calls.at(-1)?.[1];
+      expect(entriesOf?.(mockWebhook)).toMatchObject({
+        key: 'webhook.create', resourceType: 'webhook', resourceId: 'wh-1',
+        projectId: 'proj-1', summary: 'created',
+      });
+      expect(JSON.stringify(entriesOf?.(mockWebhook))).not.toContain('sensitive');
+    });
+
     it('creates a webhook with the provided secret', async () => {
       webhookRepo.createWebhook.mockResolvedValue(mockWebhook);
 
@@ -328,6 +354,7 @@ describe('WebhookService', () => {
       realGuardService = new WebhookService(
         webhookRepo,
         new OutboundUrlGuard(webhookConfig, makeUnresolvableResolver()),
+        mockAuditRecorder,
       );
     });
 

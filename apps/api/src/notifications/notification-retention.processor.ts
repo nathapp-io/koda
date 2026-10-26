@@ -3,6 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { runAsSystemWriter } from '../action-context/action-context';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import { INotificationsConfig, NOTIFICATIONS_CFG } from '../config/notifications.config';
 import { NotificationsRepository } from './notifications.repository';
 import { FleetHealthAlertsRepository } from './fleet/fleet-health-alerts.repository';
@@ -25,6 +26,7 @@ export class NotificationRetentionProcessor {
     private readonly repo: NotificationsRepository,
     private readonly config: ConfigService,
     private readonly healthAlerts: FleetHealthAlertsRepository,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /** Permissions P2 US-005: the cron method is the background entry; the purge runs as `notification`. */
@@ -42,7 +44,18 @@ export class NotificationRetentionProcessor {
   /** S4a §1: closed health episodes are kept 30 days, open ones forever. */
   private async purgeClosedHealthAlerts(now: Date): Promise<void> {
     try {
-      const deleted = await this.healthAlerts.purgeClosed(new Date(now.getTime() - HEALTH_ALERT_RETENTION_MS));
+      // Permissions P2 US-004: this step's delete and its entry are one transaction, so a rejected
+      // record rolls the delete back and the catch below logs it (the read step keeps its own).
+      const deleted = await this.audit.audited(
+        () => this.healthAlerts.purgeClosed(new Date(now.getTime() - HEALTH_ALERT_RETENTION_MS)),
+        (count) => count === 0 ? [] : [{
+          key: 'system.notification.retention',
+          resourceType: 'fleet-health-alert',
+          resourceId: 'all',
+          projectId: null,
+          summary: `purged ${count} closed health alerts`,
+        }],
+      );
       this.logger.log(`Purged ${deleted} closed fleet health alert(s)`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -55,7 +68,16 @@ export class NotificationRetentionProcessor {
     if (days === null || days === undefined || days <= 0) return;
     const before = new Date(now.getTime() - days * DAY_MS);
     try {
-      const deleted = await this.repo.purgeRead(before);
+      const deleted = await this.audit.audited(
+        () => this.repo.purgeRead(before),
+        (count) => count === 0 ? [] : [{
+          key: 'system.notification.retention',
+          resourceType: 'notification',
+          resourceId: 'all',
+          projectId: null,
+          summary: `purged ${count} read notifications`,
+        }],
+      );
       this.logger.log(`Purged ${deleted} read notification(s) read before ${before.toISOString()}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

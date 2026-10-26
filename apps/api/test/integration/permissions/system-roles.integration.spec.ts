@@ -65,7 +65,8 @@ describeIntegration('permissions roles and bindings (PG)', () => {
   beforeAll(() => {
     roles = new PrismaRoleRepository(txManager, prismaService);
     bindings = new PrismaRoleBindingRepository(txManager, prismaService);
-    seeder = new SystemRoleSeeder(SYSTEM_ROLES, roles);
+    const audit = { audited: async <T>(fn: () => Promise<T>) => fn(), record: async () => undefined } as import('../../../src/audit/audit-recorder.service').AuditRecorder;
+    seeder = new SystemRoleSeeder(SYSTEM_ROLES, roles, audit);
   });
 
   beforeEach(async () => {

@@ -1,5 +1,6 @@
 import { FleetHealthDetector } from './fleet-health.detector';
 import { currentContext, type ActionContext } from '../../action-context/action-context';
+import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 
 const T0 = new Date('2026-10-09T12:00:00.000Z').getTime();
 const CFG = { sweepEnabled: false, runnerOfflineSec: 90, credentialExpiryWarnDays: 7 };
@@ -19,7 +20,7 @@ describe('FleetHealthDetector (S4a §2.4, D507, D515)', () => {
 
   beforeEach(() => {
     vi.useFakeTimers({ now: T0 });
-    detector = new FleetHealthDetector(repo as never, outbox as never, tx as never, CFG as never);
+    detector = new FleetHealthDetector(repo as never, outbox as never, tx as never, CFG as never, mockAuditRecorder as never);
     order.length = 0;
   });
   afterEach(() => {
@@ -68,7 +69,7 @@ describe('FleetHealthDetector (S4a §2.4, D507, D515)', () => {
 
   /** Permissions P2 US-005: the interval callback is the background entry; the detect runs as `health`. */
   it('AC-7: the interval callback reads the runners as SYSTEM/health', async () => {
-    const swept = new FleetHealthDetector(repo as never, outbox as never, tx as never, { ...CFG, sweepEnabled: true } as never);
+    const swept = new FleetHealthDetector(repo as never, outbox as never, tx as never, { ...CFG, sweepEnabled: true } as never, mockAuditRecorder as never);
     const seen: Array<ActionContext | undefined> = [];
     repo.findRunners.mockImplementationOnce(async () => {
       seen.push(currentContext());
