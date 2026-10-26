@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from '../../generated/prisma/client';
+import { noteAuditEntry } from '../../action-context/audit-coverage';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { SystemRoleSeeder } from '../system-role.seeder';
 import type { AuditRecorder } from '../../audit/audit-recorder.service';
@@ -32,7 +33,18 @@ export async function ensureSystemRoles(db: RoleGrantDb): Promise<void> {
     createRole: async (input: Omit<RoleDomain, 'id'>) => roleDomain(await db.role.create({ data: input })),
     update: async (id: string, patch: Partial<RoleDomain>) => roleDomain(await db.role.update({ where: { id }, data: patch })),
   } as unknown as RoleRepository;
-  const audit = { audited: async <T>(fn: () => Promise<T>) => fn(), record: async () => undefined } as unknown as AuditRecorder;
+  // The seeder is a production entry point (`runAsSystem('seed', …)` opens an audit scope), so its
+  // recorder double must account for the entries it "records": the real `AuditRecorder` notes one per
+  // record, and the coverage guard reads that count. A double that only calls `fn` would leave the
+  // seed's Role writes counted with no entry.
+  const audit = {
+    audited: async <T>(fn: () => Promise<T>) => {
+      const result = await fn();
+      noteAuditEntry();
+      return result;
+    },
+    record: async () => noteAuditEntry(),
+  } as unknown as AuditRecorder;
   await new SystemRoleSeeder(SYSTEM_ROLES, roles, audit).onApplicationBootstrap();
 }
 
