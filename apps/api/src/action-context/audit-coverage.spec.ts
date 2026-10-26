@@ -192,4 +192,17 @@ describe('audit coverage scopes', () => {
     expect(() => noteAuditEntry()).not.toThrow();
     expect(currentAuditScope()).toBeUndefined();
   });
+
+  // Not an AC: the synchronous branch of `runInAuditScope` (check at once, value returned as it is,
+  // not a promise), which no AC's scenario reaches — every AC but AC-9 and AC-13 returns a promise.
+  it('checks a synchronous result at once and returns it unchanged', () => {
+    expect(runInAuditScope('system:unknown', () => 7)).toBe(7);
+
+    expect(() =>
+      runInAuditScope('POST /x', () => {
+        noteAuditWrite('Ticket.update');
+        return 7;
+      }),
+    ).toThrow(UnauditedWriteError);
+  });
 });
