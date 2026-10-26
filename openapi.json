@@ -11749,6 +11749,202 @@
           "audit"
         ]
       }
+    },
+    "/api/approvals": {
+      "get": {
+        "operationId": "ApprovalRequestsController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                "expired",
+                "cancelled",
+                "executed",
+                "failed"
+              ]
+            }
+          },
+          {
+            "name": "projectId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "permissionKey",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "name": "mine",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of approval request summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ret",
+                    "data"
+                  ],
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "total",
+                        "current",
+                        "size",
+                        "hasNext",
+                        "hasPrev",
+                        "records"
+                      ],
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "current": {
+                          "type": "number"
+                        },
+                        "size": {
+                          "type": "number"
+                        },
+                        "hasNext": {
+                          "type": "boolean"
+                        },
+                        "hasPrev": {
+                          "type": "boolean"
+                        },
+                        "records": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid list query"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List visible approval requests",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/approvals/{id}": {
+      "get": {
+        "operationId": "ApprovalRequestsController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approval request with frozen input, result and decisions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ret",
+                    "data"
+                  ],
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "description": "Approval request missing or invisible"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read a visible approval request and its decisions",
+        "tags": [
+          "approvals"
+        ]
+      }
     }
   },
   "info": {
@@ -20476,6 +20672,306 @@
           "risk",
           "principals",
           "ownable"
+        ]
+      },
+      "ApprovalRequestSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "permissionKey": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "actorType": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "AGENT",
+              "SYSTEM"
+            ]
+          },
+          "actorId": {
+            "type": "string"
+          },
+          "onBehalfOfType": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "onBehalfOfId": {
+            "type": "string",
+            "nullable": true
+          },
+          "origin": {
+            "type": "string"
+          },
+          "requiredMode": {
+            "type": "string",
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "expired",
+              "cancelled",
+              "executed",
+              "failed"
+            ]
+          },
+          "satisfiedBy": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ]
+          },
+          "approverType": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "approverId": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "settledAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "permissionKey",
+          "projectId",
+          "actorType",
+          "actorId",
+          "onBehalfOfType",
+          "onBehalfOfId",
+          "origin",
+          "requiredMode",
+          "status",
+          "satisfiedBy",
+          "approverType",
+          "approverId",
+          "expiresAt",
+          "decidedAt",
+          "settledAt",
+          "createdAt"
+        ]
+      },
+      "ApprovalDecisionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "deciderType": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "deciderId": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "reject"
+            ]
+          },
+          "comment": {
+            "type": "string",
+            "nullable": true
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "deciderType",
+          "deciderId",
+          "decision",
+          "comment",
+          "decidedAt"
+        ]
+      },
+      "ApprovalRequestDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "permissionKey": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "actorType": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "AGENT",
+              "SYSTEM"
+            ]
+          },
+          "actorId": {
+            "type": "string"
+          },
+          "onBehalfOfType": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "onBehalfOfId": {
+            "type": "string",
+            "nullable": true
+          },
+          "origin": {
+            "type": "string"
+          },
+          "requiredMode": {
+            "type": "string",
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "expired",
+              "cancelled",
+              "executed",
+              "failed"
+            ]
+          },
+          "satisfiedBy": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ]
+          },
+          "approverType": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "approverId": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "settledAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "input": {
+            "type": "object",
+            "nullable": true
+          },
+          "result": {
+            "type": "object",
+            "nullable": true
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApprovalDecisionDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "permissionKey",
+          "projectId",
+          "actorType",
+          "actorId",
+          "onBehalfOfType",
+          "onBehalfOfId",
+          "origin",
+          "requiredMode",
+          "status",
+          "satisfiedBy",
+          "approverType",
+          "approverId",
+          "expiresAt",
+          "decidedAt",
+          "settledAt",
+          "createdAt",
+          "input",
+          "result",
+          "decisions"
         ]
       }
     }

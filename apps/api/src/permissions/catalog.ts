@@ -62,7 +62,6 @@ export const PUBLIC_KEYS: ReadonlySet<string> = new Set([
  * roles still hold it; it waits for P3 policy to decide whether it gates binding removal.
  */
 export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
-  'approval.decide',
   'approval.policy.read',
   'approval.policy.manage',
   'fleet.approval.decide.assistant',

@@ -346,6 +346,17 @@ describeIntegration('API Integration Tests', () => {
   // 2. Agent Registration & Auth
   // ─────────────────────────────────────────────────────────────────
 
+  describe('Approval requests', () => {
+    it('GET /api/approvals with the admin token returns 200', async () => {
+      const res = await request(httpServer).get('/api/approvals')
+        .set('Authorization', `Bearer ${userAccessToken}`).expect(200);
+      expect(body(res)).toMatchObject({ current: 1, size: 20, records: expect.any(Array) });
+    });
+    it('GET /api/approvals without credentials returns 401', async () => {
+      await request(httpServer).get('/api/approvals').expect(401);
+    });
+  });
+
   describe('Audit log', () => {
     it('AC-15: GET /api/audit with the admin token returns 200', async () => {
       const res = await request(httpServer).get('/api/audit')

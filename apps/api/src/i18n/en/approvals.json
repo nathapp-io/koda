@@ -1,0 +1,5 @@
+{
+  "-2": "Validation error",
+  "400": "Validation error",
+  "requestNotFound": { "404": "Approval request not found" }
+}
