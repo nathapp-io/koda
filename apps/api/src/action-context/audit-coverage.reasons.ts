@@ -31,6 +31,7 @@ export const BOOKKEEPING_REASONS = {
   'vcs.pr-same-state': 'A PR webhook that restates the stored state, touching only `prUpdatedAt`.',
   'vcs.link-refresh': "The extractor's refresh of a ticket link that already exists.",
   'context.query-metric': "A context query's latency and result metric row.",
+  'approval.request-open': 'An approval request opened by the gate; the decision records `approval.decide`.',
 } as const;
 
 export type BookkeepingReason = keyof typeof BOOKKEEPING_REASONS;
