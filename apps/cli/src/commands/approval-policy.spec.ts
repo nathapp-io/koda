@@ -65,9 +65,14 @@ describe('approval policy commands', () => {
     expect(process.exit).toHaveBeenCalledWith(3);
     expect(policyApiMocks.map(mock => mock.mock.calls.length)).toEqual(callsBeforeEmptyUpdate);
   });
-  it('deletes through project route', async () => {
-    (projectApprovalPoliciesControllerRemove as jest.Mock).mockResolvedValue(ok(undefined));
-    await run('delete', 'p1', '--project', 'web');
-    expect(projectApprovalPoliciesControllerRemove).toHaveBeenCalledWith({ path: { slug: 'web', id: 'p1' } });
+  it.each([
+    [false, false], [false, true], [true, false], [true, true],
+  ])('deletes with an empty 204 response (project=%s, json=%s)', async (project, json) => {
+    const remove = project ? projectApprovalPoliciesControllerRemove : approvalPoliciesControllerRemove;
+    (remove as jest.Mock).mockResolvedValue({ data: '', status: 204, statusText: 'No Content', headers: {}, config: {} });
+    await run('delete', 'p1', ...(project ? ['--project', 'web'] : []), ...(json ? ['--json'] : []));
+    expect(remove).toHaveBeenCalledWith({ path: { ...(project ? { slug: 'web' } : {}), id: 'p1' } });
+    expect(log).toHaveBeenCalledWith(json ? JSON.stringify({ deleted: 'p1' }, null, 2) : 'Deleted policy p1');
+    expect(process.exit).toHaveBeenCalledWith(0);
   });
 });

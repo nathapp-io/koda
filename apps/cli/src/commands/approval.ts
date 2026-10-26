@@ -156,7 +156,17 @@ function registerPolicies(approval: Command): void {
       if (!Object.keys(body).length) { handleApiError(new Error('Nothing to update'), { validationError: true }); return; }
       try { await context(); const result = await routeCall<RecordValue>(options.project as string | undefined, approvalPoliciesControllerUpdate as never, projectApprovalPoliciesControllerUpdate as never, { path: { id }, body }); if (options.json) console.log(JSON.stringify(result, null, 2)); else console.log(`Updated policy ${id}`); process.exit(0); } catch (err: unknown) { handleApiError(err); }
     });
-  policy.command('delete <id>').option('--project <slug>').option('--json').action(async (id: string, options: { project?: string; json?: boolean }) => { try { await context(); await routeCall(options.project, approvalPoliciesControllerRemove as never, projectApprovalPoliciesControllerRemove as never, { path: { id } }); if (options.json) console.log(JSON.stringify({ deleted: id }, null, 2)); else console.log(`Deleted policy ${id}`); process.exit(0); } catch (err: unknown) { handleApiError(err); } });
+  policy.command('delete <id>').option('--project <slug>').option('--json').action(async (id: string, options: { project?: string; json?: boolean }) => {
+    try {
+      await context();
+      // DELETE returns HTTP 204 without a JSON envelope to unwrap.
+      if (options.project === undefined) await approvalPoliciesControllerRemove({ path: { id } });
+      else await projectApprovalPoliciesControllerRemove({ path: { slug: options.project, id } });
+      if (options.json) console.log(JSON.stringify({ deleted: id }, null, 2));
+      else console.log(`Deleted policy ${id}`);
+      process.exit(0);
+    } catch (err: unknown) { handleApiError(err); }
+  });
 }
 
 export function approvalCommand(program: Command): void {

@@ -21,7 +21,8 @@ const MCP_DESCRIPTION_TOOLS = ['koda_get_action', ...WRITE_TOOLS];
 
 type Schema = { required?: string[]; properties?: Record<string, unknown> };
 
-const assistantWorkspace = () => kodaToolDescriptorsFor('WORKSPACE').filter((d) => d.name !== 'koda_list_approvals');
+const mcpName = (name: string) => name === 'koda_list_approvals' ? 'koda_list_fleet_approvals' : name;
+const assistantWorkspace = () => kodaToolDescriptorsFor('WORKSPACE');
 const mcp = () => mcpToolDescriptors();
 const byName = (name: string) => mcp().find((descriptor) => descriptor.name === name);
 /** Whether one tool's description comes from the fixed MCP map rather than the sentence rewrite. */
@@ -29,14 +30,15 @@ const hasMcpDescription = (name: string): boolean => Object.prototype.hasOwnProp
 const workspaceByName = (name: string) => kodaToolDescriptorsFor('WORKSPACE').find((d) => d.name === name);
 
 describe('US-006 AC-1, AC-2: the MCP catalog is the WORKSPACE catalog, in its order', () => {
-  it('AC-1: preserves the workspace assistant order except the reserved inbox name', () => {
+  it('AC-1: preserves the workspace assistant order with a distinct legacy fleet inbox name', () => {
     const names = mcp().map((descriptor) => descriptor.name);
-    expect(names).toEqual(assistantWorkspace().map((descriptor) => descriptor.name));
+    expect(names).toEqual(assistantWorkspace().map((descriptor) => mcpName(descriptor.name)));
     expect(names).toHaveLength(assistantWorkspace().length);
   });
 
   it('US-012: reserves the approval inbox name for the MCP-only tool, leaving thread descriptors intact', () => {
     expect(mcp().map((d) => d.name)).not.toContain('koda_list_approvals');
+    expect(mcp().map((d) => d.name)).toContain('koda_list_fleet_approvals');
     expect(KODA_TOOL_DESCRIPTORS.map((d) => d.name)).toContain('koda_list_approvals');
   });
 
@@ -46,7 +48,7 @@ describe('US-006 AC-1, AC-2: the MCP catalog is the WORKSPACE catalog, in its or
 
   it('answers one descriptor per catalog tool plus koda_my_projects, in the catalog order', () => {
     expect(mcp().slice(1).map((descriptor) => descriptor.name)).toEqual(
-      KODA_TOOL_DESCRIPTORS.filter((d) => d.name !== 'koda_list_approvals').map((descriptor) => descriptor.name),
+      KODA_TOOL_DESCRIPTORS.map((descriptor) => mcpName(descriptor.name)),
     );
   });
 });
@@ -67,10 +69,10 @@ describe('US-006 AC-3, AC-4: the input schemas are the WORKSPACE ones, unchanged
 
   it('AC-4: deep-equals the WORKSPACE inputSchema for every name, and only the description differs', () => {
     for (const descriptor of assistantWorkspace()) {
-      const projected = byName(descriptor.name);
+      const projected = byName(mcpName(descriptor.name));
       expect(projected).toBeDefined();
       expect(projected?.inputSchema).toEqual(descriptor.inputSchema);
-      expect(projected?.name).toBe(descriptor.name);
+      expect(projected?.name).toBe(mcpName(descriptor.name));
       expect(Object.keys(projected as object).sort()).toEqual(['description', 'inputSchema', 'name']);
     }
   });
@@ -137,7 +139,7 @@ describe('US-006 AC-8: every MCP description names the project without the threa
     for (const descriptor of mcp()) {
       if (descriptor.name === 'koda_my_projects' || hasMcpDescription(descriptor.name)) continue;
       expect(descriptor.description).toBe(
-        (workspaceByName(descriptor.name)?.description ?? '').replace(WORKSPACE_SENTENCE, MCP_SENTENCE),
+        (workspaceByName(descriptor.name === 'koda_list_fleet_approvals' ? 'koda_list_approvals' : descriptor.name)?.description ?? '').replace(WORKSPACE_SENTENCE, MCP_SENTENCE),
       );
     }
   });
@@ -152,8 +154,8 @@ describe('US-006 AC-9: the read tools keep the catalog wording', () => {
 
   it('AC-9: every tool without an MCP description keeps its catalog text, then the MCP sentence', () => {
     for (const descriptor of KODA_TOOL_DESCRIPTORS) {
-      if (hasMcpDescription(descriptor.name) || descriptor.name === 'koda_list_approvals') continue;
-      expect(byName(descriptor.name)?.description).toBe(`${descriptor.description} ${MCP_SENTENCE}`);
+      if (hasMcpDescription(descriptor.name)) continue;
+      expect(byName(mcpName(descriptor.name))?.description).toBe(`${descriptor.description} ${MCP_SENTENCE}`);
     }
   });
 });

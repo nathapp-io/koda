@@ -86,12 +86,11 @@ export const MCP_DESCRIPTIONS: Readonly<Record<string, string>> = {
  * every call, so the shared catalog is never mutated.
  */
 export function mcpToolDescriptors(): readonly KodaToolDescriptor[] {
-  // The legacy FleetApproval thread tool shares this name with the MCP-only approval inbox.
-  // Keep it in the thread catalog, but reserve the MCP name for ApprovalMcpTools.
+  // Keep the legacy FleetApproval reader until fleet migration, without colliding with ApprovalRequest tools.
   return kodaToolDescriptorsFor('WORKSPACE')
-    .filter((descriptor) => descriptor.name !== 'koda_list_approvals')
     .map((descriptor) => ({
       ...descriptor,
+      name: descriptor.name === 'koda_list_approvals' ? 'koda_list_fleet_approvals' : descriptor.name,
       description: mcpDescriptionOf(descriptor),
     }));
 }
@@ -107,4 +106,9 @@ export function toMcpToolResult(
   result: ToolResult,
 ): { content: Array<{ type: 'text'; text: string }>; isError: boolean } {
   return { content: [{ type: 'text', text: result.content }], isError: result.isError };
+}
+
+/** Map MCP aliases back to the unchanged assistant registry and executor names. */
+export function assistantToolName(mcpName: string): string {
+  return mcpName === 'koda_list_fleet_approvals' ? 'koda_list_approvals' : mcpName;
 }

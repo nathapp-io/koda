@@ -51,9 +51,10 @@ import { canRunDbTests } from '../../helpers/test-environment';
     await grantKeys(db, { type: 'AGENT', id: agent.id }, ['label.delete'], projectId);
     await app.get(PermissionCache, { strict: false }).invalidate();
   });
-  it('AC-12: an agent with no decide key sees the inbox last', async () => {
+  it('AC-12: an agent with no decide key sees the approval tools last', async () => {
     const answer = await rpc('tools/list');
-    expect(answer.result.tools.at(-1).name).toBe('koda_list_approvals');
+    expect(answer.result.tools.slice(-2).map((tool: { name: string }) => tool.name)).toEqual(['koda_list_approvals', 'koda_decide_approval']);
+    expect(new Set(answer.result.tools.map((tool: { name: string }) => tool.name)).size).toBe(answer.result.tools.length);
     expect(answer.result.tools.filter((tool: { name: string }) => tool.name === 'koda_list_approvals')).toHaveLength(1);
   });
   it('AC-13: the opener reads its own P request through tools/call', async () => {

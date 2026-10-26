@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
-import { ApiBearerAuth, ApiExtraModels, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiExtraModels, ApiOperation, ApiParam, ApiResponse, ApiTags, getSchemaPath } from '@nestjs/swagger';
 import { parseQuery, remapPage } from '../common/dto/koda-page.query';
 import { Requires } from '../permissions/requires.decorator';
 import { RequiresGuard } from '../permissions/requires.guard';
@@ -27,7 +27,15 @@ export class ProjectApprovalPoliciesController {
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('approval.policy.read')
   @ApiOperation({ summary: 'List project and inherited global approval policies' })
-  @ApiResponse({ status: 200, description: 'Page of project and global policies' })
+  @ApiResponse({ status: 200, description: 'Page of project and global policies', schema: {
+    type: 'object', properties: { ret: { type: 'number' }, data: {
+      type: 'object', properties: {
+        total: { type: 'number' }, current: { type: 'number' }, size: { type: 'number' },
+        hasNext: { type: 'boolean' }, hasPrev: { type: 'boolean' },
+        records: { type: 'array', items: { $ref: getSchemaPath(ApprovalPolicyDto) } },
+      },
+    } },
+  } })
   @ApiResponse({ status: 400, description: 'Invalid query' })
   @ApiResponse({ status: 401, description: 'Missing or invalid credentials' })
   @ApiResponse({ status: 403, description: 'Project access or approval.policy.read permission required' })
@@ -42,7 +50,11 @@ export class ProjectApprovalPoliciesController {
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('approval.policy.read')
   @ApiOperation({ summary: 'List approvable permission keys for this project' })
-  @ApiResponse({ status: 200, description: 'Approvable keys and their approval floors and defaults' })
+  @ApiResponse({ status: 200, description: 'Approvable keys and their approval floors and defaults', schema: {
+    type: 'object', properties: { ret: { type: 'number' }, data: {
+      type: 'object', properties: { keys: { type: 'array', items: { $ref: getSchemaPath(ApprovableKeyDto) } } },
+    } },
+  } })
   @ApiResponse({ status: 401, description: 'Missing or invalid credentials' })
   @ApiResponse({ status: 403, description: 'Project access or approval.policy.read permission required' })
   keys() {
@@ -55,7 +67,9 @@ export class ProjectApprovalPoliciesController {
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('approval.policy.manage')
   @ApiOperation({ summary: 'Create a project approval policy' })
-  @ApiResponse({ status: 201, description: 'Created project policy', type: ApprovalPolicyDto })
+  @ApiResponse({ status: 201, description: 'Created project policy', schema: {
+    type: 'object', properties: { ret: { type: 'number' }, data: { $ref: getSchemaPath(ApprovalPolicyDto) } },
+  } })
   @ApiResponse({ status: 400, description: 'Invalid approval policy' })
   @ApiResponse({ status: 401, description: 'Missing or invalid credentials' })
   @ApiResponse({ status: 403, description: 'Permission denied or self-applying agent policy' })
@@ -69,7 +83,7 @@ export class ProjectApprovalPoliciesController {
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('approval.policy.manage')
   @ApiOperation({ summary: 'Update a project approval policy' })
-  @ApiResponse({ status: 200, description: 'Updated project policy', type: ApprovalPolicyDto })
+  @ApiResponse({ status: 200, description: 'Updated project policy', schema: { type: 'object', properties: { ret: { type: 'number' }, data: { $ref: getSchemaPath(ApprovalPolicyDto) } } } })
   @ApiResponse({ status: 400, description: 'Invalid or empty policy update' })
   @ApiResponse({ status: 401, description: 'Missing or invalid credentials' })
   @ApiResponse({ status: 403, description: 'Project policy management permission required' })

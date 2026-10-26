@@ -69,7 +69,11 @@ export class ApprovalRequestsController {
   @UseGuards(RequiresGuard)
   @Requires('approval.decide', { enforcedBy: 'service' })
   @ApiOperation({ summary: 'Decide a visible approval request' })
-  @ApiResponse({ status: 200, description: 'Approval request with its current decisions', type: ApprovalRequestDto })
+  @ApiResponse({ status: 200, description: 'Approval request with its current decisions', schema: {
+    type: 'object', required: ['ret', 'data'], properties: {
+      ret: { type: 'number' }, data: { $ref: getSchemaPath(ApprovalRequestDto) },
+    },
+  } })
   @ApiResponse({ status: 400, description: 'Invalid decision body' })
   @ApiResponse({ status: 401, description: 'Missing or invalid credentials' })
   @ApiResponse({ status: 403, description: 'The principal cannot decide this request' })
