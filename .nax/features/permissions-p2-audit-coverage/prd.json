@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-coverage",
   "branchName": "feat/permissions-p2-audit-coverage",
   "createdAt": "2026-10-26T00:00:00Z",
-  "updatedAt": "2026-10-26T05:56:03.208Z",
+  "updatedAt": "2026-10-26T06:00:08.548Z",
   "userStories": [
     {
       "id": "US-001",
@@ -90,14 +90,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Typed fixed catalogue and an independent ALS marker extend the existing core with well-specified lazy-await and validation behavior."
+        "reasoning": "Typed fixed catalogue and an independent ALS marker extend the existing core with well-specified lazy-await and validation behavior.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/action-context/audit-coverage.ts",
@@ -116,7 +119,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c5307b06c73076599d072dd713fe23750437e68a"
     },
     {
       "id": "US-003",
