@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-coverage",
   "branchName": "feat/permissions-p2-audit-coverage",
   "createdAt": "2026-10-26T00:00:00Z",
-  "updatedAt": "2026-10-26T06:16:41.334Z",
+  "updatedAt": "2026-10-26T06:29:23.613Z",
   "userStories": [
     {
       "id": "US-001",
@@ -283,14 +283,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "The five source files only apply an existing marker at fixed sites, with no new abstraction; the stale-holder fence and runner ack/lease paths require the security override despite the bounded implementation."
+        "reasoning": "The five source files only apply an existing marker at fixed sites, with no new abstraction; the stale-holder fence and runner ack/lease paths require the security override despite the bounded implementation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/sync/sync.service.ts",
@@ -330,7 +333,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e0eb59322d30f283e5d81342eb73f9208a372a28"
     },
     {
       "id": "US-006",
