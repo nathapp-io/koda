@@ -3197,10 +3197,17 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('AC9: a removed agent is denied project ticket access', async () => {
-      await request(httpServer)
+      const project = await prismaClient().project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      expect(await viewerBinding(rosterAgentId, project.id)).toBeNull();
+      const res = await request(httpServer)
         .get(`/api/projects/${projectSlug}/tickets`)
-        .set('Authorization', `Bearer ${rosterAgentApiKey}`)
-        .expect(403);
+        .set('Authorization', `Bearer ${rosterAgentApiKey}`);
+      // Keep status failures as Vitest assertions with the response attached: an upstream proxy
+      // refusal (e.g. 407) must not be mistaken for an application authorization response.
+      expect(res.status, JSON.stringify({ headers: res.headers, body: res.body, text: res.text })).toBe(403);
+      expect(res.headers['content-type']).toMatch(/json/);
+      expect(res.body).toMatchObject({ ret: expect.any(Number), message: expect.any(String) });
+      expect(res.body.ret).not.toBe(0);
     });
   });
 
