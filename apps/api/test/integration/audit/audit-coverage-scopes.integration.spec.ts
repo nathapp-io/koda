@@ -97,7 +97,7 @@ describeDb('system audit coverage scopes (booted API)', () => {
     expect(await db.auditEntry.count()).toBe(before);
   });
 
-  it('AC-9: marking the caller inbox read answers 200 without an audit entry', async () => {
+  it('AC-9: marking the caller inbox read answers 204 without an audit entry', async () => {
     const notification = await db.notification.create({ data: {
       userId: rootId, category: 'ASSIGNED', kind: 'ticket_assigned', title: 't', link: '/',
       sourceType: 'ticket_event', sourceId: 'coverage-unread',
@@ -106,7 +106,7 @@ describeDb('system audit coverage scopes (booted API)', () => {
       .set({ Authorization: `Bearer ${token}` });
     expect((await db.notification.findUniqueOrThrow({ where: { id: notification.id } })).readAt).not.toBeNull();
     expect(await db.auditEntry.count()).toBe(0);
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(204);
   });
 
   it('AC-10: a second notification purge changes no row and records nothing', async () => {
