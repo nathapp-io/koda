@@ -9,7 +9,6 @@ import {
 
 describe('permission contract checker', () => {
   const expectedPending = new Set([
-    'approval.policy.read',
     'fleet.approval.decide.assistant',
     // Permissions P1 US-003 deleted the two member routes that declared this key. Removing a
     // principal from a project is now deleting its bindings, which `role.binding.manage` gates, and

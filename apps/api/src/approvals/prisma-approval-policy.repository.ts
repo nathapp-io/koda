@@ -6,7 +6,7 @@ import type { ApprovalPolicy, PrismaClient } from '../generated/prisma/client';
 import type { ApprovalPolicyRecord } from './domain/approval.domain';
 
 export const MAX_POLICY_CANDIDATES = 500;
-export interface ApprovalPolicyFilter { projectId?: string | null; permissionPattern?: string }
+export interface ApprovalPolicyFilter { projectId?: string | null; projectIds?: (string | null)[]; permissionPattern?: string }
 
 @Injectable()
 export class PrismaApprovalPolicyRepository extends AbstractPrismaRepository<ApprovalPolicyRecord, ApprovalPolicy, string> {
@@ -42,7 +42,11 @@ export class PrismaApprovalPolicyRepository extends AbstractPrismaRepository<App
   }
 
   async findPage(filter: ApprovalPolicyFilter, page: IPageOption): Promise<IPageResult<ApprovalPolicyRecord>> {
-    const rows = await Paginate(this.prisma.client.approvalPolicy, page, { where: filter, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+    const { projectIds, ...where } = filter;
+    const scopedWhere = projectIds === undefined
+      ? where
+      : { ...where, OR: projectIds.map((projectId) => ({ projectId })) };
+    const rows = await Paginate(this.prisma.client.approvalPolicy, page, { where: scopedWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
     return rows.remap((row: ApprovalPolicy) => this.toDomain(row));
   }
 }

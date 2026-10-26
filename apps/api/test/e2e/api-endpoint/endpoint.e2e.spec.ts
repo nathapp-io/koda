@@ -377,6 +377,14 @@ describeIntegration('API Integration Tests', () => {
   });
 
   describe('Global approval policies', () => {
+    it('GET /api/approval-policies with the admin token returns 200', async () => {
+      const res = await request(httpServer).get('/api/approval-policies')
+        .set('Authorization', `Bearer ${userAccessToken}`).expect(200);
+      expect(body(res)).toMatchObject({ current: 1, size: 20, records: expect.any(Array) });
+    });
+    it('GET /api/approval-policies without credentials returns 401', async () => {
+      await request(httpServer).get('/api/approval-policies').expect(401);
+    });
     it('lists global policies and approvable keys for the admin', async () => {
       const res = await request(httpServer).get('/api/approval-policies')
         .set('Authorization', `Bearer ${userAccessToken}`).expect(200);

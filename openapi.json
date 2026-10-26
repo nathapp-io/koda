@@ -12270,6 +12270,385 @@
           "approvals"
         ]
       }
+    },
+    "/api/approval-policies/{id}": {
+      "patch": {
+        "operationId": "ApprovalPoliciesController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateApprovalPolicyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated global policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalPolicyDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or empty policy update"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Global policy management permission required"
+          },
+          "404": {
+            "description": "Policy not found"
+          },
+          "409": {
+            "description": "Invalid policy conflict"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update a global approval policy",
+        "tags": [
+          "approvals"
+        ]
+      },
+      "delete": {
+        "operationId": "ApprovalPoliciesController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Global policy deleted"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Global policy management permission required"
+          },
+          "404": {
+            "description": "Policy not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a global approval policy",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/projects/{slug}/approval-policies": {
+      "get": {
+        "operationId": "ProjectApprovalPoliciesController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "permissionPattern",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of project and global policies"
+          },
+          "400": {
+            "description": "Invalid query"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Project access or approval.policy.read permission required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List project and inherited global approval policies",
+        "tags": [
+          "approvals"
+        ]
+      },
+      "post": {
+        "operationId": "ProjectApprovalPoliciesController_create",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApprovalPolicyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created project policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalPolicyDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid approval policy"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Permission denied or self-applying agent policy"
+          },
+          "409": {
+            "description": "Policy pattern and subject already exist"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a project approval policy",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/projects/{slug}/approval-policies/keys": {
+      "get": {
+        "operationId": "ProjectApprovalPoliciesController_keys",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approvable keys and their approval floors and defaults"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Project access or approval.policy.read permission required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List approvable permission keys for this project",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/projects/{slug}/approval-policies/{id}": {
+      "patch": {
+        "operationId": "ProjectApprovalPoliciesController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateApprovalPolicyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated project policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalPolicyDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or empty policy update"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Project policy management permission required"
+          },
+          "404": {
+            "description": "Policy not found in this project"
+          },
+          "409": {
+            "description": "Invalid policy conflict"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update a project approval policy",
+        "tags": [
+          "approvals"
+        ]
+      },
+      "delete": {
+        "operationId": "ProjectApprovalPoliciesController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Project policy deleted"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Project policy management permission required"
+          },
+          "404": {
+            "description": "Policy not found in this project"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a project approval policy",
+        "tags": [
+          "approvals"
+        ]
+      }
     }
   },
   "info": {
@@ -21542,6 +21921,40 @@
           "appliesTo",
           "mode"
         ]
+      },
+      "UpdateApprovalPolicyDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ],
+            "type": "string"
+          },
+          "timeoutSec": {
+            "type": "number",
+            "nullable": true
+          },
+          "onTimeout": {
+            "enum": [
+              "reject",
+              "approve"
+            ],
+            "type": "string"
+          },
+          "requiredApprovals": {
+            "type": "number"
+          },
+          "approverMustHoldAction": {
+            "type": "boolean"
+          },
+          "requireDistinctApprover": {
+            "type": "boolean"
+          }
+        }
       }
     }
   }
