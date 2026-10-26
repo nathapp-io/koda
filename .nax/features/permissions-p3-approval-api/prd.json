@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-api",
   "branchName": "feat/permissions-p3-approval-api",
   "createdAt": "2026-10-26T00:00:00.000Z",
-  "updatedAt": "2026-10-26T15:29:47.565Z",
+  "updatedAt": "2026-10-26T15:39:31.851Z",
   "userStories": [
     {
       "id": "US-001",
@@ -110,14 +110,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three existing services append one shared provider and record at established transition seams, without a new abstraction; approval execution and transaction integrity require the strict security strategy."
+        "reasoning": "Three existing services append one shared provider and record at established transition seams, without a new abstraction; approval execution and transaction integrity require the strict security strategy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-decision.service.ts",
@@ -160,7 +163,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "437b12e6db33868086b7999da8a2cd9445b8e95b"
     },
     {
       "id": "US-003",
