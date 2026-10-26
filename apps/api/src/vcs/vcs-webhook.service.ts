@@ -643,7 +643,8 @@ export class VcsWebhookService implements OnModuleDestroy {
       return { success: false, reason: 'Missing sender identifier in push payload' };
     }
 
-    if (!this.outboxService) {
+    const outboxService = this.outboxService;
+    if (!outboxService) {
       this.logger.error('[webhook] OutboxService not available for push handling');
       return { success: false, reason: 'Outbox service not available' };
     }
@@ -708,7 +709,7 @@ export class VcsWebhookService implements OnModuleDestroy {
       try {
         // The code_commit row is this handler's only write: there is no business
         // write to share a transaction with.
-        await bookkeeping('vcs.push-outbox', () => this.outboxService!.record({
+        await bookkeeping('vcs.push-outbox', () => outboxService.record({
           type: 'code_commit',
           payload: eventPayload,
           metadata: { projectId: connection.projectId, eventId: commitHash },

@@ -341,8 +341,9 @@ export class ContextBuilderService {
     resultCount: number;
     leakageIncidentCount: number;
   }): void {
-    if (!this.sloDashboardService) return;
-    void bookkeeping('context.query-metric', () => this.sloDashboardService!.recordQueryMetric(metric))
+    const sloDashboardService = this.sloDashboardService;
+    if (!sloDashboardService) return;
+    void bookkeeping('context.query-metric', () => sloDashboardService.recordQueryMetric(metric))
       .catch((err: Error) => {
         this.logger.warn(`Failed to record query metric: ${err.message}`);
       });
