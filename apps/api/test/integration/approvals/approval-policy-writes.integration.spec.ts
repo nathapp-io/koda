@@ -1,5 +1,6 @@
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { ApprovalPolicyService } from '../../../src/approvals/approval-policy.service';
+import { PrismaApprovalPolicyRepository } from '../../../src/approvals/prisma-approval-policy.repository';
 import type { ApprovalPolicyInput } from '../../../src/approvals/domain/approval.domain';
 import { ApprovalPolicyConflictError, ApprovalPolicyNotFoundError, ApprovalPolicySelfApplicationError, InvalidApprovalPolicyError } from '../../../src/approvals/domain/approval.errors';
 import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
@@ -46,6 +47,25 @@ const agent = <T>(fn: () => Promise<T>) => withTestActor({ type: 'AGENT', id: 'a
     expect(await db.approvalPolicy.count()).toBe(1);
     expect(await audits()).toHaveLength(1);
   });
+  it('AC-3 concurrency: translates a racing selector violation to a domain conflict', async () => {
+    const repository = app.get(PrismaApprovalPolicyRepository, { strict: false });
+    const lookup = repository.findBySelector.bind(repository);
+    let arrivals = 0;
+    let release!: () => void;
+    const bothLookedUp = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(repository, 'findBySelector').mockImplementation(async (selector) => {
+      const row = await lookup(selector);
+      if (++arrivals === 2) release();
+      await bothLookedUp;
+      return row;
+    });
+    const results = await Promise.allSettled([create(), create()]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const failure = results.find((result) => result.status === 'rejected');
+    expect(failure?.status === 'rejected' ? failure.reason : null).toEqual(new ApprovalPolicyConflictError('*|ticket.delete|all'));
+    expect(await db.approvalPolicy.count()).toBe(1);
+    expect(await audits()).toHaveLength(1);
+  });
   it('AC-4: rejects a below-floor policy without writing', async () => {
     await expect(create({ permissionPattern: 'role.manage', mode: 'none' })).rejects.toEqual(new InvalidApprovalPolicyError('below-floor'));
     expect(await db.approvalPolicy.count()).toBe(0);
@@ -55,6 +75,40 @@ const agent = <T>(fn: () => Promise<T>) => withTestActor({ type: 'AGENT', id: 'a
     const row = await create();
     expect(await user(() => service.update(row.id, { mode: 'self', timeoutSec: 600, requiredApprovals: 1 }))).toMatchObject({ mode: 'self', timeoutSec: 600 });
     expect(await audits()).toContainEqual(expect.objectContaining({ resourceId: row.id, summary: 'updated mode,timeoutSec' }));
+  });
+  it('AC-5 concurrency: audits changes relative to the preceding committed update', async () => {
+    const row = await create();
+    const recorder = app.get(AuditRecorder);
+    const record = recorder.record.bind(recorder);
+    let signalHeld!: () => void;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { signalHeld = resolve; });
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(recorder, 'record').mockImplementationOnce(async (entry) => {
+      await record(entry);
+      signalHeld();
+      await released;
+    });
+    const first = user(() => service.update(row.id, { mode: 'self' }));
+    await held;
+    const second = user(() => service.update(row.id, { mode: 'human' }));
+    try {
+      // Hold the first transaction until the second has reached a real database row lock.
+      // Before the fix it waits at UPDATE after a stale read; afterwards it waits at SELECT FOR UPDATE.
+      await vi.waitFor(async () => {
+        const blocked = await db.$queryRaw<Array<{ count: bigint }>>`
+          SELECT count(*) FROM pg_stat_activity
+          WHERE datname = current_database() AND pid <> pg_backend_pid()
+            AND wait_event_type = 'Lock' AND query LIKE '%"ApprovalPolicy"%'
+        `;
+        expect(Number(blocked[0].count)).toBeGreaterThan(0);
+      }, { timeout: 2000, interval: 10 });
+    } finally {
+      release();
+      await Promise.all([first, second]);
+    }
+    expect(await db.approvalPolicy.findUnique({ where: { id: row.id } })).toMatchObject({ mode: 'human' });
+    expect((await audits()).filter((entry) => entry.summary?.startsWith('updated')).map((entry) => entry.summary)).toEqual(['updated mode', 'updated mode']);
   });
   it('AC-6: validates the merged row and preserves it on failure', async () => {
     const row = await create({ permissionPattern: 'role.*' });

@@ -3,6 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { TRANSACTION_MANAGER, type IRepository, type ITransactionManager } from '@nathapp/nestjs-data';
 import { currentContext } from '../action-context/action-context';
 import { AuditRecorder } from '../audit/audit-recorder.service';
+import { isUniqueViolation } from '../common/utils/prisma-errors';
 import { PermissionService } from '../permissions/permission.service';
 import { policySelector, validateApprovalPolicy } from './approval-policy.validation';
 import { APPROVAL_POLICY_REPOSITORY, type ApprovalPolicyInput, type ApprovalPolicyRecord } from './domain/approval.domain';
@@ -44,6 +45,10 @@ export class ApprovalPolicyService {
       });
       await this.record(row, `created ${row.permissionPattern} ${row.mode}`);
       return row;
+    }).catch((error: unknown) => {
+      // Translate only after run has rolled back the failed transaction.
+      if (isUniqueViolation(error, 'selector')) throw new ApprovalPolicyConflictError(policySelector(input));
+      throw error;
     });
   }
 
@@ -95,7 +100,7 @@ export class ApprovalPolicyService {
   }
 
   private async requirePolicy(id: string): Promise<ApprovalPolicyRecord> {
-    const row = await this.policies.findById(id);
+    const row = await this.queries.lockById(id);
     if (!row) throw new ApprovalPolicyNotFoundError(id);
     return row;
   }

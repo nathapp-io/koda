@@ -30,6 +30,12 @@ export class PrismaApprovalPolicyRepository extends AbstractPrismaRepository<App
       (pattern.endsWith('.*') && permissionKey.startsWith(pattern.slice(0, -1)))).map((row) => this.toDomain(row));
   }
 
+  /** Caller must hold an ambient transaction through the policy write and its audit. */
+  async lockById(id: string): Promise<ApprovalPolicyRecord | null> {
+    const rows = await this.prisma.client.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "ApprovalPolicy" WHERE "id" = ${id} FOR UPDATE`;
+    return rows.length === 0 ? null : this.findById(id);
+  }
+
   async findBySelector(selector: string): Promise<ApprovalPolicyRecord | null> {
     const row = await this.prisma.client.approvalPolicy.findUnique({ where: { selector } });
     return row ? this.toDomain(row) : null;
