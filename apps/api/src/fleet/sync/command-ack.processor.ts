@@ -69,7 +69,8 @@ export class CommandAckProcessor {
     }
     await bookkeeping('runner.command-ack', () => this.repo.ackCommand(command.id, ack.result, now));
     if (command.type === FleetCommandType.THREAD_INPUT || command.type === FleetCommandType.THREAD_ANSWER || command.type === FleetCommandType.THREAD_PUBLISH) {
-      if (this.threadEffects) await bookkeeping('thread.input-ack', () => this.threadEffects!.onInputAck(command, ack.result, (ack.detail ?? '').slice(0, 200)));
+      const threadEffects = this.threadEffects;
+      if (threadEffects) await bookkeeping('thread.input-ack', () => threadEffects.onInputAck(command, ack.result, (ack.detail ?? '').slice(0, 200)));
       return NO_CHANGE;
     }
     const actor = { type: 'RUNNER' as const, id: runnerId };
