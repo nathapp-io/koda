@@ -6,7 +6,7 @@ import {
   type KodaPrincipal,
 } from '../auth/principal/koda-principal.types';
 import { routeSurface } from '../permissions/route-surface';
-import { assertAuditCoverage, openAuditScope, type AuditScope } from './audit-coverage';
+import { assertAuditCoverage, closeAuditScope, openAuditScope, type AuditScope } from './audit-coverage';
 import { runWithActionContext } from './action-context';
 
 /**
@@ -44,11 +44,26 @@ export class ActionContextInterceptor implements NestInterceptor {
         // request runs exactly as it did before the guard existed.
         if (surface === undefined) return next.handle().subscribe(subscriber);
 
-        return openAuditScope(surface, (scope) => next.handle().subscribe({
-          next: (value) => subscriber.next(value),
-          error: (error) => subscriber.error(error),
-          complete: () => completeChecked(subscriber, scope),
-        }));
+        let scope: AuditScope | undefined;
+        const subscription = openAuditScope(surface, (opened) => {
+          scope = opened;
+
+          return next.handle().subscribe({
+            next: (value) => subscriber.next(value),
+            error: (error) => {
+              closeAuditScope(opened);
+              subscriber.error(error);
+            },
+            complete: () => completeChecked(subscriber, opened),
+          });
+        });
+
+        // A cancelled request (the client disconnected or the stream was unsubscribed before
+        // completion) closes the scope too: nothing may be counted in a request that stopped.
+        return () => {
+          if (scope !== undefined) closeAuditScope(scope);
+          subscription.unsubscribe();
+        };
       }),
     );
   }
@@ -57,7 +72,7 @@ export class ActionContextInterceptor implements NestInterceptor {
 /**
  * Forwards the completion, unless the scope wrote and recorded nothing. The check's error replaces
  * the completion: Nest answers a route with the observable's last value only on completion, so an
- * unaudited request answers 500 in `throw` mode.
+ * unaudited request answers 500 in `throw` mode. The scope closes either way — its work has settled.
  */
 function completeChecked(
   subscriber: { complete: () => void; error: (error: unknown) => void },
@@ -68,6 +83,8 @@ function completeChecked(
   } catch (error) {
     subscriber.error(error);
     return;
+  } finally {
+    closeAuditScope(scope);
   }
 
   subscriber.complete();

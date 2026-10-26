@@ -148,6 +148,14 @@ describe('PrismaVcsRepository', () => {
   });
 
   describe('US-008 bookkeeping marks', () => {
+    // `vi.clearAllMocks()` clears call history only, so a reason recorder installed here would keep
+    // running — and pushing into this test's local array — during the file's later tests.
+    afterEach(() => {
+      mockUpdate.mockReset();
+      mockPrisma.client.ticketLink.upsert.mockReset();
+      mockPrisma.client.ticketLink.create.mockReset();
+    });
+
     it('marks same-state PR updates only', async () => {
       mockQueryRaw.mockResolvedValue([{ prState: 'open' }]);
       const reasons: unknown[] = [];

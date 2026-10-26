@@ -44,6 +44,8 @@ interface ScopeState extends AuditScope {
   readonly parent: ScopeState | undefined;
   readonly writes: string[];
   entries: number;
+  /** Set once the scope's work has settled; late notes and tally flushes targeting it are ignored. */
+  closed: boolean;
 }
 
 const logger = new Logger(UnauditedWriteError.name);
@@ -51,6 +53,10 @@ const scopeStorage = new AsyncLocalStorage<ScopeState>();
 const bookkeepingStorage = new AsyncLocalStorage<BookkeepingReason>();
 
 interface TransactionTally {
+  /** The scope that owns this transaction's outcome, captured when the tally opened. */
+  readonly scope: ScopeState | undefined;
+  /** The tally enclosing this one lexically, if any; its work travels into it on fulfilment. */
+  readonly parent: TransactionTally | undefined;
   readonly writes: string[];
   entries: number;
 }
@@ -64,7 +70,8 @@ export function currentAuditScope(): AuditScope | undefined {
 /**
  * Runs fn with a new child scope of the current one as current; does not check it. A detached scope
  * has no parent: its entries count only in itself, so nothing it records can satisfy the entry point
- * that started it.
+ * that started it. The caller owns the scope's lifetime and closes it with `closeAuditScope` when its
+ * work settles; `runInAuditScope` does that for the usual case.
  */
 export function openAuditScope<T>(
   surface: string,
@@ -72,28 +79,56 @@ export function openAuditScope<T>(
   opts?: { detached?: boolean },
 ): T {
   const parent = opts?.detached === true ? undefined : scopeStorage.getStore();
-  const scope: ScopeState = { surface, parent, writes: [], entries: 0 };
+  const scope: ScopeState = { surface, parent, writes: [], entries: 0, closed: false };
 
   return scopeStorage.run(scope, () => fn(scope));
 }
 
-/** openAuditScope, then assertAuditCoverage after fn's promise fulfils (immediately for a non-thenable). */
+/**
+ * Marks the scope closed: its work has settled, so nothing counted afterwards belongs to it. A
+ * callback that inherits the scope's async context (a timer or an unawaited promise started inside
+ * it) and a transaction that flushes after the entry point returned are ignored instead of changing
+ * a scope that already passed or failed its check. Closing is idempotent.
+ */
+export function closeAuditScope(scope: AuditScope): void {
+  (scope as ScopeState).closed = true;
+}
+
+/**
+ * openAuditScope, then assertAuditCoverage after fn's promise fulfils (immediately for a non-thenable).
+ * The scope closes on every outcome — fulfilment, rejection and a synchronous throw — so the check is
+ * the last thing that reads it.
+ */
 export function runInAuditScope<T>(surface: string, fn: () => T, opts?: { detached?: boolean }): T {
   return openAuditScope<T>(surface, (scope) => {
-    const result = fn();
+    let result: T;
+    try {
+      result = fn();
+    } catch (error) {
+      closeAuditScope(scope);
+      throw error;
+    }
 
     // Prisma promises are lazy: the query runs when the promise is awaited, so the check waits for
     // a thenable result inside this scope's storage. A plain value is checked at once and returned
     // as it is.
     if (!isThenable(result)) {
-      assertAuditCoverage(scope);
+      try {
+        assertAuditCoverage(scope);
+      } finally {
+        closeAuditScope(scope);
+      }
       return result;
     }
 
     return (async () => {
-      const value = await result;
-      assertAuditCoverage(scope);
-      return value;
+      try {
+        const value = await result;
+        assertAuditCoverage(scope);
+        return value;
+      } finally {
+        closeAuditScope(scope);
+      }
     })() as T;
   }, opts);
 }
@@ -102,26 +137,70 @@ export function runInAuditScope<T>(surface: string, fn: () => T, opts?: { detach
  * Holds writes and entries until fn fulfils; rejection drops both and propagates unchanged.
  * Capture the destination now: scopes opened and checked inside fn must not receive buffered work.
  * This tracks the callback outcome, not the eventual database commit outcome.
+ *
+ * The tally only holds work its own scope lineage made. A detached scope opened inside the
+ * transaction is outside that lineage — its entry counts in itself, never in the entry point that
+ * opened the transaction, so nothing detached can satisfy it (§ "Detached work opens its own scope").
  */
 export function withTransactionTally<T>(fn: () => Promise<T>): Promise<T> {
-  const scope = scopeStorage.getStore();
-  const parent = tallyStorage.getStore();
-  const tally: TransactionTally = { writes: [], entries: 0 };
+  const tally: TransactionTally = {
+    scope: scopeStorage.getStore(),
+    parent: tallyStorage.getStore(),
+    writes: [],
+    entries: 0,
+  };
 
   return tallyStorage.run(tally, async () => {
     const result = await fn();
-    // An enclosing callback still owns the outcome of a nested tally's successful work.
-    if (parent !== undefined) {
-      for (const label of tally.writes) parent.writes.push(label);
-      parent.entries += tally.entries;
-    } else if (scope !== undefined) {
-      for (const label of tally.writes) scope.writes.push(label);
-      for (let destination: ScopeState | undefined = scope; destination !== undefined; destination = destination.parent) {
-        destination.entries += tally.entries;
-      }
-    }
+    flushTally(tally);
     return result;
   });
+}
+
+/** Adds a fulfilled tally's work to the tally or the scope that owns its outcome. */
+function flushTally(tally: TransactionTally): void {
+  // An enclosing callback still owns the outcome of a nested tally's successful work — as long as
+  // that tally belongs to the same scope lineage. A tally a detached scope opened owns its own
+  // work, which must not travel into the tally that merely encloses it lexically.
+  if (tally.parent !== undefined && ownsTally(tally.parent.scope, tally.scope)) {
+    tally.parent.writes.push(...tally.writes);
+    tally.parent.entries += tally.entries;
+    return;
+  }
+
+  const scope = tally.scope;
+  if (scope === undefined || scope.closed) return;
+
+  scope.writes.push(...tally.writes);
+  for (let destination: ScopeState | undefined = scope; destination !== undefined; destination = destination.parent) {
+    if (!destination.closed) destination.entries += tally.entries;
+  }
+}
+
+/**
+ * Whether a tally opened in `tallyScope` holds work noted in `scope`. A tally opened outside any
+ * scope holds everything — there is no entry point to attribute the work to, so it is counted
+ * nowhere — while one opened in a scope holds the work of that scope and its children, never that of
+ * a detached scope opened inside it.
+ */
+function holdsScope(tallyScope: ScopeState | undefined, scope: ScopeState | undefined): boolean {
+  if (tallyScope === undefined) return true;
+  return scope === undefined || isWithin(scope, tallyScope);
+}
+
+/** Whether a tally opened in `enclosing` owns the work of one opened in `inner`. */
+function ownsTally(enclosing: ScopeState | undefined, inner: ScopeState | undefined): boolean {
+  if (enclosing === undefined) return inner === undefined;
+  return inner === undefined || isWithin(inner, enclosing);
+}
+
+/** Whether `scope` is `target` or one of its descendants. */
+function isWithin(scope: ScopeState, target: ScopeState): boolean {
+  for (let current: ScopeState | undefined = scope; current !== undefined; current = current.parent) {
+    if (current === target) return true;
+  }
+
+  return false;
 }
 
 /** Runs and awaits fn with writes uncounted; rejects an unknown reason before invoking fn. */
@@ -142,13 +221,18 @@ export function currentBookkeepingReason(): BookkeepingReason | undefined {
 export function noteAuditWrite(label: string): void {
   if (bookkeepingStorage.getStore() !== undefined) return;
 
+  const scope = scopeStorage.getStore();
+  // A callback that outlived its scope writes into a scope that already passed or failed its check.
+  if (scope !== undefined && scope.closed) return;
+
   const tally = tallyStorage.getStore();
-  if (tally !== undefined) {
+  if (tally !== undefined && holdsScope(tally.scope, scope)) {
     tally.writes.push(label);
     return;
   }
 
-  const scope = scopeStorage.getStore();
+  // Work outside the open transaction's scope — a detached scope — is not the entry point's to
+  // buffer: it counts in the scope that made it, which is checked on its own.
   if (scope === undefined) return;
 
   scope.writes.push(label);
@@ -157,17 +241,22 @@ export function noteAuditWrite(label: string): void {
 /**
  * Buffers in the innermost tally, otherwise counts in the innermost scope and every enclosing one.
  * An entry recorded in a nested, record-only scope therefore satisfies the tick or request that
- * opened it. With neither a scope nor a tally, this is a no-op.
+ * opened it; an entry a detached scope records satisfies that scope alone. With neither a scope nor
+ * a tally, this is a no-op.
  */
 export function noteAuditEntry(): void {
+  const scope = scopeStorage.getStore();
+  // A late entry from a finished scope must not satisfy it or any scope that encloses it.
+  if (scope !== undefined && scope.closed) return;
+
   const tally = tallyStorage.getStore();
-  if (tally !== undefined) {
+  if (tally !== undefined && holdsScope(tally.scope, scope)) {
     tally.entries += 1;
     return;
   }
 
-  for (let scope = scopeStorage.getStore(); scope !== undefined; scope = scope.parent) {
-    scope.entries += 1;
+  for (let current = scope; current !== undefined; current = current.parent) {
+    if (!current.closed) current.entries += 1;
   }
 }
 

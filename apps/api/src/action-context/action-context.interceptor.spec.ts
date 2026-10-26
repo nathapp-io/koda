@@ -9,6 +9,7 @@ import {
   currentAuditScope,
   noteAuditEntry,
   noteAuditWrite,
+  type AuditScope,
 } from './audit-coverage';
 import { currentContext, currentActor, NO_APPROVAL } from './action-context';
 import { ActionContextInterceptor } from './action-context.interceptor';
@@ -285,5 +286,51 @@ describe('ActionContextInterceptor', () => {
     expect(surface).toBe('POST /x');
     expect(outcome.error).toBe(failure);
     expect(outcome.completed).toBe(false);
+  });
+
+  // Review B2 — the request scope closes when the observable terminates, so a callback that inherits
+  // the handler's async context cannot keep counting into a request that already finished.
+  it('ignores a delayed write noted after the request completed', async () => {
+    let scope: AuditScope | undefined;
+    let lateWriteRan!: () => void;
+    const lateWrite = new Promise<void>((resolve) => { lateWriteRan = resolve; });
+
+    const next = handlerDoing((subscriber) => {
+      scope = currentAuditScope();
+      setTimeout(() => {
+        noteAuditWrite('Ticket.update');
+        lateWriteRan();
+      }, 0);
+      subscriber.next('ok');
+      subscriber.complete();
+    });
+
+    const outcome = await runIntercept(requestWith(USER, POST_X), next);
+    await lateWrite;
+
+    expect(outcome.completed).toBe(true);
+    expect(scope?.writes).toEqual([]);
+  });
+
+  it('ignores a delayed entry noted after the request failed', async () => {
+    const failure = new Error('handler failed');
+    let scope: AuditScope | undefined;
+    let lateEntryRan!: () => void;
+    const lateEntry = new Promise<void>((resolve) => { lateEntryRan = resolve; });
+
+    const next = handlerDoing((subscriber) => {
+      scope = currentAuditScope();
+      setTimeout(() => {
+        noteAuditEntry();
+        lateEntryRan();
+      }, 0);
+      subscriber.error(failure);
+    });
+
+    const outcome = await runIntercept(requestWith(USER, POST_X), next);
+    await lateEntry;
+
+    expect(outcome.error).toBe(failure);
+    expect(scope?.entries).toBe(0);
   });
 });

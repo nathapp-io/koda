@@ -205,4 +205,63 @@ describe('audit coverage scopes', () => {
       }),
     ).toThrow(UnauditedWriteError);
   });
+
+  // Review B2 — a scope closes when its work settles, so a callback that inherits its async context
+  // and runs afterwards cannot change a scope that already passed or failed its check.
+  it('ignores a write a timer started inside a settled scope notes afterwards', async () => {
+    let scope: AuditScope | undefined;
+    let ran!: () => void;
+    const lateWrite = new Promise<void>((resolve) => { ran = resolve; });
+
+    await runInAuditScope('system:unknown', async () => {
+      scope = currentAuditScope();
+      setTimeout(() => {
+        noteAuditWrite('Ticket.update');
+        ran();
+      }, 0);
+    });
+    await lateWrite;
+
+    expect(scope?.writes).toEqual([]);
+  });
+
+  it('ignores a late entry from a finished child scope instead of passing its parent', async () => {
+    let lateEntryRan!: () => void;
+    const lateEntry = new Promise<void>((resolve) => { lateEntryRan = resolve; });
+
+    const outer = runInAuditScope('writer:Sweeper', async () => {
+      noteAuditWrite('Session.deleteMany');
+      await runInAuditScope('system:schedule', async () => {
+        // The timer inherits the child's context but fires after the child settled and was checked.
+        setTimeout(() => {
+          noteAuditEntry();
+          lateEntryRan();
+        }, 0);
+      });
+      await lateEntry;
+    });
+
+    const error = await rejectedWithUnauditedWrite(outer);
+    expect(error.surface).toBe('writer:Sweeper');
+  });
+
+  it('counts nothing a failed scope notes after its rejection', async () => {
+    const failure = new Error('handler failed');
+    let scope: AuditScope | undefined;
+    let lateWriteRan!: () => void;
+    const lateWrite = new Promise<void>((resolve) => { lateWriteRan = resolve; });
+
+    const outer = runInAuditScope('POST /x', () => {
+      scope = currentAuditScope();
+      setTimeout(() => {
+        noteAuditWrite('Ticket.update');
+        lateWriteRan();
+      }, 0);
+      return Promise.reject(failure);
+    });
+
+    await expect(outer).rejects.toBe(failure);
+    await lateWrite;
+    expect(scope?.writes).toEqual([]);
+  });
 });

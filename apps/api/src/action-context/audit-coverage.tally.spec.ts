@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  bookkeeping, noteAuditEntry, noteAuditWrite, openAuditScope, runInAuditScope,
-  withTransactionTally,
+  UnauditedWriteError, bookkeeping, currentAuditScope, noteAuditEntry, noteAuditWrite, openAuditScope,
+  runInAuditScope, withTransactionTally, type AuditScope,
 } from './audit-coverage';
 
 describe('withTransactionTally', () => {
@@ -116,5 +116,62 @@ describe('withTransactionTally', () => {
       });
       return 42;
     })).resolves.toBe(42);
+  });
+
+  // Review B1 — a detached scope keeps its own tally: nothing it records or writes may travel into
+  // the entry point whose transaction merely encloses it.
+  it('keeps a detached scope entry out of the enclosing scope, inside its transaction', async () => {
+    const outer = runInAuditScope('writer:Sweeper', async () => {
+      noteAuditWrite('Session.deleteMany');
+      await withTransactionTally(async () => {
+        await runInAuditScope('task:T', async () => {
+          noteAuditEntry();
+        }, { detached: true });
+      });
+    });
+
+    const error = await outer.then(() => undefined, (thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(UnauditedWriteError);
+    expect((error as UnauditedWriteError).surface).toBe('writer:Sweeper');
+  });
+
+  it('counts a detached scope write in that scope, not in the enclosing one', async () => {
+    let outerWrites: readonly string[] = [];
+
+    await openAuditScope('writer:Sweeper', async (outer) => {
+      noteAuditWrite('Session.deleteMany');
+      await withTransactionTally(async () => {
+        await expect(runInAuditScope('task:T', async () => {
+          noteAuditWrite('TicketLink.update');
+        }, { detached: true })).rejects.toBeInstanceOf(UnauditedWriteError);
+      });
+
+      noteAuditEntry();
+      outerWrites = outer.writes;
+    });
+
+    expect(outerWrites).toEqual(['Session.deleteMany']);
+  });
+
+  // Review B2 — a transaction that outlives the scope that opened it counts nothing: the entry point
+  // already settled and was checked.
+  it('drops a fulfilled tally whose scope settled first', async () => {
+    let scope: AuditScope | undefined;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let flushed!: Promise<void>;
+
+    await runInAuditScope('system:unknown', async () => {
+      scope = currentAuditScope();
+      flushed = withTransactionTally(async () => {
+        noteAuditWrite('Label.create');
+        await gate;
+      });
+    });
+
+    release();
+    await flushed;
+
+    expect(scope?.writes).toEqual([]);
   });
 });
