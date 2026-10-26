@@ -1,4 +1,6 @@
-import { Global, Module } from '@nestjs/common';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { ApprovalPolicyService } from './approval-policy.service';
+import { Global, Injectable, Module } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { createMockPrismaService, PrismaService } from '@nathapp/nestjs-prisma';
@@ -11,17 +13,29 @@ import { PrismaApprovalRequestRepository } from './prisma-approval-request.repos
 
 @Global()
 @Module({ providers: [
-  { provide: PermissionService, useValue: { roleIdsAt: vi.fn().mockResolvedValue([]) } },
+  { provide: AuditRecorder, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
+  { provide: PermissionService, useValue: { roleIdsAt: vi.fn().mockResolvedValue([]), roleIdsAnywhere: vi.fn().mockResolvedValue([]) } },
   { provide: PrismaService, useValue: createMockPrismaService({ fn: vi.fn }) },
   { provide: TRANSACTION_MANAGER, useValue: {
     run: vi.fn((fn: () => Promise<unknown>) => fn()), getClient: vi.fn(), isInTransaction: vi.fn(() => false),
   } },
-], exports: [PrismaService, TRANSACTION_MANAGER, PermissionService] })
+], exports: [PrismaService, TRANSACTION_MANAGER, PermissionService, AuditRecorder] })
 class ExternalStubsModule {}
+
+@Injectable()
+class PolicyConsumer {
+  constructor(readonly policies: ApprovalPolicyService) {}
+}
+@Module({ imports: [ApprovalEngineModule], providers: [PolicyConsumer] })
+class ConsumerModule {}
 
 describe('ApprovalEngineModule', () => {
   let moduleRef: TestingModule;
   afterEach(async () => { await moduleRef?.close(); });
+  it('exports the policy service to consuming modules without a database', async () => {
+    moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ConsumerModule] }).compile();
+    expect(moduleRef.get(PolicyConsumer).policies).toBeInstanceOf(ApprovalPolicyService);
+  });
   it('provides a resolver wired to policy and permission providers', async () => {
     moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ApprovalEngineModule] }).compile();
     const repository = moduleRef.get<PrismaApprovalPolicyRepository>(APPROVAL_POLICY_REPOSITORY);

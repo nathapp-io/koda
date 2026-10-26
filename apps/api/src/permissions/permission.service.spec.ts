@@ -34,6 +34,18 @@ describe('PermissionService', () => {
     store.projects.add('p2');
   });
 
+  it('policy writes: roleIdsAnywhere includes every scope, distinct and ascending', async () => {
+    const ref = { type: 'AGENT' as const, id: 'a1' };
+    store.bind(ref, 'developer', 'p1');
+    store.bind(ref, 'developer', 'p2');
+    store.bind(ref, 'reviewer', 'p2');
+    store.bind(ref, 'agent', null);
+    expect(await service.roleIdsAnywhere(ref)).toEqual([
+      store.roleByKey('developer').id, store.roleByKey('reviewer').id, store.roleByKey('agent').id,
+    ].sort());
+    expect(await service.roleIdsAnywhere({ type: 'AGENT', id: 'unbound' })).toEqual([]);
+  });
+
   it('approval AC-14: roleIdsAt returns distinct, ascending effective role ids', async () => {
     const ref = { type: 'AGENT' as const, id: 'a1' };
     store.bind(ref, 'developer', 'p1');

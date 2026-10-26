@@ -88,6 +88,12 @@ export class PermissionService {
     return [...new Set(rows.filter((row) => appliesIn(row, projectId)).map((row) => row.binding.roleId))].sort();
   }
 
+  /** All held roles, including project-only bindings that a global approval policy can match. */
+  async roleIdsAnywhere(principal: PrincipalRef): Promise<string[]> {
+    const rows = await this.bindings.findPrincipalBindings(principal);
+    return [...new Set(rows.map((row) => row.binding.roleId))].sort();
+  }
+
   /**
    * `{ all: true }` when the principal holds `key` globally; otherwise the accessible projects where
    * it holds `key`, ascending.
