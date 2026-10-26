@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, InvalidArgumentError } from 'commander';
 import {
   approvalRequestsControllerCancel, approvalRequestsControllerDecide, approvalRequestsControllerGet,
   approvalRequestsControllerList, projectsControllerFindBySlug,
@@ -25,11 +25,17 @@ function record(value: unknown): RecordValue {
   return value as RecordValue;
 }
 
+function parsePageSize(value: string): number {
+  const size = parsePositiveInt(value);
+  if (size > 100) throw new InvalidArgumentError('must be between 1-100');
+  return size;
+}
+
 function registerList(approval: Command): void {
   approval.command('list').description('List approval requests')
     .option('--status <status>', 'Request status').option('--project <slug>', 'Filter by project slug')
     .option('--key <permissionKey>', 'Filter by permission key').option('--mine', 'Only requests you opened')
-    .option('--page <n>', 'Page number', parsePositiveInt, 1).option('--size <n>', 'Page size', parsePositiveInt, 20)
+    .option('--page <n>', 'Page number', parsePositiveInt, 1).option('--size <n>', 'Page size (1-100)', parsePageSize, 20)
     .option('--json', 'Output as JSON').action(async (options: ApprovalOptions) => {
       try {
         await context();

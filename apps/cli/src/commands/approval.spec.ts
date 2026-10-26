@@ -40,6 +40,10 @@ describe('koda approval request commands', () => {
     expect(approvalRequestsControllerList).toHaveBeenCalledWith({ query: { current: 1, size: 20 } });
     expect(resolveContext).toHaveBeenCalledWith({});
   });
+  it('rejects a page size above the API maximum before making a request', async () => {
+    await expect(run('list', '--size', '101')).rejects.toThrow(/1-100/);
+    expect(approvalRequestsControllerList).not.toHaveBeenCalled();
+  });
   it('AC-2: explicit filters and mine true', async () => {
     (approvalRequestsControllerList as jest.Mock).mockResolvedValue(ok({ hasNext: false, records: [] }));
     await run('list', '--status', 'pending', '--key', 'label.delete', '--mine');
