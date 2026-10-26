@@ -104,6 +104,18 @@ describe('THREAD_PUBLISH acks (US-004)', () => {
     createdAt: NOW, deliveredAt: NOW, ackedAt: null, ackResult: null,
   });
 
+  it('AC-5: observes thread.input-ack for a THREAD_INPUT acknowledgement', async () => {
+    const inputCommand: FleetCommandRecord = { ...threadPublishCommand(), id: 'cmd-input', type: 'THREAD_INPUT' };
+    const { repo } = makeProcessor(inputCommand);
+    const threadEffects = { onInputAck: vi.fn(async () => { expect(currentBookkeepingReason()).toBe('thread.input-ack'); }) };
+    const withThreads = new CommandAckProcessor(repo as never, { apply: vi.fn() } as never, { holds: () => true, abandon: vi.fn() } as never,
+      { record: vi.fn() } as never, { lockById: vi.fn(), setOutcome: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never, mockAuditRecorder, threadEffects as never);
+
+    await withThreads.process('r1', 'boot-1', [publishAck('cmd-input', 'rejected', 'input_failed')], NOW);
+
+    expect(threadEffects.onInputAck).toHaveBeenCalledWith(expect.objectContaining({ type: 'THREAD_INPUT' }), 'rejected', 'input_failed');
+  });
+
   it('AC-8: routes a rejected THREAD_PUBLISH ack to the thread effects with its detail', async () => {
     const { repo } = makeProcessor(threadPublishCommand());
     const threadEffects = { onInputAck: vi.fn(async () => { expect(currentBookkeepingReason()).toBe('thread.input-ack'); }) };
