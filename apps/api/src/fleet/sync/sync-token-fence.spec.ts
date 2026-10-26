@@ -13,6 +13,7 @@ import type { ChatThreadRepository } from '../threads/domain/chat-thread.domain'
 import type { GitToken } from '../common/protocol';
 import { SyncService } from './sync.service';
 import { parseSyncRequest } from './sync-request.parser';
+import { currentBookkeepingReason } from '../../action-context/audit-coverage';
 
 const base = { protocolVersion: 4, bootId: 'b1', daemonVersion: '1', freeSlots: 0, jobs: [], commandAcks: [] };
 const request = { jobId: 'j1', leaseEpoch: 1, repoId: 'r1' };
@@ -56,6 +57,25 @@ async function expectDenied(h: ReturnType<typeof harness>, repoId = 'r1', reason
 }
 
 describe('sync repository token fence', () => {
+  it('AC-1: marks runner sync bookkeeping at the repository write', async () => {
+    const h = harness();
+    h.repo.recordRunnerSync.mockImplementation(async () => {
+      expect(currentBookkeepingReason()).toBe('runner.heartbeat');
+      return { previousBootId: 'b1' };
+    });
+    await h.sync([]);
+    expect(h.repo.recordRunnerSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC-2: marks command delivery at the delivered write', async () => {
+    const h = harness();
+    h.repo.findPendingCommands.mockResolvedValue([{ id: 'c1', type: 'ASSIGN', jobId: 'j1', leaseEpoch: 1, payload: {}, deliveredAt: null } as never]);
+    h.repo.markDelivered.mockImplementation(async () => {
+      expect(currentBookkeepingReason()).toBe('runner.command-delivery');
+    });
+    await h.sync([]);
+    expect(h.repo.markDelivered).toHaveBeenCalledTimes(1);
+  });
   it('workspace AC-7 refuses the anchor token without repoId', async () => {
     const h = harness();
     h.repo.findThreadTokenScope.mockResolvedValue({ kind: 'WORKSPACE', action: 'SESSION' });

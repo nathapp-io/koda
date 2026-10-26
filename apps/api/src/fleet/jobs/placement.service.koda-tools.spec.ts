@@ -2,6 +2,7 @@ import { FleetCommandType, FleetJobState } from '../../common/enums';
 import { KODA_TOOL_DESCRIPTORS } from '../assistant/koda-tool-descriptors';
 import type { PlacementRunnerRow } from './domain/fleet-job.domain';
 import { PlacementService } from './placement.service';
+import { currentBookkeepingReason } from '../../action-context/audit-coverage';
 
 /**
  * US-005 (1b-D3): a THREAD job's ASSIGN carries the static koda tool descriptors only for a SESSION turn placed on a
@@ -48,8 +49,14 @@ function fixture(action: 'SESSION' | 'PUBLISH' | 'DISCARD', runners: PlacementRu
     findActiveLoads: vi.fn(async () => []),
     findQueuedIds: vi.fn(async () => ['j1']),
     findThreadAssign: vi.fn(async () => threadAssign(action)),
-    createCommand: vi.fn(async () => ({})),
-    casAssign: vi.fn(async () => 1),
+    createCommand: vi.fn(async () => {
+      expect(currentBookkeepingReason()).toBe('fleet.placement');
+      return {};
+    }),
+    casAssign: vi.fn(async () => {
+      expect(currentBookkeepingReason()).toBe('fleet.placement');
+      return 1;
+    }),
     findById: vi.fn(async () => job),
     pinThreadRunner: vi.fn(async () => undefined),
   };

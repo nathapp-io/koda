@@ -3,6 +3,7 @@ import type { FleetJobEventRecord, FleetJobPatch, FleetJobRecord } from '../jobs
 import type { JobReport } from '../common/protocol';
 import { JobReportProcessor } from './job-report.processor';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
+import { currentBookkeepingReason } from '../../action-context/audit-coverage';
 
 const NOW = new Date('2026-10-03T10:00:00.000Z');
 
@@ -81,6 +82,10 @@ describe('JobReportProcessor approval_request (S1.5 §2.2)', () => {
     const repo = makeRepo();
     repo.seed({ ...runningJob, bashMode: 'escalate' });
     const { processor, closer, activity } = makeProcessor(repo);
+    activity.record.mockImplementation(async (event) => {
+      expect(event.action).toBe('job.event_rejected');
+      expect(currentBookkeepingReason()).toBe('runner.event-log');
+    });
     const outcome = await processor.process('r1', { jobId: runningJob.id, leaseEpoch: runningJob.leaseEpoch, events: [{ seq: 1, type: 'approval_request', payload: { naxAskId: 'x' } as never }] }, NOW);
     expect(closer.openBash).not.toHaveBeenCalled();
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'job.event_rejected' }));
@@ -105,6 +110,16 @@ describe('JobReportProcessor postRun mirror (US-003 AC-7, AC-8)', () => {
     const repo = makeRepo();
     repo.seed({ ...runningJob });
     const { processor } = makeProcessor(repo);
+    const appendEvent = repo.appendEvent.getMockImplementation();
+    repo.appendEvent.mockImplementation(async (jobId, event) => {
+      expect(currentBookkeepingReason()).toBe('runner.event-log');
+      return appendEvent ? appendEvent(jobId, event) : Promise.reject(new Error('appendEvent implementation missing'));
+    });
+    const update = repo.update.getMockImplementation();
+    repo.update.mockImplementation(async (id, patch) => {
+      expect(currentBookkeepingReason()).toBe('runner.event-log');
+      return update ? update(id, patch) : Promise.reject(new Error('update implementation missing'));
+    });
     const out = await processor.process('r1', snapshot(runningJob.id, runningJob.leaseEpoch, { acceptance: 'running', workflowStep: 'branch-review' }), NOW);
     expect(repo.update).toHaveBeenCalledWith('job-1', expect.objectContaining({ postRun: { acceptance: 'running', workflowStep: 'branch-review' } }));
     expect(out.ack).toEqual({ jobId: 'job-1', ackedSeq: 1 });
@@ -126,6 +141,7 @@ describe('JobReportProcessor config job end (fleet S3 D476: UPLOADING with no bu
     repo.seed({ ...runningJob, command: 'CONFIG_EDIT', bashMode: 'raw', maxCostUsd: '0' });
     const transitions = {
       apply: vi.fn(async ({ job, to }: { job: FleetJobRecord; to: string }) => {
+        expect(currentBookkeepingReason()).toBeUndefined();
         const after = await repo.update(job.id, { state: to as FleetJobRecord['state'] });
         return { job: after, live: { id: `live-${to}`, type: 'fleet_job', projectId: 'p1', jobId: job.id, state: to, at: NOW.toISOString() }, approvalLive: [] };
       }),
