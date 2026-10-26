@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-api",
   "branchName": "feat/permissions-p3-approval-api",
   "createdAt": "2026-10-26T00:00:00.000Z",
-  "updatedAt": "2026-10-26T17:03:07.290Z",
+  "updatedAt": "2026-10-26T17:15:48.699Z",
   "userStories": [
     {
       "id": "US-001",
@@ -886,14 +886,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Integrates a new authenticated protocol surface with per-agent action attribution and service-enforced visibility; strict security TDD applies."
+        "reasoning": "Integrates a new authenticated protocol surface with per-agent action attribution and service-enforced visibility; strict security TDD applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/mcp/mcp-server.factory.ts",
@@ -937,7 +940,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "3c4cd5b01060af3f23f7256040db95006ccc21e8"
     },
     {
       "id": "US-013",
