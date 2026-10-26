@@ -13,6 +13,8 @@ import {
   OutboxService as NathappOutboxService,
 } from '@nathapp/nestjs-outbox';
 import { outboxConfig } from '../config/outbox.config';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import { FanOutPublisher } from './fan-out-publisher';
 import { OutboxModule } from './outbox.module';
 import { OutboxRetentionProcessor } from './outbox-retention.processor';
@@ -26,8 +28,11 @@ import { PrismaOutboxStore } from './prisma-outbox.store';
       provide: TRANSACTION_MANAGER,
       useValue: { run: <T>(fn: () => Promise<T>) => fn(), getClient: () => ({}), isInTransaction: () => false },
     },
+    // AuditLogModule is @Global in AppModule; a standalone compile has to provide the recorder the
+    // retention processor injects (Permissions P2 US-004).
+    { provide: AuditRecorder, useValue: mockAuditRecorder },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER],
+  exports: [PrismaService, TRANSACTION_MANAGER, AuditRecorder],
 })
 class FakePrismaModule {}
 

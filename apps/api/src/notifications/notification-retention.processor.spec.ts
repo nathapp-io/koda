@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { currentContext, type ActionContext } from '../action-context/action-context';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import { NotificationRetentionProcessor } from './notification-retention.processor';
 import type { INotificationsConfig } from '../config/notifications.config';
 
@@ -7,7 +8,7 @@ function setup(config: INotificationsConfig | undefined) {
   const repo = { purgeRead: vi.fn().mockResolvedValue(7) };
   const cfg = { get: vi.fn().mockReturnValue(config) };
   const healthAlerts = { purgeClosed: vi.fn().mockResolvedValue(0) };
-  const processor = new NotificationRetentionProcessor(repo as never, cfg as never, healthAlerts as never);
+  const processor = new NotificationRetentionProcessor(repo as never, cfg as never, healthAlerts as never, mockAuditRecorder as never);
   return { processor, repo, healthAlerts };
 }
 

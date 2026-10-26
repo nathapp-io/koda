@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { OutboxStatus } from '@nathapp/nestjs-outbox';
 import { runAsSystemWriter } from '../action-context/action-context';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import { PrismaOutboxRepository } from './prisma-outbox.repository';
 import { IOutboxConfig, OUTBOX_CFG } from '../config/outbox.config';
 
@@ -25,6 +26,7 @@ export class OutboxRetentionProcessor {
   constructor(
     private readonly repository: PrismaOutboxRepository,
     private readonly config: ConfigService,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /** Permissions P2 US-005: the cron method is the background entry; the purge runs as `outbox`. */
@@ -41,7 +43,18 @@ export class OutboxRetentionProcessor {
     }
     const before = new Date(Date.now() - days * OutboxRetentionProcessor.DAY_MS);
     try {
-      const deleted = await this.repository.deleteTerminalBefore([OutboxStatus.PUBLISHED, OutboxStatus.DEAD], before);
+      // Permissions P2 US-004: the delete and its entry commit together, so a rejected record keeps
+      // the rows for the next night and the catch below logs it.
+      const deleted = await this.audit.audited(
+        () => this.repository.deleteTerminalBefore([OutboxStatus.PUBLISHED, OutboxStatus.DEAD], before),
+        (count) => count === 0 ? [] : [{
+          key: 'system.outbox.retention',
+          resourceType: 'outbox-event',
+          resourceId: 'all',
+          projectId: null,
+          summary: `purged ${count} terminal events`,
+        }],
+      );
       this.logger.log(`Purged ${deleted} terminal outbox event(s) not updated since ${before.toISOString()}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

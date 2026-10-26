@@ -4,6 +4,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- producer-atomicity
  */
 import { ConfigModule } from '@nestjs/config';
+import { Global, Module } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
@@ -36,6 +37,15 @@ import { createPgAdapter } from '../../../src/prisma/pg-adapter';
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
 
+/**
+ * Permissions P2 US-004: OutboxModule's retention processor injects AuditRecorder. AppModule provides it
+ * through the @Global AuditLogModule, so a spec compiling OutboxModule must supply a global equivalent —
+ * a root-only provider is invisible to an imported module.
+ */
+@Global()
+@Module({ providers: [{ provide: AuditRecorder, useValue: mockAuditRecorder }], exports: [AuditRecorder] })
+class FakeAuditModule {}
+
 describeIntegration('producers record outbox rows atomically', () => {
   let module: TestingModule;
   let prisma: PrismaService<PrismaClient>;
@@ -62,11 +72,11 @@ describeIntegration('producers record outbox rows atomically', () => {
       imports: [
         ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true, load: [outboxConfig] }),
         PrismaModule.forRoot({ client: PrismaClient, transaction: true, clientOptions: { adapter: createPgAdapter(DATABASE_URL) } }),
+        FakeAuditModule,
         OutboxModule,
       ],
       providers: [
         TicketsService,
-        { provide: AuditRecorder, useValue: mockAuditRecorder },
         TicketTransitionsService,
         // Permissions P1 (US-003): TicketTransitionsService's required third dependency. The
         // transitions these tests drive are their own subject, so the edge check allows them. The

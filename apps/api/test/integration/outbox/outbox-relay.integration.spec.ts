@@ -3,6 +3,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * record() -> OutboxRelay -> FanOutPublisher -> handler, on real Postgres.
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- outbox-relay
  */
+import { Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaClient } from '../../../src/generated/prisma/client';
@@ -10,6 +11,7 @@ import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxRelay, OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { outboxConfig } from '../../../src/config/outbox.config';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { OutboxAdminService } from '../../../src/outbox/outbox-admin.service';
 import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
@@ -17,6 +19,11 @@ import { OutboxModule } from '../../../src/outbox/outbox.module';
 import { PrismaOutboxRepository } from '../../../src/outbox/prisma-outbox.repository';
 import { resetDb } from '../../helpers/reset-db';
 import { createPgAdapter } from '../../../src/prisma/pg-adapter';
+
+/** AppModule provides the recorder through the @Global AuditLogModule; this compile does not. */
+@Global()
+@Module({ providers: [{ provide: AuditRecorder, useValue: mockAuditRecorder }], exports: [AuditRecorder] })
+class FakeAuditModule {}
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -37,6 +44,7 @@ describeIntegration('outbox relay end to end', () => {
       imports: [
         ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true, load: [outboxConfig] }),
         PrismaModule.forRoot({ client: PrismaClient, transaction: true, clientOptions: { adapter: createPgAdapter(DATABASE_URL) } }),
+        FakeAuditModule,
         OutboxModule,
       ],
     }).compile();
