@@ -217,4 +217,17 @@ import { canRunDbTests } from '../../helpers/test-environment';
     expect(rejected[0].reason).toBeInstanceOf(ApprovalRequestNotPendingError);
     expect(labels.state.calls).toHaveLength(1);
   });
+
+  it('AC-15: when the first of two concurrent executes fails, the command still runs once', async () => {
+    labels.state.executeThrows = true; labels.state.writeLabel = { projectId: 'p1', name: 'bug' };
+    const r = await open(); await moveToApproved(r.id);
+    const results = await Promise.allSettled([executions.execute(r.id, now), executions.execute(r.id, now)]);
+    expect(labels.state.calls).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.filter((result) => result.status === 'rejected');
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toBeInstanceOf(ApprovalRequestNotPendingError);
+    expect(await stored(r.id)).toMatchObject({ status: 'failed', result: { error: 'execution-failed', name: 'Error' } });
+    expect(await db.label.count({ where: { name: 'bug' } })).toBe(0);
+  });
 });

@@ -31,6 +31,8 @@ type Prechecked =
 @Injectable()
 export class ApprovalExecutionService {
   private readonly logger = new Logger(ApprovalExecutionService.name);
+  /** The tail of each request's in-flight run; entries are removed when the last waiter finishes. */
+  private readonly running = new Map<string, Promise<void>>();
 
   constructor(
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
@@ -89,30 +91,54 @@ export class ApprovalExecutionService {
    * has returned, a failing commit is reported to the caller and the request stays approved.
    */
   private async run(request: ApprovalRequestRecord, command: ApprovalCommand, parsed: unknown, now: Date): Promise<ApprovalRequestRecord> {
-    let callbackCompleted = false;
+    // The row lock is released when the failed callback rolls back, before the failure settlement
+    // opens its own transaction. Holding this request's slot across both keeps a waiting execute from
+    // taking the still-approved row in that gap and running the command a second time.
+    return this.serialised(request.id, async () => {
+      // Set only when the callback itself threw: a transaction that fails to open, or to commit after
+      // the callback succeeded, is reported to the caller and never settles the request.
+      let callbackFailure: { error: unknown } | undefined;
+      try {
+        return await this.txManager.run(async () => {
+          try {
+            const locked = await this.requests.lockById(request.id);
+            if (!locked) throw new ApprovalRequestNotFoundError(request.id);
+            if (locked.status !== 'approved') throw new ApprovalRequestNotPendingError(locked.status);
+
+            const result = await command.execute(parsed);
+            const settled = await bookkeeping('approval.request-settle', () => this.requests.transition(request.id, 'approved', {
+              status: 'executed', settledAt: now, result: command.toResult?.(result) ?? null,
+            }));
+            // The row is locked by this transaction, so a lost transition means a broken boundary: roll back.
+            if (!settled) throw new ApprovalRequestNotPendingError(locked.status);
+
+            return settled;
+          } catch (error) {
+            callbackFailure = { error };
+            throw error;
+          }
+        });
+      } catch (error) {
+        if (callbackFailure === undefined || error instanceof ApprovalRequestNotPendingError) throw error;
+
+        this.logger.warn(`approval request ${request.id} failed to execute: ${errorMessage(error)}`);
+        return this.settle(request.id, {
+          status: 'failed', settledAt: now, result: { error: 'execution-failed', name: errorName(error) },
+        });
+      }
+    });
+  }
+
+  /** Runs `fn` after every earlier call for the same request id has finished (one API instance). */
+  private async serialised<T>(id: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.running.get(id) ?? Promise.resolve();
+    const current = previous.then(fn, fn);
+    const tail = current.then(() => undefined, () => undefined);
+    this.running.set(id, tail);
     try {
-      return await this.txManager.run(async () => {
-        const locked = await this.requests.lockById(request.id);
-        if (!locked) throw new ApprovalRequestNotFoundError(request.id);
-        if (locked.status !== 'approved') throw new ApprovalRequestNotPendingError(locked.status);
-
-        const result = await command.execute(parsed);
-        const settled = await bookkeeping('approval.request-settle', () => this.requests.transition(request.id, 'approved', {
-          status: 'executed', settledAt: now, result: command.toResult?.(result) ?? null,
-        }));
-        // The row is locked by this transaction, so a lost transition means a broken boundary: roll back.
-        if (!settled) throw new ApprovalRequestNotPendingError(locked.status);
-
-        callbackCompleted = true;
-        return settled;
-      });
-    } catch (error) {
-      if (callbackCompleted || error instanceof ApprovalRequestNotPendingError) throw error;
-
-      this.logger.warn(`approval request ${request.id} failed to execute: ${errorMessage(error)}`);
-      return this.settle(request.id, {
-        status: 'failed', settledAt: now, result: { error: 'execution-failed', name: errorName(error) },
-      });
+      return await current;
+    } finally {
+      if (this.running.get(id) === tail) this.running.delete(id);
     }
   }
 

@@ -157,4 +157,39 @@ describe('ApprovalExecutionService', () => {
     expect(s.tx.run).toHaveBeenCalledTimes(1);
     expect(s.repo.transition).toHaveBeenCalledTimes(1);
   });
+
+  it('propagates a transaction-start failure without settling the request', async () => {
+    const s = setup();
+    const startFailure = new Error('cannot open transaction');
+    s.tx.run.mockImplementationOnce(async () => { throw startFailure; });
+
+    await expect(s.service.execute('r1', now)).rejects.toBe(startFailure);
+    expect(s.test.state.calls).toEqual([]);
+    expect(s.repo.transition).not.toHaveBeenCalled();
+    expect(s.tx.run).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a second execute out until a failed first one has settled, so the command runs once', async () => {
+    const s = setup();
+    // A transaction mock that serialises callbacks like the row lock does, and rolls back nothing else.
+    let tail: Promise<unknown> = Promise.resolve();
+    s.tx.run.mockImplementation((fn: () => Promise<unknown>) => {
+      const next = tail.then(fn, fn);
+      tail = next.catch(() => undefined);
+      return next;
+    });
+    s.repo.transition.mockImplementation(async (_id: string, from: string, p: Partial<ApprovalRequestRecord>) => {
+      if (s.state.current.status !== from) return null;
+      s.state.current = { ...s.state.current, ...p };
+      return s.state.current;
+    });
+    s.test.state.executeThrows = true;
+
+    const results = await Promise.allSettled([s.service.execute('r1', now), s.service.execute('r1', now)]);
+
+    expect(s.test.state.calls).toHaveLength(1);
+    expect(results[0]).toMatchObject({ status: 'fulfilled', value: { status: 'failed', result: { error: 'execution-failed' } } });
+    expect(results[1]).toMatchObject({ status: 'rejected' });
+    expect((results[1] as PromiseRejectedResult).reason).toBeInstanceOf(ApprovalRequestNotPendingError);
+  });
 });
