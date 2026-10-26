@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-api",
   "branchName": "feat/permissions-p3-approval-api",
   "createdAt": "2026-10-26T00:00:00.000Z",
-  "updatedAt": "2026-10-26T16:30:56.671Z",
+  "updatedAt": "2026-10-26T16:45:16.104Z",
   "userStories": [
     {
       "id": "US-001",
@@ -578,14 +578,17 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Adds globally privileged policy surfaces, nested subject validation, anti-escalation error mapping and catalog exposure; security override applies."
+        "reasoning": "Adds globally privileged policy surfaces, nested subject validation, anti-escalation error mapping and catalog exposure; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-policy.service.ts",
@@ -620,7 +623,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "dc19c8e7230cd868a1143364949d6e90886847ef"
     },
     {
       "id": "US-009",
