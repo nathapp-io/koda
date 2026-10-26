@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { Logger } from '@nestjs/common';
 import { resolveWriteGuardMode, type WriteGuardMode } from './contextless-write';
 import { UNAUDITED_SURFACES } from './audit-coverage.allowlist';
+import { BOOKKEEPING_REASONS, type BookkeepingReason } from './audit-coverage.reasons';
 
 /**
  * Permissions P2l US-001 — the entry-point audit scope, the unit of audit coverage.
@@ -47,6 +48,7 @@ interface ScopeState extends AuditScope {
 
 const logger = new Logger(UnauditedWriteError.name);
 const scopeStorage = new AsyncLocalStorage<ScopeState>();
+const bookkeepingStorage = new AsyncLocalStorage<BookkeepingReason>();
 
 /** The scope of the current entry point, or undefined outside any scope. */
 export function currentAuditScope(): AuditScope | undefined {
@@ -90,8 +92,24 @@ export function runInAuditScope<T>(surface: string, fn: () => T, opts?: { detach
   }, opts);
 }
 
-/** Counts a write in the innermost scope; a no-op with no scope. */
+/** Runs and awaits fn with writes uncounted; rejects an unknown reason before invoking fn. */
+export function bookkeeping<T>(reason: BookkeepingReason, fn: () => T | PromiseLike<T>): Promise<T> {
+  if (!Object.hasOwn(BOOKKEEPING_REASONS, reason)) {
+    return Promise.reject(new Error(`unknown bookkeeping reason: ${String(reason)}`));
+  }
+
+  return bookkeepingStorage.run(reason, async () => await fn());
+}
+
+/** The currently active bookkeeping reason, or undefined outside bookkeeping(). */
+export function currentBookkeepingReason(): BookkeepingReason | undefined {
+  return bookkeepingStorage.getStore();
+}
+
+/** Counts a write in the innermost scope; a no-op with no scope or inside bookkeeping(). */
 export function noteAuditWrite(label: string): void {
+  if (bookkeepingStorage.getStore() !== undefined) return;
+
   const scope = scopeStorage.getStore();
   if (scope === undefined) return;
 
