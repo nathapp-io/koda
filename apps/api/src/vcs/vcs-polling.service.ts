@@ -9,6 +9,7 @@ import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 import { runAsSystemWriter } from '../action-context/action-context';
+import { bookkeeping } from '../action-context/audit-coverage';
 import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES } from './providers/pagination';
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : 'Unknown error');
@@ -174,11 +175,11 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
       // M10: resume from the newest issue update seen, not from "now", so a capped
       // poll picks up where it stopped. Nothing seen keeps the old cursor.
       if (cursor) {
-        await this.vcsRepo.updateVcsConnectionLastSynced(connection.id, cursor);
+        await bookkeeping('vcs.poll-log', () => this.vcsRepo.updateVcsConnectionLastSynced(connection.id, cursor));
       }
 
       // Write sync log
-      await this.vcsRepo.createVcsSyncLog({
+      await bookkeeping('vcs.poll-log', () => this.vcsRepo.createVcsSyncLog({
         vcsConnectionId: connection.id,
         syncType: 'polling',
         issuesSynced,
@@ -186,7 +187,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
         ...(capped ? { errorMessage: cappedWarning(cursor) } : {}),
         startedAt: startTime,
         completedAt: new Date(),
-      });
+      }));
 
       this.logger.debug(
         `Polling complete for connection ${connection.id}: synced=${issuesSynced}, skipped=${issuesSkipped}`,
@@ -209,7 +210,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
       // that rejects is an unhandled rejection. lastSyncedAt is not moved, so
       // the next tick retries from the same cursor.
       try {
-        await this.vcsRepo.createVcsSyncLog({
+        await bookkeeping('vcs.poll-log', () => this.vcsRepo.createVcsSyncLog({
           vcsConnectionId: connection.id,
           syncType: 'polling',
           issuesSynced: 0,
@@ -217,7 +218,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
           errorMessage,
           startedAt: startTime,
           completedAt: new Date(),
-        });
+        }));
       } catch (logError) {
         this.logger.error(`Failed to write the polling sync log for connection ${connection.id}: ${messageOf(logError)}`);
       }

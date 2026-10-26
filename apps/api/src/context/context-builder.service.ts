@@ -12,6 +12,7 @@ import { ImpactAnalysisService, ChangeImpactResult } from '../code-intel/impact-
 import { estimateTokenCount } from './token-estimator';
 import { SloDashboardService } from '../monitoring/slo-dashboard.service';
 import { CONTEXT_REPOSITORY, IContextRepository } from './domain/context.domain';
+import { bookkeeping } from '../action-context/audit-coverage';
 
 export class ProjectNotFoundError extends NotFoundAppException {
   constructor() {
@@ -341,8 +342,7 @@ export class ContextBuilderService {
     leakageIncidentCount: number;
   }): void {
     if (!this.sloDashboardService) return;
-    this.sloDashboardService
-      .recordQueryMetric(metric)
+    void bookkeeping('context.query-metric', () => this.sloDashboardService!.recordQueryMetric(metric))
       .catch((err: Error) => {
         this.logger.warn(`Failed to record query metric: ${err.message}`);
       });

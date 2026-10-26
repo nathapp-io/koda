@@ -1,4 +1,5 @@
 import { PrismaVcsRepository } from './prisma-vcs.repository';
+import { currentBookkeepingReason } from '../action-context/audit-coverage';
 
 describe('PrismaVcsRepository', () => {
   const mockRun = vi.fn((fn: () => Promise<unknown>) => fn());
@@ -19,7 +20,7 @@ describe('PrismaVcsRepository', () => {
   const mockPrisma = {
     client: {
       ticket: { findFirst: mockFindFirst, create: mockCreate, update: mockUpdate },
-      ticketLink: { findMany: mockFindMany, update: mockUpdate },
+      ticketLink: { findMany: mockFindMany, update: mockUpdate, upsert: vi.fn(), create: vi.fn(), findFirst: vi.fn() },
       comment: { create: mockCommentCreate },
       ticketActivity: { create: mockActivityCreate },
       $queryRaw: mockQueryRaw,
@@ -144,6 +145,34 @@ describe('PrismaVcsRepository', () => {
   it('findTicketLinkForConnectionPr returns null when only another repo has that number', async () => {
     mockFindMany.mockResolvedValue([{ id: 'other', externalRef: 'other/lib#5', prNumber: 5, source: 'fleet' }]);
     await expect(repo.findTicketLinkForConnectionPr('p1', { repoOwner: 'acme', repoName: 'app' }, 5)).resolves.toBeNull();
+  });
+
+  describe('US-008 bookkeeping marks', () => {
+    it('marks same-state PR updates only', async () => {
+      mockQueryRaw.mockResolvedValue([{ prState: 'open' }]);
+      const reasons: unknown[] = [];
+      mockUpdate.mockImplementation(async () => { reasons.push(currentBookkeepingReason()); return {}; });
+      await repo.updateTicketLinkWithPrState('link-1', 'open');
+      expect(reasons).toEqual(['vcs.pr-same-state']);
+
+      mockUpdate.mockClear();
+      mockQueryRaw.mockResolvedValue([{ prState: 'open' }]);
+      await repo.updateTicketLinkWithPrState('link-1', 'closed');
+      expect(currentBookkeepingReason()).toBeUndefined();
+    });
+
+    it('marks existing link refresh but not a new link create', async () => {
+      const ticketLink = mockPrisma.client.ticketLink;
+      const reasons: unknown[] = [];
+      ticketLink.upsert.mockImplementation(async () => { reasons.push(currentBookkeepingReason()); return {}; });
+      ticketLink.findFirst.mockResolvedValue({ id: 'existing' });
+      await repo.upsertTicketLink('t1', 'https://x', 'github', 'commit');
+      expect(reasons).toEqual(['vcs.link-refresh']);
+      ticketLink.findFirst.mockResolvedValue(null);
+      ticketLink.create.mockImplementation(async () => { reasons.push(currentBookkeepingReason()); return { id: 'new' }; });
+      await repo.upsertTicketLink('t1', 'https://y', 'github', 'commit');
+      expect(reasons).toEqual(['vcs.link-refresh', undefined]);
+    });
   });
 
   describe('updateTicketLinkWithPrState (review B1)', () => {
