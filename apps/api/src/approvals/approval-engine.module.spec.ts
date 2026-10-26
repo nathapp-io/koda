@@ -17,10 +17,13 @@ import { SYSTEM_WRITER_METADATA } from '../permissions/system-writer.decorator';
 import { APPROVAL_POLICY_REPOSITORY, APPROVAL_REQUEST_REPOSITORY } from './domain/approval.domain';
 import { PrismaApprovalPolicyRepository } from './prisma-approval-policy.repository';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
+import { OutboxService } from '@nathapp/nestjs-outbox';
+import { ApprovalRequestEvents } from './approval-request-events';
 
 @Global()
 @Module({ providers: [
   { provide: AuditRecorder, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
+  { provide: OutboxService, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
   { provide: PermissionService, useValue: { roleIdsAt: vi.fn().mockResolvedValue([]), roleIdsAnywhere: vi.fn().mockResolvedValue([]) } },
   { provide: PrismaService, useValue: createMockPrismaService({ fn: vi.fn }) },
   { provide: TRANSACTION_MANAGER, useValue: {
@@ -28,7 +31,7 @@ import { PrismaApprovalRequestRepository } from './prisma-approval-request.repos
   } },
   // The sweeper reads the fleet sweep window; a stub keeps the module DB-free and starts no timer.
   { provide: FLEET_CFG, useValue: { sweepEnabled: false, approvalSweepMs: 15_000 } },
-], exports: [PrismaService, TRANSACTION_MANAGER, PermissionService, AuditRecorder, FLEET_CFG] })
+], exports: [PrismaService, TRANSACTION_MANAGER, PermissionService, AuditRecorder, OutboxService, FLEET_CFG] })
 class ExternalStubsModule {}
 
 @Injectable()
@@ -61,6 +64,10 @@ describe('ApprovalEngineModule', () => {
     expect(moduleRef.get(PolicyConsumer).policies).toBeInstanceOf(ApprovalPolicyService);
     expect(moduleRef.get(PolicyConsumer).decisions).toBeInstanceOf(ApprovalDecisionService);
     expect(moduleRef.get(PolicyConsumer).executions).toBeInstanceOf(ApprovalExecutionService);
+  });
+  it('AC-13: provides ApprovalRequestEvents with the outbox stub', async () => {
+    moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ApprovalEngineModule] }).compile();
+    expect(moduleRef.get(ApprovalRequestEvents)).toBeInstanceOf(ApprovalRequestEvents);
   });
   it('provides a resolver wired to policy and permission providers', async () => {
     moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ApprovalEngineModule] }).compile();

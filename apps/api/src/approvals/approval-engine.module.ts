@@ -9,6 +9,7 @@ import { ApprovalRequestExpirySweeper } from './approval-request-expiry.sweeper'
 import { APPROVAL_POLICY_REPOSITORY, APPROVAL_REQUEST_REPOSITORY } from './domain/approval.domain';
 import { PrismaApprovalPolicyRepository } from './prisma-approval-policy.repository';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
+import { ApprovalRequestEvents } from './approval-request-events';
 
 /**
  * P3 approval core. The command registry is one instance per application: an owning module registers
@@ -22,6 +23,7 @@ import { PrismaApprovalRequestRepository } from './prisma-approval-request.repos
   providers: [
     ApprovalDecisionService,
     ApprovalExecutionService,
+    ApprovalRequestEvents,
     ApprovalGate,
     ApprovalPolicyService,
     ApprovalPolicyResolver,

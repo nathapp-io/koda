@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { runWithActionContext } from '../../../src/action-context/action-context';
 import { UnauditedWriteError, runInAuditScope } from '../../../src/action-context/audit-coverage';
@@ -24,6 +25,7 @@ const secondsAfter = (base: Date, seconds: number) => new Date(base.getTime() + 
   let gate: ApprovalGate;
   let policies: ApprovalPolicyService;
   let db: ReturnType<typeof fixtureDb>;
+  let txManager: ITransactionManager;
   const labels = configurableTestCommand('label.delete');
   const roles = configurableTestCommand('role.manage');
 
@@ -43,6 +45,7 @@ const secondsAfter = (base: Date, seconds: number) => new Date(base.getTime() + 
     await resetDb();
     app = await bootHttpApp({ registrationEnabled: false });
     db = fixtureDb(app);
+    txManager = app.get(TRANSACTION_MANAGER, { strict: false });
     await db.project.create({ data: { id: 'p1', slug: 'gate-pending-p1', key: 'GATP', name: 'Pending gate project' } });
     gate = app.get(ApprovalGate, { strict: false });
     policies = app.get(ApprovalPolicyService, { strict: false });
@@ -54,6 +57,8 @@ const secondsAfter = (base: Date, seconds: number) => new Date(base.getTime() + 
   beforeEach(async () => {
     labels.reset();
     roles.reset();
+    await db.outboxEvent.deleteMany({ where: { type: 'approval_request_changed' } });
+    await db.approvalDecision.deleteMany();
     await db.approvalRequest.deleteMany();
     await db.approvalPolicy.deleteMany();
     await db.roleBinding.deleteMany({ where: { principalType: 'AGENT', principalId: 'a1' } });
@@ -74,6 +79,18 @@ const secondsAfter = (base: Date, seconds: number) => new Date(base.getTime() + 
     });
     expect(labels.state.calls).toEqual([]);
     expect(await db.approvalRequest.count()).toBe(1);
+  });
+
+  it('AC-11: commits exactly one content-free outbox event for the newly opened request', async () => {
+    const request = await openLabelRequest();
+    const events = await db.outboxEvent.findMany({ where: { type: 'approval_request_changed' } });
+    expect(events).toHaveLength(1);
+    const event = events[0];
+    if (event === undefined) throw new Error('expected an approval request outbox event');
+    const payload: unknown = JSON.parse(event.payload);
+    expect(payload).toMatchObject({ requestId: request.id, status: 'pending' });
+    expect(payload).not.toHaveProperty('input');
+    expect(payload).not.toHaveProperty('result');
   });
 
   it('AC-2: snapshots the default timeout and the no-policy flags', async () => {
@@ -112,13 +129,23 @@ const secondsAfter = (base: Date, seconds: number) => new Date(base.getTime() + 
     expect(await db.approvalRequest.count()).toBe(1);
   });
 
-  it('AC-5: propagates a parse error and writes no request', async () => {
+  it('AC-12: propagates a parse error and writes no request or outbox event', async () => {
     labels.state.parseThrows = true;
     const error: unknown = await agent(() => gate.gate('label.delete', labelInput, opts, now)).catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(TypeError);
     expect((error as TypeError).message).toBe('test parse refused');
     expect(await db.approvalRequest.count()).toBe(0);
+    expect(await db.outboxEvent.count({ where: { type: 'approval_request_changed' } })).toBe(0);
     expect(labels.state.calls).toEqual([]);
+  });
+
+  it('AC-14: rolls back the outbox row with the approval request transaction', async () => {
+    await expect(txManager.run(async () => {
+      await openLabelRequest();
+      throw new Error('force rollback');
+    })).rejects.toThrow('force rollback');
+    expect(await db.approvalRequest.count()).toBe(0);
+    expect(await db.outboxEvent.count({ where: { type: 'approval_request_changed' } })).toBe(0);
   });
 
   it('AC-6: opening a request settles under an open audit scope without UnauditedWriteError', async () => {
