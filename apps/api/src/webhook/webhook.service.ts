@@ -5,23 +5,32 @@ import { CreateWebhookDto, UpdateWebhookDto } from './webhook.dto';
 import { PrismaWebhookRepository } from './prisma-webhook.repository';
 import { OutboundUrlGuard, OutboundUrlRejection } from './outbound/outbound-url-guard';
 import type { WebhookDomain, WebhookListItem, WebhookView } from './domain/webhook.domain';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { fieldsSummary } from '../audit/audit-summary';
 
 @Injectable()
 export class WebhookService {
   constructor(
     private readonly webhookRepo: PrismaWebhookRepository,
     private readonly urlGuard: OutboundUrlGuard,
+    private readonly audit: AuditRecorder,
   ) {}
 
   async create(projectId: string, dto: CreateWebhookDto): Promise<WebhookDomain> {
     await this.assertUrlAllowed(dto.url);
     const secret = dto.secret ?? randomBytes(20).toString('hex');
-    return this.webhookRepo.createWebhook({
-      projectId,
-      url: dto.url,
-      secret,
-      events: JSON.stringify(dto.events),
-    });
+    return this.audit.audited(
+      () => this.webhookRepo.createWebhook({
+        projectId,
+        url: dto.url,
+        secret,
+        events: JSON.stringify(dto.events),
+      }),
+      (webhook) => ({
+        key: 'webhook.create', resourceType: 'webhook', resourceId: webhook.id,
+        projectId, summary: 'created',
+      }),
+    );
   }
 
   async update(projectId: string, id: string, dto: UpdateWebhookDto): Promise<WebhookView> {
@@ -34,12 +43,18 @@ export class WebhookService {
       await this.assertUrlAllowed(dto.url);
     }
 
-    const updated = await this.webhookRepo.update(id, {
-      ...(dto.url !== undefined && { url: dto.url }),
-      ...(dto.secret !== undefined && { secret: dto.secret }),
-      ...(dto.events !== undefined && { events: JSON.stringify(dto.events) }),
-      ...(dto.active !== undefined && { active: dto.active }),
-    });
+    const updated = await this.audit.audited(
+      () => this.webhookRepo.update(id, {
+        ...(dto.url !== undefined && { url: dto.url }),
+        ...(dto.secret !== undefined && { secret: dto.secret }),
+        ...(dto.events !== undefined && { events: JSON.stringify(dto.events) }),
+        ...(dto.active !== undefined && { active: dto.active }),
+      }),
+      (result) => ({
+        key: 'webhook.update', resourceType: 'webhook', resourceId: result.id,
+        projectId: webhook.projectId, summary: fieldsSummary(dto),
+      }),
+    );
 
     return this.toView(updated);
   }
@@ -80,7 +95,10 @@ export class WebhookService {
     if (!webhook) {
       throw new NotFoundAppException({}, 'webhooks');
     }
-    await this.webhookRepo.deleteWebhook(id);
+    await this.audit.audited(
+      () => this.webhookRepo.deleteWebhook(id),
+      () => ({ key: 'webhook.delete', resourceType: 'webhook', resourceId: id, projectId: webhook.projectId, summary: 'deleted' }),
+    );
   }
 
   /** Deletes a project's webhook. Another project's webhook is a 404, as in `update`. */
@@ -89,7 +107,10 @@ export class WebhookService {
     if (!webhook || webhook.projectId !== projectId) {
       throw new NotFoundAppException({}, 'webhooks');
     }
-    await this.webhookRepo.deleteWebhook(id);
+    await this.audit.audited(
+      () => this.webhookRepo.deleteWebhook(id),
+      () => ({ key: 'webhook.delete', resourceType: 'webhook', resourceId: id, projectId: webhook.projectId, summary: 'deleted' }),
+    );
   }
 
   async findByProjectSlug(slug: string): Promise<WebhookListItem[]> {

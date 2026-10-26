@@ -49,6 +49,7 @@ import { DnsResolver } from './outbound/dns-resolver';
 import { OutboundUrlGuard } from './outbound/outbound-url-guard';
 import { WEBHOOK_CFG, IWebhookConfig } from '../config/webhook.config';
 import { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 
 const webhookKeys = ['webhook.read', 'webhook.create', 'webhook.update', 'webhook.delete'];
 const permissions: Pick<PermissionService, 'can'> = {
@@ -274,6 +275,7 @@ describe('webhook routes (US-003)', () => {
       controllers: [WebhookController],
       providers: [
         WebhookService,
+        { provide: AuditRecorder, useValue: { audited: async (fn: () => Promise<unknown>) => fn(), record: vi.fn() } },
         PrismaWebhookRepository,
         OutboundUrlGuard,
         { provide: PrismaService, useValue: { client: fakeClient } },
