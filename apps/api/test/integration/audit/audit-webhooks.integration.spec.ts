@@ -57,6 +57,7 @@ describeIntegration('webhook configuration audit (real AppModule)', () => {
       url: ALLOWED, events: ['STATUS_CHANGE'], secret: SECRET,
     }).expect(201);
     const createdId = data<{ id: string }>(createResponse).id;
+    expect(await db.auditEntry.count({ where: { key: 'webhook.create', resourceId: createdId } })).toBe(1);
     const createdEntry = await db.auditEntry.findFirstOrThrow({
       where: { key: 'webhook.create', resourceId: createdId },
     });
@@ -91,6 +92,7 @@ describeIntegration('webhook configuration audit (real AppModule)', () => {
     await request(server).patch(`${projectPath}/${createdId}`).set(auth()).send({
       secret: UPDATED_SECRET, active: false,
     }).expect(200);
+    expect(await db.auditEntry.count({ where: { key: 'webhook.update', resourceId: createdId } })).toBe(1);
     let updateEntry = await db.auditEntry.findFirstOrThrow({
       where: { key: 'webhook.update', resourceId: createdId },
     });
@@ -109,11 +111,13 @@ describeIntegration('webhook configuration audit (real AppModule)', () => {
 
     const projectDeleteId = await createWebhook();
     await request(server).delete(`${projectPath}/${projectDeleteId}`).set(auth()).expect(204);
+    expect(await db.auditEntry.count({ where: { key: 'webhook.delete', resourceId: projectDeleteId } })).toBe(1);
     expect(await db.auditEntry.findFirstOrThrow({ where: { key: 'webhook.delete', resourceId: projectDeleteId } }))
       .toMatchObject({ projectId: auditProjectId, summary: 'deleted' });
 
     const globalDeleteId = await createWebhook(OTHER_ALLOWED);
     await request(server).delete(`/api/webhooks/${globalDeleteId}`).set(auth()).expect(204);
+    expect(await db.auditEntry.count({ where: { key: 'webhook.delete', resourceId: globalDeleteId } })).toBe(1);
     expect(await db.auditEntry.findFirstOrThrow({ where: { key: 'webhook.delete', resourceId: globalDeleteId } }))
       .toMatchObject({ projectId: auditProjectId, summary: 'deleted' });
 
