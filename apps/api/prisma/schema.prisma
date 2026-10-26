@@ -1590,3 +1590,79 @@ model RoleBinding {
   @@index([projectId])
   @@index([roleId])
 }
+
+/// Permissions P3a: one approval policy. `selector` is unique: "<projectId|*>|<permissionPattern>|<subject>",
+/// where subject is "all", "type:<USER|AGENT|ASSISTANT>", "role:<roleId>" or "principal:<USER|AGENT>:<id>".
+/// No foreign keys: a policy naming a deleted project, role or principal matches nobody.
+model ApprovalPolicy {
+  id                      String   @id @default(cuid())
+  selector                String   @unique
+  projectId               String?
+  permissionPattern       String   // an exact catalog key, or "<prefix>.*"
+  principalType           String?  // USER | AGENT | ASSISTANT
+  roleId                  String?
+  principalId             String?
+  mode                    String   // none | self | agent | human
+  timeoutSec              Int?
+  onTimeout               String   @default("reject") // reject | approve
+  requiredApprovals       Int      @default(1)
+  approverMustHoldAction  Boolean  @default(true)
+  requireDistinctApprover Boolean  @default(false)
+  updatedByType           String
+  updatedById             String
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([roleId])
+}
+
+/// Permissions P3a: one gated write waiting for (or past) approval. `input` is the command's parsed input, frozen.
+model ApprovalRequest {
+  id                      String    @id @default(cuid())
+  permissionKey           String
+  projectId               String?
+  actorType               String    // USER | AGENT | SYSTEM
+  actorId                 String
+  onBehalfOfType          String?
+  onBehalfOfId            String?
+  origin                  String    // rest | mcp | thread | runner | system
+  correlationId           String
+  input                   Json
+  inputHash               String    // sha256 hex of the canonical JSON of input
+  requiredMode            String
+  policyId                String?
+  onTimeout               String
+  approverMustHoldAction  Boolean
+  requireDistinctApprover Boolean
+  status                  String    @default("pending") // pending | approved | rejected | expired | cancelled | executed | failed
+  satisfiedBy             String?
+  approverType            String?
+  approverId              String?
+  expiresAt               DateTime
+  decidedAt               DateTime?
+  settledAt               DateTime?
+  result                  Json?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  decisions ApprovalDecision[]
+
+  @@index([status, expiresAt])
+  @@index([projectId, status, createdAt])
+  @@index([actorType, actorId, onBehalfOfId, permissionKey, inputHash, status])
+}
+
+model ApprovalDecision {
+  id          String          @id @default(cuid())
+  requestId   String
+  deciderType String          // USER | AGENT
+  deciderId   String
+  decision    String          // approve | reject
+  comment     String?
+  decidedAt   DateTime        @default(now())
+  request     ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@index([deciderId, decidedAt])
+}
