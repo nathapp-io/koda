@@ -30,7 +30,10 @@ export interface PermissionCatalogEntry {
   risk: PermissionRisk;
   principals: readonly PermissionPrincipal[];
   ownable: boolean;
-  /** Placeholder until phase P3 decides floors and defaults. */
+  /**
+   * Floor: the lowest mode any policy may set. Default: the mode for an `AGENT` subject when no
+   * policy matches.
+   */
   approval: { approvable: boolean; floor: ApprovalMode; default: ApprovalMode };
 }
 
@@ -116,7 +119,7 @@ const NEW_KEY_SCOPES: Readonly<Record<string, KeyScope>> = {
   'role.manage': 'global',
   'role.binding.global': 'global',
   'role.binding.owner': 'global',
-  'approval.decide': 'project',
+  'approval.decide': 'any',
   'approval.policy.read': 'project',
   'approval.policy.manage': 'any',
   'audit.read': 'global',
@@ -399,17 +402,23 @@ function deriveScope(key: string, access: PermissionAccess, ownable: boolean): K
 /** Risk, first match wins: role and policy keys, then reads, then deletes/removes and high-risk writes. */
 function classifyRisk(key: string): PermissionRisk {
   if (key.startsWith('role.') || key.startsWith('approval.policy.')) return 'critical';
+  if (isReadKey(key)) return 'low';
   const last = key.slice(key.lastIndexOf('.') + 1);
-  if (last === 'read') return 'low';
   if (last === 'delete' || last === 'remove') return 'high';
   if (HIGH_RISK_PREFIXES.some((prefix) => key.startsWith(prefix))) return 'high';
   return 'medium';
+}
+
+/** A key whose last segment is `read`: reads are never approvable (design §4). */
+function isReadKey(key: string): boolean {
+  return key.slice(key.lastIndexOf('.') + 1) === 'read';
 }
 
 function buildEntry(key: string): PermissionCatalogEntry {
   const access = classifyAccess(key);
   const ownable = access === 'role' && OWNABLE_KEYS.has(key);
   const risk = classifyRisk(key);
+  const approvable = access === 'role' && risk !== 'low' && !isReadKey(key);
 
   return {
     key,
@@ -418,7 +427,11 @@ function buildEntry(key: string): PermissionCatalogEntry {
     risk,
     principals: key === OWNER_BINDING_KEY ? ['user'] : ['user', 'agent'],
     ownable,
-    approval: { approvable: access === 'role' && risk !== 'low', floor: 'none', default: 'none' },
+    approval: {
+      approvable,
+      floor: approvable && risk === 'critical' ? 'human' : 'none',
+      default: !approvable ? 'none' : risk === 'critical' ? 'human' : risk === 'high' ? 'agent' : 'none',
+    },
   };
 }
 

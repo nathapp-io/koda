@@ -81,6 +81,19 @@ export class PermissionService {
     return new Set(keys);
   }
 
+  /** Distinct effective role ids in this scope, using the same binding filter as effectiveKeys. */
+  async roleIdsAt(principal: PrincipalRef, scope: PermissionScope): Promise<string[]> {
+    const projectId = scope === 'global' ? null : scope.projectId;
+    const rows = await this.bindings.findEffectiveBindings(principal, projectId);
+    return [...new Set(rows.filter((row) => appliesIn(row, projectId)).map((row) => row.binding.roleId))].sort();
+  }
+
+  /** All held roles, including project-only bindings that a global approval policy can match. */
+  async roleIdsAnywhere(principal: PrincipalRef): Promise<string[]> {
+    const rows = await this.bindings.findPrincipalBindings(principal);
+    return [...new Set(rows.map((row) => row.binding.roleId))].sort();
+  }
+
   /**
    * `{ all: true }` when the principal holds `key` globally; otherwise the accessible projects where
    * it holds `key`, ascending.

@@ -231,6 +231,46 @@ describe('the seeded-role allow/deny matrix', () => {
     expect(readPinned(readCommittedMatrix())).toEqual([...PINNED_REASONS]);
   });
 
+  it('AC-13: approval.decide is a decision in every row, granted globally to owner and admin only', () => {
+    // The key became `any`-scoped (US-001): its global cell is a decision now, not `no-project`.
+    const globalDecide: Record<string, Reason> = {
+      owner: 'granted',
+      admin: 'granted',
+      member: 'not-granted',
+      agent: 'not-granted',
+      'project-admin': 'not-granted',
+      developer: 'not-granted',
+      reviewer: 'not-granted',
+      verifier: 'not-granted',
+      triager: 'not-granted',
+      approver: 'not-granted',
+      viewer: 'not-granted',
+    };
+    // The project half of the cell is untouched by the scope change.
+    const projectDecide: Record<string, Reason> = {
+      owner: 'granted',
+      admin: 'granted',
+      member: 'not-granted',
+      agent: 'not-granted',
+      'project-admin': 'granted',
+      developer: 'not-granted',
+      reviewer: 'granted',
+      verifier: 'not-granted',
+      triager: 'not-granted',
+      approver: 'granted',
+      viewer: 'not-granted',
+    };
+
+    expect(Object.keys(globalDecide).sort()).toEqual(SYSTEM_ROLES.map((seed) => seed.key).sort());
+
+    for (const seed of SYSTEM_ROLES) {
+      expect([seed.key, matrix[seed.key]['approval.decide']]).toEqual([
+        seed.key,
+        [globalDecide[seed.key], projectDecide[seed.key]],
+      ]);
+    }
+  });
+
   it('AC-4: the runner and system keys are non-role-key in every row', () => {
     expect(rows.length).toBeGreaterThan(0);
 

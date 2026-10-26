@@ -1,0 +1,56 @@
+import type { ApprovalPolicyViolation, ApprovalRequestStatus, EligibilityRefusal } from './approval.domain';
+
+export class InvalidApprovalPolicyError extends Error {
+  constructor(readonly violation: ApprovalPolicyViolation) {
+    super(`Invalid approval policy: ${violation}`);
+    this.name = 'InvalidApprovalPolicyError'; Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+export class ApprovalPolicyConflictError extends Error {
+  constructor(readonly selector: string) {
+    super(`Approval policy already exists: ${selector}`);
+    this.name = 'ApprovalPolicyConflictError'; Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+export class ApprovalPolicyNotFoundError extends Error {
+  constructor(readonly id: string) {
+    super(`Approval policy not found: ${id}`);
+    this.name = 'ApprovalPolicyNotFoundError'; Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+export class ApprovalPolicySelfApplicationError extends Error {
+  constructor(readonly policySelector: string) {
+    super(`Approval policy applies to its own write: ${policySelector}`);
+    this.name = 'ApprovalPolicySelfApplicationError'; Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+export class UnregisteredApprovalCommandError extends Error {
+  constructor(readonly key: string) {
+    super(`Unregistered approval command: ${key}`);
+    this.name = 'UnregisteredApprovalCommandError'; Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+export class ApprovalRequestNotFoundError extends Error {
+  constructor(readonly id: string) {
+    super(`Approval request not found: ${id}`);
+    this.name = 'ApprovalRequestNotFoundError'; Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+export class ApprovalRequestNotPendingError extends Error {
+  constructor(readonly status: ApprovalRequestStatus) {
+    super(`Approval request is not pending: ${status}`);
+    this.name = 'ApprovalRequestNotPendingError'; Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+export class ApprovalRequestExpiredError extends Error {
+  constructor(readonly id: string) {
+    super(`Approval request expired: ${id}`);
+    this.name = 'ApprovalRequestExpiredError'; Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+export class ApprovalDecideForbiddenError extends Error {
+  constructor(readonly reason: EligibilityRefusal) {
+    super(`Approval decision forbidden: ${reason}`);
+    this.name = 'ApprovalDecideForbiddenError'; Object.setPrototypeOf(this, new.target.prototype);
+  }
+}

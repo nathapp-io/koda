@@ -8,6 +8,7 @@ import {
   PUBLIC_KEYS,
   type PermissionCatalogEntry,
 } from './catalog';
+import { expandEntries } from './entry-matcher';
 
 /**
  * The catalog is derived from `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv`.
@@ -80,7 +81,7 @@ const NEW_KEY_SCOPES: Readonly<Record<string, CatalogScope>> = {
   'role.manage': 'global',
   'role.binding.global': 'global',
   'role.binding.owner': 'global',
-  'approval.decide': 'project',
+  'approval.decide': 'any',
   'approval.policy.read': 'project',
   'approval.policy.manage': 'any',
   'audit.read': 'global',
@@ -179,7 +180,6 @@ describe('PERMISSION_CATALOG', () => {
 
   it('US-001 AC-5/6/7: seeded project role patterns expand to the intended code-intel and intake keys', async () => {
     const { SYSTEM_ROLES } = await import('./system-roles');
-    const { expandEntries } = await import('./entry-matcher');
     const roleKeys = (name: string) => {
       const role = SYSTEM_ROLES.find((entry) => entry.key === name);
       if (!role) throw new Error(`Missing seeded role: ${name}`);
@@ -344,10 +344,13 @@ describe('PERMISSION_CATALOG', () => {
   });
 
   it('derives access, scope, ownable, risk, principals and approval for every catalog key', () => {
+    const isReadKey = (key: string) => key.slice(key.lastIndexOf('.') + 1) === 'read';
     const derive = (key: string): Partial<PermissionCatalogEntry> => {
       const access = expectedAccess(key);
       const ownable = access === 'role' && OWNABLE_KEY_LIST.includes(key);
       const risk = expectedRisk(key);
+      // Reads are never approvable (design §4); nothing unapprovable carries a floor or default.
+      const approvable = access === 'role' && risk !== 'low' && !isReadKey(key);
       return {
         access,
         scope: expectedScope(key, access, ownable),
@@ -355,9 +358,9 @@ describe('PERMISSION_CATALOG', () => {
         risk,
         principals: key === 'role.binding.owner' ? ['user'] : ['user', 'agent'],
         approval: {
-          approvable: access === 'role' && risk !== 'low',
-          floor: 'none',
-          default: 'none',
+          approvable,
+          floor: approvable && risk === 'critical' ? 'human' : 'none',
+          default: !approvable ? 'none' : risk === 'critical' ? 'human' : risk === 'high' ? 'agent' : 'none',
         },
       };
     };
@@ -378,5 +381,95 @@ describe('PERMISSION_CATALOG', () => {
 
     expect(mismatches).toEqual([]);
     expect(PERMISSION_CATALOG).toHaveLength(INVENTORY_KEYS.length + NEW_KEY_LIST.length);
+  });
+});
+
+/**
+ * Permissions P3 approval core (US-001): the risk-derived approval metadata every catalog entry
+ * carries — whether the action can be approvable at all, the floor a policy may not go below, and
+ * the mode an `AGENT` subject gets when no policy matches (design §4).
+ */
+describe('catalog approval metadata', () => {
+  const approvalOf = (key: string) => {
+    const entry = findCatalogEntry(key);
+    if (entry === undefined) throw new Error(`missing catalog entry: ${key}`);
+    return entry.approval;
+  };
+
+  it('AC-1: ticket.delete is approvable, unfloored and agent-approved by default (risk high)', () => {
+    expect(approvalOf('ticket.delete')).toEqual({ approvable: true, floor: 'none', default: 'agent' });
+  });
+
+  it('AC-2: role.manage is approvable with a human floor and a human default (risk critical)', () => {
+    expect(approvalOf('role.manage')).toEqual({ approvable: true, floor: 'human', default: 'human' });
+  });
+
+  it('AC-3: approval.policy.manage is approvable with a human floor and a human default (risk critical)', () => {
+    expect(approvalOf('approval.policy.manage')).toEqual({
+      approvable: true,
+      floor: 'human',
+      default: 'human',
+    });
+  });
+
+  it('AC-4: role.read is critical but a read, so it is neither approvable nor floored', () => {
+    expect(approvalOf('role.read')).toEqual({ approvable: false, floor: 'none', default: 'none' });
+  });
+
+  it('AC-5: ticket.create is approvable with no floor and no default (risk medium)', () => {
+    expect(approvalOf('ticket.create')).toEqual({ approvable: true, floor: 'none', default: 'none' });
+  });
+
+  it('AC-6: ticket.read is not approvable (risk low)', () => {
+    expect(approvalOf('ticket.read').approvable).toBe(false);
+  });
+
+  it('AC-7: session.login is not approvable (access public)', () => {
+    expect(approvalOf('session.login').approvable).toBe(false);
+  });
+
+  it('AC-8: nothing unapprovable carries a floor or a default', () => {
+    const unapprovable = PERMISSION_CATALOG.filter((entry) => !entry.approval.approvable);
+    expect(unapprovable.map((entry) => entry.key)).toEqual(
+      expect.arrayContaining([
+        'role.read',
+        'approval.policy.read',
+        'ticket.read',
+        'session.login',
+        'runner.sync',
+        'system.outbox.dispatch',
+      ]),
+    );
+
+    const drift = unapprovable
+      .filter((entry) => entry.approval.floor !== 'none' || entry.approval.default !== 'none')
+      .map((entry) => `${entry.key}: floor=${entry.approval.floor} default=${entry.approval.default}`);
+
+    expect(drift).toEqual([]);
+  });
+
+  it('AC-9: only role and policy keys are floored at human', () => {
+    const floored = PERMISSION_CATALOG.filter((entry) => entry.approval.floor === 'human');
+    expect(floored.map((entry) => entry.key)).toEqual(
+      expect.arrayContaining(['role.manage', 'role.binding.global', 'approval.policy.manage']),
+    );
+
+    const elsewhere = floored
+      .filter((entry) => !entry.key.startsWith('role.') && !entry.key.startsWith('approval.policy.'))
+      .map((entry) => entry.key);
+
+    expect(elsewhere).toEqual([]);
+  });
+
+  it('AC-10: approval.decide is scoped any, so a global role can hold it', () => {
+    expect(findCatalogEntry('approval.decide')?.scope).toBe('any');
+  });
+
+  it('AC-11: the `*` entry of a GLOBAL role includes approval.decide', () => {
+    expect(expandEntries(['*'], 'GLOBAL').has('approval.decide')).toBe(true);
+  });
+
+  it('AC-12: a PROJECT role can still name approval.decide', () => {
+    expect(expandEntries(['approval.decide'], 'PROJECT').has('approval.decide')).toBe(true);
   });
 });
