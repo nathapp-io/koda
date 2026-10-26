@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-core",
   "branchName": "feat/permissions-p3-approval-core",
   "createdAt": "2026-11-04T00:00:00.000Z",
-  "updatedAt": "2026-10-26T12:55:32.935Z",
+  "updatedAt": "2026-10-26T13:14:40.035Z",
   "userStories": [
     {
       "id": "US-001",
@@ -711,14 +711,17 @@
         "US-009",
         "US-010"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "expert",
         "testStrategy": "three-session-tdd",
-        "reasoning": "High-risk deferred authority execution joins cryptographic integrity, permission revocation, ALS attribution, concurrent row locks, domain rollback and separate failure-settlement transactions."
+        "reasoning": "High-risk deferred authority execution joins cryptographic integrity, permission revocation, ALS attribution, concurrent row locks, domain rollback and separate failure-settlement transactions.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-decision.service.ts",
@@ -749,7 +752,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "2f3f3fa33cec6cb15b2e518897dad5aacb3e129e"
     },
     {
       "id": "US-012",
