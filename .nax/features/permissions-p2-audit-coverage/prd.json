@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-coverage",
   "branchName": "feat/permissions-p2-audit-coverage",
   "createdAt": "2026-10-26T00:00:00Z",
-  "updatedAt": "2026-10-26T06:29:23.613Z",
+  "updatedAt": "2026-10-26T06:37:59.019Z",
   "userStories": [
     {
       "id": "US-001",
@@ -360,14 +360,17 @@
         "US-001",
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Three existing files apply the upstream detached-scope helper and three narrow bookkeeping markers; colocated public-method tests can pin parent isolation, catch placement and the unchanged null refresh result without a new abstraction."
+        "reasoning": "Three existing files apply the upstream detached-scope helper and three narrow bookkeeping markers; colocated public-method tests can pin parent isolation, catch placement and the unchanged null refresh result without a new abstraction.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/sync/pr-attribution.service.ts",
@@ -394,7 +397,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "de67fa6a1bd9d23d468b89fdbd231b98c04cfbd3"
     },
     {
       "id": "US-007",
