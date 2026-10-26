@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-core",
   "branchName": "feat/permissions-p3-approval-core",
   "createdAt": "2026-11-04T00:00:00.000Z",
-  "updatedAt": "2026-10-26T12:00:50.323Z",
+  "updatedAt": "2026-10-26T12:12:25.391Z",
   "userStories": [
     {
       "id": "US-001",
@@ -450,14 +450,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New command contract and deterministic serialization underpin deferred authorization and SHA-256 frozen-input integrity, so strict security TDD applies."
+        "reasoning": "New command contract and deterministic serialization underpin deferred authorization and SHA-256 frozen-input integrity, so strict security TDD applies.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/permissions/catalog.ts",
@@ -477,7 +480,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "649bd00a3a3e370ff095dde8fb089e468fdd0233"
     },
     {
       "id": "US-008",
