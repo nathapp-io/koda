@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { bookkeeping, runInAuditScope } from '../../action-context/audit-coverage';
 import { GitHubAppClient } from '../git-broker/github-app-client';
 import { GitLabAccessChecker } from '../git-broker/gitlab-access-checker';
 import { GitLabTokenSource } from '../git-broker/gitlab-token.source';
@@ -38,32 +39,34 @@ export class PrAttributionService {
   ) {}
 
   async attribute(jobId: string, now = new Date()): Promise<'posted' | 'skipped' | 'failed'> {
-    try {
-      const job = await this.repo.findById(jobId);
-      if (!job || !isTerminal(job.state) || !job.resultPrUrl) return 'skipped';
-      const repo = await this.repo.findRepo(job.repoId);
-      if (!repo) return 'skipped';
-      const number = prNumberFor(repo, job.resultPrUrl);
-      if (number === null) {
-        this.logger.warn(`Job ${job.id}: resultPrUrl does not name ${repo.owner}/${repo.name}; no attribution`);
-        return 'skipped';
+    return runInAuditScope('task:PrAttributionService.attribute', async () => {
+      try {
+        const job = await this.repo.findById(jobId);
+        if (!job || !isTerminal(job.state) || !job.resultPrUrl) return 'skipped';
+        const repo = await this.repo.findRepo(job.repoId);
+        if (!repo) return 'skipped';
+        const number = prNumberFor(repo, job.resultPrUrl);
+        if (number === null) {
+          this.logger.warn(`Job ${job.id}: resultPrUrl does not name ${repo.owner}/${repo.name}; no attribution`);
+          return 'skipped';
+        }
+        // Reuse the broker's cached installation token (the same one the runner is using
+        // for this job) instead of minting a fresh one for the attribution comment.
+        const attributionCtx = { jobId: job.id, leaseEpoch: job.leaseEpoch, repo };
+        if (!(await bookkeeping('fleet.pr-attribution-claim', () => this.repo.claimAttribution(job.id, now)))) return 'skipped';
+        const who = job.requestedByType === 'AGENT'
+          ? (await this.repo.findAgentDisplayName(job.requestedById)) ?? 'a koda agent'
+          : (await this.repo.findUserDisplayName(job.requestedById)) ?? 'a koda user';
+        const body = `Dispatched by ${who} via koda job ${job.id}`;
+        const posted = repo.provider === 'github'
+          ? repo.githubInstallationId !== null && (await this.github.commentOnPullRequest(repo.githubInstallationId, repo.owner, repo.name, number, body, attributionCtx))
+          : await this.gitlab.commentOnMergeRequest(repo.owner, repo.name, number, body, await this.gitlabTokens.resolve(repo.projectId, repo.owner, repo.name));
+        if (!posted) this.logger.warn(`Job ${job.id}: attribution comment was not accepted`);
+        return posted ? 'posted' : 'failed';
+      } catch (error) {
+        this.logger.warn(`Job ${jobId}: attribution failed (${error instanceof Error ? error.name : 'unknown'})`);
+        return 'failed';
       }
-      // Reuse the broker's cached installation token (the same one the runner is using
-      // for this job) instead of minting a fresh one for the attribution comment.
-      const attributionCtx = { jobId: job.id, leaseEpoch: job.leaseEpoch, repo };
-      if (!(await this.repo.claimAttribution(job.id, now))) return 'skipped';
-      const who = job.requestedByType === 'AGENT'
-        ? (await this.repo.findAgentDisplayName(job.requestedById)) ?? 'a koda agent'
-        : (await this.repo.findUserDisplayName(job.requestedById)) ?? 'a koda user';
-      const body = `Dispatched by ${who} via koda job ${job.id}`;
-      const posted = repo.provider === 'github'
-        ? repo.githubInstallationId !== null && (await this.github.commentOnPullRequest(repo.githubInstallationId, repo.owner, repo.name, number, body, attributionCtx))
-        : await this.gitlab.commentOnMergeRequest(repo.owner, repo.name, number, body, await this.gitlabTokens.resolve(repo.projectId, repo.owner, repo.name));
-      if (!posted) this.logger.warn(`Job ${job.id}: attribution comment was not accepted`);
-      return posted ? 'posted' : 'failed';
-    } catch (error) {
-      this.logger.warn(`Job ${jobId}: attribution failed (${error instanceof Error ? error.name : 'unknown'})`);
-      return 'failed';
-    }
+    });
   }
 }

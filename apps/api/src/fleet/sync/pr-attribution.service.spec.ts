@@ -34,6 +34,7 @@ describe('prNumberFor hostile input', () => {
 });
 
 import { PrAttributionService } from './pr-attribution.service';
+import { currentAuditScope, currentBookkeepingReason } from '../../action-context/audit-coverage';
 
 describe('PrAttributionService on a config job PR (fleet S3 §5 step 8: attribution replaces a PR body footer)', () => {
   it('posts "Dispatched by <name> via koda job <id>" for a terminal CONFIG_EDIT with a PR on its own repo', async () => {
@@ -47,6 +48,28 @@ describe('PrAttributionService on a config job PR (fleet S3 §5 step 8: attribut
     const svc = new PrAttributionService(repo as never, github as never, {} as never, {} as never);
     await expect(svc.attribute('job-9')).resolves.toBe('posted');
     expect(github.commentOnPullRequest).toHaveBeenCalledWith(BigInt(77), 'acme', 'app', 12, 'Dispatched by Dev One via koda job job-9', expect.objectContaining({ jobId: 'job-9' }));
+  });
+});
+
+describe('PrAttributionService audit coverage (permissions P2 US-006)', () => {
+  it('AC-1/AC-2: claims attribution in its detached scope under the claim bookkeeping reason', async () => {
+    let observedReason: ReturnType<typeof currentBookkeepingReason>;
+    let observedSurface: string | undefined;
+    const repo = {
+      findById: vi.fn(async () => ({ id: 'j1', state: 'COMPLETED', resultPrUrl: 'https://github.com/acme/app/pull/12', repoId: 'r1', leaseEpoch: 1, requestedById: 'u1', requestedByType: 'USER' })),
+      findRepo: vi.fn(async () => ({ id: 'r1', projectId: 'p1', provider: 'github', owner: 'acme', name: 'app', githubInstallationId: BigInt(77) })),
+      claimAttribution: vi.fn(async () => {
+        observedReason = currentBookkeepingReason();
+        observedSurface = currentAuditScope()?.surface;
+        return false;
+      }),
+    };
+    const svc = new PrAttributionService(repo as never, {} as never, {} as never, {} as never);
+
+    await svc.attribute('j1');
+    expect(repo.claimAttribution).toHaveBeenCalledWith('j1', expect.any(Date));
+    expect(observedReason).toBe('fleet.pr-attribution-claim');
+    expect(observedSurface).toBe('task:PrAttributionService.attribute');
   });
 });
 

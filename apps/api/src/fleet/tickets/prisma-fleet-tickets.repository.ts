@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { bookkeeping } from '../../action-context/audit-coverage';
 import { PrismaClient } from '../../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { CommentType, TicketLinkSource } from '../../common/enums';
@@ -162,7 +163,7 @@ export class PrismaFleetTicketsRepository {
       select: { id: true },
     });
     if (created) return created.id;
-    await this.db.ticketLink.updateMany({ where: { ticketId, url }, data: { jobId } });
+    await bookkeeping('fleet.pr-link-job', () => this.db.ticketLink.updateMany({ where: { ticketId, url }, data: { jobId } }));
     return null;
   }
 
