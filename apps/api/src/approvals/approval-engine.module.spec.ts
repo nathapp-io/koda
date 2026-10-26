@@ -5,6 +5,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { createMockPrismaService, PrismaService } from '@nathapp/nestjs-prisma';
 import { ApprovalEngineModule } from './approval-engine.module';
+import { ApprovalGate } from './approval-gate.service';
 import { ApprovalCommandRegistry } from './approval-command.registry';
 import { ApprovalPolicyResolver } from './approval-policy.resolver';
 import { PermissionService } from '../permissions/permission.service';
@@ -29,7 +30,7 @@ class PolicyConsumer {
 }
 @Injectable()
 class RegistryConsumer {
-  constructor(readonly commands: ApprovalCommandRegistry) {}
+  constructor(readonly commands: ApprovalCommandRegistry, readonly gate: ApprovalGate) {}
 }
 @Module({ imports: [ApprovalEngineModule], providers: [PolicyConsumer, RegistryConsumer] })
 class ConsumerModule {}
@@ -61,5 +62,7 @@ describe('ApprovalEngineModule', () => {
     expect(commands).toBeInstanceOf(ApprovalCommandRegistry);
     expect(moduleRef.get(ApprovalCommandRegistry)).toBe(commands);
     expect(moduleRef.get(RegistryConsumer).commands).toBe(commands);
+    expect(moduleRef.get(RegistryConsumer).gate).toBeInstanceOf(ApprovalGate);
+    expect(moduleRef.get(RegistryConsumer).gate).toBe(moduleRef.get(ApprovalGate));
   });
 });
