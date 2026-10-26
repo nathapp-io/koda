@@ -56,6 +56,8 @@ export class ApprovalMcpTools {
       handler: (input) => runWithActionContext({ actor: ref, origin: 'mcp' }, async () => {
         const args = input !== null && typeof input === 'object' ? input as Record<string, unknown> : {};
         const invalid = (field: string) => toMcpToolResult({ content: `invalid_input: ${field}`, isError: true });
+        const unknown = Object.keys(args).find((key) => !['id', 'decision', 'comment'].includes(key));
+        if (unknown !== undefined) return invalid(unknown);
         if (typeof args.id !== 'string' || args.id.length < 1 || args.id.length > 64) return invalid('id');
         if (args.decision !== 'approve' && args.decision !== 'reject') return invalid('decision');
         if (args.comment !== undefined && (typeof args.comment !== 'string' || args.comment.length > 2000)) return invalid('comment');

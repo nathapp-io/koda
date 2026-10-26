@@ -89,6 +89,10 @@ describe('ApprovalMcpTools decide (US-013)', () => {
     expect(await call(input)).toEqual({ content: [{ type: 'text', text: `invalid_input: ${field}` }], isError: true });
     expect(get).not.toHaveBeenCalled(); expect(decide).not.toHaveBeenCalled();
   });
+  it('rejects unknown arguments before querying or deciding', async () => {
+    expect(await call({ id: 'r1', decision: 'approve', extra: true })).toEqual({ content: [{ type: 'text', text: 'invalid_input: extra' }], isError: true });
+    expect(get).not.toHaveBeenCalled(); expect(decide).not.toHaveBeenCalled();
+  });
   it('AC-8/9 missing request does not decide', async () => {
     get.mockRejectedValue(new ApprovalRequestNotFoundError('r1'));
     expect(await call({ id: 'r1', decision: 'approve' })).toEqual({ content: [{ type: 'text', text: 'not_found' }], isError: true });
