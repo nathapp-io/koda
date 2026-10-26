@@ -34,6 +34,20 @@ describe('PermissionService', () => {
     store.projects.add('p2');
   });
 
+  it('approval AC-14: roleIdsAt returns distinct, ascending effective role ids', async () => {
+    const ref = { type: 'AGENT' as const, id: 'a1' };
+    store.bind(ref, 'developer', 'p1');
+    store.bind(ref, 'developer', null); // duplicate role via an everywhere binding
+    store.bind(ref, 'agent', null);
+    store.bind(ref, 'reviewer', 'p2'); // different project
+    store.bind(ref, 'admin', 'p1'); // malformed GLOBAL binding, rejected by appliesIn
+    expect(await service.roleIdsAt(ref, { projectId: 'p1' })).toEqual([
+      store.roleByKey('agent').id, store.roleByKey('developer').id,
+    ].sort());
+    expect(await service.roleIdsAt(ref, 'global')).toEqual([store.roleByKey('agent').id]);
+    expect(await service.roleIdsAt({ type: 'AGENT', id: 'unbound' }, { projectId: 'p1' })).toEqual([]);
+  });
+
   it('bindings-only AC-8: three arguments and no legacy repository methods are needed', async () => {
     const findEffectiveBindings = vi.fn(async () => [{
       binding: { projectId: null }, roleKey: 'member', roleScope: 'GLOBAL', rolePermissions: ['agent.read'],
