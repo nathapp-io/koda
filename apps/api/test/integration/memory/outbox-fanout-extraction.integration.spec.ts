@@ -5,6 +5,7 @@ import { noopLastErrors, outboxRecord } from '../../helpers/outbox-record';
 import { ExtractionService } from '../../../src/memory/extraction.service';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { MemoryOutboxSubscriber } from '../../../src/memory/memory-outbox.subscriber';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { MemoryKind } from '../../../src/common/enums';
@@ -30,6 +31,9 @@ describe('AC8: FanOutPublisher dispatches to ExtractionService', () => {
 
     mockPrismaService = {
       client: mockPrismaClient,
+      // Permissions P2 US-002: `upsert` runs on the transaction manager, so the mocked service enters its
+      // callback with the same client the `$transaction` mock hands out.
+      withTransaction: vi.fn().mockImplementation((fn: (client: unknown) => Promise<unknown>) => fn(mockPrismaClient)),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -51,6 +55,11 @@ describe('AC8: FanOutPublisher dispatches to ExtractionService', () => {
             isInTransaction: vi.fn(() => false),
           },
         },
+        // Permissions P2 US-003: the subscriber records each extracted item through an `onWritten` hook. The
+        // transaction-manager stub above never enters a transaction, so the real recorder would refuse; the stub
+        // keeps these cases about extraction and dispatch. The entry itself is asserted in
+        // `test/integration/audit/audit-memory-system.integration.spec.ts`.
+        { provide: AuditRecorder, useValue: { record: vi.fn(async () => undefined), audited: vi.fn() } },
       ],
     }).compile();
 

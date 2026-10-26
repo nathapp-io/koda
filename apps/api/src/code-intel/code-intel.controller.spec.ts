@@ -83,6 +83,7 @@ describe('CodeIntelController', () => {
       controllers: [CodeIntelController],
       providers: [
         { provide: AstIndexService, useValue: astIndexService },
+        { provide: (await import('../audit/audit-recorder.service')).AuditRecorder, useValue: { record: vi.fn() } },
       ],
     })
       .overrideGuard(ProjectMembershipGuard).useValue({ canActivate: () => true })
@@ -109,7 +110,7 @@ describe('CodeIntelController', () => {
       const result = await controller.indexCommit(dto, makeCtx());
 
       expect(result.data).toMatchObject({ commitHash: 'abc123', symbolsIndexed: 1 });
-      expect(astIndexService.indexCommit).toHaveBeenCalledWith('repo-1', 'abc123', dto.files, 'proj-1');
+      expect(astIndexService.indexCommit).toHaveBeenCalledWith('repo-1', 'abc123', dto.files, 'proj-1', expect.any(Function));
     });
   });
 

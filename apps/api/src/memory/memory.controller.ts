@@ -11,6 +11,8 @@ import { ProjectAccessService } from '../projects/project-access.service';
 import { PermissionService } from '../permissions/permission.service';
 import { Requires } from '../permissions/requires.decorator';
 import { MemoryReplaceRefusedError, MemoryWriteGuard, ownerTypeFor } from './memory-write.guard';
+import { memoryAuditHook, type MemoryAuditKey } from './memory-audit';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import { RecordDecisionDto } from './dto/record-decision.dto';
 import { CreateMemoryDto } from './dto/create-memory.dto';
 import { ExtractEventDto } from './dto/extract-event.dto';
@@ -42,6 +44,7 @@ export class MemoryController {
     private readonly projectAccess: ProjectAccessService,
     private readonly permissions: PermissionService,
     private readonly writeGuard: MemoryWriteGuard,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /**
@@ -69,12 +72,16 @@ export class MemoryController {
   }
 
   /**
-   * The one principal-driven write path: the item, plus the replace check the repository runs inside its
-   * transaction. A refusal is the `permissions` 403 — by then the transaction has rolled back, so nothing
-   * of the refused write exists.
+   * The one principal-driven write path: the item, the replace check the repository runs inside its
+   * transaction, and the audit entry it records there (permissions P2 US-002). A refusal is the
+   * `permissions` 403 — by then the transaction has rolled back, so nothing of the refused write exists.
+   *
+   * `key` is the entry point's own permission key: a replacement is an entry of the route that made it
+   * (`memory.create`, `memory.extract`), never a key of its own, and the summary names the superseded item.
    */
   private async write(
     principal: KodaPrincipal,
+    key: MemoryAuditKey,
     projectId: string,
     data: { ownerId: string; ownerType: 'USER' | 'AGENT' | null },
     rest: Omit<MemoryItemInput, 'ownerId' | 'ownerType'>,
@@ -82,7 +89,10 @@ export class MemoryController {
     try {
       return await this.repository.upsert(
         { ...rest, ownerId: data.ownerId, ownerType: data.ownerType },
-        { beforeSupersede: this.writeGuard.replaceCheck(principal, projectId) },
+        {
+          beforeSupersede: this.writeGuard.replaceCheck(principal, projectId),
+          onWritten: memoryAuditHook(this.audit, key),
+        },
       );
     } catch (error) {
       if (error instanceof MemoryReplaceRefusedError) throw new ForbiddenAppException({}, 'permissions');
@@ -141,7 +151,7 @@ export class MemoryController {
 
     const ownerType = ownerTypeFor(principal);
     for (const item of persisted) {
-      await this.write(principal, projectId, { ownerId: principal.id, ownerType }, {
+      await this.write(principal, 'memory.extract', projectId, { ownerId: principal.id, ownerType }, {
         projectId: item.projectId,
         kind: item.kind,
         subject: item.subject,
@@ -187,7 +197,10 @@ export class MemoryController {
           ownerType: actorId === principal.id ? ownerTypeFor(principal) : null,
         },
         this.repository,
-        { beforeSupersede: this.writeGuard.replaceCheck(principal, decision.projectId) },
+        {
+          beforeSupersede: this.writeGuard.replaceCheck(principal, decision.projectId),
+          onWritten: memoryAuditHook(this.audit, 'memory.decision.record'),
+        },
       );
     } catch (error) {
       if (error instanceof MemoryReplaceRefusedError) throw new ForbiddenAppException({}, 'permissions');
@@ -219,7 +232,7 @@ export class MemoryController {
     // unknown, so it stays an any-row holder's to replace.
     const ownerId = (await this.mayAttribute(principal)) && input.ownerId ? input.ownerId : principal.id;
 
-    return this.write(principal, input.projectId, {
+    return this.write(principal, 'memory.create', input.projectId, {
       ownerId,
       ownerType: ownerId === principal.id ? ownerTypeFor(principal) : null,
     }, {

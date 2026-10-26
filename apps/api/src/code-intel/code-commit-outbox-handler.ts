@@ -25,7 +25,10 @@ export class CodeCommitOutboxHandler {
     @Optional() @Inject(VCS_CFG) private readonly vcsConfig?: IVcsConfig,
   ) {}
 
-  async process(payload: unknown): Promise<void> {
+  async process(
+    payload: unknown,
+    onIndexed?: (result: { symbolsIndexed: number; filesIndexed: number }) => Promise<void>,
+  ): Promise<void> {
     const p = payload as CodeCommitPayload;
 
     if (!p.changedFiles || p.changedFiles.length === 0) {
@@ -81,6 +84,6 @@ export class CodeCommitOutboxHandler {
     }
 
     this.logger.log(`code_commit: fetched ${sourceFiles.length} files for ${p.commitHash}`);
-    await this.astIndexService.indexCommit(p.repoId, p.commitHash, sourceFiles, p.projectId);
+    await this.astIndexService.indexCommit(p.repoId, p.commitHash, sourceFiles, p.projectId, onIndexed);
   }
 }

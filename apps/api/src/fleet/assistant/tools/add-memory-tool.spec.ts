@@ -1,6 +1,7 @@
 import type { MemoryItem } from '../../../memory/memory-item-repository';
 import { PrismaMemoryItemRepository } from '../../../memory/prisma-memory-item.repository';
 import { MemoryReplaceRefusedError, MemoryWriteGuard } from '../../../memory/memory-write.guard';
+import type { AuditRecorder } from '../../../audit/audit-recorder.service';
 import { ToolActionError, ToolForbiddenError, ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
 import { KODA_ADD_MEMORY } from '../koda-tool-descriptors';
 import { addMemoryTool, type AddMemoryInput } from './add-memory-tool';
@@ -60,7 +61,16 @@ function toolDeps(over: {
     replaceCheck: vi.fn(() => beforeSupersede),
   };
   const memory = { findActive, upsert } as unknown as PrismaMemoryItemRepository;
-  return { findActive, upsert, guard, beforeSupersede, tool: addMemoryTool({ memory, guard: guard as unknown as MemoryWriteGuard }) };
+  const record = vi.fn(async (): Promise<void> => undefined);
+  const audit = { record } as unknown as AuditRecorder;
+  return {
+    findActive,
+    upsert,
+    guard,
+    beforeSupersede,
+    record,
+    tool: addMemoryTool({ memory, guard: guard as unknown as MemoryWriteGuard, audit }),
+  };
 }
 
 /** The `reason` a parser refuses with; fails loudly when it accepts or throws something else. */
@@ -249,7 +259,7 @@ describe('koda_add_memory execute (US-006)', () => {
         // US-008: every principal-driven write records which table its owner names.
         ownerType: 'USER',
       },
-      { beforeSupersede: expect.any(Function) },
+      { beforeSupersede: expect.any(Function), onWritten: expect.any(Function) },
     );
   });
 
@@ -288,7 +298,7 @@ describe('koda_add_memory execute (US-006)', () => {
     await tool.execute(ctx, tool.parse(draft()));
 
     expect(guard.replaceCheck).toHaveBeenCalledWith(ctx.actor, 'project-1');
-    expect(upsert.mock.calls[0]?.[1]).toEqual({ beforeSupersede });
+    expect(upsert.mock.calls[0]?.[1]).toEqual({ beforeSupersede, onWritten: expect.any(Function) });
   });
 
   it('US-008: an agent stores its item with ownerType AGENT', async () => {
@@ -307,5 +317,65 @@ describe('koda_add_memory execute (US-006)', () => {
     await expect(tool.execute(ctx, tool.parse(draft()))).rejects.toMatchObject({
       text: 'forbidden: memory:m1 needs memory.update',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Permissions P2 US-003 — the tool records the write it made, in the store's transaction
+// ---------------------------------------------------------------------------
+
+describe('koda_add_memory audit (US-003)', () => {
+  it('AC-14: execute hands the upsert an onWritten that records memory.create for the new item', async () => {
+    const record = vi.fn(async (): Promise<void> => undefined);
+    const audit = { record } as unknown as AuditRecorder;
+    const beforeSupersede = vi.fn(async (): Promise<void> => undefined);
+    const upsert = vi.fn(async (_item: UpsertArgs, options?: UpsertOptions) => {
+      await options?.onWritten?.({
+        item: { id: 'm-1', projectId: 'p-1', kind: 'FACT' } as MemoryItem,
+        superseded: null,
+      });
+      return item({ id: 'm-1' });
+    });
+    const guard = { assertMayReplace: vi.fn(async () => undefined), replaceCheck: vi.fn(() => beforeSupersede) };
+    const tool = addMemoryTool({
+      memory: { findActive: vi.fn(async () => null), upsert } as unknown as PrismaMemoryItemRepository,
+      guard: guard as unknown as MemoryWriteGuard,
+      audit,
+    });
+
+    await tool.execute(ctx, tool.parse(draft()));
+
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(record).toHaveBeenCalledWith({
+      key: 'memory.create',
+      resourceType: 'memory-item',
+      resourceId: 'm-1',
+      projectId: 'p-1',
+      summary: 'created FACT',
+    });
+  });
+
+  it('US-003: a refused memory.create entry propagates, so the store rolls the write back', async () => {
+    const record = vi.fn(async (): Promise<void> => {
+      throw new Error('audit down');
+    });
+    const beforeSupersede = vi.fn(async (): Promise<void> => undefined);
+    const upsert = vi.fn(async (_item: UpsertArgs, options?: UpsertOptions) => {
+      await options?.onWritten?.({
+        item: { id: 'm-1', projectId: 'p-1', kind: 'FACT' } as MemoryItem,
+        superseded: null,
+      });
+      return item({ id: 'm-1' });
+    });
+    const guard = { assertMayReplace: vi.fn(async () => undefined), replaceCheck: vi.fn(() => beforeSupersede) };
+    const tool = addMemoryTool({
+      memory: { findActive: vi.fn(async () => null), upsert } as unknown as PrismaMemoryItemRepository,
+      guard: guard as unknown as MemoryWriteGuard,
+      audit: { record } as unknown as AuditRecorder,
+    });
+
+    // Not a MemoryReplaceRefusedError, so it is not re-labelled as a forbidden action.
+    await expect(tool.execute(ctx, tool.parse(draft()))).rejects.toThrow('audit down');
+    await expect(tool.execute(ctx, tool.parse(draft()))).rejects.not.toBeInstanceOf(ToolActionError);
   });
 });

@@ -54,6 +54,26 @@ describe('AstIndexService', () => {
   });
 
   describe('indexCommit()', () => {
+    it('calls onIndexed exactly once inside the transaction for nonempty input', async () => {
+      const files: SourceFile[] = [{ path: 'src/a.ts', content: 'x' }];
+      codeGraph.parseSourceFile.mockReturnValue({} as ParsedSourceFile);
+      codeGraph.extractSymbols.mockReturnValue([buildExtractedSymbol()]);
+      let inTransaction = false;
+      txManager.run.mockImplementation(async (fn) => {
+        inTransaction = true;
+        try { return await fn(); } finally { inTransaction = false; }
+      });
+      const onIndexed = vi.fn(async () => { expect(inTransaction).toBe(true); });
+      const result = await service.indexCommit('repo-1', 'abc123', files, 'proj-1', onIndexed);
+      expect(onIndexed).toHaveBeenCalledExactlyOnceWith({ symbolsIndexed: result.symbolsIndexed, filesIndexed: result.filesIndexed });
+    });
+
+    it('does not call onIndexed for empty input', async () => {
+      const onIndexed = vi.fn(async () => undefined);
+      await service.indexCommit('repo-1', 'abc123', [], 'proj-1', onIndexed);
+      expect(onIndexed).not.toHaveBeenCalled();
+    });
+
     it('returns a result with zero symbols when file list is empty', async () => {
       const result = await service.indexCommit('repo-1', 'abc123', [], 'proj-1');
 

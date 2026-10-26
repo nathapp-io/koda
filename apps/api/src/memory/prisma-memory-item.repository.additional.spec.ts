@@ -44,6 +44,7 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
   };
 
   const mockTransaction = vi.fn();
+  const mockWithTransaction = vi.fn();
 
   const mockPrismaClient = {
     memoryItem: mockMemoryItem,
@@ -52,6 +53,7 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
 
   const mockPrismaService = {
     client: mockPrismaClient,
+    withTransaction: mockWithTransaction,
   };
 
   const mockTransactionManager = {
@@ -231,7 +233,7 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
 
   describe('upsert', () => {
     it('runs inside a serializable transaction', async () => {
-      mockTransaction.mockImplementation((fn: (client: unknown) => Promise<unknown>) => {
+      mockWithTransaction.mockImplementation((fn: (client: unknown) => Promise<unknown>) => {
         const mockClient = {
           memoryItem: {
             findFirst: vi.fn().mockResolvedValue(null),
@@ -251,7 +253,7 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
         confidence: 0.9,
       });
 
-      expect(mockTransaction).toHaveBeenCalledWith(
+      expect(mockWithTransaction).toHaveBeenCalledWith(
         expect.any(Function),
         { isolationLevel: 'Serializable' },
       );
@@ -267,7 +269,7 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
         update: vi.fn().mockResolvedValue({}),
       };
 
-      mockTransaction.mockImplementation((fn: (client: unknown) => Promise<unknown>) => {
+      mockWithTransaction.mockImplementation((fn: (client: unknown) => Promise<unknown>) => {
         return fn({ memoryItem: mockClientMemoryItem });
       });
 
@@ -296,7 +298,7 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
         update: vi.fn(),
       };
 
-      mockTransaction.mockImplementation((fn: (client: unknown) => Promise<unknown>) => {
+      mockWithTransaction.mockImplementation((fn: (client: unknown) => Promise<unknown>) => {
         return fn({ memoryItem: mockClientMemoryItem });
       });
 
@@ -330,7 +332,7 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
         create: vi.fn().mockResolvedValue(created),
         update: vi.fn().mockResolvedValue({}),
       };
-      mockTransaction.mockImplementation((fn: (c: unknown) => Promise<unknown>) => fn({ memoryItem: client }));
+      mockWithTransaction.mockImplementation((fn: (c: unknown) => Promise<unknown>) => fn({ memoryItem: client }));
       return client;
     };
 
@@ -395,7 +397,7 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
         create: vi.fn().mockResolvedValue(makeModelRow({ id: 'new-mem' })),
         update: vi.fn().mockResolvedValue({}),
       };
-      mockTransaction.mockImplementation((fn: (c: unknown) => Promise<unknown>) => fn({ memoryItem: client }));
+      mockWithTransaction.mockImplementation((fn: (c: unknown) => Promise<unknown>) => fn({ memoryItem: client }));
       return client;
     };
 
@@ -453,6 +455,99 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
       expect(beforeSupersede).not.toHaveBeenCalled();
       expect(client.create).not.toHaveBeenCalled();
       expect(result.id).toBe('mem-1');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Permissions P2 US-002 — the upsert runs on the transaction manager and calls onWritten
+  // -------------------------------------------------------------------------
+
+  describe('upsert transaction and onWritten hook (US-002)', () => {
+    /** A PrismaService whose withTransaction enters the callback with one mocked client. */
+    const withTransactionClient = (existingRow: unknown) => {
+      const client = {
+        findFirst: vi.fn().mockResolvedValue(existingRow),
+        create: vi.fn().mockResolvedValue(makeModelRow({ id: 'new-mem' })),
+        update: vi.fn().mockResolvedValue({}),
+      };
+      mockWithTransaction.mockImplementation((fn: (c: unknown) => Promise<unknown>) => fn({ memoryItem: client }));
+      return client;
+    };
+
+    /** The identical-restatement row the no-op path answers with. */
+    const restatement = makeModelRow({ object: 'active', sourceType: 'ticket_event', sourceId: 'evt-1' });
+    const restatementInput = {
+      projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status',
+      object: 'active', sourceType: 'ticket_event', sourceId: 'evt-1',
+    };
+
+    it('AC-24: runs on the transaction manager with Serializable isolation', async () => {
+      withTransactionClient(restatement);
+
+      await repository.upsert(restatementInput);
+
+      expect(mockWithTransaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
+      // The raw client transaction is never entered behind the transaction manager's back.
+      expect(mockTransaction).not.toHaveBeenCalled();
+    });
+
+    it('AC-25: a restatement calls neither onWritten nor beforeSupersede', async () => {
+      withTransactionClient(restatement);
+      const onWritten = vi.fn();
+      const beforeSupersede = vi.fn();
+
+      const result = await repository.upsert(restatementInput, { onWritten, beforeSupersede });
+
+      expect(mockWithTransaction).toHaveBeenCalledTimes(1);
+      expect(onWritten).not.toHaveBeenCalled();
+      expect(beforeSupersede).not.toHaveBeenCalled();
+      expect(result.id).toBe('mem-1');
+    });
+
+    it('calls onWritten with the created item and the item it superseded, after the create', async () => {
+      const client = withTransactionClient(makeModelRow({ id: 'old-mem' }));
+      const onWritten = vi.fn(async () => undefined);
+      let createCallsWhenCalled = -1;
+      onWritten.mockImplementation(async () => { createCallsWhenCalled = client.create.mock.calls.length; });
+
+      await repository.upsert(
+        { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status', object: 'v2' },
+        { onWritten },
+      );
+
+      expect(onWritten).toHaveBeenCalledWith({
+        item: expect.objectContaining({ id: 'new-mem' }),
+        superseded: expect.objectContaining({ id: 'old-mem' }),
+      });
+      expect(createCallsWhenCalled).toBe(1);
+    });
+
+    it('calls onWritten with no superseded item on a fresh key', async () => {
+      withTransactionClient(null);
+      const onWritten = vi.fn(async () => undefined);
+
+      await repository.upsert(
+        { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status', object: 'v1' },
+        { onWritten },
+      );
+
+      expect(onWritten).toHaveBeenCalledWith({ item: expect.objectContaining({ id: 'new-mem' }), superseded: null });
+    });
+
+    it('lets the hook\'s refusal reach the caller, so the transaction rolls back the writes', async () => {
+      const client = withTransactionClient(makeModelRow({ id: 'old-mem' }));
+      const refusal = new Error('audit down');
+
+      await expect(
+        repository.upsert(
+          { projectId: 'project-123', kind: MemoryKind.FACT, subject: 'ticket:1', predicate: 'status', object: 'v2' },
+          { onWritten: async () => { throw refusal; } },
+        ),
+      ).rejects.toBe(refusal);
+
+      // The update and the create ran before the hook threw; withTransaction is what rolls them back.
+      expect(mockWithTransaction).toHaveBeenCalledTimes(1);
+      expect(client.create).toHaveBeenCalledTimes(1);
     });
   });
 

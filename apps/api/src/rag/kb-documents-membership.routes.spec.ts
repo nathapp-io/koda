@@ -19,6 +19,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import request from 'supertest';
 import { RagController } from './rag.controller';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import { RagService } from './rag.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
 import { PrismaRagRepository } from './prisma-rag.repository';
@@ -103,6 +105,7 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
         // @UseGuards(ProjectMembershipGuard, RequiresGuard).
         ProjectMembershipGuard,
         { provide: PermissionService, useValue: { can } },
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
       ],
     }).compile();
 

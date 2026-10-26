@@ -35,7 +35,7 @@ describe('CodeCommitOutboxHandler removed files (VCS LOW)', () => {
 
     expect(ast.removeFiles).toHaveBeenCalledWith('p1', 'acme/widgets', ['src/gone.ts']);
     expect(fetchCommitFiles).toHaveBeenCalledWith('acme/widgets', 'c1', ['src/new.ts']);
-    expect(ast.indexCommit).toHaveBeenCalledWith('acme/widgets', 'c1', [{ path: 'src/new.ts', content: 'x' }], 'p1');
+    expect(ast.indexCommit).toHaveBeenCalledWith('acme/widgets', 'c1', [{ path: 'src/new.ts', content: 'x' }], 'p1', undefined);
   });
 
   it('only removes when every changed file was deleted', async () => {

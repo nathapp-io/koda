@@ -1,6 +1,7 @@
 import type { ExtractionService } from '../../../memory/extraction.service';
 import type { MemoryItem } from '../../../memory/memory-item-repository';
 import type { PrismaMemoryItemRepository } from '../../../memory/prisma-memory-item.repository';
+import type { AuditRecorder } from '../../../audit/audit-recorder.service';
 import { MemoryReplaceRefusedError, MemoryWriteGuard } from '../../../memory/memory-write.guard';
 import { ToolActionError, ToolForbiddenError, ToolInputError, type AssistantTool, type ToolContext } from '../assistant-tool.types';
 import { KODA_RECORD_DECISION } from '../koda-tool-descriptors';
@@ -62,13 +63,16 @@ function toolDeps(over: {
   };
   const memory = { findActive } as unknown as PrismaMemoryItemRepository;
   const extraction = { recordDecision } as unknown as ExtractionService;
+  const record = vi.fn(async (): Promise<void> => undefined);
+  const audit = { record } as unknown as AuditRecorder;
   return {
     findActive,
     recordDecision,
     memory,
     guard,
     beforeSupersede,
-    tool: recordDecisionTool({ memory, extraction, guard: guard as unknown as MemoryWriteGuard }),
+    record,
+    tool: recordDecisionTool({ memory, extraction, guard: guard as unknown as MemoryWriteGuard, audit }),
   };
 }
 
@@ -227,7 +231,7 @@ describe('koda_record_decision execute (US-007)', () => {
         ownerType: 'USER',
       },
       memory,
-      { beforeSupersede },
+      { beforeSupersede, onWritten: expect.any(Function) },
     );
   });
 
@@ -275,7 +279,7 @@ describe('koda_record_decision execute (US-007)', () => {
     await tool.execute(ctx, tool.parse(draft()));
 
     expect(guard.replaceCheck).toHaveBeenCalledWith(ctx.actor, 'project-1');
-    expect(recordDecision.mock.calls[0]?.[2]).toEqual({ beforeSupersede });
+    expect(recordDecision.mock.calls[0]?.[2]).toEqual({ beforeSupersede, onWritten: expect.any(Function) });
   });
 
   it('US-008: an agent records its decision with ownerType AGENT', async () => {
@@ -294,5 +298,65 @@ describe('koda_record_decision execute (US-007)', () => {
     await expect(tool.execute(ctx, tool.parse(draft()))).rejects.toMatchObject({
       text: 'forbidden: memory:m2 needs memory.update',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Permissions P2 US-003 — the decision tool records the write it made
+// ---------------------------------------------------------------------------
+
+describe('koda_record_decision audit (US-003)', () => {
+  it('AC-15: execute hands recordDecision an onWritten that records memory.decision.record for the new item', async () => {
+    const record = vi.fn(async (): Promise<void> => undefined);
+    const beforeSupersede = vi.fn(async (): Promise<void> => undefined);
+    const recordDecision = vi.fn(async (_input: unknown, _repository: unknown, options?: RecordDecisionArgs[2]) => {
+      await options?.onWritten?.({
+        item: { id: 'm-2', projectId: 'p-1', kind: 'DECISION' } as MemoryItem,
+        superseded: null,
+      });
+      return { canonicalId: 'c-2', memoryId: 'm-2' };
+    });
+    const guard = { assertMayReplace: vi.fn(async () => undefined), replaceCheck: vi.fn(() => beforeSupersede) };
+    const tool = recordDecisionTool({
+      memory: { findActive: vi.fn(async () => null) } as unknown as PrismaMemoryItemRepository,
+      extraction: { recordDecision } as unknown as ExtractionService,
+      guard: guard as unknown as MemoryWriteGuard,
+      audit: { record } as unknown as AuditRecorder,
+    });
+
+    await tool.execute(ctx, tool.parse(draft()));
+
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(record).toHaveBeenCalledWith({
+      key: 'memory.decision.record',
+      resourceType: 'memory-item',
+      resourceId: 'm-2',
+      projectId: 'p-1',
+      summary: 'created DECISION',
+    });
+  });
+
+  it('US-003: a refused memory.decision.record entry propagates, so the store rolls the decision back', async () => {
+    const record = vi.fn(async (): Promise<void> => {
+      throw new Error('audit down');
+    });
+    const beforeSupersede = vi.fn(async (): Promise<void> => undefined);
+    const recordDecision = vi.fn(async (_input: unknown, _repository: unknown, options?: RecordDecisionArgs[2]) => {
+      await options?.onWritten?.({
+        item: { id: 'm-2', projectId: 'p-1', kind: 'DECISION' } as MemoryItem,
+        superseded: null,
+      });
+      return { canonicalId: 'c-2', memoryId: 'm-2' };
+    });
+    const guard = { assertMayReplace: vi.fn(async () => undefined), replaceCheck: vi.fn(() => beforeSupersede) };
+    const tool = recordDecisionTool({
+      memory: { findActive: vi.fn(async () => null) } as unknown as PrismaMemoryItemRepository,
+      extraction: { recordDecision } as unknown as ExtractionService,
+      guard: guard as unknown as MemoryWriteGuard,
+      audit: { record } as unknown as AuditRecorder,
+    });
+
+    await expect(tool.execute(ctx, tool.parse(draft()))).rejects.toThrow('audit down');
+    await expect(tool.execute(ctx, tool.parse(draft()))).rejects.not.toBeInstanceOf(ToolActionError);
   });
 });

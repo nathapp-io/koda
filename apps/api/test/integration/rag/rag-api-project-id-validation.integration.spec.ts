@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RagController } from '../../../src/rag/rag.controller';
+import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 import { RagService } from '../../../src/rag/rag.service';
 import { HybridRetrieverService } from '../../../src/rag/hybrid-retriever.service';
 import { EvaluationService } from '../../../src/retrieval/evaluation.service';
@@ -93,6 +95,7 @@ describe('RagController — Project ID Validation at API Boundary (AC6)', () => 
         { provide: ProjectAccessService, useValue: {} },
         // US-007: the KB routes carry permission keys; this spec asserts the slug/projectId contract only.
         { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
+        { provide: AuditRecorder, useValue: mockAuditRecorder },
       ],
     }).compile();
 

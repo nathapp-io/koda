@@ -11,6 +11,7 @@ import {
   MemoryItem,
   MemoryOwnerType,
 } from './memory-item-repository';
+import type { MemoryWritten } from './memory-audit';
 
 export function buildActiveKey(_projectId: string, kind: string, subject: string, predicate: string): string {
   return `${kind}:${subject}:${predicate}`;
@@ -30,6 +31,13 @@ export interface MemoryDedupKey {
  */
 export interface MemoryUpsertOptions {
   beforeSupersede?: (existing: MemoryItem) => Promise<void>;
+  /**
+   * Permissions P2 US-002: what the write did, awaited after the insert and still inside the same
+   * transaction. A throw rolls the transaction back, so a refused audit entry leaves neither the new item
+   * nor the superseded item's status change. Not called on the identical-restatement no-op path, which
+   * writes nothing.
+   */
+  onWritten?: (written: MemoryWritten) => Promise<void>;
 }
 
 /** The stored owner kind, read back as the union the domain uses; anything else is a system item. */
@@ -172,9 +180,14 @@ export class PrismaMemoryItemRepository
   }
 
   async upsert(item: MemoryItemInput, options?: MemoryUpsertOptions): Promise<MemoryItem> {
-    return this.prisma.client.$transaction(
-      async (client) => {
-        const db = client as unknown as PrismaClient;
+    // Permissions P2 US-002: the write runs on the transaction manager rather than a bare
+    // `client.$transaction`, so the callback runs in the AsyncLocalStorage the transaction manager (and
+    // thus `AuditRecorder.record`) reads — `onWritten` records its entry in this same transaction. The
+    // callback still writes through its own `tx`: a `PrismaService` that is not wired with the module's
+    // proxy (a bare one in a test) resolves `client` to the root client inside a transaction.
+    return this.prisma.withTransaction(
+      async (tx) => {
+        const db = tx as unknown as PrismaClient;
 
         const activeKey = buildActiveKey(item.projectId, item.kind, item.subject, item.predicate);
 
@@ -229,6 +242,13 @@ export class PrismaMemoryItemRepository
             ttlAt: item.ttlAt ?? null,
             supersededBy: item.supersededBy,
           },
+        });
+
+        // Permissions P2 US-002: last, so the audit entry names an item that exists, and inside the
+        // transaction, so a refused entry takes the insert (and the supersede above) with it.
+        await options?.onWritten?.({
+          item: this.toDomain(created),
+          superseded: existingActive ? this.toDomain(existingActive) : null,
         });
 
         return this.toDomain(created);

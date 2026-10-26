@@ -3,6 +3,8 @@ import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { AstIndexService, SourceFile } from './ast-index.service';
 import { CodeCommitOutboxHandler } from './code-commit-outbox-handler';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
+import { AuditRecorder } from '../audit/audit-recorder.service';
+import { runAsSystemWriter } from '../action-context/action-context';
 
 @Injectable()
 @SystemWriter('system.codeintel.index-commit')
@@ -11,6 +13,7 @@ export class CodeIntelOutboxSubscriber implements OnModuleInit {
 
   constructor(
     private readonly registry: FanOutPublisher,
+    private readonly audit: AuditRecorder,
     @Optional() private readonly codeCommitHandler?: CodeCommitOutboxHandler,
     @Optional() private readonly astIndexService?: AstIndexService,
   ) {}
@@ -23,6 +26,10 @@ export class CodeIntelOutboxSubscriber implements OnModuleInit {
   }
 
   private async handleCodeCommit(payload: unknown): Promise<void> {
+    await runAsSystemWriter(this, () => this.indexCodeCommit(payload));
+  }
+
+  private async indexCodeCommit(payload: unknown): Promise<void> {
     const p = payload as Record<string, unknown>;
     const repoId = p.repoId as string | undefined;
     const commitHash = p.commitHash as string | undefined;
@@ -31,9 +38,22 @@ export class CodeIntelOutboxSubscriber implements OnModuleInit {
     const changedFiles = (p.changedFiles as SourceFile[] | undefined)
       ?? (p.files as SourceFile[] | undefined);
 
+    const onIndexed = async (indexed: { symbolsIndexed: number; filesIndexed: number }): Promise<void> => {
+      if (!repoId || !projectId) {
+        throw new Error('code_commit: missing repoId or projectId for index audit');
+      }
+      await this.audit.record({
+        key: 'system.codeintel.index-commit',
+        resourceType: 'code-repo',
+        resourceId: repoId,
+        projectId,
+        summary: `indexed ${indexed.symbolsIndexed} symbols in ${indexed.filesIndexed} files`,
+      });
+    };
+
     if (this.codeCommitHandler) {
       this.logger.debug('code_commit: delegating to CodeCommitOutboxHandler');
-      await this.codeCommitHandler.process(p);
+      await this.codeCommitHandler.process(p, onIndexed);
       return;
     }
 
@@ -55,6 +75,6 @@ export class CodeIntelOutboxSubscriber implements OnModuleInit {
     if (!this.astIndexService) return;
 
     this.logger.log(`code_commit: indexing ${repoId} ${commitHash} (${changedFiles.length} files)`);
-    await this.astIndexService.indexCommit(repoId, commitHash, changedFiles, projectId);
+    await this.astIndexService.indexCommit(repoId, commitHash, changedFiles, projectId, onIndexed);
   }
 }
