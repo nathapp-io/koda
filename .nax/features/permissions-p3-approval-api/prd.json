@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-api",
   "branchName": "feat/permissions-p3-approval-api",
   "createdAt": "2026-10-26T00:00:00.000Z",
-  "updatedAt": "2026-10-26T16:57:34.920Z",
+  "updatedAt": "2026-10-26T17:03:07.290Z",
   "userStories": [
     {
       "id": "US-001",
@@ -805,14 +805,17 @@
         "US-001",
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Cross-module outbox fan-out includes authorization-sensitive recipient eligibility and content-disclosure constraints; security override applies."
+        "reasoning": "Cross-module outbox fan-out includes authorization-sensitive recipient eligibility and content-disclosure constraints; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/live/ticket-live.subscriber.ts",
@@ -850,7 +853,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1435d0043a4a5c32518e693254c9d21932487427"
     },
     {
       "id": "US-012",
