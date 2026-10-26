@@ -37,9 +37,18 @@ describeIntegration('system role seeder audit (real AppModule)', () => {
     expect(await rows()).toEqual([expect.objectContaining({ key: 'role.manage', resourceType: 'role', resourceId: viewer.id, projectId: null, actorType: 'SYSTEM', actorId: 'seed', origin: 'system', summary: 'restored from seed, fields: name, scope' })]);
   });
 
-  it('AC-2: records nothing on an unchanged second bootstrap', async () => {
+  it('AC-2: records writes, then records nothing on an unchanged second bootstrap', async () => {
+    const viewer = await db.role.findUniqueOrThrow({ where: { key: 'viewer' } });
+    await db.role.update({ where: { id: viewer.id }, data: { name: 'Changed viewer for AC-2' } });
+
     await seeder.onApplicationBootstrap();
     const before = await db.auditEntry.count({ where: { key: 'role.manage', actorId: 'seed' } });
+    expect(before).toBeGreaterThan(0);
+    expect(await rows()).toEqual([expect.objectContaining({
+      key: 'role.manage', resourceId: viewer.id, actorId: 'seed',
+      summary: 'restored from seed, fields: name, scope',
+    })]);
+
     await seeder.onApplicationBootstrap();
     expect(await db.auditEntry.count({ where: { key: 'role.manage', actorId: 'seed' } })).toBe(before);
   });
