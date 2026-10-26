@@ -11945,6 +11945,67 @@
           "approvals"
         ]
       }
+    },
+    "/api/approvals/{id}/decisions": {
+      "post": {
+        "operationId": "ApprovalRequestsController_decide",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideApprovalRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Approval request with its current decisions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRequestDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid decision body"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "The principal cannot decide this request"
+          },
+          "404": {
+            "description": "Approval request missing or invisible"
+          },
+          "409": {
+            "description": "Request is not pending or has expired"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Decide a visible approval request",
+        "tags": [
+          "approvals"
+        ]
+      }
     }
   },
   "info": {
@@ -20972,6 +21033,25 @@
           "input",
           "result",
           "decisions"
+        ]
+      },
+      "DecideApprovalRequestDto": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "type": "string"
+          },
+          "comment": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "decision"
         ]
       }
     }

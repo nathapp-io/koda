@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import request from 'supertest';
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { ApprovalGate } from '../../../src/approvals/approval-gate.service';
+import { ApprovalRequestQueries } from '../../../src/approvals/approval-request.queries';
 import { ApprovalCommandRegistry } from '../../../src/approvals/approval-command.registry';
 import { configurableTestCommand } from '../../../src/approvals/test-helpers/test-approval-command';
 import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
@@ -62,10 +63,14 @@ import { canRunDbTests } from '../../helpers/test-environment';
     await app.get(PermissionCache).invalidate();
     pInput = { labelId: randomUUID() }; projectRequestId = await open(p, agent.id);
   });
-  it('AC-1/2: approves, executes once and returns current request decisions', async () => {
-    const res = await post(projectRequestId, { decision: 'approve' }).expect(200);
-    expect(data<{ status: string }>(res).status).toBe('executed'); expect(labels.state.calls).toHaveLength(1);
-    expect(data<{ decisions: unknown[] }>(res).decisions).toHaveLength(1);
+  it('AC-1/2: approves, executes once and returns current request decisions without a post-decision visibility check', async () => {
+    const getSpy = vi.spyOn(app.get(ApprovalRequestQueries), 'get');
+    try {
+      const res = await post(projectRequestId, { decision: 'approve' }).expect(200);
+      expect(data<{ status: string }>(res).status).toBe('executed'); expect(labels.state.calls).toHaveLength(1);
+      expect(data<{ decisions: unknown[] }>(res).decisions).toHaveLength(1);
+      expect(getSpy).toHaveBeenCalledTimes(1);
+    } finally { getSpy.mockRestore(); }
   });
   it('AC-3/4: rejects and returns its decision comment', async () => {
     const body = data<{ status: string; decisions: { comment: string; decision: string }[] }>(await post(projectRequestId, { decision: 'reject', comment: 'no' }).expect(200));

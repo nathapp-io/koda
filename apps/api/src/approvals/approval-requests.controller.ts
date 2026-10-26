@@ -79,7 +79,7 @@ export class ApprovalRequestsController {
     try {
       await this.queries.get(ref(principal), id);
       const request = await this.decisions.decide(id, dto.decision, dto.comment ?? null);
-      return JsonResponse.Ok(ApprovalRequestDto.from(await this.queries.get(ref(principal), request.id)));
+      return JsonResponse.Ok(ApprovalRequestDto.from({ request, decisions: await this.queries.decisionsFor(request.id) }));
     } catch (error) { rethrowApprovalError(error); }
   }
 }

@@ -35,6 +35,11 @@ export class ApprovalRequestQueries {
     return { request, decisions: await this.requests.findDecisions(id) };
   }
 
+  /** Decision response data after the controller has already checked request visibility. */
+  decisionsFor(id: string): Promise<ApprovalDecisionRecord[]> {
+    return this.requests.findDecisions(id);
+  }
+
   /** Unscoped, for system readers such as the notification subscriber. */
   findById(id: string): Promise<ApprovalRequestRecord | null> {
     return this.requests.findById(id);
