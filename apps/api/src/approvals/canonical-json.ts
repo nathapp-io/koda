@@ -7,8 +7,11 @@
  * approval of `[b, a]`) and no whitespace is emitted.
  *
  * The output is the string `JSON.stringify` would produce for the value with its keys sorted, so a
- * reader can parse it back: `undefined` object members are dropped, `undefined` array members become
- * `null`, and a value that carries `toJSON` (a `Date`, a `Prisma.Decimal`) is serialised through it.
+ * reader can parse it back: `undefined` object members are dropped, `undefined` array members and
+ * sparse-array holes become `null`, and a value that carries `toJSON` (a `Date`, a `Prisma.Decimal`,
+ * an object with its own JSON form) is serialised through what `toJSON` answers, then sorted like any
+ * other value. `canonicalJson(x)` and `canonicalJson(JSON.parse(JSON.stringify(x)))` therefore agree
+ * for every JSON-serialisable `x` — which is what makes the gate's hash match the stored `input`.
  */
 
 const OPEN_OBJECT = '{';
@@ -24,11 +27,19 @@ export function canonicalJson(value: unknown): string {
 
 function serialize(value: unknown): string {
   if (typeof value === 'object' && value !== null && hasCustomToJson(value)) {
-    return serializeLeaf(value);
+    // `toJSON` may answer an object, not just a string: canonicalise what `JSON.stringify` produced
+    // for it, so a value hashed here equals the same value read back from the persisted JSON.
+    return serialize(normalizeThroughJson(value));
   }
   if (Array.isArray(value)) return serializeArray(value);
   if (typeof value === 'object' && value !== null) return serializeObject(value);
   return serializeLeaf(value);
+}
+
+/** The plain JSON value `JSON.stringify` writes for `value` (`toJSON` already applied). */
+function normalizeThroughJson(value: object): unknown {
+  const text = JSON.stringify(value);
+  return text === undefined ? null : (JSON.parse(text) as unknown);
 }
 
 /** A leaf's own JSON: primitives as `JSON.stringify` writes them, `undefined` as `null`. */
@@ -37,7 +48,12 @@ function serializeLeaf(value: unknown): string {
 }
 
 function serializeArray(items: readonly unknown[]): string {
-  const members = items.map((item) => serialize(item));
+  // Indexed, not `map`: `map` skips holes, which would drop a position (two different sparse arrays
+  // would hash alike) and can emit invalid JSON. A hole reads as `undefined`, which `JSON.stringify`
+  // also writes as `null`, so a position is never lost.
+  const members: string[] = [];
+  for (let index = 0; index < items.length; index += 1) members.push(serialize(items[index]));
+
   return `${OPEN_ARRAY}${members.join(SEPARATOR)}${CLOSE_ARRAY}`;
 }
 
