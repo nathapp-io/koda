@@ -324,6 +324,14 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${loginData.accessToken}`)
         .expect(200);
 
+      const loggedOutUser = await prismaClient().user.findUniqueOrThrow({ where: { email: 'logout-replay@koda.test' } });
+      const logoutEntries = await prismaClient().auditEntry.findMany({ where: { key: 'session.logout', resourceId: loggedOutUser.id } });
+      expect(logoutEntries).toHaveLength(1);
+      expect(logoutEntries[0]).toMatchObject({ key: 'session.logout', resourceId: loggedOutUser.id });
+      expect(logoutEntries[0].actorType).toBe('USER');
+      expect(logoutEntries[0].actorId).toBe(loggedOutUser.id);
+      expect(logoutEntries[0].summary).toBe('logged out');
+
       // The refresh token issued before logout is signed with a stale
       // tokenVersion — the refresh strategy marks it revoked and the
       // service must refuse to mint a new pair from it.

@@ -186,7 +186,16 @@ export class AuthService {
   }
 
   async logout(userId: string): Promise<void> {
-    await this.authRepo.bumpTokenVersion(userId);
+    await this.audit.audited(
+      () => this.authRepo.bumpTokenVersion(userId),
+      () => ({
+        key: 'session.logout',
+        resourceType: 'user',
+        resourceId: userId,
+        projectId: null,
+        summary: 'logged out',
+      }),
+    );
     await this.cache.invalidate(userTokenVersionCacheTag(userId), { mode: 'tag' });
     // MEMORY strategy has no tag registry, so tag mode degrades to deleting the
     // literal `USER:<id>` key and never matches `USER-AUTH-STATE:<id>`. Evict
