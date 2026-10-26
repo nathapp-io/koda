@@ -105,8 +105,10 @@ export class ApprovalGate {
     },
     now: Date,
   ): Promise<ApprovalRequestRecord> {
-    const { key, projectId, parsed, resolved, context, actorType } = opened;
-    const inputHash = approvalInputHash(parsed);
+    const { key, projectId, resolved, context, actorType } = opened;
+    // Freeze once: the snapshot the row stores is exactly the value the hash describes.
+    const input = freezeApprovalInput(opened.parsed);
+    const inputHash = approvalInputHash(input);
     const duplicate: PendingApprovalMatch = {
       actorType,
       actorId: context.actor.id,
@@ -123,28 +125,29 @@ export class ApprovalGate {
     // The ApprovalRequest row is itself the record of the ask, so opening it is bookkeeping: no
     // audit entry, and the write does not count against the entry point's audit coverage.
     return bookkeeping('approval.request-open', () => this.txManager.run(async () => this.requests.create(
-      newRequest({ ...opened, inputHash }, now),
+      newRequest({ key, projectId, resolved, context, actorType, input, inputHash }, now),
     )));
   }
 }
 
 /**
  * The row an open writes. The policy's settings are copied, not referenced: a later policy edit
- * leaves this request's mode, timeout and flags as they were when the caller was asked.
+ * leaves this request's mode, timeout and flags as they were when the caller was asked. `input` is
+ * the frozen snapshot its `inputHash` was computed from.
  */
 function newRequest(
   opened: {
     key: string;
     projectId: string | null;
-    parsed: unknown;
     resolved: ResolvedApproval;
     context: ActionContext;
     actorType: ApprovalRequestRecord['actor']['type'];
+    input: unknown;
     inputHash: string;
   },
   now: Date,
 ): ApprovalRequestRecord {
-  const { key, projectId, parsed, resolved, context, actorType, inputHash } = opened;
+  const { key, projectId, resolved, context, actorType, input, inputHash } = opened;
   const { policy } = resolved;
   const timeoutSec = policy?.timeoutSec ?? DEFAULT_APPROVAL_TIMEOUT_SEC;
 
@@ -156,7 +159,7 @@ function newRequest(
     onBehalfOf: context.onBehalfOf ?? null,
     origin: context.origin,
     correlationId: context.correlationId,
-    input: freezeApprovalInput(parsed),
+    input,
     inputHash,
     requiredMode: resolved.mode,
     policyId: policy?.id ?? null,

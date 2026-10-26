@@ -183,6 +183,19 @@ describe('ApprovalGate', () => {
     }));
   });
 
+  it('hashes the frozen snapshot it stores, not the raw parsed value', async () => {
+    resolve.mockResolvedValue({ mode: 'agent', floor: 'none', policy: null, source: 'default' });
+    // The test command's parse only accepts string members; the gate's contract is any JSON value.
+    vi.spyOn(testCommand.command, 'parse').mockImplementation((value) => value as Record<string, string>);
+
+    await agent(() => gate.gate('label.delete', { amount: new Number(7) }, opts, now));
+
+    const created = requests.create.mock.calls[0]?.[0];
+    expect(created?.input).toEqual({ amount: 7 });
+    expect(created?.inputHash).toBe(approvalInputHash(created?.input));
+    expect(created?.inputHash).not.toBe(approvalInputHash({ amount: new Number(8) }));
+  });
+
   it('defaults the clock to the current time when the caller passes none', async () => {
     resolve.mockResolvedValue({ mode: 'agent', floor: 'none', policy: null, source: 'default' });
     const before = Date.now();
