@@ -1,6 +1,8 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { runAsSystem } from '../action-context/action-context';
 import { expandEntries } from './entry-matcher';
+import { fieldsSummary } from '../audit/audit-summary';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { RoleDomain, RoleRepository, RoleSeed } from './permissions.types';
 import { ROLE_REPOSITORY, SYSTEM_ROLES_SEED } from './permissions.tokens';
 
@@ -26,6 +28,7 @@ export class SystemRoleSeeder implements OnApplicationBootstrap {
   constructor(
     @Inject(SYSTEM_ROLES_SEED) private readonly seeds: readonly RoleSeed[],
     @Inject(ROLE_REPOSITORY) private readonly roles: RoleRepository,
+    private readonly audit: AuditRecorder,
   ) {}
 
   /** Permissions P2 US-005: the boot hook is the background entry, so the seed writes as `seed`. */
@@ -46,14 +49,25 @@ export class SystemRoleSeeder implements OnApplicationBootstrap {
   private async seedRole(seed: RoleSeed): Promise<void> {
     const stored = await this.roles.findOne({ key: seed.key });
     if (stored === null) {
-      await this.roles.createRole(this.newRole(seed));
+      await this.audit.audited(
+        () => this.roles.createRole(this.newRole(seed)),
+        (created) => ({
+          key: 'role.manage', resourceType: 'role', resourceId: created.id, projectId: null, summary: 'seeded',
+        }),
+      );
       this.logger.log(`seeded system role '${seed.key}'`);
       return;
     }
 
     const patch = this.patchFor(stored, seed);
     if (Object.keys(patch).length === 0) return;
-    await this.roles.update(stored.id, patch);
+    await this.audit.audited(
+      () => this.roles.update(stored.id, patch),
+      () => ({
+        key: 'role.manage', resourceType: 'role', resourceId: stored.id, projectId: null,
+        summary: `restored from seed, ${fieldsSummary(patch)}`,
+      }),
+    );
     this.logger.log(`restored system role '${seed.key}'`);
   }
 

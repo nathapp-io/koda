@@ -83,6 +83,11 @@ const seed = (over: Partial<RoleSeed> & Pick<RoleSeed, 'key'>): RoleSeed => ({
 });
 
 /** Test-local lookups that fail loudly instead of using `!` (oxlint forbids non-null assertions). */
+const mockAuditRecorder = () => ({
+  record: vi.fn(async () => undefined),
+  audited: async <T>(fn: () => Promise<T>, _entriesOf: (result: T) => unknown) => fn(),
+}) as unknown as import('../audit/audit-recorder.service').AuditRecorder;
+
 function findRow(rows: readonly RoleDomain[], key: string): RoleDomain {
   const row = rows.find((entry) => entry.key === key);
   if (row === undefined) throw new Error(`no ${key} role`);
@@ -105,7 +110,7 @@ describe('US-002 SystemRoleSeeder.onApplicationBootstrap', () => {
     it('AC-6: rejects with UnknownPermissionEntryError when a seeded role holds an unknown entry', async () => {
       const { repo } = fakeRepo();
 
-      await expect(new SystemRoleSeeder(invalidSeeds, repo).onApplicationBootstrap()).rejects.toBeInstanceOf(
+      await expect(new SystemRoleSeeder(invalidSeeds, repo, mockAuditRecorder()).onApplicationBootstrap()).rejects.toBeInstanceOf(
         UnknownPermissionEntryError,
       );
     });
@@ -113,7 +118,7 @@ describe('US-002 SystemRoleSeeder.onApplicationBootstrap', () => {
     it('AC-7: writes nothing when any seeded role holds an unknown entry', async () => {
       const { repo, created, updates } = fakeRepo();
 
-      await expect(new SystemRoleSeeder(invalidSeeds, repo).onApplicationBootstrap()).rejects.toBeInstanceOf(
+      await expect(new SystemRoleSeeder(invalidSeeds, repo, mockAuditRecorder()).onApplicationBootstrap()).rejects.toBeInstanceOf(
         UnknownPermissionEntryError,
       );
 
@@ -125,10 +130,35 @@ describe('US-002 SystemRoleSeeder.onApplicationBootstrap', () => {
   });
 
   describe('first bootstrap on an empty table', () => {
+    it('AC-4: records an audit entry for a created role', async () => {
+      const seedEntry = seed({ key: 'audit-role' });
+      const roleRepo: RoleRepository = {
+        ...fakeRepo().repo,
+        findOne: async () => null,
+        createRole: async (input) => ({ ...input, id: 'r-1' }),
+      };
+      const record = vi.fn(async () => undefined);
+      const recorder = {
+        record,
+        audited: async <T>(fn: () => Promise<T>, entriesOf: (result: T) => unknown) => {
+          const result = await fn();
+          const entries = entriesOf(result);
+          for (const entry of Array.isArray(entries) ? entries : [entries]) await record(entry);
+          return result;
+        },
+      } as unknown as import('../audit/audit-recorder.service').AuditRecorder;
+
+      await new SystemRoleSeeder([seedEntry], roleRepo, recorder).onApplicationBootstrap();
+
+      expect(record).toHaveBeenCalledTimes(1);
+      expect(record).toHaveBeenCalledWith({
+        key: 'role.manage', resourceType: 'role', resourceId: 'r-1', projectId: null, summary: 'seeded',
+      });
+    });
     it('creates every seeded role with its scope, system flag, lock and permissions', async () => {
       const { repo, created } = fakeRepo();
 
-      await new SystemRoleSeeder(SYSTEM_ROLES, repo).onApplicationBootstrap();
+      await new SystemRoleSeeder(SYSTEM_ROLES, repo, mockAuditRecorder()).onApplicationBootstrap();
 
       expect(created.map((row) => row.key)).toEqual(SYSTEM_ROLES.map((entry) => entry.key));
       expect(created.every((row) => row.system)).toBe(true);
@@ -156,7 +186,7 @@ describe('US-002 SystemRoleSeeder.onApplicationBootstrap', () => {
     it('AC-3: creates no new Role rows', async () => {
       const { repo, created, updates } = fakeRepo(seeded());
 
-      await new SystemRoleSeeder(SYSTEM_ROLES, repo).onApplicationBootstrap();
+      await new SystemRoleSeeder(SYSTEM_ROLES, repo, mockAuditRecorder()).onApplicationBootstrap();
 
       expect(created).toEqual([]);
       // Nothing about the stored rows differs from the seed, so there is nothing to write either.
@@ -169,7 +199,7 @@ describe('US-002 SystemRoleSeeder.onApplicationBootstrap', () => {
       developer.permissions = ['ticket.read'];
       const { repo, created, updates } = fakeRepo(rows);
 
-      await new SystemRoleSeeder(SYSTEM_ROLES, repo).onApplicationBootstrap();
+      await new SystemRoleSeeder(SYSTEM_ROLES, repo, mockAuditRecorder()).onApplicationBootstrap();
 
       expect(created).toEqual([]);
       expect(updates).toEqual([]);
@@ -182,7 +212,7 @@ describe('US-002 SystemRoleSeeder.onApplicationBootstrap', () => {
       owner.permissions = ['ticket.read'];
       const { repo, updates } = fakeRepo(rows);
 
-      await new SystemRoleSeeder(SYSTEM_ROLES, repo).onApplicationBootstrap();
+      await new SystemRoleSeeder(SYSTEM_ROLES, repo, mockAuditRecorder()).onApplicationBootstrap();
 
       expect(updates).toHaveLength(1);
       expect(updates[0].id).toBe('id-owner');
@@ -197,7 +227,7 @@ describe('US-002 SystemRoleSeeder.onApplicationBootstrap', () => {
       owner.scope = 'PROJECT';
       const { repo, updates } = fakeRepo(rows);
 
-      await new SystemRoleSeeder(SYSTEM_ROLES, repo).onApplicationBootstrap();
+      await new SystemRoleSeeder(SYSTEM_ROLES, repo, mockAuditRecorder()).onApplicationBootstrap();
 
       expect(updates).toHaveLength(1);
       expect(updates[0].patch).toMatchObject({ name: 'Owner', scope: 'GLOBAL', permissions: ['*'] });
@@ -211,7 +241,7 @@ describe('US-002 SystemRoleSeeder.onApplicationBootstrap', () => {
       developer.permissions = ['ticket.read'];
       const { repo, updates } = fakeRepo(rows);
 
-      await new SystemRoleSeeder(SYSTEM_ROLES, repo).onApplicationBootstrap();
+      await new SystemRoleSeeder(SYSTEM_ROLES, repo, mockAuditRecorder()).onApplicationBootstrap();
 
       expect(updates).toHaveLength(1);
       expect(updates[0].patch).toEqual({ name: 'Developer', scope: 'PROJECT' });
@@ -224,7 +254,7 @@ describe('US-002 SystemRoleSeeder.onApplicationBootstrap', () => {
       const { repo } = fakeRepo(seeded());
       const del = vi.spyOn(repo, 'delete');
 
-      await new SystemRoleSeeder(SYSTEM_ROLES, repo).onApplicationBootstrap();
+      await new SystemRoleSeeder(SYSTEM_ROLES, repo, mockAuditRecorder()).onApplicationBootstrap();
 
       expect(del).not.toHaveBeenCalled();
     });
@@ -239,7 +269,7 @@ describe('US-002 SystemRoleSeeder.onApplicationBootstrap', () => {
       });
 
       // A single seed keeps the assertion to one recorded creation.
-      await new SystemRoleSeeder([findSeed('developer')], repo).onApplicationBootstrap();
+      await new SystemRoleSeeder([findSeed('developer')], repo, mockAuditRecorder()).onApplicationBootstrap();
 
       expect(createRole).toHaveBeenCalledTimes(1);
       expect(seen).toHaveLength(1);

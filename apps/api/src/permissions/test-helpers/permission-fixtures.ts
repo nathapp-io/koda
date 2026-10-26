@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from '../../generated/prisma/client';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { SystemRoleSeeder } from '../system-role.seeder';
+import type { AuditRecorder } from '../../audit/audit-recorder.service';
 import { SYSTEM_ROLES } from '../system-roles';
 import type { PrincipalRef, RoleDomain, RoleRepository, RoleScope } from '../permissions.types';
 
@@ -31,7 +32,8 @@ export async function ensureSystemRoles(db: RoleGrantDb): Promise<void> {
     createRole: async (input: Omit<RoleDomain, 'id'>) => roleDomain(await db.role.create({ data: input })),
     update: async (id: string, patch: Partial<RoleDomain>) => roleDomain(await db.role.update({ where: { id }, data: patch })),
   } as unknown as RoleRepository;
-  await new SystemRoleSeeder(SYSTEM_ROLES, roles).onApplicationBootstrap();
+  const audit = { audited: async <T>(fn: () => Promise<T>) => fn(), record: async () => undefined } as unknown as AuditRecorder;
+  await new SystemRoleSeeder(SYSTEM_ROLES, roles, audit).onApplicationBootstrap();
 }
 
 /** Bind a principal to a seeded role, returning an existing identical binding when present. */
