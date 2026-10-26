@@ -108,12 +108,15 @@ export class ApprovalExecutionService {
             if (locked.status !== 'approved') throw new ApprovalRequestNotPendingError(locked.status);
 
             const result = await command.execute(parsed);
-            const settled = await bookkeeping('approval.request-settle', () => this.requests.transition(request.id, 'approved', {
-              status: 'executed', settledAt: now, result: command.toResult?.(result) ?? null,
-            }));
+            const settled = await bookkeeping('approval.request-settle', async () => {
+              const transitioned = await this.requests.transition(request.id, 'approved', {
+                status: 'executed', settledAt: now, result: command.toResult?.(result) ?? null,
+              });
+              if (transitioned) await this.events.record(transitioned);
+              return transitioned;
+            });
             // The row is locked by this transaction, so a lost transition means a broken boundary: roll back.
             if (!settled) throw new ApprovalRequestNotPendingError(locked.status);
-            await this.events.record(settled);
 
             return settled;
           } catch (error) {

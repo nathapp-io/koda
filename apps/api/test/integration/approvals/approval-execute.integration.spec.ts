@@ -100,8 +100,8 @@ import { canRunDbTests } from '../../helpers/test-environment';
     const events = await db.outboxEvent.findMany({
       where: { type: 'approval_request_changed' }, orderBy: { createdAt: 'asc' }, take: 100,
     });
-    const statuses = events.filter((event) => (event.payload as { requestId: string }).requestId === r.id)
-      .map((event) => (event.payload as { status: string }).status);
+    const payloads = events.map((event) => JSON.parse(event.payload) as { requestId: string; status: string });
+    const statuses = payloads.filter((payload) => payload.requestId === r.id).map((payload) => payload.status);
     expect(statuses).toEqual(['pending', 'approved', 'executed']);
   });
 
