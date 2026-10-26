@@ -264,10 +264,19 @@ describeIntegration('retention purges and fleet health episodes audit (real AppM
   });
 
   it('AC-11: a detect that changes nothing records nothing', async () => {
-    await insertRunner(db, { name: `online-runner-${++n}`, lastSeenAt: later(), createdById: ids.root, capabilities: FLEET_CAPS });
+    // Control: the writer is live in this fixture, so the count the AC-11 assertion compares against is
+    // non-zero and produced by the recording path (an offline episode opens, then closes on recovery).
+    const runner = await offlineRunner();
+    expect(await detect(later())).toEqual({ opened: 1, closed: 0 });
+    await db.runner.update({ where: { id: runner.id }, data: { lastSeenAt: later() } });
+    expect(await detect(later())).toEqual({ opened: 0, closed: 1 });
+    const before = await count(HEALTH_KEY);
+    expect(before).toBe(2);
 
-    expect(await detect(later())).toEqual({ opened: 0, closed: 0 });
+    // AC-11: every runner online and no open episode — the plan opens and closes nothing.
+    expect(await db.fleetHealthAlert.count({ where: { closedAt: null } })).toBe(0);
+    expect(await detect(later(60_000))).toEqual({ opened: 0, closed: 0 });
 
-    expect(await count(HEALTH_KEY)).toBe(0);
+    expect(await count(HEALTH_KEY)).toBe(before);
   });
 });
