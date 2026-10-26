@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-api",
   "branchName": "feat/permissions-p3-approval-api",
   "createdAt": "2026-10-26T00:00:00.000Z",
-  "updatedAt": "2026-10-26T15:15:17.322Z",
+  "updatedAt": "2026-10-26T15:29:47.565Z",
   "userStories": [
     {
       "id": "US-001",
@@ -32,14 +32,17 @@
         "outbox"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Four additive source changes reuse the existing outbox and transaction patterns; strict security TDD remains appropriate because the hook changes the approval gate's atomic write path."
+        "reasoning": "Four additive source changes reuse the existing outbox and transaction patterns; strict security TDD remains appropriate because the hook changes the approval gate's atomic write path.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-gate.service.ts",
@@ -76,7 +79,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "7230ece5a52690c8ca4703fa098ce722200a1107"
     },
     {
       "id": "US-002",
@@ -150,7 +157,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -224,7 +234,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -299,7 +312,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -352,7 +368,10 @@
         "apps/api/test/integration/approvals/approval-decide-route.integration.spec.ts"
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -433,7 +452,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -496,7 +518,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -568,7 +593,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-009",
@@ -624,7 +652,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-010",
@@ -701,7 +732,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-011",
@@ -777,7 +811,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-012",
@@ -857,7 +894,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-013",
@@ -921,7 +961,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-014",
@@ -979,7 +1022,10 @@
         }
       ],
       "workdir": "apps/cli",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-015",
@@ -1030,7 +1076,10 @@
         "apps/cli/src/commands/approval-policy.spec.ts"
       ],
       "workdir": "apps/cli",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Goal and completion: expose the existing P3 approval engine through REST, MCP and the thin CLI; add transactional status-change outbox events, scoped inbox visibility, requester cancellation, stale-approved retry, policy CRUD, project live refetch signals and eligible-human notifications. Completion is the fifteen binding stories with their stated behavior, not production gating or a web inbox. Preserve their exact workdirs and dependency edges, including US-010's root openapi.json generation despite its binding apps/api workdir. No application implementation is part of this PRD-writing task.\n\nNavigation and authoritative context: codebase-memory MCP is unavailable in this session, so discovery used direct file reads and literal/regex search in the supplied repository root. The detected Express/Next.js labels are not the architecture authority: .nax/mono/apps/api/context.md:18 specifies NestJS 12 + Fastify, Prisma 7, Nathapp platform modules and Vitest; .nax/mono/apps/cli/context.md:21 specifies Commander, generated Axios client and Jest. The API integration helper intentionally defaults to an Express adapter while allowing Fastify (apps/api/test/helpers/http-app.ts:15 and :35); that does not change production's Fastify architecture. Read the nathapp-nestjs-patterns skill before implementing NestJS code, as required by app guidance; no matching skill file was exposed by repository glob during planning. Never edit generated AGENTS.md or .nax/rules/ and .nax/mono/ guidance for this feature.\n\nExisting engine and mutation seams: apps/api/src/approvals/approval-engine.module.ts:20 currently exports ApprovalPolicyService, ApprovalCommandRegistry, ApprovalGate, ApprovalDecisionService and ApprovalExecutionService and keeps both repository providers/tokens private. Add the events provider, then public query and MCP services; never export repositories (.nax/rules/api-data.md:28). AppModule already imports ApprovalEngineModule at apps/api/src/app.module.ts:149; add ApprovalApiModule without removing or duplicating the singleton registry. ApprovalGate's constructor is at apps/api/src/approvals/approval-gate.service.ts:29; gate parses first, applies direct-human satisfaction and delegates non-human waits to openRequest. openRequest performs pending duplicate lookup before its bookkeeping-wrapped transaction (same file:132-140). Record pending only after the create inside that existing callback, never for duplicates, parse failures or immediate execution. Do not otherwise change approval-core behavior. ApprovalDecisionService.decide commits record() before calling execute (apps/api/src/approvals/approval-decision.service.ts:22-26). record() locks, checks pending/expiry, re-reads effective keys, checks decideEligibility, inserts a decision, transitions and audits within txManager.run (same file:29-64). Events must be awaited in that same transaction. Cancellation is an additive method on this service, not a change to decide eligibility.\n\nExecution and retry risk: apps/api/src/approvals/approval-execution.service.ts:43-58 checks approved and reconstructs the original action context. Precheck covers no-command, hash mismatch, revoked action permission and invalid input (same file:61-77). The successful command transaction wraps the transition in bookkeeping (same file:108-121); failure settles in a separate transaction (same file:127-134 and :153-164). Put events inside each corresponding bookkeeping/transaction closure and only after a non-null transition; otherwise audit coverage or atomicity breaks. Preserve the distinction between callback failure and commit failure: a failed commit leaves approved for retry, rather than falsely marking failed. Preserve the per-request in-process serialization and database row lock. ApprovalRequestExpirySweeper is @SystemWriter('system.approval.expire'), MAX_PER_TICK is 100, its timer currently runs tick alone and unrefs/clears on shutdown (apps/api/src/approvals/approval-request-expiry.sweeper.ts:13, :35-65). tick has its own system scope and returns {expired, approved, failed}; per-request transactions and post-commit execution are at :78-103, and transitions/audit at :111-128. Add event recording without changing tick counts. Add separate retryStale using decidedAt <= now-300000, sequential execution, skip ApprovalRequestNotPendingError, warn and continue on other exceptions. Chain tick then retryStale with independent top-level error handling, retaining sweepEnabled and timer cleanup.\n\nVisibility is access control, not full decision eligibility: apps/api/src/approvals/approval-eligibility.ts:63-76 currently keeps matchesDecidePattern private. Export its unchanged exact-or-prefix matcher; never change decideEligibility's refusal ordering or tier rules (:78-107). Visibility includes actor/onBehalfOf identity even without a decide key; otherwise it checks scoped decide patterns only, not action permission or policy tier. PermissionService.effectiveKeys caches per principal and project (apps/api/src/permissions/permission.service.ts:75-83). computeKeys and appliesIn recognize global bindings in every scope (:152-171 and :183-186); global Owner/Admin additionally get project keys everywhere, with isGlobalAdminBinding at :189. A custom GLOBAL decide grant must expose project requests too, even though deciding them can later fail missing-action-permission. Add approvalDecideScopes without changing can, effectiveKeys or principalIdsWithKey. The new method enumerates accessible project ids in ascending order and extracts sorted unique suffix patterns, with 'all' taking precedence. Global-admin short-circuit is based on effective global bindings, not just global key possession. Empty decide patterns must yield own-only queries, not an accidentally unbounded OR. Request filter fields AND visibility; mine replaces decider visibility with actor/onBehalfOf clauses. Prefix p.* translates to startsWith 'p.', not startsWith 'p' without its separating dot. Repository pagination orders createdAt desc then id desc and applies filtering before counting/paging.\n\nPersistence boundaries: apps/api/src/approvals/prisma-approval-request.repository.ts:15-40 maps flat Prisma actor/onBehalfOf columns to domain objects; :43-46 owns SELECT FOR UPDATE, :60-63 owns compare-and-set transitions, :65-72 creates and orders decisions (decidedAt asc, id asc, take 50). Add bounded visible-page and stale-approved queries here, not in controllers or notification subscribers. Domain request/policy/decision records and all seven statuses already exist in apps/api/src/approvals/domain/approval.domain.ts:25-51. apps/api/src/approvals/prisma-approval-policy.repository.ts:43-46 supplies the existing Paginate/remap pattern. ApprovalPolicyFilter currently has only projectId and permissionPattern (:9). Translate projectIds to OR equalities and remove the pseudo-field before calling Prisma; keep single-project filtering and list semantics unchanged. ApprovalPolicyService already validates floors, requiredApprovals, selectors and anti-self-application, transactions, immutable selector identity and audit (apps/api/src/approvals/approval-policy.service.ts:26-88, :99-140). Add page and non-locking public get while retaining the existing private locked requirePolicy for writes. Do not duplicate these business rules in controllers or CLI. Prisma schema already contains ApprovalPolicy, ApprovalRequest and ApprovalDecision (apps/api/prisma/schema.prisma:1597, :1621, :1656), with request indexes at :1651-1653. No new schema, data migration, indexes or production backfill are specified. Use the generated Prisma 7 client only at repository boundaries and existing isUniqueViolation logic, not raw meta.target.\n\nREST wiring and contract: mirror apps/api/src/audit/audit.controller.ts:12-24 for parseQuery, JsonResponse.Ok and toPageResult. KodaPageQuery defaults to current=1, size=20, caps size=100 and explains the non-transforming global pipe (apps/api/src/common/dto/koda-page.query.ts:9-36); parseQuery strips undeclared properties (:58-67), and remapPage preserves the page envelope (:75-77). Boolean transformation must match apps/api/src/tickets/dto/list-tickets.query.ts:7-9 so invalid strings survive transformation and IsBoolean rejects them. Summary DTOs intentionally exclude input/result; detail DTOs flatten actors and include decisions. Every new REST route has RequiresGuard, ApiOperation and status-specific ApiResponse metadata; every response field needs ApiProperty (.nax/rules/api-controllers.md:12-21). RequiresGuard passes service-enforced metadata without performing a global decide grant check (apps/api/src/permissions/requires.guard.ts:30-35), which is essential for own self requests; the service handles visibility and the engine handles eligibility. Runner keys remain excluded by CombinedAuthGuard, never opt these routes into RunnerRoute. Project policy controllers mirror the ordered ProjectMembershipGuard, RequiresGuard chain and CurrentProject context in apps/api/src/fleet/approvals/project-fleet-approvals.controller.ts:34-70, including ApiParam for slug. ApprovalApiModule must import ProjectAccessModule as well as ApprovalEngineModule so DI can resolve the membership guard. Catch domain errors in every controller handler through rethrowApprovalError; preserve unknown errors unchanged. Add only each story's introduced approvals namespace codes in en/zh, using exact English templates and matching placeholder names; validation uses both -2 and 400 as illustrated at apps/api/src/i18n/en/permissions.json:11-18. Rendered client messages, not hidden args, are the assertions.\n\nPermission-contract impact: apps/api/src/permissions/catalog.ts:64-69 currently leaves approval.decide, approval.policy.read and approval.policy.manage pending alongside fleet.approval.decide.assistant and member.remove. Remove each only in the story introducing its declared surface, and update expectedPending in permission-contract.spec.ts at the same step. Add approval.request.cancel to NEW_KEY_SCOPES and IMPLICIT_KEYS (catalog.ts:73 and :117), not to grantable/approvable roles. Update catalog.spec.ts's independent expected derivation and regenerate only the new implicit column in permissions/__snapshots__/role-matrix.json. Permission contract and route endpoint tests are regression anchors; do not rewrite unrelated expectations.\n\nTransactional outbox and consumers: OutboxService injection is established by apps/api/src/fleet/approvals/approval-closer.ts:74-82. GLOBAL_OUTBOX_TYPES currently contains only the two fleet types (apps/api/src/outbox/global-outbox-types.ts:7); add the new constant so null-project requests are accepted. Event payloads never carry frozen input or result. FanOutPublisher handlers receive payload only, not outbox metadata; it registers in onModuleInit, runs each handler under runAsSystem('outbox') and aggregates errors for retry (apps/api/src/outbox/fan-out-publisher.ts:7, :56-60, :74-93). Consequently the live handler reconstructs the stable '<requestId>:<status>' id from the parsed payload. Mirror TicketLiveSubscriber's registration and nonthrowing warn boundary (apps/api/src/live/ticket-live.subscriber.ts:21-32), while explicitly warning for malformed approval payloads. Extend the four-member LiveEvent union without changing ticket conversion (apps/api/src/live/live-event.ts:71-97). Only project requests publish; the frame contains no key, actor or content. Notifications mirror FleetApprovalRequestedSubscriber's registration, pending reread and system-writer declaration (apps/api/src/notifications/fleet/fleet-approval-requested.subscriber.ts:24-66). NotificationsModule currently imports OutboxModule, LiveModule, ProjectAccessModule, BudgetStoreModule (apps/api/src/notifications/notifications.module.ts:34); add ApprovalEngineModule and the subscriber without reversing dependencies. Query through ApprovalRequestQueries.findById, enumerate exact-key human candidates using principalIdsWithKey (permission.service.ts:126-150) or global admins, then run decideEligibility with current effective keys for each. Narrowed-only deciders remain visible in the inbox but are intentionally not notification candidates. Use NotificationWriter.deliver as the sole insert path, keeping its idempotency and preference filtering. Nonpending/missing sources stop quietly; database errors should retain relay retry behavior rather than being swallowed as malformed input.\n\nMCP seams and staged expectations: apps/api/src/fleet/assistant/mcp/mcp-server.factory.ts:22-34 deliberately bypasses SDK argument validation; registrations must self-validate unknown input before calling a service. McpToolRegistration is at :38-43; existing assistant registration order and toMcpToolResult error conversion are at :97-124. McpController currently constructs the server with assistant registrations only (apps/api/src/fleet/assistant/mcp/mcp.controller.ts:49-70), enforces MCP_ENABLED and agent-only at :89-91, then supplies request-local principal/visibility through authInfo.extra. Add ApprovalMcpTools as the last constructor dependency and append its registrations, unfiltered by assistant visibleMcpToolNames. AssistantModule imports the engine (apps/api/src/fleet/assistant/assistant.module.ts:41-59); do not register these tools in AssistantToolRegistry or the thread executor and do not move PendingAction. Each approval handler owns a runWithActionContext AGENT/mcp scope. US-012 deliberately has only koda_list_approvals at its stage; US-013 then adds koda_decide_approval after it and updates the relevant earlier tool-list expectations. Preserve US-012's criteria in this PRD but understand the exact single-tool/last-tool assertions as that story's intermediate state, superseded by US-013's final two-tool ordering, not as incompatible final-state requirements.\n\nCLI and generation: mirror generated function calls, envelope unwrapping, paging, output and error handling in apps/cli/src/commands/fleet-approval.ts:1-50, :118-156 and :160-240; add a separate top-level approval command, not more fleet approval commands. apps/cli/src/commands/role-binding.ts:40-50 demonstrates explicit slug-to-id lookup and :124-128 validates exclusive options before any context/lookup/network operation. Always set up with withContext({}, {requireProject:false}); local project config must never implicitly select a policy scope. Request --project resolves a project id; policy --project selects slug routes. Use the generated API shapes and boolean mine, never ad-hoc HTTP or duplicated domain validation. package.json:20-23 defines root api:export-spec, generate:cli and generate; generate openapi.json after US-010 and regenerate CLI after that, without manually editing generated files. The feature specifies generated CLI output as gitignored; app context describes it as source-controlled, but .gitignore:21-25 explicitly ignores apps/cli/src/generated/ except .gitkeep. Regenerate instead of hand-editing or force-adding generated output; verify actual tracked-state conventions during generation. IMPORTANT baseline discrepancy: apps/cli/src/utils/error.ts:104-137 currently maps recognized 401/403 to exit 2 and unknown API errors to 1, but US-014 AC-14 explicitly requires an ApiError status-403 decision failure to pass through handleApiError and exit 1. The AC is authoritative for this new command; do not silently change it to exit 2 or globally alter unrelated command behavior. CLI errors go through the existing handleApiError unchanged (401/403 exit 2); src/utils/error.ts is not edited. The existing apps/cli/src/utils/error.spec.ts is the regression seam for that default. No new ApiError class is required. Policy invalid options/empty patches are explicitly exit 3, with validation before every API call.\n\nTest impact and rollout: constructor additions break direct instantiations unless updated together. Existing direct calls were located in approval-gate.service.spec.ts:48/:57, approval-decision.service.spec.ts:31, approval-execution.service.spec.ts:44/:83, approval-request-expiry.sweeper.spec.ts:89 and test/integration/approvals/approval-execute.integration.spec.ts:142. Add the last events stub/instance at each seam while preserving existing assertions. The DB-free engine compilation fixture provides global external stubs but not OutboxService yet (apps/api/src/approvals/approval-engine.module.spec.ts:21-32); add and export its stub. Add the API module compilation test under src/approvals/, not integration. Existing approval integration patterns register configurableTestCommand once, reset state before each case, use withTestActor/fixtureDb and shared DB gates (apps/api/test/integration/approvals/approval-decide.integration.spec.ts:16-53); its :113-125 rollback regression must continue passing. For these new specs, delete ApprovalDecision, ApprovalRequest and ApprovalPolicy rows in beforeEach, use fresh principals and the seeded approver plus explicit label.delete grant. Create REST/MCP agents via POST /api/agents with admin credentials and use their returned Bearer API key; do not confuse withTestActor ids with authenticated principals. Insert visibility-only ticket.delete/global role.manage requests directly when no registered command exists. Keep requests' expiresAt in the future except explicit expiry cases. Outbox events must be inspected by request id/type and ordered by creation; no outbox row should survive a rollback. Subscribers are tested by invoking captured FanOutPublisher handlers. MCP is exercised through POST /api/mcp with MCP_ENABLED enabled. Jest CLI specs mock ../generated, context and process/console boundaries as apps/cli/src/commands/fleet-approval.spec.ts:1-64 does. DB-mode tests require KODA_DB_TESTS=1 outside NAX_SANDBOXED=1; shared test setup may force-reset the test database, so do not run DB suites concurrently against one database. Skipped sandbox tests are not verification. Generated acceptance tests remain in app-local .nax feature locations and must not be edited or copied into source. Type checking, lint, scoped unit/integration and app acceptance commands are implementation verification, not additional stories or acceptance criteria. The API remains the sole owner of all decisions, policy invariants and permission evaluation throughout this additive rollout.\n\nRefine-pass preservation audit (manual, against .nax/features/permissions-p3-approval-api/spec.md:751-993): all 189 numbered spec ACs remain in their owning stories, at the same leading ordinal; added criteria follow them. Enumerated checked spec AC ordinals: US-001 [1,2,3,4,5,6,7,8,9,10,11,12,13]; US-002 [1,2,3,4,5,6,7,8]; US-003 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-004 [1,2,3,4,5,6,7,8,9,10,11]; US-005 [1,2,3,4,5,6,7,8,9,10,11,12]; US-006 [1,2,3,4,5,6,7,8,9,10,11,12,13,14]; US-007 [1,2,3,4,5,6,7,8,9,10]; US-008 [1,2,3,4,5,6,7,8,9,10,11,12,13,14]; US-009 [1,2,3,4,5,6,7,8,9]; US-010 [1,2,3,4,5,6,7,8,9,10,11,12,13]; US-011 [1,2,3,4,5,6,7,8,9,10,11,12]; US-012 [1,2,3,4,5,6,7,8,9,10,11,12,13]; US-013 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-014 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-015 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]. Qualifying clauses were retained, including no pending duplicate, before callback return, no projectId key, and nothing else, only/with competing project fixtures, holding no decide key, whoever opened it, already rejected/executed, whatever decidedAt, no projectIds, and the final not-404 distinction. No deprecated file-check tags occur. Clarifications preserve the assertions while using actual data flow: REST page rows live in data.records; MCP list text lives in content[0].text, because toMcpToolResult wraps strings in a text-content array (apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts:102-106).\n\nRefine-pass negative-path inventory: US-001 AC-6/9/12; US-002 AC-4/5; US-003 AC-10/14; US-004 AC-3/4/7/10/11; US-005 AC-5 through AC-12; US-006 AC-6 through AC-12; US-007 AC-4/5/9/10; US-008 AC-2/4/6 through AC-10/12; US-009 AC-2 through AC-5/7 through AC-9; US-010 AC-3/4/6/7/13; US-011 AC-3/4/8/9/11/12; US-012 AC-6 through AC-10; US-013 AC-5 through AC-13; US-014 AC-14; US-015 AC-9/10/12/13. Thus every story already has at least one observable refusal/error/skip behavior, and failure-table-specific supplemental assertions remain. Added regression anchors cover unchanged tick counts, the exported matcher's old semantics, disabled-sweep lifecycle, the legacy policy list array, ticket live conversion, assistant registration order with an empty approval-tools stub, the existing fleet CLI group and request-command siblings. The concrete existing seams are approval-request-expiry.sweeper.spec.ts:104-180, approval-eligibility.ts:63-68, approval-policy.service.ts:87-89, live/live-event.ts:76-97 and mcp.controller.routes.spec.ts:64-118. These checks do not authorize unrelated refactors or new runtime helpers.\n\nRefine-pass structure/scope audit: all fifteen binding ids, workdirs and dependency arrays are unchanged, every dependency resolves to one of those ids, and every spec-recommended Context Files entry fits within its story's five-file limit and is retained. Optional extra context remains existing code or an upstream output; newly authored files occur only in expectedFiles. US-014's fifth optional context now points to the existing error utility regression spec because its opt-in compatibility change is required to reconcile the authoritative exit-1 AC with current default exit 2. All 21 feature-level Out of Scope items from spec.md:439-462 remain verbatim in the top-level array; there are no story-local deferral blocks to hoist. The list-only MCP expectations are intermediate US-012 assertions, superseded only where US-013 explicitly adds its second tool, rather than contradictory instructions within one story. Complexity was reduced for standard additive event hooks, bounded retry and the project controller mirror; strict API TDD remains for access-control paths, while thin generated-client CLI formatting uses ordinary mocked-client TDD because it implements no permission or credential-resolution rules. No runtime parser or shell was available to execute a machine validation in this session, so this audit does not claim one.",
