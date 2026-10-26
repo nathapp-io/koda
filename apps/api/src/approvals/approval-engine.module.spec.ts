@@ -19,6 +19,7 @@ import { PrismaApprovalPolicyRepository } from './prisma-approval-policy.reposit
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
 import { OutboxService } from '@nathapp/nestjs-outbox';
 import { ApprovalRequestEvents } from './approval-request-events';
+import { ApprovalRequestQueries } from './approval-request.queries';
 
 @Global()
 @Module({ providers: [
@@ -42,7 +43,7 @@ class PolicyConsumer {
 class RegistryConsumer {
   constructor(readonly commands: ApprovalCommandRegistry, readonly gate: ApprovalGate) {}
 }
-/** The five services the module promises to an importing module (US-012 AC-11). */
+/** Public engine services must be injectable by an importing module. */
 @Injectable()
 class EngineConsumer {
   constructor(
@@ -51,6 +52,7 @@ class EngineConsumer {
     readonly executions: ApprovalExecutionService,
     readonly policies: ApprovalPolicyService,
     readonly commands: ApprovalCommandRegistry,
+    readonly queries: ApprovalRequestQueries,
   ) {}
 }
 @Module({ imports: [ApprovalEngineModule], providers: [PolicyConsumer, RegistryConsumer, EngineConsumer] })
@@ -101,7 +103,7 @@ describe('ApprovalEngineModule', () => {
     // The instance's constructor is what `runAsSystemWriter` reads the key from.
     expect(Reflect.getMetadata(SYSTEM_WRITER_METADATA, sweeper.constructor)).toBe('system.approval.expire');
   });
-  it('US-012 AC-11: an importing module injects all five exported services', async () => {
+  it('US-012 AC-11 and visibility: an importing module injects all exported services', async () => {
     moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ConsumerModule] }).compile();
 
     const consumer = moduleRef.get(EngineConsumer);
@@ -110,5 +112,6 @@ describe('ApprovalEngineModule', () => {
     expect(consumer.executions).toBeInstanceOf(ApprovalExecutionService);
     expect(consumer.policies).toBeInstanceOf(ApprovalPolicyService);
     expect(consumer.commands).toBeInstanceOf(ApprovalCommandRegistry);
+    expect(consumer.queries).toBeInstanceOf(ApprovalRequestQueries);
   });
 });

@@ -22,6 +22,14 @@ const GLOBAL_ADMIN_ROLE_KEYS: readonly string[] = ['owner', 'admin'];
 const PRINCIPAL_KEY_READ_CONCURRENCY = 10;
 export type PermissionScope = { projectId: string } | 'global';
 
+/** 'all' holds approval.decide; otherwise the narrowed decide patterns, ascending. */
+export type DecidePatterns = 'all' | readonly string[];
+export interface DecideScopes {
+  everywhere: boolean;
+  global: DecidePatterns;
+  projects: ReadonlyArray<{ projectId: string; patterns: DecidePatterns }>;
+}
+
 export interface PermissionContext {
   projectId?: string;
   resource?: { createdBy: PrincipalRef | null };
@@ -79,6 +87,25 @@ export class PermissionService {
       ...(await this.computeKeys(principal, projectId)),
     ]);
     return new Set(keys);
+  }
+
+  /** Read scopes for the approval inbox; GLOBAL decide keys apply in every project. */
+  async approvalDecideScopes(principal: PrincipalRef): Promise<DecideScopes> {
+    const bindings = await this.bindings.findEffectiveBindings(principal, null);
+    if (bindings.some(isGlobalAdminBinding)) return { everywhere: true, global: 'all', projects: [] };
+
+    const [globalKeys, candidates] = await Promise.all([
+      this.effectiveKeys(principal, 'global'),
+      this.bindings.findAccessibleProjectIds(principal),
+    ]);
+    const projects = await Promise.all([...new Set(candidates)].sort().map(async (projectId) => ({
+      projectId, patterns: decidePatterns(await this.effectiveKeys(principal, { projectId })),
+    })));
+    return {
+      everywhere: false,
+      global: decidePatterns(globalKeys),
+      projects: projects.filter(({ patterns }) => patterns === 'all' || patterns.length > 0),
+    };
   }
 
   /** Distinct effective role ids in this scope, using the same binding filter as effectiveKeys. */
@@ -172,6 +199,13 @@ export class PermissionService {
       this.logger.warn(`role ${roleKey} has an invalid permission entry and grants nothing: ${String(error)}`);
     }
   }
+}
+
+function decidePatterns(keys: ReadonlySet<string>): DecidePatterns {
+  if (keys.has(APPROVAL_DECIDE)) return 'all';
+  return [...new Set([...keys]
+    .filter((key) => key.startsWith(APPROVAL_DECIDE_NARROWED_PREFIX))
+    .map((key) => key.slice(APPROVAL_DECIDE_NARROWED_PREFIX.length)))].sort();
 }
 
 function holdsNarrowedDecide(held: ReadonlySet<string>): boolean {

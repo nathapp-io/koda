@@ -1,6 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { AbstractPrismaRepository, PrismaService, type PrismaModelDelegate } from '@nathapp/nestjs-prisma';
-import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
+import { AbstractPrismaRepository, Paginate, PrismaService, type PrismaModelDelegate } from '@nathapp/nestjs-prisma';
+import { TRANSACTION_MANAGER, type IPageResult, type ITransactionManager } from '@nathapp/nestjs-data';
+import type { IPageOption } from '@nathapp/nestjs-common';
+import type { DecidePatterns, DecideScopes } from '../permissions/permission.service';
+import type { PrincipalRef } from '../permissions/permissions.types';
+import type { ApprovalRequestFilter } from './approval-request.queries';
 import { Prisma, type ApprovalRequest, type ApprovalDecision, type PrismaClient } from '../generated/prisma/client';
 import type { ApprovalDecisionRecord, ApprovalRequestRecord, ApprovalRequestStatus } from './domain/approval.domain';
 
@@ -39,6 +43,36 @@ export class PrismaApprovalRequestRepository extends AbstractPrismaRepository<Ap
     };
   }
 
+  async findVisiblePage(
+    visibility: { principal: PrincipalRef; scopes: DecideScopes },
+    filter: ApprovalRequestFilter,
+    page: IPageOption,
+  ): Promise<IPageResult<ApprovalRequestRecord>> {
+    const { principal, scopes } = visibility;
+    const clauses: Prisma.ApprovalRequestWhereInput[] = [
+      { actorType: principal.type, actorId: principal.id },
+      { onBehalfOfType: principal.type, onBehalfOfId: principal.id },
+    ];
+    const unrestricted = !filter.mine && (scopes.everywhere || scopes.global === 'all');
+    if (!filter.mine && !unrestricted) {
+      clauses.push(...patternClauses(scopes.global));
+      for (const { projectId, patterns } of scopes.projects) {
+        clauses.push(...patternClauses(patterns).map((keyClause) => ({ ...keyClause, projectId })));
+      }
+    }
+    const where: Prisma.ApprovalRequestWhereInput = {
+      ...(filter.status !== undefined ? { status: filter.status } : {}),
+      ...(filter.projectId !== undefined ? { projectId: filter.projectId } : {}),
+      ...(filter.permissionKey !== undefined ? { permissionKey: filter.permissionKey } : {}),
+      // Do not use OR: [{}] for unrestricted scopes: Prisma elides empty OR branches.
+      ...(!unrestricted ? { OR: clauses } : {}),
+    };
+    const rows = await Paginate(this.prisma.client.approvalRequest, page, {
+      where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+    return rows.remap((row: ApprovalRequest) => this.toDomain(row));
+  }
+
   async lockById(id: string): Promise<ApprovalRequestRecord | null> {
     const rows = await this.prisma.client.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "ApprovalRequest" WHERE "id" = ${id} FOR UPDATE`;
     return rows.length === 0 ? null : this.findById(id);
@@ -71,4 +105,11 @@ export class PrismaApprovalRequestRepository extends AbstractPrismaRepository<Ap
     return rows.map((row) => this.decisionToDomain(row));
   }
   private decisionToDomain(row: ApprovalDecision): ApprovalDecisionRecord { return { ...row } as ApprovalDecisionRecord; }
+}
+
+function patternClauses(patterns: DecidePatterns): Prisma.ApprovalRequestWhereInput[] {
+  if (patterns === 'all') return [{}];
+  return patterns.map((pattern) => ({
+    permissionKey: pattern.endsWith('.*') ? { startsWith: pattern.slice(0, -1) } : pattern,
+  }));
 }

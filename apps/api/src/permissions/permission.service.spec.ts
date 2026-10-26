@@ -34,6 +34,25 @@ describe('PermissionService', () => {
     store.projects.add('p2');
   });
 
+  it('visibility AC-1: a global owner sees requests everywhere', async () => {
+    const ref = { type: 'USER' as const, id: 'u1' };
+    store.bind(ref, 'owner', null);
+    expect(await service.approvalDecideScopes(ref)).toEqual({ everywhere: true, global: 'all', projects: [] });
+  });
+
+  it('visibility: sorts and deduplicates narrowed patterns and omits empty projects', async () => {
+    const ref = { type: 'USER' as const, id: 'u1' };
+    const bindings = { findEffectiveBindings: vi.fn().mockResolvedValue([]), findAccessibleProjectIds: vi.fn().mockResolvedValue(['p2', 'p1', 'p1']) };
+    const subject = new PermissionService({} as never, bindings as never, permissionCache);
+    vi.spyOn(subject, 'effectiveKeys').mockImplementation(async (_principal, scope) => new Set(
+      scope === 'global' ? ['approval.decide@role.manage'] : scope.projectId === 'p1'
+        ? ['approval.decide@ticket.delete', 'approval.decide@label.*', 'approval.decide@label.*', 'project.read'] : [],
+    ));
+    expect(await subject.approvalDecideScopes(ref)).toEqual({
+      everywhere: false, global: ['role.manage'], projects: [{ projectId: 'p1', patterns: ['label.*', 'ticket.delete'] }],
+    });
+  });
+
   it('policy writes: roleIdsAnywhere includes every scope, distinct and ascending', async () => {
     const ref = { type: 'AGENT' as const, id: 'a1' };
     store.bind(ref, 'developer', 'p1');

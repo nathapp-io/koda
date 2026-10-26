@@ -10,6 +10,7 @@ import { APPROVAL_POLICY_REPOSITORY, APPROVAL_REQUEST_REPOSITORY } from './domai
 import { PrismaApprovalPolicyRepository } from './prisma-approval-policy.repository';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
 import { ApprovalRequestEvents } from './approval-request-events';
+import { ApprovalRequestQueries } from './approval-request.queries';
 
 /**
  * P3 approval core. The command registry is one instance per application: an owning module registers
@@ -19,8 +20,9 @@ import { ApprovalRequestEvents } from './approval-request-events';
  * `ApprovalRequestExpirySweeper` is provided, not exported: its interval is the only caller (US-012).
  */
 @Module({
-  exports: [ApprovalPolicyService, ApprovalCommandRegistry, ApprovalGate, ApprovalDecisionService, ApprovalExecutionService],
+  exports: [ApprovalPolicyService, ApprovalCommandRegistry, ApprovalGate, ApprovalDecisionService, ApprovalExecutionService, ApprovalRequestQueries],
   providers: [
+    ApprovalRequestQueries,
     ApprovalDecisionService,
     ApprovalExecutionService,
     ApprovalRequestEvents,
