@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-delivery",
   "branchName": "feat/permissions-p2-audit-delivery",
   "createdAt": "2026-10-26T00:00:00.000Z",
-  "updatedAt": "2026-10-26T02:52:08.512Z",
+  "updatedAt": "2026-10-26T02:58:26.325Z",
   "userStories": [
     {
       "id": "US-001",
@@ -172,14 +172,17 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three bounded service wrappers reuse AuditRecorder and existing repositories without a new abstraction or package integration; users-only/project-scoped settings and ADMIN outbox retry still require the strict security TDD override."
+        "reasoning": "Three bounded service wrappers reuse AuditRecorder and existing repositories without a new abstraction or package integration; users-only/project-scoped settings and ADMIN outbox retry still require the strict security TDD override.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/notifications/notification-preferences.service.ts",
@@ -225,7 +228,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "a6efa2f209ff517c39acfb79eb69263593256a5e"
     },
     {
       "id": "US-004",
