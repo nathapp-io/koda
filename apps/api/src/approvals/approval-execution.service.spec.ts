@@ -148,6 +148,7 @@ describe('ApprovalExecutionService', () => {
       status: 'failed', settledAt: now, result: { error: 'execution-failed', name: 'Error' },
     });
     expect(s.reasons).toEqual(['approval.request-settle', 'approval.request-settle']);
+    expect(s.events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'r1', status: 'failed' }));
     expect(warn.mock.calls[0]?.[0]).toContain('r1');
   });
 

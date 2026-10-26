@@ -73,6 +73,8 @@ it('stores approval attribution and resolves global keys at global scope', async
   expect(s.permissions.effectiveKeys).toHaveBeenCalledWith({ type: 'USER', id: 'u1' }, 'global');
   expect(s.repo.transition).toHaveBeenCalledWith('r1', 'pending', { status: 'approved', decidedAt: now, satisfiedBy: 'human', approverType: 'USER', approverId: 'u1' });
   expect(s.approvals).toEqual([{ requiredMode: 'agent', satisfiedBy: 'human', approverType: 'USER', approverId: 'u1', requestId: 'r1' }]);
+  expect(s.events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'r1', status: 'approved' }));
+  expect(s.events.record.mock.invocationCallOrder[0]).toBeLessThan(s.execution.execute.mock.invocationCallOrder[0] as number);
 });
 
 it.each(['missing', 'rejected', 'expired', 'boundary'] as const)('refuses %s before any write', async (kind) => {

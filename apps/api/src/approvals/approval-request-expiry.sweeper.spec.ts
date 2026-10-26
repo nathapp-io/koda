@@ -190,6 +190,7 @@ describe('ApprovalRequestExpirySweeper.tick', () => {
     expect(b.requests.transition).toHaveBeenCalledWith('r1', 'pending', {
       status: 'approved', decidedAt: NOW, satisfiedBy: 'none',
     });
+    expect(b.events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'r1', status: 'approved' }));
     expect(b.audit.record).toHaveBeenCalledWith({
       key: 'system.approval.expire', resourceType: 'approval-request', resourceId: 'r1', projectId: 'p1',
       summary: 'approved on timeout label.delete',
