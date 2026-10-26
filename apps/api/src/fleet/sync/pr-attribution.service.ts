@@ -67,6 +67,6 @@ export class PrAttributionService {
         this.logger.warn(`Job ${jobId}: attribution failed (${error instanceof Error ? error.name : 'unknown'})`);
         return 'failed';
       }
-    });
+    }, { detached: true });
   }
 }

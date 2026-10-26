@@ -34,7 +34,7 @@ describe('prNumberFor hostile input', () => {
 });
 
 import { PrAttributionService } from './pr-attribution.service';
-import { currentAuditScope, currentBookkeepingReason } from '../../action-context/audit-coverage';
+import { currentAuditScope, currentBookkeepingReason, runInAuditScope } from '../../action-context/audit-coverage';
 
 describe('PrAttributionService on a config job PR (fleet S3 §5 step 8: attribution replaces a PR body footer)', () => {
   it('posts "Dispatched by <name> via koda job <id>" for a terminal CONFIG_EDIT with a PR on its own repo', async () => {
@@ -55,21 +55,24 @@ describe('PrAttributionService audit coverage (permissions P2 US-006)', () => {
   it('AC-1/AC-2: claims attribution in its detached scope under the claim bookkeeping reason', async () => {
     let observedReason: ReturnType<typeof currentBookkeepingReason>;
     let observedSurface: string | undefined;
+    let observedParent: ReturnType<typeof currentAuditScope>;
     const repo = {
       findById: vi.fn(async () => ({ id: 'j1', state: 'COMPLETED', resultPrUrl: 'https://github.com/acme/app/pull/12', repoId: 'r1', leaseEpoch: 1, requestedById: 'u1', requestedByType: 'USER' })),
       findRepo: vi.fn(async () => ({ id: 'r1', projectId: 'p1', provider: 'github', owner: 'acme', name: 'app', githubInstallationId: BigInt(77) })),
       claimAttribution: vi.fn(async () => {
         observedReason = currentBookkeepingReason();
         observedSurface = currentAuditScope()?.surface;
+        observedParent = currentAuditScope()?.parent;
         return false;
       }),
     };
     const svc = new PrAttributionService(repo as never, {} as never, {} as never, {} as never);
 
-    await svc.attribute('j1');
+    await runInAuditScope('POST /fleet/runner/sync', () => svc.attribute('j1'));
     expect(repo.claimAttribution).toHaveBeenCalledWith('j1', expect.any(Date));
     expect(observedReason).toBe('fleet.pr-attribution-claim');
     expect(observedSurface).toBe('task:PrAttributionService.attribute');
+    expect(observedParent).toBeUndefined();
   });
 });
 
