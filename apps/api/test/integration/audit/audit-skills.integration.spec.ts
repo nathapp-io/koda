@@ -64,7 +64,12 @@ describeIntegration('skill writes audit (real AppModule)', () => {
     await db.projectSkill.deleteMany();
     await db.skill.deleteMany();
     await db.skillSource.deleteMany();
+    // `mockReset` restores a `vi.spyOn` mock's original implementation, so without a
+    // default every test that forgets to stub `resolve` would call GitHub.
     resolve.mockReset();
+    resolve.mockImplementation(async () => {
+      throw new Error('SKILL_RESOLVER.resolve must be stubbed by the test');
+    });
     recordSpy?.mockRestore();
     recordSpy = undefined;
   });
@@ -92,10 +97,19 @@ describeIntegration('skill writes audit (real AppModule)', () => {
   });
 
   it('AC-4: rejected create audit rolls back the source', async () => {
+    resolve.mockResolvedValue({ sha: 's1', skills: [{ name: 'audit-c', description: 'd', dir: 'skills/c' }] });
     failAuditFor('skill.source.create');
     const response = await request(server).post('/api/admin/skills/sources').set(auth()).send(sourceBody('skills/c'));
     expect(response.status).toBeGreaterThanOrEqual(500);
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(recordSpy).toHaveBeenCalledWith(expect.objectContaining({ key: 'skill.source.create', resourceType: 'skill-source' }));
     expect(await db.skillSource.count({ where: { path: 'skills/c' } })).toBe(0);
+    // The write ran (the recorder was reached), so the missing row proves the rollback.
+    const attempt = recordSpy?.mock.calls
+      .map((call) => call[0] as { key: string; resourceId: string })
+      .find((input) => input.key === 'skill.source.create');
+    expect(attempt).toBeDefined();
+    expect(await db.auditEntry.count({ where: { key: 'skill.source.create', resourceId: attempt?.resourceId } })).toBe(0);
   });
 
   it('AC-5: audits a successful update with resulting status and skill count', async () => {
