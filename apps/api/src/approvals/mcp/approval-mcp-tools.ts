@@ -6,6 +6,7 @@ import { toMcpToolResult } from '../../fleet/assistant/mcp/mcp-tool-catalog';
 import { ApprovalRequestQueries } from '../approval-request.queries';
 import { ApprovalDecisionService } from '../approval-decision.service';
 import type { ApprovalRequestStatus } from '../domain/approval.domain';
+import { ApprovalDecideForbiddenError, ApprovalRequestExpiredError, ApprovalRequestNotFoundError, ApprovalRequestNotPendingError } from '../domain/approval.errors';
 
 const STATUSES: ApprovalRequestStatus[] = ['pending', 'approved', 'rejected', 'expired', 'cancelled', 'executed', 'failed'];
 
@@ -42,6 +43,33 @@ export class ApprovalMcpTools {
         } catch (error) {
           this.logger.error('MCP tool koda_list_approvals failed', error instanceof Error ? error.stack : String(error));
           return toMcpToolResult({ content: 'error: koda_list_approvals failed', isError: true });
+        }
+      }),
+    }, {
+      name: 'koda_decide_approval',
+      description: 'Approve or reject one pending approval request by its id. An approval runs the requested action at once; the answer is the request\'s new status. This agent may decide a request only when its permissions and the request\'s policy allow it; it may confirm its own request only when the request requires `self`.',
+      inputSchema: { type: 'object', properties: {
+        id: { type: 'string', minLength: 1, maxLength: 64 },
+        decision: { type: 'string', enum: ['approve', 'reject'] },
+        comment: { type: 'string', maxLength: 2000 },
+      }, required: ['id', 'decision'], additionalProperties: false },
+      handler: (input) => runWithActionContext({ actor: ref, origin: 'mcp' }, async () => {
+        const args = input !== null && typeof input === 'object' ? input as Record<string, unknown> : {};
+        const invalid = (field: string) => toMcpToolResult({ content: `invalid_input: ${field}`, isError: true });
+        if (typeof args.id !== 'string' || args.id.length < 1 || args.id.length > 64) return invalid('id');
+        if (args.decision !== 'approve' && args.decision !== 'reject') return invalid('decision');
+        if (args.comment !== undefined && (typeof args.comment !== 'string' || args.comment.length > 2000)) return invalid('comment');
+        try {
+          await this.queries.get(ref, args.id);
+          const request = await this.decisions.decide(args.id, args.decision, (args.comment as string | undefined) ?? null);
+          return toMcpToolResult({ content: `${request.id} ${request.status}`, isError: false });
+        } catch (error) {
+          if (error instanceof ApprovalRequestNotFoundError) return toMcpToolResult({ content: 'not_found', isError: true });
+          if (error instanceof ApprovalRequestNotPendingError) return toMcpToolResult({ content: `not_pending: ${error.status}`, isError: true });
+          if (error instanceof ApprovalRequestExpiredError) return toMcpToolResult({ content: 'expired', isError: true });
+          if (error instanceof ApprovalDecideForbiddenError) return toMcpToolResult({ content: `forbidden: ${error.reason}`, isError: true });
+          this.logger.error('MCP tool koda_decide_approval failed', error instanceof Error ? error.stack : String(error));
+          return toMcpToolResult({ content: 'error: koda_decide_approval failed', isError: true });
         }
       }),
     }];
