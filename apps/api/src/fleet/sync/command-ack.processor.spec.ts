@@ -2,6 +2,7 @@ import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-
 import type { FleetCommandRecord, FleetJobRecord } from '../jobs/domain/fleet-job.domain';
 import { CommandAckProcessor } from './command-ack.processor';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
+import { currentBookkeepingReason } from '../../action-context/audit-coverage';
 
 const NOW = new Date('2026-10-03T10:00:00.000Z');
 
@@ -45,6 +46,13 @@ function makeProcessor(commandRecord: FleetCommandRecord) {
 }
 
 describe('CommandAckProcessor live lists (S1.5 2a)', () => {
+  it('marks the exact command ack write as runner.command-ack', async () => {
+    const { processor, repo } = makeProcessor(command({ type: 'ASSIGN' }));
+    repo.ackCommand.mockImplementation(async () => { expect(currentBookkeepingReason()).toBe('runner.command-ack'); });
+    await processor.process('r1', 'boot-1', [{ commandId: 'cmd-1', leaseEpoch: 1, result: 'ok' }], NOW);
+    expect(repo.ackCommand).toHaveBeenCalledTimes(1);
+  });
+
   it('an ok ASSIGN ack returns no job and no approval events', async () => {
     const { processor } = makeProcessor(command({ type: 'ASSIGN' }));
     await expect(processor.process('r1', 'boot-1', [{ commandId: 'cmd-1', leaseEpoch: 1, result: 'ok' }], NOW))

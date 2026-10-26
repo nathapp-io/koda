@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { bookkeeping } from '../../action-context/audit-coverage';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { Prisma } from '../../generated/prisma/client';
 import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
@@ -89,7 +90,7 @@ export class JobReportProcessor {
       return { outcome: { ...NONE, ack: { jobId: job.id, ackedSeq: job.ackedRunnerSeq } }, spent: null };
     }
     for (const e of events) {
-      if (!stored.has(e.seq)) await this.repo.appendEvent(job.id, { leaseEpoch: job.leaseEpoch, runnerSeq: e.seq, type: e.type, payload: e.payload });
+      if (!stored.has(e.seq)) await bookkeeping('runner.event-log', () => this.repo.appendEvent(job.id, { leaseEpoch: job.leaseEpoch, runnerSeq: e.seq, type: e.type, payload: e.payload }));
     }
     return this.applyContiguous(job, runnerId, now);
   }
@@ -110,7 +111,7 @@ export class JobReportProcessor {
       next += 1;
     }
     const ackedSeq = next - 1;
-    if (ackedSeq !== job.ackedRunnerSeq) current = await this.repo.update(job.id, { ackedRunnerSeq: ackedSeq });
+    if (ackedSeq !== job.ackedRunnerSeq) current = await bookkeeping('runner.event-log', () => this.repo.update(job.id, { ackedRunnerSeq: ackedSeq }));
     if (mirrored && live.length === 0) live.push(this.live.event(current));
     return { outcome: { ack: { jobId: job.id, ackedSeq }, unknown: false, live, approvalLive }, spent: costChanged(job, current) ? current : null };
   }
@@ -118,7 +119,7 @@ export class JobReportProcessor {
   private async applyOne(job: FleetJobRecord, event: FleetJobEventRecord, runnerId: string, now: Date): Promise<{ job: FleetJobRecord; live?: LiveFleetJobEvent; approvalLive?: LiveFleetApprovalEvent[]; mirrored: boolean }> {
     const effect = interpretEvent(event.type, event.payload);
     if (effect.kind === 'none') return { job, mirrored: false };
-    if (effect.kind === 'mirror') return { job: await this.repo.update(job.id, effect.patch), mirrored: true };
+    if (effect.kind === 'mirror') return { job: await bookkeeping('runner.event-log', () => this.repo.update(job.id, effect.patch)), mirrored: true };
     if (effect.kind === 'approval') {
       // Spec §2.2: inside the report transaction, after the lease fence; the job row is locked (lock order job -> approval).
       const change = await this.approvals.openBash(job, effect.ask, runnerId, now);
@@ -134,10 +135,10 @@ export class JobReportProcessor {
     }
     const reason = effect.kind === 'invalid' ? effect.reason : `transition ${job.state} -> ${effect.to}`;
     this.logger.warn(`Rejected runner event on job ${job.id} (runnerSeq ${event.runnerSeq}): ${reason}`);
-    await this.activity.record({
+    await bookkeeping('runner.event-log', () => this.activity.record({
       actorType: 'RUNNER', actorId: runnerId, action: 'job.event_rejected', entityType: 'job', entityId: job.id, jobId: job.id,
       projectId: job.projectId, responsibleUserId: responsibleUserOf(job), payload: { runnerSeq: event.runnerSeq, type: event.type, reason },
-    });
+    }));
     return { job, mirrored: false };
   }
 }

@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { bookkeeping } from '../../action-context/audit-coverage';
 import { AuthException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
@@ -58,9 +59,9 @@ export class SyncService {
     const req = parseSyncRequest(raw);
     const capabilities = req.capabilities === undefined ? undefined : parseCapabilities(req.capabilities);
     const now = new Date();
-    const seen = await this.repo.recordRunnerSync(runnerId, {
+    const seen = await bookkeeping('runner.heartbeat', () => this.repo.recordRunnerSync(runnerId, {
       now, bootId: req.bootId, daemonVersion: req.daemonVersion, protocolVersion: req.protocolVersion, capabilities,
-    });
+    }));
     if (!seen) throw new AuthException({}, 'fleet.runnerAuth');
 
     const { live: ackLive, approvalLive: ackApprovalLive } = await this.acks.process(runnerId, req.bootId, req.commandAcks, now);
@@ -163,7 +164,7 @@ export class SyncService {
 
   private async deliver(runnerId: string, now: Date): Promise<FleetCommandOut[]> {
     const pending = await this.repo.findPendingCommands(runnerId);
-    await this.repo.markDelivered(pending.filter((c) => c.deliveredAt === null).map((c) => c.id), now);
+    await bookkeeping('runner.command-delivery', () => this.repo.markDelivered(pending.filter((c) => c.deliveredAt === null).map((c) => c.id), now));
     return pending.map((c) => ({ commandId: c.id, type: c.type, jobId: c.jobId, leaseEpoch: c.leaseEpoch, payload: c.payload as FleetCommandOut['payload'] }));
   }
 }

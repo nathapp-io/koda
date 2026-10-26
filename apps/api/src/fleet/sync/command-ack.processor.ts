@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { bookkeeping } from '../../action-context/audit-coverage';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { FleetCommandAckResult, FleetCommandType, FleetJobState } from '../../common/enums';
 import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
@@ -57,18 +58,18 @@ export class CommandAckProcessor {
     }
     if (command.ackedAt) return NO_CHANGE; // already applied, withdrawn or stale: idempotent
     if (command.type === FleetCommandType.ABANDON) {
-      await this.repo.ackCommand(command.id, ack.result, now);
+      await bookkeeping('runner.command-ack', () => this.repo.ackCommand(command.id, ack.result, now));
       return NO_CHANGE;
     }
     const job = await this.repo.lockById(command.jobId);
     if (!job || !this.fence.holds(job, runnerId, command.leaseEpoch)) {
-      await this.repo.ackCommand(command.id, FleetCommandAckResult.STALE, now);
+      await bookkeeping('runner.command-ack', () => this.repo.ackCommand(command.id, FleetCommandAckResult.STALE, now));
       if (job) await this.fence.abandon(runnerId, job, command.leaseEpoch);
       return NO_CHANGE;
     }
-    await this.repo.ackCommand(command.id, ack.result, now);
+    await bookkeeping('runner.command-ack', () => this.repo.ackCommand(command.id, ack.result, now));
     if (command.type === FleetCommandType.THREAD_INPUT || command.type === FleetCommandType.THREAD_ANSWER || command.type === FleetCommandType.THREAD_PUBLISH) {
-      await this.threadEffects?.onInputAck(command, ack.result, (ack.detail ?? '').slice(0, 200));
+      if (this.threadEffects) await bookkeeping('thread.input-ack', () => this.threadEffects!.onInputAck(command, ack.result, (ack.detail ?? '').slice(0, 200)));
       return NO_CHANGE;
     }
     const actor = { type: 'RUNNER' as const, id: runnerId };
@@ -79,14 +80,14 @@ export class CommandAckProcessor {
       const { approvalId } = command.payload as { approvalId?: unknown };
       const approval = typeof approvalId === 'string' ? await this.approvals.lockById(approvalId) : null;   // job locked above
       if (approval) {
-        await this.approvals.setOutcome(approval.id, { ...(approval.outcome ?? {}), delivery: { result: ack.result, detail: ack.detail ? detail : null, at: now.toISOString() } });
+        await bookkeeping('runner.command-ack', () => this.approvals.setOutcome(approval.id, { ...(approval.outcome ?? {}), delivery: { result: ack.result, detail: ack.detail ? detail : null, at: now.toISOString() } }));
       }
       return NO_CHANGE;
     }
 
     if (command.type === FleetCommandType.READOPT) {
       if (ack.result === 'ok') {
-        await this.repo.update(job.id, { runnerBootId: bootId });
+        await bookkeeping('runner.command-ack', () => this.repo.update(job.id, { runnerBootId: bootId }));
         return NO_CHANGE;
       }
       const r = await this.transitions.apply({ job, to: FleetJobState.CRASHED, by: 'server', now, actor, reason: `readopt rejected: ${detail}` });
@@ -125,7 +126,7 @@ export class CommandAckProcessor {
           ? await this.repo.findPendingCommand({ jobId: job.id, type: FleetCommandType.ASSIGN, leaseEpoch: job.leaseEpoch })
           : null;
         if (pendingAssign) {
-          await this.repo.update(job.id, { runnerBootId: bootId });
+          await bookkeeping('runner.boot-reconcile', () => this.repo.update(job.id, { runnerBootId: bootId }));
           continue;
         }
         if (await this.repo.findPendingCommand({ jobId: job.id, type: FleetCommandType.READOPT, leaseEpoch: job.leaseEpoch })) continue;
