@@ -107,7 +107,10 @@ describe('VcsPollingService', () => {
   });
 
   describe('poll bookkeeping marks', () => {
-    it('marks cursor and successful sync-log writes', async () => {
+    it('marks cursor and successful sync-log writes through an active polling tick', async () => {
+      vi.useFakeTimers();
+      const connection = makeConnection({ isActive: true, syncMode: 'polling' });
+      mockRepo.findVcsConnectionById.mockResolvedValue(connection);
       const reasons: Array<string | undefined> = [];
       mockRepo.updateVcsConnectionLastSynced.mockImplementation(async () => {
         reasons.push(currentBookkeepingReason());
@@ -120,13 +123,17 @@ describe('VcsPollingService', () => {
         fetchIssues: vi.fn().mockResolvedValue({ issues: [], cursor: new Date(), capped: false }),
       } as never);
 
-      await (service as unknown as { poll: (connection: VcsConnectionWithProjectDomain) => Promise<void> })
-        .poll(makeConnection());
+      service.schedulePolling(connection);
+      await vi.advanceTimersByTimeAsync(connection.pollingIntervalMs);
 
+      expect(mockRepo.findVcsConnectionById).toHaveBeenCalledWith(connection.id);
       expect(reasons).toEqual(['vcs.poll-log', 'vcs.poll-log']);
     });
 
-    it('marks error-path sync-log writes after provider failure', async () => {
+    it('marks error-path sync-log writes after provider failure through an active polling tick', async () => {
+      vi.useFakeTimers();
+      const connection = makeConnection({ isActive: true, syncMode: 'polling' });
+      mockRepo.findVcsConnectionById.mockResolvedValue(connection);
       let reason: string | undefined;
       mockRepo.createVcsSyncLog.mockImplementation(async () => {
         reason = currentBookkeepingReason();
@@ -136,9 +143,10 @@ describe('VcsPollingService', () => {
         fetchIssues: vi.fn().mockRejectedValue(new Error('provider failed')),
       } as never);
 
-      await (service as unknown as { poll: (connection: VcsConnectionWithProjectDomain) => Promise<void> })
-        .poll(makeConnection());
+      service.schedulePolling(connection);
+      await vi.advanceTimersByTimeAsync(connection.pollingIntervalMs);
 
+      expect(mockRepo.findVcsConnectionById).toHaveBeenCalledWith(connection.id);
       expect(reason).toBe('vcs.poll-log');
     });
   });
