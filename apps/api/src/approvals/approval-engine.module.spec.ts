@@ -5,6 +5,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { createMockPrismaService, PrismaService } from '@nathapp/nestjs-prisma';
 import { ApprovalEngineModule } from './approval-engine.module';
+import { ApprovalCommandRegistry } from './approval-command.registry';
 import { ApprovalPolicyResolver } from './approval-policy.resolver';
 import { PermissionService } from '../permissions/permission.service';
 import { APPROVAL_POLICY_REPOSITORY, APPROVAL_REQUEST_REPOSITORY } from './domain/approval.domain';
@@ -26,7 +27,11 @@ class ExternalStubsModule {}
 class PolicyConsumer {
   constructor(readonly policies: ApprovalPolicyService) {}
 }
-@Module({ imports: [ApprovalEngineModule], providers: [PolicyConsumer] })
+@Injectable()
+class RegistryConsumer {
+  constructor(readonly commands: ApprovalCommandRegistry) {}
+}
+@Module({ imports: [ApprovalEngineModule], providers: [PolicyConsumer, RegistryConsumer] })
 class ConsumerModule {}
 
 describe('ApprovalEngineModule', () => {
@@ -48,5 +53,13 @@ describe('ApprovalEngineModule', () => {
     moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ApprovalEngineModule] }).compile();
     expect(moduleRef.get(APPROVAL_POLICY_REPOSITORY)).toBe(moduleRef.get(PrismaApprovalPolicyRepository));
     expect(moduleRef.get(APPROVAL_REQUEST_REPOSITORY)).toBe(moduleRef.get(PrismaApprovalRequestRepository));
+  });
+  it('US-007 AC-8: exports one ApprovalCommandRegistry instance on every get', async () => {
+    moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ConsumerModule] }).compile();
+
+    const commands = moduleRef.get(ApprovalCommandRegistry);
+    expect(commands).toBeInstanceOf(ApprovalCommandRegistry);
+    expect(moduleRef.get(ApprovalCommandRegistry)).toBe(commands);
+    expect(moduleRef.get(RegistryConsumer).commands).toBe(commands);
   });
 });
