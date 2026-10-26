@@ -42,6 +42,7 @@ const PUBLIC_KEY_LIST = [
 const IMPLICIT_KEY_LIST = [
   'auth.me.read',
   'session.logout',
+  'approval.request.cancel',
   'home.read',
   'notification.read',
   'notification.mark-read',
@@ -82,6 +83,7 @@ const NEW_KEY_SCOPES: Readonly<Record<string, CatalogScope>> = {
   'role.binding.global': 'global',
   'role.binding.owner': 'global',
   'approval.decide': 'any',
+  'approval.request.cancel': 'any',
   'approval.policy.read': 'project',
   'approval.policy.manage': 'any',
   'audit.read': 'global',
@@ -472,4 +474,8 @@ describe('catalog approval metadata', () => {
   it('AC-12: a PROJECT role can still name approval.decide', () => {
     expect(expandEntries(['approval.decide'], 'PROJECT').has('approval.decide')).toBe(true);
   });
+});
+
+it('cancel AC-1: cancellation is implicit, any-scope and not approvable', () => {
+  expect(findCatalogEntry('approval.request.cancel')).toMatchObject({ access: 'implicit', scope: 'any', approval: { approvable: false } });
 });

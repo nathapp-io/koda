@@ -12006,6 +12006,66 @@
           "approvals"
         ]
       }
+    },
+    "/api/approvals/{id}/cancel": {
+      "post": {
+        "operationId": "ApprovalRequestsController_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled approval request with its decisions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ret",
+                    "data"
+                  ],
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Only the requester may cancel"
+          },
+          "404": {
+            "description": "Approval request missing or invisible"
+          },
+          "409": {
+            "description": "Request is not pending"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cancel your own pending approval request",
+        "tags": [
+          "approvals"
+        ]
+      }
     }
   },
   "info": {

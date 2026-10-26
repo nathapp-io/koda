@@ -72,6 +72,7 @@ export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
 export const IMPLICIT_KEYS: ReadonlySet<string> = new Set([
   'auth.me.read',
   'session.logout',
+  'approval.request.cancel',
   'home.read',
   'notification.read',
   'notification.mark-read',
@@ -119,6 +120,7 @@ const NEW_KEY_SCOPES: Readonly<Record<string, KeyScope>> = {
   'role.binding.global': 'global',
   'role.binding.owner': 'global',
   'approval.decide': 'any',
+  'approval.request.cancel': 'any',
   'approval.policy.read': 'project',
   'approval.policy.manage': 'any',
   'audit.read': 'global',

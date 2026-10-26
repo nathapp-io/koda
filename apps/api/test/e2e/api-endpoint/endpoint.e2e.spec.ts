@@ -355,6 +355,25 @@ describeIntegration('API Integration Tests', () => {
     it('GET /api/approvals without credentials returns 401', async () => {
       await request(httpServer).get('/api/approvals').expect(401);
     });
+    it('POST /api/approvals/:id/cancel withdraws an own request and refuses a second cancellation', async () => {
+      const row = await prismaClient().approvalRequest.create({ data: {
+        permissionKey: 'label.delete', actorType: 'USER', actorId: adminUserId,
+        origin: 'rest', correlationId: 'cancel-endpoint', input: {}, inputHash: 'cancel-endpoint',
+        requiredMode: 'agent', onTimeout: 'reject', approverMustHoldAction: true,
+        requireDistinctApprover: false, expiresAt: new Date(Date.now() + 60_000),
+      } });
+      try {
+        const res = await request(httpServer).post(`/api/approvals/${row.id}/cancel`)
+          .set('Authorization', `Bearer ${userAccessToken}`).send({}).expect(200);
+        expect(body(res)).toMatchObject({ id: row.id, status: 'cancelled', decisions: [] });
+        const again = await request(httpServer).post(`/api/approvals/${row.id}/cancel`)
+          .set('Authorization', `Bearer ${userAccessToken}`).send({}).expect(409);
+        refusal(again, 'approvals.notPending.409', { status: 'cancelled' });
+      } finally { await prismaClient().approvalRequest.delete({ where: { id: row.id } }); }
+    });
+    it('POST /api/approvals/:id/cancel without credentials returns 401', async () => {
+      await request(httpServer).post('/api/approvals/unknown/cancel').send({}).expect(401);
+    });
   });
 
   describe('Audit log', () => {

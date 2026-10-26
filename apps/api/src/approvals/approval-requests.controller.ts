@@ -82,4 +82,26 @@ export class ApprovalRequestsController {
       return JsonResponse.Ok(ApprovalRequestDto.from({ request, decisions: await this.queries.decisionsFor(request.id) }));
     } catch (error) { rethrowApprovalError(error); }
   }
+
+  @Post(':id/cancel')
+  @HttpCode(200)
+  @UseGuards(RequiresGuard)
+  @Requires('approval.request.cancel')
+  @ApiOperation({ summary: 'Cancel your own pending approval request' })
+  @ApiResponse({ status: 200, description: 'Cancelled approval request with its decisions', schema: {
+    type: 'object', required: ['ret', 'data'], properties: {
+      ret: { type: 'number' }, data: { $ref: getSchemaPath(ApprovalRequestDto) },
+    },
+  } })
+  @ApiResponse({ status: 401, description: 'Missing or invalid credentials' })
+  @ApiResponse({ status: 403, description: 'Only the requester may cancel' })
+  @ApiResponse({ status: 404, description: 'Approval request missing or invisible' })
+  @ApiResponse({ status: 409, description: 'Request is not pending' })
+  async cancel(@Principal() principal: KodaPrincipal, @Param('id') id: string) {
+    try {
+      await this.queries.get(ref(principal), id);
+      const request = await this.decisions.cancel(id);
+      return JsonResponse.Ok(ApprovalRequestDto.from({ request, decisions: await this.queries.decisionsFor(request.id) }));
+    } catch (error) { rethrowApprovalError(error); }
+  }
 }

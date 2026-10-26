@@ -4,5 +4,9 @@
   "requestNotFound": { "404": "Approval request not found" },
   "notPending": { "409": "The approval request is already {status}" },
   "expired": { "409": "The approval request has expired" },
-  "decideForbidden": { "403": "You cannot decide this approval request: {reason}" }
+  "decideForbidden": { "403": "You cannot decide this approval request: {reason}" },
+  "cancelForbidden": {
+    "403": "Only the requester can cancel this approval request",
+    "40003": "Only the requester can cancel this approval request"
+  }
 }
