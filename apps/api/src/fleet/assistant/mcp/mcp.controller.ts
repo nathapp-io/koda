@@ -8,6 +8,7 @@ import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { Principal } from '@nathapp/nestjs-auth';
 import { Throttle } from '@nathapp/nestjs-throttler';
 import { mcpConfig } from '../../../config/mcp.config';
+import { ApprovalMcpTools } from '../../../approvals/mcp/approval-mcp-tools';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
 import { isAgentPrincipal, type AgentPrincipal, type KodaPrincipal } from '../../../auth/principal/koda-principal.types';
 import { PermissionService } from '../../../permissions/permission.service';
@@ -52,6 +53,7 @@ export class McpController {
     private readonly registry: AssistantToolRegistry,
     private readonly permissions: PermissionService,
     @Inject(mcpConfig.KEY) private readonly cfg: ConfigType<typeof mcpConfig>,
+    approvalTools: ApprovalMcpTools,
   ) {
     this.handler = createMcpHandler(
       (ctx) => {
@@ -60,7 +62,10 @@ export class McpController {
         // Permissions P1 US-005: the request's own set, so the stateless handler registers exactly the tools this
         // agent may see. An absent set registers nothing rather than everything.
         const visible = (extra?.[VISIBLE_TOOLS_KEY] as ReadonlySet<string> | undefined) ?? new Set<string>();
-        return createKodaMcpServer(kodaMcpToolRegistrations(executor, principal, visible));
+        return createKodaMcpServer([
+          ...kodaMcpToolRegistrations(executor, principal, visible),
+          ...approvalTools.registrations(principal),
+        ]);
       },
       { responseMode: 'json' },
     );

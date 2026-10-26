@@ -17,8 +17,10 @@ import { PermissionService } from '../../../permissions/permission.service';
 import { AssistantToolExecutor } from '../assistant-tool.executor';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
 import type { AssistantTool } from '../assistant-tool.types';
+import { ApprovalMcpTools } from '../../../approvals/mcp/approval-mcp-tools';
 import { McpController } from './mcp.controller';
 import { mcpToolDescriptors } from './mcp-tool-catalog';
+import type { McpToolRegistration } from './mcp-server.factory';
 
 const agent = { actorType: 'agent', id: 'agent-claude', slug: 'claude' } as unknown as AgentPrincipal;
 const user = { actorType: 'user', id: 'user-1' } as unknown as UserPrincipal;
@@ -58,6 +60,8 @@ describe('McpController routes', () => {
   let module: TestingModule;
   let app: NestFastifyApplication;
   let currentPrincipal: KodaPrincipal | undefined;
+  let approvalRegistrations: McpToolRegistration[] = [];
+  const registrations = vi.fn(() => approvalRegistrations);
   const executeFor = vi.fn();
   const projectIdsWithKey = vi.fn();
   const can = vi.fn();
@@ -69,6 +73,7 @@ describe('McpController routes', () => {
       imports: [ConfigModule.forFeature(mcpConfig)],
       controllers: [McpController],
       providers: [
+        { provide: ApprovalMcpTools, useValue: { registrations } },
         { provide: AssistantToolExecutor, useValue: { executeFor } },
         // US-005: the controller reads each tool's key from the registry and the agent's projects from the
         // permission service, so its isolated module provides both instead of the whole assistant graph.
@@ -91,6 +96,9 @@ describe('McpController routes', () => {
 
   beforeEach(() => {
     currentPrincipal = agent;
+    registrations.mockReset();
+    approvalRegistrations = [];
+    registrations.mockImplementation(() => approvalRegistrations);
     can.mockReset();
     can.mockResolvedValue({ allowed: true, reason: 'implicit' });
     executeFor.mockReset();
@@ -126,13 +134,22 @@ describe('McpController routes', () => {
     expect(rpcBody(res).result.serverInfo.name).toBe('koda');
   });
 
-  it('AC-5: tools/list answers the MCP descriptor names', async () => {
+  it('US-012 AC-14: an empty approval stub preserves the assistant descriptor order', async () => {
     await boot(true);
 
     const res = await send(app, 'POST', rpc('tools/list'));
 
     expect(res.statusCode).toBe(200);
     expect(rpcBody(res).result.tools.map((t: { name: string }) => t.name)).toEqual(mcpToolDescriptors().map((d) => d.name));
+  });
+
+  it('US-012 AC-11: appends approval registrations after all assistant tools', async () => {
+    approvalRegistrations = [{ name: 'koda_list_approvals', description: 'Inbox', inputSchema: { type: 'object', properties: {} }, handler: async () => ({ content: [], isError: false }) }];
+    await boot(true);
+    const res = await send(app, 'POST', rpc('tools/list'));
+    expect(res.statusCode, res.body).toBe(200);
+    expect(rpcBody(res).result.tools.map((t: { name: string }) => t.name)).toEqual([...mcpToolDescriptors().map((d) => d.name), 'koda_list_approvals']);
+    expect(registrations).toHaveBeenCalledWith(agent);
   });
 
   it('US-005: tools/list answers only the tools an agent holding no project key may see', async () => {

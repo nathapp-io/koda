@@ -86,10 +86,14 @@ export const MCP_DESCRIPTIONS: Readonly<Record<string, string>> = {
  * every call, so the shared catalog is never mutated.
  */
 export function mcpToolDescriptors(): readonly KodaToolDescriptor[] {
-  return kodaToolDescriptorsFor('WORKSPACE').map((descriptor) => ({
-    ...descriptor,
-    description: mcpDescriptionOf(descriptor),
-  }));
+  // The legacy FleetApproval thread tool shares this name with the MCP-only approval inbox.
+  // Keep it in the thread catalog, but reserve the MCP name for ApprovalMcpTools.
+  return kodaToolDescriptorsFor('WORKSPACE')
+    .filter((descriptor) => descriptor.name !== 'koda_list_approvals')
+    .map((descriptor) => ({
+      ...descriptor,
+      description: mcpDescriptionOf(descriptor),
+    }));
 }
 
 /** 3-D16: one descriptor's MCP description — the fixed map's, else the catalog's sentence rewritten. */

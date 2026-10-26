@@ -159,7 +159,7 @@ describeIntegration('MCP tools/list lists only the tools whose key the agent hol
     // The visibility is the key's, not a read-only heuristic: `viewer` holds `comment.create` too.
     expect(listed).toContain('koda_add_comment');
     // Catalog order is preserved by the filter, so the listing stays a subsequence of the catalog.
-    expect(listed).toEqual(DESCRIPTOR_NAMES.filter((name) => listed.includes(name)));
+    expect(listed).toEqual([...DESCRIPTOR_NAMES.filter((name) => listed.includes(name)), 'koda_list_approvals']);
   }, TIMEOUT);
 
   it('AC-2: a developer binding lists the dispatch, ticket-create and memory tools', async () => {
@@ -169,7 +169,7 @@ describeIntegration('MCP tools/list lists only the tools whose key the agent hol
     expect(listed).toContain('koda_create_tickets');
     expect(listed).toContain('koda_add_memory');
     // Catalog order survives the filter: the listing is a subsequence of it.
-    expect(listed).toEqual(DESCRIPTOR_NAMES.filter((name) => listed.includes(name)));
+    expect(listed).toEqual([...DESCRIPTOR_NAMES.filter((name) => listed.includes(name)), 'koda_list_approvals']);
   }, TIMEOUT);
 
   it('AC-3: an agent with no binding, no roster row and no global role lists exactly the workspace and implicit-key tools', async () => {
@@ -177,7 +177,7 @@ describeIntegration('MCP tools/list lists only the tools whose key the agent hol
 
     const listed = await listedTools('bare-agent');
 
-    expect(listed).toEqual(['koda_my_projects', 'koda_get_action']);
+    expect(listed).toEqual(['koda_my_projects', 'koda_get_action', 'koda_list_approvals']);
   }, TIMEOUT);
 
   it('AC-4: a dispatch call by a viewer-only agent answers the SDK unknown-tool error and creates no job', async () => {
@@ -198,6 +198,6 @@ describeIntegration('MCP tools/list lists only the tools whose key the agent hol
   it('AC-6: a global admin binding lists every MCP descriptor name', async () => {
     const listed = await listedTools('admin-agent');
 
-    expect(listed).toEqual(DESCRIPTOR_NAMES);
+    expect(listed).toEqual([...DESCRIPTOR_NAMES, 'koda_list_approvals']);
   }, TIMEOUT);
 });
