@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-api",
   "branchName": "feat/permissions-p3-approval-api",
   "createdAt": "2026-10-26T00:00:00.000Z",
-  "updatedAt": "2026-10-26T16:26:58.442Z",
+  "updatedAt": "2026-10-26T16:30:56.671Z",
   "userStories": [
     {
       "id": "US-001",
@@ -505,14 +505,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Two source files add a bounded scan and sequential delegation to the existing executor from the existing timer; strict TDD applies because retry establishes a system-writer scope for authorized execution."
+        "reasoning": "Two source files add a bounded scan and sequential delegation to the existing executor from the existing timer; strict TDD applies because retry establishes a system-writer scope for authorized execution.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-request-expiry.sweeper.ts",
@@ -541,7 +544,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "774217fa708e09da55a038c4752594facd09794f"
     },
     {
       "id": "US-008",
