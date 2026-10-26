@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-api",
   "branchName": "feat/permissions-p3-approval-api",
   "createdAt": "2026-10-26T00:00:00.000Z",
-  "updatedAt": "2026-10-26T17:24:12.632Z",
+  "updatedAt": "2026-10-26T17:30:04.735Z",
   "userStories": [
     {
       "id": "US-001",
@@ -1044,14 +1044,17 @@
       "dependencies": [
         "US-010"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "Existing Commander, withContext and generated-client patterns cover registration, arguments and output; this story changes neither credential resolution nor access-control decisions, so mocked-client single-session TDD is sufficient."
+        "reasoning": "Existing Commander, withContext and generated-client patterns cover registration, arguments and output; this story changes neither credential resolution nor access-control decisions, so mocked-client single-session TDD is sufficient.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/cli/src/commands/fleet-approval.ts",
@@ -1073,7 +1076,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "0363914128a875e9bb242292e2b436f41e07a4b8"
     },
     {
       "id": "US-015",
