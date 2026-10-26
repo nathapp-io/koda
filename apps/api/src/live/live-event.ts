@@ -68,7 +68,17 @@ export interface LiveFleetLogEvent {
   at: string;
 }
 
-export type LiveEvent = LiveTicketEvent | LiveFleetJobEvent | LiveFleetApprovalEvent | LiveFleetLogEvent;
+/** P3b: content-free approval request change; only requests with a project are published. */
+export interface LiveApprovalRequestEvent {
+  id: string;
+  type: 'approval_request';
+  projectId: string;
+  requestId: string;
+  status: string;
+  at: string;
+}
+
+export type LiveEvent = LiveTicketEvent | LiveFleetJobEvent | LiveFleetApprovalEvent | LiveFleetLogEvent | LiveApprovalRequestEvent;
 
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 

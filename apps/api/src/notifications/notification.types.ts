@@ -24,7 +24,7 @@ export const WATCH_REASONS = ['REPORTER', 'ASSIGNEE', 'COMMENTER', 'MENTIONED', 
 export type WatchReason = (typeof WATCH_REASONS)[number];
 
 export type NotificationSourceType =
-  'ticket_event' | 'fleet_job' | 'fleet_approval' | 'fleet_budget_incident' | 'fleet_health_alert';
+  'ticket_event' | 'fleet_job' | 'fleet_approval' | 'fleet_budget_incident' | 'fleet_health_alert' | 'approval_request';
 
 export type NotificationParams = Readonly<Record<string, string | number>>;
 

@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { ApprovalEngineModule } from '../approvals/approval-engine.module';
+import { ApprovalRequestedSubscriber } from './approvals/approval-requested.subscriber';
 import { LiveModule } from '../live/live.module';
 import { OutboxModule } from '../outbox/outbox.module';
 import { ProjectAccessModule } from '../projects/project-access.module';
@@ -32,7 +34,7 @@ import { FleetNotificationReader } from './fleet/fleet-notification.reader';
  * only path that inserts rows. Controllers are added in Tasks A8-A9.
  */
 @Module({
-  imports: [OutboxModule, LiveModule, ProjectAccessModule, BudgetStoreModule],
+  imports: [OutboxModule, LiveModule, ProjectAccessModule, BudgetStoreModule, ApprovalEngineModule],
   controllers: [MeNotificationsController, TicketWatchController],
   providers: [
     MeNotificationsService,
@@ -50,6 +52,7 @@ import { FleetNotificationReader } from './fleet/fleet-notification.reader';
     TicketNotificationReadsRepository,
     TicketMentionResolver,
     TicketNotificationSubscriber,
+    ApprovalRequestedSubscriber,
     // Fleet S4a §2.4 (Part D)
     FleetNotificationReader,
     FleetHealthAlertsRepository,
