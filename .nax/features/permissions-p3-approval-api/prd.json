@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-api",
   "branchName": "feat/permissions-p3-approval-api",
   "createdAt": "2026-10-26T00:00:00.000Z",
-  "updatedAt": "2026-10-26T15:50:40.381Z",
+  "updatedAt": "2026-10-26T16:04:41.739Z",
   "userStories": [
     {
       "id": "US-001",
@@ -274,14 +274,17 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Adds authenticated data-disclosure surfaces with service-enforced permissions, DTO validation and cross-module DI; security override applies."
+        "reasoning": "Adds authenticated data-disclosure surfaces with service-enforced permissions, DTO validation and cross-module DI; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/audit/audit.controller.ts",
@@ -323,7 +326,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4e7aae2a19a9d4d10f655b7db9df7edaa97f5ce6"
     },
     {
       "id": "US-005",
