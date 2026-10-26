@@ -10,7 +10,10 @@ import { ApprovalDecisionService } from './approval-decision.service';
 import { ApprovalExecutionService } from './approval-execution.service';
 import { ApprovalCommandRegistry } from './approval-command.registry';
 import { ApprovalPolicyResolver } from './approval-policy.resolver';
+import { ApprovalRequestExpirySweeper } from './approval-request-expiry.sweeper';
+import { FLEET_CFG } from '../config/fleet.config';
 import { PermissionService } from '../permissions/permission.service';
+import { SYSTEM_WRITER_METADATA } from '../permissions/system-writer.decorator';
 import { APPROVAL_POLICY_REPOSITORY, APPROVAL_REQUEST_REPOSITORY } from './domain/approval.domain';
 import { PrismaApprovalPolicyRepository } from './prisma-approval-policy.repository';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
@@ -23,7 +26,9 @@ import { PrismaApprovalRequestRepository } from './prisma-approval-request.repos
   { provide: TRANSACTION_MANAGER, useValue: {
     run: vi.fn((fn: () => Promise<unknown>) => fn()), getClient: vi.fn(), isInTransaction: vi.fn(() => false),
   } },
-], exports: [PrismaService, TRANSACTION_MANAGER, PermissionService, AuditRecorder] })
+  // The sweeper reads the fleet sweep window; a stub keeps the module DB-free and starts no timer.
+  { provide: FLEET_CFG, useValue: { sweepEnabled: false, approvalSweepMs: 15_000 } },
+], exports: [PrismaService, TRANSACTION_MANAGER, PermissionService, AuditRecorder, FLEET_CFG] })
 class ExternalStubsModule {}
 
 @Injectable()
@@ -34,7 +39,18 @@ class PolicyConsumer {
 class RegistryConsumer {
   constructor(readonly commands: ApprovalCommandRegistry, readonly gate: ApprovalGate) {}
 }
-@Module({ imports: [ApprovalEngineModule], providers: [PolicyConsumer, RegistryConsumer] })
+/** The five services the module promises to an importing module (US-012 AC-11). */
+@Injectable()
+class EngineConsumer {
+  constructor(
+    readonly gate: ApprovalGate,
+    readonly decisions: ApprovalDecisionService,
+    readonly executions: ApprovalExecutionService,
+    readonly policies: ApprovalPolicyService,
+    readonly commands: ApprovalCommandRegistry,
+  ) {}
+}
+@Module({ imports: [ApprovalEngineModule], providers: [PolicyConsumer, RegistryConsumer, EngineConsumer] })
 class ConsumerModule {}
 
 describe('ApprovalEngineModule', () => {
@@ -68,5 +84,24 @@ describe('ApprovalEngineModule', () => {
     expect(moduleRef.get(RegistryConsumer).commands).toBe(commands);
     expect(moduleRef.get(RegistryConsumer).gate).toBeInstanceOf(ApprovalGate);
     expect(moduleRef.get(RegistryConsumer).gate).toBe(moduleRef.get(ApprovalGate));
+  });
+  it('US-012 AC-10: registers the expiry sweeper with its system writer key', async () => {
+    moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ApprovalEngineModule] }).compile();
+
+    const sweeper = moduleRef.get(ApprovalRequestExpirySweeper);
+    expect(sweeper).toBeInstanceOf(ApprovalRequestExpirySweeper);
+    expect(Reflect.getMetadata(SYSTEM_WRITER_METADATA, ApprovalRequestExpirySweeper)).toBe('system.approval.expire');
+    // The instance's constructor is what `runAsSystemWriter` reads the key from.
+    expect(Reflect.getMetadata(SYSTEM_WRITER_METADATA, sweeper.constructor)).toBe('system.approval.expire');
+  });
+  it('US-012 AC-11: an importing module injects all five exported services', async () => {
+    moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ConsumerModule] }).compile();
+
+    const consumer = moduleRef.get(EngineConsumer);
+    expect(consumer.gate).toBeInstanceOf(ApprovalGate);
+    expect(consumer.decisions).toBeInstanceOf(ApprovalDecisionService);
+    expect(consumer.executions).toBeInstanceOf(ApprovalExecutionService);
+    expect(consumer.policies).toBeInstanceOf(ApprovalPolicyService);
+    expect(consumer.commands).toBeInstanceOf(ApprovalCommandRegistry);
   });
 });
