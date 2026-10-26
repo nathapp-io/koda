@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-api",
   "branchName": "feat/permissions-p3-approval-api",
   "createdAt": "2026-10-26T00:00:00.000Z",
-  "updatedAt": "2026-10-26T17:15:48.699Z",
+  "updatedAt": "2026-10-26T17:24:12.632Z",
   "userStories": [
     {
       "id": "US-001",
@@ -974,14 +974,17 @@
       "dependencies": [
         "US-012"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Adds a protocol handler on existing wiring but permits authorized action execution and must prevent invisible/invalid requests from reaching decide; security override applies."
+        "reasoning": "Adds a protocol handler on existing wiring but permits authorized action execution and must prevent invisible/invalid requests from reaching decide; security override applies.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/approvals/mcp/approval-mcp-tools.ts",
@@ -1008,7 +1011,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4720ce2de3488f271b2452cc4f07f52fd3b1afba"
     },
     {
       "id": "US-014",
