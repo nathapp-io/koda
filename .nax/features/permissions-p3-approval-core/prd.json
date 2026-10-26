@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-core",
   "branchName": "feat/permissions-p3-approval-core",
   "createdAt": "2026-11-04T00:00:00.000Z",
-  "updatedAt": "2026-10-26T11:01:36.438Z",
+  "updatedAt": "2026-10-26T11:13:21.710Z",
   "userStories": [
     {
       "id": "US-001",
@@ -31,14 +31,17 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Small catalog change with broad access-control implications, including GLOBAL grants and critical permission floors; security override applies."
+        "reasoning": "Small catalog change with broad access-control implications, including GLOBAL grants and critical permission floors; security override applies.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/permissions/catalog.ts",
@@ -62,7 +65,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0d9e6fb8fdffd6182ce80281bb9da3af8551f5b7"
     },
     {
       "id": "US-002",
@@ -138,7 +145,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -204,7 +214,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -260,7 +273,10 @@
         "validateApprovalPolicy returns null for the base input with timeoutSec, onTimeout and requiredApprovals omitted."
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -326,7 +342,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -382,7 +401,10 @@
         "decideEligibility permits a third-party human holding approval.decide@label.delete and label.delete for the base request."
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -432,7 +454,10 @@
         "apps/api/src/approvals/canonical-json.spec.ts"
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -485,7 +510,10 @@
         "apps/api/test/integration/approvals/approval-gate.integration.spec.ts"
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-009",
@@ -547,7 +575,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-010",
@@ -607,7 +638,10 @@
         "A rejected decision's audit entry has null approverType and approverId."
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-011",
@@ -676,7 +710,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-012",
@@ -732,7 +769,10 @@
         "tick skips a row that became non-pending or no longer due between findDue and lockById."
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Repository verification and architecture: codebase-memory MCP and shell execution are unavailable in this drafting session; discovery used direct Read/Grep/Glob against the supplied execution root, not an index from another checkout. This is an additive enhancement to an existing API, not greenfield. The detected Express/Next.js summaries are not authoritative: apps/api/src/main.ts:1-11 uses AppFactory.createFastifyApp, apps/api/package.json:44-94 declares NestJS 12, Nathapp platform packages, Prisma 7 and Vitest, and .nax/mono/apps/api/context.md:26-34 documents the server as NestJS/Fastify with Prisma 7 and Vitest. Only apps/api changes in this feature. Follow the Nathapp NestJS patterns skill before implementing Nest code; no nathapp-nestjs-patterns SKILL.md was found through the exposed repository globs during drafting. Do not edit generated AGENTS.md, generated Prisma source or downstream clients manually. All twelve binding stories, workdirs and dependency edges are preserved.\n\nCatalog impact: apps/api/src/permissions/catalog.ts:16-34 owns ApprovalMode and PermissionCatalogEntry, including the placeholder comment; :60-66 retains the pending approval surface keys; :124-134 gives approval.decide its existing project scope; :400-419 classifies risk and builds the placeholder metadata. Reads must be excluded separately because role.read and approval.policy.read classify as critical before the read check. Keep isReadKey local to avoid an entry-matcher/catalog cycle. apps/api/src/permissions/catalog.spec.ts:83-85 pins the new-key scope map and :346-379 re-derives metadata for every key; update that derivation without weakening its mismatches assertion. apps/api/src/permissions/role-matrix.spec.ts:11-20 documents snapshot update mode and :92-118 computes/serializes both global and project reasons. Regenerate apps/api/src/permissions/__snapshots__/role-matrix.json: only approval.decide's global cell changes in eleven role rows, granted for owner/admin and not-granted for nine others. apps/api/src/permissions/system-roles.ts:18-29 grants owner/admin wildcards, :49-53 grants project-admin approval privileges, and :107-123 grants reviewer approval.decide. No seeded role edit is needed. Consumers of catalog.ts include entry-matcher.ts, permission.service.ts, requires.guard.ts, role-admin.service.ts, permission-catalog.controller.ts and system-writer.decorator.ts, plus catalog, role-matrix, folded-keys and permission-contract tests. Search found no current production consumer of approval.approvable/default/floor; changing metadata must not gate existing writes. The catalog endpoint naturally exposes the new metadata without a DTO/route contract addition. Keep approval.decide, approval.policy.read and approval.policy.manage in PENDING_SURFACE_KEYS.\n\nPersistence and migration: apps/api/prisma/schema.prisma:829-861 already defines append-only AuditEntry, including the five approval columns, with no FKs. Existing FleetApproval (:925) and PendingAction (:1113) must remain unchanged. Add only the three new models. The sole FK is ApprovalDecision.requestId -> ApprovalRequest.id with cascade delete; project, role, principal and policy identifiers remain historical strings. Mirror SQL style in apps/api/prisma/migrations/20261103090000_audit_entry/migration.sql:1-29: tables, indexes, then the new FK, matching prisma migrate diff from the preceding schema, including timestamp precision, cuid/client-side defaults and JSON null handling. Ship 20261104090000_approval_engine and regenerate the gitignored Prisma client with bun run db:generate. No backfill or default policy seeds. Production deployment applies the migration before booting the new module. apps/api/test/helpers/migration-schema.ts:13-30 splits SQL into statements and :41-63 reconstructs scratch schemas from earlier migrations; use it because ordinary DB tests build via db push and cannot prove migration parity.\n\nRepository conventions: .nax/rules/api-repositories.md:13-46 requires AbstractPrismaRepository, domain-owned interfaces, mapping methods and symbol aliases via useExisting; :48-69 permits concrete filtered-query escape hatches. apps/api/src/audit/prisma-audit-entry.repository.ts:20-38 is the current generated-client/mapping pattern and :40-57 demonstrates Paginate. apps/api/src/fleet/approvals/prisma-approval.repository.ts:33-35 accesses the transaction-aware PrismaService.client, and :51-54 supplies the parameterized SELECT id FOR UPDATE then findById pattern. Mirror that lock, not the older fleet repository's non-abstract inheritance. Preserve transaction locality for all custom methods, especially transition and createDecision. Expose repository tokens to app.get(..., { strict: false }) while keeping repositories internal to the engine's public API. Candidate scans cap at 500 and warn, decisions cap at 50, sweeps cap at 100; pattern matching includes the separating dot. A conditional updateMany transition returning null is a compare-and-set, not an unconditional update.\n\nPermission and policy seams: apps/api/src/permissions/permission.service.ts:73-81 caches effectiveKeys by principal and scope; :132-145 computes keys from effective bindings and applies global-admin project expansion; :170-178 defines appliesIn. Add roleIdsAt using the same appliesIn semantics and sorted distinct role ids, without changing can/effectiveKeys or existing expectations. apps/api/src/permissions/prisma-role-binding.repository.ts:128-147 already supplies findEffectiveBindings and findPrincipalBindings, so roleIdsAnywhere needs no new repository query. Global anti-escalation must inspect every binding, including project-only bindings, rather than only global scope. Resolver tiers precede pattern specificity; assistant subjects match only explicit ASSISTANT policies, never role/all USER/AGENT defaults. Floor clamping remains necessary even for invalid hand-edited rows. Selector identity is immutable. Validation precedes anti-escalation and duplicate detection on create; no role/principal existence checks are added. Policy services are not route authorization substitutes.\n\nAction context and audit: apps/api/src/action-context/action-context.ts:39-58 defines ActionApproval/ActionContext, :89-106 supplies runWithActionContext/currentContext, and :134-160 supplies runAsSystem/runAsSystemWriter. The latter derives SYSTEM/approval from system.approval.expire and opens an audit scope. apps/api/src/audit/audit-recorder.service.ts:41-68 requires an active transaction and reads actor, delegation, correlation and approval from context; apps/api/src/audit/audit-log.module.ts:10-23 is global and exports AuditRecorder. apps/api/src/action-context/audit-coverage.ts:156-176 tracks transaction callback outcomes, not commit outcomes, and :223-230 provides bookkeeping. apps/api/src/action-context/audit-coverage.reasons.ts:5-34 is the reason catalog; apps/api/src/action-context/audit-coverage.bookkeeping.spec.ts:14-44 pins all current ids. Add request-open in US-009 and request-settle in US-011 with exact reason sentences; keep previous reasons and per-reason behavior unchanged. Suppress only request bookkeeping, never command/domain writes. Policy writes and decisions must audit atomically. Deferred command audit entries use the original request actor, not the decider or sweeper, with the frozen approval block and requestId. Rejection records satisfiedBy none with no approver.\n\nGate/execution design and risk: approval is separate from permission; the gate itself is not a new production authorization surface. Register no production commands and call no new services from existing routes/tools. Parsing precedes resolver access and persistence; parsed values must be JSON-serialisable and reparseable. Hash canonical sorted JSON and store its JSON round-trip; include actor, on-behalf-of pair, key, project and hash in sequential dedupe. Snapshot mode, timeout behavior, flags and expiry; later edits cannot alter pending asks. None-mode executes before direct-human handling; a direct human always runs even with distinct-approver required. Eligibility is pure and order-sensitive: action permission precedes decide permission; .own is accepted only for actor/delegated owner, not a third-party approver. Both approve and reject require the same eligibility. Decide uses a row lock and commits its decision/audit before invoking execution. Execution prechecks command, hash, current principal keys and reparsing, then re-locks/rechecks approved status inside the command transaction; domain mutation and executed status are atomic, making concurrent execute single-run. Command failure rolls back domain effects, retains the committed approval and settles failed separately. Do not conflate callback failure with the explicit commit-failure exclusion: a post-callback commit failure propagates and leaves approved; no retry/recovery is introduced. Only the permission key or .own is rechecked, not liveness, ownership or domain invariants, which remain the command's responsibility. Cached permission tests use fresh principals and avoid warming the actor's effective keys before revoke; production invalidation stays with existing membership services. Approved requests stranded between transactions deliberately have no recovery here. Concurrent identical gate opens deliberately remain possible without a uniqueness constraint. No raw exception message, credential or frozen input should be logged by new failure handling.\n\nModule and sweeper integration: apps/api/src/app.module.ts:66-92 initializes config/Prisma and :145-147 imports global PermissionsModule and AuditLogModule; add ApprovalEngineModule without unrelated imports changing. apps/api/src/permissions/permissions.module.ts:36-56 exports PermissionService globally. Existing apps/api/src/fleet/approvals/approvals.module.ts:15-22 declares ApprovalsModule/ApprovalExpirySweeper; do not collide with or replace it. apps/api/src/fleet/assistant/actions/pending-action-expiry.sweeper.ts:28-57 supplies timer/unref/cleanup and :65-80 supplies system context, per-item transactions, warn-and-continue. New sweeper does not publish legacy fleet/thread live events. apps/api/src/config/fleet.config.ts:6,21-23,136-137 supplies FLEET_CFG, sweepEnabled and approvalSweepMs (15,000 ms default, test-disabled unless explicitly enabled). Reuse the existing system.approval.expire declaration; the permission contract helper is actually apps/api/src/permissions/test-helpers/permission-contract.ts, not src/permissions/permission-contract.ts. Register providers incrementally: US-002 owns repositories/base module; US-003 resolver; US-005 policy service; US-007 registry; US-008 gate; US-010 decision; US-011 execution and post-commit decision wiring; US-012 sweeper and final five-service export proof. US-010 tests must not assert approved final status because US-011 wires synchronous post-commit execution. Do not create a circular runtime service dependency to reflect the story dependency graph.\n\nTesting and done: all stories use strict three-session-tdd because this engine changes permission/approval control paths, role checks or cryptographic integrity. Keep pure mode, validation, resolver, eligibility, registry, canonical JSON, gate and DI specs beside source; DI compilation uses stubbed external PrismaService, TRANSACTION_MANAGER, PermissionService, AuditRecorder and FLEET_CFG as needed with no DB. Integration specs live only under test/integration/approvals and boot AppModule for real wiring, permissions, transactions, row locks, audit and rollback. apps/api/test/helpers/action-context.ts:75-88 awaits withTestActor within ALS, and :109-145 gives fixtureDb's SYSTEM/seed and transaction-proxy semantics; avoid passing raw lazy Prisma promises outside their actor context. grantKeys creates a custom exact-key role, not a wildcard seeded role. Each integration file registers its singleton configurable test command once in beforeAll and resets state in beforeEach; use fresh principals to isolate caches. apps/api/vitest.config.ts:7-14 emits Nest decorator metadata via SWC and :35-46 disables file parallelism for DB mode. apps/api/package.json:15-25 separates default unit tests and host DB-mode scripts. test/helpers/test-environment.ts:4-11 gates DB work on KODA_DB_TESTS=1 outside NAX_SANDBOXED=1; skipped sandbox DB tests are not verification. Run new integration specs via bun run test:scoped outside the sandbox against the dedicated test Postgres (or private container for another checkout); never concurrent destructive DB runs on the same database. Generated acceptance tests stay under apps/api/.nax/features/permissions-p3-approval-core and are run with vitest.nax.config.ts and story-specific AC filters; never edit them or copy them to src. No code, tests or migrations were executed during this PRD-only session. Done means service-only engine, migrated schema, real catalog defaults, policy precedence/anti-escalation, frozen-input gate, audited decision, exactly-once transactional execution and expiry all satisfy the assigned ACs, with legacy production approval flows unchanged and no new REST/MCP/CLI/web contract or generated-client changes.\n\nAdversarial refine audit: manually enumerated all 157 numbered spec ACs at .nax/features/permissions-p3-approval-core/spec.md:763-977 and compared each to its original story. Preserved every source AC in acceptanceCriteria (not suggestedCriteria), including the already-approved CAS no-op, unchanged policy row, existing decision count, second-execution refusal, no-request/no-command effects, pattern-specificity explanations, array-order qualifier and real role-resolution seam. The spec-local AC ranges retained are US-001 1-12; US-002 1-15; US-003 1-15; US-004 1-15; US-005 1-15; US-006 1-15; US-007 1-9; US-008 1-11; US-009 1-9; US-010 1-15; US-011 1-15; US-012 1-11. Final per-story AC counts are 13,15,15,15,15,15,9,13,9,15,16,11 (161 total): the four additional assertions are the two required failure-table cases (null parser output and non-assistant system gating) and two explicit regression anchors (only approval.decide global matrix cells change, and post-wiring rejection never invokes execution). No spec AC was deleted or relocated. Every story has a negative path already: non-approvable read/public metadata; duplicate selector/CAS miss; unknown resolver key; invalid validation input; invalid/self-applying policy write; ineligible decider; invalid/duplicate registry key; gate refusal; parse failure without request; decision refusal; execution precheck/command failure; per-item sweep failure.\n\nAudit corrections: canonicalJson ACs now explicitly expect strings rather than a parsed object or array. The successful USER-type policy creation AC observes the returned principalType. US-011's audit-scope success and failure AC explicitly uses two independently approved requests, so it cannot be misread as executing one already-executed request again, which would contradict its status guards. US-010's description assigns satisfiedBy from eligibility and approver identity from the decider, matching ActionApproval.requiredMode/satisfiedBy types (apps/api/src/action-context/action-context.ts:39-46) and the audit ACs. US-011's failure description explicitly covers callback failures, not post-callback commit failures excluded by the spec. US-008's resolver seam stub may return none to avoid an accidental dependency on US-009's pending branch. Pure eligibility tests supply label.delete.own directly: catalog.ts:88-112 does not make label.delete ownable and entry-matcher.ts:117-121 rejects that role entry, so those ACs do not authorize a catalog change. Existing revokeProjectRoles is confirmed at apps/api/src/permissions/test-helpers/permission-fixtures.ts:98-101; it deletes project bindings, not actor liveness state.\n\nStructural audit: all twelve story ids, binding dependency arrays and apps/api workdirs remain exactly as required; every referenced dependency exists. Each contextFiles list includes all of that story's spec-recommended context, respects the five-file limit and contains no file created by that same story. Future context paths are produced by transitive upstream expectedFiles; all expectedFiles match the spec's Creates section. All 16 feature-level Out of Scope bullets at spec.md:524-539 remain verbatim and in order, including the US-specific bullets that appear in that feature-level section; no story-local deferral was hoisted from an AC section. Adjacent Scope Out clauses echo the policy, concurrent-open, credential-storage, execution-recovery and legacy/distributed-sweep boundaries. US-009 and US-012 complexity are medium because they extend existing gate/repository/serializer and sweeper patterns rather than introduce another architecture. All stories retain three-session-tdd because the security override applies to approval enforcement and integrity even when implementation complexity is medium. This audit used repository reads and manual comparison; read-only parser/script execution was requested but unavailable, so neither JSON parser validation nor application tests are claimed.",
