@@ -63,7 +63,6 @@ export const PUBLIC_KEYS: ReadonlySet<string> = new Set([
  */
 export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'approval.policy.read',
-  'approval.policy.manage',
   'fleet.approval.decide.assistant',
   'member.remove',
 ]);

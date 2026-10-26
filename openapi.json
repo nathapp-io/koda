@@ -12066,6 +12066,210 @@
           "approvals"
         ]
       }
+    },
+    "/api/approval-policies": {
+      "get": {
+        "operationId": "ApprovalPoliciesController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "permissionPattern",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of global policies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "current": {
+                          "type": "number"
+                        },
+                        "size": {
+                          "type": "number"
+                        },
+                        "hasNext": {
+                          "type": "boolean"
+                        },
+                        "hasPrev": {
+                          "type": "boolean"
+                        },
+                        "records": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ApprovalPolicyDto"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Global policy management permission required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List global approval policies",
+        "tags": [
+          "approvals"
+        ]
+      },
+      "post": {
+        "operationId": "ApprovalPoliciesController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApprovalPolicyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created global policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalPolicyDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid approval policy"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Permission denied or self-applying agent policy"
+          },
+          "409": {
+            "description": "Policy pattern and subject already exist"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a global approval policy",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/approval-policies/keys": {
+      "get": {
+        "operationId": "ApprovalPoliciesController_keys",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Approvable keys and their approval floors and defaults",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "keys": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ApprovableKeyDto"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Global policy management permission required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List approvable permission keys",
+        "tags": [
+          "approvals"
+        ]
+      }
     }
   },
   "info": {
@@ -21112,6 +21316,231 @@
         },
         "required": [
           "decision"
+        ]
+      },
+      "ApprovalPolicyDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "permissionPattern": {
+            "type": "string"
+          },
+          "principalType": {
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT",
+              "ASSISTANT"
+            ],
+            "type": "string"
+          },
+          "roleId": {
+            "type": "string",
+            "nullable": true
+          },
+          "principalId": {
+            "type": "string",
+            "nullable": true
+          },
+          "mode": {
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ],
+            "type": "string"
+          },
+          "timeoutSec": {
+            "type": "number",
+            "nullable": true
+          },
+          "onTimeout": {
+            "enum": [
+              "reject",
+              "approve"
+            ],
+            "type": "string"
+          },
+          "requiredApprovals": {
+            "type": "number"
+          },
+          "approverMustHoldAction": {
+            "type": "boolean"
+          },
+          "requireDistinctApprover": {
+            "type": "boolean"
+          },
+          "updatedByType": {
+            "type": "string"
+          },
+          "updatedById": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "selector",
+          "projectId",
+          "permissionPattern",
+          "principalType",
+          "roleId",
+          "principalId",
+          "mode",
+          "timeoutSec",
+          "onTimeout",
+          "requiredApprovals",
+          "approverMustHoldAction",
+          "requireDistinctApprover",
+          "updatedByType",
+          "updatedById",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "ApprovableKeyDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "global",
+              "project",
+              "any"
+            ],
+            "type": "string"
+          },
+          "risk": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "type": "string"
+          },
+          "floor": {
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ],
+            "type": "string"
+          },
+          "default": {
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "scope",
+          "risk",
+          "floor",
+          "default"
+        ]
+      },
+      "ApprovalPolicySubjectDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "all",
+              "type",
+              "role",
+              "principal"
+            ],
+            "type": "string"
+          },
+          "principalType": {
+            "enum": [
+              "USER",
+              "AGENT",
+              "ASSISTANT"
+            ],
+            "type": "string"
+          },
+          "roleId": {
+            "type": "string"
+          },
+          "principalId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "CreateApprovalPolicyDto": {
+        "type": "object",
+        "properties": {
+          "permissionPattern": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "appliesTo": {
+            "$ref": "#/components/schemas/ApprovalPolicySubjectDto"
+          },
+          "mode": {
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ],
+            "type": "string"
+          },
+          "timeoutSec": {
+            "type": "number",
+            "nullable": true
+          },
+          "onTimeout": {
+            "enum": [
+              "reject",
+              "approve"
+            ],
+            "type": "string"
+          },
+          "requiredApprovals": {
+            "type": "number"
+          },
+          "approverMustHoldAction": {
+            "type": "boolean"
+          },
+          "requireDistinctApprover": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "permissionPattern",
+          "appliesTo",
+          "mode"
         ]
       }
     }

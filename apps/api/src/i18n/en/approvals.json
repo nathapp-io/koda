@@ -1,6 +1,9 @@
 {
   "-2": "Validation error",
   "400": "Validation error",
+  "invalidPolicy": { "400": "Invalid approval policy: {violation}", "-2": "Invalid approval policy: {violation}" },
+  "policyConflict": { "409": "An approval policy for this pattern and subject already exists" },
+  "policySelfApplication": { "403": "An agent cannot change an approval policy that applies to itself", "40003": "An agent cannot change an approval policy that applies to itself" },
   "requestNotFound": { "404": "Approval request not found" },
   "notPending": { "409": "The approval request is already {status}" },
   "expired": { "409": "The approval request has expired" },

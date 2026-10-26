@@ -376,6 +376,34 @@ describeIntegration('API Integration Tests', () => {
     });
   });
 
+  describe('Global approval policies', () => {
+    it('lists global policies and approvable keys for the admin', async () => {
+      const res = await request(httpServer).get('/api/approval-policies')
+        .set('Authorization', `Bearer ${userAccessToken}`).expect(200);
+      expect(body(res)).toMatchObject({ current: 1, size: 20, records: expect.any(Array) });
+      const keys = await request(httpServer).get('/api/approval-policies/keys')
+        .set('Authorization', `Bearer ${userAccessToken}`).expect(200);
+      expect(body<{ keys: { key: string }[] }>(keys).keys.map(({ key }) => key)).toContain('label.delete');
+    });
+    it('creates a global policy and rejects a duplicate', async () => {
+      const policy = { permissionPattern: 'label.delete', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human' };
+      const res = await request(httpServer).post('/api/approval-policies')
+        .set('Authorization', `Bearer ${userAccessToken}`).send(policy).expect(201);
+      const row = body<{ id: string; projectId: string | null }>(res);
+      try {
+        expect(row.projectId).toBeNull();
+        const duplicate = await request(httpServer).post('/api/approval-policies')
+          .set('Authorization', `Bearer ${userAccessToken}`).send(policy).expect(409);
+        refusal(duplicate, 'approvals.policyConflict.409');
+      } finally { await prismaClient().approvalPolicy.delete({ where: { id: row.id } }); }
+    });
+    it('requires credentials on all three routes', async () => {
+      await request(httpServer).get('/api/approval-policies').expect(401);
+      await request(httpServer).get('/api/approval-policies/keys').expect(401);
+      await request(httpServer).post('/api/approval-policies').send({}).expect(401);
+    });
+  });
+
   describe('Audit log', () => {
     it('AC-15: GET /api/audit with the admin token returns 200', async () => {
       const res = await request(httpServer).get('/api/audit')

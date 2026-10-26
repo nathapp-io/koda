@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
-import { TRANSACTION_MANAGER, type IRepository, type ITransactionManager } from '@nathapp/nestjs-data';
+import { TRANSACTION_MANAGER, type IPageResult, type IRepository, type ITransactionManager } from '@nathapp/nestjs-data';
 import { currentContext } from '../action-context/action-context';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
@@ -8,7 +8,7 @@ import { PermissionService } from '../permissions/permission.service';
 import { policySelector, validateApprovalPolicy } from './approval-policy.validation';
 import { APPROVAL_POLICY_REPOSITORY, type ApprovalPolicyInput, type ApprovalPolicyRecord } from './domain/approval.domain';
 import { ApprovalPolicyConflictError, ApprovalPolicyNotFoundError, ApprovalPolicySelfApplicationError, InvalidApprovalPolicyError } from './domain/approval.errors';
-import { PrismaApprovalPolicyRepository } from './prisma-approval-policy.repository';
+import { PrismaApprovalPolicyRepository, type ApprovalPolicyFilter } from './prisma-approval-policy.repository';
 
 type PolicyPatch = Partial<Omit<ApprovalPolicyInput, 'projectId' | 'permissionPattern' | 'appliesTo'>>;
 const MUTABLE_FIELDS = ['mode', 'timeoutSec', 'onTimeout', 'requiredApprovals', 'approverMustHoldAction', 'requireDistinctApprover'] as const;
@@ -82,6 +82,10 @@ export class ApprovalPolicyService {
       await this.policies.delete(id);
       await this.record(row, `deleted ${row.permissionPattern}`);
     });
+  }
+
+  page(filter: ApprovalPolicyFilter, page: { current: number; size: number }): Promise<IPageResult<ApprovalPolicyRecord>> {
+    return this.queries.findPage(filter, page);
   }
 
   async list(filter: { projectId?: string | null; permissionPattern?: string }, page: { current: number; size: number }): Promise<ApprovalPolicyRecord[]> {
