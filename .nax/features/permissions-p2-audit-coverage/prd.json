@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-coverage",
   "branchName": "feat/permissions-p2-audit-coverage",
   "createdAt": "2026-10-26T00:00:00Z",
-  "updatedAt": "2026-10-26T06:49:06.680Z",
+  "updatedAt": "2026-10-26T07:03:19.587Z",
   "userStories": [
     {
       "id": "US-001",
@@ -527,14 +527,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Five existing files apply a standard marker at fixed calls and a same-state branch, without a new integration or abstraction; editing the persistent replay-protection guard invokes strict security isolation."
+        "reasoning": "Five existing files apply a standard marker at fixed calls and a same-state branch, without a new integration or abstraction; editing the persistent replay-protection guard invokes strict security isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/vcs/vcs-polling.service.ts",
@@ -569,7 +572,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "d18a7e05083ee32611df32b29567d829d9f75415"
     },
     {
       "id": "US-009",
