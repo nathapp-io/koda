@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-api",
   "branchName": "feat/permissions-p3-approval-api",
   "createdAt": "2026-10-26T00:00:00.000Z",
-  "updatedAt": "2026-10-26T16:49:56.822Z",
+  "updatedAt": "2026-10-26T16:57:34.920Z",
   "userStories": [
     {
       "id": "US-001",
@@ -721,14 +721,17 @@
         "US-006",
         "US-009"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "The project controller mirrors completed global CRUD and established project guards, with one repository filter extension; project isolation and role checks mandate strict security TDD."
+        "reasoning": "The project controller mirrors completed global CRUD and established project guards, with one repository filter extension; project isolation and role checks mandate strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/approvals/prisma-approval-policy.repository.ts",
@@ -767,7 +770,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c48888ecc39905cf2f6cde35c0e6331e39c8ac66"
     },
     {
       "id": "US-011",
