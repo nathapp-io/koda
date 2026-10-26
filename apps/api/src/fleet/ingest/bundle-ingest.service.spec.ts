@@ -1,5 +1,7 @@
 import { Readable } from 'stream';
+import { currentBookkeepingReason } from '../../action-context/audit-coverage';
 import { currentContext, runWithActionContext, type ActionContext } from '../../action-context/action-context';
+import { tarGz } from '../../../test/helpers/tar-gz';
 import { BundleIngestService } from './bundle-ingest.service';
 
 const now = new Date('2026-10-05T10:00:00Z');
@@ -96,5 +98,90 @@ describe('BundleIngestService background context (US-004)', () => {
 
     expect(seen[0]?.correlationId).not.toBe('c-runner');
     expect(seen[0]?.correlationId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+});
+
+/**
+ * Permissions P2 US-007: the queue's own bookkeeping — the claim, the retry and failure marks — is uncounted, while
+ * the rows the bundle parses into are the ingest's domain write and must stay counted.
+ */
+describe('BundleIngestService audit coverage (permissions P2 US-007)', () => {
+  type Reason = ReturnType<typeof currentBookkeepingReason>;
+  const JOB = {
+    id: 'j1', leaseEpoch: 1, naxRunId: null, projectId: 'p1', repoId: 'r1', runnerId: 'rn', state: 'COMPLETED', command: 'PLAN',
+    stateReason: null, finishResult: null, escalationReason: null, resultPrUrl: null, resultBranch: null, resultSha: null,
+    costSpentUsd: '0', workflow: null,
+  };
+
+  /** A service whose repo calls each record the bookkeeping reason that was current when they were reached. */
+  async function make(opts: { attempts?: number; expired?: boolean; storeFails?: boolean; body?: Buffer } = {}) {
+    const seen: Record<'claimNext' | 'markRetry' | 'markFailed' | 'replaceRows', Reason[]> = {
+      claimNext: [], markRetry: [], markFailed: [], replaceRows: [],
+    };
+    const repo = {
+      claimNext: vi.fn(async () => { seen.claimNext.push(currentBookkeepingReason()); return claim(opts.attempts ?? 0); }),
+      findArtifact: vi.fn(async () => ({ storageKey: 'k', expiredAt: opts.expired ? now : null })),
+      markRetry: vi.fn(async () => { seen.markRetry.push(currentBookkeepingReason()); }),
+      markFailed: vi.fn(async () => { seen.markFailed.push(currentBookkeepingReason()); }),
+      markOutcome: vi.fn(),
+      replaceRows: vi.fn(async () => { seen.replaceRows.push(currentBookkeepingReason()); }),
+    };
+    const body = opts.body ?? Buffer.from('not gzip');
+    const store = { get: vi.fn(async () => (opts.storeFails ? Promise.reject(new Error('EIO disk')) : Readable.from([body]))) };
+    const jobs = { lockById: vi.fn(async () => JOB), update: vi.fn(async () => JOB), appendEvent: vi.fn() };
+    const svc = new BundleIngestService(
+      repo as never, store as never, jobs as never, { event: vi.fn(() => ({})), publish: vi.fn() } as never,
+      { record: vi.fn() } as never, { signal: vi.fn() } as never, { run: (fn: () => unknown) => fn() } as never,
+      { upsertPrLinks: vi.fn() } as never, { onIngestCorrection: vi.fn() } as never, { emit: vi.fn() } as never,
+      { record: vi.fn(async () => undefined) } as never,
+    );
+    return { svc, repo, seen };
+  }
+
+  it('AC-4: ingestOne claims the next bundle while currentBookkeepingReason() answers fleet.ingest-queue', async () => {
+    const { svc, repo, seen } = await make({ storeFails: true });
+
+    await svc.ingestOne(now);
+
+    expect(repo.claimNext).toHaveBeenCalledTimes(1);
+    expect(seen.claimNext).toEqual(['fleet.ingest-queue']);
+  });
+
+  it('AC-5: a bundle read that throws marks a retry while currentBookkeepingReason() answers fleet.ingest-queue', async () => {
+    const { svc, repo, seen } = await make({ attempts: 0, storeFails: true });
+
+    await svc.ingestOne(now);
+
+    // attempts 0 with an unexpired artifact is the retry branch, not the exhausted-attempt failure.
+    expect(repo.markRetry).toHaveBeenCalledWith('i1', 1, expect.any(Date), expect.stringContaining('EIO disk'));
+    expect(repo.markFailed).not.toHaveBeenCalled();
+    expect(seen.markRetry).toEqual(['fleet.ingest-queue']);
+  });
+
+  it('AC-6: an ingesting claim writes its parsed rows while currentBookkeepingReason() answers undefined', async () => {
+    const { svc, repo, seen } = await make({ body: await tarGz([{ name: 'workflow/result.json', body: '{"schemaVersion":1}' }]) });
+
+    await svc.ingestOne(now);
+
+    expect(repo.replaceRows).toHaveBeenCalledTimes(1);
+    expect(repo.markRetry).not.toHaveBeenCalled();
+    expect(seen.replaceRows).toEqual([undefined]);
+  });
+
+  it('marks an expired bundle failed while currentBookkeepingReason() answers fleet.ingest-queue', async () => {
+    const { svc, repo, seen } = await make({ expired: true });
+
+    await svc.ingestOne(now);
+
+    expect(repo.markFailed).toHaveBeenCalledWith('i1', 1, 'bundle expired');
+    expect(seen.markFailed).toEqual(['fleet.ingest-queue']);
+  });
+
+  it('leaves no reason current once ingestOne has resolved', async () => {
+    const { svc } = await make({ storeFails: true });
+
+    await svc.ingestOne(now);
+
+    expect(currentBookkeepingReason()).toBeUndefined();
   });
 });

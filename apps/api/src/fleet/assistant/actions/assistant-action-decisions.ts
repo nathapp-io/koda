@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
 import { AuditRecorder } from '../../../audit/audit-recorder.service';
 import { runAsSystem } from '../../../action-context/action-context';
+import { bookkeeping } from '../../../action-context/audit-coverage';
 import { FLEET_CFG, IFleetConfig } from '../../../config/fleet.config';
 import type { LiveFleetApprovalEvent } from '../../../live/live-event';
 import { ThreadEventBus } from '../../../live/thread-event-bus';
@@ -149,7 +150,9 @@ export class AssistantActionDecisions implements OnModuleInit, AssistantActionDe
    * thread that is gone leaves nothing to write, and the decide route still answers 200 with the approved approval.
    */
   private finalize(action: PendingActionRecord, outcome: ActionOutcome, now: Date): Promise<string | null> {
-    return this.tx.run(async () => {
+    // Permissions P2 US-007: the terminal status and its outcome note are the decide's bookkeeping. The tool has
+    // already run (and recorded for itself), so only this settle is uncounted.
+    return this.tx.run(() => bookkeeping('assistant.action-finalize', async () => {
       if (!(await this.actions.lockThread(action.threadId))) return null;
       if (!(await this.actions.lockById(action.id))) return null;
       const settled = await this.actions.resolve(action.id, {
@@ -161,7 +164,7 @@ export class AssistantActionDecisions implements OnModuleInit, AssistantActionDe
         decidedAt: now,
       });
       return this.actions.insertSystemNote(settled.threadId, outcomeNote(settled));
-    });
+    }));
   }
 
   private async reject(caller: ApprovalCaller, action: PendingActionRecord, approval: FleetApprovalRecord, dto: DecideApprovalDto, now: Date): Promise<SettledAction> {

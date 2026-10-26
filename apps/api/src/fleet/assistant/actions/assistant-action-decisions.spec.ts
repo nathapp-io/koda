@@ -8,6 +8,7 @@
  */
 import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
+import { currentBookkeepingReason } from '../../../action-context/audit-coverage';
 import { testFleetConfig } from '../../../common/test-helpers/fleet-config';
 import { mockAuditRecorder } from '../../../common/test-helpers/global-stubs.module';
 import type { PermissionService } from '../../../permissions/permission.service';
@@ -415,5 +416,85 @@ describe('AssistantActionDecisions approve (2a-D8 step 8)', () => {
 
     await expect(service.decide(CALLER, approval(), dto('approve'), NOW)).rejects.toMatchObject({ prefix: 'fleet.approvalNotPending' });
     expect(run).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Permissions P2 US-007: the tool itself is the domain write, so it runs counted; only the terminal settle that follows
+ * it — the action's final status and the outcome note — is bookkeeping.
+ */
+describe('AssistantActionDecisions audit coverage (permissions P2 US-007)', () => {
+  type Reason = ReturnType<typeof currentBookkeepingReason>;
+
+  /** Records the bookkeeping reason current at each call of a stub, then answers exactly as the stub did. */
+  function watching<T>(fn: T, seen: Reason[]): T {
+    const mock = fn as unknown as {
+      getMockImplementation(): ((...args: never[]) => unknown) | undefined;
+      mockImplementation(impl: (...args: never[]) => unknown): void;
+    };
+    const impl = mock.getMockImplementation();
+    mock.mockImplementation((...args: never[]) => {
+      seen.push(currentBookkeepingReason());
+      return impl?.(...args);
+    });
+    return fn;
+  }
+
+  it('AC-12: the approved action runs its tool while currentBookkeepingReason() answers undefined', async () => {
+    const { service, executor } = build();
+    const seen: Reason[] = [];
+    watching(executor.executeAction, seen);
+
+    await service.decide(CALLER, approval(), dto('approve'), NOW);
+
+    expect(executor.executeAction).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([undefined]);
+  });
+
+  it('AC-13: the terminal EXECUTED resolve and the note are written under assistant.action-finalize, after the tool', async () => {
+    const { service, actions, executor } = build();
+    const reasons: Reason[] = [];
+    const statuses: Array<string | undefined> = [];
+    const impl = actions.resolve.getMockImplementation() as (id: string, r: Partial<PendingActionRecord>) => Promise<PendingActionRecord>;
+    actions.resolve.mockImplementation(async (id: string, r: Partial<PendingActionRecord>) => {
+      reasons.push(currentBookkeepingReason());
+      statuses.push(r.status);
+      return impl(id, r);
+    });
+    const noteReasons: Reason[] = [];
+    watching(actions.insertSystemNote, noteReasons);
+
+    await service.decide(CALLER, approval(), dto('approve'), NOW);
+
+    // The approval's own APPROVED resolve is not part of the marker; the terminal settle is.
+    expect(statuses).toEqual(['APPROVED', 'EXECUTED']);
+    expect(reasons).toEqual([undefined, 'assistant.action-finalize']);
+    expect(noteReasons).toEqual(['assistant.action-finalize']);
+    expect(executor.executeAction.mock.invocationCallOrder[0]).toBeLessThan(actions.resolve.mock.invocationCallOrder[1]);
+  });
+
+  it('AC-13: a failing tool finalizes FAILED under the same reason', async () => {
+    const { service, actions } = build({ outcome: { ok: false, text: 'not_found' } });
+    const reasons: Reason[] = [];
+    const statuses: Array<string | undefined> = [];
+    const impl = actions.resolve.getMockImplementation() as (id: string, r: Partial<PendingActionRecord>) => Promise<PendingActionRecord>;
+    actions.resolve.mockImplementation(async (id: string, r: Partial<PendingActionRecord>) => {
+      reasons.push(currentBookkeepingReason());
+      statuses.push(r.status);
+      return impl(id, r);
+    });
+
+    await service.decide(CALLER, approval(), dto('approve'), NOW);
+
+    expect(statuses).toEqual(['APPROVED', 'FAILED']);
+    expect(reasons).toEqual([undefined, 'assistant.action-finalize']);
+  });
+
+  it('leaves no reason current once the decide has resolved', async () => {
+    const { service } = build();
+
+    await service.decide(CALLER, approval(), dto('approve'), NOW);
+
+    expect(currentBookkeepingReason()).toBeUndefined();
   });
 });

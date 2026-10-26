@@ -1,4 +1,5 @@
 import { Prisma } from '../../../generated/prisma/client';
+import { currentBookkeepingReason, openAuditScope, noteAuditEntry } from '../../../action-context/audit-coverage';
 import { PrismaThreadIngestRepository } from './prisma-thread-ingest.repository';
 import type { ThreadIngestBatch } from './domain/thread-ingest.domain';
 import type { ThreadLine } from './thread-line';
@@ -752,4 +753,63 @@ it('US-001 AC-15: a WORKSPACE session on a runner with kodaTools records no noti
   await repoWith(client).fold(batch([sessionStarted()]));
   expect(thread.session).not.toHaveProperty('kodaToolsUnavailableOn');
   expect(thread.session).toMatchObject({ jobId: 'J', state: 'live' });
+});
+
+/**
+ * Permissions P2 US-007: the whole fold body is bookkeeping — the transcript, its cost mirror rows and the session
+ * fields — because the transcript *is* the domain row a runner's stream produces. The `turn_end` entry still counts:
+ * bookkeeping drops writes only, never entries.
+ */
+describe('PrismaThreadIngestRepository.fold audit coverage (permissions P2 US-007)', () => {
+  /** Records the bookkeeping reason current at each call of `fn`, then delegates to the stub's own implementation. */
+  function watch<T extends (...args: never[]) => unknown>(fn: T, seen: Array<ReturnType<typeof currentBookkeepingReason>>): void {
+    const impl = (fn as unknown as { getMockImplementation(): T }).getMockImplementation();
+    (fn as unknown as { mockImplementation(f: T): void }).mockImplementation(((args: never) => {
+      seen.push(currentBookkeepingReason());
+      return impl(args);
+    }) as T);
+  }
+
+  it('AC-2: a turn_start line creates its assistant message while currentBookkeepingReason() answers thread.transcript', async () => {
+    const { client, messages } = fakeClient({ nextSeq: 2 });
+    const seen: Array<ReturnType<typeof currentBookkeepingReason>> = [];
+    watch(client.chatMessage.create, seen);
+
+    await repoWith(client).fold(batch([start('t1')]));
+
+    expect(messages).toHaveLength(1);
+    expect(seen).toEqual(['thread.transcript']);
+  });
+
+  it('AC-3: the ingest cursor upsert runs while currentBookkeepingReason() answers thread.transcript', async () => {
+    const { client } = fakeClient({ nextSeq: 2 });
+    const seen: Array<ReturnType<typeof currentBookkeepingReason>> = [];
+    watch(client.threadIngestCursor.upsert, seen);
+
+    await repoWith(client).fold(batch([start('t1')]));
+
+    expect(client.threadIngestCursor.upsert).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual(['thread.transcript']);
+  });
+
+  it('keeps the turn_end entry counted: the fold records it while its writes stay uncounted', async () => {
+    const { client } = fakeClient({ nextSeq: 2 });
+    const audit = { record: vi.fn(async () => { noteAuditEntry(); }) };
+
+    const entries = await openAuditScope('system:thread', async (scope) => {
+      await repoWith(client, audit).fold(batch([start('t1'), end()]));
+      return scope.entries;
+    });
+
+    expect(audit.record).toHaveBeenCalledTimes(1);
+    expect(entries).toBe(1);
+  });
+
+  it('leaves no reason current once the fold has resolved', async () => {
+    const { client } = fakeClient({ nextSeq: 2 });
+
+    await repoWith(client).fold(batch([start('t1')]));
+
+    expect(currentBookkeepingReason()).toBeUndefined();
+  });
 });

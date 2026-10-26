@@ -10,6 +10,7 @@ import { LocalDiskLogStore } from './local-disk-log.store';
 import { logKey } from './log-store';
 import { MemoryLogRepo } from './test-helpers/memory-log-repo';
 import { FleetLogException } from './log-upload.exceptions';
+import { currentBookkeepingReason } from '../../action-context/audit-coverage';
 import { LogUpload, LogUploadService } from './log-upload.service';
 
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
@@ -223,6 +224,31 @@ describe('LogUploadService', () => {
     it('US-001: without a hooks provider an upload still succeeds', async () => {
       svc = withHooks(undefined);
       await expect(threadUp('{"a":1}\n')).resolves.toEqual({ outcome: 'appended', size: 8 });
+    });
+  });
+
+  /**
+   * Permissions P2l US-007: the stream metadata row an upload writes is bookkeeping — the chunk itself is the
+   * log, not a domain change. The marker covers `write`'s whole body, so the reason is current at the row write.
+   */
+  describe('audit coverage (permissions P2 US-007)', () => {
+    it('AC-1: upload of one log chunk calls logs.upsertStream while currentBookkeepingReason() answers fleet.log-chunk', async () => {
+      const original = logs.upsertStream.bind(logs);
+      const seen: Array<ReturnType<typeof currentBookkeepingReason>> = [];
+      const spy = vi.spyOn(logs, 'upsertStream').mockImplementation(async (...args: Parameters<typeof original>) => {
+        seen.push(currentBookkeepingReason());
+        return original(...args);
+      });
+
+      await expect(up('abc\n')).resolves.toEqual({ outcome: 'appended', size: 4 });
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(seen).toEqual(['fleet.log-chunk']);
+    });
+
+    it('AC-1: the reason is gone once the upload has resolved', async () => {
+      await up('abc\n');
+      expect(currentBookkeepingReason()).toBeUndefined();
     });
   });
 

@@ -1,4 +1,5 @@
 import { currentContext, type ActionContext } from '../action-context/action-context';
+import { currentBookkeepingReason } from '../action-context/audit-coverage';
 import { EmailTemplateSeeder } from './email-template.seeder';
 import { EMAIL_TEMPLATE_CODES } from './templates/template-codes';
 
@@ -65,5 +66,46 @@ describe('EmailTemplateSeeder (S4b §1, R3)', () => {
 
     expect(seen.length).toBe(EMAIL_TEMPLATE_CODES.length * 2);
     expect(seen.every((context) => context?.actor.type === 'SYSTEM' && context.actor.id === 'seed')).toBe(true);
+  });
+});
+
+/**
+ * Permissions P2 US-007: the built-in templates come from code — git is their source of truth — so the seeder's
+ * whole write path is bookkeeping.
+ */
+describe('EmailTemplateSeeder audit coverage (permissions P2 US-007)', () => {
+  it('AC-14: seed() on a repository with no templates creates each template while currentBookkeepingReason() answers email.template-seed', async () => {
+    const { seeder, service } = setup();
+    const seen: Array<ReturnType<typeof currentBookkeepingReason>> = [];
+    service.create.mockImplementation(async (input: unknown) => {
+      seen.push(currentBookkeepingReason());
+      return input;
+    });
+
+    await expect(seeder.seed()).resolves.toBe(EMAIL_TEMPLATE_CODES.length * 2);
+
+    expect(seen).toHaveLength(EMAIL_TEMPLATE_CODES.length * 2);
+    expect(seen.every((reason) => reason === 'email.template-seed')).toBe(true);
+  });
+
+  it('AC-14: the update of a changed template is seeded under the same reason', async () => {
+    const { seeder, service, repo } = setup();
+    repo.findTemplate.mockResolvedValue({ id: 't1', subject: 'old', content: '<p>old</p>' });
+    const seen: Array<ReturnType<typeof currentBookkeepingReason>> = [];
+    service.update.mockImplementation(async (input: unknown) => {
+      seen.push(currentBookkeepingReason());
+      return input;
+    });
+
+    await expect(seeder.seed()).resolves.toBe(EMAIL_TEMPLATE_CODES.length * 2);
+
+    expect(seen).toHaveLength(EMAIL_TEMPLATE_CODES.length * 2);
+    expect(seen.every((reason) => reason === 'email.template-seed')).toBe(true);
+  });
+
+  it('leaves no reason current once the seed has resolved', async () => {
+    const { seeder } = setup();
+    await seeder.seed();
+    expect(currentBookkeepingReason()).toBeUndefined();
   });
 });
