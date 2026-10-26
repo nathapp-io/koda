@@ -50,6 +50,12 @@ const logger = new Logger(UnauditedWriteError.name);
 const scopeStorage = new AsyncLocalStorage<ScopeState>();
 const bookkeepingStorage = new AsyncLocalStorage<BookkeepingReason>();
 
+interface TransactionTally {
+  readonly writes: string[];
+  entries: number;
+}
+const tallyStorage = new AsyncLocalStorage<TransactionTally>();
+
 /** The scope of the current entry point, or undefined outside any scope. */
 export function currentAuditScope(): AuditScope | undefined {
   return scopeStorage.getStore();
@@ -92,6 +98,32 @@ export function runInAuditScope<T>(surface: string, fn: () => T, opts?: { detach
   }, opts);
 }
 
+/**
+ * Holds writes and entries until fn fulfils; rejection drops both and propagates unchanged.
+ * Capture the destination now: scopes opened and checked inside fn must not receive buffered work.
+ * This tracks the callback outcome, not the eventual database commit outcome.
+ */
+export function withTransactionTally<T>(fn: () => Promise<T>): Promise<T> {
+  const scope = scopeStorage.getStore();
+  const parent = tallyStorage.getStore();
+  const tally: TransactionTally = { writes: [], entries: 0 };
+
+  return tallyStorage.run(tally, async () => {
+    const result = await fn();
+    // An enclosing callback still owns the outcome of a nested tally's successful work.
+    if (parent !== undefined) {
+      for (const label of tally.writes) parent.writes.push(label);
+      parent.entries += tally.entries;
+    } else if (scope !== undefined) {
+      for (const label of tally.writes) scope.writes.push(label);
+      for (let destination: ScopeState | undefined = scope; destination !== undefined; destination = destination.parent) {
+        destination.entries += tally.entries;
+      }
+    }
+    return result;
+  });
+}
+
 /** Runs and awaits fn with writes uncounted; rejects an unknown reason before invoking fn. */
 export function bookkeeping<T>(reason: BookkeepingReason, fn: () => T | PromiseLike<T>): Promise<T> {
   if (!Object.hasOwn(BOOKKEEPING_REASONS, reason)) {
@@ -106,9 +138,15 @@ export function currentBookkeepingReason(): BookkeepingReason | undefined {
   return bookkeepingStorage.getStore();
 }
 
-/** Counts a write in the innermost scope; a no-op with no scope or inside bookkeeping(). */
+/** Buffers in the innermost tally, otherwise counts in the innermost scope; skips bookkeeping. */
 export function noteAuditWrite(label: string): void {
   if (bookkeepingStorage.getStore() !== undefined) return;
+
+  const tally = tallyStorage.getStore();
+  if (tally !== undefined) {
+    tally.writes.push(label);
+    return;
+  }
 
   const scope = scopeStorage.getStore();
   if (scope === undefined) return;
@@ -117,10 +155,17 @@ export function noteAuditWrite(label: string): void {
 }
 
 /**
- * Counts an entry in the innermost scope and every enclosing one; a no-op with no scope. An entry
- * recorded in a nested, record-only scope therefore satisfies the tick or request that opened it.
+ * Buffers in the innermost tally, otherwise counts in the innermost scope and every enclosing one.
+ * An entry recorded in a nested, record-only scope therefore satisfies the tick or request that
+ * opened it. With neither a scope nor a tally, this is a no-op.
  */
 export function noteAuditEntry(): void {
+  const tally = tallyStorage.getStore();
+  if (tally !== undefined) {
+    tally.entries += 1;
+    return;
+  }
+
   for (let scope = scopeStorage.getStore(); scope !== undefined; scope = scope.parent) {
     scope.entries += 1;
   }

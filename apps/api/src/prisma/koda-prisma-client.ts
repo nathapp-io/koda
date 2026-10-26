@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from '../generated/prisma/client';
+import { withTransactionTally } from '../action-context/audit-coverage';
 import { contextlessWriteHandler, resolveWriteGuardMode, type WriteGuardMode } from '../action-context/contextless-write';
 
 /** The top-level `$allOperations` hook also receives raw operations, with `model` undefined. */
@@ -22,10 +23,26 @@ export class KodaPrismaClient extends PrismaClient {
     // Prisma propagates `$extends` into the `tx` of an interactive transaction, so a guarded write
     // there rejects before the statement runs and the transaction rolls back.
     // The returned object is not `instanceof KodaPrismaClient`; nothing in the API checks that.
-    return this.$extends(
+    const extended = this.$extends(
       contextlessWriteExtension(
         resolveWriteGuardMode({ ENV_NAME: process.env['ENV_NAME'], NODE_ENV: process.env['NODE_ENV'] }),
       ),
-    ) as unknown as KodaPrismaClient;
+    );
+    return new Proxy(extended, {
+      get(target, property) {
+        if (property !== '$transaction') return Reflect.get(target, property);
+
+        return (
+          input: ((tx: Prisma.TransactionClient) => Promise<unknown>) | readonly Prisma.PrismaPromise<unknown>[],
+          options?: unknown,
+        ) => {
+          const transaction: (input: unknown, options?: unknown) => unknown = Reflect.get(target, '$transaction');
+          if (typeof input === 'function') {
+            return transaction.call(target, (tx: Prisma.TransactionClient) => withTransactionTally(() => input(tx)), options);
+          }
+          return transaction.call(target, input, options);
+        };
+      },
+    }) as unknown as KodaPrismaClient;
   }
 }
