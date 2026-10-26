@@ -52,6 +52,12 @@ export class ApprovalPolicyService {
     });
   }
 
+  async get(id: string): Promise<ApprovalPolicyRecord> {
+    const row = await this.policies.findById(id);
+    if (!row) throw new ApprovalPolicyNotFoundError(id);
+    return row;
+  }
+
   update(id: string, patch: PolicyPatch): Promise<ApprovalPolicyRecord> {
     return this.txManager.run(async () => {
       const stored = await this.requirePolicy(id);

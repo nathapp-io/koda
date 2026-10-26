@@ -49,6 +49,38 @@ export class CreateApprovalPolicyDto {
   requireDistinctApprover?: boolean;
 }
 
+export class UpdateApprovalPolicyDto {
+  @ApiPropertyOptional({ enum: MODES })
+  @IsOptional()
+  @IsIn(MODES)
+  mode?: ApprovalMode;
+
+  @ApiPropertyOptional({ type: Number, nullable: true })
+  @IsOptional()
+  @IsInt()
+  timeoutSec?: number | null;
+
+  @ApiPropertyOptional({ enum: ['reject', 'approve'] })
+  @IsOptional()
+  @IsIn(['reject', 'approve'])
+  onTimeout?: 'reject' | 'approve';
+
+  @ApiPropertyOptional({ type: Number })
+  @IsOptional()
+  @IsInt()
+  requiredApprovals?: number;
+
+  @ApiPropertyOptional({ type: Boolean })
+  @IsOptional()
+  @IsBoolean()
+  approverMustHoldAction?: boolean;
+
+  @ApiPropertyOptional({ type: Boolean })
+  @IsOptional()
+  @IsBoolean()
+  requireDistinctApprover?: boolean;
+}
+
 export class ApprovalPolicyDto {
   @ApiProperty() id!: string;
   @ApiProperty() selector!: string;

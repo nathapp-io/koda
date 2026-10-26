@@ -3,6 +3,8 @@
   "400": "验证错误",
   "invalidPolicy": { "400": "无效的审批策略：{violation}", "-2": "无效的审批策略：{violation}" },
   "policyConflict": { "409": "此模式和主体的审批策略已存在" },
+  "policyNotFound": { "404": "审批策略不存在" },
+  "emptyPolicyPatch": { "400": "策略更新未设置任何字段", "-2": "策略更新未设置任何字段" },
   "policySelfApplication": { "403": "代理不能更改适用于自身的审批策略", "40003": "代理不能更改适用于自身的审批策略" },
   "requestNotFound": { "404": "审批请求不存在" },
   "notPending": { "409": "审批请求已{status}" },

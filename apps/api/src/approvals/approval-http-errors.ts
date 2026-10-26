@@ -1,6 +1,6 @@
 import { AppException, ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
-import { ApprovalPolicyConflictError, ApprovalPolicySelfApplicationError, InvalidApprovalPolicyError, ApprovalCancelForbiddenError, ApprovalDecideForbiddenError, ApprovalRequestExpiredError, ApprovalRequestNotFoundError, ApprovalRequestNotPendingError } from './domain/approval.errors';
+import { ApprovalPolicyConflictError, ApprovalPolicyNotFoundError, ApprovalPolicySelfApplicationError, InvalidApprovalPolicyError, ApprovalCancelForbiddenError, ApprovalDecideForbiddenError, ApprovalRequestExpiredError, ApprovalRequestNotFoundError, ApprovalRequestNotPendingError } from './domain/approval.errors';
 
 export function rethrowApprovalError(error: unknown): never {
   if (error instanceof ApprovalRequestNotFoundError) throw new NotFoundAppException({}, 'approvals.requestNotFound');
@@ -10,6 +10,7 @@ export function rethrowApprovalError(error: unknown): never {
   if (error instanceof ApprovalCancelForbiddenError) throw new ForbiddenAppException({}, 'approvals.cancelForbidden');
   if (error instanceof InvalidApprovalPolicyError) throw new ValidationAppException({ violation: error.violation }, 'approvals.invalidPolicy');
   if (error instanceof ApprovalPolicyConflictError) throw new ConflictAppException({}, 'approvals.policyConflict');
+  if (error instanceof ApprovalPolicyNotFoundError) throw new NotFoundAppException({}, 'approvals.policyNotFound');
   if (error instanceof ApprovalPolicySelfApplicationError) throw new ForbiddenAppException({}, 'approvals.policySelfApplication');
   throw error;
 }
