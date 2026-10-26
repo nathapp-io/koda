@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-core",
   "branchName": "feat/permissions-p3-approval-core",
   "createdAt": "2026-11-04T00:00:00.000Z",
-  "updatedAt": "2026-10-26T11:35:56.900Z",
+  "updatedAt": "2026-10-26T11:54:13.922Z",
   "userStories": [
     {
       "id": "US-001",
@@ -322,14 +322,17 @@
         "US-003",
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Cross-module transactional policy management with audit attribution and anti-escalation checks over project/global role membership; security override applies."
+        "reasoning": "Cross-module transactional policy management with audit attribution and anti-escalation checks over project/global role membership; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-policy.validation.ts",
@@ -357,7 +360,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1300ab1f5dd773dcd7321a5fc641f3fa1b19a374"
     },
     {
       "id": "US-006",
