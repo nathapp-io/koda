@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-core",
   "branchName": "feat/permissions-p3-approval-core",
   "createdAt": "2026-11-04T00:00:00.000Z",
-  "updatedAt": "2026-10-26T12:46:01.000Z",
+  "updatedAt": "2026-10-26T12:55:32.935Z",
   "userStories": [
     {
       "id": "US-001",
@@ -644,14 +644,17 @@
         "US-006",
         "US-009"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Audited access-control decisions combine scoped permission lookup and ordered eligibility with transactional row locking and race behavior."
+        "reasoning": "Audited access-control decisions combine scoped permission lookup and ordered eligibility with transactional row locking and race behavior.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-eligibility.ts",
@@ -673,7 +676,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "732bf7ad2d2155edfb30c023d329fc47b4ab050c"
     },
     {
       "id": "US-011",
