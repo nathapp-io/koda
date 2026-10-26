@@ -42,6 +42,7 @@ function setup(rows: { master?: Row[]; category?: Row[] } = {}) {
     txManager as never,
     packagePrefs as never,
     email as never,
+    { audited: vi.fn(async (fn: () => Promise<unknown>) => fn()), record: vi.fn() } as never,
   );
   return { service, notificationCategoryPreference, notificationPreference, packagePrefs, txManager, email };
 }

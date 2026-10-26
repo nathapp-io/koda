@@ -4,6 +4,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { IPreferenceService, PREFERENCE_SERVICE } from '@nathapp/nestjs-notify';
 import { EmailAvailability } from '../email/email-availability';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import { KODA_TENANT_ID } from '../email/koda-tenant';
 import {
   EMAIL_CATEGORY_DEFAULTS, NOTIFICATION_CATEGORIES, NotificationCategory, NotificationChannelValue,
@@ -43,6 +44,7 @@ export class NotificationPreferencesService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(PREFERENCE_SERVICE) private readonly packagePrefs: IPreferenceService,
     private readonly email: EmailAvailability,
+    private readonly audit: AuditRecorder,
   ) {}
 
   private get db() {
@@ -88,18 +90,32 @@ export class NotificationPreferencesService {
 
   /** Writes only the supplied fields: the master switch through the package service, each item per channel. */
   async update(userId: string, change: PreferencesChange): Promise<void> {
-    if (change.emailEnabled !== undefined) {
-      await this.packagePrefs.updatePreference(userId, KODA_TENANT_ID, EMAIL, change.emailEnabled);
-    }
     const items = change.items ?? [];
-    if (items.length === 0) return;
-    await this.txManager.run(async () => {
-      const client = this.txnClient();
-      for (const item of items) {
-        if (item.inApp !== undefined) await this.upsertCategory(client, userId, item.category, IN_APP, item.inApp);
-        if (item.email !== undefined) await this.upsertCategory(client, userId, item.category, EMAIL, item.email);
+    const fields = new Set<string>();
+    if (change.emailEnabled !== undefined) fields.add('emailEnabled');
+    for (const item of items) {
+      if (item.inApp !== undefined) fields.add(`${item.category}.inApp`);
+      if (item.email !== undefined) fields.add(`${item.category}.email`);
+    }
+    await this.audit.audited(async () => {
+      if (change.emailEnabled !== undefined) {
+        await this.packagePrefs.updatePreference(userId, KODA_TENANT_ID, EMAIL, change.emailEnabled);
       }
-    });
+      if (items.length === 0) return;
+      await this.txManager.run(async () => {
+        const client = this.txnClient();
+        for (const item of items) {
+          if (item.inApp !== undefined) await this.upsertCategory(client, userId, item.category, IN_APP, item.inApp);
+          if (item.email !== undefined) await this.upsertCategory(client, userId, item.category, EMAIL, item.email);
+        }
+      });
+    }, () => fields.size === 0 ? [] : [{
+      key: 'notification.preference.update',
+      resourceType: 'user',
+      resourceId: userId,
+      projectId: null,
+      summary: `fields: ${[...fields].sort().join(', ')}`,
+    }]);
   }
 
   /** The transactional Prisma client when one is open; otherwise the global one. */

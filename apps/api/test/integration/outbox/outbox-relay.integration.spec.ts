@@ -12,6 +12,7 @@ import { OutboxRelay, OutboxService as NathappOutboxService } from '@nathapp/nes
 import { outboxConfig } from '../../../src/config/outbox.config';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { OutboxAdminService } from '../../../src/outbox/outbox-admin.service';
+import { mockAuditRecorder } from '../../../src/common/test-helpers/global-stubs.module';
 import { OutboxModule } from '../../../src/outbox/outbox.module';
 import { PrismaOutboxRepository } from '../../../src/outbox/prisma-outbox.repository';
 import { resetDb } from '../../helpers/reset-db';
@@ -108,7 +109,7 @@ describeIntegration('outbox relay end to end', () => {
   });
 
   it('admin retry resets a dead event so the relay delivers it again', async () => {
-    const admin = new OutboxAdminService(module.get(PrismaOutboxRepository));
+    const admin = new OutboxAdminService(module.get(PrismaOutboxRepository), mockAuditRecorder);
     const handler = vi.fn();
     publisher.register('relay_revive', handler);
     const record = await outbox.record({ type: 'relay_revive', payload: {}, metadata: { projectId, eventId: 'revive-1' } });

@@ -10,7 +10,17 @@ describe('OutboxAdminService', () => {
     findById: vi.fn(),
     resetForRetry: vi.fn().mockResolvedValue(1),
   };
-  const service = new OutboxAdminService(repo as never);
+  const record = vi.fn(async () => undefined);
+  const audited = vi.fn(async <T>(fn: () => Promise<T>, entriesOf: (result: T) => unknown) => {
+    const result = await fn();
+    const entries = entriesOf(result);
+    for (const entry of Array.isArray(entries) ? entries : [entries]) {
+      if (entry) await record(entry);
+    }
+    return result;
+  });
+  const audit = { audited, record } as never;
+  const service = new OutboxAdminService(repo as never, audit);
 
   beforeEach(() => vi.clearAllMocks());
 
@@ -50,9 +60,11 @@ describe('OutboxAdminService', () => {
     expect(repo.resetForRetry).not.toHaveBeenCalled();
   });
 
-  it('409s when the row changed status between the read and the reset', async () => {
-    repo.findById.mockResolvedValue({ id: 'e1', status: OutboxStatus.DEAD });
+  it('US-003 AC15: 409s on a zero-row reset without recording', async () => {
+    repo.findById.mockResolvedValue({ id: 'e1', type: 'ticket_event', projectId: 'p1', status: OutboxStatus.DEAD });
     repo.resetForRetry.mockResolvedValueOnce(0);
     await expect(service.retry('e1')).rejects.toMatchObject({ status: HttpStatus.CONFLICT });
+    expect(audited).toHaveBeenCalledTimes(1);
+    expect(record).not.toHaveBeenCalled();
   });
 });
