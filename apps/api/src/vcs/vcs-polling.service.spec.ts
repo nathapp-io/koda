@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { VcsPollingService } from './vcs-polling.service';
 import { currentContext, type ActionContext } from '../action-context/action-context';
+import { currentBookkeepingReason } from '../action-context/audit-coverage';
 import { VCS_CFG } from '../config/vcs.config';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VcsSyncService } from './vcs-sync.service';
@@ -103,6 +104,43 @@ describe('VcsPollingService', () => {
   afterEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
+  });
+
+  describe('poll bookkeeping marks', () => {
+    it('marks cursor and successful sync-log writes', async () => {
+      const reasons: Array<string | undefined> = [];
+      mockRepo.updateVcsConnectionLastSynced.mockImplementation(async () => {
+        reasons.push(currentBookkeepingReason());
+      });
+      mockRepo.createVcsSyncLog.mockImplementation(async () => {
+        reasons.push(currentBookkeepingReason());
+        return {} as never;
+      });
+      vi.mocked(createVcsProvider).mockReturnValue({
+        fetchIssues: vi.fn().mockResolvedValue({ issues: [], cursor: new Date(), capped: false }),
+      } as never);
+
+      await (service as unknown as { poll: (connection: VcsConnectionWithProjectDomain) => Promise<void> })
+        .poll(makeConnection());
+
+      expect(reasons).toEqual(['vcs.poll-log', 'vcs.poll-log']);
+    });
+
+    it('marks error-path sync-log writes after provider failure', async () => {
+      let reason: string | undefined;
+      mockRepo.createVcsSyncLog.mockImplementation(async () => {
+        reason = currentBookkeepingReason();
+        return {} as never;
+      });
+      vi.mocked(createVcsProvider).mockReturnValue({
+        fetchIssues: vi.fn().mockRejectedValue(new Error('provider failed')),
+      } as never);
+
+      await (service as unknown as { poll: (connection: VcsConnectionWithProjectDomain) => Promise<void> })
+        .poll(makeConnection());
+
+      expect(reason).toBe('vcs.poll-log');
+    });
   });
 
   describe('onModuleInit', () => {

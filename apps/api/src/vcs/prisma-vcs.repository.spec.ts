@@ -158,7 +158,7 @@ describe('PrismaVcsRepository', () => {
       mockUpdate.mockClear();
       mockQueryRaw.mockResolvedValue([{ prState: 'open' }]);
       await repo.updateTicketLinkWithPrState('link-1', 'closed');
-      expect(currentBookkeepingReason()).toBeUndefined();
+      expect(reasons).toEqual(['vcs.pr-same-state', undefined]);
     });
 
     it('marks existing link refresh but not a new link create', async () => {
