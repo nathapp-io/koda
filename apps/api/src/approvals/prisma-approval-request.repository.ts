@@ -90,6 +90,14 @@ export class PrismaApprovalRequestRepository extends AbstractPrismaRepository<Ap
     return rows.map((row) => this.toDomain(row));
   }
 
+  async findStaleApproved(before: Date, limit: number): Promise<ApprovalRequestRecord[]> {
+    const rows = await this.prisma.client.approvalRequest.findMany({
+      where: { status: 'approved', decidedAt: { lte: before } },
+      orderBy: [{ decidedAt: 'asc' }, { id: 'asc' }], take: limit,
+    });
+    return rows.map((row) => this.toDomain(row));
+  }
+
   /** Caller owns the transaction, retaining the update lock through the subsequent read. */
   async transition(id: string, from: ApprovalRequestStatus, patch: Partial<ApprovalRequestRecord>): Promise<ApprovalRequestRecord | null> {
     const updated = await this.prisma.client.approvalRequest.updateMany({ where: { id, status: from }, data: this.toPersistenceUpdate(patch) });
