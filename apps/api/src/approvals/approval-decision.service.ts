@@ -6,6 +6,7 @@ import { PermissionService } from '../permissions/permission.service';
 import { decideEligibility } from './approval-eligibility';
 import type { ApprovalRequestRecord } from './domain/approval.domain';
 import { ApprovalDecideForbiddenError, ApprovalRequestExpiredError, ApprovalRequestNotFoundError, ApprovalRequestNotPendingError } from './domain/approval.errors';
+import { ApprovalExecutionService } from './approval-execution.service';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
 
 @Injectable()
@@ -15,9 +16,17 @@ export class ApprovalDecisionService {
     private readonly requests: PrismaApprovalRequestRepository,
     private readonly permissions: PermissionService,
     private readonly audit: AuditRecorder,
+    private readonly execution: ApprovalExecutionService,
   ) {}
 
-  decide(requestId: string, decision: 'approve' | 'reject', comment: string | null, now = new Date()): Promise<ApprovalRequestRecord> {
+  async decide(requestId: string, decision: 'approve' | 'reject', comment: string | null, now = new Date()): Promise<ApprovalRequestRecord> {
+    const decided = await this.record(requestId, decision, comment, now);
+    // The decision is committed before the command runs, in its own transaction, so a failing
+    // command leaves the approval on record and settles the request as failed.
+    return decision === 'approve' ? this.execution.execute(requestId) : decided;
+  }
+
+  private record(requestId: string, decision: 'approve' | 'reject', comment: string | null, now: Date): Promise<ApprovalRequestRecord> {
     return this.txManager.run(async () => {
       const request = await this.requests.lockById(requestId);
       if (!request) throw new ApprovalRequestNotFoundError(requestId);
@@ -51,7 +60,6 @@ export class ApprovalDecisionService {
         key: 'approval.decide', resourceType: 'approval-request', resourceId: requestId,
         projectId: request.projectId, summary: `${approved ? 'approved' : 'rejected'} ${request.permissionKey}`,
       }));
-      // US-011 adds execution after this transaction commits; decisions never run commands here.
       return updated;
     });
   }

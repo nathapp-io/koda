@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ApprovalCommandRegistry } from './approval-command.registry';
+import { ApprovalExecutionService } from './approval-execution.service';
 import { ApprovalGate } from './approval-gate.service';
 import { ApprovalDecisionService } from './approval-decision.service';
 import { ApprovalPolicyService } from './approval-policy.service';
@@ -14,9 +15,10 @@ import { PrismaApprovalRequestRepository } from './prisma-approval-request.repos
  * so `ApprovalGate` (US-008) and the registering module share one map.
  */
 @Module({
-  exports: [ApprovalPolicyService, ApprovalCommandRegistry, ApprovalGate, ApprovalDecisionService],
+  exports: [ApprovalPolicyService, ApprovalCommandRegistry, ApprovalGate, ApprovalDecisionService, ApprovalExecutionService],
   providers: [
     ApprovalDecisionService,
+    ApprovalExecutionService,
     ApprovalGate,
     ApprovalPolicyService,
     ApprovalPolicyResolver,

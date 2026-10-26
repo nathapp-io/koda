@@ -7,6 +7,7 @@ import { createMockPrismaService, PrismaService } from '@nathapp/nestjs-prisma';
 import { ApprovalEngineModule } from './approval-engine.module';
 import { ApprovalGate } from './approval-gate.service';
 import { ApprovalDecisionService } from './approval-decision.service';
+import { ApprovalExecutionService } from './approval-execution.service';
 import { ApprovalCommandRegistry } from './approval-command.registry';
 import { ApprovalPolicyResolver } from './approval-policy.resolver';
 import { PermissionService } from '../permissions/permission.service';
@@ -27,7 +28,7 @@ class ExternalStubsModule {}
 
 @Injectable()
 class PolicyConsumer {
-  constructor(readonly policies: ApprovalPolicyService, readonly decisions: ApprovalDecisionService) {}
+  constructor(readonly policies: ApprovalPolicyService, readonly decisions: ApprovalDecisionService, readonly executions: ApprovalExecutionService) {}
 }
 @Injectable()
 class RegistryConsumer {
@@ -43,6 +44,7 @@ describe('ApprovalEngineModule', () => {
     moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ConsumerModule] }).compile();
     expect(moduleRef.get(PolicyConsumer).policies).toBeInstanceOf(ApprovalPolicyService);
     expect(moduleRef.get(PolicyConsumer).decisions).toBeInstanceOf(ApprovalDecisionService);
+    expect(moduleRef.get(PolicyConsumer).executions).toBeInstanceOf(ApprovalExecutionService);
   });
   it('provides a resolver wired to policy and permission providers', async () => {
     moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ApprovalEngineModule] }).compile();

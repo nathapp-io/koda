@@ -32,6 +32,7 @@ export const BOOKKEEPING_REASONS = {
   'vcs.link-refresh': "The extractor's refresh of a ticket link that already exists.",
   'context.query-metric': "A context query's latency and result metric row.",
   'approval.request-open': 'An approval request opened by the gate; the decision records `approval.decide`.',
+  'approval.request-settle': "An approval request's terminal status and result; the command records its own key and the expiry records `system.approval.expire`.",
 } as const;
 
 export type BookkeepingReason = keyof typeof BOOKKEEPING_REASONS;

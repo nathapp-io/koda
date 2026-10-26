@@ -2,6 +2,7 @@ import { ApprovalDecisionService } from './approval-decision.service';
 import { decideEligibility } from './approval-eligibility';
 import { currentContext, runWithActionContext } from '../action-context/action-context';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
+import type { ApprovalExecutionService } from './approval-execution.service';
 import type { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
 import type { PermissionService } from '../permissions/permission.service';
 import type { AuditRecorder } from '../audit/audit-recorder.service';
@@ -26,11 +27,12 @@ function setup() {
   const audit = { record: vi.fn().mockImplementation(async () => { approvals.push(currentContext()?.approval); }) };
   const approvals: unknown[] = [];
   const tx = { run: vi.fn((fn: () => Promise<unknown>) => fn()), getClient: vi.fn(), isInTransaction: vi.fn(() => true) };
+  const execution = { execute: vi.fn().mockImplementation(async () => ({ ...request, status: 'executed' })) };
   const service = new ApprovalDecisionService(tx as ITransactionManager, repo as unknown as PrismaApprovalRequestRepository,
-    permissions as unknown as PermissionService, audit as unknown as AuditRecorder);
+    permissions as unknown as PermissionService, audit as unknown as AuditRecorder, execution as unknown as ApprovalExecutionService);
   const decide = (decision: 'approve' | 'reject' = 'approve') => runWithActionContext(
     { actor: { type: 'USER', id: 'u1' }, origin: 'rest' }, () => service.decide('r1', decision, decision === 'reject' ? 'no' : null, now));
-  return { request, repo, keys, permissions, audit, approvals, tx, service, decide };
+  return { request, repo, keys, permissions, audit, approvals, tx, execution, service, decide };
 }
 
 beforeEach(() => { vi.mocked(decideEligibility).mockReset().mockReturnValue({ ok: true, satisfiedBy: 'human' }); });
@@ -83,4 +85,19 @@ it.each(['missing', 'rejected', 'expired', 'boundary'] as const)('refuses %s bef
   expect(s.repo.createDecision).not.toHaveBeenCalled();
   expect(s.repo.transition).not.toHaveBeenCalled();
   expect(s.audit.record).not.toHaveBeenCalled();
+});
+
+it('executes after an approve commits and returns the execution result', async () => {
+  const s = setup();
+  expect(await s.decide()).toMatchObject({ status: 'executed' });
+  expect(s.execution.execute).toHaveBeenCalledExactlyOnceWith('r1');
+  expect(s.tx.run).toHaveBeenCalledTimes(1);
+});
+
+it('does not execute a rejection or a refused decision', async () => {
+  const s = setup();
+  await s.decide('reject');
+  vi.mocked(decideEligibility).mockReturnValue({ ok: false, reason: 'tier-too-low' });
+  await expect(s.decide()).rejects.toBeInstanceOf(ApprovalDecideForbiddenError);
+  expect(s.execution.execute).not.toHaveBeenCalled();
 });

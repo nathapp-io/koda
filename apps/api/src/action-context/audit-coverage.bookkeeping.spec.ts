@@ -41,6 +41,7 @@ const EXPECTED_REASON_IDS = [
   'fleet.ingest-progress',
   'fleet.analytics-progress',
   'approval.request-open',
+  'approval.request-settle',
 ] as const;
 
 const EXPECTED_UNAUDITED_SURFACES = [
@@ -123,7 +124,7 @@ describe('audit coverage bookkeeping', () => {
     expect(entries).toBe(1);
   });
 
-  it('AC-9: contains exactly the 26 initial, two progress and approval reason ids', () => {
+  it('AC-9: contains exactly the 26 initial, two progress and two approval reason ids', () => {
     expect(Object.keys(BOOKKEEPING_REASONS).sort()).toEqual([...EXPECTED_REASON_IDS].sort());
   });
 
