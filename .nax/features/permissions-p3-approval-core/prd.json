@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-core",
   "branchName": "feat/permissions-p3-approval-core",
   "createdAt": "2026-11-04T00:00:00.000Z",
-  "updatedAt": "2026-10-26T11:54:13.922Z",
+  "updatedAt": "2026-10-26T12:00:50.323Z",
   "userStories": [
     {
       "id": "US-001",
@@ -393,14 +393,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Pure function but directly enforces access control, delegated self-approval, distinctness, tier ordering and .own limitations; strict security TDD is required."
+        "reasoning": "Pure function but directly enforces access control, delegated self-approval, distinctness, tier ordering and .own limitations; strict security TDD is required.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/approvals/domain/approval.domain.ts",
@@ -420,7 +423,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e1d73650414af0e5431b80a5313065e662b46d3e"
     },
     {
       "id": "US-007",
