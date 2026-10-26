@@ -153,6 +153,89 @@ describe('withTransactionTally', () => {
     expect(outerWrites).toEqual(['Session.deleteMany']);
   });
 
+  // Review B1 (follow-up) — a detached boundary keeps its own outcome even inside a transaction that
+  // has no entry point above it: the scope-less tally must not swallow the detached write, or the
+  // detached scope passes with its write discarded.
+  it('checks a detached scope opened inside a scope-less transaction', async () => {
+    let detachedError: unknown;
+
+    await expect(withTransactionTally(async () => {
+      await runInAuditScope('task:T', async () => {
+        noteAuditWrite('TicketLink.update');
+      }, { detached: true }).catch((error: unknown) => { detachedError = error; });
+    })).resolves.toBeUndefined();
+
+    expect(detachedError).toBeInstanceOf(UnauditedWriteError);
+    expect((detachedError as UnauditedWriteError).surface).toBe('task:T');
+    expect((detachedError as UnauditedWriteError).writes).toEqual(['TicketLink.update']);
+  });
+
+  it('counts the transaction a detached scope opens in that scope under a scope-less transaction', async () => {
+    await expect(withTransactionTally(async () => {
+      await expect(runInAuditScope('task:T', async () => {
+        await withTransactionTally(async () => {
+          noteAuditWrite('TicketLink.update');
+        });
+      }, { detached: true })).rejects.toBeInstanceOf(UnauditedWriteError);
+    })).resolves.toBeUndefined();
+  });
+
+  // Review B3 — an ordinary scope opened inside a scope-less transaction is still enclosed by that
+  // transaction, so its nested transaction's work defers to the enclosing callback (US-004 AC-8)
+  // instead of being counted in the scope that is already settling.
+  it('defers a nested-scope write through a nested tally to the scope-less enclosing transaction', async () => {
+    await expect(withTransactionTally(async () => {
+      await expect(runInAuditScope('system:vcs', async () => {
+        await withTransactionTally(async () => {
+          noteAuditWrite('Label.create');
+        });
+      })).resolves.toBeUndefined();
+    })).resolves.toBeUndefined();
+  });
+
+  it('defers a nested-scope write through a nested tally to the enclosing entry point', async () => {
+    await openAuditScope('POST /x', async (scope) => {
+      await withTransactionTally(async () => {
+        await expect(runInAuditScope('system:vcs', async () => {
+          await withTransactionTally(async () => {
+            noteAuditWrite('Label.create');
+          });
+        })).resolves.toBeUndefined();
+        expect(scope.writes).toEqual([]);
+      });
+
+      expect(scope.writes).toEqual(['Label.create']);
+    });
+  });
+
+  // Review B2 (follow-up) — a nested transaction that settles after the scope that opened it settled
+  // and was checked is dropped, even when an enclosing transaction could absorb its entry: otherwise
+  // the enclosing entry point passes on an entry it never recorded.
+  it('drops a tally that settles after its scope closed instead of merging into the enclosing tally', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let late!: Promise<void>;
+
+    const outer = runInAuditScope('writer:Sweeper', async () => {
+      noteAuditWrite('Session.deleteMany');
+      await withTransactionTally(async () => {
+        await runInAuditScope('system:child', async () => {
+          // Started but not awaited: it outlives the child scope that opened it.
+          late = withTransactionTally(async () => {
+            noteAuditEntry();
+            await gate;
+          });
+        });
+        release();
+        await late;
+      });
+    });
+
+    const error = await outer.then(() => undefined, (thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(UnauditedWriteError);
+    expect((error as UnauditedWriteError).surface).toBe('writer:Sweeper');
+  });
+
   // Review B2 — a transaction that outlives the scope that opened it counts nothing: the entry point
   // already settled and was checked.
   it('drops a fulfilled tally whose scope settled first', async () => {

@@ -46,6 +46,11 @@ interface ScopeState extends AuditScope {
   entries: number;
   /** Set once the scope's work has settled; late notes and tally flushes targeting it are ignored. */
   closed: boolean;
+  /**
+   * Opened with `{ detached: true }`, or nested inside a scope that was: no entry point owns this
+   * scope's outcome, so a transaction outside it never buffers its work.
+   */
+  readonly detached: boolean;
 }
 
 const logger = new Logger(UnauditedWriteError.name);
@@ -78,8 +83,17 @@ export function openAuditScope<T>(
   fn: (scope: AuditScope) => T,
   opts?: { detached?: boolean },
 ): T {
-  const parent = opts?.detached === true ? undefined : scopeStorage.getStore();
-  const scope: ScopeState = { surface, parent, writes: [], entries: 0, closed: false };
+  const detachedRoot = opts?.detached === true;
+  const parent = detachedRoot ? undefined : scopeStorage.getStore();
+  const scope: ScopeState = {
+    surface,
+    parent,
+    writes: [],
+    entries: 0,
+    closed: false,
+    // A scope nested in a detached one belongs to the same detached boundary: no entry point owns it.
+    detached: detachedRoot || parent?.detached === true,
+  };
 
   return scopeStorage.run(scope, () => fn(scope));
 }
@@ -138,9 +152,11 @@ export function runInAuditScope<T>(surface: string, fn: () => T, opts?: { detach
  * Capture the destination now: scopes opened and checked inside fn must not receive buffered work.
  * This tracks the callback outcome, not the eventual database commit outcome.
  *
- * The tally only holds work its own scope lineage made. A detached scope opened inside the
- * transaction is outside that lineage — its entry counts in itself, never in the entry point that
+ * The tally only holds work its own scope lineage made (`holdsScope`). A detached scope opened inside
+ * the transaction is outside that lineage — its entry counts in itself, never in the entry point that
  * opened the transaction, so nothing detached can satisfy it (§ "Detached work opens its own scope").
+ * Work that arrives after the scope that opened the transaction settled is dropped instead of being
+ * handed to an enclosing transaction, whose entry point was already checked.
  */
 export function withTransactionTally<T>(fn: () => Promise<T>): Promise<T> {
   const tally: TransactionTally = {
@@ -159,17 +175,21 @@ export function withTransactionTally<T>(fn: () => Promise<T>): Promise<T> {
 
 /** Adds a fulfilled tally's work to the tally or the scope that owns its outcome. */
 function flushTally(tally: TransactionTally): void {
+  // The scope that opened this transaction has already settled and been checked; its work is
+  // reported, so nothing may travel into a tally that is still open or into the closed scope.
+  if (tally.scope !== undefined && tally.scope.closed) return;
+
   // An enclosing callback still owns the outcome of a nested tally's successful work — as long as
   // that tally belongs to the same scope lineage. A tally a detached scope opened owns its own
   // work, which must not travel into the tally that merely encloses it lexically.
-  if (tally.parent !== undefined && ownsTally(tally.parent.scope, tally.scope)) {
+  if (tally.parent !== undefined && holdsScope(tally.parent.scope, tally.scope)) {
     tally.parent.writes.push(...tally.writes);
     tally.parent.entries += tally.entries;
     return;
   }
 
   const scope = tally.scope;
-  if (scope === undefined || scope.closed) return;
+  if (scope === undefined) return;
 
   scope.writes.push(...tally.writes);
   for (let destination: ScopeState | undefined = scope; destination !== undefined; destination = destination.parent) {
@@ -178,20 +198,21 @@ function flushTally(tally: TransactionTally): void {
 }
 
 /**
- * Whether a tally opened in `tallyScope` holds work noted in `scope`. A tally opened outside any
- * scope holds everything — there is no entry point to attribute the work to, so it is counted
- * nowhere — while one opened in a scope holds the work of that scope and its children, never that of
- * a detached scope opened inside it.
+ * Whether a transaction tally opened in `tallyScope` holds work noted in `scope`, i.e. whether that
+ * transaction owns the work's outcome: it adds the work to its captured scope on fulfilment and drops
+ * it on rejection.
+ *
+ * A tally opened inside a scope holds the work of that scope and of the scopes nested in it, never
+ * the work of a detached boundary. A tally opened outside any scope holds the ordinary work made
+ * inside it — its own writes, and the scopes opened in it, which defer attribution until the callback
+ * settles (US-004 AC-8) — but not detached work: a detached scope is checked on its own, so
+ * swallowing its write here would let it pass unaudited (AC-12).
  */
 function holdsScope(tallyScope: ScopeState | undefined, scope: ScopeState | undefined): boolean {
-  if (tallyScope === undefined) return true;
-  return scope === undefined || isWithin(scope, tallyScope);
-}
+  if (scope === undefined) return tallyScope === undefined;
+  if (tallyScope === undefined) return !scope.detached;
 
-/** Whether a tally opened in `enclosing` owns the work of one opened in `inner`. */
-function ownsTally(enclosing: ScopeState | undefined, inner: ScopeState | undefined): boolean {
-  if (enclosing === undefined) return inner === undefined;
-  return inner === undefined || isWithin(inner, enclosing);
+  return isWithin(scope, tallyScope);
 }
 
 /** Whether `scope` is `target` or one of its descendants. */
