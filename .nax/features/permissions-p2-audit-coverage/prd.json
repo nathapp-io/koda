@@ -3,7 +3,7 @@
   "feature": "permissions-p2-audit-coverage",
   "branchName": "feat/permissions-p2-audit-coverage",
   "createdAt": "2026-10-26T00:00:00Z",
-  "updatedAt": "2026-10-26T06:37:59.019Z",
+  "updatedAt": "2026-10-26T06:49:06.680Z",
   "userStories": [
     {
       "id": "US-001",
@@ -432,14 +432,17 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Eight modules with broad transcript/seed exceptions and branch-local ledger markers; assistant approval/action paths invoke the security override."
+        "reasoning": "Eight modules with broad transcript/seed exceptions and branch-local ledger markers; assistant approval/action paths invoke the security override.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/logs/log-upload.service.ts",
@@ -494,7 +497,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "974809f9f752524b2f1a62b35c51b3a5386fe0af"
     },
     {
       "id": "US-008",
