@@ -969,7 +969,7 @@ Verification note: `openapi.json` is regenerated with `bun run api:export-spec` 
 11. [unit] `approval reject r1` calls `approvalRequestsControllerDecide` with `body: { decision: 'reject' }`.
 12. [unit] `approval cancel r1` calls `approvalRequestsControllerCancel({ path: { id: 'r1' } })`.
 13. [unit] `approval cancel r1` prints `r1 cancelled` for an answer whose status is `cancelled`.
-14. [unit] An `ApiError` with status 403 from `approvalRequestsControllerDecide` goes through `handleApiError`, and the process exits with code 1.
+14. [unit] An `ApiError` with status 403 from `approvalRequestsControllerDecide` goes through `handleApiError`, and the process exits with code 2 (the CLI's auth-error exit, `apps/cli/src/utils/error.ts`).
 15. [unit] The program built by `src/index.ts` has an `approval` command.
 
 Verification note: `bun run generate:cli` (repo root) regenerates `apps/cli/src/generated/` from the US-010 `openapi.json`; `bun run --cwd apps/cli type-check` and `bun run --cwd apps/cli lint` pass.
