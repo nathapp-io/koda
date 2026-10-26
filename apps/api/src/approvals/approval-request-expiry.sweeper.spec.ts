@@ -85,6 +85,7 @@ function build(over: BuildOptions = {}) {
     isInTransaction: vi.fn(() => true),
   };
   const config = { sweepEnabled: over.sweepEnabled ?? false, approvalSweepMs: 15_000 };
+  const events = { record: vi.fn().mockResolvedValue(undefined) };
 
   const sweeper = new ApprovalRequestExpirySweeper(
     tx as never,
@@ -92,8 +93,9 @@ function build(over: BuildOptions = {}) {
     audit as never,
     execution as never,
     config,
+    events as never,
   );
-  return { sweeper, requests, audit, execution, tx, config };
+  return { sweeper, requests, audit, execution, tx, config, events };
 }
 
 describe('ApprovalRequestExpirySweeper lifecycle', () => {
@@ -169,6 +171,7 @@ describe('ApprovalRequestExpirySweeper.tick', () => {
     const result: ApprovalRequestExpiryResult = await b.sweeper.tick(NOW);
 
     expect(result).toEqual({ expired: 1, approved: 0, failed: 0 });
+    expect(b.events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'r1', status: 'expired' }));
     expect(b.tx.run).toHaveBeenCalledTimes(1);
     expect(b.requests.transition).toHaveBeenCalledWith('r1', 'pending', { status: 'expired', settledAt: NOW });
     expect(b.audit.record).toHaveBeenCalledWith({

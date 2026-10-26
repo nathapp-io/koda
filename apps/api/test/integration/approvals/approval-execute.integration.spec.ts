@@ -8,6 +8,7 @@ import { ApprovalCommandRegistry } from '../../../src/approvals/approval-command
 import { ApprovalDecisionService } from '../../../src/approvals/approval-decision.service';
 import { ApprovalExecutionService } from '../../../src/approvals/approval-execution.service';
 import { ApprovalGate } from '../../../src/approvals/approval-gate.service';
+import { ApprovalRequestEvents } from '../../../src/approvals/approval-request-events';
 import { ApprovalRequestNotPendingError } from '../../../src/approvals/domain/approval.errors';
 import { PrismaApprovalRequestRepository } from '../../../src/approvals/prisma-approval-request.repository';
 import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
@@ -92,6 +93,18 @@ import { canRunDbTests } from '../../helpers/test-environment';
     expect((await stored(r.id)).status).toBe('executed');
   });
 
+  it('records pending, approved and executed outbox events in transition order', async () => {
+    await eligible(); await grantKeys(db, user, ['label.delete'], 'p1');
+    const r = await open();
+    await decide(r.id);
+    const events = await db.outboxEvent.findMany({
+      where: { type: 'approval_request_changed' }, orderBy: { createdAt: 'asc' }, take: 100,
+    });
+    const statuses = events.filter((event) => (event.payload as { requestId: string }).requestId === r.id)
+      .map((event) => (event.payload as { status: string }).status);
+    expect(statuses).toEqual(['pending', 'approved', 'executed']);
+  });
+
   it('AC-2: the command runs under the request actor and the approval that released it', async () => {
     await eligible(); const r = await open(); await decide(r.id);
     expect(contexts).toHaveLength(1);
@@ -140,7 +153,8 @@ import { canRunDbTests } from '../../helpers/test-environment';
   it('AC-8: no registered command fails the request with no-command', async () => {
     const r = await open(); await moveToApproved(r.id);
     const bare = new ApprovalExecutionService(app.get(TRANSACTION_MANAGER, { strict: false }) as ITransactionManager,
-      requests, app.get(PermissionService, { strict: false }), new ApprovalCommandRegistry());
+      requests, app.get(PermissionService, { strict: false }), new ApprovalCommandRegistry(),
+      app.get(ApprovalRequestEvents, { strict: false }));
     expect(await bare.execute(r.id, now)).toMatchObject({ status: 'failed', result: { error: 'no-command' } });
     expect(labels.state.calls).toEqual([]);
   });

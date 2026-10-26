@@ -9,6 +9,7 @@ import { canonicalJson } from './canonical-json';
 import type { ApprovalRequestRecord } from './domain/approval.domain';
 import { ApprovalRequestNotFoundError, ApprovalRequestNotPendingError } from './domain/approval.errors';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
+import { ApprovalRequestEvents } from './approval-request-events';
 
 const OWN_SUFFIX = '.own';
 
@@ -39,6 +40,7 @@ export class ApprovalExecutionService {
     private readonly requests: PrismaApprovalRequestRepository,
     private readonly permissions: PermissionService,
     private readonly registry: ApprovalCommandRegistry,
+    private readonly events: ApprovalRequestEvents,
   ) {}
 
   async execute(requestId: string, now: Date = new Date()): Promise<ApprovalRequestRecord> {
@@ -111,6 +113,7 @@ export class ApprovalExecutionService {
             }));
             // The row is locked by this transaction, so a lost transition means a broken boundary: roll back.
             if (!settled) throw new ApprovalRequestNotPendingError(locked.status);
+            await this.events.record(settled);
 
             return settled;
           } catch (error) {
@@ -144,9 +147,11 @@ export class ApprovalExecutionService {
 
   /** Settles an approved request in its own transaction as bookkeeping. */
   private async settle(id: string, patch: Pick<ApprovalRequestRecord, 'status' | 'settledAt' | 'result'>): Promise<ApprovalRequestRecord> {
-    const settled = await bookkeeping('approval.request-settle', () => this.txManager.run(
-      () => this.requests.transition(id, 'approved', patch),
-    ));
+    const settled = await bookkeeping('approval.request-settle', () => this.txManager.run(async () => {
+      const transitioned = await this.requests.transition(id, 'approved', patch);
+      if (transitioned) await this.events.record(transitioned);
+      return transitioned;
+    }));
     if (settled) return settled;
 
     // Another execute settled it first.

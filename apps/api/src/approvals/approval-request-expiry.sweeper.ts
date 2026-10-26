@@ -8,6 +8,7 @@ import { ApprovalExecutionService } from './approval-execution.service';
 import type { ApprovalRequestRecord } from './domain/approval.domain';
 import { ApprovalRequestNotPendingError } from './domain/approval.errors';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
+import { ApprovalRequestEvents } from './approval-request-events';
 
 /** At most this many requests settle in one tick; a longer backlog waits for the next one. */
 export const MAX_PER_TICK = 100;
@@ -45,6 +46,7 @@ export class ApprovalRequestExpirySweeper implements OnModuleInit, OnModuleDestr
     private readonly audit: AuditRecorder,
     private readonly execution: ApprovalExecutionService,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'sweepEnabled' | 'approvalSweepMs'>,
+    private readonly events: ApprovalRequestEvents,
   ) {}
 
   onModuleInit(): void {
@@ -116,6 +118,7 @@ export class ApprovalRequestExpirySweeper implements OnModuleInit, OnModuleDestr
     // The row is locked by this transaction, so a lost transition means a broken boundary: throw so the
     // transaction rolls back, instead of recording an entry for a settlement that did not happen.
     if (!settled) throw new ApprovalRequestNotPendingError(locked.status);
+    await this.events.record(settled);
 
     await this.audit.record({
       key: 'system.approval.expire',

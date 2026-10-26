@@ -7,6 +7,7 @@ import { decideEligibility } from './approval-eligibility';
 import type { ApprovalRequestRecord } from './domain/approval.domain';
 import { ApprovalDecideForbiddenError, ApprovalRequestExpiredError, ApprovalRequestNotFoundError, ApprovalRequestNotPendingError } from './domain/approval.errors';
 import { ApprovalExecutionService } from './approval-execution.service';
+import { ApprovalRequestEvents } from './approval-request-events';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
 
 @Injectable()
@@ -17,6 +18,7 @@ export class ApprovalDecisionService {
     private readonly permissions: PermissionService,
     private readonly audit: AuditRecorder,
     private readonly execution: ApprovalExecutionService,
+    private readonly events: ApprovalRequestEvents,
   ) {}
 
   async decide(requestId: string, decision: 'approve' | 'reject', comment: string | null, now = new Date()): Promise<ApprovalRequestRecord> {
@@ -52,6 +54,7 @@ export class ApprovalDecisionService {
       });
       // A lost CAS under our row lock indicates a broken transaction boundary: roll back all writes.
       if (!updated) throw new ApprovalRequestNotPendingError(request.status);
+      await this.events.record(updated);
       const approval: ActionApproval = {
         requiredMode: request.requiredMode, satisfiedBy: approved ? eligibility.satisfiedBy : 'none',
         ...(approved ? { approverType: decider.type, approverId: decider.id } : {}), requestId,
