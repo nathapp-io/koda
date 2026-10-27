@@ -95,10 +95,14 @@ integration('fleet budget override command through ApprovalDecisionService', () 
 
     const after = await policyRow();
     expect({ amountUsd: after.amountUsd.toString(), pausedAt: after.pausedAt }).toEqual({ amountUsd: '20', pausedAt: null });
-    expect(await db.budgetIncident.findFirstOrThrow({ where: { policyId, kind: 'resumed' } }))
-      .toMatchObject({ actorId: userId, approvalId: requestId });
-    expect(await db.auditEntry.findFirst({ where: { key: 'fleet.budget.override', resourceId: requestId } }))
-      .toMatchObject({ key: 'fleet.budget.override', summary: 'raised to 20 and resumed', approvalRequestId: requestId });
+    // AC-9 says one incident: nothing in the schema (no unique index on policyId + kind) stops a second,
+    // so this asserts the resume wrote exactly one rather than merely that one matching row exists.
+    const resumed = await db.budgetIncident.findMany({ where: { policyId, kind: 'resumed' } });
+    expect(resumed).toHaveLength(1);
+    expect(resumed[0]).toMatchObject({ actorId: userId, approvalId: requestId });
+    const audited = await db.auditEntry.findMany({ where: { key: 'fleet.budget.override', resourceId: requestId } });
+    expect(audited).toHaveLength(1);
+    expect(audited[0]).toMatchObject({ key: 'fleet.budget.override', summary: 'raised to 20 and resumed', approvalRequestId: requestId });
     expect(settled).toMatchObject({ status: 'executed', result: { resumedAmountUsd: '20' } });
   });
 
