@@ -14,6 +14,8 @@ describe('permission contract checker', () => {
     // principal from a project is now deleting its bindings, which `role.binding.manage` gates, and
     // the key waits for P3 policy to decide whether it gates binding removal.
     'member.remove',
+    'fleet.job.shell.escalate',
+    'fleet.budget.override',
   ]);
   const requires = (keys: readonly string[], enforcedBy: 'guard' | 'service' = 'guard'): RequiresMetadata => ({
     keys,

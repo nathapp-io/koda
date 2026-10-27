@@ -221,8 +221,15 @@ describe('the seeded-role allow/deny matrix', () => {
 
     for (const row of rows) {
       expect(Object.keys(row.cells)).toEqual(PERMISSION_CATALOG.map((entry) => entry.key));
-      expect(Object.keys(row.cells)).toHaveLength(221);
+      expect(Object.keys(row.cells)).toHaveLength(223);
     }
+  });
+
+  it('US-001 AC-8/9/10/11: fleet ask permissions follow the seeded role patterns', () => {
+    expect(matrix.developer['fleet.job.shell.escalate'][1]).toBe('granted');
+    expect(matrix.developer['fleet.budget.override'][1]).toBe('not-granted');
+    expect(matrix['project-admin']['fleet.budget.override'][1]).toBe('granted');
+    expect(matrix.viewer['fleet.job.shell.escalate'][1]).toBe('not-granted');
   });
 
   it('AC-3: the 17 pinned cells of the design table hold in the matrix and in the committed file', () => {

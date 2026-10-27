@@ -88,6 +88,8 @@ const NEW_KEY_SCOPES: Readonly<Record<string, CatalogScope>> = {
   'approval.policy.manage': 'any',
   'audit.read': 'global',
   'memory.update': 'any',
+  'fleet.job.shell.escalate': 'project',
+  'fleet.budget.override': 'any',
 };
 const NEW_KEY_LIST = Object.keys(NEW_KEY_SCOPES);
 
@@ -101,6 +103,7 @@ const HIGH_RISK_PREFIXES = [
   'fleet.budget.',
   'fleet.enrollment.',
   'fleet.credential.',
+  'fleet.job.shell.',
 ];
 
 /** `[key, catalog_scope]` in file order, with cells holding several keys split on `;`. */
@@ -361,7 +364,7 @@ describe('PERMISSION_CATALOG', () => {
         principals: key === 'role.binding.owner' ? ['user'] : ['user', 'agent'],
         approval: {
           approvable,
-          floor: approvable && risk === 'critical' ? 'human' : 'none',
+          floor: !approvable ? 'none' : risk === 'critical' ? 'human' : key === 'fleet.budget.override' ? 'self' : 'none',
           default: !approvable ? 'none' : risk === 'critical' ? 'human' : risk === 'high' ? 'agent' : 'none',
         },
       };
@@ -392,6 +395,24 @@ describe('PERMISSION_CATALOG', () => {
  * the mode an `AGENT` subject gets when no policy matches (design §4).
  */
 describe('catalog approval metadata', () => {
+  it('US-001 AC-1: shell escalation is a high-risk project ask', () => {
+    expect(findCatalogEntry('fleet.job.shell.escalate')).toMatchObject({
+      scope: 'project', access: 'role', risk: 'high',
+      approval: { approvable: true, floor: 'none', default: 'agent' },
+    });
+  });
+
+  it('US-001 AC-2: budget override requires a decider and is any-scoped', () => {
+    expect(findCatalogEntry('fleet.budget.override')).toMatchObject({
+      scope: 'any', access: 'role', risk: 'high',
+      approval: { approvable: true, floor: 'self', default: 'agent' },
+    });
+  });
+
+  it('US-001 AC-3/4: existing budget entries retain their approval metadata', () => {
+    expect(findCatalogEntry('fleet.budget.read')?.approval.approvable).toBe(false);
+    expect(findCatalogEntry('fleet.budget.update')?.approval.floor).toBe('none');
+  });
   const approvalOf = (key: string) => {
     const entry = findCatalogEntry(key);
     if (entry === undefined) throw new Error(`missing catalog entry: ${key}`);
