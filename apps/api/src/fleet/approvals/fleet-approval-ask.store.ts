@@ -1,5 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { ApprovalResolvedBy } from './domain/approval.domain';
+import type { IPageOption } from '@nathapp/nestjs-common';
+import type { IPageResult } from '@nathapp/nestjs-data';
+import type { ApprovalFilters, ApprovalResolvedBy, FleetApprovalRecord, PendingCount, RequeueCandidate } from './domain/approval.domain';
 import {
   FLEET_APPROVAL_ASK_REPOSITORY, FleetApprovalAskRecord, FleetAskWithStatus, IFleetApprovalAskRepository, NewFleetApprovalAsk,
 } from './domain/fleet-approval-ask.domain';
@@ -45,5 +47,37 @@ export class FleetApprovalAskStore {
 
   setOutcome(requestId: string, outcome: Record<string, unknown>): Promise<FleetApprovalAskRecord> {
     return this.asks.setOutcome(requestId, outcome);
+  }
+
+  findApproval(requestId: string): Promise<FleetApprovalRecord | null> {
+    return this.asks.findApproval(requestId);
+  }
+
+  findPage(f: ApprovalFilters, page: IPageOption): Promise<IPageResult<FleetApprovalRecord>> {
+    return this.asks.findPage(f, page);
+  }
+
+  countPending(projectIds: readonly string[]): Promise<PendingCount[]> {
+    return this.asks.countPending(projectIds);
+  }
+
+  countPendingAllProjects(): Promise<PendingCount[]> {
+    return this.asks.countPendingAllProjects();
+  }
+
+  countPendingUnscoped(): Promise<number> {
+    return this.asks.countPendingUnscoped();
+  }
+
+  countPendingByJob(jobIds: readonly string[]): Promise<Map<string, number>> {
+    return this.asks.countPendingByJob(jobIds);
+  }
+
+  findRequeueCandidates(policyId: string, since: Date, limit: number): Promise<RequeueCandidate[]> {
+    return this.asks.findRequeueCandidates(policyId, since, limit);
+  }
+
+  findProjectSlug(projectId: string): Promise<string | null> {
+    return this.asks.findProjectSlug(projectId);
   }
 }

@@ -13,6 +13,19 @@ export type ApprovalDecision = (typeof APPROVAL_DECISIONS)[number];
 export const APPROVAL_RESOLVED_BY = ['user', 'timeout', 'job_ended', 'superseded', 'manual_resume', 'window_reset', 'policy_deleted'] as const;
 export type ApprovalResolvedBy = (typeof APPROVAL_RESOLVED_BY)[number];
 
+/**
+ * Permissions P3 (US-002): the engine key of each fleet approval type. The fleet row is a view over an
+ * `ApprovalRequest`, so the type is decided by the key the request was opened with.
+ */
+export const FLEET_ASK_KEY = {
+  nax_bash_escalate: 'fleet.job.shell.escalate',
+  budget_override_required: 'fleet.budget.override',
+} as const;
+export const FLEET_ASK_KEYS: readonly string[] = Object.values(FLEET_ASK_KEY);
+
+/** A link resolution that makes the fleet status `cancelled` whatever the request status. */
+export const CANCELLING_RESOLUTIONS: readonly ApprovalResolvedBy[] = ['job_ended', 'superseded', 'policy_deleted', 'window_reset'];
+
 /** Ceiling on how many cancelled jobs one approval may offer for re-queue. */
 export const MAX_REQUEUE_CANDIDATES = 200;
 

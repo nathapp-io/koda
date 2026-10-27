@@ -1,5 +1,7 @@
+import type { IPageOption } from '@nathapp/nestjs-common';
+import type { IPageResult } from '@nathapp/nestjs-data';
 import type { ApprovalRequestStatus } from '../../../approvals/domain/approval.domain';
-import type { ApprovalResolvedBy } from './approval.domain';
+import type { ApprovalFilters, ApprovalResolvedBy, FleetApprovalRecord, PendingCount, RequeueCandidate } from './approval.domain';
 
 export type FleetAskKind = 'bash' | 'budget';
 
@@ -38,4 +40,16 @@ export interface IFleetApprovalAskRepository {
   setResolvedBy(requestId: string, resolvedBy: ApprovalResolvedBy): Promise<FleetApprovalAskRecord>;
   /** Replaces the outcome. */
   setOutcome(requestId: string, outcome: Record<string, unknown>): Promise<FleetApprovalAskRecord>;
+
+  /** US-002: the fleet view of one ask; null when the request is not a fleet ask or has no link. */
+  findApproval(requestId: string): Promise<FleetApprovalRecord | null>;
+  /** Fleet-key requests that have a link; newest createdAt first, then id. */
+  findPage(f: ApprovalFilters, page: IPageOption): Promise<IPageResult<FleetApprovalRecord>>;
+  countPending(projectIds: readonly string[]): Promise<PendingCount[]>;
+  countPendingAllProjects(): Promise<PendingCount[]>;
+  countPendingUnscoped(): Promise<number>;
+  /** Pending ask count per job id; jobs with none are absent. */
+  countPendingByJob(jobIds: readonly string[]): Promise<Map<string, number>>;
+  findRequeueCandidates(policyId: string, since: Date, limit: number): Promise<RequeueCandidate[]>;
+  findProjectSlug(projectId: string): Promise<string | null>;
 }
