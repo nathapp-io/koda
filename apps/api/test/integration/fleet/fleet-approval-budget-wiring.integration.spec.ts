@@ -415,6 +415,10 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
     expect(await requestOf(ask.id)).toMatchObject({ status: 'cancelled', result: { closedBy: 'manual_resume' } });
     // The fleet reads the link's manual-resume resolution as an approved ask.
     expect((await linkOf(ask.id)).resolvedBy).toBe('manual_resume');
+    // Fix round 3: the deferred close keeps the whole resume — the raised amount, its re-queues and the resumer.
+    expect((await linkOf(ask.id)).outcome).toEqual({ resumedAmountUsd: '20', requeueResults: [], resumedById: world.ids.root });
+    expect(await prisma.fleetActivity.findMany({ where: { entityType: 'approval', entityId: ask.id, action: 'approval.decided' } }))
+      .toMatchObject([{ actorType: 'USER', actorId: world.ids.root }]);
   });
 
   it('a resume with an approvalId stamps it and closes nothing', async () => {

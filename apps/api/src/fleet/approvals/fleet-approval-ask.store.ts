@@ -4,7 +4,7 @@ import type { IPageResult } from '@nathapp/nestjs-data';
 import type { ApprovalFilters, ApprovalResolvedBy, FleetApprovalRecord, PendingCount, RequeueCandidate } from './domain/approval.domain';
 import {
   FLEET_APPROVAL_ASK_REPOSITORY, FleetApprovalAskRecord, FleetAskWithStatus, IFleetApprovalAskRepository, JobEndAsk,
-  NewFleetApprovalAsk, PolicyAskClose,
+  NewFleetApprovalAsk, PersistedPolicyClose, PolicyAskClose,
 } from './domain/fleet-approval-ask.domain';
 
 /**
@@ -56,9 +56,9 @@ export class FleetApprovalAskStore {
     return this.asks.findPendingForPolicyPage(budgetPolicyId, afterRequestId, limit);
   }
 
-  /** US-007 (fix round 2): stamp the intent of a policy close on every pending ask of the policy. */
-  markPendingPolicyAsks(budgetPolicyId: string, resolvedBy: ApprovalResolvedBy): Promise<number> {
-    return this.asks.markPendingPolicyAsks(budgetPolicyId, resolvedBy);
+  /** US-007 (fix rounds 2-3): stamp the close a policy action intends on every pending ask of the policy. */
+  markPendingPolicyAsks(budgetPolicyId: string, close: PersistedPolicyClose): Promise<number> {
+    return this.asks.markPendingPolicyAsks(budgetPolicyId, close);
   }
 
   /** The durable policy-close queue: one bounded, skip-locked, least-recently-attempted batch. */

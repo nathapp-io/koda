@@ -9,7 +9,7 @@ const NOW = new Date('2026-10-02T10:00:00.000Z');
 
 const link = (over: Partial<FleetApprovalAskRecord> = {}): FleetApprovalAskRecord => ({
   requestId: 'a1', kind: 'budget', projectId: 'p1', jobId: null, leaseEpoch: null, naxAskId: null, budgetPolicyId: 'pol',
-  resolvedBy: null, outcome: null, pendingResolvedBy: null, recordedStatus: null, createdAt: NOW, updatedAt: NOW, ...over,
+  resolvedBy: null, outcome: null, pendingClose: null, recordedStatus: null, createdAt: NOW, updatedAt: NOW, ...over,
 });
 const view = (over: Partial<FleetApprovalRecord> = {}): FleetApprovalRecord => ({
   id: 'a1', type: 'budget_override_required', status: 'approved', projectId: 'p1', jobId: null, leaseEpoch: null, naxAskId: null,
@@ -36,28 +36,28 @@ function build(over: {
   const registry = { register: vi.fn((type: string, handler: (p: unknown) => Promise<void>) => handlers.set(type, handler)) };
   const store = {
     findByRequest: vi.fn(async () => (over.link === undefined ? link() : over.link)),
+    // Fix round 3: the marker is a claim, taken under a `FOR UPDATE` lock on the link.
+    lockByRequest: vi.fn(async () => (over.link === undefined ? link() : over.link)),
     findApproval: vi.fn(async () => (over.view === undefined ? view() : over.view)),
     setResolvedBy: vi.fn(async () => link()),
     setRecordedStatus: vi.fn(async () => link()),
   };
   const queries = { findById: vi.fn(async () => (over.request === undefined ? request() : over.request)) };
-  const resolved = [{ approvalId: 'a1', status: 'approved' }];
-  const closer = { recordResolved: vi.fn(async () => resolved) };
-  const live = { publish: vi.fn() };
+  const closer = { recordResolved: vi.fn(async () => [{ approvalId: 'a1', status: 'approved' }]) };
   const budgets = { findById: vi.fn(async () => over.policy === undefined ? { updatedById: 'u1' } : over.policy) };
   const txManager = { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) };
   const subscriber = new FleetAskEventsSubscriber(
-    registry as never, store as never, queries as never, closer as never, live as never, budgets as never, txManager as never,
+    registry as never, store as never, queries as never, closer as never, budgets as never, txManager as never,
   );
   subscriber.onModuleInit();
   const handle = handlers.get(APPROVAL_REQUEST_CHANGED);
   if (handle === undefined) throw new Error('the subscriber did not register');
-  return { handle, store, queries, closer, live, budgets, txManager };
+  return { handle, store, queries, closer, budgets, txManager };
 }
 
 describe('FleetAskEventsSubscriber (US-007 fix round 2, US-009)', () => {
   it.each(['rejected', 'executed', 'failed', 'expired'] as const)('records the fleet outputs of a settled %s ask', async (status) => {
-    const { handle, store, closer, live } = build({ request: request({ status }) });
+    const { handle, store, closer } = build({ request: request({ status }) });
 
     await handle(payload({ status }));
 
@@ -67,8 +67,9 @@ describe('FleetAskEventsSubscriber (US-007 fix round 2, US-009)', () => {
       : { type: 'USER', id: 'u9', responsibleUserId: 'u9' };
     expect(closer.recordResolved).toHaveBeenCalledWith(expect.objectContaining({ id: 'a1' }), actor);
     expect(store.setRecordedStatus).toHaveBeenCalledWith('a1', status);
-    // Published only once the outputs and the idempotency key committed.
-    expect(live.publish).toHaveBeenCalledWith([{ approvalId: 'a1', status: 'approved' }]);
+    // The live frame is the separate durable-event consumer's job (`FleetApprovalLiveSubscriber`), so it cannot be lost
+    // by a crash after this commit.
+    expect(store.lockByRequest).toHaveBeenCalledWith('a1');
   });
 
   it.each(['pending', 'approved', 'cancelled'] as const)('skips the %s status, which the fleet writes itself', async (status) => {
@@ -89,13 +90,12 @@ describe('FleetAskEventsSubscriber (US-007 fix round 2, US-009)', () => {
   });
 
   it('a redelivered event for the status the link already recorded writes nothing', async () => {
-    const { handle, closer, store, live } = build({ link: link({ recordedStatus: 'executed' }) });
+    const { handle, closer, store } = build({ link: link({ recordedStatus: 'executed' }) });
 
     await handle(payload({ status: 'executed' }));
 
     expect(closer.recordResolved).not.toHaveBeenCalled();
     expect(store.setRecordedStatus).not.toHaveBeenCalled();
-    expect(live.publish).not.toHaveBeenCalled();
   });
 
   it('a fleet-key request with no link is ignored', async () => {
@@ -105,6 +105,7 @@ describe('FleetAskEventsSubscriber (US-007 fix round 2, US-009)', () => {
 
     expect(closer.recordResolved).not.toHaveBeenCalled();
   });
+
 
   it('a malformed payload is skipped, never a crash the relay would retry forever', async () => {
     const { handle, store } = build();

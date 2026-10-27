@@ -3,12 +3,10 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { ApprovalRequestRecord } from '../../approvals/domain/approval.domain';
 import { ApprovalRequestQueries } from '../../approvals/approval-request.queries';
 import { APPROVAL_REQUEST_CHANGED, parseApprovalRequestChangedPayload } from '../../approvals/approval-request-events';
-import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import { FanOutPublisher } from '../../outbox/fan-out-publisher';
 import { BUDGET_REPOSITORY, type IBudgetRepository } from '../budgets/domain/budget.domain';
 import { SYSTEM_ACTOR } from '../jobs/job-transitions.service';
 import { ApprovalCloser, type ApprovalActor } from './approval-closer';
-import { ApprovalLivePublisher } from './approval-live.publisher';
 import { FLEET_ASK_KEYS, type FleetApprovalRecord } from './domain/approval.domain';
 import { FleetApprovalAskStore } from './fleet-approval-ask.store';
 
@@ -38,7 +36,6 @@ export class FleetAskEventsSubscriber implements OnModuleInit {
     private readonly store: FleetApprovalAskStore,
     private readonly queries: ApprovalRequestQueries,
     private readonly closer: ApprovalCloser,
-    private readonly live: ApprovalLivePublisher,
     @Inject(BUDGET_REPOSITORY) private readonly budgets: Pick<IBudgetRepository, 'findById'>,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
@@ -56,27 +53,29 @@ export class FleetAskEventsSubscriber implements OnModuleInit {
     }
     if (!RECORDED_STATUSES.has(p.status) || !FLEET_ASK_KEYS.includes(p.permissionKey)) return;
 
-    const live = await this.record(p.requestId, p.status);
-    if (live === null) return;
-    // Only once the outputs and the idempotency key have committed.
-    this.live.publish(live);
+    await this.record(p.requestId, p.status);
   };
 
-  /** One settle's outputs, in one transaction with its `recordedStatus`; null when there is nothing to record. */
-  private record(requestId: string, status: string): Promise<LiveFleetApprovalEvent[] | null> {
+  /**
+   * One settle's outputs, in one transaction with its `recordedStatus`, under a `FOR UPDATE` lock on the link. The lock
+   * is what makes the marker a claim: two concurrent deliveries of the same event serialise here, and the loser sees the
+   * recorded status and writes nothing. The live frame is not published here — `FleetApprovalLiveSubscriber` derives it
+   * from the same durable event, so a crash between this commit and any publication loses no live event.
+   */
+  private record(requestId: string, status: string): Promise<boolean> {
     return this.txManager.run(async () => {
-      const link = await this.store.findByRequest(requestId);
+      const link = await this.store.lockByRequest(requestId);
       // A non-fleet request, a request with no link, or this status already recorded: nothing to write.
-      if (link === null || link.recordedStatus === status) return null;
+      if (link === null || link.recordedStatus === status) return false;
       const request = await this.queries.findById(requestId);
       const view = await this.store.findApproval(requestId);
-      if (request === null || view === null) return null;
+      if (request === null || view === null) return false;
 
       // The fleet fills the resolution while the column is still null, exactly as the view derives it.
       if (link.resolvedBy === null) await this.store.setResolvedBy(requestId, status === 'expired' ? 'timeout' : 'user');
-      const live = await this.closer.recordResolved(view, await this.actorFor(request, view));
+      await this.closer.recordResolved(view, await this.actorFor(request, view));
       await this.store.setRecordedStatus(requestId, status);
-      return live;
+      return true;
     });
   }
 

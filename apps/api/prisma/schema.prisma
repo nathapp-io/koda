@@ -1666,10 +1666,11 @@ model FleetApprovalAsk {
   budgetPolicyId String?
   resolvedBy     String?   // user | timeout | job_ended | superseded | manual_resume | window_reset | policy_deleted
   outcome        Json?
-  /// Permissions P3 US-007 (fix round 2): the resolution a policy close intended for this ask. A close stamps every
-  /// pending ask of the policy before it starts, so an ask it could not settle — the request was held, or the call hit
-  /// its bound — is drained later by the durable continuation with the reason that action actually chose.
-  pendingResolvedBy String?
+  /// Permissions P3 US-007 (fix rounds 2-3): the complete close a policy action intended for this ask — resolution,
+  /// status, actor and outcome. A close stamps every pending ask of the policy before it starts, so an ask it could not
+  /// settle (the request was held, or the call hit its bound) is drained later by the durable continuation with the same
+  /// attribution and outcome, not just the reason.
+  pendingClose   Json?
   /// Permissions P3 US-009 (delivered early for US-007 fix round 2): the last engine status whose fleet outputs (the
   /// activity row, the `fleet.approval.resolved` webhook and the live event) were recorded. Redelivery of the same
   /// status records nothing.

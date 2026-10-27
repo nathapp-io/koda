@@ -4,9 +4,7 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { runAsSystemWriter } from '../../action-context/action-context';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
-import { BUDGET_REPOSITORY, type BudgetPolicyRecord, type IBudgetRepository } from '../budgets/domain/budget.domain';
-import { SYSTEM_ACTOR } from '../jobs/job-transitions.service';
-import { ApprovalCloser, systemActor, type ApprovalActor } from './approval-closer';
+import { ApprovalCloser } from './approval-closer';
 import { ApprovalLivePublisher } from './approval-live.publisher';
 import { FleetApprovalAskStore } from './fleet-approval-ask.store';
 
@@ -26,9 +24,10 @@ export interface PolicyAskCloseResult {
  * backlog, nor wait on a request an in-flight decide holds. So it stamps the resolution it intends on every pending ask
  * of the policy (`FleetApprovalAsk.pendingResolvedBy`) and settles what it can; this sweeper drains the rest.
  *
- * The queue is durable and self-describing: a link with an intent whose request is still pending is work, and it
- * carries the reason that action chose, so a leftover of a delete still closes `policy_deleted` after the policy row
- * is gone (a leftover of a rollover closes `window_reset`, not whatever the current state would derive). Scheduling
+ * The queue is durable and self-describing: a link with a persisted close whose request is still pending is work, and
+ * it carries the *whole* close that action chose — resolution, status, actor and outcome — so a leftover of a delete
+ * still closes `policy_deleted` after the policy row is gone, and a leftover of a resume still records the raised
+ * amount, its re-queues and the resumer (fix round 3). Scheduling
  * skip-locks requests and links and moves the batch to the tail before any close is attempted, so neither a held ask
  * nor a failing one can hide later work, even across restarts.
  */
@@ -40,7 +39,6 @@ export class PolicyAskCloseSweeper implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly store: FleetApprovalAskStore,
-    @Inject(BUDGET_REPOSITORY) private readonly budgets: Pick<IBudgetRepository, 'findById'>,
     private readonly closer: ApprovalCloser,
     private readonly live: ApprovalLivePublisher,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
@@ -75,19 +73,14 @@ export class PolicyAskCloseSweeper implements OnModuleInit, OnModuleDestroy {
     for (const ask of batch) {
       try {
         const change = await this.txManager.run(async () => {
-          // The policy row is gone after a delete: the close still happens, attributed to the system and the intent.
-          const policy = await this.budgets.findById(ask.budgetPolicyId ?? '');
-          const actor: ApprovalActor = policy === null ? deletedPolicyActor : systemActor(policy as BudgetPolicyRecord);
-          const closed = await this.closer.closePolicyAsk(ask.requestId, {
-            // A manual resume is the one resolution the fleet reports as `approved`; every other reason cancels.
-            status: ask.pendingResolvedBy === 'manual_resume' ? 'approved' : 'cancelled',
-            resolvedBy: ask.pendingResolvedBy, actor,
-          }, now);
+          // The close the action intended, replayed verbatim: the same resolution, status, actor and outcome. A policy
+          // deleted after the action ran changes nothing here — the intent is on the link.
+          const closed = await this.closer.closePolicyAsk(ask.requestId, ask.pendingClose, now);
           if (closed.approval !== null) {
             // The audit and every cancellation write commit or roll back together, per close.
             await this.audit.record({
               key: 'system.approval.expire', resourceType: 'fleet-approval', resourceId: ask.requestId,
-              projectId: ask.projectId, summary: `policy close continued: ${ask.pendingResolvedBy}`,
+              projectId: ask.projectId, summary: `policy close continued: ${ask.pendingClose.resolvedBy}`,
             });
           }
           return closed;
@@ -104,9 +97,6 @@ export class PolicyAskCloseSweeper implements OnModuleInit, OnModuleDestroy {
     return result;
   }
 }
-
-/** The policy of a continued close has been deleted: there is no editor left to attribute it to. */
-const deletedPolicyActor: ApprovalActor = { type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId: null };
 
 function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

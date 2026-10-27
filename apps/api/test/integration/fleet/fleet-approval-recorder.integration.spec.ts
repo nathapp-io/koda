@@ -113,11 +113,30 @@ describeIntegration('fleet ask recorder (PG)', () => {
     expect(seen.filter((e) => e.type === 'fleet_approval')).toMatchObject([{ approvalId: requestId, status: 'approved' }]);
     expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } }))).toMatchObject({ recordedStatus: 'executed', resolvedBy: 'user' });
 
-    // A redelivery of the same status records nothing: the idempotency key is on the link.
+    // A redelivery of the same status records nothing: the idempotency key is on the link. The live frame may repeat
+    // (it comes from its own durable-event consumer, fix round 3) but it is the same frame — same id — each time.
     await deliver(APPROVAL_REQUEST_CHANGED);
     expect(await activity(requestId)).toHaveLength(1);
     expect(await resolvedWebhooks()).toBe(1);
-    expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
+    const frames = seen.filter((e) => e.type === 'fleet_approval');
+    expect(frames.length).toBeGreaterThanOrEqual(1);
+    expect(new Set(frames.map((f) => f.id)).size).toBe(1);
+  });
+
+  it('fix round 3: two concurrent deliveries of the same event record the outputs once', async () => {
+    const { requestId } = await pendingBashAsk();
+    await decide(requestId).expect(200);
+    const events = await prisma.outboxEvent.findMany({ where: { type: APPROVAL_REQUEST_CHANGED } });
+    const records = events.map((row) => outboxRecord(row.type, JSON.parse(row.payload), {
+      id: row.id, metadata: { projectId: row.projectId, eventId: row.eventId },
+    }));
+
+    // The marker is claimed under a row lock, so the duplicate delivery waits and then writes nothing.
+    await Promise.all(records.flatMap((record) => [publisher.publish(record), publisher.publish(record)]));
+
+    expect(await activity(requestId)).toHaveLength(1);
+    expect(await resolvedWebhooks()).toBe(1);
+    expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).recordedStatus).toBe('executed');
   });
 
   it('an expired ask records the expiry, fills the link timeout and answers to the system', async () => {

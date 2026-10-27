@@ -52,7 +52,7 @@ function askStore() {
       const link: FleetApprovalAskRecord = {
         requestId: d.requestId, kind: d.kind, projectId: d.projectId, jobId: d.jobId ?? null, leaseEpoch: d.leaseEpoch ?? null,
         naxAskId: d.naxAskId ?? null, budgetPolicyId: d.budgetPolicyId ?? null, resolvedBy: null, outcome: null,
-        pendingResolvedBy: null, recordedStatus: null, createdAt: NOW, updatedAt: NOW,
+        pendingClose: null, recordedStatus: null, createdAt: NOW, updatedAt: NOW,
       };
       links.set(link.requestId, link);
       views.set(link.requestId, {
@@ -96,13 +96,13 @@ function askStore() {
       if (view) views.set(requestId, { ...view, outcome, ...(typeof resumedById === 'string' ? { decidedById: resumedById } : {}) });
       return link;
     }),
-    // US-007 (fix round 2): the close stamps its intent on every pending ask of the policy before it starts, and the
-    // durable continuation reads it back.
-    markPendingPolicyAsks: vi.fn(async (budgetPolicyId: string, resolvedBy: FleetApprovalAskRecord['resolvedBy']) => {
+    // US-007 (fix rounds 2-3): the close stamps itself — resolution, status, actor and outcome — on every pending ask
+    // of the policy before it starts, and the durable continuation replays it.
+    markPendingPolicyAsks: vi.fn(async (budgetPolicyId: string, close: FleetApprovalAskRecord['pendingClose']) => {
       let count = 0;
       for (const [id, link] of links) {
         if (link.budgetPolicyId !== budgetPolicyId || views.get(id)?.status !== 'pending') continue;
-        links.set(id, { ...link, pendingResolvedBy: resolvedBy });
+        links.set(id, { ...link, pendingClose: close });
         count += 1;
       }
       return count;

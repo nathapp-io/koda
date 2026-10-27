@@ -44,10 +44,10 @@ describeDb('FleetApprovalAsk repository (PG)', () => {
     const rows = await db.$queryRaw<Array<{ column_name: string }>>`
       SELECT column_name FROM information_schema.columns
       WHERE table_schema = current_schema() AND table_name = 'FleetApprovalAsk'
-        AND column_name IN ('pendingResolvedBy', 'recordedStatus')
+        AND column_name IN ('pendingClose', 'recordedStatus')
       ORDER BY column_name
     `;
-    expect(rows.map((r) => r.column_name)).toEqual(['pendingResolvedBy', 'recordedStatus']);
+    expect(rows.map((r) => r.column_name)).toEqual(['pendingClose', 'recordedStatus']);
   });
 
   it('F1 round 4: the shipped migration indexes the durable attempt order and unique tie-breaker', async () => {

@@ -39,14 +39,14 @@ describeIntegration('legacy fleet approvals migrate onto the engine (PG)', () =>
       state: 'RUNNING', runnerId, leaseEpoch: 1, bashMode: 'escalate', firstStartedAt: new Date(), ...over,
     },
   });
-  const legacyBash = async () => {
+  const legacyBash = async (over: Partial<Prisma.FleetApprovalUncheckedCreateInput> = {}) => {
     const running = await job();
     const naxAskId = `legacy-ask-${++n}`;
     const row = await prisma.fleetApproval.create({
       data: {
         type: 'nax_bash_escalate', projectId: world.projectId, jobId: running.id, leaseEpoch: running.leaseEpoch, naxAskId,
         payload: { command: 'bun run test', commandTruncated: false, options: ['allow', 'deny'] },
-        requestedAt: new Date(), expiresAt: new Date(Date.now() + 300_000),
+        requestedAt: new Date(), expiresAt: null, ...over,
       },
     });
     return { job: running, row };
@@ -95,6 +95,48 @@ describeIntegration('legacy fleet approvals migrate onto the engine (PG)', () =>
     expect(one).toEqual(expect.objectContaining({ status: 'pending', jobId: row.jobId }));
     const counts = data<{ total: number }>(await request(app.getHttpServer()).get('/api/fleet/approval-counts').set(as(world.tokens.dev)).expect(200));
     expect(counts.total).toBe(1);
+  });
+
+  it('F4 (fix round 3): an old pending legacy ask stays decidable — it never expired before the migration', async () => {
+    // Three days old and no expiry of its own: a migration that dated the expiry from its creation would hand the
+    // engine an already-expired ask, and every decide would answer 409.
+    const requestedAt = new Date(Date.now() - 3 * 86_400_000);
+    const { row } = await legacyBash({ requestedAt, createdAt: requestedAt });
+
+    await migrate();
+
+    const migrated = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: row.id } });
+    expect(migrated.status).toBe('pending');
+    expect(migrated.expiresAt.getTime()).toBeGreaterThan(Date.now());
+    await request(app.getHttpServer()).post(`${PROJECT}/${row.id}/decide`).set(as(padmin)).send({ decision: 'deny' }).expect(200);
+  });
+
+  it('F4 (fix round 3): the copy is one transaction, and a row left without its link is finished on the next pass', async () => {
+    const { job: running, row } = await legacyBash();
+    // The state an interrupted earlier attempt leaves: the request is there, its link is not.
+    await withTestActor({ type: 'SYSTEM', id: 'seed' }, () => migrator.migrateAll());
+    await prisma.fleetApprovalAsk.delete({ where: { requestId: row.id } });
+    // A second legacy row, so the pass has to progress past the half-migrated one.
+    const second = await legacyBash();
+
+    expect(await migrate()).toBe(2);
+
+    expect(await prisma.approvalRequest.count({ where: { id: { in: [row.id, second.row.id] } } })).toBe(2);
+    expect(await prisma.fleetApprovalAsk.count({ where: { requestId: { in: [row.id, second.row.id] } } })).toBe(2);
+    // The requester lookup still resolved the job, and no second decision row appeared for the finished ask.
+    expect(await prisma.fleetCommand.count({ where: { jobId: running.id } })).toBe(0);
+  });
+
+  it('F4 (fix round 3): the timed pass drains a batch the boot pass left behind', async () => {
+    await legacyBash();
+    await legacyBash();
+
+    // One row per batch, as a small batch size would copy.
+    expect(await withTestActor({ type: 'SYSTEM', id: 'seed' }, () => migrator.migrateBatch(1))).toBe(1);
+    expect(await prisma.fleetApprovalAsk.count()).toBe(1);
+    // The continuation (the timer runs this same pass) finishes the rest without a restart.
+    expect(await migrate()).toBe(1);
+    expect(await prisma.fleetApprovalAsk.count()).toBe(2);
   });
 
   it('builds the frozen input and hash, so a migrated pending ask is decidable and executes', async () => {

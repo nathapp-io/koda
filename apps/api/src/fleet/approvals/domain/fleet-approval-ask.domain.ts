@@ -10,16 +10,27 @@ export interface FleetApprovalAskRecord {
   requestId: string; kind: FleetAskKind; projectId: string | null; jobId: string | null; leaseEpoch: number | null;
   naxAskId: string | null; budgetPolicyId: string | null; resolvedBy: ApprovalResolvedBy | null;
   outcome: Record<string, unknown> | null;
-  /** US-007 (fix round 2): the resolution a policy close intended for this ask, drained later if it could not settle it. */
-  pendingResolvedBy: ApprovalResolvedBy | null;
+  /** US-007 (fix rounds 2-3): the complete close a policy action intended for this ask, drained later if it could not settle it. */
+  pendingClose: PersistedPolicyClose | null;
   /** US-009: the last engine status whose fleet outputs were recorded; a redelivery of it records nothing. */
   recordedStatus: string | null;
   createdAt: Date; updatedAt: Date;
 }
 
-/** One policy ask the durable continuation claimed: the resolution its close intended, and where it belongs. */
+/**
+ * The close a policy action intended, persisted on the link so the durable continuation settles a leftover ask with the
+ * same resolution, fleet status, actor and outcome the action chose when it ran.
+ */
+export interface PersistedPolicyClose {
+  resolvedBy: ApprovalResolvedBy;
+  status: 'approved' | 'cancelled';
+  actor: { type: 'USER' | 'SYSTEM' | 'RUNNER'; id: string; responsibleUserId: string | null };
+  outcome?: Record<string, unknown>;
+}
+
+/** One policy ask the durable continuation claimed: the close its action intended, and where it belongs. */
 export interface PolicyAskClose {
-  requestId: string; budgetPolicyId: string | null; projectId: string | null; pendingResolvedBy: ApprovalResolvedBy;
+  requestId: string; budgetPolicyId: string | null; projectId: string | null; pendingClose: PersistedPolicyClose;
 }
 
 export type NewFleetApprovalAsk = Pick<FleetApprovalAskRecord, 'requestId' | 'kind' | 'projectId'>
@@ -74,8 +85,8 @@ export interface IFleetApprovalAskRepository {
    * held request is stepped over rather than met again, and a newer pending ask is still settled.
    */
   findPendingForPolicyPage(budgetPolicyId: string, afterRequestId?: string, limit?: number): Promise<FleetApprovalAskRecord[]>;
-  /** Stamps the resolution a close intends for every pending ask of the policy (US-007 fix round 2). */
-  markPendingPolicyAsks(budgetPolicyId: string, resolvedBy: ApprovalResolvedBy): Promise<number>;
+  /** Stamps the close a policy action intends for every pending ask of the policy (US-007 fix rounds 2-3). */
+  markPendingPolicyAsks(budgetPolicyId: string, close: PersistedPolicyClose): Promise<number>;
   /**
    * Claim a bounded, least-recently-attempted batch of pending policy asks that have an intended resolution. Skips held
    * request/link rows and durably moves the selected links to the queue's tail via updatedAt, so neither a held ask nor

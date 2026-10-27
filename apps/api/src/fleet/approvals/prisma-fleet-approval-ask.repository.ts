@@ -12,7 +12,7 @@ import type {
 import { FLEET_ASK_KEY, FLEET_ASK_KEYS } from './domain/approval.domain';
 import {
   FleetApprovalAskRecord, FleetAskKind, FleetAskWithStatus, IFleetApprovalAskRepository, MAX_COUNTED_PROJECTS,
-  MAX_PENDING_ASKS_PER_JOB, JobEndAsk, NewFleetApprovalAsk, PolicyAskClose,
+  MAX_PENDING_ASKS_PER_JOB, JobEndAsk, NewFleetApprovalAsk, PersistedPolicyClose, PolicyAskClose,
 } from './domain/fleet-approval-ask.domain';
 import { fleetStatusWhere, toFleetApproval, type FleetAskRow } from './fleet-approval-view';
 
@@ -173,13 +173,13 @@ export class PrismaFleetApprovalAskRepository
   }
 
   /**
-   * US-007 (fix round 2): stamp the close's intent on every pending ask of the policy before the close starts, so an
-   * ask it cannot settle (held, or past the call's bound) keeps the reason that action chose.
+   * US-007 (fix rounds 2-3): stamp the close on every pending ask of the policy before the close starts, so an ask it
+   * cannot settle (held, or past the call's bound) is drained later with the same resolution, status, actor and outcome.
    */
-  async markPendingPolicyAsks(budgetPolicyId: string, resolvedBy: ApprovalResolvedBy): Promise<number> {
+  async markPendingPolicyAsks(budgetPolicyId: string, close: PersistedPolicyClose): Promise<number> {
     const { count } = await this.db.fleetApprovalAsk.updateMany({
       where: { budgetPolicyId, request: { status: 'pending' } },
-      data: { pendingResolvedBy: resolvedBy },
+      data: { pendingClose: json(close as unknown as Record<string, unknown>) },
     });
     return count;
   }
@@ -194,14 +194,14 @@ export class PrismaFleetApprovalAskRepository
         SELECT a."requestId"
         FROM "FleetApprovalAsk" a
         JOIN "ApprovalRequest" r ON r."id" = a."requestId"
-        WHERE a."kind" = 'budget' AND a."pendingResolvedBy" IS NOT NULL AND r."status" = 'pending'
+        WHERE a."kind" = 'budget' AND a."pendingClose" IS NOT NULL AND r."status" = 'pending'
         ORDER BY a."updatedAt" ASC, a."requestId" ASC
         LIMIT ${limit}
         FOR UPDATE OF r, a SKIP LOCKED
       )
       UPDATE "FleetApprovalAsk" a SET "updatedAt" = clock_timestamp()
       FROM next WHERE a."requestId" = next."requestId"
-      RETURNING a."requestId", a."budgetPolicyId", a."projectId", a."pendingResolvedBy"
+      RETURNING a."requestId", a."budgetPolicyId", a."projectId", a."pendingClose"
     `;
   }
 
@@ -375,7 +375,7 @@ const toAskRecord = (model: AskModel): FleetApprovalAskRecord => ({
   ...model,
   kind: model.kind as FleetAskKind,
   resolvedBy: model.resolvedBy as ApprovalResolvedBy | null,
-  pendingResolvedBy: model.pendingResolvedBy as ApprovalResolvedBy | null,
+  pendingClose: asObject(model.pendingClose) as unknown as PersistedPolicyClose | null,
   outcome: asObject(model.outcome),
 });
 

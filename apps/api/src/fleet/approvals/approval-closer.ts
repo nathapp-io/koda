@@ -17,7 +17,7 @@ import { checkBashDecision } from './bash-decision';
 import {
   APPROVAL_REPOSITORY, ApprovalDecision, ApprovalResolvedBy, FleetApprovalRecord, IApprovalRepository,
 } from './domain/approval.domain';
-import { MAX_PENDING_ASKS_PER_JOB } from './domain/fleet-approval-ask.domain';
+import { MAX_PENDING_ASKS_PER_JOB, type PersistedPolicyClose } from './domain/fleet-approval-ask.domain';
 import { FleetApprovalAskStore } from './fleet-approval-ask.store';
 
 /** US-002: `responsibleUserId` is null when the job the approval belongs to was requested by an agent. */
@@ -44,6 +44,14 @@ export interface PolicyClose {
  * must not each build their own literal: a third copy is how the two lists drift apart.
  */
 export const userActor = (id: string): ApprovalActor => ({ type: 'USER', id, responsibleUserId: id });
+/** The close as the continuation needs it: what to write, for whom, and with which outcome. */
+const persistedClose = (close: PolicyClose): PersistedPolicyClose => ({
+  resolvedBy: close.resolvedBy,
+  status: close.status,
+  actor: { type: close.actor.type, id: close.actor.id, responsibleUserId: close.actor.responsibleUserId },
+  ...(close.outcome === undefined ? {} : { outcome: close.outcome }),
+});
+
 /** A system action answers to the policy's last editor; there is no human in the loop. */
 export const systemActor = (policy: BudgetPolicyRecord): ApprovalActor =>
   ({ type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId: policy.updatedById });
@@ -152,7 +160,9 @@ export class ApprovalCloser {
   async closeForPolicy(policyId: string, close: PolicyClose, now: Date, limit = MAX_ASKS_CLOSED_PER_CALL): Promise<ApprovalChange> {
     const live: LiveFleetApprovalEvent[] = [];
     let first: FleetApprovalRecord | null = null;
-    const intended = await this.store.markPendingPolicyAsks(policyId, close.resolvedBy);
+    // The whole close, not just its reason: a leftover must keep the actor (attribution) and the outcome (a resume's
+    // amount, its re-queues and the resumer) that this action chose.
+    const intended = await this.store.markPendingPolicyAsks(policyId, persistedClose(close));
     if (intended === 0) return { approval: null, live };
 
     let after: string | undefined;

@@ -2,6 +2,7 @@ import { Module, type OnModuleInit } from '@nestjs/common';
 import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
 import { ApprovalCommandRegistry } from '../../approvals/approval-command.registry';
 import { OutboxCoreModule } from '../../outbox/outbox-core.module';
+import { LiveModule } from '../../live/live.module';
 import { FleetBudgetOverrideCommand } from './commands/fleet-budget-override.command';
 import { FleetShellEscalateCommand } from './commands/fleet-shell-escalate.command';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
@@ -14,6 +15,7 @@ import { ApprovalExpirySweeper } from './approval-expiry-sweeper';
 import { ApprovalJobEndSweeper } from './approval-job-end.sweeper';
 import { ApprovalStoreModule } from './approval-store.module';
 import { ApprovalsService } from './approvals.service';
+import { FleetApprovalLiveSubscriber } from './fleet-approval-live.subscriber';
 import { FleetAskEventsSubscriber } from './fleet-ask-events.subscriber';
 import { LegacyFleetApprovalMigrator } from './legacy-fleet-approval.migrator';
 import { PolicyAskCloseSweeper } from './policy-ask-close.sweeper';
@@ -24,12 +26,13 @@ import { ProjectFleetApprovalsController } from './project-fleet-approvals.contr
 /** S1.5 C8 approvals (plan D226): decide, list, counts. Storage and the close port are ApprovalStoreModule. */
 @Module({
   imports: [
-    PrismaModule, OutboxCoreModule, ApprovalEngineModule, ProjectAccessModule, ApprovalStoreModule, BudgetStoreModule,
+    PrismaModule, OutboxCoreModule, LiveModule, ApprovalEngineModule, ProjectAccessModule, ApprovalStoreModule, BudgetStoreModule,
     BudgetsModule, FleetJobsModule, FleetActivityModule,
   ],
   controllers: [ProjectFleetApprovalsController, FleetApprovalsController, FleetApprovalCountsController],
   providers: [
     ApprovalsService, ApprovalExpirySweeper, ApprovalJobEndSweeper, PolicyAskCloseSweeper, FleetAskEventsSubscriber,
+    FleetApprovalLiveSubscriber,
     LegacyFleetApprovalMigrator, FleetShellEscalateCommand, FleetBudgetOverrideCommand,
   ],
   exports: [ApprovalsService],
