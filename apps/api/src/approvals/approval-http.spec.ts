@@ -35,7 +35,7 @@ describe('approval HTTP boundary', () => {
     const decision = { id: 'decision', requestId: record.id, deciderType: 'USER' as const, deciderId: 'user', decision: 'reject' as const, comment: null, decidedAt: date, params: null };
     expect(ApprovalRequestDto.from({ request: record, decisions: [decision] })).toEqual({
       ...ApprovalRequestSummaryDto.from(record), input: record.input, result: record.result,
-      decisions: [{ id: 'decision', deciderType: 'USER', deciderId: 'user', decision: 'reject', comment: null, decidedAt: date.toISOString() }],
+      decisions: [{ id: 'decision', deciderType: 'USER', deciderId: 'user', decision: 'reject', comment: null, params: null, decidedAt: date.toISOString() }],
     });
     expect(ApprovalDecisionDto.from(decision)).not.toHaveProperty('requestId');
   });

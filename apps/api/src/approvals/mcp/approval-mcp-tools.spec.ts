@@ -75,6 +75,11 @@ describe('ApprovalMcpTools decide (US-013)', () => {
     get.mockResolvedValue({}); decide.mockResolvedValue({ id: 'r1', status: 'executed' });
   });
   it('AC-1: registers list then decide', () => expect(registrations().map(({ name }) => name)).toEqual(['koda_list_approvals', 'koda_decide_approval']));
+  it('AC-6: advertises optional object params without changing required arguments', () => {
+    expect(decisionTool().inputSchema).toMatchObject({
+      properties: { params: { type: 'object' } }, required: ['id', 'decision'],
+    });
+  });
   it('AC-2/3/4: checks visibility then decides in MCP action context and answers status', async () => {
     decide.mockImplementation(async () => {
       const ctx = currentContext();
@@ -84,6 +89,14 @@ describe('ApprovalMcpTools decide (US-013)', () => {
     expect(await call({ id: 'r1', decision: 'approve' })).toEqual({ content: [{ type: 'text', text: 'r1 executed' }], isError: false });
     expect(get).toHaveBeenCalledWith({ type: 'AGENT', id: agent.id }, 'r1');
     expect(decide).toHaveBeenCalledWith('r1', 'approve', null);
+  });
+  it('AC-8: forwards supplied decision params in the service params position', async () => {
+    await call({ id: 'r1', decision: 'approve', params: { remember: true } });
+    expect(decide).toHaveBeenCalledWith('r1', 'approve', null, undefined, { remember: true });
+  });
+  it.each([[], null, 'x', new Date(), undefined])('AC-9/10: rejects non-plain params %j before deciding', async (params) => {
+    expect(await call({ id: 'r1', decision: 'approve', params })).toEqual({ content: [{ type: 'text', text: 'invalid_input: params' }], isError: true });
+    expect(get).not.toHaveBeenCalled(); expect(decide).not.toHaveBeenCalled();
   });
   it.each([[{ id: 'r1', decision: 'maybe' }, 'decision'], [{ id: '', decision: 'approve' }, 'id'], [{ id: 'r1', decision: 'approve', comment: 'x'.repeat(2001) }, 'comment']])('AC-5/6/7/9 invalid input %j', async (input, field) => {
     expect(await call(input)).toEqual({ content: [{ type: 'text', text: `invalid_input: ${field}` }], isError: true });

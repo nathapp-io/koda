@@ -52,18 +52,24 @@ export class ApprovalMcpTools {
         id: { type: 'string', minLength: 1, maxLength: 64 },
         decision: { type: 'string', enum: ['approve', 'reject'] },
         comment: { type: 'string', maxLength: 2000 },
+        params: { type: 'object' },
       }, required: ['id', 'decision'], additionalProperties: false },
       handler: (input) => runWithActionContext({ actor: ref, origin: 'mcp' }, async () => {
         const args = input !== null && typeof input === 'object' ? input as Record<string, unknown> : {};
         const invalid = (field: string) => toMcpToolResult({ content: `invalid_input: ${field}`, isError: true });
-        const unknown = Object.keys(args).find((key) => !['id', 'decision', 'comment'].includes(key));
+        const unknown = Object.keys(args).find((key) => !['id', 'decision', 'comment', 'params'].includes(key));
         if (unknown !== undefined) return invalid(unknown);
         if (typeof args.id !== 'string' || args.id.length < 1 || args.id.length > 64) return invalid('id');
         if (args.decision !== 'approve' && args.decision !== 'reject') return invalid('decision');
         if (args.comment !== undefined && (typeof args.comment !== 'string' || args.comment.length > 2000)) return invalid('comment');
+        if (Object.hasOwn(args, 'params') && (args.params === null || typeof args.params !== 'object' || Array.isArray(args.params)
+          || (Object.getPrototypeOf(args.params) !== Object.prototype && Object.getPrototypeOf(args.params) !== null))) return invalid('params');
         try {
           await this.queries.get(ref, args.id);
-          const request = await this.decisions.decide(args.id, args.decision, (args.comment as string | undefined) ?? null);
+          const comment = (args.comment as string | undefined) ?? null;
+          const request = Object.hasOwn(args, 'params')
+            ? await this.decisions.decide(args.id, args.decision, comment, undefined, args.params)
+            : await this.decisions.decide(args.id, args.decision, comment);
           return toMcpToolResult({ content: `${request.id} ${request.status}`, isError: false });
         } catch (error) {
           if (error instanceof ApprovalRequestNotFoundError) return toMcpToolResult({ content: 'not_found', isError: true });
