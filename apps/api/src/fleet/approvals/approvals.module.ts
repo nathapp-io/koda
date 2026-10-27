@@ -15,7 +15,6 @@ import { ApprovalExpirySweeper } from './approval-expiry-sweeper';
 import { ApprovalJobEndSweeper } from './approval-job-end.sweeper';
 import { ApprovalStoreModule } from './approval-store.module';
 import { ApprovalsService } from './approvals.service';
-import { FleetApprovalLiveSubscriber } from './fleet-approval-live.subscriber';
 import { FleetAskEventsSubscriber } from './fleet-ask-events.subscriber';
 import { LegacyFleetApprovalMigrator } from './legacy-fleet-approval.migrator';
 import { PolicyAskCloseSweeper } from './policy-ask-close.sweeper';
@@ -32,7 +31,6 @@ import { ProjectFleetApprovalsController } from './project-fleet-approvals.contr
   controllers: [ProjectFleetApprovalsController, FleetApprovalsController, FleetApprovalCountsController],
   providers: [
     ApprovalsService, ApprovalExpirySweeper, ApprovalJobEndSweeper, PolicyAskCloseSweeper, FleetAskEventsSubscriber,
-    FleetApprovalLiveSubscriber,
     LegacyFleetApprovalMigrator, FleetShellEscalateCommand, FleetBudgetOverrideCommand,
   ],
   exports: [ApprovalsService],

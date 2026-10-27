@@ -1673,10 +1673,11 @@ model FleetApprovalAsk {
   /// settle (the request was held, or the call hit its bound) is drained later by the durable continuation with the same
   /// attribution and outcome, not just the reason.
   pendingClose   Json?
-  /// Permissions P3 US-009: the last engine status whose activity row and resolved webhook were recorded.
-  /// Live publication has a separate acknowledgement so recording these outputs cannot lose a live frame.
+  /// Permissions P3 US-009: the last engine status whose fleet outputs — the activity row, the resolved webhook and the
+  /// live event — were recorded. A redelivery of that status records nothing; the table goes with US-012.
   recordedStatus String?
-  /// Separate from output recording: successful live publication is deduplicated across relay retries.
+  /// Written by the retired live subscriber of the US-007 fix rounds; left for the legacy repair and dropped with the
+  /// table in US-012.
   publishedStatus String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt

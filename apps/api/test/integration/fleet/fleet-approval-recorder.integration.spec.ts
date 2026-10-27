@@ -114,7 +114,7 @@ describeIntegration('fleet ask recorder (PG)', () => {
     expect(seen.filter((e) => e.type === 'fleet_approval')).toMatchObject([{ approvalId: requestId, status: 'approved' }]);
     expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } }))).toMatchObject({ recordedStatus: 'executed', resolvedBy: 'user' });
 
-    // Recording and live delivery have independent durable markers; neither repeats on redelivery.
+    // Recording is idempotent per engine status; a redelivery writes nothing and publishes no second frame.
     await deliver(APPROVAL_REQUEST_CHANGED);
     expect(await activity(requestId)).toHaveLength(1);
     expect(await resolvedWebhooks()).toBe(1);
@@ -136,75 +136,45 @@ describeIntegration('fleet ask recorder (PG)', () => {
 
     expect(await activity(requestId)).toHaveLength(1);
     expect(await resolvedWebhooks()).toBe(1);
-    expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } }))).toMatchObject({ recordedStatus: 'executed', publishedStatus: 'executed' });
+    expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).recordedStatus).toBe('executed');
     expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
   });
 
-  it('F5 round 4: publication failure makes the relay retry without repeating committed outputs', async () => {
+  it('US-009: a failing live listener neither fails the relay nor loses the recorded outputs', async () => {
     const { requestId } = await pendingBashAsk();
     await decide(requestId).expect(200);
-    const fail = vi.spyOn(app.get(ProjectEventBus), 'publishRetryable').mockImplementationOnce(() => { throw new Error('live unavailable'); });
+    const unsubscribe = app.get(ProjectEventBus).subscribe(world.projectId, () => { throw new Error('socket unavailable'); });
     try {
-      await expect(deliver(APPROVAL_REQUEST_CHANGED)).rejects.toThrow('live unavailable');
-      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBeNull();
+      // The recorder publishes after its transaction commits, so the outputs are already durable when a
+      // listener fails; the bus logs and skips that listener rather than making the relay retry.
       await deliver(APPROVAL_REQUEST_CHANGED);
       await deliver(APPROVAL_REQUEST_CHANGED);
-      expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
       expect(await activity(requestId)).toHaveLength(1);
       expect(await resolvedWebhooks()).toBe(1);
+      expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
     } finally {
-      fail.mockRestore();
+      unsubscribe();
     }
   });
 
-  it('F5 round 4: a marker write failure retries without duplicating frames already delivered to consumers', async () => {
+  it('US-009: a marker write failure rolls the outputs back and the retried delivery records them once', async () => {
     const { requestId } = await pendingBashAsk();
     await decide(requestId).expect(200);
-    const fail = vi.spyOn(app.get(FleetApprovalAskStore), 'setPublishedStatus').mockRejectedValueOnce(new Error('marker unavailable'));
+    const fail = vi.spyOn(app.get(FleetApprovalAskStore), 'setRecordedStatus').mockRejectedValueOnce(new Error('marker unavailable'));
     try {
       await expect(deliver(APPROVAL_REQUEST_CHANGED)).rejects.toThrow('marker unavailable');
-      expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
-      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBeNull();
-      await deliver(APPROVAL_REQUEST_CHANGED);
-      expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
-      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBe('executed');
-    } finally {
-      fail.mockRestore();
-    }
-  });
+      // Nothing of the rolled-back attempt survives: no activity row, no webhook row, no live frame.
+      expect(await activity(requestId)).toEqual([]);
+      expect(await resolvedWebhooks()).toBe(0);
+      expect(seen.filter((e) => e.type === 'fleet_approval')).toEqual([]);
+      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).recordedStatus).toBeNull();
 
-  it.each(['publication', 'acknowledgement'])('F5 round 5: %s retry after 1100 other acknowledged frames never repeats a delivered frame', async (failure) => {
-    const { requestId } = await pendingBashAsk();
-    await decide(requestId).expect(200);
-    const bus = app.get(ProjectEventBus);
-    const frameId = `${requestId}:executed:fleet`;
-    const unsubscribe = bus.subscribe(world.projectId, (frame) => {
-      if (failure === 'publication' && frame.id === frameId) throw new Error('socket unavailable');
-    });
-    const fail = vi.spyOn(app.get(FleetApprovalAskStore), 'setPublishedStatus');
-    if (failure === 'acknowledgement') fail.mockRejectedValueOnce(new Error('marker unavailable'));
-    try {
-      await expect(deliver(APPROVAL_REQUEST_CHANGED)).rejects.toThrow('unavailable');
-      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBeNull();
-      const otherFrames: LiveEvent[] = [];
-      for (let i = 0; i < 1100; i++) {
-        const other: LiveEvent = {
-          id: `other-${i}`, type: 'ticket', action: 'created', projectId: world.projectId,
-          ticketId: 'other-ticket', actorId: world.ids.dev, at: new Date().toISOString(),
-        };
-        bus.publishRetryable(other);
-        otherFrames.push(other);
-      }
-      for (const other of otherFrames) bus.acknowledgeRetryable(other);
-      unsubscribe();
       await deliver(APPROVAL_REQUEST_CHANGED);
-      await deliver(APPROVAL_REQUEST_CHANGED);
-      expect(seen.filter((frame) => frame.id === frameId)).toHaveLength(1);
-      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBe('executed');
       expect(await activity(requestId)).toHaveLength(1);
       expect(await resolvedWebhooks()).toBe(1);
+      expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
+      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).recordedStatus).toBe('executed');
     } finally {
-      unsubscribe();
       fail.mockRestore();
     }
   });
