@@ -33,13 +33,6 @@ const ASK_INCLUDE = {
 type RequestWithAsk = Prisma.ApprovalRequestGetPayload<{ include: typeof ASK_INCLUDE }>;
 
 /**
- * How many pages of MAX_COUNTED_PROJECTS project groups `countPendingAllProjects` may read. Soft-deleted
- * projects are filtered per page, so a page can yield fewer live rows than it contains; this is the hard
- * iteration cap (`.nax/rules/api-data.md`) that keeps that scan bounded anyway.
- */
-const MAX_PENDING_COUNT_PAGES = 4;
-
-/**
  * Permissions P3d-1 (US-009): the `FleetApprovalAsk` link table. Module-private — `ApprovalStoreModule`
  * provides it behind `FLEET_APPROVAL_ASK_REPOSITORY` and publishes `FleetApprovalAskStore` instead.
  */
@@ -179,44 +172,34 @@ export class PrismaFleetApprovalAskRepository
 
   /**
    * US-006: every project's pending fleet asks for a caller with a global `fleet.approval.read` grant.
-   * A soft-deleted project is excluded, so a project that is gone never shows a badge — and because the
-   * exclusion happens before a project counts against the bound, deleted projects can never spend it.
    *
-   * `ApprovalRequest.projectId` has no relation (a deleted project leaves its asks readable), so the
-   * live check cannot ride the group query: the groups are read in bounded pages of at most
-   * MAX_COUNTED_PROJECTS until MAX_PENDING_COUNT_PAGES of them have been read or a page comes back
-   * short, and each page is filtered by its projects in one bounded lookup.
+   * A soft-deleted project never shows a badge, and it must not spend a slot of the answer either, so
+   * the soft-delete rule is applied by the database *before* the bound. That rules out the Prisma
+   * group query: `ApprovalRequest.projectId` has no relation to `Project` (a deleted project leaves its
+   * asks readable), and no page-scan of it can promise to reach live projects that sort behind an
+   * arbitrary number of deleted ones. One bounded join answers it instead: at most
+   * MAX_COUNTED_PROJECTS + 1 grouped rows, ordered by slug, so the answer is the first
+   * MAX_COUNTED_PROJECTS live projects and the truncation is logged.
    */
   async countPendingAllProjects(): Promise<PendingCount[]> {
-    const counted = new Map<string, PendingCount>();
-    let truncated = false;
-    let fullPage = true;
-
-    for (let page = 0; page < MAX_PENDING_COUNT_PAGES && fullPage; page += 1) {
-      const groups = await this.db.approvalRequest.groupBy({
-        by: ['projectId'],
-        where: pendingWhere({ projectId: { not: null } }),
-        _count: { _all: true },
-        // The page bound needs a deterministic order, or two reads of the same installation disagree.
-        orderBy: { projectId: 'asc' },
-        take: MAX_COUNTED_PROJECTS,
-        skip: page * MAX_COUNTED_PROJECTS,
-      });
-      fullPage = groups.length === MAX_COUNTED_PROJECTS;
-      for (const entry of await this.toPendingCounts(groups, true)) {
-        if (counted.size < MAX_COUNTED_PROJECTS) counted.set(entry.projectId, entry);
-        else truncated = true;
-      }
-    }
-    // A full last page means more project groups exist than the scan was allowed to read.
-    if (fullPage) truncated = true;
-
-    if (truncated) {
+    const rows = await this.db.$queryRaw<Array<{ projectId: string; slug: string; pending: number }>>`
+      SELECT r."projectId" AS "projectId", p."slug" AS "slug", COUNT(*)::int AS "pending"
+      FROM "ApprovalRequest" r
+      JOIN "Project" p ON p."id" = r."projectId"
+      JOIN "FleetApprovalAsk" a ON a."requestId" = r."id"
+      WHERE r."status" = 'pending'
+        AND p."deletedAt" IS NULL
+        AND r."permissionKey" IN (${Prisma.join([...FLEET_ASK_KEYS])})
+      GROUP BY r."projectId", p."slug"
+      ORDER BY p."slug" ASC
+      LIMIT ${MAX_COUNTED_PROJECTS + 1}
+    `;
+    if (rows.length > MAX_COUNTED_PROJECTS) {
       this.logger.warn(
         `countPendingAllProjects: more than ${MAX_COUNTED_PROJECTS} live projects have a pending fleet ask; the tail is not counted`,
       );
     }
-    return [...counted.values()].sort((a, b) => a.slug.localeCompare(b.slug));
+    return rows.slice(0, MAX_COUNTED_PROJECTS).map(({ projectId, slug, pending }) => ({ projectId, slug, pending }));
   }
 
   countPendingUnscoped(): Promise<number> {
@@ -237,19 +220,18 @@ export class PrismaFleetApprovalAskRepository
   }
 
   /**
-   * The rows of a `groupBy` read, with their slugs, in slug order. `liveOnly` drops a soft-deleted
-   * project: `countPending` keeps today's behaviour and only the unfiltered read needs it.
+   * The rows of a `groupBy` read, with their slugs, in slug order. A project the lookup cannot answer
+   * (gone from `Project`) is left out: a badge needs a slug to point at.
    */
   private async toPendingCounts(
     groups: Array<{ projectId: string | null; _count: { _all: number } }>,
-    liveOnly = false,
   ): Promise<PendingCount[]> {
     const ids = groups.map((g) => g.projectId).filter((id): id is string => id !== null);
     // A caller with a global grant and no pending ask anywhere is the common case; without this it
     // would still ask Postgres for `id IN ()`.
     if (ids.length === 0) return [];
     const projects = await this.db.project.findMany({
-      where: { id: { in: ids }, ...(liveOnly ? { deletedAt: null } : {}) }, select: { id: true, slug: true },
+      where: { id: { in: ids } }, select: { id: true, slug: true },
     });
     const slugOf = new Map(projects.map((p) => [p.id, p.slug]));
     return groups
