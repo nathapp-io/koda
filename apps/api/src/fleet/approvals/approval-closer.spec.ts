@@ -74,16 +74,17 @@ function askStore() {
       if (view) views.set(requestId, { ...view, outcome, ...(typeof resumedById === 'string' ? { decidedById: resumedById } : {}) });
       return link;
     }),
-    // US-007 (fix rounds 2-3): the close stamps itself — resolution, status, actor and outcome — on every pending ask
-    // of the policy before it starts, and the durable continuation replays it.
+    // US-007 (fix rounds 2-4): the close stamps itself — resolution, status, actor and outcome — on every pending ask
+    // of the policy before it starts, the first intent on a link winning so a later action cannot rewrite it. The
+    // durable continuation replays the link's own intent.
     markPendingPolicyAsks: vi.fn(async (budgetPolicyId: string, close: FleetApprovalAskRecord['pendingClose']) => {
-      let count = 0;
-      for (const [id, link] of links) {
-        if (link.budgetPolicyId !== budgetPolicyId || views.get(id)?.status !== 'pending') continue;
-        links.set(id, { ...link, pendingClose: close });
-        count += 1;
+      const pending = pendingOfPolicy(budgetPolicyId);
+      for (const id of pending) {
+        const link = links.get(id) as FleetApprovalAskRecord;
+        if (link.pendingClose === null) links.set(id, { ...link, pendingClose: close });
       }
-      return count;
+      // The answer is how many asks of the policy are still pending, not how many this call stamped.
+      return pending.length;
     }),
     // US-007 (fix round 1): the policy close pages too, so a held ask is stepped over instead of ending the call.
     findPendingForPolicyPage: vi.fn(async (budgetPolicyId: string, after?: string, limit = MAX_PENDING_ASKS_PER_JOB) =>
@@ -294,6 +295,24 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
     expect(store.setOutcome).toHaveBeenCalledWith('req-2', { resumedAmountUsd: '20', requeueResults: [], resumedById: 'u9' });
     expect(r.approval).toEqual(expect.objectContaining({ id: 'req-1' }));
     expect(r.live).toEqual([{ approvalId: 'req-1', status: 'approved' }, { approvalId: 'req-2', status: 'approved' }]);
+  });
+
+  it('B1: a link an earlier close already stamped keeps that close, whatever this call was asked to write', async () => {
+    // The resume could not settle this ask (its request was held), so only its intent landed; the delete runs next.
+    await store.insert({ requestId: 'req-1', kind: 'budget', projectId: 'p1', budgetPolicyId: 'pol' });
+    await store.markPendingPolicyAsks('pol', {
+      status: 'approved', resolvedBy: 'manual_resume', actor: resumer, outcome: { resumedAmountUsd: '20', requeueResults: [] },
+    });
+
+    const r = await closer.closeForPolicy('pol', { status: 'cancelled', resolvedBy: 'policy_deleted', actor: resumer }, NOW);
+
+    // The resume's reason, resumer and amount — not the delete's — reach the engine, the link and the fleet outputs.
+    expect(asks.close).toHaveBeenLastCalledWith('req-1', { status: 'cancelled', reason: 'manual_resume' }, NOW);
+    expect(store.links.get('req-1')?.pendingClose).toEqual(expect.objectContaining({ resolvedBy: 'manual_resume' }));
+    expect(store.setResolvedBy).toHaveBeenCalledWith('req-1', 'manual_resume');
+    expect(store.setOutcome).toHaveBeenCalledWith('req-1', { resumedAmountUsd: '20', requeueResults: [], resumedById: 'u9' });
+    expect(r.approval).toEqual(expect.objectContaining({ status: 'approved', resolvedBy: 'manual_resume' }));
+    expect(activity.record).toHaveBeenLastCalledWith(expect.objectContaining({ actorType: 'USER', actorId: 'u9', action: 'approval.decided' }));
   });
 });
 

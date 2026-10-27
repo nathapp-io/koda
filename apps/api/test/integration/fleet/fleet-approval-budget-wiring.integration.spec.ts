@@ -20,6 +20,8 @@ import { BudgetsService } from '../../../src/fleet/budgets/budgets.service';
 import { BudgetSweeper } from '../../../src/fleet/budgets/budget-sweeper';
 import { ApprovalCloser, userActor } from '../../../src/fleet/approvals/approval-closer';
 import { PolicyAskCloseSweeper } from '../../../src/fleet/approvals/policy-ask-close.sweeper';
+import { ApprovalRequestExpirySweeper } from '../../../src/approvals/approval-request-expiry.sweeper';
+import { PrismaApprovalRequestRepository } from '../../../src/approvals/prisma-approval-request.repository';
 import { ProjectEventBus } from '../../../src/live/project-event-bus';
 import type { LiveEvent } from '../../../src/live/live-event';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
@@ -432,5 +434,59 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
 
     expect((await requestOf(ask.id)).status).toBe('pending');
     expect((await prisma.budgetIncident.findFirstOrThrow({ where: { policyId: policy.id, kind: 'resumed' } })).approvalId).toBe(ask.id);
+  });
+
+  /**
+   * B1 (fix round 4): the close a policy action stamps on an ask is first-write-wins, and both the immediate close and
+   * the continuation replay the link's own intent. A resume that could not settle a held request keeps its resolution,
+   * its raised amount and its resumer even when a later action — here the delete — closes the ask.
+   */
+  it('B1: a later policy close settles a held ask with the resume it was already owed', async () => {
+    const policy = await projectPolicy();
+    await job({ costSpentUsd: 10 });
+    await evaluate(policy.id);
+    const [{ request: ask }] = await asksOf(policy.id);
+
+    // The resume skips the held request, lifts the pause and stamps what it meant to write.
+    await whileRequestHeld(ask.id, () =>
+      request(app.getHttpServer()).post(`${budgetRoute}/${policy.id}/resume`).set(asRoot()).send({ amountUsd: 20 }).expect(200));
+    expect(await requestOf(ask.id)).toMatchObject({ status: 'pending' });
+
+    await request(app.getHttpServer()).delete(`${budgetRoute}/${policy.id}`).set(asRoot()).expect(204);
+
+    // The ask is the resume's, not the delete's: same reason, same outcome, same attribution as the unheld path.
+    expect(await requestOf(ask.id)).toMatchObject({ status: 'cancelled', result: { closedBy: 'manual_resume' } });
+    expect((await linkOf(ask.id)).resolvedBy).toBe('manual_resume');
+    expect((await linkOf(ask.id)).outcome).toEqual({ resumedAmountUsd: '20', requeueResults: [], resumedById: world.ids.root });
+    expect(await prisma.fleetActivity.findMany({ where: { entityType: 'approval', entityId: ask.id, action: 'approval.decided' } }))
+      .toMatchObject([{ actorType: 'USER', actorId: world.ids.root }]);
+  });
+
+  /**
+   * B2 (fix round 4): a stamped ask belongs to the durable continuation, so timeout policy neither scans it nor settles
+   * it — not even when the request's deadline passes between the stamp and the continuation, which is what a decide
+   * holding the row for longer than the remaining time would produce.
+   */
+  it('B2: a stamped ask is not expired away before its continuation runs', async () => {
+    const policy = await projectPolicy();
+    await job({ costSpentUsd: 10 });
+    await evaluate(policy.id);
+    const [{ request: ask }] = await asksOf(policy.id);
+
+    await whileRequestHeld(ask.id, () =>
+      request(app.getHttpServer()).post(`${budgetRoute}/${policy.id}/resume`).set(asRoot()).send({ amountUsd: 20 }).expect(200));
+    expect(await requestOf(ask.id)).toMatchObject({ status: 'pending' });
+
+    // Two days later the 24 h deadline is long past; the expiry sweep must still leave the resume's ask alone.
+    const past = new Date(Date.now() + 2 * 86_400_000);
+    expect((await app.get(ApprovalRequestExpirySweeper, { strict: false }).tick(past)).expired).toBe(0);
+    expect(await requestOf(ask.id)).toMatchObject({ status: 'pending' });
+    // The recheck inside the settlement agrees with the scan: a stamp that lands after the scan still wins.
+    await expect(app.get(PrismaApprovalRequestRepository, { strict: false }).canSettleTimeout(ask.id)).resolves.toBe(false);
+
+    expect((await policySweeper.tick(past)).closed).toBe(1);
+    expect(await requestOf(ask.id)).toMatchObject({ status: 'cancelled', result: { closedBy: 'manual_resume' } });
+    expect((await linkOf(ask.id)).resolvedBy).toBe('manual_resume');
+    expect((await linkOf(ask.id)).outcome).toEqual({ resumedAmountUsd: '20', requeueResults: [], resumedById: world.ids.root });
   });
 });

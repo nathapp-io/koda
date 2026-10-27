@@ -12,7 +12,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaClient } from '../../../src/generated/prisma/client';
+import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import type { ApprovalRequestEventPayload, SyncRequest, SyncResponse } from '@nathapp/fleet-protocol';
 import { ApprovalPolicyService } from '../../../src/approvals/approval-policy.service';
 import { ApprovalRequestExpirySweeper } from '../../../src/approvals/approval-request-expiry.sweeper';
@@ -43,17 +43,26 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
   let world: Awaited<ReturnType<typeof seedFleetHttpWorld>>;
   let runner: { runnerId: string; apiKey: string };
   const saved = process.env.FLEET_SYNC_WAIT_MS;
-  let relayEnabled = false;
+  /** The relay capability this file last pushed for the shared runner; `null` until a case states one. */
+  let relayEnabled: boolean | null = null;
+  /** The runner's enrollment capabilities: what `afterEach` restores, whatever a case pushed. */
+  let baselineCapabilities: Prisma.InputJsonValue;
 
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
   const sync = async (over: Partial<SyncRequest> = {}) =>
     data<SyncResponse>(await request(server).post('/api/fleet/runner/sync').set(auth(runner.apiKey)).send(syncBody({ protocolVersion: 2, ...over })).expect(200));
-  /** The relay capability is what lets a runner hold an escalated job; one sync turns it on for the rest of the file. */
-  const enableRelay = async (): Promise<void> => {
-    if (relayEnabled) return;
-    await sync({ capabilities: { ...FLEET_CAPS, approvals: { relay: true } } });
-    relayEnabled = true;
+  /**
+   * The relay capability is runner state, not a per-case fixture: a case that needs it says so, and `afterEach` puts the
+   * runner back to the enrollment baseline, so a case never inherits another's capabilities and the no-relay case below
+   * keeps its meaning in any order (and under `--sequence.shuffle`).
+   */
+  const setRelay = async (relay: boolean): Promise<void> => {
+    if (relayEnabled === relay) return;
+    await sync({ capabilities: relay ? { ...FLEET_CAPS, approvals: { relay: true } } : FLEET_CAPS });
+    relayEnabled = relay;
   };
+  const enableRelay = (): Promise<void> => setRelay(true);
+  const disableRelay = (): Promise<void> => setRelay(false);
   const dispatch = (body: object, expected = 201) =>
     request(server).post('/api/projects/web/fleet/jobs').set(auth(world.tokens.dev)).send({ repoId: world.repoId, command: 'RUN', maxCostUsd: 5, ...body }).expect(expected);
 
@@ -145,6 +154,9 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     runner = await enrollRunner(server, world.tokens.root, 'relay-1');
+    baselineCapabilities = (await prisma.runner.findUniqueOrThrow({
+      where: { id: runner.runnerId }, select: { capabilities: true },
+    })).capabilities as Prisma.InputJsonValue;
   });
   afterAll(async () => {
     await app.close();
@@ -157,8 +169,15 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
    * (review fix round 1). Closing whatever a test left non-terminal keeps the failure count naming real failures.
    * This is fixture hygiene, not a job transition: no runner report produces it, and `finish` is still the path every
    * passing test takes.
+   *
+   * The runner is shared by every case, so its capabilities are reset here too (M2): a case that turns the relay on
+   * must not hand that capability — or a still-busy slot — to the next one.
    */
   afterEach(async () => {
+    if (relayEnabled !== null) {
+      await prisma.runner.update({ where: { id: runner.runnerId }, data: { capabilities: baselineCapabilities } });
+      relayEnabled = null;
+    }
     const active = await prisma.fleetJob.findMany({
       where: { state: { in: ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING'] } },
       select: { id: true },
@@ -172,7 +191,7 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
   });
 
   it('a runner without the relay: a pinned escalate dispatch is 422, an unpinned one waits QUEUED (D270)', async () => {
-    await sync();   // first sync: runner online with FLEET_CAPS (no relay)
+    await disableRelay();   // this case states the capability it needs: online with FLEET_CAPS and no relay
     const pinned = await dispatch({ feature: 'pinned', bashMode: 'escalate', pinnedRunnerId: runner.runnerId }, 422);
     expect(JSON.stringify(pinned.body)).toContain('approvals_relay');
     const jobId = data<{ job: { id: string } }>(await dispatch({ feature: 'waits', bashMode: 'gated' })).job.id;

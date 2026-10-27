@@ -18,7 +18,7 @@ import { checkBashDecision } from './bash-decision';
 import {
   ApprovalDecision, ApprovalResolvedBy, FleetApprovalRecord,
 } from './domain/approval.domain';
-import { MAX_PENDING_ASKS_PER_JOB, type PersistedPolicyClose } from './domain/fleet-approval-ask.domain';
+import { MAX_PENDING_ASKS_PER_JOB, type FleetApprovalAskRecord, type PersistedPolicyClose } from './domain/fleet-approval-ask.domain';
 import { FleetApprovalAskStore } from './fleet-approval-ask.store';
 
 /** US-002: `responsibleUserId` is null when the job the approval belongs to was requested by an agent. */
@@ -59,6 +59,14 @@ const persistedClose = (close: PolicyClose): PersistedPolicyClose => ({
   actor: { type: close.actor.type, id: close.actor.id, responsibleUserId: close.actor.responsibleUserId },
   ...(close.outcome === undefined ? {} : { outcome: close.outcome }),
 });
+
+/**
+ * The close one link is owed: the intent stamped before the first attempt, else this call's. The first action to reach
+ * an ask owns its settlement, so a held ask keeps the resume that meant to close it instead of the delete that came
+ * later (fix round 4 / B1).
+ */
+const owedClose = (link: Pick<FleetApprovalAskRecord, 'pendingClose'>, close: PolicyClose): PolicyClose =>
+  link.pendingClose === null ? close : { ...link.pendingClose };
 
 /** A system action answers to the policy's last editor; there is no human in the loop. */
 export const systemActor = (policy: BudgetPolicyRecord): ApprovalActor =>
@@ -163,14 +171,19 @@ export class ApprovalCloser {
    * Fix round 2: the intent is stamped on every pending ask of the policy *before* the first close
    * (`store.markPendingPolicyAsks`), so whatever this call leaves behind — a held request, an ask past the bound — is
    * drained later by `PolicyAskCloseSweeper` with the resolution this action chose, even after the policy row is gone.
+   *
+   * Fix round 4 (B1): the stamp is first-write-wins, and this call replays *each link's* stamped intent rather than its
+   * own. An ask an earlier action (a resume) could not settle while its request was held keeps that action's resolution,
+   * actor and outcome — the same close it would have been given had it not been held — instead of being reported with
+   * the reason of whichever policy action ran last.
    */
   async closeForPolicy(policyId: string, close: PolicyClose, now: Date, limit = MAX_ASKS_CLOSED_PER_CALL): Promise<ApprovalChange> {
     const live: LiveFleetApprovalEvent[] = [];
     let first: FleetApprovalRecord | null = null;
     // The whole close, not just its reason: a leftover must keep the actor (attribution) and the outcome (a resume's
     // amount, its re-queues and the resumer) that this action chose.
-    const intended = await this.store.markPendingPolicyAsks(policyId, persistedClose(close));
-    if (intended === 0) return { approval: null, live };
+    const pending = await this.store.markPendingPolicyAsks(policyId, persistedClose(close));
+    if (pending === 0) return { approval: null, live };
 
     let after: string | undefined;
     let processed = 0;
@@ -179,7 +192,7 @@ export class ApprovalCloser {
       const links = await this.store.findPendingForPolicyPage(policyId, after, take);
       if (links.length === 0) return { approval: first, live };
       for (const link of links) {
-        const closed = await this.closePolicyAsk(link.requestId, close, now);
+        const closed = await this.closePolicyAsk(link.requestId, owedClose(link, close), now);
         if (closed.approval === null) continue;
         first ??= closed.approval;
         live.push(...closed.live);

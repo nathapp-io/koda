@@ -32,7 +32,9 @@ export const FLEET_ASK_TYPE: Readonly<Record<string, ApprovalType>> = Object.fre
 
 /** The fleet type of a permission key, or null when the key is not a fleet ask's. */
 export function fleetTypeOfKey(permissionKey: string): ApprovalType | null {
-  return FLEET_ASK_TYPE[permissionKey] ?? null;
+  // An own-property check, not a lookup: a key such as `constructor` or `toString` would otherwise answer an
+  // inherited `Object.prototype` member instead of null.
+  return Object.hasOwn(FLEET_ASK_TYPE, permissionKey) ? FLEET_ASK_TYPE[permissionKey] ?? null : null;
 }
 
 /** A link resolution that makes the fleet status `cancelled` whatever the request status. */

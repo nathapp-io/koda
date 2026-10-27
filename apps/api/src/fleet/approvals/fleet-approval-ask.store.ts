@@ -56,7 +56,10 @@ export class FleetApprovalAskStore {
     return this.asks.findPendingForPolicyPage(budgetPolicyId, afterRequestId, limit);
   }
 
-  /** US-007 (fix rounds 2-3): stamp the close a policy action intends on every pending ask of the policy. */
+  /**
+   * US-007 (fix rounds 2-4): stamp the close a policy action intends on every pending ask of the policy that has no
+   * intent yet — the first action to reach an ask owns its settlement — and answer how many asks are still pending.
+   */
   markPendingPolicyAsks(budgetPolicyId: string, close: PersistedPolicyClose): Promise<number> {
     return this.asks.markPendingPolicyAsks(budgetPolicyId, close);
   }

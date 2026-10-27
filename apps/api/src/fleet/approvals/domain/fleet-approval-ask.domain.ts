@@ -87,7 +87,11 @@ export interface IFleetApprovalAskRepository {
    * held request is stepped over rather than met again, and a newer pending ask is still settled.
    */
   findPendingForPolicyPage(budgetPolicyId: string, afterRequestId?: string, limit?: number): Promise<FleetApprovalAskRecord[]>;
-  /** Stamps the close a policy action intends for every pending ask of the policy (US-007 fix rounds 2-3). */
+  /**
+   * Stamps the close a policy action intends for every pending ask of the policy that has none yet, and answers how many
+   * asks of the policy are still pending. The first intent on a link wins: `closeForPolicy` and `PolicyAskCloseSweeper`
+   * both replay it, so a later action can only add work to the queue, never rewrite what an earlier one committed to.
+   */
   markPendingPolicyAsks(budgetPolicyId: string, close: PersistedPolicyClose): Promise<number>;
   /**
    * Claim a bounded, least-recently-attempted batch of pending policy asks that have an intended resolution. Skips held

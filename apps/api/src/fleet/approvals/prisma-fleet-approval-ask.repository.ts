@@ -173,15 +173,24 @@ export class PrismaFleetApprovalAskRepository
   }
 
   /**
-   * US-007 (fix rounds 2-3): stamp the close on every pending ask of the policy before the close starts, so an ask it
+   * US-007 (fix rounds 2-4): stamp the close on every pending ask of the policy before the close starts, so an ask it
    * cannot settle (held, or past the call's bound) is drained later with the same resolution, status, actor and outcome.
+   *
+   * The first intent an ask is stamped with wins: a later policy action must not overwrite it, or an ask a resume
+   * could not settle (its request was held) would be reported `superseded` by the hard stop or delete that follows
+   * instead of keeping the amount, resumer and outcome the resume committed to. Both the immediate close and the
+   * continuation replay the link's own intent, so the later action just adds work to the queue.
+   *
+   * Answers the number of pending asks of the policy — stamped now or by an earlier action — because that, not the
+   * number of fresh stamps, decides whether the caller has anything to close at all.
    */
   async markPendingPolicyAsks(budgetPolicyId: string, close: PersistedPolicyClose): Promise<number> {
-    const { count } = await this.db.fleetApprovalAsk.updateMany({
-      where: { budgetPolicyId, request: { status: 'pending' } },
+    await this.db.fleetApprovalAsk.updateMany({
+      // `DbNull` is "no value" for a `Json?` column in a filter; a plain `null` matches nothing there.
+      where: { budgetPolicyId, pendingClose: { equals: Prisma.DbNull }, request: { status: 'pending' } },
       data: { pendingClose: json(close as unknown as Record<string, unknown>) },
     });
-    return count;
+    return this.db.fleetApprovalAsk.count({ where: { budgetPolicyId, request: { status: 'pending' } } });
   }
 
   /**
