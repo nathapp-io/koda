@@ -1611,6 +1611,7 @@ model ApprovalRequest {
 
   decisions ApprovalDecision[]
   assistantAction AssistantActionRequest?
+  fleetAsk FleetApprovalAsk?
 
   @@index([status, expiresAt])
   @@index([projectId, status, createdAt])
@@ -1651,4 +1652,25 @@ model ApprovalDecision {
 
   @@index([requestId])
   @@index([deciderId, decidedAt])
+}
+
+/// Permissions P3d-1: the fleet's row for one ask on the approval engine. jobId and budgetPolicyId have no
+/// foreign key (a deleted job or policy leaves the ask readable).
+model FleetApprovalAsk {
+  requestId      String    @id
+  kind           String    // bash | budget
+  projectId      String?
+  jobId          String?
+  leaseEpoch     Int?
+  naxAskId       String?
+  budgetPolicyId String?
+  resolvedBy     String?   // user | timeout | job_ended | superseded | manual_resume | window_reset | policy_deleted
+  outcome        Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  request        ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, leaseEpoch, naxAskId])
+  @@index([jobId])
+  @@index([budgetPolicyId])
 }
