@@ -220,7 +220,9 @@
     "approval.policy.read": ["no-project","granted"],
     "approval.policy.manage": ["granted","granted"],
     "audit.read": ["granted","granted"],
-    "memory.update": ["granted","granted"]
+    "memory.update": ["granted","granted"],
+    "fleet.job.shell.escalate": ["no-project","granted"],
+    "fleet.budget.override": ["granted","granted"]
   },
   "admin": {
     "agent.create": ["granted","granted"],
@@ -443,7 +445,9 @@
     "approval.policy.read": ["no-project","granted"],
     "approval.policy.manage": ["granted","granted"],
     "audit.read": ["granted","granted"],
-    "memory.update": ["granted","granted"]
+    "memory.update": ["granted","granted"],
+    "fleet.job.shell.escalate": ["no-project","granted"],
+    "fleet.budget.override": ["granted","granted"]
   },
   "member": {
     "agent.create": ["not-granted","not-granted"],
@@ -666,7 +670,9 @@
     "approval.policy.read": ["no-project","not-granted"],
     "approval.policy.manage": ["not-granted","not-granted"],
     "audit.read": ["not-granted","not-granted"],
-    "memory.update": ["not-granted","not-granted"]
+    "memory.update": ["not-granted","not-granted"],
+    "fleet.job.shell.escalate": ["no-project","not-granted"],
+    "fleet.budget.override": ["not-granted","not-granted"]
   },
   "agent": {
     "agent.create": ["not-granted","not-granted"],
@@ -889,7 +895,9 @@
     "approval.policy.read": ["no-project","not-granted"],
     "approval.policy.manage": ["not-granted","not-granted"],
     "audit.read": ["not-granted","not-granted"],
-    "memory.update": ["not-granted","not-granted"]
+    "memory.update": ["not-granted","not-granted"],
+    "fleet.job.shell.escalate": ["no-project","not-granted"],
+    "fleet.budget.override": ["not-granted","not-granted"]
   },
   "project-admin": {
     "agent.create": ["not-granted","not-granted"],
@@ -1112,7 +1120,9 @@
     "approval.policy.read": ["no-project","granted"],
     "approval.policy.manage": ["not-granted","granted"],
     "audit.read": ["not-granted","not-granted"],
-    "memory.update": ["not-granted","granted"]
+    "memory.update": ["not-granted","granted"],
+    "fleet.job.shell.escalate": ["no-project","granted"],
+    "fleet.budget.override": ["not-granted","granted"]
   },
   "developer": {
     "agent.create": ["not-granted","not-granted"],
@@ -1330,12 +1340,14 @@
     "role.manage": ["not-granted","not-granted"],
     "role.binding.global": ["not-granted","not-granted"],
     "role.binding.owner": ["not-granted","not-granted"],
-    "approval.decide": ["not-granted","not-granted"],
+    "approval.decide": ["not-granted","granted"],
     "approval.request.cancel": ["implicit","implicit"],
     "approval.policy.read": ["no-project","granted"],
     "approval.policy.manage": ["not-granted","not-granted"],
     "audit.read": ["not-granted","not-granted"],
-    "memory.update": ["not-granted","not-owner"]
+    "memory.update": ["not-granted","not-owner"],
+    "fleet.job.shell.escalate": ["no-project","granted"],
+    "fleet.budget.override": ["not-granted","not-granted"]
   },
   "reviewer": {
     "agent.create": ["not-granted","not-granted"],
@@ -1558,7 +1570,9 @@
     "approval.policy.read": ["no-project","granted"],
     "approval.policy.manage": ["not-granted","not-granted"],
     "audit.read": ["not-granted","not-granted"],
-    "memory.update": ["not-granted","not-granted"]
+    "memory.update": ["not-granted","not-granted"],
+    "fleet.job.shell.escalate": ["no-project","not-granted"],
+    "fleet.budget.override": ["not-granted","not-granted"]
   },
   "verifier": {
     "agent.create": ["not-granted","not-granted"],
@@ -1781,7 +1795,9 @@
     "approval.policy.read": ["no-project","granted"],
     "approval.policy.manage": ["not-granted","not-granted"],
     "audit.read": ["not-granted","not-granted"],
-    "memory.update": ["not-granted","not-granted"]
+    "memory.update": ["not-granted","not-granted"],
+    "fleet.job.shell.escalate": ["no-project","not-granted"],
+    "fleet.budget.override": ["not-granted","not-granted"]
   },
   "triager": {
     "agent.create": ["not-granted","not-granted"],
@@ -2004,7 +2020,9 @@
     "approval.policy.read": ["no-project","granted"],
     "approval.policy.manage": ["not-granted","not-granted"],
     "audit.read": ["not-granted","not-granted"],
-    "memory.update": ["not-granted","not-granted"]
+    "memory.update": ["not-granted","not-granted"],
+    "fleet.job.shell.escalate": ["no-project","not-granted"],
+    "fleet.budget.override": ["not-granted","not-granted"]
   },
   "approver": {
     "agent.create": ["not-granted","not-granted"],
@@ -2227,7 +2245,9 @@
     "approval.policy.read": ["no-project","granted"],
     "approval.policy.manage": ["not-granted","not-granted"],
     "audit.read": ["not-granted","not-granted"],
-    "memory.update": ["not-granted","not-granted"]
+    "memory.update": ["not-granted","not-granted"],
+    "fleet.job.shell.escalate": ["no-project","not-granted"],
+    "fleet.budget.override": ["not-granted","not-granted"]
   },
   "viewer": {
     "agent.create": ["not-granted","not-granted"],
@@ -2450,6 +2470,8 @@
     "approval.policy.read": ["no-project","granted"],
     "approval.policy.manage": ["not-granted","not-granted"],
     "audit.read": ["not-granted","not-granted"],
-    "memory.update": ["not-granted","not-granted"]
+    "memory.update": ["not-granted","not-granted"],
+    "fleet.job.shell.escalate": ["no-project","not-granted"],
+    "fleet.budget.override": ["not-granted","not-granted"]
   }
 }

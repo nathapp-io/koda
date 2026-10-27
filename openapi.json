@@ -21611,6 +21611,10 @@
             "type": "string",
             "nullable": true
           },
+          "params": {
+            "type": "object",
+            "nullable": true
+          },
           "decidedAt": {
             "type": "string",
             "format": "date-time"
@@ -21622,6 +21626,7 @@
           "deciderId",
           "decision",
           "comment",
+          "params",
           "decidedAt"
         ]
       },
@@ -21776,6 +21781,11 @@
           "comment": {
             "type": "string",
             "maxLength": 2000
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The decider's choice, when the action asks for one"
           }
         },
         "required": [

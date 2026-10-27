@@ -13,7 +13,9 @@ export interface PendingApprovalMatch {
   onBehalfOfType: 'USER' | 'AGENT' | null; onBehalfOfId: string | null;
   permissionKey: string; projectId: string | null; inputHash: string;
 }
-export type NewApprovalDecision = Omit<ApprovalDecisionRecord, 'id' | 'decidedAt' | 'comment'> & { comment?: string | null; decidedAt?: Date };
+export type NewApprovalDecision = Omit<ApprovalDecisionRecord, 'id' | 'decidedAt' | 'comment' | 'params'> & {
+  comment?: string | null; decidedAt?: Date; params?: unknown;
+};
 
 @Injectable()
 export class PrismaApprovalRequestRepository extends AbstractPrismaRepository<ApprovalRequestRecord, ApprovalRequest, string> {
@@ -105,14 +107,20 @@ export class PrismaApprovalRequestRepository extends AbstractPrismaRepository<Ap
   }
 
   async createDecision(input: NewApprovalDecision): Promise<ApprovalDecisionRecord> {
-    return this.decisionToDomain(await this.prisma.client.approvalDecision.create({ data: input }));
+    const { params, ...fields } = input;
+    // A `Json?` column takes `Prisma.DbNull` for "no value": a plain `null` is refused.
+    const stored = params === null || params === undefined ? Prisma.DbNull : params as Prisma.InputJsonValue;
+    return this.decisionToDomain(await this.prisma.client.approvalDecision.create({ data: { ...fields, params: stored } }));
   }
 
   async findDecisions(requestId: string): Promise<ApprovalDecisionRecord[]> {
     const rows = await this.prisma.client.approvalDecision.findMany({ where: { requestId }, orderBy: [{ decidedAt: 'asc' }, { id: 'asc' }], take: 50 });
     return rows.map((row) => this.decisionToDomain(row));
   }
-  private decisionToDomain(row: ApprovalDecision): ApprovalDecisionRecord { return { ...row } as ApprovalDecisionRecord; }
+  private decisionToDomain(row: ApprovalDecision): ApprovalDecisionRecord {
+    // A database NULL reads back as `params: null`, the shape the domain states for "no params".
+    return { ...row, params: row.params ?? null } as ApprovalDecisionRecord;
+  }
 }
 
 function patternClauses(patterns: DecidePatterns): Prisma.ApprovalRequestWhereInput[] {

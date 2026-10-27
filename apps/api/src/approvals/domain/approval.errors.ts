@@ -61,3 +61,17 @@ export class ApprovalCancelForbiddenError extends Error {
     this.name = 'ApprovalCancelForbiddenError'; Object.setPrototypeOf(this, new.target.prototype);
   }
 }
+
+/** Why a decider's params were refused. */
+export type DecisionParamsRefusal = 'not-accepted' | 'too-large' | 'invalid';
+
+/**
+ * A decider sent params the request's command cannot honour: it takes none, the value is over the
+ * size cap, or the command's `parseDecision` (or the frozen input's own `parse`) refused them.
+ */
+export class ApprovalDecisionParamsInvalidError extends Error {
+  constructor(readonly reason: DecisionParamsRefusal) {
+    super(`Invalid decision params: ${reason}`);
+    this.name = 'ApprovalDecisionParamsInvalidError'; Object.setPrototypeOf(this, new.target.prototype);
+  }
+}

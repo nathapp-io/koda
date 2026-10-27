@@ -13,7 +13,7 @@
 import { Injectable } from '@nestjs/common';
 import { findCatalogEntry } from '../permissions/catalog';
 
-export interface ApprovalCommand<TInput = unknown, TResult = unknown> {
+export interface ApprovalCommand<TInput = unknown, TResult = unknown, TDecision = unknown> {
   /** A catalog key with `approval.approvable === true`. */
   key: string;
   /**
@@ -21,10 +21,24 @@ export interface ApprovalCommand<TInput = unknown, TResult = unknown> {
    * accept its own output: an approved request re-parses the input frozen when it was opened.
    */
   parse(input: unknown): TInput;
-  /** Runs the action under the caller's (or the request's) action context. */
-  execute(input: TInput): Promise<TResult>;
+  /**
+   * Validates a decider's params for this request. Absent: a decision may carry no params. The
+   * returned value must be JSON-serialisable, and `parseDecision` must accept its own output: the
+   * execution re-parses the value stored on the approving decision. Throws to refuse.
+   */
+  parseDecision?(decision: 'approve' | 'reject', params: unknown, input: TInput): TDecision;
+  /**
+   * Runs inside the decide transaction after a principal's reject is recorded; a throw rolls it back.
+   * It writes rows and may queue `committedEffect`s (the fleet answer's runner wake): the decision
+   * service owns that transaction, so those effects run only once the decision and these rows commit.
+   */
+  onReject?(input: TInput, decision: TDecision | undefined): Promise<void>;
+  /** `decision` is the approving decision's parsed params, or undefined when none were parsed. */
+  execute(input: TInput, decision?: TDecision): Promise<TResult>;
   /** What `ApprovalRequest.result` stores; omitted means null. */
   toResult?(result: TResult): unknown;
+  /** Runs after the execution transaction committed, under the request's context; a throw is logged only. */
+  afterCommit?(input: TInput, decision: TDecision | undefined, result: TResult): Promise<void>;
 }
 
 @Injectable()

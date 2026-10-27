@@ -15,11 +15,20 @@ import { ApprovalRequestEvents } from './approval-request-events';
 const OWN_SUFFIX = '.own';
 
 /** The pre-check outcomes that settle a request as failed before its command is run. */
-type PrecheckFailure = 'no-command' | 'input-hash-mismatch' | 'permission-revoked' | 'invalid-input';
+type PrecheckFailure = 'no-command' | 'input-hash-mismatch' | 'permission-revoked' | 'invalid-input' | 'invalid-decision';
 
-/** A pre-check pass hands the command and its parsed input on, so `parse` runs once at execution. */
+/**
+ * What `recheckPrincipal` answers: the principal whose key is re-checked, `'skip'` for a system ask
+ * that has no principal behind it, or `null` when there is nothing to check.
+ */
+type RecheckPrincipal = { type: 'USER' | 'AGENT'; id: string } | 'skip' | null;
+
+/**
+ * A pre-check pass hands the command, its parsed input and the approving decision's parsed params on,
+ * so `parse` and `parseDecision` each run once at execution.
+ */
 type Prechecked =
-  | { ok: true; command: ApprovalCommand; parsed: unknown }
+  | { ok: true; command: ApprovalCommand; parsed: unknown; decision: unknown }
   | { ok: false; error: PrecheckFailure };
 
 /**
@@ -56,7 +65,7 @@ export class ApprovalExecutionService {
       const checked = await this.precheck(request);
       if (checked.ok === false) return this.settle(request.id, { status: 'failed', settledAt: now, result: { error: checked.error } });
 
-      return this.run(request, checked.command, checked.parsed, now);
+      return this.run(request, checked.command, checked.parsed, checked.decision, now);
     });
   }
 
@@ -69,19 +78,46 @@ export class ApprovalExecutionService {
 
     if (!(await this.stillHoldsKey(request))) return { ok: false, error: 'permission-revoked' };
 
+    let parsed: unknown;
     try {
-      return { ok: true, command, parsed: command.parse(request.input) };
+      parsed = command.parse(request.input);
     } catch {
       return { ok: false, error: 'invalid-input' };
+    }
+
+    return this.withDecision(command, request.id, parsed);
+  }
+
+  /**
+   * The decision step: the approving decision's params are re-parsed exactly as the frozen input is,
+   * so what `execute` receives is what `parseDecision` produced at decide time. A command without the
+   * hook takes no decision, so its decisions are never read.
+   */
+  private async withDecision(command: ApprovalCommand, requestId: string, parsed: unknown): Promise<Prechecked> {
+    const parseDecision = command.parseDecision?.bind(command);
+    if (parseDecision === undefined) return { ok: true, command, parsed, decision: undefined };
+
+    // The last approval is the one that released the request; a timeout approval writes no decision
+    // row at all, which is the only case with nothing to re-parse.
+    const decisions = await this.requests.findDecisions(requestId);
+    const approving = decisions.filter((decision) => decision.decision === 'approve').at(-1);
+
+    try {
+      return { ok: true, command, parsed, decision: parseDecision('approve', approving?.params ?? undefined, parsed) };
+    } catch {
+      return { ok: false, error: 'invalid-decision' };
     }
   }
 
   /**
    * The key-only re-check: the principal the action belongs to must still hold the key (or its
    * `.own` form) at the request's scope. Row ownership and domain rules are the command's business.
+   * A system ask has no principal to re-check: the decider's eligibility at decide time is the
+   * authority, and the command checks its own state when it runs.
    */
   private async stillHoldsKey(request: ApprovalRequestRecord): Promise<boolean> {
     const principal = recheckPrincipal(request);
+    if (principal === 'skip') return true;
     if (principal === null) return false;
 
     const scope = request.projectId === null ? 'global' : { projectId: request.projectId };
@@ -90,50 +126,91 @@ export class ApprovalExecutionService {
   }
 
   /**
-   * Step 3 and 4. Only a failure of the callback is turned into a `failed` request: once the callback
+   * Steps 3 to 5. Only a failure of the callback is turned into a `failed` request: once the callback
    * has returned, a failing commit is reported to the caller and the request stays approved.
    */
-  private async run(request: ApprovalRequestRecord, command: ApprovalCommand, parsed: unknown, now: Date): Promise<ApprovalRequestRecord> {
+  private async run(
+    request: ApprovalRequestRecord, command: ApprovalCommand, parsed: unknown, decision: unknown, now: Date,
+  ): Promise<ApprovalRequestRecord> {
     // The row lock is released when the failed callback rolls back, before the failure settlement
     // opens its own transaction. Holding this request's slot across both keeps a waiting execute from
     // taking the still-approved row in that gap and running the command a second time.
     return this.serialised(request.id, async () => {
-      // Set only when the callback itself threw: a transaction that fails to open, or to commit after
-      // the callback succeeded, is reported to the caller and never settles the request.
-      let callbackFailure: { error: unknown } | undefined;
-      try {
-        return await withCommittedEffects(() => this.txManager.run(async () => {
-          try {
-            const locked = await this.requests.lockById(request.id);
-            if (!locked) throw new ApprovalRequestNotFoundError(request.id);
-            if (locked.status !== 'approved') throw new ApprovalRequestNotPendingError(locked.status);
-
-            const result = await command.execute(parsed);
-            const settled = await bookkeeping('approval.request-settle', async () => {
-              const transitioned = await this.requests.transition(request.id, 'approved', {
-                status: 'executed', settledAt: now, result: command.toResult?.(result) ?? null,
-              });
-              if (transitioned) await this.events.record(transitioned);
-              return transitioned;
-            });
-            // The row is locked by this transaction, so a lost transition means a broken boundary: roll back.
-            if (!settled) throw new ApprovalRequestNotPendingError(locked.status);
-
-            return settled;
-          } catch (error) {
-            callbackFailure = { error };
-            throw error;
-          }
-        }));
-      } catch (error) {
-        if (callbackFailure === undefined || error instanceof ApprovalRequestNotPendingError) throw error;
-
-        this.logger.warn(`approval request ${request.id} failed to execute: ${errorMessage(error)}`);
-        return this.settle(request.id, {
-          status: 'failed', settledAt: now, result: { error: 'execution-failed', name: errorName(error) },
-        });
+      const { settled, raw } = await this.executeOnce(request, command, parsed, decision, now);
+      // Step 5: only a committed execution has a follow-up, and its failure changes nothing.
+      if (settled.status === 'executed' && raw !== undefined) {
+        await this.followUp(request.id, command, parsed, decision, raw.result);
       }
+
+      return settled;
     });
+  }
+
+  /**
+   * The execution transaction. `raw` is the command's own result, kept for the follow-up hook because
+   * the request stores the `toResult` projection instead.
+   */
+  private async executeOnce(
+    request: ApprovalRequestRecord, command: ApprovalCommand, parsed: unknown, decision: unknown, now: Date,
+  ): Promise<{ settled: ApprovalRequestRecord; raw?: { result: unknown } }> {
+    // Set only when the callback itself threw: a transaction that fails to open, or to commit after
+    // the callback succeeded, is reported to the caller and never settles the request.
+    let callbackFailure: { error: unknown } | undefined;
+    let raw: { result: unknown } | undefined;
+    try {
+      const settled = await withCommittedEffects(() => this.txManager.run(async () => {
+        try {
+          const locked = await this.requests.lockById(request.id);
+          if (!locked) throw new ApprovalRequestNotFoundError(request.id);
+          if (locked.status !== 'approved') throw new ApprovalRequestNotPendingError(locked.status);
+
+          const result = await command.execute(parsed, decision);
+          raw = { result };
+          const settled = await bookkeeping('approval.request-settle', async () => {
+            const transitioned = await this.requests.transition(request.id, 'approved', {
+              status: 'executed', settledAt: now, result: command.toResult?.(result) ?? null,
+            });
+            if (transitioned) await this.events.record(transitioned);
+            return transitioned;
+          });
+          // The row is locked by this transaction, so a lost transition means a broken boundary: roll back.
+          if (!settled) throw new ApprovalRequestNotPendingError(locked.status);
+
+          return settled;
+        } catch (error) {
+          callbackFailure = { error };
+          throw error;
+        }
+      }));
+
+      return { settled, raw };
+    } catch (error) {
+      if (callbackFailure === undefined || error instanceof ApprovalRequestNotPendingError) throw error;
+
+      this.logger.warn(`approval request ${request.id} failed to execute: ${errorMessage(error)}`);
+      return {
+        settled: await this.settle(request.id, {
+          status: 'failed', settledAt: now, result: { error: 'execution-failed', name: errorName(error) },
+        }),
+      };
+    }
+  }
+
+  /**
+   * The command's own follow-up, run once its transaction committed and still under the request's
+   * context. It is warning-only: the command's writes are already durable, so a throw leaves the
+   * request executed. Only the transaction owner reaches this after a real commit — inside a caller's
+   * own `withCommittedEffects` scope (the assistant executor), it runs when that owner's callback returns.
+   */
+  private async followUp(requestId: string, command: ApprovalCommand, parsed: unknown, decision: unknown, result: unknown): Promise<void> {
+    const afterCommit = command.afterCommit?.bind(command);
+    if (afterCommit === undefined) return;
+
+    try {
+      await afterCommit(parsed, decision, result);
+    } catch (error) {
+      this.logger.warn(`approval request ${requestId} after-commit failed: ${errorMessage(error)}`);
+    }
   }
 
   /** Runs `fn` after every earlier call for the same request id has finished (one API instance). */
@@ -165,10 +242,14 @@ export class ApprovalExecutionService {
   }
 }
 
-/** The principal whose authority is re-checked: the on-behalf-of one for the assistant, else the actor. */
-function recheckPrincipal(request: ApprovalRequestRecord): { type: 'USER' | 'AGENT'; id: string } | null {
+/**
+ * The principal whose authority is re-checked: the on-behalf-of one for the assistant, `'skip'` for
+ * any other system component (an ask was not chosen by a principal), else the actor. `null` means
+ * there is no principal to check, which fails the re-check.
+ */
+function recheckPrincipal(request: ApprovalRequestRecord): RecheckPrincipal {
   const { actor, onBehalfOf } = request;
-  if (actor.type === 'SYSTEM' && actor.id === 'assistant') return onBehalfOf;
+  if (actor.type === 'SYSTEM') return actor.id === 'assistant' ? onBehalfOf : 'skip';
   if (actor.type === 'USER' || actor.type === 'AGENT') return { type: actor.type, id: actor.id };
   return null;
 }

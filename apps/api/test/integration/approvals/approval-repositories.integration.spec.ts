@@ -35,13 +35,16 @@ describeDb('approval engine migration', () => {
   beforeAll(async () => {
     scratch = await scratchSchemaBefore(process.env.DATABASE_URL as string, schema, '20261104090000_approval_engine');
     await applyMigration(scratch.db, '20261104090000_approval_engine');
+    // The generated client knows every column the later migrations add, so the scratch schema must
+    // carry them too or a create on this table sends a column the schema does not have.
+    await applyMigration(scratch.db, '20261106090000_approval_fleet_core');
   }, 60_000);
   afterAll(async () => { await scratch?.drop(); });
   it('AC-1: creates every model column and the unique selector index', async () => {
     const expected = {
       ApprovalPolicy: 'id selector projectId permissionPattern principalType roleId principalId mode timeoutSec onTimeout requiredApprovals approverMustHoldAction requireDistinctApprover updatedByType updatedById createdAt updatedAt',
       ApprovalRequest: 'id permissionKey projectId actorType actorId onBehalfOfType onBehalfOfId origin correlationId input inputHash requiredMode policyId onTimeout approverMustHoldAction requireDistinctApprover status satisfiedBy approverType approverId expiresAt decidedAt settledAt result createdAt updatedAt',
-      ApprovalDecision: 'id requestId deciderType deciderId decision comment decidedAt',
+      ApprovalDecision: 'id requestId deciderType deciderId decision comment decidedAt params',
     };
     for (const [table, names] of Object.entries(expected)) {
       const columns = await scratch.db.$queryRaw<Array<{ column_name: string }>>`SELECT column_name FROM information_schema.columns WHERE table_schema = ${schema} AND table_name = ${table} ORDER BY ordinal_position`;

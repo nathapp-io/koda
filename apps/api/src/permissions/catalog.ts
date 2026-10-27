@@ -4,8 +4,8 @@
  *
  * Every route, tool and system writer declares a key from this catalog; roles are bundles of these
  * keys and nothing else. The keys and their `catalog_scope` column come from
- * `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv` (212 keys), plus the nine keys
- * the design adds on top. `INVENTORY_SCOPE_ROWS` is that TSV data in file order, and
+ * `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv` (212 keys), plus the keys the
+ * design adds (`NEW_KEY_SCOPES`). `INVENTORY_SCOPE_ROWS` is that TSV data in file order, and
  * `catalog.spec.ts` re-reads the TSV to prove the two cannot drift.
  *
  * The derivation below is executable on purpose: `access`, `scope`, `ownable` and `risk` are computed
@@ -64,6 +64,8 @@ export const PUBLIC_KEYS: ReadonlySet<string> = new Set([
 export const PENDING_SURFACE_KEYS: ReadonlySet<string> = new Set([
   'fleet.approval.decide.assistant',
   'member.remove',
+  'fleet.job.shell.escalate',
+  'fleet.budget.override',
 ]);
 
 /** Keys every authenticated principal holds on its own data; they cannot be removed by role edits. */
@@ -123,6 +125,8 @@ const NEW_KEY_SCOPES: Readonly<Record<string, KeyScope>> = {
   'approval.policy.manage': 'any',
   'audit.read': 'global',
   'memory.update': 'any',
+  'fleet.job.shell.escalate': 'project',
+  'fleet.budget.override': 'any',
 };
 
 const NEW_KEYS: readonly string[] = Object.keys(NEW_KEY_SCOPES);
@@ -140,6 +144,7 @@ const HIGH_RISK_PREFIXES: readonly string[] = [
   'fleet.budget.',
   'fleet.enrollment.',
   'fleet.credential.',
+  'fleet.job.shell.',
 ];
 
 /**
@@ -412,6 +417,9 @@ function isReadKey(key: string): boolean {
   return key.slice(key.lastIndexOf('.') + 1) === 'read';
 }
 
+/** Keys whose decision needs the decider's input, so nobody-asked (`none`) cannot run them. */
+const DECIDER_INPUT_KEYS: ReadonlySet<string> = new Set(['fleet.budget.override']);
+
 function buildEntry(key: string): PermissionCatalogEntry {
   const access = classifyAccess(key);
   const ownable = access === 'role' && OWNABLE_KEYS.has(key);
@@ -427,7 +435,7 @@ function buildEntry(key: string): PermissionCatalogEntry {
     ownable,
     approval: {
       approvable,
-      floor: approvable && risk === 'critical' ? 'human' : 'none',
+      floor: !approvable ? 'none' : risk === 'critical' ? 'human' : DECIDER_INPUT_KEYS.has(key) ? 'self' : 'none',
       default: !approvable ? 'none' : risk === 'critical' ? 'human' : risk === 'high' ? 'agent' : 'none',
     },
   };

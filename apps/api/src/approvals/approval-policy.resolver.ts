@@ -9,7 +9,7 @@ import {
 } from './domain/approval.domain';
 import type { PrismaApprovalPolicyRepository } from './prisma-approval-policy.repository';
 
-export interface ApprovalSubject { type: ApprovalSubjectType; id: string }
+export interface ApprovalSubject { type: ApprovalSubjectType | 'SYSTEM'; id: string }
 export interface ResolvedApproval {
   mode: ApprovalMode;
   floor: ApprovalMode;
@@ -37,7 +37,7 @@ export class ApprovalPolicyResolver {
 
     const [candidates, roleIds] = await Promise.all([
       this.policies.findCandidates(key, projectId),
-      subject.type === 'ASSISTANT'
+      subject.type === 'ASSISTANT' || subject.type === 'SYSTEM'
         ? Promise.resolve([] as string[])
         : this.permissions.roleIdsAt({ type: subject.type, id: subject.id }, projectId === null ? 'global' : { projectId }),
     ]);
@@ -62,6 +62,9 @@ export class ApprovalPolicyResolver {
 }
 
 function applicableSubjectRank(policy: ApprovalPolicyRecord, subject: ApprovalSubject, roleIds: string[]): number | null {
+  if (subject.type === 'SYSTEM') {
+    return policy.principalId === null && policy.roleId === null && policy.principalType === null ? 3 : null;
+  }
   if (policy.principalId !== null) {
     return policy.principalType === subject.type && policy.principalId === subject.id ? 0 : null;
   }

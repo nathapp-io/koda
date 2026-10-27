@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ApprovalAskService } from './approval-ask.service';
 import { ApprovalCommandRegistry } from './approval-command.registry';
 import { ApprovalExecutionService } from './approval-execution.service';
 import { ApprovalGate } from './approval-gate.service';
@@ -21,7 +22,7 @@ import { ApprovalMcpTools } from './mcp/approval-mcp-tools';
  * `ApprovalRequestExpirySweeper` is provided, not exported: its interval is the only caller (US-012).
  */
 @Module({
-  exports: [ApprovalPolicyResolver, ApprovalPolicyService, ApprovalCommandRegistry, ApprovalGate, ApprovalDecisionService, ApprovalExecutionService, ApprovalRequestQueries, ApprovalMcpTools],
+  exports: [ApprovalPolicyResolver, ApprovalPolicyService, ApprovalCommandRegistry, ApprovalGate, ApprovalAskService, ApprovalDecisionService, ApprovalExecutionService, ApprovalRequestQueries, ApprovalMcpTools],
   providers: [
     ApprovalMcpTools,
     ApprovalRequestQueries,
@@ -29,6 +30,7 @@ import { ApprovalMcpTools } from './mcp/approval-mcp-tools';
     ApprovalExecutionService,
     ApprovalRequestEvents,
     ApprovalGate,
+    ApprovalAskService,
     ApprovalPolicyService,
     ApprovalPolicyResolver,
     ApprovalRequestExpirySweeper,

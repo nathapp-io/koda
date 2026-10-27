@@ -43,12 +43,13 @@ export class ApprovalDecisionDto {
   @ApiProperty() deciderId!: string;
   @ApiProperty({ enum: ['approve', 'reject'] }) decision!: string;
   @ApiProperty({ type: String, nullable: true }) comment!: string | null;
+  @ApiProperty({ type: Object, nullable: true }) params!: unknown;
   @ApiProperty({ format: 'date-time' }) decidedAt!: string;
 
   static from(record: ApprovalDecisionRecord): ApprovalDecisionDto {
     return Object.assign(new ApprovalDecisionDto(), {
       id: record.id, deciderType: record.deciderType, deciderId: record.deciderId,
-      decision: record.decision, comment: record.comment, decidedAt: record.decidedAt.toISOString(),
+      decision: record.decision, comment: record.comment, params: record.params, decidedAt: record.decidedAt.toISOString(),
     });
   }
 }

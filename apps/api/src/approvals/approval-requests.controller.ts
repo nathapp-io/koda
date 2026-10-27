@@ -82,7 +82,7 @@ export class ApprovalRequestsController {
   async decide(@Principal() principal: KodaPrincipal, @Param('id') id: string, @Body() dto: DecideApprovalRequestDto) {
     try {
       await this.queries.get(ref(principal), id);
-      const request = await this.decisions.decide(id, dto.decision, dto.comment ?? null);
+      const request = await this.decisions.decide(id, dto.decision, dto.comment ?? null, undefined, dto.params);
       return JsonResponse.Ok(ApprovalRequestDto.from({ request, decisions: await this.queries.decisionsFor(request.id) }));
     } catch (error) { rethrowApprovalError(error); }
   }

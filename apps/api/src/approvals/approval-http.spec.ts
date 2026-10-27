@@ -1,7 +1,7 @@
-import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { validateSync } from 'class-validator';
 import { parseQuery } from '../common/dto/koda-page.query';
-import { ApprovalRequestNotFoundError } from './domain/approval.errors';
+import { ApprovalCancelForbiddenError, ApprovalDecisionParamsInvalidError, ApprovalRequestNotFoundError } from './domain/approval.errors';
 import type { ApprovalRequestRecord } from './domain/approval.domain';
 import { rethrowApprovalError } from './approval-http-errors';
 import { ApprovalDecisionDto, ApprovalRequestDto, ApprovalRequestSummaryDto } from './dto/approval-request.dto';
@@ -32,10 +32,10 @@ describe('approval HTTP boundary', () => {
     });
   });
   it('detail retains result and serializes decisions without internal requestId', () => {
-    const decision = { id: 'decision', requestId: record.id, deciderType: 'USER' as const, deciderId: 'user', decision: 'reject' as const, comment: null, decidedAt: date };
+    const decision = { id: 'decision', requestId: record.id, deciderType: 'USER' as const, deciderId: 'user', decision: 'reject' as const, comment: null, decidedAt: date, params: null };
     expect(ApprovalRequestDto.from({ request: record, decisions: [decision] })).toEqual({
       ...ApprovalRequestSummaryDto.from(record), input: record.input, result: record.result,
-      decisions: [{ id: 'decision', deciderType: 'USER', deciderId: 'user', decision: 'reject', comment: null, decidedAt: date.toISOString() }],
+      decisions: [{ id: 'decision', deciderType: 'USER', deciderId: 'user', decision: 'reject', comment: null, params: null, decidedAt: date.toISOString() }],
     });
     expect(ApprovalDecisionDto.from(decision)).not.toHaveProperty('requestId');
   });
@@ -43,6 +43,31 @@ describe('approval HTTP boundary', () => {
     expect(() => rethrowApprovalError(new ApprovalRequestNotFoundError('missing'))).toThrow(NotFoundAppException);
     const error = new Error('database unavailable');
     expect(() => rethrowApprovalError(error)).toThrow(error);
+  });
+  it('US-007 AC-11: maps a principal cancelling an ask to a 403 cancellation refusal', () => {
+    let raised: unknown;
+    try {
+      rethrowApprovalError(new ApprovalCancelForbiddenError('request'));
+    } catch (error) {
+      raised = error;
+    }
+
+    expect(raised).toBeInstanceOf(ForbiddenAppException);
+    expect((raised as ForbiddenAppException).getStatus()).toBe(403);
+    expect((raised as ForbiddenAppException).prefix).toBe('approvals.cancelForbidden');
+    expect((raised as ForbiddenAppException).args).toEqual({});
+  });
+  it.each(['not-accepted', 'too-large', 'invalid'] as const)('AC-13: maps invalid decision params (%s) to a validation refusal', (reason) => {
+    let raised: unknown;
+    try {
+      rethrowApprovalError(new ApprovalDecisionParamsInvalidError(reason));
+    } catch (error) {
+      raised = error;
+    }
+
+    expect(raised).toBeInstanceOf(ValidationAppException);
+    expect((raised as ValidationAppException).prefix).toBe('approvals.invalidDecisionParams');
+    expect((raised as ValidationAppException).args).toEqual({ reason });
   });
   it.each(['true', 'false'])('mine=%s is boolean after parsing', (mine) => {
     const query = parseQuery(ListApprovalRequestsQuery, { mine });

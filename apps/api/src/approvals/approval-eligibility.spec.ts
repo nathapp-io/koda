@@ -22,6 +22,12 @@ function request(patch: Partial<EligibilityRequest> = {}): EligibilityRequest {
 
 const keys = (...entries: string[]): ReadonlySet<string> => new Set(entries);
 
+/** The bash ask the runner raises for a job (US-007): actor `SYSTEM/runner`, on behalf of a principal. */
+const BASH = 'fleet.job.shell.escalate';
+function askRequest(patch: Partial<EligibilityRequest> = {}): EligibilityRequest {
+  return request({ permissionKey: BASH, actor: { type: 'SYSTEM', id: 'runner' }, ...patch });
+}
+
 describe('decideEligibility', () => {
   it('AC-1: a user holding decide and the action satisfies a human tier', () => {
     expect(decideEligibility(request(), USER('u1'), keys('approval.decide', 'label.delete')))
@@ -147,5 +153,43 @@ describe('decideEligibility', () => {
     const agentOnBehalf = request({ onBehalfOf: { type: 'USER', id: 'u9' }, requiredMode: 'human' });
     expect(decideEligibility(agentOnBehalf, USER('u9'), keys('label.delete')))
       .toEqual({ ok: false, reason: 'missing-decide-permission' });
+  });
+});
+
+describe('decideEligibility on a system ask', () => {
+  it('US-007 AC-1: the user a runner ask is on behalf of approves as human with the action key only', () => {
+    expect(decideEligibility(askRequest({ onBehalfOf: { type: 'USER', id: 'u1' } }), USER('u1'), keys(BASH)))
+      .toEqual({ ok: true, satisfiedBy: 'human' });
+  });
+
+  it('US-007 AC-2: the agent a runner ask is on behalf of contributes self, below the agent tier', () => {
+    expect(decideEligibility(askRequest({ onBehalfOf: AGENT('a1') }), AGENT('a1'), keys(BASH, 'approval.decide')))
+      .toEqual({ ok: false, reason: 'tier-too-low' });
+  });
+
+  it('US-007 AC-3: another agent holding the narrowed decide entry approves a runner ask', () => {
+    expect(decideEligibility(
+      askRequest({ onBehalfOf: AGENT('a1') }),
+      AGENT('a2'),
+      keys(BASH, 'approval.decide@fleet.job.shell.escalate'),
+    )).toEqual({ ok: true, satisfiedBy: 'agent' });
+  });
+
+  it('an unrelated decider holding only the action still needs a decide permission', () => {
+    expect(decideEligibility(askRequest(), USER('u2'), keys(BASH)))
+      .toEqual({ ok: false, reason: 'missing-decide-permission' });
+  });
+
+  it('requireDistinctApprover refuses the on-behalf-of agent of a system ask', () => {
+    expect(decideEligibility(
+      askRequest({ onBehalfOf: AGENT('a1'), requiredMode: 'self', requireDistinctApprover: true }),
+      AGENT('a1'),
+      keys(BASH, 'approval.decide'),
+    )).toEqual({ ok: false, reason: 'distinct-approver-required' });
+  });
+
+  it('gives a system ask with no on-behalf-of principal no own-request exception', () => {
+    expect(decideEligibility(askRequest(), USER('u1'), keys(BASH, 'approval.decide')))
+      .toEqual({ ok: true, satisfiedBy: 'human' });
   });
 });

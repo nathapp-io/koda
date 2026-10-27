@@ -72,6 +72,25 @@ import { canRunDbTests } from '../../helpers/test-environment';
       expect(getSpy).toHaveBeenCalledTimes(1);
     } finally { getSpy.mockRestore(); }
   });
+  it('US-005 AC-1/4: accepts and returns decision params in the decision DTO', async () => {
+    labels.state.parseDecision = { calls: [], result: { remember: true }, throws: false };
+    const res = await post(projectRequestId, { decision: 'approve', params: { remember: true } }).expect(200);
+    expect(data<{ decisions: { params: unknown }[] }>(res).decisions).toMatchObject([{ params: { remember: true } }]);
+    expect(await db.approvalDecision.findMany({ where: { requestId: projectRequestId } })).toMatchObject([{ params: { remember: true } }]);
+    expect(data<{ decisions: { params: unknown }[] }>(await get(projectRequestId).expect(200)).decisions).toMatchObject([{ params: { remember: true } }]);
+  });
+  it('US-005 AC-2: returns localized not-accepted when command has no decision parser', async () => {
+    const before = await db.approvalDecision.count({ where: { requestId: projectRequestId } });
+    const res = await post(projectRequestId, { decision: 'approve', params: { a: 1 } }).expect(400);
+    expect(res.body.message).toContain('not-accepted');
+    expect(res.body.message).toBe(message('invalidDecisionParams', '400', { reason: 'not-accepted' }));
+    expect(await db.approvalDecision.count({ where: { requestId: projectRequestId } })).toBe(before);
+  });
+  it('US-005 AC-3: rejects non-object params before creating a decision', async () => {
+    const before = await db.approvalDecision.count({ where: { requestId: projectRequestId } });
+    await post(projectRequestId, { decision: 'approve', params: 'x' }).expect(400);
+    expect(await db.approvalDecision.count({ where: { requestId: projectRequestId } })).toBe(before);
+  });
   it('AC-3/4: rejects and returns its decision comment', async () => {
     const body = data<{ status: string; decisions: { comment: string; decision: string }[] }>(await post(projectRequestId, { decision: 'reject', comment: 'no' }).expect(200));
     expect(body.status).toBe('rejected'); expect(body.decisions).toMatchObject([{ comment: 'no', decision: 'reject' }]);

@@ -8,6 +8,10 @@
  * Approving and rejecting share this rule: whoever could not approve a request cannot reject it
  * either. A refusal is `EligibilityRefusal`; `assistant-cannot-decide` is never returned here (step
  * 1 already refuses every `SYSTEM` decider) and is kept in the type for the API error mapping.
+ *
+ * A system-raised request (US-007) is on behalf of the principal it records: the assistant's user,
+ * or the user or agent a fleet ask was raised for. That principal deciding it counts as the
+ * request's own requester, whichever `SYSTEM` component raised it.
  */
 import type { ApprovalMode } from '../permissions/catalog';
 import type { ApprovalRequestRecord, EligibilityRefusal } from './domain/approval.domain';
@@ -30,8 +34,6 @@ interface PrincipalKind {
   id: string;
 }
 
-/** The thread assistant acts as `SYSTEM/assistant` on behalf of a user (P3 design §4). */
-const ASSISTANT: PrincipalKind = { type: 'SYSTEM', id: 'assistant' };
 const OWN_SUFFIX = '.own';
 const DECIDE_KEY = 'approval.decide';
 const DECIDE_PATTERN_PREFIX = 'approval.decide@';
@@ -47,7 +49,7 @@ function isSamePrincipal(one: PrincipalKind, other: PrincipalKind | null): boole
 
 /** The mode the decider itself contributes to the ladder. */
 function contributedMode(decider: DeciderRef, isActor: boolean, isOnBehalf: boolean): ApprovalMode {
-  // Only a human requester gets the assistant exception. An agent confirming its own delegated
+  // Only a human requester gets the on-behalf-of exception. An agent confirming its own delegated
   // action contributes self, exactly as it would over MCP, never agent or human.
   if (isOnBehalf && decider.type === 'USER') return 'human';
   if (isActor || isOnBehalf) return 'self';
@@ -79,6 +81,13 @@ function holdsDecide(deciderKeys: ReadonlySet<string>, permissionKey: string): b
   return false;
 }
 
+/**
+ * Who may decide the request, and the tier that decider contributes.
+ *
+ * A system-raised request is on behalf of the principal it records — the assistant's user (P3 design
+ * §4), or the user or agent a fleet ask was raised for — and that principal deciding it counts as
+ * the request's own requester, whichever `SYSTEM` component raised it.
+ */
 export function decideEligibility(
   request: ApprovalRequestRef,
   decider: DeciderRef,
@@ -87,8 +96,9 @@ export function decideEligibility(
   if (decider.type === 'SYSTEM' || decider.type === 'RUNNER') return refuse('not-a-principal');
 
   const isActor = isSamePrincipal(decider, request.actor);
-  const isOnBehalf = isSamePrincipal(request.actor, ASSISTANT)
-    && isSamePrincipal(decider, request.onBehalfOf);
+  // Every system-raised request counts the principal it acts for as its own requester: a user
+  // contributes human and an agent only self, exactly as the assistant's does.
+  const isOnBehalf = request.actor.type === 'SYSTEM' && isSamePrincipal(decider, request.onBehalfOf);
 
   if (request.requireDistinctApprover && (isActor || (isOnBehalf && decider.type === 'AGENT'))) {
     return refuse('distinct-approver-required');
