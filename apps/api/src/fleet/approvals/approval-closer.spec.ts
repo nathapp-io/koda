@@ -2,7 +2,7 @@ import { ApprovalCloser, MAX_ASKS_CLOSED_PER_CALL } from './approval-closer';
 import { Logger } from '@nestjs/common';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { approvalWebhookPayload } from './approval-payloads';
-import type { FleetApprovalRecord, NewFleetApproval } from './domain/approval.domain';
+import type { FleetApprovalRecord } from './domain/approval.domain';
 import type { FleetApprovalAskRecord, NewFleetApprovalAsk } from './domain/fleet-approval-ask.domain';
 import { MAX_PENDING_ASKS_PER_JOB } from './domain/fleet-approval-ask.domain';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
@@ -13,28 +13,6 @@ const policy = (over: Partial<BudgetPolicyRecord> = {}): BudgetPolicyRecord => (
   amountUsd: '10', warnPercent: 80, hardStop: true, runningJobs: 'finish', pausedAt: NOW, pausedWindowStart: NOW,
   createdById: 'u0', updatedById: 'u1', createdAt: NOW, updatedAt: NOW, ...over,
 });
-
-/** The legacy `FleetApproval` repository: only `expire` still uses it, until US-012. */
-function legacyRepo() {
-  const rows = new Map<string, FleetApprovalRecord>();
-  let seq = 0;
-  return {
-    rows,
-    create: vi.fn(async (d: NewFleetApproval) => {
-      const row = { id: `a${++seq}`, status: 'pending', jobId: null, leaseEpoch: null, naxAskId: null, outcome: null, expiresAt: null,
-        decision: null, decidedById: null, decidedAt: null, resolvedBy: null, comment: null, createdAt: NOW, updatedAt: NOW, ...d } as FleetApprovalRecord;
-      rows.set(row.id, row);
-      return row;
-    }),
-    findPendingForPolicy: vi.fn(async (id: string) => [...rows.values()].find((r) => r.policyId === id && r.status === 'pending') ?? null),
-    lockById: vi.fn(async (id: string) => rows.get(id) ?? null),
-    resolve: vi.fn(async (id: string, x: Partial<FleetApprovalRecord>) => {
-      const row = { ...(rows.get(id) as FleetApprovalRecord), ...x };
-      rows.set(id, row);
-      return row;
-    }),
-  };
-}
 
 /**
  * US-006/US-007: the engine link table, as `FleetApprovalAskStore` publishes it. `insert` is the only write that
@@ -155,7 +133,6 @@ function askService(store: ReturnType<typeof askStore>) {
 }
 
 function fakes() {
-  const repo = legacyRepo();
   const store = askStore();
   const asks = askService(store);
   const activity = { record: vi.fn(async () => undefined) };
@@ -165,9 +142,9 @@ function fakes() {
   mockAuditRecorder.record.mockReset();
   mockAuditRecorder.record.mockImplementation(async () => undefined);
   const closer = new ApprovalCloser(
-    repo as never, store as never, asks as never, activity as never, webhooks as never, live as never, outbox as never, mockAuditRecorder,
+    store as never, asks as never, activity as never, webhooks as never, live as never, outbox as never, mockAuditRecorder,
   );
-  return { closer, repo, store, asks, activity, webhooks, outbox };
+  return { closer, store, asks, activity, webhooks, outbox };
 }
 
 describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
@@ -530,13 +507,5 @@ describe('bash half on the approval engine (US-006)', () => {
     expect(closed).toBe(total);
     expect(asks.close).toHaveBeenCalledTimes(total);
     expect(await closer.closeForJob(job, NOW)).toEqual([]);
-  });
-
-  it('expire still settles the legacy row until US-012', async () => {
-    const { closer, repo, activity: legacyActivity } = fakes();
-    const legacy = await repo.create({ type: 'nax_bash_escalate', projectId: 'p1', policyId: null, payload: {}, requestedAt: NOW, jobId: 'j1', leaseEpoch: 2, naxAskId: 'ask-1f2e3d4c' });
-    const { approval: expired } = await closer.expire(legacy, job, NOW);
-    expect(expired).toEqual(expect.objectContaining({ status: 'expired', resolvedBy: 'timeout', decidedAt: NOW }));
-    expect(legacyActivity.record).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'approval.expired', actorType: 'SYSTEM', responsibleUserId: 'u9' }));
   });
 });

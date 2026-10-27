@@ -11,12 +11,10 @@ import { FleetActivityModule } from '../activity/fleet-activity.module';
 import { BudgetStoreModule } from '../budgets/budget-store.module';
 import { BudgetsModule } from '../budgets/budgets.module';
 import { FleetJobsModule } from '../jobs/fleet-jobs.module';
-import { ApprovalExpirySweeper } from './approval-expiry-sweeper';
 import { ApprovalJobEndSweeper } from './approval-job-end.sweeper';
 import { ApprovalStoreModule } from './approval-store.module';
 import { ApprovalsService } from './approvals.service';
 import { FleetAskEventsSubscriber } from './fleet-ask-events.subscriber';
-import { LegacyFleetApprovalMigrator } from './legacy-fleet-approval.migrator';
 import { PolicyAskCloseSweeper } from './policy-ask-close.sweeper';
 import { FleetApprovalCountsController } from './fleet-approval-counts.controller';
 import { FleetApprovalsController } from './fleet-approvals.controller';
@@ -30,8 +28,8 @@ import { ProjectFleetApprovalsController } from './project-fleet-approvals.contr
   ],
   controllers: [ProjectFleetApprovalsController, FleetApprovalsController, FleetApprovalCountsController],
   providers: [
-    ApprovalsService, ApprovalExpirySweeper, ApprovalJobEndSweeper, PolicyAskCloseSweeper, FleetAskEventsSubscriber,
-    LegacyFleetApprovalMigrator, FleetShellEscalateCommand, FleetBudgetOverrideCommand,
+    ApprovalsService, ApprovalJobEndSweeper, PolicyAskCloseSweeper, FleetAskEventsSubscriber,
+    FleetShellEscalateCommand, FleetBudgetOverrideCommand,
   ],
   exports: [ApprovalsService],
 })

@@ -1,6 +1,3 @@
-import type { IPageOption } from '@nathapp/nestjs-common';
-import type { IPageResult } from '@nathapp/nestjs-data';
-
 export const APPROVAL_TYPES = ['budget_override_required', 'nax_bash_escalate'] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -67,28 +64,6 @@ export interface FleetApprovalRecord {
   updatedAt: Date;
 }
 
-export interface NewFleetApproval {
-  type: ApprovalType;
-  projectId: string | null;
-  policyId: string | null;
-  payload: Record<string, unknown>;
-  requestedAt: Date;
-  jobId?: string | null;
-  leaseEpoch?: number | null;
-  naxAskId?: string | null;
-  expiresAt?: Date | null;
-}
-
-export interface ApprovalResolution {
-  status: Exclude<ApprovalStatus, 'pending'>;
-  resolvedBy: ApprovalResolvedBy;
-  decidedAt: Date;
-  decision?: ApprovalDecision | null;
-  decidedById?: string | null;
-  comment?: string | null;
-  outcome?: Record<string, unknown> | null;
-}
-
 export interface ApprovalFilters {
   projectId?: string;
   status?: ApprovalStatus;
@@ -108,37 +83,4 @@ export interface PendingCount {
   projectId: string;
   slug: string;
   pending: number;
-}
-
-export const APPROVAL_REPOSITORY = Symbol('APPROVAL_REPOSITORY');
-
-/** S1.5 §1.1. Lock order (§1.4): a caller that also locks a BudgetPolicy locks it first. */
-export interface IApprovalRepository {
-  create(data: NewFleetApproval): Promise<FleetApprovalRecord>;
-  findById(id: string): Promise<FleetApprovalRecord | null>;
-  /** SELECT ... FOR UPDATE (inside txManager.run); null when the approval is gone. */
-  lockById(id: string): Promise<FleetApprovalRecord | null>;
-  findPendingForPolicy(policyId: string): Promise<FleetApprovalRecord | null>;
-  /** S1.5 2a: re-reported asks are idempotent on (jobId, leaseEpoch, naxAskId). */
-  findByAsk(jobId: string, leaseEpoch: number, naxAskId: string): Promise<FleetApprovalRecord | null>;
-  /** Pending bash approvals of one job, oldest first. */
-  findPendingForJob(jobId: string): Promise<FleetApprovalRecord[]>;
-  /** Pending bash approvals whose expiresAt has passed, soonest first. */
-  findExpiredPending(now: Date, limit: number): Promise<FleetApprovalRecord[]>;
-  /** Pending approval count per job id; jobs with none are absent. */
-  countPendingByJob(jobIds: readonly string[]): Promise<Map<string, number>>;
-  resolve(id: string, r: ApprovalResolution): Promise<FleetApprovalRecord>;
-  setOutcome(id: string, outcome: Record<string, unknown>): Promise<FleetApprovalRecord>;
-  /** Newest first. */
-  findPage(f: ApprovalFilters, page: IPageOption): Promise<IPageResult<FleetApprovalRecord>>;
-  /** Only projects with a pending approval, in slug order. */
-  countPending(projectIds: readonly string[]): Promise<PendingCount[]>;
-  /**
-   * US-006: every live project's pending approvals, grouped by project, in slug order — the set a
-   * principal with a global `fleet.approval.read` grant counts. A soft-deleted project is left out.
-   */
-  countPendingAllProjects(): Promise<PendingCount[]>;
-  countPendingUnscoped(): Promise<number>;
-  findRequeueCandidates(policyId: string, since: Date, limit: number): Promise<RequeueCandidate[]>;
-  findProjectSlug(projectId: string): Promise<string | null>;
 }

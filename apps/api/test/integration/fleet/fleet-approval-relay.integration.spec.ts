@@ -464,6 +464,35 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     await finish(jobId, leaseEpoch, 3);
   });
 
+  /**
+   * Permissions P3 US-012 AC-1 (regression pin): the deletion of `FleetApproval` must leave the whole fleet loop
+   * intact — relay opens the ask, the fleet decide adapter allows it, the runner acks the answer, and the fleet GET
+   * reports the request and the stored delivery. The pin runs over the fleet routes, not the engine's, so it also
+   * covers the adapters the deletion touches.
+   */
+  it('US-012 AC-1: a relayed ask allowed on the fleet route and acked ok reads back approved with delivery ok', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('fleet-pin');
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-0000001b') }] }] });
+    const [link] = await linksOf(jobId);
+
+    const decided = data<{ id: string; status: string; decision: string }>(await request(server)
+      .post(`/api/projects/web/fleet/approvals/${link!.requestId}/decide`)
+      .set(auth(world.tokens.dev)).send({ decision: 'allow' }).expect(200));
+    expect(decided).toEqual(expect.objectContaining({ id: link!.requestId, status: 'approved', decision: 'allow' }));
+
+    const answer = (await sync()).commands.find((c) => c.type === 'APPROVAL_ANSWER' && c.jobId === jobId);
+    expect(answer?.payload).toEqual({ approvalId: link!.requestId, naxAskId: 'ask-0000001b', choice: 'allow' });
+    await sync({ commandAcks: [{ commandId: answer!.commandId, leaseEpoch, result: 'ok' }] });
+
+    const read = data<{ status: string; outcome: { delivery: { result: string } } }>(await request(server)
+      .get(`/api/projects/web/fleet/approvals/${link!.requestId}`).set(auth(world.tokens.dev)).expect(200));
+    expect(read.status).toBe('approved');
+    expect(read.outcome.delivery.result).toBe('ok');
+
+    await finish(jobId, leaseEpoch, 3);
+  });
+
   it('an unanswered ask expires through the engine sweeper; a decide after it is 409 and leaves it expired', async () => {
     await enableRelay();
     const { jobId, leaseEpoch } = await startRunning('expiry');

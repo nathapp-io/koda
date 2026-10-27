@@ -46,7 +46,6 @@ integration('waiting assistant thread writes through ApprovalGate (PG)', () => {
     expect(answer).toEqual({ content: `pending ${id}: awaiting approval; do not retry`, isError: false });
     expect(await db.assistantActionRequest.findUniqueOrThrow({ where: { requestId: id } })).toMatchObject({ requestId: id, threadId: seed.threadId, jobId: seed.jobId, toolCallId: 'open', tool: 'koda_add_comment', preview: 'Add a comment to WEB-1 "Gate ticket":\n\nhello' });
     expect(bus).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ type: 'thread', threadId: seed.threadId }));
-    expect(await db.fleetApproval.count({ where: { type: 'assistant_action' } })).toBe(0);
   });
   it('AC-6: refuses at ten before duplicate lookup', async () => {
     for (let i = 0; i < 10; i++) expect((await call(`slot-${i}`, { ...args, body: `body-${i}` })).isError).toBe(false);

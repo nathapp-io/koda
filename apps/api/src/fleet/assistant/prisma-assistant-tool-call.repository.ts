@@ -185,7 +185,7 @@ export class PrismaAssistantToolCallRepository
 }
 
 /**
- * Writes one table's groups onto the entries the caller asked for. A null key (`FleetApproval.projectId` is
+ * Writes one table's groups onto the entries the caller asked for. A null key (`ApprovalRequest.projectId` is
  * nullable) and a project outside the requested list are both ignored rather than invented.
  */
 function applyCounts(

@@ -1,6 +1,5 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
-import { runAsSystem } from '../../action-context/action-context';
 import { OutboxService } from '@nathapp/nestjs-outbox';
 import { ApprovalAskService } from '../../approvals/approval-ask.service';
 import type { ApprovalDecisionRecord } from '../../approvals/domain/approval.domain';
@@ -17,7 +16,7 @@ import { ApprovalLivePublisher } from './approval-live.publisher';
 import { approvalActivityPayload, approvalWebhookPayload } from './approval-payloads';
 import { checkBashDecision } from './bash-decision';
 import {
-  APPROVAL_REPOSITORY, ApprovalDecision, ApprovalResolvedBy, FleetApprovalRecord, IApprovalRepository,
+  ApprovalDecision, ApprovalResolvedBy, FleetApprovalRecord,
 } from './domain/approval.domain';
 import { MAX_PENDING_ASKS_PER_JOB, type PersistedPolicyClose } from './domain/fleet-approval-ask.domain';
 import { FleetApprovalAskStore } from './fleet-approval-ask.store';
@@ -99,16 +98,15 @@ const closedAction = (a: Pick<FleetApprovalRecord, 'status'>): string =>
  * S1.5 §2.1: the narrow port budgets and jobs use to open and close approvals inside their own transactions. Budget
  * callers hold the BudgetPolicy lock, bash callers the FleetJob lock (lock order, spec §1.4).
  *
- * Permissions P3 (US-006, US-007): both halves are asks on the approval engine — `ApprovalAskService` decides whether
- * one is needed at all — linked back to the job or budget policy by `FleetApprovalAskStore`. Only `expire` still uses
- * the legacy `IApprovalRepository`, which US-012 removes.
+ * Permissions P3 (US-006, US-007, US-012): both halves are asks on the approval engine — `ApprovalAskService` decides
+ * whether one is needed at all — linked back to the job or budget policy by `FleetApprovalAskStore`. The legacy
+ * `FleetApproval` row and its repository are gone: every method reads and writes the engine and the link.
  */
 @Injectable()
 export class ApprovalCloser {
   private readonly logger = new Logger(ApprovalCloser.name);
 
   constructor(
-    @Inject(APPROVAL_REPOSITORY) private readonly repo: IApprovalRepository,
     private readonly store: FleetApprovalAskStore,
     private readonly askService: ApprovalAskService,
     private readonly activity: FleetActivityService,
@@ -314,13 +312,6 @@ export class ApprovalCloser {
     const view = await this.store.findApproval(requestId);
     if (view === null) throw new Error(`Fleet ask ${requestId} closed job_ended but has no view`);
     return { approval: view, live: await this.recordResolved(view, jobSystemActor(job)) };
-  }
-
-  /** Spec §2.4: nax has already denied by its own timeout. The caller re-checked `pending` under the lock. */
-  async expire(approval: FleetApprovalRecord, job: Pick<FleetJobRecord, 'requestedById' | 'requestedByType'>, now: Date): Promise<ApprovalChange> {
-    const expired = await this.repo.resolve(approval.id, { status: 'expired', resolvedBy: 'timeout', decidedAt: now });
-    await runAsSystem('approval', () => this.audit.record({ key: 'system.approval.expire', resourceType: 'fleet-approval', resourceId: expired.id, projectId: expired.projectId, summary: 'expired' }));
-    return { approval: expired, live: await this.recordResolved(expired, jobSystemActor(job)) };
   }
 
   private record(approval: FleetApprovalRecord, actor: ApprovalActor, action: string, extra: Record<string, unknown> = {}): Promise<void> {
