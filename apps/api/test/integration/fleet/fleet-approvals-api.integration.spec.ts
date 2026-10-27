@@ -19,7 +19,7 @@ import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers/permission-fixtures';
 import enFleet from '../../../src/i18n/en/fleet.json';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
-import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
+import { seedFleetAsk, type SeedFleetAskSpec } from '../../helpers/fleet-ask-fixtures';
 import { outboxRecord } from '../../helpers/outbox-record';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 
@@ -28,7 +28,7 @@ const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 30_000 });
 
-interface Approval { id: string; status: string; decision: string | null; resolvedBy: string | null; outcome: { resumedAmountUsd?: string; requeueResults?: Array<{ jobId: string; ok: boolean; error?: string }> } | null; requeueCandidates?: Array<{ jobId: string }>; requeueCandidatesTruncated?: boolean }
+interface Approval { id: string; type: string; status: string; jobId: string | null; decision: string | null; resolvedBy: string | null; outcome: { resumedAmountUsd?: string; requeueResults?: Array<{ jobId: string; ok: boolean; error?: string }> } | null; requeueCandidates?: Array<{ jobId: string }>; requeueCandidatesTruncated?: boolean }
 interface Page<T> { total: number; records: T[] }
 
 /** The two race branches the concurrency cases can legitimately lose to, by i18n key. */
@@ -359,5 +359,84 @@ describeIntegration('fleet approvals API (PG)', () => {
     const forRoot = data<{ total: number; unscoped: number }>(await request(server).get('/api/fleet/approval-counts').set(tok('root')).expect(200));
     expect(forRoot.unscoped).toBe(1);
     expect(data<{ total: number }>(await request(server).get('/api/fleet/approval-counts').set(tok('outsider')).expect(200)).total).toBe(0);
+  });
+
+  /**
+   * Permissions P3 US-011: the list, the detail page and the counts read the approval engine, so every case below
+   * seeds with `seedFleetAsk` and reads the engine request id back out of the fleet DTO.
+   */
+  const bashAsk = (jobId: string, over: Partial<SeedFleetAskSpec> = {}) => {
+    const naxAskId = over.link?.naxAskId ?? `ask-api-${++n}`;
+    return seedFleetAsk(prisma, {
+      kind: 'bash', projectId: world.projectId, expiresAt: new Date(Date.now() + 300_000),
+      input: { jobId, leaseEpoch: 1, naxAskId, payload: { command: 'bun run test', commandTruncated: false, options: ['allow', 'deny'] } },
+      link: { jobId, leaseEpoch: 1, naxAskId },
+      ...over,
+    });
+  };
+
+  it('US-011 AC-1: lists a seeded pending bash ask as its request row, with the link\'s job', async () => {
+    const running = await job({ state: 'RUNNING', runnerId: runner.id, leaseEpoch: 1, bashMode: 'escalate' });
+    const { requestId } = await bashAsk(running.id);
+
+    const page = data<Page<Approval>>(await request(server).get(PROJECT).set(tok('viewer')).expect(200));
+
+    expect(page.records).toEqual([
+      expect.objectContaining({ id: requestId, type: 'nax_bash_escalate', status: 'pending', jobId: running.id }),
+    ]);
+  });
+
+  it('US-011 AC-2: as an admin, status=approved answers the executed bash ask and not the rejected one', async () => {
+    const running = await job({ state: 'RUNNING', runnerId: runner.id, leaseEpoch: 1 });
+    const executed = await bashAsk(running.id, {
+      status: 'executed', settledAt: new Date(),
+      decisions: [{ deciderType: 'USER', deciderId: world.ids.root, decision: 'approve', params: { choice: 'allow' } }],
+    });
+    const rejected = await bashAsk(running.id, {
+      status: 'rejected',
+      decisions: [{ deciderType: 'USER', deciderId: world.ids.root, decision: 'reject' }],
+    });
+
+    const page = data<Page<Approval>>(await request(server).get(`${ADMIN}?status=approved`).set(tok('root')).expect(200));
+
+    expect(page.records.map((a) => a.id)).toEqual([executed.requestId]);
+    expect(page.records.map((a) => a.id)).not.toContain(rejected.requestId);
+  });
+
+  it('US-011 AC-3: a pending budget ask includes its one re-queue candidate, untruncated', async () => {
+    const { approvalId, queued } = await stopped();
+
+    const one = data<Approval>(await request(server).get(`${PROJECT}/${approvalId}`).set(tok('viewer')).expect(200));
+
+    expect(one.requeueCandidates?.map((c) => c.jobId)).toEqual([queued.id]);
+    expect(one.requeueCandidatesTruncated).toBe(false);
+  });
+
+  it("US-011 AC-4: another project's ask is a 404 naming fleet.approvals", async () => {
+    const running = await job({ state: 'RUNNING' });
+    const { requestId } = await bashAsk(running.id);
+
+    const res = await request(server).get(`/api/projects/ops/fleet/approvals/${requestId}`).set(tok('root')).expect(404);
+
+    expect(res.body.message).toBe(enFleet.approvals['404']);
+  });
+
+  it('US-011 AC-5: an admin counts one pending ask in each of two projects', async () => {
+    const web = await bashAsk('job-counts-web', { link: { jobId: 'job-counts-web', leaseEpoch: 1, naxAskId: 'ask-counts-web' } });
+    const ops = await seedFleetAsk(prisma, {
+      kind: 'bash', projectId: world.opsProjectId,
+      input: { jobId: 'job-counts-ops', leaseEpoch: 1, naxAskId: 'ask-counts-ops', payload: { command: 'ls', commandTruncated: false, options: ['allow'] } },
+      link: { jobId: 'job-counts-ops', leaseEpoch: 1, naxAskId: 'ask-counts-ops' },
+    });
+
+    const counts = data<{ total: number; unscoped: number; projects: Array<{ projectId: string; slug: string; pending: number }> }>(
+      await request(server).get('/api/fleet/approval-counts').set(tok('root')).expect(200));
+
+    expect(counts.total).toBe(2);
+    expect(counts.projects).toEqual([
+      { projectId: world.opsProjectId, slug: 'ops', pending: 1 },
+      { projectId: world.projectId, slug: 'web', pending: 1 },
+    ]);
+    expect(web.requestId).not.toBe(ops.requestId);
   });
 });

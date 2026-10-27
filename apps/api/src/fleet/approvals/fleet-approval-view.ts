@@ -2,7 +2,7 @@ import type { Prisma } from '../../generated/prisma/client';
 import type { ApprovalDecisionRecord, ApprovalRequestRecord } from '../../approvals/domain/approval.domain';
 import type { FleetApprovalAskRecord } from './domain/fleet-approval-ask.domain';
 import {
-  APPROVAL_RESOLVED_BY, CANCELLING_RESOLUTIONS, FLEET_ASK_KEY, FLEET_ASK_KEYS,
+  APPROVAL_RESOLVED_BY, CANCELLING_RESOLUTIONS, FLEET_ASK_KEY, FLEET_ASK_KEYS, fleetTypeOfKey,
   type ApprovalDecision, type ApprovalResolvedBy, type ApprovalStatus, type FleetApprovalRecord,
 } from './domain/approval.domain';
 
@@ -23,12 +23,10 @@ const asObject = (value: unknown): Record<string, unknown> | null =>
 
 /** The fleet type of a request, from the catalog key it was opened with. */
 function fleetTypeOf(permissionKey: string): FleetApprovalRecord['type'] {
-  switch (permissionKey) {
-    case FLEET_ASK_KEY.nax_bash_escalate: return 'nax_bash_escalate';
-    case FLEET_ASK_KEY.budget_override_required: return 'budget_override_required';
-    // The readers filter on FLEET_ASK_KEYS, so any other key is a programming error, not a row to label.
-    default: throw new Error(`not a fleet ask key: ${permissionKey}`);
-  }
+  const type = fleetTypeOfKey(permissionKey);
+  // The readers filter on FLEET_ASK_KEYS, so any other key is a programming error, not a row to label.
+  if (type === null) throw new Error(`not a fleet ask key: ${permissionKey}`);
+  return type;
 }
 
 /** `cancelled` for a cancelling link resolution, `approved` for a manual resume, else the request's own. */

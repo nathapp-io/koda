@@ -103,6 +103,9 @@ export async function seedFleetAsk(db: PrismaClient, spec: SeedFleetAskSpec): Pr
       budgetPolicyId: link.budgetPolicyId ?? null,
       resolvedBy: link.resolvedBy ?? null,
       outcome: nullableJson(link.outcome),
+      // Production writes the link in the request's own transaction, so its `createdAt` is the ask's. A
+      // seeded `createdAt` carries over, which is what a suite asserting the ask's age (US-011 AC-8) needs.
+      ...(spec.createdAt === undefined ? {} : { createdAt: spec.createdAt }),
     },
   });
 

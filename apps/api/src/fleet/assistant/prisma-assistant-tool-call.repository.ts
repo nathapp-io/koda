@@ -3,6 +3,7 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
 import { bookkeeping } from '../../action-context/audit-coverage';
 import { AssistantToolCall as AssistantToolCallModel, PrismaClient } from '../../generated/prisma/client';
+import { FLEET_ASK_KEYS } from '../approvals/domain/approval.domain';
 import type {
   AgentToolCallCreator, AssistantToolCallRecord, AssistantToolCallRepository, ProjectCounts, ProjectCountsReader, ToolCallContext, ToolCallCreator,
   ToolCallOutcome, UserToolCallCreator,
@@ -168,9 +169,11 @@ export class PrismaAssistantToolCallRepository
         where: { projectId: { in: ids }, state: { in: [...FAILED_JOB_STATES] }, finishedAt: { gte: failedSince } },
         _count: { _all: true },
       }),
-      this.prisma.client.fleetApproval.groupBy({
+      // Permissions P3 (US-011): a pending ask is an engine request carrying a fleet key; a pending
+      // `ticket.delete` (or any other key) in the same project is not one.
+      this.prisma.client.approvalRequest.groupBy({
         by: ['projectId'],
-        where: { projectId: { in: ids }, status: 'pending' },
+        where: { projectId: { in: ids }, status: 'pending', permissionKey: { in: [...FLEET_ASK_KEYS] } },
         _count: { _all: true },
       }),
     ]);

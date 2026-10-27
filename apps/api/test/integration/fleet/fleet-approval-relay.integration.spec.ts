@@ -20,6 +20,9 @@ import { MAX_ASKS_CLOSED_PER_CALL } from '../../../src/fleet/approvals/approval-
 import { ApprovalJobEndSweeper } from '../../../src/fleet/approvals/approval-job-end.sweeper';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
+import { outboxRecord } from '../../helpers/outbox-record';
+import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
+import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
@@ -474,6 +477,34 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     expect(await requestOf(link!.requestId)).toMatchObject({ status: 'expired' });
     await decide(link!.requestId, world.tokens.dev).expect(409);
     expect((await requestOf(link!.requestId)).status).toBe('expired');
+
+    await finish(jobId, leaseEpoch, 3);
+  });
+
+  /**
+   * Permissions P3 US-011 (AC-14): the relayed ask is announced by the fleet's outbox event, and the consumer
+   * reads the ask on the engine. Every global admin is told; the requester is not.
+   */
+  it('US-011 AC-14: the relayed bash ask notifies every global admin as a fleet approval', async () => {
+    await enableRelay();
+    const secondAdmin = await prisma.user.create({ data: { email: 'relay-admin2@koda.test', passwordHash: 'x' } });
+    await grantBaseline(prisma, { type: 'USER', id: secondAdmin.id });
+    await grantRole(prisma, { type: 'USER', id: secondAdmin.id }, 'admin', null);
+    const { jobId, leaseEpoch } = await startRunning('notify');
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-0000001b') }] }] });
+    const [link] = await linksOf(jobId);
+
+    const publisher = app.get(FanOutPublisher);
+    for (const row of await prisma.outboxEvent.findMany({ where: { type: 'fleet_approval_requested', eventId: link!.requestId } })) {
+      await publisher.publish(outboxRecord(row.type, JSON.parse(row.payload), { id: row.id, metadata: { projectId: row.projectId, eventId: row.eventId } }));
+    }
+
+    for (const adminId of [world.ids.root, secondAdmin.id]) {
+      expect(await prisma.notification.findMany({ where: { userId: adminId } })).toEqual([
+        expect.objectContaining({ kind: 'approval_requested', sourceType: 'fleet_approval', sourceId: link!.requestId, link: '/admin/fleet/approvals' }),
+      ]);
+    }
+    expect(await prisma.notification.count({ where: { userId: world.ids.dev } })).toBe(0);
 
     await finish(jobId, leaseEpoch, 3);
   });

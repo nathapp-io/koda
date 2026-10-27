@@ -55,7 +55,10 @@ describeDb('fleet system budget audit (PG)', () => {
   }, 60_000);
   afterAll(async () => { await app?.close(); });
   beforeEach(async () => {
-    await db.fleetApproval.deleteMany();
+    // Permissions P3 US-011: the evaluator's asks live on the approval engine, so the cleanup targets the engine
+    // request and its link, not the legacy row.
+    await db.fleetApprovalAsk.deleteMany();
+    await db.approvalRequest.deleteMany();
     await db.budgetIncident.deleteMany();
     await db.budgetPolicy.deleteMany();
     await db.fleetJob.deleteMany();

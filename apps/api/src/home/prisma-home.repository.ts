@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '../generated/prisma/client';
 import { accessibleProjectIds } from '../permissions/membership.queries';
+import { FLEET_ASK_KEYS, fleetTypeOfKey } from '../fleet/approvals/domain/approval.domain';
 import {
   ACTIVE_JOB_STATES, FAILED_JOB_STATES, OPEN_TICKET_STATUSES, type HomeActivityRow, type HomeApprovalRow, type HomeApprovalScope,
   type HomeCaller, type HomeJobRow, type HomeProjectRow, type HomeTicketRow,
@@ -62,25 +63,39 @@ export class PrismaHomeRepository {
     });
   }
 
-  /** Prisma ignores an empty `OR`, so an empty scope must short-circuit to a never-match where. */
+  /** A pending fleet ask that has its link: the rows `findPendingApprovals` lists and its count counts. */
   private static pendingWhere(scope: HomeApprovalScope): Record<string, unknown> {
     const or: Array<Record<string, unknown>> = [];
     if (scope.projectIds.length) or.push({ projectId: { in: scope.projectIds } });
     if (scope.includeUnscoped) or.push({ projectId: null });
-    return or.length ? { status: 'pending', OR: or } : { status: 'pending', id: { in: [] } };
+    // Permissions P3 (US-011): the ask is an engine request labelled by its fleet key, and only one with a
+    // link is a fleet row. Prisma ignores an empty `OR`, so an empty scope short-circuits to a never-match.
+    const fleet = { status: 'pending', permissionKey: { in: [...FLEET_ASK_KEYS] }, fleetAsk: { isNot: null } };
+    return or.length ? { ...fleet, OR: or } : { ...fleet, id: { in: [] } };
   }
 
   async findPendingApprovals(scope: HomeApprovalScope, take: number): Promise<HomeApprovalRow[]> {
-    return this.prisma.client.fleetApproval.findMany({
+    const rows = await this.prisma.client.approvalRequest.findMany({
       where: PrismaHomeRepository.pendingWhere(scope),
-      select: { id: true, type: true, projectId: true, jobId: true, requestedAt: true, expiresAt: true },
-      orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true, permissionKey: true, projectId: true, createdAt: true, expiresAt: true,
+        fleetAsk: { select: { jobId: true } },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take,
+    });
+    return rows.flatMap((row) => {
+      const type = fleetTypeOfKey(row.permissionKey);
+      // The `where` already restricts the keys to the fleet's; a row outside them is not a fleet approval row.
+      return type === null ? [] : [{
+        id: row.id, type, projectId: row.projectId, jobId: row.fleetAsk?.jobId ?? null,
+        requestedAt: row.createdAt, expiresAt: row.expiresAt,
+      }];
     });
   }
 
   async countPendingApprovals(scope: HomeApprovalScope): Promise<number> {
-    return this.prisma.client.fleetApproval.count({ where: PrismaHomeRepository.pendingWhere(scope) });
+    return this.prisma.client.approvalRequest.count({ where: PrismaHomeRepository.pendingWhere(scope) });
   }
 
   private static failedWhere(projectIds: string[], since: Date): Record<string, unknown> {

@@ -23,6 +23,21 @@ export const FLEET_ASK_KEY = {
 } as const;
 export const FLEET_ASK_KEYS: readonly string[] = Object.values(FLEET_ASK_KEY);
 
+/**
+ * The reverse of `FLEET_ASK_KEY`: the type a request is labelled with, from the key it was opened with.
+ * The readers that query `ApprovalRequest` directly (home, assistant project counts) label a row with it
+ * instead of copying the mapping.
+ */
+export const FLEET_ASK_TYPE: Readonly<Record<string, ApprovalType>> = Object.freeze({
+  [FLEET_ASK_KEY.nax_bash_escalate]: 'nax_bash_escalate',
+  [FLEET_ASK_KEY.budget_override_required]: 'budget_override_required',
+});
+
+/** The fleet type of a permission key, or null when the key is not a fleet ask's. */
+export function fleetTypeOfKey(permissionKey: string): ApprovalType | null {
+  return FLEET_ASK_TYPE[permissionKey] ?? null;
+}
+
 /** A link resolution that makes the fleet status `cancelled` whatever the request status. */
 export const CANCELLING_RESOLUTIONS: readonly ApprovalResolvedBy[] = ['job_ended', 'superseded', 'policy_deleted', 'window_reset'];
 

@@ -104,13 +104,18 @@ export class PrismaDashboardRepository implements IDashboardRepository {
     return new Map(groups.map((g) => [g.state, g._count._all]));
   }
 
+  /**
+   * Permissions P3 (US-011): an ask is an engine `ApprovalRequest` with a `FleetApprovalAsk` link, so the
+   * pending count and its oldest timestamp are read from the link. The link's `createdAt` is written in the
+   * same transaction as the request, which is why it stands in for the ask's `requestedAt`.
+   */
   async pendingSummaryByJob(jobIds: readonly string[]): Promise<PendingSummary[]> {
     if (jobIds.length === 0) return [];
-    const groups = await this.db.fleetApproval.groupBy({
-      by: ['jobId'], where: { status: 'pending', jobId: { in: [...jobIds] } }, _count: { _all: true }, _min: { requestedAt: true },
+    const groups = await this.db.fleetApprovalAsk.groupBy({
+      by: ['jobId'], where: { jobId: { in: [...jobIds] }, request: { status: 'pending' } }, _count: { _all: true }, _min: { createdAt: true },
     });
-    return groups.flatMap((g) => (g.jobId !== null && g._min.requestedAt !== null
-      ? [{ jobId: g.jobId, count: g._count._all, oldestRequestedAt: g._min.requestedAt }]
+    return groups.flatMap((g) => (g.jobId !== null && g._min.createdAt !== null
+      ? [{ jobId: g.jobId, count: g._count._all, oldestRequestedAt: g._min.createdAt }]
       : []));
   }
 }
