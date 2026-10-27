@@ -133,11 +133,16 @@ integration('fleet shell escalation command through ApprovalDecisionService', ()
   });
 
   it('AC-4: approving after the job is missing resolves the ask without writing an answer command', async () => {
-    await db.fleetJob.delete({ where: { id: jobId } });
-    const settled = await withTestActor({ type: 'USER', id: userId }, () => service.decide(requestId, 'approve', null, now));
+    const missingJobId = 'missing-shell-job';
+    const missingRequestId = (await seedFleetAsk(db, {
+      kind: 'bash', projectId, expiresAt: new Date('2030-01-01T00:00:00Z'),
+      input: { jobId: missingJobId, leaseEpoch: 3, naxAskId, payload: { options: ['allow', 'deny'] } },
+      link: { jobId: missingJobId, leaseEpoch: 3, naxAskId },
+    })).requestId;
+    const settled = await withTestActor({ type: 'USER', id: userId }, () => service.decide(missingRequestId, 'approve', null, now));
 
     expect(settled).toMatchObject({ status: 'executed', result: { answered: false } });
-    expect(await db.fleetCommand.count({ where: { jobId, type: 'APPROVAL_ANSWER' } })).toBe(0);
-    expect(await db.fleetApprovalAsk.findUnique({ where: { requestId } })).toMatchObject({ resolvedBy: 'job_ended' });
+    expect(await db.fleetCommand.count({ where: { jobId: missingJobId, type: 'APPROVAL_ANSWER' } })).toBe(0);
+    expect(await db.fleetApprovalAsk.findUnique({ where: { requestId: missingRequestId } })).toMatchObject({ resolvedBy: 'job_ended' });
   });
 });
