@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-fleet",
   "branchName": "feat/permissions-p3-approval-fleet",
   "createdAt": "2026-11-07T00:00:00Z",
-  "updatedAt": "2026-10-27T10:42:20.858Z",
+  "updatedAt": "2026-10-27T11:17:01.404Z",
   "userStories": [
     {
       "id": "US-001",
@@ -106,14 +106,17 @@
         "persistence"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Introduces a shared projection and relation-aware query abstraction whose status/null semantics affect all later consumers."
+        "reasoning": "Introduces a shared projection and relation-aware query abstraction whose status/null semantics affect all later consumers.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/approvals/prisma-approval.repository.ts",
@@ -150,7 +153,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "032416fefa568a44751367d320a38ae00be8e7fe"
     },
     {
       "id": "US-003",
