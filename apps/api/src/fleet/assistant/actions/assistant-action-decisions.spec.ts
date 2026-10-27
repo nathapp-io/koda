@@ -77,7 +77,8 @@ function build(opts: { stored?: PendingActionRecord | null; threadsEnabled?: boo
 function realExecutor(tool: AssistantTool<unknown>): AssistantToolExecutor {
   const registry = new AssistantToolRegistry();
   registry.register(tool);
-  const calls = { findUserActor: vi.fn(async () => CONTEXT.creator), findCallContext: vi.fn(async () => CONTEXT) };
+  const calls = { findAgentActor: vi.fn(async () => null), findProjectSlug: vi.fn(async () => null),
+    findUserActor: vi.fn(async () => CONTEXT.creator), findCallContext: vi.fn(async () => CONTEXT) };
   const access = { resolveMembership: vi.fn(async () => 'DEVELOPER') };
   // Permissions P1 US-004: the approve re-checks the action's key through `PermissionService`; every key is allowed
   // here, so the cases stay about the decide handler's own refusals.

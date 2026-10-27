@@ -567,7 +567,7 @@ function parseInput(tool: AssistantTool, input: unknown): { value: unknown } | {
 }
 
 /** The creator acts with the principal their login would produce. No project role decorates it (permissions P1 US-004). */
-function userPrincipal(creator: UserToolCallCreator): UserPrincipal {
+export function userPrincipal(creator: UserToolCallCreator): UserPrincipal {
   const role = creator.role === 'ADMIN' ? 'ADMIN' : 'MEMBER';
   return {
     actorType: 'user',
@@ -591,7 +591,7 @@ const isAgentCreator = (creator: ToolCallCreator): creator is AgentToolCallCreat
  * agent is blacklisted (the one status that removes access); `disabled` stays false because an agent's status is
  * liveness, not access.
  */
-function agentPrincipal(creator: AgentToolCallCreator): AgentPrincipal {
+export function agentPrincipal(creator: AgentToolCallCreator): AgentPrincipal {
   return {
     actorType: 'agent',
     id: creator.id,

@@ -27,6 +27,7 @@ import { PrismaPendingActionRepository } from './actions/prisma-pending-action.r
 import { ASSISTANT_TOOL_CALL_REPOSITORY, PROJECT_COUNTS_READER } from './assistant-tool-call.domain';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
+import { AssistantToolCommands } from './commands/assistant-tool-commands';
 import { PrismaAssistantToolCallRepository } from './prisma-assistant-tool-call.repository';
 import { McpController } from './mcp/mcp.controller';
 import { RunnerToolController } from './runner-tool.controller';
@@ -87,6 +88,7 @@ import { WorkspaceTools } from './tools/workspace-tools';
     // S5b 2b1 US-006: the memory write group. `koda_add_memory` registers on init (2b1-D8) and upserts through
     // the repository MemoryModule already exports.
     MemoryWriteTools,
+    AssistantToolCommands,
     // S5b 2a US-001: propose storage. The repository stays module-private behind its token.
     PrismaPendingActionRepository,
     { provide: PENDING_ACTION_REPOSITORY, useExisting: PrismaPendingActionRepository },

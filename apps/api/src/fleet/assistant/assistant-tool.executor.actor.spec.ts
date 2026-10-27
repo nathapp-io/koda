@@ -40,6 +40,7 @@ function setup(users: Record<string, UserRow> = {}, opts: { membership?: Error }
   const readUser = vi.fn(async (userId: string) => users[userId] ?? null);
   const readContext = vi.fn(async () => THREAD);
   const calls: AssistantToolCallRepository = {
+    findAgentActor: vi.fn(async () => null), findProjectSlug: vi.fn(async () => null),
     findUserActor: readUser,
     findByCall: vi.fn(async () => null),
     record: vi.fn(async (_row: AssistantToolCallRecord) => undefined),

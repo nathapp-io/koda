@@ -27,6 +27,7 @@ function makeRepo(): { repo: AssistantToolCallRepository; rows: AssistantToolCal
   const repo: AssistantToolCallRepository = {
     // 3-D12: `executeAction` resolves the requester through `findUserActor`, so it answers the same user the
     // call-context stub carries — the creator every approved-action fixture here names.
+    findAgentActor: vi.fn(async () => null), findProjectSlug: vi.fn(async () => null),
     findUserActor: vi.fn(async () => CALL_CONTEXT.creator),
     findByCall: vi.fn(async (jobId: string, toolCallId: string) => rows.find((r) => r.jobId === jobId && r.toolCallId === toolCallId) ?? null),
     record: vi.fn(async (row: AssistantToolCallRecord) => { rows.push(row); }),

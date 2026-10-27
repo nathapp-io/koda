@@ -52,6 +52,7 @@ function executorFor(tool: AssistantTool<unknown>): AssistantToolExecutor {
   const calls: AssistantToolCallRepository = {
     // 3-D12: `executeAction` resolves the requester through `findUserActor`, so it answers the same user the
     // call-context stub carries — the creator `approvedAction()` names.
+    findAgentActor: vi.fn(async () => null), findProjectSlug: vi.fn(async () => null),
     findUserActor: vi.fn(async () => CALL_CONTEXT.creator),
     findByCall: async () => null,
     record: async (row) => { rows.push(row); },

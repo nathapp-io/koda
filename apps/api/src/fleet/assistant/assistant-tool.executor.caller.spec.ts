@@ -14,6 +14,7 @@ const threadCall = { jobId: 'j1', toolCallId: 'c1', name: 'koda_get_ticket', inp
 function setup(workspace = false) {
   const rows: AssistantToolCallRecord[] = [];
   const calls: AssistantToolCallRepository = {
+    findAgentActor: vi.fn(async () => null), findProjectSlug: vi.fn(async () => null),
     findUserActor: vi.fn(async () => null),
     findByCall: vi.fn(async () => rows[0] ?? null),
     record: vi.fn(async row => { rows.push(row); }),

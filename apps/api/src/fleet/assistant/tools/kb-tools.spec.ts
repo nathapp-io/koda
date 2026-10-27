@@ -90,6 +90,7 @@ function harness(opts: { answer?: Partial<KnowledgeSearchResult>; doc?: Knowledg
 
   const rows: AssistantToolCallRecord[] = [];
   const calls: AssistantToolCallRepository = {
+    findAgentActor: vi.fn(async () => null), findProjectSlug: vi.fn(async () => null),
     findUserActor: vi.fn(async () => null),
     findByCall: vi.fn(async () => null),
     record: vi.fn(async (record) => { rows.push(record); }),

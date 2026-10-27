@@ -17,6 +17,7 @@ const text = 'comment c1 added to WEB-1 /web/tickets/WEB-1';
 function setup() {
   const rows: AssistantToolCallRecord[] = [];
   const calls: AssistantToolCallRepository = {
+    findAgentActor: vi.fn(async () => null), findProjectSlug: vi.fn(async () => null),
     findUserActor: vi.fn(async () => null), findByCall: vi.fn(async () => null), findCallContext: vi.fn(async () => null),
     record: vi.fn(async row => { rows.push(row); }),
   };

@@ -30,6 +30,7 @@ const context = (over: Partial<ToolCallContext['creator']> = {}): ToolCallContex
 function makeRepo(ctx: ToolCallContext | null, actor: ToolCallContext['creator'] | null = ctx?.creator ?? null) {
   const rows: AssistantToolCallRecord[] = [];
   const repo: AssistantToolCallRepository = {
+    findAgentActor: vi.fn(async () => null), findProjectSlug: vi.fn(async () => null),
     findUserActor: vi.fn(async (userId: string) => (actor?.id === userId ? actor : null)),
     findByCall: vi.fn(async (jobId, toolCallId) => rows.find((r) => r.jobId === jobId && r.toolCallId === toolCallId) ?? null),
     record: vi.fn(async (row) => { rows.push(row); }),

@@ -18,6 +18,20 @@ import { FleetWriteTools } from './tools/fleet-write-tools';
 import { KnowledgeTools } from './tools/knowledge-tools';
 import { MemoryWriteTools } from './tools/memory-write-tools';
 
+import { ApprovalCommandRegistry } from '../../approvals/approval-command.registry';
+
+const commandSamples: Record<string, unknown> = {
+  'comment.create': { ref: 'KODA-1', body: 'hello' },
+  'ticket.create': { tickets: [{ title: 'A ticket', type: 'TASK' }] },
+  'ticket.update': { ref: 'KODA-1', title: 'Updated' },
+  'ticket.link.add': { links: [{ ref: 'KODA-1', url: 'https://example.com' }] },
+  'memory.create': { kind: 'FACT', subject: 'subject', predicate: 'predicate', object: 'value' },
+  'memory.decision.record': { topic: 'topic', decision: 'decision' },
+  'fleet.job.dispatch': { repo: 'owner/repo', command: 'RUN', feature: 'feature', maxCostUsd: 1 },
+  'fleet.job.cancel': { jobId: 'j1' },
+  'fleet.job.requeue': { jobId: 'j1' },
+};
+
 describe('AssistantModule', () => {
   let module: TestingModule;
 
@@ -27,6 +41,20 @@ describe('AssistantModule', () => {
 
   afterEach(async () => {
     await module.close();
+  });
+
+  it('AC-1 / AC-7: registers exactly nine write commands whose parsers accept their own outputs', async () => {
+    await module.init();
+    const registry = module.get(ApprovalCommandRegistry);
+    const tools = module.get(AssistantToolRegistry).list().filter((tool) => tool.kind === 'write');
+    expect(tools.map((tool) => tool.key).sort()).toEqual(Object.keys(commandSamples).sort());
+    for (const tool of tools) {
+      const command = registry.get(tool.key);
+      expect(command, tool.key).toBeDefined();
+      if (!command) throw new Error(`missing command: ${tool.key}`);
+      const parsed = command.parse({ projectId: 'p1', threadId: null, jobId: null, args: commandSamples[tool.key] });
+      expect(command.parse(parsed), tool.key).toEqual(parsed);
+    }
   });
 
   it('AC-15: compiles and resolves AssistantToolExecutor', () => {

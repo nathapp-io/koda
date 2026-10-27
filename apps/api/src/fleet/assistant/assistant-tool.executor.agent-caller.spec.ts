@@ -41,6 +41,7 @@ const CALL = { jobId: 'j1', toolCallId: 'c1' };
 function setup(context: ToolCallContext | null, tool: AssistantTool) {
   const rows = [];
   const calls: AssistantToolCallRepository = {
+    findAgentActor: vi.fn(async () => null), findProjectSlug: vi.fn(async () => null),
     findUserActor: vi.fn(async () => null),
     findByCall: vi.fn(async () => null),
     findCallContext: vi.fn(async () => context),
@@ -67,6 +68,7 @@ function setup(context: ToolCallContext | null, tool: AssistantTool) {
 function storingSetup(context: ToolCallContext, tool: AssistantTool) {
   const rows: AssistantToolCallRecord[] = [];
   const calls: AssistantToolCallRepository = {
+    findAgentActor: vi.fn(async () => null), findProjectSlug: vi.fn(async () => null),
     findUserActor: vi.fn(async () => null),
     findByCall: vi.fn(async (jobId, toolCallId) => rows.find((r) => r.jobId === jobId && r.toolCallId === toolCallId) ?? null),
     findCallContext: vi.fn(async () => context),
