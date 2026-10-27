@@ -391,6 +391,19 @@ describe('US-006 direct thread writes through the gate', () => {
     expect(logged.mock.calls[0]?.[1]).toBe(error.stack);
   });
 
+  it('AC-7: treats a concurrent duplicate link insert as a successful pending answer', async () => {
+    const { executor, approval } = writeSetup({}, opts);
+    approval.gate.gate.mockResolvedValue({ status: 'pending', request: { id: 'request-7' } } as never);
+    const { Prisma } = await import('../../generated/prisma/client');
+    approval.links.insert.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('duplicate', {
+      code: 'P2002', clientVersion: 'test', meta: { target: 'AssistantActionRequest_requestId_key' },
+    }));
+    approval.links.findByRequest.mockResolvedValueOnce(null).mockResolvedValue({ requestId: 'request-7' } as never);
+
+    expect(await executor.execute(call())).toEqual({ content: 'pending request-7: awaiting approval; do not retry', isError: false });
+    expect(approval.links.findByRequest).toHaveBeenCalledTimes(2);
+  });
+
   it('AC-7: links a policy-race pending result without a transaction or cap check', async () => {
     const { executor, approval } = writeSetup({}, opts);
     approval.gate.gate.mockResolvedValue({ status: 'pending', request: { id: 'request-7' } } as never);

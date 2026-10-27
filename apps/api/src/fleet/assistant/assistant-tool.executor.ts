@@ -416,10 +416,16 @@ export class AssistantToolExecutor {
       if (gated.status === 'executed') return { outcome: 'ok', content: gated.result.text, projectId: scope.id };
       const requestId = gated.request.id;
       if (!(await this.links.findByRequest(requestId))) {
-        await bookkeeping('assistant.action-request-link', () => this.links.insert({
-          requestId, threadId: thread.threadId, jobId: thread.jobId,
-          toolCallId: call.toolCallId, tool: name, preview,
-        }));
+        try {
+          await bookkeeping('assistant.action-request-link', () => this.links.insert({
+            requestId, threadId: thread.threadId, jobId: thread.jobId,
+            toolCallId: call.toolCallId, tool: name, preview,
+          }));
+        } catch (error) {
+          // Another call may have linked the same pending request after our lookup. Treat only that requestId
+          // uniqueness race as success; unrelated insert failures must retain the normal error mapping.
+          if (!isUniqueViolation(error, 'requestId') || !(await this.links.findByRequest(requestId))) throw error;
+        }
       }
       return { ...refusal('pending', `pending ${requestId}: awaiting approval; do not retry`), projectId: scope.id };
     } catch (error) {
