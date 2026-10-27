@@ -5,6 +5,10 @@
  * one command per key in `beforeAll` and calls `reset()` in `beforeEach`; the spec then turns on just
  * the behaviour the case needs through `state`.
  *
+ * A key production already registers — the two fleet asks — cannot be registered again, so a spec
+ * that boots `AppModule` installs its double over the registered command instead
+ * (`installOverRegisteredCommand`).
+ *
  * The command's input is an object of string values (the shape most approvable keys take: an id, or
  * an id and a name). `execute` records the input and the decision it was handed, returns `'done'`,
  * and can additionally write a `Label` row and record an audit entry — both through the dependencies
@@ -20,7 +24,7 @@
  * `execute` writes through the `PrismaService` (not a raw client) so that the row joins the ambient
  * transaction: an execution that fails rolls the label back with it.
  */
-import type { ApprovalCommand } from '../approval-command.registry';
+import type { ApprovalCommand, ApprovalCommandRegistry } from '../approval-command.registry';
 
 /** The input shape `parse` accepts and returns a copy of: a flat object of string values. */
 export type TestCommandInput = Record<string, string>;
@@ -181,6 +185,41 @@ export function configurableTestCommand(key: string, deps: TestCommandDeps = {})
       parseCount = 0;
     },
   };
+}
+
+/** Every member of `ApprovalCommand` a spec may replace; `key` belongs to the registry entry. */
+const OVERRIDABLE_MEMBERS = ['parse', 'execute', 'toResult', 'parseDecision', 'onReject', 'afterCommit'] as const;
+
+/**
+ * Installs `command`'s behaviour over the command the registry already holds for its key.
+ *
+ * A spec that boots `AppModule` inherits the commands a production module registers in
+ * `onModuleInit` — the two fleet asks — and `register` refuses a second command for a key, so the
+ * double cannot sit beside the production one. The registry hands out the instance it stores, so
+ * writing the double's members onto that instance is enough: every ask, decide and execute resolves
+ * the double, and the registry keeps its one-command-per-key rule instead of gaining a test-only
+ * replacement path.
+ *
+ * The override lasts as long as the app it was installed in, which is the spec file: each file boots
+ * its own application, and its commands are that application's instances.
+ *
+ * ```ts
+ * const shell = configurableTestCommand('fleet.job.shell.escalate');
+ * installOverRegisteredCommand(app.get(ApprovalCommandRegistry, { strict: false }), shell.command);
+ * ```
+ */
+export function installOverRegisteredCommand(registry: ApprovalCommandRegistry, command: ApprovalCommand): void {
+  const registered = registry.get(command.key);
+  if (registered === undefined) {
+    throw new Error(`installOverRegisteredCommand: no command registered for ${command.key}`);
+  }
+
+  // Descriptors, not values: the hooks are getters a spec switches per case, and a copied value would
+  // freeze the switch at install time.
+  for (const member of OVERRIDABLE_MEMBERS) {
+    const descriptor = Object.getOwnPropertyDescriptor(command, member);
+    if (descriptor !== undefined) Object.defineProperty(registered, member, descriptor);
+  }
 }
 
 function freshState(): TestCommandState {

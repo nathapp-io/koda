@@ -16,7 +16,7 @@ import { ApprovalAskService, type OpenAsk } from '../../../src/approvals/approva
 import { ApprovalCommandRegistry } from '../../../src/approvals/approval-command.registry';
 import type { ApprovalRequestRecord } from '../../../src/approvals/domain/approval.domain';
 import { PrismaApprovalRequestRepository } from '../../../src/approvals/prisma-approval-request.repository';
-import { configurableTestCommand } from '../../../src/approvals/test-helpers/test-approval-command';
+import { configurableTestCommand, installOverRegisteredCommand } from '../../../src/approvals/test-helpers/test-approval-command';
 import { fixtureDb, withTestActor } from '../../helpers/action-context';
 import { bootHttpApp } from '../../helpers/http-app';
 import { resetDb } from '../../helpers/reset-db';
@@ -121,7 +121,9 @@ async function holdRow(id: string): Promise<RowLock> {
     asks = app.get(ApprovalAskService, { strict: false });
     requests = app.get(PrismaApprovalRequestRepository, { strict: false });
     await db.project.create({ data: { id: 'p1', slug: 'skip-locked', key: 'SKL', name: 'Skip locked' } });
-    app.get(ApprovalCommandRegistry, { strict: false }).register(shell.command);
+    // `ApprovalsModule` already registers the production bash command; a second registration for the
+    // key is refused, so the spec's double is installed over it.
+    installOverRegisteredCommand(app.get(ApprovalCommandRegistry, { strict: false }), shell.command);
   });
   afterAll(async () => { await app?.close(); });
   beforeEach(async () => {

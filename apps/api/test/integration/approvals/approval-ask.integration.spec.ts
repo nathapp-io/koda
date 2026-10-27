@@ -7,7 +7,10 @@ import { ApprovalPolicyService } from '../../../src/approvals/approval-policy.se
 import type { ApprovalRequestRecord } from '../../../src/approvals/domain/approval.domain';
 import { ApprovalCancelForbiddenError, ApprovalDecideForbiddenError } from '../../../src/approvals/domain/approval.errors';
 import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
-import { configurableTestCommand } from '../../../src/approvals/test-helpers/test-approval-command';
+import {
+  configurableTestCommand,
+  installOverRegisteredCommand,
+} from '../../../src/approvals/test-helpers/test-approval-command';
 import { PermissionCache } from '../../../src/permissions/permission-cache';
 import { grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { fixtureDb, withTestActor } from '../../helpers/action-context';
@@ -81,8 +84,10 @@ const budgetAsk = (patch: Partial<OpenAsk> = {}): OpenAsk => ({
     decisions = app.get(ApprovalDecisionService, { strict: false });
     permissionCache = app.get(PermissionCache, { strict: false });
     const registry = app.get(ApprovalCommandRegistry, { strict: false });
-    registry.register(shell.command);
-    registry.register(budget.command);
+    // `ApprovalsModule` registers the production commands for the two fleet asks in `onModuleInit`,
+    // and the registry refuses a second command for a key: the doubles are installed over them.
+    installOverRegisteredCommand(registry, shell.command);
+    installOverRegisteredCommand(registry, budget.command);
   });
   afterAll(async () => { await app?.close(); });
   beforeEach(async () => {

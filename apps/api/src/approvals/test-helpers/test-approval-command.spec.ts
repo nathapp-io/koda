@@ -1,4 +1,9 @@
-import { configurableTestCommand } from './test-approval-command';
+import { ApprovalCommandRegistry, type ApprovalCommand } from '../approval-command.registry';
+import {
+  configurableTestCommand,
+  installOverRegisteredCommand,
+  type TestCommandInput,
+} from './test-approval-command';
 
 /**
  * P3 approval core (US-007). The reusable command a spec registers under an approvable key, so the
@@ -186,5 +191,66 @@ describe('configurableTestCommand', () => {
     state.writeLabel = { projectId: 'p1', name: 'bug' };
 
     await expect(command.execute({ labelId: 'l1' })).rejects.toThrow('needs a prisma dependency');
+  });
+});
+
+/**
+ * P3d-2 CI repair. A spec that boots `AppModule` cannot register a double for a key production
+ * already registered (the two fleet asks), so it installs the double over the production command.
+ */
+describe('installOverRegisteredCommand', () => {
+  /** The command a module's `onModuleInit` registered before the spec took the key over. */
+  const registeredStub = (): ApprovalCommand<TestCommandInput, string> => ({
+    key: 'label.delete',
+    parse: (input) => input as TestCommandInput,
+    execute: async () => 'production',
+  });
+
+  const withRegistered = () => {
+    const registry = new ApprovalCommandRegistry();
+    const registered = registeredStub();
+    registry.register(registered);
+
+    return { registry, registered };
+  };
+
+  it('replaces the registered command’s behaviour and leaves the registry holding that instance', async () => {
+    const { registry, registered } = withRegistered();
+    const double = configurableTestCommand('label.delete');
+
+    installOverRegisteredCommand(registry, double.command);
+
+    expect(registry.get('label.delete')).toBe(registered);
+    expect(registered.parse({ labelId: 'l1' })).toEqual({ labelId: 'l1' });
+    await expect(registered.execute({ labelId: 'l1' })).resolves.toBe('done');
+    expect(double.state.calls).toEqual([{ labelId: 'l1' }]);
+    expect(registry.get('label.delete')?.key).toBe('label.delete');
+  });
+
+  it('installs the hooks as live switches, so a case can still turn them on after the install', () => {
+    const { registry, registered } = withRegistered();
+    const double = configurableTestCommand('label.delete');
+    installOverRegisteredCommand(registry, double.command);
+    expect(registered.toResult).toBeUndefined();
+    expect(registered.parseDecision).toBeUndefined();
+
+    double.state.toResult = (result: string) => ({ ran: result });
+    double.state.parseDecision = { calls: [], result: 'ok', throws: false };
+
+    expect(registered.toResult?.('done')).toEqual({ ran: 'done' });
+    expect(registered.parseDecision?.('approve', undefined, { labelId: 'l1' })).toBe('ok');
+
+    double.state.toResult = null;
+    double.state.parseDecision = null;
+
+    expect(registered.toResult).toBeUndefined();
+    expect(registered.parseDecision).toBeUndefined();
+  });
+
+  it('refuses a key nothing is registered for, naming it', () => {
+    const registry = new ApprovalCommandRegistry();
+
+    expect(() => installOverRegisteredCommand(registry, configurableTestCommand('label.delete').command))
+      .toThrow('installOverRegisteredCommand: no command registered for label.delete');
   });
 });
