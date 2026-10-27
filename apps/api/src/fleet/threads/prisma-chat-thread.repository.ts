@@ -24,7 +24,7 @@ import { buildWorkspaceThreadInstructions, buildProjectThreadInstructions, build
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
 import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadPendingAction, type ChatThreadRecord, type ChatThreadRepository, type ThreadScope, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
-import { MAX_PENDING_ACTIONS } from '../assistant/actions/pending-action.domain';
+import { MAX_PENDING_ACTIONS } from '../assistant/requests/assistant-action-request.domain';
 import { DELIVERABLE_STATUSES, MAX_DELIVERED_NOTES, deliveryText } from '../assistant/actions/outcome-delivery';
 import { requestOutcomeNote } from '../assistant/requests/request-outcome-note';
 import type { ChatThreadKind, ThreadAction, ThreadBackend } from '../common/thread-jobs';
@@ -129,21 +129,25 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
    * `get` first still cannot read a preview it may not see.
    */
   async pendingActions(scope: ThreadScope, threadId: string): Promise<ChatThreadPendingAction[]> {
-    const rows = await this.prisma.client.pendingAction.findMany({
-      where: { threadId, status: 'PENDING', thread: scopeWhere(scope) },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    const rows = await this.prisma.client.assistantActionRequest.findMany({
+      where: { threadId, request: { status: 'pending' }, thread: scopeWhere(scope) },
+      orderBy: [{ createdAt: 'asc' }, { requestId: 'asc' }],
       take: MAX_PENDING_ACTIONS,
-      select: { id: true, projectId: true, approvalId: true, tool: true, preview: true, expiresAt: true, createdAt: true },
+      select: {
+        requestId: true, tool: true, preview: true, createdAt: true,
+        request: { select: { id: true, projectId: true, expiresAt: true } },
+      },
     });
     if (rows.length === 0) return [];
-    const projects = await this.prisma.client.project.findMany({
-      where: { id: { in: [...new Set(rows.map((row) => row.projectId))] } },
-      select: { id: true, slug: true },
+    const projectIds = [...new Set(rows.flatMap((row) => row.request.projectId ? [row.request.projectId] : []))];
+    const projects = projectIds.length === 0 ? [] : await this.prisma.client.project.findMany({
+      where: { id: { in: projectIds } }, select: { id: true, slug: true },
     });
     const slugs = new Map(projects.map((project) => [project.id, project.slug]));
     return rows.map((row) => ({
-      id: row.id, approvalId: row.approvalId, tool: row.tool, preview: row.preview,
-      projectSlug: slugs.get(row.projectId) ?? '', expiresAt: row.expiresAt, createdAt: row.createdAt,
+      id: row.request.id, approvalId: row.request.id, tool: row.tool, preview: row.preview,
+      projectSlug: row.request.projectId ? slugs.get(row.request.projectId) ?? '' : '',
+      expiresAt: row.request.expiresAt, createdAt: row.createdAt,
     }));
   }
 

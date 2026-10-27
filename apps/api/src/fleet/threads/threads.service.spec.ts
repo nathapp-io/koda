@@ -73,7 +73,7 @@ describe('ThreadsService.get (US-003 AC-12)', () => {
 
 describe('ThreadsService.get pending actions (S5b US-004)', () => {
   const action = {
-    id: 'a1', approvalId: 'ap1', tool: 'koda_add_comment', preview: 'Add a comment to KODA-1 "Fix login":\n\nhello',
+    id: 'ap1', approvalId: 'ap1', tool: 'koda_add_comment', preview: 'Add a comment to KODA-1 "Fix login":\n\nhello',
     projectSlug: 'web', expiresAt: new Date('2026-10-24T09:00:00.000Z'), createdAt: new Date('2026-10-23T09:00:00.000Z'),
   };
 
