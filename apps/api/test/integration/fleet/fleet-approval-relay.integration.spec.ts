@@ -141,9 +141,6 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     runner = await enrollRunner(server, world.tokens.root, 'relay-1');
-    await prisma.webhook.create({
-      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['fleet.approval.requested', 'fleet.approval.resolved']) },
-    });
   });
   afterAll(async () => {
     await app.close();
@@ -309,22 +306,31 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
 
   it('AC-11: the pending open dispatches fleet.approval.requested to the project webhook with the request id', async () => {
     await enableRelay();
-    const { jobId, leaseEpoch } = await startRunning('webhook');
-    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000014') }] }] });
-    const [link] = await linksOf(jobId);
-
-    const deliveries = await prisma.outboxEvent.findMany({
-      where: {
-        type: 'webhook_delivery',
-        AND: [{ payload: { contains: '"event":"fleet.approval.requested"' } }, { payload: { contains: `"jobId":"${jobId}"` } }],
-      },
+    // Only this case needs a subscription: every other relay here would otherwise queue a delivery to an
+    // unreachable host, which is noise (and outbox work) the rest of the file does not read.
+    const webhook = await prisma.webhook.create({
+      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['fleet.approval.requested', 'fleet.approval.resolved']) },
     });
-    expect(deliveries).toHaveLength(1);
-    expect(deliveries[0]!.payload).toContain(`"approvalId":"${link!.requestId}"`);
-    // A8: the webhook never carries the command text.
-    expect(deliveries[0]!.payload).not.toContain('bun run test');
+    try {
+      const { jobId, leaseEpoch } = await startRunning('webhook');
+      await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000014') }] }] });
+      const [link] = await linksOf(jobId);
 
-    await finish(jobId, leaseEpoch, 3);
+      const deliveries = await prisma.outboxEvent.findMany({
+        where: {
+          type: 'webhook_delivery',
+          AND: [{ payload: { contains: '"event":"fleet.approval.requested"' } }, { payload: { contains: `"jobId":"${jobId}"` } }],
+        },
+      });
+      expect(deliveries).toHaveLength(1);
+      expect(deliveries[0]!.payload).toContain(`"approvalId":"${link!.requestId}"`);
+      // A8: the webhook never carries the command text.
+      expect(deliveries[0]!.payload).not.toContain('bun run test');
+
+      await finish(jobId, leaseEpoch, 3);
+    } finally {
+      await prisma.webhook.delete({ where: { id: webhook.id } });
+    }
   });
 
   it('AC-12: the pending open records one fleet_approval_requested outbox event keyed by the request id', async () => {
@@ -389,9 +395,9 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     ]);
   });
 
-  it('AC-13/AC-15 (F1): the job-end close settles every pending ask, past the 100-link page', async () => {
+  it('AC-13/AC-15 (F1): the job-end close settles every pending ask, across several 100-link pages', async () => {
     await enableRelay();
-    const total = 105;   // more than one page of MAX_PENDING_ASKS_PER_JOB
+    const total = 205;   // three pages of MAX_PENDING_ASKS_PER_JOB
     const { jobId, leaseEpoch } = await startRunning('job-end-many');
     // Reported in three reports: a runner batch, not one oversized one.
     for (let first = 0; first < total; first += 35) {
