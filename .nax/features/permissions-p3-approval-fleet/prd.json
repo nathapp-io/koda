@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-fleet",
   "branchName": "feat/permissions-p3-approval-fleet",
   "createdAt": "2026-11-07T00:00:00Z",
-  "updatedAt": "2026-10-27T10:25:12.552Z",
+  "updatedAt": "2026-10-27T10:42:20.858Z",
   "userStories": [
     {
       "id": "US-001",
@@ -27,14 +27,17 @@
         "notifications"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Cross-module notification compatibility plus real concurrent transaction behavior and lock-order inversion prevention."
+        "reasoning": "Cross-module notification compatibility plus real concurrent transaction behavior and lock-order inversion prevention.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-ask.service.ts",
@@ -68,7 +71,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "28b3a040e8c4e9772a2488c7076f7f3172942e28"
     },
     {
       "id": "US-002",
@@ -140,7 +147,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -205,7 +215,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -242,7 +255,10 @@
         "apps/api/test/integration/fleet/fleet-shell-escalate-command.integration.spec.ts"
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -313,7 +329,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -400,7 +419,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -473,7 +495,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -523,7 +548,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-009",
@@ -603,7 +631,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-010",
@@ -683,7 +714,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-011",
@@ -798,7 +832,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-012",
@@ -906,7 +943,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "This is an API-only replacement of an existing persistence and decision subsystem, not a greenfield build. All twelve binding stories run in apps/api; no changes to apps/web, apps/cli or the runner protocol are authorized. The supplied stack autodetection is inaccurate: the app context identifies NestJS 12 with Fastify, Prisma 7, Nathapp platform modules and Vitest, not Express; the web is Nuxt rather than Next.js (.nax/mono/apps/api/context.md:23, .nax/mono/apps/api/context.md:38). Read the nathapp-nestjs-patterns skill before writing Nest code; it was not found among repository files during this planning session. codebase-memory MCP was not exposed, so discovery used direct file reads and text searches. Findings below distinguish verified current behavior from the target in the supplied specification.\n\nGoal and compatibility: eliminate FleetApproval as a second request model and use ApprovalRequest plus FleetApprovalAsk for both nax_bash_escalate/fleet.job.shell.escalate and budget_override_required/fleet.budget.override. Keep public fleet routes, FleetApprovalDto fields, pagination/envelopes, webhook payloads, fleet activity rows, fleet_approval live events and fleet_approval_requested notifications. The request id replaces the old approval id everywhere, including APPROVAL_ANSWER.payload.approvalId, BudgetIncident.approvalId and outbox metadata.eventId. Budget expiresAt becomes a date rather than null; bash asks may expire earlier under policy timeouts; settled old history is deliberately discarded. User rulings retain old decide catalog/Developer seed keys only as UI hints and route metadata, never API authorization. Generic engine notification links must not replace the existing /admin/fleet/approvals notification before P3 web. The two action keys remain command-only pending surfaces: do not add routes/tools/system writers declaring them or alter PENDING_SURFACE_KEYS.\n\nVerified engine seam: ApprovalAskService.open requires the caller's active transaction, checks registry and ASK_KEYS_BY_COMPONENT, parses input, resolves a principal-or-SYSTEM subject, returns not-needed for mode none, freezes/hashes the input and records a request event (apps/api/src/approvals/approval-ask.service.ts:48, apps/api/src/approvals/approval-ask.service.ts:69, apps/api/src/approvals/approval-ask.service.ts:139). close currently locks with lockById and settles only pending system asks with result.closedBy (apps/api/src/approvals/approval-ask.service.ts:106). PrismaApprovalRequestRepository.lockById uses parameterized SELECT FOR UPDATE and transition is a status CAS (apps/api/src/approvals/prisma-approval-request.repository.ts:75, apps/api/src/approvals/prisma-approval-request.repository.ts:101). US-001 adds a parallel SKIP LOCKED method and changes close only, leaving ordinary decide/execute locking unchanged. The engine notifier currently parses a pending event then reads eligibility/recipients; insert the fleet-key early return before findById (apps/api/src/notifications/approvals/approval-requested.subscriber.ts:29).\n\nVerified execution/authorization seam: ApprovalCommand has parse, optional parseDecision/onReject, execute, toResult and afterCommit; owning modules register onModuleInit (apps/api/src/approvals/approval-command.registry.ts:16). ApprovalDecisionService.decide commits record first, then executes approves; record locks the request, checks expiry and effective-key eligibility before params, caps canonical JSON at 4096 characters, freezes parsed params, records approval.decide and runs onReject inside its transaction with committed effects (apps/api/src/approvals/approval-decision.service.ts:32, apps/api/src/approvals/approval-decision.service.ts:67, apps/api/src/approvals/approval-decision.service.ts:127). Reject onReject returns Promise<void>; share the bash answer step without changing that engine contract. ApprovalExecutionService reconstructs request context, re-parses frozen input and decision params, locks the request before command.execute, settles executed/failed, then runs afterCommit under the same context (apps/api/src/approvals/approval-execution.service.ts:54, apps/api/src/approvals/approval-execution.service.ts:146, apps/api/src/approvals/approval-execution.service.ts:206, apps/api/src/approvals/approval-execution.service.ts:256). Non-assistant SYSTEM asks skip the asker's key recheck (apps/api/src/approvals/approval-execution.service.ts:248). No engine API redesign is needed. A bash approve with omitted params defaults to allow and the stored parsed decision must parse back to itself. decideEligibility orders distinct-approver/action/decide-pattern/tier refusals, with an onBehalfOf agent contributing self (apps/api/src/approvals/approval-eligibility.ts:51, apps/api/src/approvals/approval-eligibility.ts:94). Map only its own-job tier-too-low refusal to fleet.approvalSelfDecide; other refusals remain permissions. Treat adapter authorization, lease fencing and command decision paths as security critical and use three-session-tdd.\n\nVerified storage/read-model seam: ApprovalRequest already owns decisions and optional fleetAsk relations with indexes on (status, expiresAt) and (projectId, status, createdAt); FleetApprovalAsk has requestId primary key/cascade, unique (jobId, leaseEpoch, naxAskId), indexed job/policy references with deliberately no job/policy FK (apps/api/prisma/schema.prisma:1584, apps/api/prisma/schema.prisma:1612, apps/api/prisma/schema.prisma:1659). PrismaFleetApprovalAskRepository already provides insert, lookup, link lock, bounded pending-for-job and pending-for-policy reads, setResolvedBy and setOutcome, and handles nullable JSON using Prisma.DbNull (apps/api/src/fleet/approvals/prisma-fleet-approval-ask.repository.ts:39, apps/api/src/fleet/approvals/prisma-fleet-approval-ask.repository.ts:60, apps/api/src/fleet/approvals/prisma-fleet-approval-ask.repository.ts:93). FleetApprovalAskStore is the public delegating facade over its module-private repository (apps/api/src/fleet/approvals/fleet-approval-ask.store.ts:8). US-002 extends both repository and store with eight read methods; extend the repository interface in domain/fleet-approval-ask.domain.ts as needed so those delegations are typed. US-009 adds nullable recordedStatus and setRecordedStatus to schema/domain/repository/store. The pure fleet-approval-view mapper must map persistence records into engine domain records before building the fleet view; request persistence flattens actor/onBehalfOf, unlike ApprovalRequestRecord (apps/api/src/approvals/prisma-approval-request.repository.ts:26). Do not leak Prisma rows to services or duplicate engine policy logic.\n\nStatus/decision compatibility is the central read risk: cancelling link resolutions take precedence over approved/executed/rejected engine states; manual_resume projects engine cancelled to fleet approved and reads resumedById from outcome. Last decision drives the public choice; default bash approve is allow; pending has no decision. Derive resolvedBy user/timeout before the asynchronous recorder catches up. fleetStatusWhere must implement the specified branches, always restrict to fleet keys with a non-null link, and explicitly include NULL in notCancelling because SQL notIn alone drops NULL. Combine project/type/job filters without overwriting relation predicates. Preserve newest createdAt/id ordering, slug ordering, scoped empty-list short circuits, and soft-delete filtering only for all-project counts. Mirror old requeue candidate criteria exactly (CANCELLED, policy budget reason, startedAt null, finishedAt >= requestedAt, oldest queuedAt/id) from apps/api/src/fleet/approvals/prisma-approval.repository.ts:160; count/filter behavior is at apps/api/src/fleet/approvals/prisma-approval.repository.ts:104 and apps/api/src/fleet/approvals/prisma-approval.repository.ts:116. Every read must be page-, limit- or id-set-bounded (.nax/rules/api-data.md:116); the spec explicitly defers a new unfiltered-admin-list index.\n\nVerified producer/closer seam: ApprovalCloser currently owns legacy creates/resolutions, activity/webhook/outbox recording and live-event construction with stable BashAsk, BashJob, ApprovalChange and PolicyClose contracts (apps/api/src/fleet/approvals/approval-closer.ts:19, apps/api/src/fleet/approvals/approval-closer.ts:44, apps/api/src/fleet/approvals/approval-closer.ts:56). Its private dispatch/enqueueRequested read project slug through the legacy repository and only enqueue project-scoped notifications (apps/api/src/fleet/approvals/approval-closer.ts:154, apps/api/src/fleet/approvals/approval-closer.ts:164). Keep those outputs and move slug lookup to store. Keep legacy repo injection only for expire until US-012. openBash changes from born-closed legacy rows to no request/no link for non-running/raw/past-deadline inputs; audit runner.sync on the job with exact reason. A policy-none ask returns ApprovalChange.answer for JobReportProcessor to enqueue with approvalId null, not a command run by open. JobReportProcessor applies contiguous runner events after lease fencing, calls openBash with the current job state inside report processing (apps/api/src/fleet/sync/job-report.processor.ts:98, apps/api/src/fleet/sync/job-report.processor.ts:118). It already has the job repository, so write the immediate answer there, with no extra runner wake. JobTransitionsService, BudgetEvaluator, BudgetSweeper and BudgetsService all depend on ApprovalCloser, so retain their port shapes (apps/api/src/fleet/jobs/job-transitions.service.ts:41, apps/api/src/fleet/budgets/budget-evaluator.ts:49, apps/api/src/fleet/budgets/budget-sweeper.ts:42, apps/api/src/fleet/budgets/budgets.service.ts:45).\n\nConcurrency: decide/execute lock request then job/policy. Existing fleet transition/evaluator/sweeper/delete/resume paths hold job/policy first; close must use FOR UPDATE SKIP LOCKED to avoid inversion deadlocks. A skipped close writes no link resolution or events and incident approvalId is null. The holder may roll back, leaving a pending ask; bash expires at deadline, and later command checks settle asks with gone resources. Bash command must check missing job/non-RUNNING/epoch mismatch/no runner under the job lock for both approve and reject, set job_ended and write no answer; adapter returns 409 afterward. Server terminal transitions still withdraw pending answer commands before close. Budget command locks policy, rechecks spend and candidates, and closes another newer pending ask as superseded once approval resumes the policy; publish those live events via committedEffect. Requeue candidates use frozen input.requestedAt and decimal monetary comparisons, never floats for spend. Each post-approval requeue uses FleetJobsService.requeue in its own transaction, preserves per-id failures and proceeds; merge outcome afterCommit in one transaction. Audit actor becomes SYSTEM/budget with approval attribution, following engine context.\n\nVerified adapter/module impact: ApprovalsService currently mixes list/get/counts, legacy permission.can by DECIDE_KEYS, locks, runner commands, budget resume, requeue and audit in one service (apps/api/src/fleet/approvals/approvals.service.ts:32, apps/api/src/fleet/approvals/approvals.service.ts:66, apps/api/src/fleet/approvals/approvals.service.ts:97, apps/api/src/fleet/approvals/approvals.service.ts:152). Move command effects to registered classes and helpers first, then make decide an eligibility-first compatibility adapter. Keep legacy repo for list/get/counts through US-010, remove in US-011. BudgetsService.resume already accepts opts.approvalId to prevent a second close and inserts that id on the resumed incident; its own pause/spend checks remain (apps/api/src/fleet/budgets/budgets.service.ts:123). Add read-only assertResumable for prevalidation to preserve fleet 400/409 errors while leaving the ask pending. Preserve existing route guard metadata: project decide declares the two old keys with enforcedBy service (apps/api/src/fleet/approvals/project-fleet-approvals.controller.ts:56); global decide still guards fleet.approval.read. ApprovalStoreModule exports closer/store/live and currently also legacy repo; it must import ApprovalEngineModule without importing job services (apps/api/src/fleet/approvals/approval-store.module.ts:16). ApprovalsModule currently imports jobs/budgets/store and provides old sweeper/service; add engine import, both command providers/registration and OutboxCoreModule/subscriber there, then remove old sweeper in cleanup (apps/api/src/fleet/approvals/approvals.module.ts:15). Unit module-compilation tests must catch DI cycles and missing providers without a DB (apps/api/src/fleet/approvals/approvals.module.spec.ts:6).\n\nDelivery/events: CommandAckProcessor currently locks the job before the legacy approval and merges delivery { result, detail truncated to 200, at ISO } as runner.command-ack bookkeeping (apps/api/src/fleet/sync/command-ack.processor.ts:30, apps/api/src/fleet/sync/command-ack.processor.ts:65, apps/api/src/fleet/sync/command-ack.processor.ts:81). Change only approval delivery persistence to lockByRequest/setOutcome on the link; null/unknown ids are ignored. FleetAskEventsSubscriber records fleet resolved outputs only for rejected/executed/failed/expired through FanOutPublisher, after engine commit. It locks the link, skips recordedStatus duplicates, fills resolvedBy only when null, records mapped activity/webhook in transaction and publishes live afterward; DB errors propagate for retry. Approved is not a fleet resolution event because executed/failed follows. The relay context stays system:outbox: no @SystemWriter or runAsSystemWriter on the new subscriber. The existing assistant outcome subscriber demonstrates registration, transactional idempotency and relay context but has its own SystemWriter annotation that must NOT be copied (apps/api/src/fleet/assistant/requests/assistant-action-outcome.subscriber.ts:13, apps/api/src/fleet/assistant/requests/assistant-action-outcome.subscriber.ts:30). Events are now eventually consistent; immediate decide/get responses derive resolvedBy from request/decision without waiting.\n\nReaders and dependency impact verified by text search: FleetJobsService constructor uses APPROVAL_REPOSITORY for job pending counts (apps/api/src/fleet/jobs/fleet-jobs.service.ts:59). Dashboard groups legacy approvals/min requestedAt (apps/api/src/fleet/dashboard/prisma-dashboard.repository.ts:107); change to links grouped by job/min createdAt through pending requests. Home has pendingWhere with an empty-scope never-match guard, bounded list and count (apps/api/src/home/prisma-home.repository.ts:66, apps/api/src/home/prisma-home.repository.ts:73); retain scope semantics and public HomeApprovalRow while changing engine source/key filtering and joining links. Assistant project counts group legacy rows (apps/api/src/fleet/assistant/prisma-assistant-tool-call.repository.ts:171); generic ticket.delete requests must never inflate fleet counts. FleetNotificationReader reads legacy status/jobId (apps/api/src/notifications/fleet/fleet-notification.reader.ts:22); load request plus link so existing global-admin fleet notification subscriber continues working.\n\nMigration/rollout: stories US-001 and US-002 independently establish concurrency and projection seams; US-003/004 implement bash command and fencing, US-005 implements budget command, US-006/007 switch producers/closers, US-008 delivery, US-009 event recorder, US-010 decide, US-011 every reader, and US-012 removes legacy persistence/sweeper/types only after consumers move. Dependencies must match the binding table exactly, even where integration flows remain red between producer and adapter/reader conversion. Add 20261107090000_fleet_approval_ask_recorded_status/migration.sql before 20261107090100_drop_fleet_approval/migration.sql. Do not rewrite earlier migrations or copy old rows; the user accepted loss of six settled bash history rows and reported no pending rows on 2026-10-27. Old FleetApproval model/table is at apps/api/prisma/schema.prisma:925 and BudgetIncident's old comment at apps/api/prisma/schema.prisma:915. Drop its partial index from test/helpers/partial-indexes.ts and module exports, old repository/sweeper/schema tests, closer.expire, old writer-map entry (36 becomes 35) and remaining cleanup references. Historical SQL in assistant-action-actor.integration.spec.ts intentionally targets a pre-drop_pending_action scratch migration schema and must remain. Verify deletion completeness using root bun run type-check and bun run lint plus empty prisma migrate diff from migrations to schema, not as behavioral ACs. Regenerate Prisma client after schema changes. Contracts stay stable, so avoid controller/DTO changes and downstream OpenAPI/client churn; generated CLI files must never be edited.\n\nTest plan and existing coverage: unit specs next to ask service/notifier, closer/store/service, command-ack/report processors and module DI wiring are rewritten with vi doubles; new command/view/subscriber unit specs accompany behavior. SeedFleetAsk must freeze/hash input and insert only request, optional decisions and link, leaving jobs/policies/candidates to each test. Existing integration suites in test/integration/fleet cover relay, budget wiring, approvals API, dashboards, assistant tools; permission suites enforce-fleet-approvals-budgets and membership-fleet-consumers pin route authorization/visibility; audit suites pin system asks, budgets and new approval.decide plus command keys; home and notification suites pin counts and recipient compatibility. New PG suites exercise skip-locked timing/rollback, view/status-filter equivalence and commands through real ApprovalDecisionService. Keep each specified AC with its story and add failure-table rows that were not already covered as mandatory criteria in that same story. Run DB specs with bun run test:db:up and bun run test:scoped outside the sandbox, using KODA_DB_TESTS=1 and shared canRunDbTests gates; NAX_SANDBOXED=1 skips are not verification. Never run two reset-based DB runs on the same database concurrently; use a private container for another worktree. Generated acceptance stays under the feature .nax location and runs via vitest.nax.config.ts, not by copying tests. All observations and tests must preserve existing fleet errors/envelopes while asserting engine persistence, not fabricate compatibility FleetApproval writes.\n\nRefine self-audit: checked all 129 numbered spec ACs individually against the same story's acceptanceCriteria. Preservation ledger (each listed AC remains present, not moved): US-001 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8; US-002 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-003 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-004 AC-1, AC-2, AC-3; US-005 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-006 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-007 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12; US-008 AC-1, AC-2, AC-3, AC-4, AC-5; US-009 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11; US-010 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-011 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14; US-012 AC-1. Regression qualifiers remain attached: the link-sourced ids, null resolvedBy while recorder lags, manual resumedById, exact row subsets/order, unrelated ticket.delete exclusion, settled asks uncounted, still-pending rejections of invalid fleet inputs, already-settled/ended jobs, outcome-key preservation, duplicate recordedStatus parenthetical, post-transaction live timing and both explicit regression-pin labels. No deprecated file/grep/verbatim AC tags were present. All 18 feature-level Out of Scope items remain verbatim and in their original order; the story-prefixed exclusions really are under that feature-level heading, not story-local AC blocks. No binding dependency or workdir was changed; every referenced dependency id exists, and all 16 specified new-file outputs remain assigned to their original creators.\n\nAudit corrections grounded in fresh source reads: KodaPrincipal uses actorType user/agent/runner, not DeciderRef.type (apps/api/src/auth/principal/koda-principal.types.ts:8); effectiveKeys requires PrincipalRef plus PermissionScope (apps/api/src/permissions/permission.service.ts:82), while decideEligibility requires DeciderRef (apps/api/src/approvals/approval-eligibility.ts:94). US-010 now explicitly normalizes user/agent callers and uses global for a null project rather than passing a raw KodaPrincipal into engine APIs. The body-order criterion is semantic adapter validation, not a promise to override HTTP parsing/class-validator: DecideApprovalDto already structurally validates decision, amount and arrays (apps/api/src/fleet/approvals/dto/decide-approval.dto.ts:6). Generic engine route tests target the actual ApprovalRequestsController POST approvals/:id/decisions and its approvals.invalidDecisionParams mapping (apps/api/src/approvals/approval-requests.controller.ts:67, apps/api/src/approvals/approval-http-errors.ts:11). ApprovalDecisionService gives onReject requestId but no approver fields; only approved execution needs approverId, so bash rejection must not require it (apps/api/src/approvals/approval-decision.service.ts:97, apps/api/src/approvals/approval-decision.service.ts:106). US-009 resolves decider data using existing queries.decisionsFor instead of assuming decisions are in approval_request_changed, whose payload deliberately omits them (apps/api/src/approvals/approval-request.queries.ts:39, apps/api/src/approvals/approval-request-events.ts:8). Unknown/null approvalId suppresses link writes, not ordinary ackCommand bookkeeping (apps/api/src/fleet/sync/command-ack.processor.ts:71). Restored FleetJobsService as US-011's fifth-spec-list reader context by replacing the extra ApprovalsService context entry; its existing service remains explicitly in scope and described in the analysis.\n\nEvery story has an observable negative path: US-001 held/missing request; US-002 failed/cancelled mapping and non-fleet/settled exclusion; US-003 invalid shell params; US-004 ended or wrong lease; US-005 invalid raise, missing policy and candidate/requeue failures; US-006 invalid relay inputs and held close; US-007 held request/delete; US-008 null/unknown ack id; US-009 malformed/ignored/duplicate event; US-010 permission/domain refusals; US-011 cross-project 404; US-012 settled-request redecide 409 after legacy removal. The US-012 negative regression is added only to verify unchanged adapter behavior after deletion, not to expand its production scope. Supplementary failure-table criteria now also pin no new outbox event for a skipped engine close, no duplicate outputs on event redelivery, and the request staying pending on budgetNotPaused. These are the spec's failure behaviors, not new features. No quality gates became ACs. Existing engine/closer/module ports make US-006, US-007 and US-010 complex rather than expert; US-003 is a medium-sized command implementation. Security-critical routing retains three-session-tdd regardless of those lighter complexity labels. Root JSON parsing/execution tools are not exposed in this session; the audit used direct reads/searches and exact structured edits, not a claimed runtime validation run.",
