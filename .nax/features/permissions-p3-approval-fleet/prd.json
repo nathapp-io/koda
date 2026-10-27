@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-fleet",
   "branchName": "feat/permissions-p3-approval-fleet",
   "createdAt": "2026-11-07T00:00:00Z",
-  "updatedAt": "2026-10-27T12:08:44.032Z",
+  "updatedAt": "2026-10-27T13:54:34.634Z",
   "userStories": [
     {
       "id": "US-001",
@@ -384,14 +384,17 @@
         "US-002",
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Existing closer/store and engine ports avoid a new architecture, but relay transaction ordering, policy-none answers and concurrent job closes span modules; shell authorization requires strict TDD isolation."
+        "reasoning": "Existing closer/store and engine ports avoid a new architecture, but relay transaction ordering, policy-none answers and concurrent job closes span modules; shell authorization requires strict TDD isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/approvals/approval-closer.ts",
@@ -438,7 +441,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "32a7a0f024a1b4b7793fbd357ad6fbfe27948e77"
     },
     {
       "id": "US-007",
