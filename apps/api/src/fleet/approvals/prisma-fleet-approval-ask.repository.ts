@@ -131,6 +131,25 @@ export class PrismaFleetApprovalAskRepository
     return rows.map((row) => this.toDomain(row));
   }
 
+  /**
+   * US-006 (F1 round 3): the backlog a bounded job-end close leaves. `FleetApprovalAsk.jobId` has no foreign key to
+   * `FleetJob` (a deleted job must not delete the ask record), so the state filter is one bounded join, oldest ask
+   * first, capped by the caller's `limit`.
+   */
+  async findEndedJobPendingAsks(limit: number): Promise<string[]> {
+    const rows = await this.db.$queryRaw<Array<{ jobId: string }>>`
+      SELECT a."jobId" AS "jobId"
+      FROM "FleetApprovalAsk" a
+      JOIN "ApprovalRequest" r ON r."id" = a."requestId"
+      JOIN "FleetJob" j ON j."id" = a."jobId"
+      WHERE r."status" = 'pending' AND j."state" <> 'RUNNING'
+      GROUP BY a."jobId"
+      ORDER BY MIN(a."createdAt") ASC
+      LIMIT ${limit}
+    `;
+    return rows.map((row) => row.jobId);
+  }
+
   async findPendingForPolicy(budgetPolicyId: string): Promise<FleetApprovalAskRecord | null> {
     const row = await this.db.fleetApprovalAsk.findFirst({
       where: { budgetPolicyId, request: { status: 'pending' } },

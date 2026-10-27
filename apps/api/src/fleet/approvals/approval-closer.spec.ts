@@ -1,4 +1,4 @@
-import { ApprovalCloser, SWEEP_WARN_PAGES } from './approval-closer';
+import { ApprovalCloser, MAX_ASKS_CLOSED_PER_CALL } from './approval-closer';
 import { Logger } from '@nestjs/common';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { approvalWebhookPayload } from './approval-payloads';
@@ -346,19 +346,36 @@ describe('bash half on the approval engine (US-006)', () => {
     store.setResolvedBy.mockClear();
   }
 
-  it('US-006 AC-13 (F1): closeForJob settles every pending ask of a job, past the 100-link page', async () => {
-    const total = MAX_PENDING_ASKS_PER_JOB + 30;
+  it('US-006 AC-13 (F1 round 3): one call closes at most MAX_ASKS_CLOSED_PER_CALL asks, and repeated calls drain the job', async () => {
+    // More asks than one bounded close may settle: the job transition transaction must stay inside Prisma's
+    // interactive-transaction timeout, so the sweep stops at the bound and the continuation takes the rest.
+    const total = MAX_ASKS_CLOSED_PER_CALL + 50;
     await openMany(total);
 
-    const live = await closer.closeForJob(job, NOW);
+    const first = await closer.closeForJob(job, NOW);
+    expect(first).toHaveLength(MAX_ASKS_CLOSED_PER_CALL);
+    expect(asks.close).toHaveBeenCalledTimes(MAX_ASKS_CLOSED_PER_CALL);
+    expect(store.findPendingForJobPage).toHaveBeenCalledTimes(1);   // one page == the bound
 
+    const rest = await closer.closeForJob(job, NOW);
+    expect(rest).toHaveLength(50);
     expect(asks.close).toHaveBeenCalledTimes(total);
-    expect(store.setResolvedBy).toHaveBeenCalledTimes(total);
-    expect(live).toHaveLength(total);
+
+    expect(await closer.closeForJob(job, NOW)).toEqual([]);
+  });
+
+  it('US-006 AC-13 (F1 round 3): a call that stops at its bound logs the backlog it left', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    warn.mockClear();
+    await openMany(MAX_ASKS_CLOSED_PER_CALL + 5);
+
+    await closer.closeForJob(job, NOW);
+
+    expect(warn.mock.calls.filter(([message]) => String(message).includes('drained by the job-end sweeper'))).toHaveLength(1);
   });
 
   it('US-006 AC-14 (F1): a held ask is skipped and the sweep still reaches every ask past it', async () => {
-    const total = MAX_PENDING_ASKS_PER_JOB + 20;
+    const total = MAX_ASKS_CLOSED_PER_CALL + 20;
     await openMany(total);
     // The third request of the sweep is held by an in-flight decide: the engine answers null for it.
     let calls = 0;
@@ -367,59 +384,28 @@ describe('bash half on the approval engine (US-006)', () => {
       return calls === 3 ? null : { id: requestId, status: 'cancelled' };
     });
 
-    const live = await closer.closeForJob(job, NOW);
+    const first = await closer.closeForJob(job, NOW);
+    const rest = await closer.closeForJob(job, NOW);
 
-    expect(asks.close).toHaveBeenCalledTimes(total);
-    expect(store.setResolvedBy).toHaveBeenCalledTimes(total - 1);
-    expect(live).toHaveLength(total - 1);
-  });
-
-  /**
-   * A store whose keyset walks numbered pages of `MAX_PENDING_ASKS_PER_JOB` synthetic links, then a last page of
-   * `lastPage` links, then an empty page. The cursor carries the page number, so each page is strictly "after" the
-   * previous one, exactly as the real `requestId` keyset behaves.
-   */
-  function pagedStore(fullPages: number, lastPage: number): void {
-    store.findPendingForJobPage.mockImplementation(async (_jobId: string, after?: string) => {
-      const page = after === undefined ? 1 : Number(after.split(':')[0]) + 1;
-      const size = page <= fullPages ? MAX_PENDING_ASKS_PER_JOB : page === fullPages + 1 ? lastPage : 0;
-      return Array.from({ length: size }, (_, index) => ({
-        requestId: `${page}:${index}`, kind: 'bash' as const, projectId: 'p1', jobId: 'j1', leaseEpoch: 2,
-        naxAskId: `ask-${page}-${index}`, budgetPolicyId: null, resolvedBy: null, outcome: null, createdAt: NOW, updatedAt: NOW,
-      }));
-    });
-    store.findApproval.mockImplementation(async (requestId: string) => ({
-      id: requestId, type: 'nax_bash_escalate' as const, status: 'pending' as const, projectId: 'p1', jobId: 'j1',
-      leaseEpoch: 2, naxAskId: null, policyId: null, payload: {}, outcome: null, requestedAt: NOW, expiresAt: null,
-      decision: null, decidedById: null, decidedAt: null, resolvedBy: null, comment: null, createdAt: NOW, updatedAt: NOW,
-    }));
-  }
-
-  it('US-006 AC-13 (F1 round 2): the sweep pages until exhausted, past any fixed page count', async () => {
-    // A job with far more asks than a sweep used to walk in one call: every one of them must still be closed.
-    const pages = 52;   // 5 200 asks at MAX_PENDING_ASKS_PER_JOB per page
-    const total = pages * MAX_PENDING_ASKS_PER_JOB;
-    pagedStore(pages, 0);
-
-    const live = await closer.closeForJob(job, NOW);
-
-    expect(asks.close).toHaveBeenCalledTimes(total);
+    // The held ask is stepped over in the first call and closed by the continuation, not met twice in a row.
+    expect(first).toHaveLength(MAX_ASKS_CLOSED_PER_CALL - 1);
+    expect(rest).toHaveLength(21);
     expect(store.setResolvedBy).toHaveBeenCalledTimes(total);
-    expect(live).toHaveLength(total);
   });
 
-  it('US-006 (F1 round 2): a long sweep warns once and keeps closing rather than stopping', async () => {
-    const warn = vi.spyOn(Logger.prototype, 'warn');
-    warn.mockClear();
-    const pages = SWEEP_WARN_PAGES + 2;
-    const total = pages * MAX_PENDING_ASKS_PER_JOB + 5;
-    pagedStore(pages, 5);
+  it('US-006 AC-13 (F1 round 3): repeated bounded calls drain a job far beyond one page', async () => {
+    // A job with far more asks than one call may settle: each call stays inside the transaction budget and the
+    // continuation (the job-end sweeper) keeps calling until the job has none left.
+    const calls = 5;
+    const total = calls * MAX_ASKS_CLOSED_PER_CALL;
+    await openMany(total);
 
-    const live = await closer.closeForJob(job, NOW);
+    let closed = 0;
+    for (let call = 0; call < calls; call += 1) closed += (await closer.closeForJob(job, NOW)).length;
 
+    expect(closed).toBe(total);
     expect(asks.close).toHaveBeenCalledTimes(total);
-    expect(live).toHaveLength(total);
-    expect(warn.mock.calls.filter(([message]) => String(message).includes('pages of pending asks'))).toHaveLength(1);
+    expect(await closer.closeForJob(job, NOW)).toEqual([]);
   });
 
   it('expire still settles the legacy row until US-012', async () => {

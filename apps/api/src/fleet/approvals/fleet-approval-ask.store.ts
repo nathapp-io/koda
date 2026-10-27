@@ -42,6 +42,11 @@ export class FleetApprovalAskStore {
     return this.asks.findPendingForJobPage(jobId, afterRequestId, limit);
   }
 
+  /** US-006 (F1 round 3): the jobs a bounded job-end close left with pending asks. */
+  findEndedJobPendingAsks(limit: number): Promise<string[]> {
+    return this.asks.findEndedJobPendingAsks(limit);
+  }
+
   findPendingForPolicy(budgetPolicyId: string): Promise<FleetApprovalAskRecord | null> {
     return this.asks.findPendingForPolicy(budgetPolicyId);
   }

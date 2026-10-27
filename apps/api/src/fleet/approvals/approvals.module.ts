@@ -10,6 +10,7 @@ import { BudgetStoreModule } from '../budgets/budget-store.module';
 import { BudgetsModule } from '../budgets/budgets.module';
 import { FleetJobsModule } from '../jobs/fleet-jobs.module';
 import { ApprovalExpirySweeper } from './approval-expiry-sweeper';
+import { ApprovalJobEndSweeper } from './approval-job-end.sweeper';
 import { ApprovalStoreModule } from './approval-store.module';
 import { ApprovalsService } from './approvals.service';
 import { FleetApprovalCountsController } from './fleet-approval-counts.controller';
@@ -20,7 +21,7 @@ import { ProjectFleetApprovalsController } from './project-fleet-approvals.contr
 @Module({
   imports: [PrismaModule, ApprovalEngineModule, ProjectAccessModule, ApprovalStoreModule, BudgetStoreModule, BudgetsModule, FleetJobsModule, FleetActivityModule],
   controllers: [ProjectFleetApprovalsController, FleetApprovalsController, FleetApprovalCountsController],
-  providers: [ApprovalsService, ApprovalExpirySweeper, FleetShellEscalateCommand, FleetBudgetOverrideCommand],
+  providers: [ApprovalsService, ApprovalExpirySweeper, ApprovalJobEndSweeper, FleetShellEscalateCommand, FleetBudgetOverrideCommand],
   exports: [ApprovalsService],
 })
 export class ApprovalsModule implements OnModuleInit {

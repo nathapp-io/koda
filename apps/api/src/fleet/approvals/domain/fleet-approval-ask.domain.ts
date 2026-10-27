@@ -50,6 +50,11 @@ export interface IFleetApprovalAskRepository {
    * a sweep closes every ask, so it needs a total order on the cursor, not the oldest-first order above.
    */
   findPendingForJobPage(jobId: string, afterRequestId?: string, limit?: number): Promise<FleetApprovalAskRecord[]>;
+  /**
+   * US-006 (F1 round 3): the jobs that still have a pending ask but are no longer RUNNING, oldest ask first, at most
+   * `limit`. This is the backlog a bounded job-end close leaves behind, which `ApprovalJobEndSweeper` drains.
+   */
+  findEndedJobPendingAsks(limit: number): Promise<string[]>;
   findPendingForPolicy(budgetPolicyId: string): Promise<FleetApprovalAskRecord | null>;
   setResolvedBy(requestId: string, resolvedBy: ApprovalResolvedBy): Promise<FleetApprovalAskRecord>;
   /** Replaces the outcome. */

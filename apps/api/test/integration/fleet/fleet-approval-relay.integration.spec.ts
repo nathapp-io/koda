@@ -16,6 +16,8 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import type { ApprovalRequestEventPayload, SyncRequest, SyncResponse } from '@nathapp/fleet-protocol';
 import { ApprovalPolicyService } from '../../../src/approvals/approval-policy.service';
 import { ApprovalRequestExpirySweeper } from '../../../src/approvals/approval-request-expiry.sweeper';
+import { MAX_ASKS_CLOSED_PER_CALL } from '../../../src/fleet/approvals/approval-closer';
+import { ApprovalJobEndSweeper } from '../../../src/fleet/approvals/approval-job-end.sweeper';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
 import { resetDb } from '../../helpers/reset-db';
@@ -395,9 +397,9 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     ]);
   });
 
-  it('AC-13/AC-15 (F1): the job-end close settles every pending ask, across several 100-link pages', async () => {
+  it('AC-13/AC-15 (F1): the job-end close stays bounded in the transition transaction and the sweeper drains the rest', async () => {
     await enableRelay();
-    const total = 205;   // three pages of MAX_PENDING_ASKS_PER_JOB
+    const total = 205;   // three pages of MAX_PENDING_ASKS_PER_JOB, more than one bounded close settles
     const { jobId, leaseEpoch } = await startRunning('job-end-many');
     // Reported in three reports: a runner batch, not one oversized one.
     for (let first = 0; first < total; first += 35) {
@@ -410,15 +412,26 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     }
     const links = await linksOf(jobId);
     expect(links).toHaveLength(total);
+    const settledCount = () => prisma.approvalRequest.count({
+      where: { id: { in: links.map((l) => l.requestId) }, status: 'cancelled' },
+    });
 
-    await sync({ jobs: [{ jobId, leaseEpoch, events: [
+    const res = await sync({ jobs: [{ jobId, leaseEpoch, events: [
       { seq: total + 2, type: 'state', payload: { to: 'UPLOADING' } },
       { seq: total + 3, type: 'state', payload: { to: 'COMPLETED' } },
     ] }] });
 
+    // The transition committed (no interactive-transaction timeout) and settled only its bounded share of asks.
+    expect(res.jobAcks).toContainEqual({ jobId, ackedSeq: total + 3 });
+    expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: jobId } })).state).toBe('COMPLETED');
+    expect(await settledCount()).toBe(MAX_ASKS_CLOSED_PER_CALL);
+
+    // The durable continuation finishes the job, in its own transactions, without another runner report.
+    const sweeper = app.get(ApprovalJobEndSweeper, { strict: false });
+    for (let tick = 0; tick < 5 && (await settledCount()) < total; tick += 1) await sweeper.tick(new Date());
+
+    expect(await settledCount()).toBe(total);
     const settled = await prisma.approvalRequest.findMany({ where: { id: { in: links.map((l) => l.requestId) } } });
-    expect(settled).toHaveLength(total);
-    expect(settled.filter((r) => r.status === 'cancelled')).toHaveLength(total);
     expect(settled.filter((r) => (r.result as { closedBy?: string } | null)?.closedBy === 'job_ended')).toHaveLength(total);
     expect(await prisma.fleetApprovalAsk.count({ where: { jobId, resolvedBy: 'job_ended' } })).toBe(total);
     expect(await prisma.fleetActivity.count({ where: { jobId, action: 'approval.cancelled' } })).toBe(total);

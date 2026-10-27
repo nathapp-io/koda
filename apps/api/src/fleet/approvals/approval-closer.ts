@@ -67,10 +67,12 @@ const notOpenedReason = (job: BashJob, ask: BashAsk, now: Date): string | null =
 };
 
 /**
- * US-006 (F1): a job-end sweep logs once past this many pages of pending asks — an abnormal job worth seeing in the
- * logs. It never stops there: an ask left pending would never be settled `job_ended`, so the sweep runs to exhaustion.
+ * US-006 (F1 round 3): how many asks one `closeForJob` call settles. The call runs inside the job transition's
+ * interactive transaction, so its work has to fit Prisma's 5 s budget: one page of asks is ~600 statements, well
+ * inside it, while an unbounded sweep over thousands would roll the transition back. The rest of a job's asks are
+ * drained by `ApprovalJobEndSweeper` in its own transactions.
  */
-export const SWEEP_WARN_PAGES = 10;
+export const MAX_ASKS_CLOSED_PER_CALL = 100;
 
 /** Plan D262: spec §2.5 activity actions for a closed approval. */
 const closedAction = (a: Pick<FleetApprovalRecord, 'status'>): string =>
@@ -184,19 +186,25 @@ export class ApprovalCloser {
    * Spec §1.4: the job left RUNNING, so nax has exited or is exiting; every pending ask of it is moot. A request held
    * by an in-flight decide or execute is skipped — the close must not block the job transition (US-006 AC-14).
    *
-   * The read is paged (US-006 F1) and runs until the job has no pending ask left: a runner may relay more asks than
-   * one page holds, and an ask this sweep skips would stay pending with no `job_ended` cancellation at all. There is
-   * therefore no page cap. Termination is structural, not a bound: the cursor is the last `requestId` of the page and
-   * the query only returns rows strictly above it, so every iteration advances a unique key over a finite table. A
-   * sweep longer than SWEEP_WARN_PAGES is logged once and carries on.
+   * The read is paged (US-006 F1) and bounded per call (F1 round 3): this runs inside the job transition's
+   * interactive transaction, so it settles at most `limit` asks (one page by default, ~600 statements, well inside
+   * Prisma's 5 s budget) and logs the backlog it leaves. `ApprovalJobEndSweeper` continues the job in its own
+   * transactions until nothing is pending, so a job with thousands of asks neither times the transition out nor
+   * leaves an ask with no `job_ended` cancellation. The cursor is the last `requestId` of the page, so a skipped
+   * (held) request is stepped over rather than met again.
    */
-  async closeForJob(job: Pick<FleetJobRecord, 'id' | 'requestedById' | 'requestedByType'>, now: Date): Promise<LiveFleetApprovalEvent[]> {
+  async closeForJob(
+    job: Pick<FleetJobRecord, 'id' | 'requestedById' | 'requestedByType'>,
+    now: Date,
+    limit = MAX_ASKS_CLOSED_PER_CALL,
+  ): Promise<LiveFleetApprovalEvent[]> {
     const live: LiveFleetApprovalEvent[] = [];
     let after: string | undefined;
-    let page = 0;
-    let links = await this.store.findPendingForJobPage(job.id, after);
-    while (links.length > 0) {
-      page += 1;
+    let processed = 0;
+    while (processed < limit) {
+      const take = Math.min(MAX_PENDING_ASKS_PER_JOB, limit - processed);
+      const links = await this.store.findPendingForJobPage(job.id, after, take);
+      if (links.length === 0) return live;
       for (const link of links) {
         const closed = await this.askService.close(link.requestId, { status: 'cancelled', reason: 'job_ended' }, now);
         if (closed === null) continue;
@@ -208,14 +216,12 @@ export class ApprovalCloser {
         }
         live.push(...(await this.recordResolved(view, jobSystemActor(job))));
       }
+      processed += links.length;
       const next = links.at(-1);
-      if (links.length < MAX_PENDING_ASKS_PER_JOB || next === undefined) break;
+      if (links.length < take || next === undefined) return live;
       after = next.requestId;
-      if (page === SWEEP_WARN_PAGES) {
-        this.logger.warn(`Job ${job.id}: job-end close passed ${SWEEP_WARN_PAGES} pages of pending asks and keeps going`);
-      }
-      links = await this.store.findPendingForJobPage(job.id, after);
     }
+    this.logger.warn(`Job ${job.id}: job-end close stopped at ${limit} asks; the rest is drained by the job-end sweeper`);
     return live;
   }
 
