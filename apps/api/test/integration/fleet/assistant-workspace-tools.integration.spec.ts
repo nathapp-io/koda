@@ -181,6 +181,17 @@ describeIntegration('koda_my_projects and workspace-scoped tools (PG, US-003)', 
         status: 'pending', expiresAt: new Date(now + DAY_MS),
       },
     });
+    // US-011 (fix round 1): a fleet-key request with no `FleetApprovalAsk` link is not a fleet row — the approval list
+    // cannot show it, so the count must not promise it either.
+    await prisma.approvalRequest.create({
+      data: {
+        permissionKey: 'fleet.job.shell.escalate', projectId: rich.id, actorType: 'SYSTEM', actorId: 'runner', origin: 'runner',
+        correlationId: 'corr-rich-unlinked', input: { jobId: 'job-rich-unlinked', leaseEpoch: 1, naxAskId: 'ask-rich-unlinked', payload: { command: 'ls', commandTruncated: false, options: ['allow'] } },
+        inputHash: 'hash-rich-unlinked', requiredMode: 'agent', onTimeout: 'reject',
+        approverMustHoldAction: true, requireDistinctApprover: false,
+        status: 'pending', expiresAt: new Date(now + DAY_MS),
+      },
+    });
     richPendingAsk = pendingAsk.requestId;
 
     devJob = await workspaceJob(dev.id);
@@ -249,11 +260,15 @@ describeIntegration('koda_my_projects and workspace-scoped tools (PG, US-003)', 
     expect(lineOf(result.content, richSlug)).toContain('pending_approvals: 1');
   });
 
-  it('US-011 AC-11: the pending count is the fleet ask alone, not a pending ticket.delete request', async () => {
-    // The project holds three ask-shaped rows: one pending fleet ask, one approved fleet ask and one pending
-    // `ticket.delete` request (seeded above). Two are pending; only the fleet one is a pending approval.
+  it('US-011 AC-11: only the linked fleet ask counts, not a ticket.delete request nor an unlinked fleet-key request', async () => {
+    // Three pending requests live in the project: the fleet ask with its link, a `ticket.delete` request of another
+    // key, and a fleet-key request without a link (fix round 1). Only the first is a fleet approval row.
     const ask = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: richPendingAsk }, select: { projectId: true } });
-    expect(await prisma.approvalRequest.count({ where: { projectId: ask.projectId, status: 'pending' } })).toBe(2);
+    expect(await prisma.approvalRequest.count({ where: { projectId: ask.projectId, status: 'pending' } })).toBe(3);
+    expect(await prisma.fleetApprovalAsk.count({ where: { projectId: ask.projectId } })).toBe(2); // the pending ask and the settled one
+    expect(await prisma.approvalRequest.count({
+      where: { projectId: ask.projectId, status: 'pending', permissionKey: { in: ['fleet.job.shell.escalate', 'fleet.budget.override'] } },
+    })).toBe(2);
 
     const result = await call(richJob, 'ac11', {});
 

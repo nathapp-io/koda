@@ -169,11 +169,11 @@ export class PrismaAssistantToolCallRepository
         where: { projectId: { in: ids }, state: { in: [...FAILED_JOB_STATES] }, finishedAt: { gte: failedSince } },
         _count: { _all: true },
       }),
-      // Permissions P3 (US-011): a pending ask is an engine request carrying a fleet key; a pending
-      // `ticket.delete` (or any other key) in the same project is not one.
+      // Permissions P3 (US-011): a pending ask is an engine request carrying a fleet key *and* a link — an
+      // unlinked request is not a fleet row, so counting it would promise an approval the list cannot show.
       this.prisma.client.approvalRequest.groupBy({
         by: ['projectId'],
-        where: { projectId: { in: ids }, status: 'pending', permissionKey: { in: [...FLEET_ASK_KEYS] } },
+        where: { projectId: { in: ids }, status: 'pending', permissionKey: { in: [...FLEET_ASK_KEYS] }, fleetAsk: { isNot: null } },
         _count: { _all: true },
       }),
     ]);

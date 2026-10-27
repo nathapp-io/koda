@@ -20,8 +20,7 @@ import { MAX_ASKS_CLOSED_PER_CALL } from '../../../src/fleet/approvals/approval-
 import { ApprovalJobEndSweeper } from '../../../src/fleet/approvals/approval-job-end.sweeper';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
-import { outboxRecord } from '../../helpers/outbox-record';
-import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
+import { OutboxRelay } from '@nathapp/nestjs-outbox';
 import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
@@ -482,29 +481,50 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
   });
 
   /**
-   * Permissions P3 US-011 (AC-14): the relayed ask is announced by the fleet's outbox event, and the consumer
-   * reads the ask on the engine. Every global admin is told; the requester is not.
+   * Permissions P3 US-011 (AC-14): the relayed ask reaches every global admin through the fleet's notification, and
+   * the *relay* — not a hand-picked event — carries both events of the ask: the fleet's announcement and the engine's
+   * `approval_request_changed`. The engine subscriber must skip the fleet keys (US-001), so an admin holds exactly one
+   * notification for the ask; a duplicate from the engine path would be a second row with the same source id.
+   *
+   * The earlier cases of this file never run the relay, so their pending events are marked published first: the batch
+   * this test leases then holds only the ask's own two events (a stale webhook delivery would otherwise retry here).
    */
-  it('US-011 AC-14: the relayed bash ask notifies every global admin as a fleet approval', async () => {
+  it('US-011 AC-14: the outbox relay tells every global admin once, through the fleet approval only', async () => {
     await enableRelay();
     const secondAdmin = await prisma.user.create({ data: { email: 'relay-admin2@koda.test', passwordHash: 'x' } });
     await grantBaseline(prisma, { type: 'USER', id: secondAdmin.id });
     await grantRole(prisma, { type: 'USER', id: secondAdmin.id }, 'admin', null);
+    await prisma.outboxEvent.updateMany({ where: { status: { in: ['pending', 'processing'] } }, data: { status: 'published', publishedAt: new Date() } });
+
     const { jobId, leaseEpoch } = await startRunning('notify');
     await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-0000001b') }] }] });
     const [link] = await linksOf(jobId);
 
-    const publisher = app.get(FanOutPublisher);
-    for (const row of await prisma.outboxEvent.findMany({ where: { type: 'fleet_approval_requested', eventId: link!.requestId } })) {
-      await publisher.publish(outboxRecord(row.type, JSON.parse(row.payload), { id: row.id, metadata: { projectId: row.projectId, eventId: row.eventId } }));
-    }
+    // Both events of this ask are in the outbox: the engine's change (keyed `<requestId>:<status>`) and the fleet's
+    // announcement (keyed by the request id).
+    const events = await prisma.outboxEvent.findMany({
+      where: { OR: [{ eventId: link!.requestId }, { eventId: { startsWith: `${link!.requestId}:` } }] },
+      select: { id: true, type: true },
+    });
+    expect(events.map((e) => e.type).sort()).toEqual(['approval_request_changed', 'fleet_approval_requested']);
+
+    // The real relay: it leases pending rows and runs every registered handler for them.
+    const relay = app.get(OutboxRelay, { strict: false });
+    const settled = async () => prisma.outboxEvent.count({ where: { id: { in: events.map((e) => e.id) }, status: { in: ['published', 'dead'] } } });
+    for (let pass = 0; pass < 10 && (await settled()) < events.length; pass += 1) await relay.dispatchPendingBatch();
+    expect(await prisma.outboxEvent.findMany({ where: { id: { in: events.map((e) => e.id) } }, select: { status: true } }))
+      .toEqual([{ status: 'published' }, { status: 'published' }]);
 
     for (const adminId of [world.ids.root, secondAdmin.id]) {
-      expect(await prisma.notification.findMany({ where: { userId: adminId } })).toEqual([
-        expect.objectContaining({ kind: 'approval_requested', sourceType: 'fleet_approval', sourceId: link!.requestId, link: '/admin/fleet/approvals' }),
+      // One row per admin for this ask, whichever subscriber wrote it: the fleet's.
+      expect(await prisma.notification.findMany({ where: { userId: adminId, sourceId: link!.requestId } })).toEqual([
+        expect.objectContaining({ kind: 'approval_requested', sourceType: 'fleet_approval', link: '/admin/fleet/approvals' }),
       ]);
     }
-    expect(await prisma.notification.count({ where: { userId: world.ids.dev } })).toBe(0);
+    // No engine approval notification for a fleet ask (it would be `sourceType: 'approval_request'`), and the job's
+    // requester is not an approver.
+    expect(await prisma.notification.count({ where: { sourceType: 'approval_request', sourceId: link!.requestId } })).toBe(0);
+    expect(await prisma.notification.count({ where: { userId: world.ids.dev, sourceId: link!.requestId } })).toBe(0);
 
     await finish(jobId, leaseEpoch, 3);
   });
