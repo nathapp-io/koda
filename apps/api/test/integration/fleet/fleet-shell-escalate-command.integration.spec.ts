@@ -131,4 +131,13 @@ integration('fleet shell escalation command through ApprovalDecisionService', ()
     });
     notify.mockRestore();
   });
+
+  it('AC-4: approving after the job is missing resolves the ask without writing an answer command', async () => {
+    await db.fleetJob.delete({ where: { id: jobId } });
+    const settled = await withTestActor({ type: 'USER', id: userId }, () => service.decide(requestId, 'approve', null, now));
+
+    expect(settled).toMatchObject({ status: 'executed', result: { answered: false } });
+    expect(await db.fleetCommand.count({ where: { jobId, type: 'APPROVAL_ANSWER' } })).toBe(0);
+    expect(await db.fleetApprovalAsk.findUnique({ where: { requestId } })).toMatchObject({ resolvedBy: 'job_ended' });
+  });
 });
