@@ -28,9 +28,9 @@ describeDb('PrismaAssistantActionRequestRepository (PG)', () => {
   }, 120_000);
   afterAll(async () => { await app?.close(); });
 
-  async function request(status = 'pending', actorId = 'a1') {
+  async function request(status = 'pending', actorId = 'a1', requestProjectId = projectId) {
     return write(() => db.approvalRequest.create({ data: {
-      permissionKey: 'ticket.comment', projectId, actorType: 'AGENT', actorId, origin: 'thread', correlationId: randomUUID(),
+      permissionKey: 'ticket.comment', projectId: requestProjectId, actorType: 'AGENT', actorId, origin: 'thread', correlationId: randomUUID(),
       input: {}, inputHash: randomUUID(), requiredMode: 'human', onTimeout: 'reject', approverMustHoldAction: true,
       requireDistinctApprover: false, status, expiresAt: new Date(Date.now() + 60_000),
     } }));
@@ -55,17 +55,32 @@ describeDb('PrismaAssistantActionRequestRepository (PG)', () => {
     const second = await request();
     const rejected = await request('rejected');
     const foreign = await request();
-    for (const [r, target] of [[first, t], [second, t], [rejected, t], [foreign, other]] as const) {
+    const otherProject = await write(() => db.project.create({ data: { name: 'Other project', slug: `other-${randomUUID()}`, key: randomUUID() } }));
+    const wrongProject = await request('pending', 'a1', otherProject.id);
+    for (const [r, target] of [[first, t], [second, t], [rejected, t], [foreign, other], [wrongProject, t]] as const) {
       await write(() => repo.insert({ requestId: r.id, threadId: target.id, jobId: null, toolCallId: null, tool: 'write', preview: 'p' }));
     }
-    expect(await repo.countPendingInThread(t.id)).toBe(2);
+    expect(await repo.countPendingInThread(t.id)).toBe(3);
     expect(await repo.findScopedInThread(first.id, projectId, t.id)).toMatchObject({ request: { status: 'pending' } });
     expect(await repo.findScopedInThread(foreign.id, projectId, t.id)).toBeNull();
+    expect(await repo.findScopedInThread(wrongProject.id, projectId, t.id)).toBeNull();
+    const ownWithoutLink = await request();
+    expect(await repo.findOwnRequest(ownWithoutLink.id, projectId, { type: 'AGENT', id: 'a1' })).toMatchObject({ assistantAction: null });
     expect(await repo.findOwnRequest(first.id, projectId, { type: 'AGENT', id: 'a1' })).toMatchObject({ assistantAction: { requestId: first.id } });
     expect(await repo.findOwnRequest(first.id, projectId, { type: 'AGENT', id: 'a2' })).toBeNull();
   });
+  it('deleting a thread cascades its link without deleting the approval request', async () => {
+    const t = await thread();
+    const approval = await request();
+    await write(() => repo.insert({ requestId: approval.id, threadId: t.id, jobId: null, toolCallId: null, tool: 'write', preview: 'p' }));
+    await write(() => db.chatThread.delete({ where: { id: t.id } }));
+    expect(await repo.findByRequest(approval.id)).toBeNull();
+    expect(await db.approvalRequest.findUnique({ where: { id: approval.id } })).toMatchObject({ id: approval.id, status: 'pending' });
+  });
+
   it('writes notes in sequence and stores the noted mark; locks existing and missing rows', async () => {
     const t = await thread();
+    await write(() => db.chatMessage.create({ data: { threadId: t.id, seq: 4, role: 'assistant', content: 'prior', status: 'complete' } }));
     const approval = await request();
     await write(() => repo.insert({ requestId: approval.id, threadId: t.id, jobId: null, toolCallId: null, tool: 'write', preview: 'p' }));
     const tx = app.get<ITransactionManager>(TRANSACTION_MANAGER);
@@ -75,7 +90,7 @@ describeDb('PrismaAssistantActionRequestRepository (PG)', () => {
     }));
     const id = await write(() => repo.insertSystemNote(t.id, 'note'));
     const note = await db.chatMessage.findUniqueOrThrow({ where: { id } });
-    expect(note).toMatchObject({ content: 'note', role: 'system', seq: 1 });
+    expect(note).toMatchObject({ content: 'note', role: 'system', seq: 5 });
     const at = new Date();
     await write(() => repo.markNoted(approval.id, id, at));
     expect(await repo.findByRequest(approval.id)).toMatchObject({ noteMessageId: id, notedAt: at });
