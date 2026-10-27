@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-fleet",
   "branchName": "feat/permissions-p3-approval-fleet",
   "createdAt": "2026-11-07T00:00:00Z",
-  "updatedAt": "2026-10-27T17:26:04.138Z",
+  "updatedAt": "2026-10-27T17:43:42.195Z",
   "userStories": [
     {
       "id": "US-001",
@@ -703,14 +703,17 @@
         "US-006",
         "US-007"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "The engine already owns decisions and eligibility, so this is a cross-module compatibility adapter rather than a new authorization architecture; principal normalization, error ordering and self-approval checks still require strict security TDD."
+        "reasoning": "The engine already owns decisions and eligibility, so this is a cross-module compatibility adapter rather than a new authorization architecture; principal normalization, error ordering and self-approval checks still require strict security TDD.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/fleet/approvals/approvals.service.ts",
@@ -749,7 +752,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f10f9cf6b47fcf6913e2d28fe19e60618bc27b3b"
     },
     {
       "id": "US-011",
