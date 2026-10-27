@@ -1,7 +1,7 @@
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { validateSync } from 'class-validator';
 import { parseQuery } from '../common/dto/koda-page.query';
-import { ApprovalDecisionParamsInvalidError, ApprovalRequestNotFoundError } from './domain/approval.errors';
+import { ApprovalCancelForbiddenError, ApprovalDecisionParamsInvalidError, ApprovalRequestNotFoundError } from './domain/approval.errors';
 import type { ApprovalRequestRecord } from './domain/approval.domain';
 import { rethrowApprovalError } from './approval-http-errors';
 import { ApprovalDecisionDto, ApprovalRequestDto, ApprovalRequestSummaryDto } from './dto/approval-request.dto';
@@ -43,6 +43,19 @@ describe('approval HTTP boundary', () => {
     expect(() => rethrowApprovalError(new ApprovalRequestNotFoundError('missing'))).toThrow(NotFoundAppException);
     const error = new Error('database unavailable');
     expect(() => rethrowApprovalError(error)).toThrow(error);
+  });
+  it('US-007 AC-11: maps a principal cancelling an ask to a 403 cancellation refusal', () => {
+    let raised: unknown;
+    try {
+      rethrowApprovalError(new ApprovalCancelForbiddenError('request'));
+    } catch (error) {
+      raised = error;
+    }
+
+    expect(raised).toBeInstanceOf(ForbiddenAppException);
+    expect((raised as ForbiddenAppException).getStatus()).toBe(403);
+    expect((raised as ForbiddenAppException).prefix).toBe('approvals.cancelForbidden');
+    expect((raised as ForbiddenAppException).args).toEqual({});
   });
   it.each(['not-accepted', 'too-large', 'invalid'] as const)('AC-13: maps invalid decision params (%s) to a validation refusal', (reason) => {
     let raised: unknown;

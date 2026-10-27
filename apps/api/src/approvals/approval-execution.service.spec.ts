@@ -174,6 +174,34 @@ describe('ApprovalExecutionService', () => {
     expect(s.permissions.effectiveKeys).not.toHaveBeenCalled();
   });
 
+  it('US-007 AC-8: runs a system ask without re-checking any principal key', async () => {
+    const s = setup({ actor: { type: 'SYSTEM', id: 'runner' }, onBehalfOf: { type: 'USER', id: 'u1' } });
+
+    const settled = await s.service.execute('r1', now);
+
+    expect(settled).toMatchObject({ status: 'executed' });
+    expect(s.permissions.effectiveKeys).not.toHaveBeenCalled();
+    expect(s.test.state.calls).toEqual([{ labelId: 'l1' }]);
+  });
+
+  it('US-007 AC-8: runs a budget ask without re-checking any principal key', async () => {
+    const s = setup({ actor: { type: 'SYSTEM', id: 'budget' }, onBehalfOf: null });
+
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
+    expect(s.permissions.effectiveKeys).not.toHaveBeenCalled();
+  });
+
+  it('US-007 AC-9: still settles permission-revoked for an assistant request whose principal lost the key', async () => {
+    const s = setup({ actor: { type: 'SYSTEM', id: 'assistant' }, onBehalfOf: { type: 'USER', id: 'u9' } });
+    s.permissions.effectiveKeys.mockResolvedValue(new Set(['approval.decide']));
+
+    const settled = await s.service.execute('r1', now);
+
+    expect(settled).toMatchObject({ status: 'failed', result: { error: 'permission-revoked' } });
+    expect(s.permissions.effectiveKeys).toHaveBeenCalledWith({ type: 'USER', id: 'u9' }, { projectId: 'p1' });
+    expect(s.test.state.calls).toEqual([]);
+  });
+
   it('settles invalid-input when the frozen input no longer parses', async () => {
     const s = setup();
     s.test.state.parseThrows = true;

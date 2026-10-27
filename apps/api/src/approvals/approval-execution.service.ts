@@ -18,6 +18,12 @@ const OWN_SUFFIX = '.own';
 type PrecheckFailure = 'no-command' | 'input-hash-mismatch' | 'permission-revoked' | 'invalid-input' | 'invalid-decision';
 
 /**
+ * What `recheckPrincipal` answers: the principal whose key is re-checked, `'skip'` for a system ask
+ * that has no principal behind it, or `null` when there is nothing to check.
+ */
+type RecheckPrincipal = { type: 'USER' | 'AGENT'; id: string } | 'skip' | null;
+
+/**
  * A pre-check pass hands the command, its parsed input and the approving decision's parsed params on,
  * so `parse` and `parseDecision` each run once at execution.
  */
@@ -106,9 +112,12 @@ export class ApprovalExecutionService {
   /**
    * The key-only re-check: the principal the action belongs to must still hold the key (or its
    * `.own` form) at the request's scope. Row ownership and domain rules are the command's business.
+   * A system ask has no principal to re-check: the decider's eligibility at decide time is the
+   * authority, and the command checks its own state when it runs.
    */
   private async stillHoldsKey(request: ApprovalRequestRecord): Promise<boolean> {
     const principal = recheckPrincipal(request);
+    if (principal === 'skip') return true;
     if (principal === null) return false;
 
     const scope = request.projectId === null ? 'global' : { projectId: request.projectId };
@@ -233,10 +242,14 @@ export class ApprovalExecutionService {
   }
 }
 
-/** The principal whose authority is re-checked: the on-behalf-of one for the assistant, else the actor. */
-function recheckPrincipal(request: ApprovalRequestRecord): { type: 'USER' | 'AGENT'; id: string } | null {
+/**
+ * The principal whose authority is re-checked: the on-behalf-of one for the assistant, `'skip'` for
+ * any other system component (an ask was not chosen by a principal), else the actor. `null` means
+ * there is no principal to check, which fails the re-check.
+ */
+function recheckPrincipal(request: ApprovalRequestRecord): RecheckPrincipal {
   const { actor, onBehalfOf } = request;
-  if (actor.type === 'SYSTEM' && actor.id === 'assistant') return onBehalfOf;
+  if (actor.type === 'SYSTEM') return actor.id === 'assistant' ? onBehalfOf : 'skip';
   if (actor.type === 'USER' || actor.type === 'AGENT') return { type: actor.type, id: actor.id };
   return null;
 }
