@@ -45,6 +45,7 @@
                 "stages": ["run", "review"],
                 "allowedTools": [
                     "search_graph",
+                    "query_graph",
                     "trace_path",
                     "get_code_snippet",
                     "get_architecture",
