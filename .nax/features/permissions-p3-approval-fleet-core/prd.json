@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-fleet-core",
   "branchName": "feat/permissions-p3-approval-fleet-core",
   "createdAt": "2026-11-06T09:00:00.000Z",
-  "updatedAt": "2026-10-27T08:28:41.046Z",
+  "updatedAt": "2026-10-27T08:42:26.461Z",
   "userStories": [
     {
       "id": "US-001",
@@ -508,14 +508,17 @@
         "US-006",
         "US-010"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Changes requester identity and execution authority bypass semantics while preserving agent self-approval restrictions and assistant revocation; this is security-critical access control."
+        "reasoning": "Changes requester identity and execution authority bypass semantics while preserving agent self-approval restrictions and assistant revocation; this is security-critical access control.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-eligibility.ts",
@@ -546,7 +549,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e10b7d6b8a1f60124da755c6f836d1fa8e0d7129"
     },
     {
       "id": "US-008",
