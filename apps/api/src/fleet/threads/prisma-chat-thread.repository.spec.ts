@@ -2,7 +2,8 @@ import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module
 import { Prisma } from '../../generated/prisma/client';
 import { MAX_PENDING_ACTIONS, type PendingActionStatus } from '../assistant/actions/pending-action.domain';
 import { DELIVERABLE_STATUSES, DELIVERY_HEADER, deliveryText } from '../assistant/actions/outcome-delivery';
-import { outcomeNote } from '../assistant/actions/outcome-note';
+import { requestOutcomeNote } from '../assistant/requests/request-outcome-note';
+import type { ApprovalRequestStatus } from '../../../approvals/domain/approval.domain';
 import { THREAD_LIMITS } from '../common/thread-jobs';
 import { PrismaChatThreadRepository } from './prisma-chat-thread.repository';
 
@@ -451,7 +452,7 @@ describe('PrismaChatThreadRepository SESSION turn instructions (S5b US-003)', ()
         fleetThreadTurn: { findFirst: vi.fn(async () => null), create: turnCreate },
         fleetRepo: { findUnique: repoFindUnique, findFirst: anchorFindFirst },
         project: { findUnique: projectFindUnique },
-        pendingAction: { findMany: async () => [], updateMany: async () => ({ count: 0 }) },
+        assistantActionRequest: { findMany: async () => [], updateMany: async () => ({ count: 0 }) },
         $queryRaw: vi.fn(async () => [{ nextSeq: 1 }]),
       },
     };
@@ -543,27 +544,30 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
     deliveredAt: null, deliveredMessageId: null, createdAt: new Date('2026-01-01T00:00:00.000Z'), ...over,
   });
 
-  /** The note the delivered text carries, built with the real US-001 helper. */
-  const noteOf = (a: StoredAction): string =>
-    outcomeNote({ id: a.id, tool: a.tool, status: a.status as PendingActionStatus, result: a.result });
+  /** Maps the legacy-shaped fixture fields to ApprovalRequest's lowercase status/result contract. */
+  const requestStatus = (status: string) => status.toLowerCase();
+  const requestResult = (a: StoredAction): unknown => a.status === 'EXECUTED' ? { text: a.result ?? '' } : a.result;
+  const noteOf = (a: StoredAction): string => requestOutcomeNote({
+    requestId: a.id, tool: a.tool, status: requestStatus(a.status) as ApprovalRequestStatus, result: requestResult(a),
+  });
 
-  /** The `pendingAction` delegate over `rows`: the repository's `findMany` and `updateMany`, nothing else. */
+  /** AssistantActionRequest link delegate; request status/result are read through the joined request. */
   function pendingStore(rows: readonly StoredAction[]) {
     const all = [...rows];
     const findMany = vi.fn(async (args: {
-      where: { threadId: string; status: { in: string[] }; deliveredAt: null };
+      where: { threadId: string; deliveredAt: null; request: { status: { in: string[] } } };
       orderBy: readonly unknown[]; take: number;
     }) => all
-      .filter((row) => row.threadId === args.where.threadId && args.where.status.in.includes(row.status) && row.deliveredAt === null)
+      .filter((row) => row.threadId === args.where.threadId && args.where.request.status.in.includes(requestStatus(row.status)) && row.deliveredAt === null)
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))
       .slice(0, args.take)
-      .map((row) => ({ id: row.id, tool: row.tool, status: row.status, result: row.result })));
+      .map((row) => ({ requestId: row.id, tool: row.tool, request: { status: requestStatus(row.status), result: requestResult(row) } })));
     const updateMany = vi.fn(async (args: {
-      where: { id: { in: string[] } }; data: { deliveredAt: Date; deliveredMessageId: string };
+      where: { requestId: { in: string[] }; deliveredAt: null }; data: { deliveredAt: Date; deliveredMessageId: string };
     }) => {
       let count = 0;
       for (const row of all) {
-        if (args.where.id.in.includes(row.id)) {
+        if (args.where.requestId.in.includes(row.id) && row.deliveredAt === null) {
           row.deliveredAt = args.data.deliveredAt;
           row.deliveredMessageId = args.data.deliveredMessageId;
           count += 1;
@@ -620,7 +624,7 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
         project: { findUnique: vi.fn(async () => ({ slug: 'sandbox', brief: null })) },
         runner: { findUnique: vi.fn(async () => ({ lastSeenAt: new Date(), protocolVersion: 5 })) },
         fleetCommand: { findFirst: vi.fn(async () => null) },
-        pendingAction: { findMany: store.findMany, updateMany: store.updateMany },
+        assistantActionRequest: { findMany: store.findMany, updateMany: store.updateMany },
         $queryRaw: vi.fn(async () => [{ nextSeq: 2 }]),
       },
     };
@@ -684,7 +688,7 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
 
     expect(store.updateMany).toHaveBeenCalledTimes(1);
     expect(store.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ['A1'] } }, data: { deliveredAt: expect.any(Date), deliveredMessageId: 'M' },
+      where: { requestId: { in: ['A1'] }, deliveredAt: null }, data: { deliveredAt: expect.any(Date), deliveredMessageId: 'M' },
     });
     expect(executed.deliveredAt).not.toBeNull();
     expect(executed.deliveredMessageId).toBe('M');
@@ -720,12 +724,12 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
     await send(repo, 'hello');
 
     expect(store.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { threadId: 'T', status: { in: [...DELIVERABLE_STATUSES] }, deliveredAt: null },
+      where: { threadId: 'T', deliveredAt: null, request: { status: { in: [...DELIVERABLE_STATUSES] } } },
     }));
     expect(pending.deliveredAt).toBeNull();
     expect(pending.deliveredMessageId).toBeNull();
     expect(executed.deliveredMessageId).toBe('M');
-    expect(store.updateMany).toHaveBeenCalledWith({ where: { id: { in: ['A2'] } }, data: expect.anything() });
+    expect(store.updateMany).toHaveBeenCalledWith({ where: { requestId: { in: ['A2'] }, deliveredAt: null }, data: expect.anything() });
     expect(payloadTexts(commandCreate)).toEqual([`${DELIVERY_HEADER}\n${noteOf(executed)}\n\nhello`]);
   });
 
@@ -739,7 +743,7 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
     expect(approved.deliveredAt).toBeNull();
     expect(approved.deliveredMessageId).toBeNull();
     expect(executed.deliveredMessageId).toBe('M');
-    expect(store.updateMany).toHaveBeenCalledWith({ where: { id: { in: ['A2'] } }, data: expect.anything() });
+    expect(store.updateMany).toHaveBeenCalledWith({ where: { requestId: { in: ['A2'] }, deliveredAt: null }, data: expect.anything() });
     expect(payloadTexts(commandCreate)).toEqual([`${DELIVERY_HEADER}\n${noteOf(executed)}\n\nhello`]);
   });
 
@@ -751,7 +755,7 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
 
     expect(store.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ threadId: 'T' }) }));
     expect(elsewhere.deliveredAt).toBeNull();
-    expect(store.updateMany).toHaveBeenCalledWith({ where: { id: { in: ['A1'] } }, data: expect.anything() });
+    expect(store.updateMany).toHaveBeenCalledWith({ where: { requestId: { in: ['A1'] }, deliveredAt: null }, data: expect.anything() });
   });
 
   it('AC-9/AC-10: the 20 oldest notes go in age order and the newest of 21 stays undelivered', async () => {
@@ -766,7 +770,7 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
     // `A20` has the latest createdAt, so it is the one that did not fit the cap.
     expect(store.all.filter((row) => row.deliveredAt === null).map((row) => row.id)).toEqual(['A20']);
     expect(store.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 20,
+      orderBy: [{ createdAt: 'asc' }, { requestId: 'asc' }], take: 20,
     }));
   });
 
