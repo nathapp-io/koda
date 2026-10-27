@@ -1,0 +1,689 @@
+{
+  "project": "koda",
+  "feature": "permissions-p3-approval-fleet-core",
+  "branchName": "feat/permissions-p3-approval-fleet-core",
+  "createdAt": "2026-11-06T09:00:00.000Z",
+  "updatedAt": "2026-10-27T07:00:48.664Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add the two fleet ask catalog keys",
+      "description": "**Goal** \u2014 Add fleet.job.shell.escalate and fleet.budget.override with their risk, scope, default and floor rules, leaving both surfaces pending.\n\n**Motivation** \u2014 The engine shipped for writes a principal asks for: `ApprovalGate.gate` runs a registered command at once or opens a request, and a decision is approve or reject.\n\n**Approach** \u2014 `apps/api/src/permissions/catalog.ts`:\n```ts\nconst NEW_KEY_SCOPES = {\n  // ... existing ten keys unchanged ...\n  'fleet.job.shell.escalate': 'project',\n  'fleet.budget.override': 'any',\n};\nconst HIGH_RISK_PREFIXES = [ /* existing */ 'fleet.job.shell.' ];\n/** Keys whose decision needs the decider's input, so nobody-asked (`none`) cannot run them. */\nconst DECIDER_INPUT_KEYS: ReadonlySet<string> = new Set(['fleet.budget.override']);\n// buildEntry:\nfloor: !approvable ? 'none' : risk === 'critical' ? 'human' : DECIDER_INPUT_KEYS.has(key) ? 'self' : 'none',\n```\n\nDerived entries (US-001 AC-1, AC-2):\n\n| Key | scope | access | risk | approvable | floor | default |\n|:--|:--|:--|:--|:--|:--|:--|\n| `fleet.job.shell.escalate` | project | role | high | true | none | agent |\n| `fleet.budget.override` | any | role | high | true | self | agent |\n\nBoth join `PENDING_SURFACE_KEYS`: no route, tool or system writer declares them until `permissions-p3-approval-fleet`. The header comment's \"plus the nine keys the design adds\" becomes \"plus the keys the design adds (`NEW_KEY_SCOPES`)\". `catalog.spec.ts` keeps its own copies of `NEW_KEY_SCOPES` and `HIGH_RISK_PREFIXES` and its own derivation, and gains the same two keys, the prefix and the floor rule. `role-matrix.spec.ts` AC-2's column count goes from 221 to 223 and the snapshot is regenerated.\n\nWho holds them through existing entries (the role-matrix snapshot shows it): Owner and Admin through `*`; Project Admin through `*` (both fit a PROJECT role); Developer holds `fleet.job.shell.escalate` through `fleet.job.*` but not `fleet.budget.override`. No other seeded role holds either.\n\n**Bash asks are high risk.** By the catalog's rules `fleet.job.shell.escalate` would be medium risk (its last segment is not `delete`/`remove` and no high-risk prefix matches), so its default would be `none` and every bash ask would be allowed with nobody asked. `fleet.job.shell.` joins `HIGH_RISK_PREFIXES`, which gives the default `agent`: an agent other than the job's own, or a human, decides, as today.\n\n**A key whose decision needs the decider's input has the floor `self`.** `fleet.budget.override` cannot run with nobody asked, because someone must choose the amount. A new `DECIDER_INPUT_KEYS` set in `catalog.ts` holds it, and `buildEntry` gives such a key the floor `self` (still `human` for a critical key). A policy can therefore never set it to `none`.\n\n**`fleet.budget.override` is scope `any`.** A global budget policy's ask has no project; a project or repo policy's ask has one. `fleet.job.shell.escalate` is scope `project`: every job has a project.\n\n**The floor `self` still lets an agent decide a budget ask.** A `type:AGENT` or pattern policy at `self` is satisfied by any agent holding the decide permission and the action key; that agent chooses the amount in its params. What the floor rules out is nobody deciding.\n\n**Scope** \u2014 In: catalog derivation, mirrored catalog derivation, permission-contract expectedPending, role-matrix count and regenerated snapshot (Vitest -u from apps/api). Out: Developer's new narrowed decide seed and corresponding project decide-cell flip (US-002); resolver SYSTEM handling (US-010); opening asks (US-006); registering fleet commands or declaring new production surfaces (next feature). Switching any producer or reader to the engine, registering the two fleet commands, the adapters over `/fleet/approvals`, and dropping `FleetApproval`, `ApprovalCloser`, `ApprovalExpirySweeper` and the `fleet.approval.decide.*` keys: `permissions-p3-approval-fleet`.\n\n**Interface** \u2014 The catalog rule declarations above are the specified interface; existing findCatalogEntry and PermissionCatalogEntry remain the consumers' interface.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] findCatalogEntry('fleet.job.shell.escalate') returns an entry matching { scope: 'project', access: 'role', risk: 'high', approval: { approvable: true, floor: 'none', default: 'agent' } } using toMatchObject.",
+        "AC-2 [unit] findCatalogEntry('fleet.budget.override') returns an entry matching { scope: 'any', access: 'role', risk: 'high', approval: { approvable: true, floor: 'self', default: 'agent' } } using toMatchObject.",
+        "AC-3 [unit, regression pin] findCatalogEntry('fleet.budget.read') still returns approval.approvable false.",
+        "AC-4 [unit, regression pin] findCatalogEntry('fleet.budget.update').approval.floor is still 'none'.",
+        "AC-5 [unit] PENDING_SURFACE_KEYS equals the set fleet.approval.decide.assistant, member.remove, fleet.job.shell.escalate, fleet.budget.override.",
+        "AC-6 [unit] The catalog spec's independent derivation returns no mismatch for any catalog key, with fleet.job.shell. in its high-risk prefixes and the self floor for fleet.budget.override in its derivation.",
+        "AC-7 [unit] Every role-matrix row has 223 cells.",
+        "AC-8 [unit] The regenerated role matrix allows Developer's fleet.job.shell.escalate cell in project p1.",
+        "AC-9 [unit] The regenerated role matrix denies Developer's fleet.budget.override cell in project p1.",
+        "AC-10 [unit] The regenerated role matrix allows Project Admin's fleet.budget.override cell in project p1.",
+        "AC-11 [unit] The regenerated role matrix denies Viewer's fleet.job.shell.escalate cell in project p1."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "security",
+        "catalog"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Deterministic additions across catalog mirrors and matrix snapshots, but risk defaults and policy floors are access-control behavior requiring strict isolated TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/permissions/catalog.spec.ts",
+        "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+        "apps/api/src/permissions/role-matrix.spec.ts",
+        "apps/api/src/permissions/system-roles.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "the two keys, the prefix, `DECIDER_INPUT_KEYS`, the floor rule, `PENDING_SURFACE_KEYS`, the header comment"
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "its mirrored `NEW_KEY_SCOPES`, `HIGH_RISK_PREFIXES` and derivation gain the same keys, prefix and floor rule"
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "`expectedPending` gains the two keys"
+        },
+        {
+          "path": "apps/api/src/permissions/role-matrix.spec.ts",
+          "reason": "AC-2's cell count goes from 221 to 223"
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "regenerated by running the role-matrix spec with vitest's `-u` flag from apps/api; gains the two key columns"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "Grant Developer narrowed bash decision authority",
+      "description": "**Goal** \u2014 Extend the Developer seed and conditionally patch stored Developer roles with approval.decide@fleet.job.shell.escalate.\n\n**Motivation** \u2014 Building these four pieces first, with no production caller, lets `permissions-p3-approval-fleet` move both asks and drop `FleetApproval` without also changing the engine.\n\n**Approach** \u2014 `apps/api/src/permissions/system-roles.ts`: the `developer` entries gain `'approval.decide@fleet.job.shell.escalate'` directly after `'fleet.approval.decide.bash'` (which stays until the next feature).\n\nMigration `apps/api/prisma/migrations/20261106090000_approval_fleet_core/migration.sql` holds this statement. Whichever of US-002, US-003 and US-009 lands first creates the file and the others append their statements in landing order; any order is valid, since the three statements touch different tables:\n```sql\nUPDATE \"Role\"\nSET \"permissions\" = \"permissions\" || '[\"approval.decide@fleet.job.shell.escalate\"]'::jsonb, \"updatedAt\" = NOW()\nWHERE \"key\" = 'developer'\n  AND \"permissions\" @> '[\"fleet.approval.decide.bash\"]'::jsonb\n  AND NOT \"permissions\" @> '[\"approval.decide@fleet.job.shell.escalate\"]'::jsonb;\n```\n\nBaseline (to locate the migration convention only): `apps/api/prisma/migrations/20261105090100_drop_pending_action/migration.sql`.\n\n**Developer now passes the plain `approval.decide` check in a project.** `PermissionService.can` grants `approval.decide` to any holder of an `approval.decide@<pattern>` entry (`holdsNarrowedDecide`), so Developer's project `approval.decide` cell in the role matrix flips from `not-granted` to `granted`. The routes that check it (`GET /approvals`, the decide route) are `enforcedBy: 'service'`, and `decideEligibility` still limits a Developer to `fleet.job.shell.escalate` requests. Its global cell stays `not-granted`.\n\n**The stored Developer role is patched by the migration.** `SystemRoleSeeder` restores only locked roles from the seed, and Developer is unlocked, so the seed change alone never reaches an existing database. The migration appends `approval.decide@fleet.job.shell.escalate` to the `developer` row's `permissions` when that row holds `fleet.approval.decide.bash` and does not hold the new entry. A Developer role an admin has already edited to drop bash deciding is left alone.\n\nVerification note: the AC-4..7 statement is read from the migration file at test time (the test locates `20261106090000_approval_fleet_core/migration.sql` and extracts the `UPDATE \"Role\"` statement), so the test and the shipped SQL cannot drift. Update role-matrix.spec.ts AC-13's projectDecide.developer pin and regenerate __snapshots__/role-matrix.json with Vitest -u.\n\n**Scope** \u2014 In: seed, stored-role SQL, idempotent migration behavior and Developer role-matrix project decide cell. Out: catalog additions (US-001), decision/execution eligibility implementation (US-007), params-column SQL (US-003), link-table SQL (US-009), and removing fleet.approval.decide.bash (next feature). Removing `fleet.approval.decide.bash` from the Developer seed: `permissions-p3-approval-fleet`.\n\n**Interface** \u2014 The SQL statement above is the migration contract; the seed continues to use SYSTEM_ROLES and expandEntries(<developer entries>, 'PROJECT').",
+      "acceptanceCriteria": [
+        "AC-1 [unit] SYSTEM_ROLES' developer entries contain 'approval.decide@fleet.job.shell.escalate', and expandEntries of them does not throw.",
+        "AC-2 [unit] Developer's entries still contain 'fleet.approval.decide.bash'.",
+        "AC-3 [unit] expandEntries(<developer entries>, 'PROJECT') contains 'approval.decide@fleet.job.shell.escalate'.",
+        "AC-4 [integration] Given a developer role whose permissions are the seed without 'approval.decide@fleet.job.shell.escalate', executing the migration's actual UPDATE via $executeRawUnsafe appends that entry exactly once at the end of its permissions array.",
+        "AC-5 [integration] Executing the same migration UPDATE a second time leaves that row's permissions unchanged.",
+        "AC-6 [integration] Executing the migration UPDATE leaves a developer row whose permissions lack 'fleet.approval.decide.bash' unchanged.",
+        "AC-7 [integration] Executing the migration UPDATE leaves a reviewer role row holding 'fleet.approval.decide.bash' unchanged.",
+        "AC-8 [unit] Developer's approval.decide role-matrix cell in project p1 is granted.",
+        "AC-9 [unit] Developer's global approval.decide role-matrix cell stays not-granted."
+      ],
+      "tags": [
+        "api",
+        "permissions",
+        "security",
+        "migration"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Seed, narrow conditional data migration and snapshot adjustment are conventional, but grant persisted decision authority and require the access-control security override."
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/system-roles.ts",
+        "apps/api/src/permissions/system-role.seeder.ts",
+        "apps/api/src/permissions/entry-matcher.ts",
+        "apps/api/src/permissions/role-matrix.spec.ts",
+        "apps/api/prisma/migrations/20261105090100_drop_pending_action/migration.sql"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261106090000_approval_fleet_core/migration.sql",
+        "apps/api/test/integration/permissions/developer-bash-decide-migration.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/system-roles.ts",
+          "reason": "the `developer` entries gain `approval.decide@fleet.job.shell.escalate`"
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "regenerated as in US-001; Developer's project `approval.decide` cell becomes `granted`"
+        },
+        {
+          "path": "apps/api/src/permissions/role-matrix.spec.ts",
+          "reason": "AC-13's `projectDecide.developer` pin becomes `granted`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Persist and validate decision params with transactional rejection hooks",
+      "description": "**Goal** \u2014 Add optional decision choices to the command contract and persistence, validate them after eligibility, and support transactional onReject effects.\n\n**Motivation** \u2014 A rejection has an effect. A bash deny sends `APPROVAL_ANSWER` with choice `deny` to the runner. The engine's reject writes the decision and nothing else.\n\n**Approach** \u2014 `apps/api/src/approvals/approval-command.registry.ts`:\n```ts\nexport interface ApprovalCommand<TInput = unknown, TResult = unknown, TDecision = unknown> {\n  key: string;\n  parse(input: unknown): TInput;\n  /**\n   * Validates a decider's params for this request. Absent: a decision may carry no params. The\n   * returned value must be JSON-serialisable, and `parseDecision` must accept its own output: the\n   * execution re-parses the value stored on the approving decision. Throws to refuse.\n   */\n  parseDecision?(decision: 'approve' | 'reject', params: unknown, input: TInput): TDecision;\n  /** Runs inside the decide transaction after a principal's reject is recorded; a throw rolls it back. */\n  onReject?(input: TInput, decision: TDecision | undefined): Promise<void>;\n  /** `decision` is the approving decision's parsed params, or undefined when none were parsed. */\n  execute(input: TInput, decision?: TDecision): Promise<TResult>;\n  toResult?(result: TResult): unknown;\n  /** Runs after the execution transaction committed, under the request's context; a throw is logged only. */\n  afterCommit?(input: TInput, decision: TDecision | undefined, result: TResult): Promise<void>;\n}\n```\n\n`ApprovalDecisionRecord` gains `params: unknown` (null when none). `NewApprovalDecision` becomes `Omit<ApprovalDecisionRecord, 'id' | 'decidedAt' | 'comment' | 'params'> & { comment?: string | null; decidedAt?: Date; params?: unknown }`, so existing `createDecision` calls without `params` still type-check. `createDecision` maps a `params` that is null or undefined to `Prisma.DbNull` (a plain `null` is refused by Prisma on a `Json?` column, as `toPersistenceUpdate` already handles for `input` and `result`) and passes any other value as `Prisma.InputJsonValue`; `decisionToDomain` maps a database NULL to `params: null`. `apps/api/prisma/schema.prisma` `ApprovalDecision` gains `params Json?`, in the migration as `ALTER TABLE \"ApprovalDecision\" ADD COLUMN \"params\" JSONB;`.\n\n`ApprovalDecisionService.decide(requestId, decision, comment, now = new Date(), params?: unknown)`. The new parameter goes last, so every existing call (`decide(id, decision, comment)` and `decide(id, decision, null, now)`) is unchanged. A `params` of `null` is treated as absent (`undefined`) at the start of `decide`. Inside `record`, in this order after the eligibility check and before `createDecision`:\n1. `command = registry.get(request.permissionKey)`; when the command has `parseDecision` or `onReject`, `parsedInput = command.parse(request.input)` once (a throw becomes `ApprovalDecisionParamsInvalidError('invalid')`). This refusal applies to a reject without params too, on purpose: the input was frozen from `parse`'s own output, so a parse that now throws means the command changed incompatibly, and the request is left to expire rather than settled by a decision the command cannot act on.\n2. When `params !== undefined` and the command is absent or has no `parseDecision`: throw `ApprovalDecisionParamsInvalidError('not-accepted')`.\n3. When `params !== undefined` and `canonicalJson(params).length > 4096`: throw `ApprovalDecisionParamsInvalidError('too-large')`.\n4. When the command has `parseDecision`: `parsed = command.parseDecision(decision, params, parsedInput)`; a throw becomes `ApprovalDecisionParamsInvalidError('invalid')`.\n5. `createDecision({ ..., params: parsed === undefined ? null : freezeApprovalInput(parsed) })`.\n6. After the status transition and the `approval.decide` audit entry, on `reject` with `command?.onReject`: `await command.onReject(parsedInput, parsed)` under the same decide context (approval block included). `onReject` runs under the request row lock: it should write rows (a runner command row, as the fleet's `APPROVAL_ANSWER` is) and never do network I/O, which a rollback cannot undo.\n\n`ApprovalDecisionService` gains the constructor parameter `registry: ApprovalCommandRegistry` as its last parameter (after `events`).\n\n`apps/api/src/approvals/domain/approval.errors.ts` gains:\n```ts\nexport type DecisionParamsRefusal = 'not-accepted' | 'too-large' | 'invalid';\nexport class ApprovalDecisionParamsInvalidError extends Error {\n  constructor(readonly reason: DecisionParamsRefusal) { /* name + prototype as the others */ }\n}\n```\n`rethrowApprovalError` maps it to `new ValidationAppException({ reason: error.reason }, 'approvals.invalidDecisionParams')`. `apps/api/src/i18n/en/approvals.json` and `zh/approvals.json` gain `invalidDecisionParams` with keys `\"400\"` and `\"-2\"`: `\"Invalid decision params: {reason}\"` / `\"\u65e0\u6548\u7684\u51b3\u5b9a\u53c2\u6570\uff1a{reason}\"`.\n\n**Decision params are parsed at decide time and again at execution.** `parseDecision(decision, params, input)` validates the decider's params under the request lock, after eligibility (a caller who may not decide gets 403 whatever it sends), and its output is stored frozen in `ApprovalDecision.params`. The execution re-parses the stored value, as it re-parses the frozen input: `parseDecision` must accept its own output.\n\n**A command without `parseDecision` refuses params.** A decision with `params` on such a request is refused (`ApprovalDecisionParamsInvalidError('not-accepted')`, 400) and nothing is written, so a client cannot believe a choice was honoured when it was ignored.\n\n**`params` is at most 4 096 characters of canonical JSON.** A larger value is refused with `ApprovalDecisionParamsInvalidError('too-large')` before `parseDecision` runs.\n\n**`onReject` runs inside the decide transaction.** A throw rolls the whole decision back: no decision row, the request stays `pending`, and the error reaches the caller. The command decides what a rejection whose target is gone means (the bash command answers nothing when the job has ended).\n\nThe shared migration `20261106090000_approval_fleet_core/migration.sql` is created by whichever of US-002, US-003 and US-009 lands first and extended by the others in landing order; preserve their statements. Extend test-approval-command.ts with optional parseDecision and onReject switches, update direct service construction in approval-decision.service.spec.ts with registry last, and update exact decision literals/expectations (including approval-http.spec.ts) with params:null. Existing createDecision calls in approval-repositories.integration.spec.ts need no change because params remains optional.\n\n**Scope** \u2014 In: full additive command interface (including afterCommit declaration), decision domain/persistence and column SQL, ordered decide-time validation, transactional rejection callback, typed refusal mapping and translations. Out: execution-time decision re-parse and afterCommit invocation (US-004), REST/MCP params (US-005), ask eligibility changes (US-007), and actual bash APPROVAL_ANSWER production writes (next feature). How the bash `onReject` answers the runner: it writes the `APPROVAL_ANSWER` command row in the decide transaction and wakes the runner after commit (`committedEffect`), in `permissions-p3-approval-fleet`.\n\n**Interface** \u2014 The ApprovalCommand and error declarations above are binding; the service signature is `decide(requestId: string, decision: 'approve' | 'reject', comment: string | null, now = new Date(), params?: unknown): Promise<ApprovalRequestRecord>`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] After migrations, createDecision with params: { remember: true } round-trips through findDecisions as params equal to { remember: true }.",
+        "AC-2 [integration] decide(id, 'reject', null) with no params on a command without parseDecision succeeds with the stored params column SQL NULL and findDecisions returning params:null.",
+        "AC-3 [unit] decide(id, 'approve', null, now, { remember: true }) on a command whose parseDecision returns { remember: true } calls createDecision with params: { remember: true }.",
+        "AC-4 [unit] decide(id, 'reject', 'no', now, null) on a command without parseDecision is not refused and calls createDecision with params:null.",
+        "AC-5 [unit] decide(id, 'approve', null, now, { a: 1 }) on a command without parseDecision rejects with ApprovalDecisionParamsInvalidError reason 'not-accepted' without calling createDecision.",
+        "AC-6 [unit] Params whose canonical JSON is 4097 characters reject with reason 'too-large' before parseDecision is called.",
+        "AC-7 [unit] When parseDecision throws, decide rejects with reason 'invalid' without calling transition.",
+        "AC-8 [unit] A decider refused by eligibility who sends params receives ApprovalDecideForbiddenError without parseDecision being called.",
+        "AC-9 [unit] parseDecision receives ('approve', params, <the command's parse of the request input>).",
+        "AC-10 [unit] On reject, onReject is called once with the parsed input and parsed params, after transition and before the transaction callback returns.",
+        "AC-11 [unit] On reject for a command with onReject and no parseDecision, onReject is called with the command's parse of the request input and undefined.",
+        "AC-12 [integration] When onReject throws, decide rejects with that error while the request remains pending with no ApprovalDecision row for it.",
+        "AC-13 [unit] rethrowApprovalError(new ApprovalDecisionParamsInvalidError('invalid')) throws ValidationAppException with prefix approvals.invalidDecisionParams and args { reason: 'invalid' }.",
+        "AC-14 [unit] en/approvals.json defines invalidDecisionParams with keys '400' and '-2'.",
+        "AC-15 [unit] zh/approvals.json defines invalidDecisionParams with keys '400' and '-2'."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "security",
+        "transactions",
+        "migration"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Crosses command generics, JSON persistence, ordered access checks, audit context and rollback-sensitive rejection effects; strict security isolation is required."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-command.registry.ts",
+        "apps/api/src/approvals/approval-decision.service.ts",
+        "apps/api/src/approvals/domain/approval.domain.ts",
+        "apps/api/src/approvals/domain/approval.errors.ts",
+        "apps/api/src/approvals/approval-http-errors.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261106090000_approval_fleet_core/migration.sql",
+        "apps/api/test/integration/approvals/approval-decision-params.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`ApprovalDecision.params Json?`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-command.registry.ts",
+          "reason": "`ApprovalCommand` gains `parseDecision`, `onReject`, `afterCommit` and the `decision` argument of `execute`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-decision.service.ts",
+          "reason": "`decide`'s `params`, the params steps in `record`, `onReject`, the `registry` constructor parameter"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-decision.service.spec.ts",
+          "reason": "the constructor gains `registry`; the reject AC's exact `createDecision` call gains `params: null`"
+        },
+        {
+          "path": "apps/api/src/approvals/domain/approval.domain.ts",
+          "reason": "`ApprovalDecisionRecord.params`"
+        },
+        {
+          "path": "apps/api/src/approvals/domain/approval.errors.ts",
+          "reason": "`DecisionParamsRefusal` and `ApprovalDecisionParamsInvalidError`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-http-errors.ts",
+          "reason": "maps the new error to 400"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-http.spec.ts",
+          "reason": "the decision literal gains `params: null`"
+        },
+        {
+          "path": "apps/api/src/approvals/prisma-approval-request.repository.ts",
+          "reason": "`NewApprovalDecision` omits and re-adds `params` as optional; `createDecision` maps null/undefined `params` to `Prisma.DbNull`; `decisionToDomain` maps `params`"
+        },
+        {
+          "path": "apps/api/src/approvals/test-helpers/test-approval-command.ts",
+          "reason": "an option to build the test command with `parseDecision` and `onReject`"
+        },
+        {
+          "path": "apps/api/src/i18n/en/approvals.json",
+          "reason": "`invalidDecisionParams`"
+        },
+        {
+          "path": "apps/api/src/i18n/zh/approvals.json",
+          "reason": "`invalidDecisionParams`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Execute parsed decisions and run post-execution follow-up",
+      "description": "**Goal** \u2014 Re-parse stored approving params, pass the parsed decision to execution, and run warning-only afterCommit follow-up.\n\n**Motivation** \u2014 A decision is more than approve or reject. A bash ask is answered `allow`, `allow_for_job` or `deny` (`apps/api/src/fleet/approvals/bash-decision.ts`). A budget ask is answered `keep_paused` or `raise_budget_and_resume` with an `amountUsd` and the cancelled jobs to re-queue (`ApprovalsService.decide`).\n\n**Approach** \u2014 `ApprovalExecutionService`:\n- The precheck gains a step after the input parse: when the command has `parseDecision`, it loads the request's decisions (`findDecisions`), takes the last one whose `decision` is `approve` (none after a timeout approval), and re-parses: `command.parseDecision('approve', stored?.params ?? undefined, parsed)`. A throw settles the request `failed` with `result: { error: 'invalid-decision' }`. `PrecheckFailure` gains `'invalid-decision'` and `Prechecked`'s ok branch gains `decision: unknown`.\n- `run` calls `command.execute(parsed, decision)`.\n- After `withCommittedEffects(...)` returns an `executed` record and the command has `afterCommit` (guaranteed after commit only when `execute` owns the transaction scope; inside an outer `withCommittedEffects` owner, such as the assistant executor's, it runs when that owner's callback returns), it awaits `command.afterCommit(parsed, decision, result)` inside a try/catch; a throw logs `approval request <id> after-commit failed: <message>` at warn and the settled record is still returned.\n\n**Decision params are parsed at decide time and again at execution.** `parseDecision(decision, params, input)` validates the decider's params under the request lock, after eligibility (a caller who may not decide gets 403 whatever it sends), and its output is stored frozen in `ApprovalDecision.params`. The execution re-parses the stored value, as it re-parses the frozen input: `parseDecision` must accept its own output.\n\n**`afterCommit` runs after the execution transaction commits, and its failure changes nothing.** It is for follow-up writes that need their own transactions (the budget re-queue, plan D232). A throw is logged as a warning; the request stays `executed`. It does not run after a `failed` settle.\n\nPreserve the existing request lock, per-request serialization and distinction between callback failure and transaction open/commit failure. Keep the raw TResult for the hook, not the toResult projection stored in the request. Extend the existing helper to record the decision execute received and take an optional afterCommit; add findDecisions to execution-service repository doubles and extend the decision-params integration file authored by US-003.\n\n**Scope** \u2014 In: execution precheck, invalid-decision settlement, optional execute argument, raw-result follow-up and warning isolation. Out: decide-time parsing/onReject/storage/interface declarations (US-003), SYSTEM authority skip (US-007), API params (US-005), actual budget requeue implementation or fleet command registration (next feature).\n\n**Interface** \u2014 Verbatim hook signatures from the command contract supplied by US-003:\n```ts\nparseDecision?(decision: 'approve' | 'reject', params: unknown, input: TInput): TDecision;\n/** `decision` is the approving decision's parsed params, or undefined when none were parsed. */\nexecute(input: TInput, decision?: TDecision): Promise<TResult>;\n/** Runs after the execution transaction committed, under the request's context; a throw is logged only. */\nafterCommit?(input: TInput, decision: TDecision | undefined, result: TResult): Promise<void>;\n```",
+      "acceptanceCriteria": [
+        "AC-1 [integration] A request approved with params { remember: true } executes its command with decision equal to { remember: true }.",
+        "AC-2 [unit] A command with parseDecision executing a request approved without params receives the value returned by parseDecision('approve', undefined, input).",
+        "AC-3 [unit] The precheck calls parseDecision('approve', { remember: true }, input) when the request's only decision is an approve storing { remember: true }.",
+        "AC-4 [unit] Stored params refused by parseDecision at execution settle the request failed with result { error: 'invalid-decision' } without calling execute.",
+        "AC-5 [unit] A command without parseDecision executes with decision undefined without calling findDecisions.",
+        "AC-6 [unit] After an executed settle, afterCommit is called once with the parsed input, parsed decision and command's raw result.",
+        "AC-7 [unit] afterCommit is called after the transaction callback has returned, with its call order after txManager.run resolved.",
+        "AC-8 [unit] When afterCommit throws, the returned record remains executed and logger.warn receives a message starting 'approval request <id> after-commit failed:'.",
+        "AC-9 [unit] A command whose execute throws and whose request settles failed never has afterCommit called."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "security",
+        "transactions"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Runs authorized deferred commands across transaction and commit-effect boundaries; decision validation and settlement semantics require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-execution.service.ts",
+        "apps/api/src/approvals/prisma-approval-request.repository.ts",
+        "apps/api/src/approvals/approval-execution.service.spec.ts",
+        "apps/api/src/common/committed-effects.ts",
+        "apps/api/src/approvals/test-helpers/test-approval-command.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-execution.service.ts",
+          "reason": "the decision re-parse, `execute(input, decision)`, `afterCommit`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-execution.service.spec.ts",
+          "reason": "the request repository double gains `findDecisions`"
+        },
+        {
+          "path": "apps/api/src/approvals/test-helpers/test-approval-command.ts",
+          "reason": "records the `decision` `execute` received and takes an optional `afterCommit`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Expose decision params through REST and MCP",
+      "description": "**Goal** \u2014 Accept object params through the approval decide route and MCP tool and return stored params in decision DTOs.\n\n**Motivation** \u2014 A decision is more than approve or reject. A bash ask is answered `allow`, `allow_for_job` or `deny` (`apps/api/src/fleet/approvals/bash-decision.ts`). A budget ask is answered `keep_paused` or `raise_budget_and_resume` with an `amountUsd` and the cancelled jobs to re-queue (`ApprovalsService.decide`).\n\n**Approach** \u2014 **REST and MCP (US-005).** `DecideApprovalRequestDto` gains:\n```ts\n@ApiPropertyOptional({ type: Object, description: 'The decider\\'s choice, when the action asks for one' })\n@IsOptional() @IsObject()\nparams?: Record<string, unknown>;\n```\n`ApprovalRequestsController.decide` passes it: `this.decisions.decide(id, dto.decision, dto.comment ?? null, undefined, dto.params)`. `ApprovalDecisionDto` gains `@ApiProperty({ type: Object, nullable: true }) params!: unknown;`, mapped from `record.params`. The MCP tool `koda_decide_approval` adds `params: { type: 'object' }` to its input schema's properties and `'params'` to its allowed argument names; a present `params` that is not a plain object answers `invalid_input: params`. With `params` absent it calls `decide(args.id, args.decision, comment)` exactly as today; with it, `decide(args.id, args.decision, comment, undefined, args.params)`. `openapi.json` is regenerated with `bun run api:export-spec` (repo root) after this story.\n\nPreserve route visibility checks, service-enforced eligibility and the Nathapp JsonResponse envelope; DTO validation refuses non-null, non-object params before any decision is persisted. REST params:null remains optional under @IsOptional and is normalized to absent by the service; MCP instead refuses every present non-plain-object params value, including null. Error handling is the US-003 mapping: `ApprovalDecisionParamsInvalidError('not-accepted' | 'too-large' | 'invalid')` becomes HTTP 400 `approvals.invalidDecisionParams`, and a forbidden decider remains 403 `approvals.decideForbidden`. Extend approval-http.spec.ts for params:null mapping, mcp/approval-mcp-tools.spec.ts for schema/allowlist/call arity, and the shared approval-decision-params.integration.spec.ts authored by US-003 for HTTP round trips. The regenerated spec adds params to the decide body and decision DTO, and no other operation changes.\n\n**Scope** \u2014 In: DTO request validation and response mapping, controller forwarding, MCP input/schema forwarding and root OpenAPI regeneration. Out: engine decision parsing/persistence/error implementation (US-003), execution hooks (US-004), fleet command registration and /fleet/approvals adapters (next feature), web inbox and CLI formatting. The web inbox deciding fleet asks with params: P3 web. Showing decision params in the CLI (`koda approvals show` prints them as part of the detail JSON already; no new formatting).\n\n**Interface** \u2014 The DTO declarations and exact service-call forms above are binding; MCP required remains ['id', 'decision'] and properties.params is { type: 'object' }.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] POST /approvals/:id/decisions with { decision: 'approve', params: { remember: true } } by an eligible decider returns 200 with the request's decision row storing params { remember: true }.",
+        "AC-2 [integration] The same route with params: { a: 1 } for a command without parseDecision returns 400 with the invalidDecisionParams message containing not-accepted.",
+        "AC-3 [integration] The decide route with params:'x' returns 400 from validation without creating a decision row.",
+        "AC-4 [integration] GET /approvals/:id for a request decided with params returns decisions[0].params equal to { remember: true }.",
+        "AC-5 [unit] ApprovalDecisionDto.from of a record with params:null returns params:null.",
+        "AC-6 [unit] koda_decide_approval's input schema properties.params equals { type: 'object' } and required is still ['id', 'decision'].",
+        "AC-7 [unit] Calling koda_decide_approval with { id: 'r1', decision: 'approve' } calls decide with exactly ('r1', 'approve', null).",
+        "AC-8 [unit] Calling koda_decide_approval with { id: 'r1', decision: 'approve', params: { remember: true } } calls decide with ('r1', 'approve', null, undefined, { remember: true }).",
+        "AC-9 [unit] Calling koda_decide_approval with params:[] returns invalid_input: params without calling decide.",
+        "FH-1 [unit] Calling koda_decide_approval with any present params value that is not a plain object returns invalid_input: params without deciding."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "security",
+        "mcp",
+        "openapi"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Adds standard optional DTO fields and argument forwarding to existing controller/MCP boundaries without a new abstraction; authorization-sensitive inputs still require the security-override strategy."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/dto/decide-approval-request.dto.ts",
+        "apps/api/src/approvals/dto/approval-request.dto.ts",
+        "apps/api/src/approvals/approval-requests.controller.ts",
+        "apps/api/src/approvals/mcp/approval-mcp-tools.ts",
+        "apps/api/test/integration/approvals/approval-decide-route.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/dto/decide-approval-request.dto.ts",
+          "reason": "`params`"
+        },
+        {
+          "path": "apps/api/src/approvals/dto/approval-request.dto.ts",
+          "reason": "`ApprovalDecisionDto.params`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-http.spec.ts",
+          "reason": "`ApprovalDecisionDto.from` output gains `params: null`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-requests.controller.ts",
+          "reason": "passes `dto.params` to `decide`"
+        },
+        {
+          "path": "apps/api/src/approvals/mcp/approval-mcp-tools.ts",
+          "reason": "the decide tool's `params`"
+        },
+        {
+          "path": "apps/api/src/approvals/mcp/approval-mcp-tools.spec.ts",
+          "reason": "the decide tool's input schema gains `params`"
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated with bun run api:export-spec from the repo root; the decide body and the decision DTO gain `params`, and no other operation changes"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Open system-raised asks inside the caller's transaction",
+      "description": "**Goal** \u2014 Provide and export ApprovalAskService.open for the two pinned fleet component/key pairs without executing a command or owning a transaction.\n\n**Motivation** \u2014 They are raised by the system, not by a principal. A bash ask arrives in a runner report; a budget ask is opened by the budget evaluator when spend crosses a hard stop. Both are opened inside a transaction that already holds the job or budget policy lock (S1.5 lock order, `apps/api/src/fleet/approvals/domain/approval.domain.ts`). The gate refuses every `SYSTEM` actor except the assistant, opens its own transaction, and runs the command when no approval is needed.\n\n**Approach** \u2014 `apps/api/src/approvals/approval-ask.service.ts` (new), provided and exported by `ApprovalEngineModule`:\n```ts\nexport interface OpenAsk {\n  key: string;                                         // a registered command's key\n  projectId: string | null;\n  component: string;                                   // the SYSTEM actor id: 'runner' | 'budget'\n  onBehalfOf: { type: 'USER' | 'AGENT'; id: string } | null;\n  origin: 'runner' | 'system';\n  input: unknown;                                      // parsed with the command's `parse`\n  deadline: Date | null;                               // caps expiresAt\n}\nexport type AskOutcome<TInput = unknown> =\n  | { status: 'not-needed'; input: TInput }\n  | { status: 'pending'; request: ApprovalRequestRecord };\n\n@Injectable()\nexport class ApprovalAskService {\n  constructor(\n    private readonly registry: ApprovalCommandRegistry,\n    @Inject(ApprovalPolicyResolver) private readonly resolver: Pick<ApprovalPolicyResolver, 'resolve'>,\n    @Inject(APPROVAL_REQUEST_REPOSITORY) private readonly requests: Pick<PrismaApprovalRequestRepository, 'create' | 'lockById' | 'transition'>,\n    private readonly events: ApprovalRequestEvents,\n    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,\n  ) {}\n  /** Inside the caller's transaction. */\n  open<TInput>(ask: OpenAsk, now?: Date): Promise<AskOutcome<TInput>>;\n  /** Inside the caller's transaction; null when the request is gone or not pending. */\n  close(requestId: string, close: { status: 'cancelled' | 'expired'; reason: string }, now?: Date): Promise<ApprovalRequestRecord | null>;\n}\n```\nThe interface block shows the complete service contract; US-008 supplies the close implementation. This story implements open and the shared service wiring without pulling close behavior into its scope.\n\n`open` steps:\n1. `txManager.isInTransaction()` is false: throw `Error('approval ask needs the caller\\'s transaction')`.\n2. Unknown command: `UnregisteredApprovalCommandError(key)`. The key must be the one `ASK_KEYS_BY_COMPONENT` (a constant in the service: `{ runner: 'fleet.job.shell.escalate', budget: 'fleet.budget.override' }`) gives for `component`; any other pair (the assistant, an empty component, `runner` with `ticket.delete`) throws `Error('approval ask key <key> is not raised by <component>')`, so a system-raised request, which skips the key re-check, exists only for the two fleet asks. A project-scope catalog key with `projectId === null`: `Error('approval ask needs a project for key <key>')`.\n3. `parsed = command.parse(input)` (a throw propagates).\n4. `subject = onBehalfOf ?? { type: 'SYSTEM', id: component }`; `resolved = await resolver.resolve({ key, projectId, subject })`.\n5. `resolved.mode === 'none'`: answer `{ status: 'not-needed', input: parsed }`; nothing is written.\n6. Otherwise, as bookkeeping `approval.request-open`, create the request: actor `{ type: 'SYSTEM', id: component }`, `onBehalfOf`, `origin`, `correlationId` = the current context's or a new UUID, `input = freezeApprovalInput(parsed)` and its `inputHash`, `requiredMode = resolved.mode`, `policyId`, `onTimeout: 'reject'`, `approverMustHoldAction` and `requireDistinctApprover` from the policy (true and false without one), `expiresAt = min(now + (policy?.timeoutSec ?? DEFAULT_APPROVAL_TIMEOUT_SEC) s, deadline)`, with `DEFAULT_APPROVAL_TIMEOUT_SEC` from `apps/api/src/approvals/domain/approval.domain.ts` (86 400; not the fleet protocol's 600). A `deadline` at or before `now` still opens the request, with `expiresAt = deadline`; the engine's sweeper expires it on its next tick (the fleet caller decides whether to open such an ask at all). Record the request event in the same transaction and answer `{ status: 'pending', request }`.\n\n**Only the two fleet asks may be opened this way.** `open` pins each component to its one key, so the re-check skip and the on-behalf-of eligibility below cannot reach any other command.\n\n**The ask's subject is the principal it is on behalf of, or the system.** A bash ask is on behalf of the job's requester (`requestedByType`/`requestedById`, a user or an agent). It resolves with that principal as subject, so a policy for an agent or a role applies to the jobs that principal runs. A budget ask has no one on behalf: it resolves with a new subject type `SYSTEM` (the component id), which matches project and pattern policies only, like the rank-3 rule today, and never a role, type or principal policy. `SYSTEM` is not a policy subject a write can name (`ApprovalPolicyInput` is unchanged).\n\n**The ask actor is the component, and `runner` is not a system writer id.** `SYSTEM_ACTOR_IDS` (`action-context.ts`) derives from `system.*` keys, so `runAsSystem('runner', ...)` throws; `open` and the execution build their contexts with `runWithActionContext` and never call it. The next feature must not either.\n\n**The ask actor is the component.** The request's actor is `SYSTEM/<component>`, `runner` for a bash ask and `budget` for a budget ask (design \u00a74: \"the actor is `system:budget`\"). The design says a bash ask's actor is \"the job's agent\"; a job has no executing agent identity, so the job's requester is recorded as `onBehalfOf` instead.\n\n**An ask never approves on timeout.** Its deadline is the asker's: nax denies a bash ask itself at its deadline, and a budget pause outlives any timeout. `open` snapshots `onTimeout: 'reject'` whatever the policy says, and caps `expiresAt` at the caller's `deadline`.\n\n**An ask the policy resolves to `none` opens no request.** `open` answers `{ status: 'not-needed' }` with the parsed input and writes nothing; the caller answers the ask itself (a bash allow). This matches the gate, which runs a `none` command with no request row.\n\n**`open` and `close` join the caller's transaction and lock nothing themselves except the request row.** They do not call `txManager.run`: the fleet callers already hold the job or budget policy lock, and a nested `run` that throws poisons the outer transaction (the approval-assistant B1 finding, `PrismaTransactionManager`). A caller outside a transaction is a programming error and throws.\n\n**No de-duplication in `open`.** The gate looks for a pending duplicate by input hash; an ask's idempotency is the fleet's own key (job, lease epoch, nax ask id), held by the unique index on `FleetApprovalAsk`.\n\n**`ApprovalAskService` lives in `src/approvals/`; the link table lives in `src/fleet/approvals/`.** The engine stays fleet-agnostic: the link is a fleet row that references `ApprovalRequest`, as `AssistantActionRequest` does.\n\nOpening records approval_request_changed in the caller transaction, not AuditEntry. No production callers or command registrations are introduced. Verification note: approval-engine.module.spec.ts resolves ApprovalAskService from an importing consumer module with external collaborators mocked and no DB. Create the ask unit spec and shared ask integration spec now; US-007/008 extend them.\n\n**Scope** \u2014 In: OpenAsk/AskOutcome, service dependencies and open algorithm, component pinning, request/event bookkeeping, expiry snapshots and engine module export. Out: close implementation (US-008), SYSTEM resolver behavior (US-010), decision/execution authority changes (US-007), link rows/store (US-009), production relay/evaluator calls or fleet command registration (next feature). De-duplicating identical asks across fleet keys: the fleet's unique link index does it per bash ask. Switching any producer or reader to the engine, registering the two fleet commands, the adapters over `/fleet/approvals`, and dropping `FleetApproval`, `ApprovalCloser`, `ApprovalExpirySweeper` and the `fleet.approval.decide.*` keys: `permissions-p3-approval-fleet`.\n\n**Interface** \u2014 The verbatim service declarations above define the contract; no tx argument is passed and no transaction is opened internally.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Inside txManager.run, open({ key: 'fleet.job.shell.escalate', projectId: P, component: 'runner', onBehalfOf: { type: 'USER', id: U }, origin: 'runner', input, deadline: null }) for a registered test command returns status pending and stores request actor SYSTEM/runner.",
+        "AC-2 [integration] That stored request matches { onBehalfOf: { type: 'USER', id: U }, origin: 'runner', requiredMode: 'agent' }.",
+        "AC-3 [integration] The stored request's onTimeout is reject when the matching policy has onTimeout approve and mode agent.",
+        "AC-4 [unit] With no policy and deadline 60 seconds after now, open stores expiresAt equal to now + 60 seconds.",
+        "AC-5 [unit] With policy timeoutSec:120 and deadline 600 seconds after now, open stores expiresAt equal to now + 120 seconds.",
+        "AC-6 [unit] With no policy and deadline:null, open stores expiresAt equal to now + 86400 seconds.",
+        "AC-7 [unit] A deadline one second before now opens a pending request whose expiresAt equals that deadline.",
+        "AC-8 [unit] When the resolver returns none, open returns { status: 'not-needed', input: <parsed> } without calling create or events.record.",
+        "AC-9 [unit] With onBehalfOf:null, component:budget and key fleet.budget.override, open calls the resolver with subject { type: 'SYSTEM', id: 'budget' }.",
+        "AC-10 [unit] With onBehalfOf { type: 'AGENT', id: 'a1' }, open calls the resolver with subject { type: 'AGENT', id: 'a1' }.",
+        "AC-11 [unit] open outside a transaction rejects with Error message \"approval ask needs the caller's transaction\" without calling create.",
+        "AC-12 [unit] open with key fleet.job.shell.escalate and no command registered rejects with UnregisteredApprovalCommandError.",
+        "AC-13 [unit] open with component runner and a registered command on ticket.delete rejects with Error without calling the resolver.",
+        "AC-14 [unit] open for fleet.job.shell.escalate with projectId:null rejects with Error without calling the resolver.",
+        "AC-15 [unit] Input refused by the command's parse causes open to reject with that parse error without calling the resolver or create."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "security",
+        "transactions",
+        "fleet"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-010"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Introduces a privileged system ask path with component pinning, policy subjects, ambient transaction ownership and outbox bookkeeping; strict security isolation is mandatory."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-gate.service.ts",
+        "apps/api/src/approvals/approval-engine.module.ts",
+        "apps/api/src/approvals/approval-request-events.ts",
+        "apps/api/src/approvals/approval-policy.resolver.ts",
+        "apps/api/src/action-context/audit-coverage.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/approvals/approval-ask.service.ts",
+        "apps/api/src/approvals/approval-ask.service.spec.ts",
+        "apps/api/test/integration/approvals/approval-ask.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When opening a pending ask fails later in the caller's transaction, neither its ApprovalRequest nor its approval_request_changed event is committed.",
+        "When the resolver returns none, open does not invoke command.execute.",
+        "When open inherits a correlationId from the current context, the stored request retains that correlationId while its actor becomes SYSTEM/<component>."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-engine.module.ts",
+          "reason": "provides and exports `ApprovalAskService`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-engine.module.spec.ts",
+          "reason": "the module test resolves `ApprovalAskService`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Authorize ask decisions without re-checking the system requester",
+      "description": "**Goal** \u2014 Generalize SYSTEM on-behalf-of eligibility and skip requester key re-checks only for non-assistant system asks, retaining cancellation refusal.\n\n**Motivation** \u2014 They are raised by the system, not by a principal. A bash ask arrives in a runner report; a budget ask is opened by the budget evaluator when spend crosses a hard stop.\n\n**Approach** \u2014 **Eligibility and execution (US-007).** `decideEligibility`: `isOnBehalf = request.actor.type === 'SYSTEM' && isSamePrincipal(decider, request.onBehalfOf)` (replacing the assistant-only comparison). `ApprovalExecutionService.recheckPrincipal` answers a new `'skip'` for a `SYSTEM` actor other than `assistant`, and `stillHoldsKey` answers true for it.\n\n**The principal an ask is on behalf of counts as its own requester.** `decideEligibility` treats the on-behalf-of principal of any `SYSTEM` actor as it already treats the assistant's: a user contributes `human` and an agent `self`. A user deciding an ask of a job it requested is allowed (today's rule), and an agent deciding an ask of its own job contributes only `self`, which the default `agent` refuses (today's \"no agent self-approval\" ruling, US-006 of `permissions-p1d`).\n\n**An ask is never re-checked against its actor's key at execution.** The re-check guards a principal whose permission was revoked while its request waited. An ask was not chosen by a principal: the decider's eligibility at decide time is the authority, and the command checks its own state when it runs (the job still `RUNNING` on the same lease; the budget policy still paused). `ApprovalExecutionService` skips the key re-check for a `SYSTEM` actor other than the assistant.\n\n**No principal can cancel an ask.** `ApprovalDecisionService.cancel` compares the current actor with the requester, and a `SYSTEM` actor other than the assistant has no principal requester, so the cancel is refused (`ApprovalCancelForbiddenError`). This is today's code; an AC pins it.\n\nThe actor is SYSTEM/runner or SYSTEM/budget, not the job requester; onBehalfOf records that requester. A budget ask with onBehalfOf:null has no own-request exception and requires approval.decide or a matching narrowed decide entry. Keep action-key checks and distinct-approver semantics unchanged; direct humans satisfy any mode but do not gain unrelated-request decide permission. The skip must not affect SYSTEM/assistant: the assistant's onBehalfOf principal remains subject to permission-revoked. Only the two component/key pairs pinned by ApprovalAskService.open may create fleet asks, and no new production registration is made here.\n\nUse open from US-006 for integration requests rather than manually fabricating request rows. US-007 AC-4 uses the real US-010 resolver for a budget ask, with no stubbed resolver. AC-6 uses Developer-bound users and US-002's seeded narrowed entry. Extend approval-eligibility.spec.ts, approval-execution.service.spec.ts and the ask integration spec created by US-006; keep existing assistant regression cases intact.\n\n**Scope** \u2014 In: SYSTEM-wide onBehalfOf matching, non-assistant SYSTEM recheck skip and cancellation regression pin. Out: opening/closing implementation (US-006/008), resolver SYSTEM ranking (US-010), Developer seed (US-002), decision params and hooks (US-003/004), and production fleet command state checks (next feature). Re-checking the asker's key at execution (designer call above).\n\n**Interface** \u2014 The binding algorithm is `isOnBehalf = request.actor.type === 'SYSTEM' && isSamePrincipal(decider, request.onBehalfOf)`; recheckPrincipal gains the 'skip' outcome while existing principal/null outcomes retain their meaning.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] decideEligibility for actor SYSTEM/runner, onBehalfOf USER/u1 and requiredMode agent, decided by USER/u1 holding only the action key, returns { ok: true, satisfiedBy: 'human' }.",
+        "AC-2 [unit] For the same request with no policy and requireDistinctApprover false, when onBehalfOf is AGENT/a1 and AGENT/a1 holds the action key and approval.decide, decideEligibility returns { ok: false, reason: 'tier-too-low' }.",
+        "AC-3 [unit] For that request, AGENT/a2 other than the on-behalf-of agent holding the action key and approval.decide@fleet.job.shell.escalate receives { ok: true, satisfiedBy: 'agent' }.",
+        "AC-4 [integration] A budget-key ask opened through open with component budget, onBehalfOf:null, project P and no policy refuses approve by a user holding fleet.budget.override in P but neither decide form with ApprovalDecideForbiddenError reason missing-decide-permission.",
+        "AC-5 [unit, regression pin] For the existing assistant cases in approval-eligibility.spec.ts, decideEligibility returns the same results unchanged: the on-behalf-of user holding label.delete contributes human; the on-behalf-of agent holding the action contributes self, is refused with tier-too-low for required agent/human, may satisfy required self without approval.decide, and is refused with distinct-approver-required when requireDistinctApprover is true.",
+        "AC-6 [integration] A bash-key ask opened through open on behalf of a Developer-bound user, approved by another Developer-bound user, returns executed with the command having run once.",
+        "AC-7 [integration] An ask on behalf of user u1 whose RoleBinding rows are all deleted after open still executes after an eligible decider approves, without permission-revoked.",
+        "AC-8 [unit] ApprovalExecutionService.execute of an approved request with actor SYSTEM/runner does not call effectiveKeys.",
+        "AC-9 [unit, regression pin] An approved assistant request with actor SYSTEM/assistant whose on-behalf-of user lacks the key still settles failed with { error: 'permission-revoked' }.",
+        "AC-10 [integration, regression pin] In approval-ask.integration.spec.ts, ApprovalDecisionService.cancel called as the on-behalf-of user for a pending ask rejects with ApprovalCancelForbiddenError and leaves the request pending.",
+        "FH-1 [unit] rethrowApprovalError maps ApprovalCancelForbiddenError from a principal's ask cancellation attempt to HTTP 403 approvals.cancelForbidden."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "security",
+        "fleet",
+        "authorization"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-004",
+        "US-006",
+        "US-010"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Changes requester identity and execution authority bypass semantics while preserving agent self-approval restrictions and assistant revocation; this is security-critical access control."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-eligibility.ts",
+        "apps/api/src/approvals/approval-execution.service.ts",
+        "apps/api/src/approvals/approval-decision.service.ts",
+        "apps/api/src/approvals/approval-ask.service.ts",
+        "apps/api/test/integration/approvals/approval-ask.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-eligibility.ts",
+          "reason": "on-behalf-of for any `SYSTEM` actor"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-eligibility.spec.ts",
+          "reason": "the ask cases"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-execution.service.ts",
+          "reason": "`recheckPrincipal` answers `'skip'` for an ask"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-execution.service.spec.ts",
+          "reason": "the ask and assistant re-check cases"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Close system asks as cancelled or expired",
+      "description": "**Goal** \u2014 Implement ApprovalAskService.close to settle pending system asks with a bounded reason and transactional request-change event.\n\n**Motivation** \u2014 They close without a decision. A bash ask closes when its job leaves `RUNNING`. A budget ask closes when a newer hard stop supersedes it, its policy is deleted, its window resets or an admin resumes from the budgets page. The engine knows only expiry and the actor's own cancel.\n\n**Approach** \u2014 `close` steps: no transaction \u2192 the step-1 error. `lockById`; null or `status !== 'pending'` \u2192 null. The request's actor is not `SYSTEM` or is `SYSTEM/assistant` \u2192 `Error('approval ask close: not an ask')`. `reason` empty or longer than 64 characters \u2192 `Error('approval ask close: invalid reason')`. As bookkeeping `approval.request-settle`: `transition(id, 'pending', { status, settledAt: now, result: { closedBy: reason } })`, record the event, answer the record. A lost transition under the lock throws `ApprovalRequestNotPendingError`.\n\nThe shared step-1 error is `Error('approval ask needs the caller\\'s transaction')`.\n\n**`open` and `close` join the caller's transaction and lock nothing themselves except the request row.** They do not call `txManager.run`: the fleet callers already hold the job or budget policy lock, and a nested `run` that throws poisons the outer transaction (the approval-assistant B1 finding, `PrismaTransactionManager`). A caller outside a transaction is a programming error and throws.\n\nClose is bookkeeping, not a principal cancellation or decision: record one approval_request_changed outbox event in the same transaction, no AuditEntry and no decision row. It may close an already-overdue pending request as either caller-specified terminal status. Validate actor and reason only after the missing/nonpending early return, preserving idempotent null results. Use the service/spec and integration file created by US-006; this story does not author new files. No producer or closer is switched to call it here.\n\n**Scope** \u2014 In: close implementation, request row locking, reason checks, CAS settlement and event bookkeeping. Out: open implementation/module registration (US-006), principal decide/cancel eligibility (US-007), link resolvedBy/outcome persistence (US-009), and production job/budget lifecycle callers (next feature).\n\n**Interface** \u2014 Verbatim service method from the ask contract:\n```ts\n/** Inside the caller's transaction; null when the request is gone or not pending. */\nclose(requestId: string, close: { status: 'cancelled' | 'expired'; reason: string }, now?: Date): Promise<ApprovalRequestRecord | null>;\n```",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Inside txManager.run, close(id, { status: 'cancelled', reason: 'job_ended' }) on a pending ask returns the request with status cancelled.",
+        "AC-2 [integration] That closed request has settledAt equal to now and result { closedBy: 'job_ended' }.",
+        "AC-3 [integration] close(id, { status: 'expired', reason: 'timeout' }) returns status expired.",
+        "AC-4 [integration] Closing records one approval_request_changed outbox row whose metadata.eventId is '<id>:cancelled'.",
+        "AC-5 [integration] Closing writes no AuditEntry row.",
+        "AC-6 [unit] close returns null without calling transition when lockById returns null.",
+        "AC-7 [unit] close of an executed request returns null without calling transition.",
+        "AC-8 [unit] close of a request with actor SYSTEM/assistant rejects with Error without calling transition.",
+        "AC-9 [unit] close of a request with actor AGENT/a1 rejects with Error.",
+        "AC-10 [unit] close with reason '' rejects with Error.",
+        "AC-11 [unit] close with a 65-character reason rejects with Error.",
+        "AC-12 [unit] A transition returning null under the request lock causes close to reject with ApprovalRequestNotPendingError.",
+        "AC-13 [unit] close outside a transaction rejects with the same Error as US-006 AC-11, message \"approval ask needs the caller's transaction\"."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "security",
+        "transactions",
+        "fleet"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A localized service addition with conventional locking and CAS, but it is a privileged settlement path that must refuse principals and assistant requests."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-ask.service.ts",
+        "apps/api/src/approvals/approval-ask.service.spec.ts",
+        "apps/api/src/approvals/approval-request-expiry.sweeper.ts",
+        "apps/api/src/approvals/approval-request-events.ts",
+        "apps/api/test/integration/approvals/approval-ask.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Add fleet ask links behind a private repository and public store",
+      "description": "**Goal** \u2014 Add FleetApprovalAsk schema, migration, domain contract, private Prisma repository and exported FleetApprovalAskStore without production writers.\n\n**Motivation** \u2014 Building these four pieces first, with no production caller, lets `permissions-p3-approval-fleet` move both asks and drop `FleetApproval` without also changing the engine.\n\n**Approach** \u2014 `apps/api/prisma/schema.prisma`, in the same migration:\n```prisma\n/// Permissions P3d-1: the fleet's row for one ask on the approval engine. jobId and budgetPolicyId have no\n/// foreign key (a deleted job or policy leaves the ask readable).\nmodel FleetApprovalAsk {\n  requestId      String    @id\n  kind           String    // bash | budget\n  projectId      String?\n  jobId          String?\n  leaseEpoch     Int?\n  naxAskId       String?\n  budgetPolicyId String?\n  resolvedBy     String?   // user | timeout | job_ended | superseded | manual_resume | window_reset | policy_deleted\n  outcome        Json?\n  createdAt      DateTime  @default(now())\n  updatedAt      DateTime  @updatedAt\n  request        ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)\n\n  @@unique([jobId, leaseEpoch, naxAskId])\n  @@index([jobId])\n  @@index([budgetPolicyId])\n}\n```\n`ApprovalRequest` gains `fleetAsk FleetApprovalAsk?`.\n\n`apps/api/src/fleet/approvals/domain/fleet-approval-ask.domain.ts` (new):\n```ts\nexport type FleetAskKind = 'bash' | 'budget';\nexport interface FleetApprovalAskRecord {\n  requestId: string; kind: FleetAskKind; projectId: string | null; jobId: string | null; leaseEpoch: number | null;\n  naxAskId: string | null; budgetPolicyId: string | null; resolvedBy: ApprovalResolvedBy | null;\n  outcome: Record<string, unknown> | null; createdAt: Date; updatedAt: Date;\n}\nexport type NewFleetApprovalAsk = Pick<FleetApprovalAskRecord, 'requestId' | 'kind' | 'projectId'>\n  & Partial<Pick<FleetApprovalAskRecord, 'jobId' | 'leaseEpoch' | 'naxAskId' | 'budgetPolicyId'>>;\n/** A link joined with its request's status. */\nexport interface FleetAskWithStatus { ask: FleetApprovalAskRecord; status: ApprovalRequestStatus }\nexport const FLEET_APPROVAL_ASK_REPOSITORY = Symbol('FLEET_APPROVAL_ASK_REPOSITORY');\n/** The `take` bound of `findPendingForJob` (`.nax/rules/api-data.md`: every findMany is bounded). */\nexport const MAX_PENDING_ASKS_PER_JOB = 100;\nexport interface IFleetApprovalAskRepository {\n  insert(data: NewFleetApprovalAsk): Promise<FleetApprovalAskRecord>;\n  findByRequest(requestId: string): Promise<FleetApprovalAskRecord | null>;\n  /** S1.5 2a: a re-reported ask is the same ask. */\n  findByAsk(jobId: string, leaseEpoch: number, naxAskId: string): Promise<FleetAskWithStatus | null>;\n  /** SELECT ... FOR UPDATE on the link row, inside txManager.run. */\n  lockByRequest(requestId: string): Promise<FleetApprovalAskRecord | null>;\n  /** Links whose request is pending, oldest request first, at most MAX_PENDING_ASKS_PER_JOB (100). */\n  findPendingForJob(jobId: string): Promise<FleetApprovalAskRecord[]>;\n  findPendingForPolicy(budgetPolicyId: string): Promise<FleetApprovalAskRecord | null>;\n  setResolvedBy(requestId: string, resolvedBy: ApprovalResolvedBy): Promise<FleetApprovalAskRecord>;\n  /** Replaces the outcome. */\n  setOutcome(requestId: string, outcome: Record<string, unknown>): Promise<FleetApprovalAskRecord>;\n}\n```\n`ApprovalResolvedBy` is imported from the existing `approval.domain.ts` (which the next feature trims, keeping the type). `PrismaFleetApprovalAskRepository` (new, `apps/api/src/fleet/approvals/prisma-fleet-approval-ask.repository.ts`) extends `AbstractPrismaRepository` and is provided by `ApprovalStoreModule` behind `FLEET_APPROVAL_ASK_REPOSITORY`. The token is never exported (`.nax/rules/api-data.md` \"Repositories are module-private\"; the existing `APPROVAL_REPOSITORY` export goes away with `FleetApproval` in the next feature). The module's public contract is a new service, `FleetApprovalAskStore` (`apps/api/src/fleet/approvals/fleet-approval-ask.store.ts`), which injects the token and offers the same eight methods with the same signatures, each delegating to the repository; `ApprovalStoreModule` provides and exports it. `ApprovalStoreModule` is the module budgets and jobs import without a cycle (plan D226); `ApprovalsModule` imports both and could not be imported by them.\n\nThe migration's DDL for the table:\n```sql\nCREATE TABLE \"FleetApprovalAsk\" (\n  \"requestId\" TEXT NOT NULL, \"kind\" TEXT NOT NULL, \"projectId\" TEXT, \"jobId\" TEXT, \"leaseEpoch\" INTEGER,\n  \"naxAskId\" TEXT, \"budgetPolicyId\" TEXT, \"resolvedBy\" TEXT, \"outcome\" JSONB,\n  \"createdAt\" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updatedAt\" TIMESTAMP(3) NOT NULL,\n  CONSTRAINT \"FleetApprovalAsk_pkey\" PRIMARY KEY (\"requestId\")\n);\nCREATE UNIQUE INDEX \"FleetApprovalAsk_jobId_leaseEpoch_naxAskId_key\" ON \"FleetApprovalAsk\"(\"jobId\", \"leaseEpoch\", \"naxAskId\");\nCREATE INDEX \"FleetApprovalAsk_jobId_idx\" ON \"FleetApprovalAsk\"(\"jobId\");\nCREATE INDEX \"FleetApprovalAsk_budgetPolicyId_idx\" ON \"FleetApprovalAsk\"(\"budgetPolicyId\");\nALTER TABLE \"FleetApprovalAsk\" ADD CONSTRAINT \"FleetApprovalAsk_requestId_fkey\" FOREIGN KEY (\"requestId\") REFERENCES \"ApprovalRequest\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;\n```\nPostgres treats NULLs as distinct, so the unique index de-duplicates only bash links (all three columns set); budget links have null job columns and are never de-duplicated by it. After the schema change, `prisma migrate diff` from the migrations to the schema must be empty.\n\n**The link table is `FleetApprovalAsk`.** The name avoids `FleetApproval`, which the next feature drops. `FleetApprovalAsk.requestId` references `ApprovalRequest.id` with `onDelete: Cascade`; `jobId` and `budgetPolicyId` are plain strings, as on `FleetApproval`, so a deleted job or policy leaves the ask readable.\n\nThe shared migration path is apps/api/prisma/migrations/20261106090000_approval_fleet_core/migration.sql: whichever of US-002, US-003 and US-009 lands first creates it and the others append their statements in landing order. Preserve other stories' SQL and existing FleetApproval schema. Regenerate the Prisma client after schema edits. New code follows ambient PrismaService.client transaction access, generated client imports and repository-domain mapping; do not copy unsafe casts from legacy siblings. Unit DI verification must inject the store from a real importing consumer, not merely non-strict container lookup, with external collaborators mocked and no DB.\n\n**Scope** \u2014 In: new link model/relation/DDL/indexes, domain types, all eight repository methods, delegating public store and ApprovalStoreModule wiring. Out: engine ask methods (US-006/008), decision params column (US-003), Developer SQL (US-002), production link insert/read callers or deleting legacy FleetApproval/store exports (next feature). Retaining the existing module exports is an in-scope backward-compatibility assertion, not a removal or redesign of those legacy paths.\n\n**Interface** \u2014 The verbatim schema, DDL and IFleetApprovalAskRepository declarations above are binding; FleetApprovalAskStore exposes the same eight signatures and delegates each to the private repository.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] After migrations, insert({ requestId, kind: 'bash', projectId: P, jobId: J, leaseEpoch: 2, naxAskId: 'ask-1' }) then findByRequest(requestId) returns those values with budgetPolicyId, resolvedBy and outcome null.",
+        "AC-2 [integration] findByAsk(J, 2, 'ask-1') returns that link joined with its request's status.",
+        "AC-3 [integration] findByAsk(J, 3, 'ask-1') returns null.",
+        "AC-4 [integration] A second insert for another request with the same job, lease epoch and nax ask id rejects with Prisma error code P2002.",
+        "AC-5 [integration] findPendingForJob(J) returns J's two pending-request links oldest request first, using take MAX_PENDING_ASKS_PER_JOB, and excludes J's cancelled-request link and another job's pending link.",
+        "AC-6 [integration] findPendingForPolicy(B) returns the link whose budgetPolicyId is B and request is pending, and returns null when its only link's request is expired.",
+        "AC-7 [integration] Inside a transaction, lockByRequest(requestId) returns the link row and returns null for a request with no link.",
+        "AC-8 [integration] After setResolvedBy(requestId, 'job_ended'), findByRequest returns resolvedBy 'job_ended'.",
+        "AC-9 [integration] Calling setOutcome(requestId, { delivery: { result: 'ok' } }) then setOutcome(requestId, { requeueResults: [] }) leaves outcome equal to { requeueResults: [] }.",
+        "AC-10 [integration] Deleting ApprovalRequest deletes its FleetApprovalAsk link row.",
+        "AC-11 [unit] A throwaway consumer module importing ApprovalStoreModule receives FleetApprovalAskStore by injection, while ApprovalStoreModule exports metadata does not contain FLEET_APPROVAL_ASK_REPOSITORY.",
+        "REG-1 [unit] After the new store is registered, a consumer importing ApprovalStoreModule can still inject the existing ApprovalCloser, ApprovalLivePublisher, PrismaApprovalRepository and APPROVAL_REPOSITORY exports unchanged."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approvals",
+        "persistence",
+        "migration"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Adds a new schema/repository/store abstraction with uniqueness, cascade, joined pending queries and cycle-free module exports; it stores links but does not implement access-control decisions."
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/fleet/assistant/requests/prisma-assistant-action-request.repository.ts",
+        "apps/api/src/fleet/approvals/approval-store.module.ts",
+        "apps/api/src/fleet/approvals/domain/approval.domain.ts",
+        ".nax/rules/api-data.md"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261106090000_approval_fleet_core/migration.sql",
+        "apps/api/src/fleet/approvals/domain/fleet-approval-ask.domain.ts",
+        "apps/api/src/fleet/approvals/prisma-fleet-approval-ask.repository.ts",
+        "apps/api/src/fleet/approvals/fleet-approval-ask.store.ts",
+        "apps/api/test/integration/fleet/fleet-approval-ask.repository.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Given more than 100 pending links for a job, findPendingForJob returns exactly the oldest 100.",
+        "Two budget links for different requests with null jobId, leaseEpoch and naxAskId both insert successfully.",
+        "Deleting a job or budget policy does not delete its FleetApprovalAsk link."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`FleetApprovalAsk` and `ApprovalRequest.fleetAsk`"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-store.module.ts",
+          "reason": "provides the repository behind its token and provides and exports `FleetApprovalAskStore`"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-store.module.spec.ts",
+          "reason": "a consumer module importing `ApprovalStoreModule` injects `FleetApprovalAskStore`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "Resolve approval policy for a SYSTEM subject",
+      "description": "**Goal** \u2014 Widen resolver subjects with SYSTEM so system-owned asks use only pattern-only policies and catalog defaults without role lookup.\n\n**Motivation** \u2014 They are raised by the system, not by a principal. A bash ask arrives in a runner report; a budget ask is opened by the budget evaluator when spend crosses a hard stop.\n\n**Approach** \u2014 **Resolver (US-010).** `ApprovalSubject.type` widens to `ApprovalSubjectType | 'SYSTEM'`. For a `SYSTEM` subject `resolve` reads no role ids (as for `ASSISTANT`), `applicableSubjectRank` answers null for a role, type or principal policy and 3 for a pattern-only policy, and the fallback is `entry.approval.default`.\n\n**The ask's subject is the principal it is on behalf of, or the system.** A bash ask is on behalf of the job's requester (`requestedByType`/`requestedById`, a user or an agent). It resolves with that principal as subject, so a policy for an agent or a role applies to the jobs that principal runs. A budget ask has no one on behalf: it resolves with a new subject type `SYSTEM` (the component id), which matches project and pattern policies only, like the rank-3 rule today, and never a role, type or principal policy. `SYSTEM` is not a policy subject a write can name (`ApprovalPolicyInput` is unchanged).\n\nKeep current project/global precedence, specificity, strictest-mode tie-breaks and catalog floor enforcement. SYSTEM is not ASSISTANT: assistant retains its existing policy applicability and default human; SYSTEM may match project/global pattern-only policies and defaults from the catalog. Do not widen ApprovalSubjectType in the policy input/domain write union. It depends on US-001, which adds `fleet.budget.override` to the catalog.budget.override entry carrying the specified high-risk default agent and floor self; do not skip assertions or move production catalog changes into this story. Integration with the real catalog occurs after both foundations in US-006/007.\n\n**Scope** \u2014 In: resolver-only subject type widening, no role lookup, subject ranking and regression pins for USER/AGENT/ASSISTANT. Out: catalog key definitions/defaults (US-001), passing SYSTEM subjects from open (US-006), decision eligibility (US-007), and SYSTEM as a writable policy subject (feature exclusion). `SYSTEM` as a policy subject a write can name.\n\n**Interface** \u2014 Verbatim widening: `ApprovalSubject.type` widens to `ApprovalSubjectType | 'SYSTEM'`. The resolver continues to expose its existing resolve({ key, projectId, subject }) shape; ApprovalPolicyInput is unchanged.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] resolve({ key: 'fleet.budget.override', projectId: P, subject: { type: 'SYSTEM', id: 'budget' } }) returns the mode of a project pattern-only policy for that key.",
+        "AC-2 [unit] For that SYSTEM subject, a project role policy for the key is ignored, returning source default when only that policy is present.",
+        "AC-3 [unit] For that SYSTEM subject, when the only candidate is a project type:AGENT policy for the key with mode human, resolve ignores it and returns source default with catalog default mode agent.",
+        "AC-4 [unit] For that SYSTEM subject, when the only candidate is a project principal:AGENT:budget policy for the key with mode human, resolve ignores it and returns source default with catalog default mode agent.",
+        "AC-5 [unit] With no policy, resolution returns catalog default agent.",
+        "AC-6 [unit] roleIdsAt is not called for a SYSTEM subject.",
+        "AC-7 [unit, regression pin] resolve retains the existing USER, AGENT and ASSISTANT cases in approval-policy.resolver.spec.ts unchanged: matching USER principal policies precede pattern-only policies at the same project/global scope; matching AGENT principal, role, type and pattern-only policies retain their existing project-before-global precedence, specificity, mode and id tie-break outcomes; ASSISTANT ignores pattern-only policies and defaults to human but matches explicit type:ASSISTANT policies."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "permissions",
+        "security",
+        "policy"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A small resolver change, but subject policy applicability and fallback modes are security-critical access-control rules."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-policy.resolver.ts",
+        "apps/api/src/approvals/approval-policy.resolver.spec.ts",
+        "apps/api/src/approvals/domain/approval.domain.ts",
+        "apps/api/src/permissions/catalog.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-policy.resolver.ts",
+          "reason": "the `SYSTEM` subject"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-policy.resolver.spec.ts",
+          "reason": "the `SYSTEM` subject cases"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Repository inspection and architectural baseline\n- Execution root: /Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda. The codebase-memory MCP is not exposed in this session; structural exploration therefore used direct reads and targeted text searches. No implementation or validation commands were executed while drafting this PRD. The requested nathapp-nestjs-patterns skill was not found by repository glob; implementation agents must load it from their host skill installation before writing NestJS code.\n- This is an additive enhancement to an existing engine, not greenfield and not the fleet cutover. The supplied stack detector is inaccurate: .nax/mono/apps/api/context.md:23 identifies NestJS 12 with Fastify via AppFactory, Prisma 7, Vitest and oxlint; the root guidance identifies Nuxt 4, not Next.js. All ten binding stories run in apps/api. US-005 additionally regenerates root openapi.json through the root command; retain its explicitly bound workdir. No runner, web, or CLI business logic changes belong here.\n\nCatalog, roles and access-control impact\n- apps/api/src/permissions/catalog.ts:64 currently lists just fleet.approval.decide.assistant and member.remove as pending surfaces. NEW_KEY_SCOPES at :115 has ten existing additions; HIGH_RISK_PREFIXES at :134 includes fleet.budget. but not fleet.job.shell. buildEntry at :415 computes approval floors only for critical keys and high-risk defaults as agent. Add both fleet keys, the shell prefix and the decider-input floor without changing reads or existing floors. Catalog consumers expand wildcards dynamically, so Developer's fleet.job.* acquires shell escalation while its read wildcard does not acquire budget override. Keep the independent derivation in catalog.spec.ts:80 and :95 independent, and update expectedPending in test-helpers/permission-contract.spec.ts:11.\n- apps/api/src/permissions/system-roles.ts:54 defines Developer as a PROJECT role, with fleet.job.* at :73 and the legacy fleet.approval.decide.bash entry at :82. Append the new narrowed decide entry directly after that legacy entry; do not remove the old one. SystemRoleSeeder documents preserving unlocked permissions at system-role.seeder.ts:19 and implements that at :88. A seed-only change cannot update existing installations. The conditional JSONB migration must append only to developer rows retaining the legacy permission and lacking the new permission, preserving explicit admin removals and other roles.\n- PermissionService.can already recognizes narrowed decide holders at apps/api/src/permissions/permission.service.ts:73, with holdsNarrowedDecide at :211; do not broaden that service unnecessarily. ApprovalRequestsController's list/get/decide declarations already use enforcedBy: service at approval-requests.controller.ts:27, :52 and :69. Developer's plain project cell flips to granted but eligibility must still constrain decisions by permission key. role-matrix.spec.ts:224 pins 221 columns and :250 pins project Developer decide to not-granted; change these to 223 and granted in their respective stories and regenerate the file snapshot with Vitest -u, never hand-author the matrix.\n\nDecision storage and command execution seams\n- apps/api/src/approvals/approval-command.registry.ts:16 defines the current two-generic command with parse, execute(input) and optional toResult. The registry validates catalog approvability and duplicate registration at :34. Add the third defaulted generic and optional hooks compatibly: existing assistant commands using two generics at apps/api/src/fleet/assistant/commands/assistant-tool.command.ts:28 must continue unchanged. No production command is registered for either new key here.\n- apps/api/src/approvals/domain/approval.domain.ts:48 defines ApprovalDecisionRecord without params; DEFAULT_APPROVAL_TIMEOUT_SEC is 86400 at :26. ApprovalPolicyInput at :11 admits USER/AGENT/ASSISTANT subjects only and must remain unchanged. Prisma schema ApprovalRequest starts at apps/api/prisma/schema.prisma:1584, AssistantActionRequest at :1620 and ApprovalDecision at :1641. The existing assistant link is the architectural precedent for a fleet-owned link with a cascading request relation.\n- PrismaApprovalRequestRepository defines NewApprovalDecision at apps/api/src/approvals/prisma-approval-request.repository.ts:16, creates decisions at :108 and finds them sorted by decidedAt then id with take:50 at :112. Make params optional on creation but always present as unknown/null on the domain record. Map missing/null params to Prisma.DbNull, not plain null or Prisma.JsonNull, so SQL NULL round-trips correctly. Existing createDecision callers need not add params. Update exact decision literals in unit HTTP specs and constructor doubles.\n- ApprovalDecisionService currently takes six collaborators at approval-decision.service.ts:16, locks and checks eligibility in record at :55, inserts at :72, transitions at :75, records the event at :80 and wraps the audit in an approval context at :85. Add registry last and params as the fifth decide argument, preserving both legacy three-argument calls and four-argument clock injection. Normalize null to undefined; check eligibility before examining params or command parsers, so unauthorized callers cannot probe parsers. Parse frozen input once if either parseDecision or onReject exists. Reject unsupported or oversized params before parseDecision; freeze the parsed decision output. Run onReject after transition and audit inside the same transaction and approval context; it may write transactional rows but must not perform network I/O. Throwing must roll back decision, status, outbox and audit together.\n- approval-input.ts:24 hashes canonical JSON of frozen input and :29 JSON-round-trips snapshots; canonical-json.ts:23 implements deterministic sorted JSON including toJSON normalization. Use these helpers rather than inventing a second representation. The params limit is canonicalJson(params).length, 4096 characters, not a byte-size limit or a limit on the parser's output.\n- ApprovalExecutionService precheck at approval-execution.service.ts:60 verifies command, hash, authority and input. Extend it with a distinct invalid-decision outcome and the latest approving decision's re-parsed params; commands lacking parseDecision must not query decisions. run at :96 serializes calls per request, locks the approved row and commits command writes with the executed transition/outbox, while only callback failures trigger a separate failed settlement. Preserve its commit-failure behavior: a failed commit is not a command failure. Pass parsed decision to execute; retain the raw command result separately from toResult's persisted result for afterCommit. A hook exception is warning-only and must never enter the command-failure path.\n- apps/api/src/common/committed-effects.ts:11 queues nonpersistent live effects only when it owns the outer AsyncLocalStorage scope; nested scopes simply run their callback. committedEffect at :20 is explicitly not for domain writes. The assistant owns an outer withCommittedEffects at apps/api/src/fleet/assistant/assistant-tool.executor.ts:337. Preserve the spec's ownership caveat: an executor-owned transaction gives a true post-commit hook; inside an outer owner's scope, the hook runs when that owner's callback returns. Do not claim a durable background queue or use committedEffect for budget requeue domain writes. No afterCommit on failed/precheck-failed requests.\n\nAsks, resolver and security boundaries\n- ApprovalGate at approval-gate.service.ts:51 accepts USER/AGENT or SYSTEM/assistant with onBehalfOf, refuses other system actors, directly executes mode none and direct humans, deduplicates pending inputs at :125, and owns a txManager.run at :135. Follow its snapshot/newRequest shape at :151 but not its transaction ownership, direct-human shortcut or deduplication. ApprovalAskService is a separate exported engine service: transaction required, no nested run, no execution, no duplicate lookup, and only runner/shell or budget/override pairs are allowed. Mode none returns parsed input with zero writes; other modes open an ask even for a human onBehalfOf.\n- ApprovalPolicyResolver currently types ApprovalSubject at approval-policy.resolver.ts:12, avoids role lookup only for ASSISTANT at :39, uses assistant default human at :54 and subject ranks at :62. Widen only the resolver input to SYSTEM, skip role lookup for it, permit only pattern-only policies at rank 3 and use catalog default agent. Do not accidentally let SYSTEM match a principal/type/role policy or inherit assistant's rejection of all-subject patterns. Keep policy write subject validation closed.\n- approval-eligibility.ts:88 currently special-cases SYSTEM/assistant when computing isOnBehalf. Generalize to any SYSTEM actor, retaining principal-only deciders, distinct-approver checks, action-key ownership and matching decide patterns. A human onBehalfOf contributes human without needing a separate decide permission; the onBehalfOf agent contributes self, so default agent still rejects self-approval. A budget ask with no onBehalfOf needs a decide permission even for a human holding the action.\n- recheckPrincipal at approval-execution.service.ts:171 currently returns the assistant's onBehalfOf or a principal actor; other system actors fail permission-revoked. Add the explicit skip sentinel only for non-assistant SYSTEM actors. That privileged skip is safe only because open pins the two component/key pairs and decider eligibility is checked under lock. Assistant revocation must keep failing. cancel at approval-decision.service.ts:31 already identifies only assistant onBehalfOf as a cancellable requester, so fleet asks must remain forbidden without broadening cancel.\n- SYSTEM_ACTOR_IDS derives from system writer keys at apps/api/src/action-context/action-context.ts:78 and runAsSystem rejects unknown ids at :128. runner is not a writer id. Build opening/execution contexts via runWithActionContext, never runAsSystem('runner'). Correlation id is inherited or newly generated. Open/close are bookkeeping writes, not audit actions. ApprovalRequestEvents.record at approval-request-events.ts:46 records approval_request_changed with eventId requestId:status and no input/result content. Both ask operations must record it inside the caller's transaction. Existing live and notification subscribers receive these events only once production callers arrive in the next feature.\n\nFleet storage, dependency boundaries and migrations\n- The legacy FleetApproval model still exists at apps/api/prisma/schema.prisma:925. Keep it, all legacy routes/DTOs, closer, sweeper, webhooks and live events intact. ApprovalResolvedBy already exists at apps/api/src/fleet/approvals/domain/approval.domain.ts:13, and the old repository documents budget-policy-before-approval locking at :88. Add FleetApprovalAsk as a parallel empty table, not a data copy. jobId and budgetPolicyId are deliberately strings with no foreign keys, so deleting those sources preserves readable asks. Only request deletion cascades. The nullable composite unique key deduplicates fully specified bash tuples but permits budget links with null tuple fields.\n- ApprovalStoreModule at apps/api/src/fleet/approvals/approval-store.module.ts:11 is the cycle-free store/close port imported by budgets and jobs. Add a private new repository token and exported delegating FleetApprovalAskStore; leave the old repository exports alone until the next feature removes them. Its existing DI spec at approval-store.module.spec.ts:9 explicitly warns that non-strict moduleRef.get alone cannot prove an export: test a real importing consumer and verify the new token is not exported.\n- Mirror the joined request lookup and SELECT FOR UPDATE pattern in apps/api/src/fleet/assistant/requests/prisma-assistant-action-request.repository.ts:17 and :28, but not its legacy unsafe casts. .nax/rules/api-data.md:20 requires repository -> service -> public and private repository tokens, :89 requires txManager.run ambient clients rather than passing transactions, and :120 requires bounded findMany. findPendingForJob is pending-only, oldest request first, take MAX_PENDING_ASKS_PER_JOB (100). setOutcome replaces, never merges.\n- One shared migration path, apps/api/prisma/migrations/20261106090000_approval_fleet_core/migration.sql, is conditionally created by the first of US-002/003/009 and appended to by the others; all three list it as a potential new output. Preserve other stories' SQL and do not overwrite the file. Statements touch different tables and may land in any order. Baseline migration apps/api/prisma/migrations/20261105090100_drop_pending_action/migration.sql:1 shows the repository convention. New SQL consists of the conditional Role UPDATE, nullable ApprovalDecision.params JSONB, and FleetApprovalAsk DDL/indexes/cascade. The migration's Role UPDATE, params column and new link DDL must be verified from the shipped file, not inferred solely from Prisma db-push setup. Regenerate Prisma after schema changes. Validate an empty prisma migrate diff from migrations to schema; db-push test setup alone does not prove shipped migration correctness. Migration tests must extract the actual Role UPDATE from the shipped file rather than duplicating SQL in tests.\n\nAPI surface, affected dependents and tests\n- DecideApprovalRequestDto at dto/decide-approval-request.dto.ts:4 currently validates decision/comment only. ApprovalDecisionDto at dto/approval-request.dto.ts:40 maps decision detail with no params. ApprovalRequestsController.decide at approval-requests.controller.ts:81 does a visibility read before deciding and returns fresh decision details, so preserve visibility and JsonResponse envelope while forwarding the optional fifth argument. The HTTP error mapping at approval-http-errors.ts:5 must translate the new refusal into ValidationAppException with localized en/zh messages (400 and -2).\n- MCP koda_decide_approval lives at mcp/approval-mcp-tools.ts:48; its schema, unknown-argument allowlist at :59 and three-argument decide call at :67 must all change consistently. Validate a present params as a plain object, not arrays/null/primitives, before deciding; preserve the exact old call signature when absent. Regenerate openapi.json via bun run api:export-spec from root; follow root guidance for generated CLI clients if regenerating the affected contract (bun run generate), never hand-edit generated files, and make no CLI formatting changes.\n- Existing focused suites include catalog.spec.ts, role-matrix.spec.ts, permission-contract.spec.ts, approval-decision.service.spec.ts, approval-execution.service.spec.ts, approval-eligibility.spec.ts, approval-policy.resolver.spec.ts, approval-http.spec.ts, mcp/approval-mcp-tools.spec.ts and approval-engine.module.spec.ts. The decision unit setup constructs the service directly at approval-decision.service.spec.ts:32 and pins exact createDecision arguments at :62; update registry injection and params:null expectations. The execution double at approval-execution.service.spec.ts:32 needs findDecisions, and its commit/publication tests at :70 must retain their rollback/commit-failure guarantees. configurableTestCommand at test-helpers/test-approval-command.ts:81 supports switchable parsing/execution and optional toResult; extend it compatibly with decision parsers, rejection callbacks, received decision recording and afterCommit, without always exposing optional hooks.\n- Real transaction/HTTP precedents include test/integration/approvals/approval-decide-route.integration.spec.ts:20, which uses canRunDbTests, bootHttpApp, scoped role fixtures and cache invalidation; existing approval-decide, approval-execute, approval-gate, approval-cancel and approval-repositories integration suites are regression anchors. New decision-params integration file is authored by US-003, extended by US-004/005; new ask integration file is authored by US-006, extended by US-007/008; the ask service/spec are authored by US-006 then extended by US-008. These are shared-file seams, not new independent test-only stories.\n- Unit module-wiring specs must stay adjacent to modules and DB-free with external stubs. Integration specs genuinely exercise Postgres rows, uniqueness, rollback, locking and cascades. Run bun run test:db:up then targeted bun run test:scoped outside NAX_SANDBOXED=1, using KODA_DB_TESTS=1 where required. A sandbox skip is not verification. Test setup force-resets a local *_test DB, so do not run two DB-mode suites concurrently; use a private container for another checkout. Generated acceptance tests stay under app .nax/features and are not edited. Run db:generate after schema changes and the app type-check at completion as verification, not as product ACs.\n\nImplementation order and done definition\n- Preserve the exact ten-story dependency graph. Independent foundations: US-001 catalog, US-003 decision contract/storage, US-009 fleet storage, US-010 resolver. US-002 follows catalog; US-004/005 follow decision support; US-006 follows catalog/resolver; US-008 follows opening; US-007 joins seed, execution, opening and resolver. Keep all numbered spec ACs in their original story and include the enumerated failure-table cases, including unsupported params with no registered command and invalid component pairs.\n- Done means additive engine/store contracts plus migrations, catalog/seed updates, REST/MCP params and behavioral verification. There are no production callers of the new ask service/store and no registrations for the new keys. Existing gate, assistant no-params flows and FleetApproval production flows remain unchanged. Main risks are accidental authority bypass outside the two asks, agent self-approval, broadened policy writes, nested transaction poisoning, rejection side effects escaping rollback, afterCommit failures marking successful execution failed, SQL NULL mishandling, seed migration overwrites and accidental fleet producer cutover.\n\nSecond-pass adversarial audit\n- Spec AC inventory checked individually against the story acceptanceCriteria: US-001 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11; US-002 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9; US-003 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-004 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9; US-005 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9; US-006 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-007 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10; US-008 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13; US-009 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11; US-010 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7. All 109 numbered spec criteria remain in their original stories. Existing/still/unchanged qualifiers, no-policy/distinct-approver qualifiers, last-argument clock semantics, SQL NULL, query bounds, transaction call ordering and raw-result qualifiers were retained. No deprecated grep/file/verbatim AC tags were found.\n- Every story already has a negative path: US-001 denied Developer budget/Viewer shell cells; US-002 migration no-op for edited Developer or reviewer and global denial; US-003 unsupported/oversized/invalid params, eligibility refusal and rejection rollback; US-004 invalid stored decision and failed execute/hook; US-005 invalid REST/MCP params; US-006 wrong key/component, no project/transaction and parse failure; US-007 agent self-approval, missing decide permission, assistant revocation and cancel refusal; US-008 missing/nonpending/non-ask requests, invalid reasons and lost transition; US-009 missing lookups and duplicate P2002; US-010 ignored role/type/principal policies. No artificial new failure path was needed.\n- All 18 Failure Handling rows are represented: unsupported params by US-003 AC-5/FH-1 and US-005 AC-2; too-large by US-003 AC-6; invalid parsing by US-003 AC-7/FH-2; unauthorized params by US-003 AC-8/FH-3; rejection rollback by US-003 AC-12; execution decision refusal by US-004 AC-4; warning-only follow-up by US-004 AC-8; MCP object refusal by US-005 AC-9/FH-1; outside-transaction calls by US-006 AC-11 and US-008 AC-13; unknown command by US-006 AC-12; wrong component by US-006 AC-13/FH-1; missing project by US-006 AC-14; open parse refusal by US-006 AC-15; principal cancel by US-007 AC-10/FH-1; missing/nonpending close by US-008 AC-6/7/FH-1; non-ask close by US-008 AC-8/9/FH-2; invalid reason by US-008 AC-10/11/FH-2; duplicate link by US-009 AC-4.\n- Corrected an overbroad US-005 description: the specified @IsOptional decorator permits REST params:null and the service normalizes it to absent; only non-null non-object REST values are rejected by @IsObject. MCP deliberately rejects every present non-plain-object value, including null. These are distinct interfaces, not a reason to change either one. The existing decorator conventions are at dto/decide-approval-request.dto.ts:9 and the new service normalization is specified in US-003.\n- Reworded US-007 AC-5 and US-010 AC-7 into observable return-value regression assertions while preserving the existing-case unchanged anchors. Actual assistant eligibility cases are at approval-eligibility.spec.ts:83-108; existing USER/AGENT/ASSISTANT policy cases are at approval-policy.resolver.spec.ts:28-129. Made US-010 ignored type/principal policy criteria observable through default source and agent mode. Made the unauthorized-params failure observable with getter non-invocation plus the existing HTTP error mapping.\n- Prioritized US-003 contextFiles toward the spec's command contract, decision service, domain record/errors and HTTP mapper; persistence and reusable-helper paths remain documented in this shared analysis and its description. Every story retains at most five readable context files, including only existing files or US-006 outputs for dependent US-007/008. No new helper or production caller was invented.\n- Added US-009 REG-1 solely to satisfy the requested explicit backward-compatibility protection for the changed module exports. It pins the current ApprovalStoreModule exports at approval-store.module.ts:15; retaining these legacy exports is required until the next feature, whereas the new repository token remains private. Other changed signatures/behavior already have regression anchors in US-001 AC-3/4, US-002 AC-2/5/6/7/9, US-003 AC-2/4, US-004 AC-5, US-005 AC-5/6/7, US-007 AC-5/9/10 and US-010 AC-7.\n- Reduced US-005 complexity from complex to medium because it extends existing DTO/controller/MCP paths with standard object validation and forwarding, not a new abstraction. Kept strict three-session-tdd for access-control stories under the binding security override. US-009 remains complex/three-session-tdd-lite for schema, repository, joined queries, store facade and module wiring, without access-control implementation. No dependency, workdir or story ID changed from the binding structure.\n- All eight feature exclusions were checked verbatim against the spec and retained in top-level outOfScope; adjacent story Scope-Out boundaries retain the corresponding production-cutover, legacy-permission, web/CLI, writable-SYSTEM, deduplication, requester-recheck and runner-answer deferrals. The audit is a source/spec review, not an executed test or JSON-parser validation.",
+  "outOfScope": [
+    "Switching any producer or reader to the engine, registering the two fleet commands, the adapters over `/fleet/approvals`, and dropping `FleetApproval`, `ApprovalCloser`, `ApprovalExpirySweeper` and the `fleet.approval.decide.*` keys: `permissions-p3-approval-fleet`.",
+    "Removing `fleet.approval.decide.bash` from the Developer seed: `permissions-p3-approval-fleet`.",
+    "The web inbox deciding fleet asks with params: P3 web.",
+    "`SYSTEM` as a policy subject a write can name.",
+    "De-duplicating identical asks across fleet keys: the fleet's unique link index does it per bash ask.",
+    "Showing decision params in the CLI (`koda approvals show` prints them as part of the detail JSON already; no new formatting).",
+    "Re-checking the asker's key at execution (designer call above).",
+    "How the bash `onReject` answers the runner: it writes the `APPROVAL_ANSWER` command row in the decide transaction and wakes the runner after commit (`committedEffect`), in `permissions-p3-approval-fleet`."
+  ],
+  "routingProfile": "native-codex-ds"
+}

@@ -327,7 +327,7 @@ Postgres treats NULLs as distinct, so the unique index de-duplicates only bash l
 7. **US-007: Deciding and executing an ask** — `Workdir: apps/api` — Depends on US-002, US-004, US-006, US-010. On-behalf-of eligibility for any `SYSTEM` actor, no key re-check for an ask, and no principal cancel.
 8. **US-008: Closing an ask** — `Workdir: apps/api` — Depends on US-006. `ApprovalAskService.close`.
 9. **US-009: The fleet link table** — `Workdir: apps/api` — No dependencies. `FleetApprovalAsk`, its domain module, `PrismaFleetApprovalAskRepository` behind its module-private token, and the exported `FleetApprovalAskStore` service in `ApprovalStoreModule`.
-10. **US-010: The SYSTEM subject in the resolver** — `Workdir: apps/api` — No dependencies. `ApprovalSubject.type` widened with `SYSTEM`, which matches pattern-only policies and never role, type or principal policies.
+10. **US-010: The SYSTEM subject in the resolver** — `Workdir: apps/api` — Depends on US-001. `ApprovalSubject.type` widened with `SYSTEM`, which matches pattern-only policies and never role, type or principal policies.
 
 ### Context Files
 
