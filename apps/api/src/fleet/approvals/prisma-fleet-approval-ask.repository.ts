@@ -33,6 +33,13 @@ const ASK_INCLUDE = {
 type RequestWithAsk = Prisma.ApprovalRequestGetPayload<{ include: typeof ASK_INCLUDE }>;
 
 /**
+ * How many pages of MAX_COUNTED_PROJECTS project groups `countPendingAllProjects` may read. Soft-deleted
+ * projects are filtered per page, so a page can yield fewer live rows than it contains; this is the hard
+ * iteration cap (`.nax/rules/api-data.md`) that keeps that scan bounded anyway.
+ */
+const MAX_PENDING_COUNT_PAGES = 4;
+
+/**
  * Permissions P3d-1 (US-009): the `FleetApprovalAsk` link table. Module-private — `ApprovalStoreModule`
  * provides it behind `FLEET_APPROVAL_ASK_REPOSITORY` and publishes `FleetApprovalAskStore` instead.
  */
@@ -172,24 +179,44 @@ export class PrismaFleetApprovalAskRepository
 
   /**
    * US-006: every project's pending fleet asks for a caller with a global `fleet.approval.read` grant.
-   * A soft-deleted project is excluded, so a project that is gone never shows a badge. Bounded by
-   * MAX_COUNTED_PROJECTS: past that many projects the tail is dropped and the truncation is logged.
+   * A soft-deleted project is excluded, so a project that is gone never shows a badge — and because the
+   * exclusion happens before a project counts against the bound, deleted projects can never spend it.
+   *
+   * `ApprovalRequest.projectId` has no relation (a deleted project leaves its asks readable), so the
+   * live check cannot ride the group query: the groups are read in bounded pages of at most
+   * MAX_COUNTED_PROJECTS until MAX_PENDING_COUNT_PAGES of them have been read or a page comes back
+   * short, and each page is filtered by its projects in one bounded lookup.
    */
   async countPendingAllProjects(): Promise<PendingCount[]> {
-    const groups = await this.db.approvalRequest.groupBy({
-      by: ['projectId'],
-      where: pendingWhere({ projectId: { not: null } }),
-      _count: { _all: true },
-      // The bound needs a deterministic order, or two reads of the same installation disagree.
-      orderBy: { projectId: 'asc' },
-      take: MAX_COUNTED_PROJECTS,
-    });
-    if (groups.length === MAX_COUNTED_PROJECTS) {
+    const counted = new Map<string, PendingCount>();
+    let truncated = false;
+    let fullPage = true;
+
+    for (let page = 0; page < MAX_PENDING_COUNT_PAGES && fullPage; page += 1) {
+      const groups = await this.db.approvalRequest.groupBy({
+        by: ['projectId'],
+        where: pendingWhere({ projectId: { not: null } }),
+        _count: { _all: true },
+        // The page bound needs a deterministic order, or two reads of the same installation disagree.
+        orderBy: { projectId: 'asc' },
+        take: MAX_COUNTED_PROJECTS,
+        skip: page * MAX_COUNTED_PROJECTS,
+      });
+      fullPage = groups.length === MAX_COUNTED_PROJECTS;
+      for (const entry of await this.toPendingCounts(groups, true)) {
+        if (counted.size < MAX_COUNTED_PROJECTS) counted.set(entry.projectId, entry);
+        else truncated = true;
+      }
+    }
+    // A full last page means more project groups exist than the scan was allowed to read.
+    if (fullPage) truncated = true;
+
+    if (truncated) {
       this.logger.warn(
-        `countPendingAllProjects: more than ${MAX_COUNTED_PROJECTS} projects have a pending fleet ask; the tail is not counted`,
+        `countPendingAllProjects: more than ${MAX_COUNTED_PROJECTS} live projects have a pending fleet ask; the tail is not counted`,
       );
     }
-    return this.toPendingCounts(groups, true);
+    return [...counted.values()].sort((a, b) => a.slug.localeCompare(b.slug));
   }
 
   countPendingUnscoped(): Promise<number> {

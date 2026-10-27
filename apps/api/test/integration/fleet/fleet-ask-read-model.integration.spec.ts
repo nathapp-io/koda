@@ -324,8 +324,45 @@ describeDb('fleet ask read model (PG)', () => {
     expect(new Set(counts.map((c) => c.projectId)).size).toBe(MAX_COUNTED_PROJECTS);
     expect(counts.every((c) => c.pending === 1)).toBe(true);
     // A truncated read says so instead of quietly under-reporting the installation.
-    expect(warn.mock.calls.map(([message]) => String(message)).join('\n')).toContain(`more than ${MAX_COUNTED_PROJECTS} projects`);
+    expect(warn.mock.calls.map(([message]) => String(message)).join('\n'))
+      .toContain(`more than ${MAX_COUNTED_PROJECTS} live projects`);
     // The bound is deterministic, so two reads of a growing installation answer the same rows.
     expect(await store.countPendingAllProjects()).toEqual(counts);
+  });
+
+  it('countPendingAllProjects spends the bound on live projects, not on soft-deleted ones', async () => {
+    // One more deleted project than the bound, and their ids sort first: a cap applied before the
+    // soft-delete rule would spend every slot on them and answer no live project at all.
+    const deleted = Array.from({ length: MAX_COUNTED_PROJECTS + 1 }, (_, index) => ({
+      id: `aa-deleted-${String(index).padStart(4, '0')}`,
+      name: `deleted${index}`,
+      slug: `deleted-${String(index).padStart(4, '0')}`,
+      key: `D${index}`,
+      deletedAt: new Date(),
+    }));
+    const live = [
+      { id: 'zz-live-1', name: 'live one', slug: 'zz-live-one', key: 'L1' },
+      { id: 'zz-live-2', name: 'live two', slug: 'zz-live-two', key: 'L2' },
+    ];
+    await prisma.project.createMany({ data: [...deleted, ...live] });
+    await prisma.approvalRequest.createMany({
+      data: [...deleted, ...live].map((project) => ({
+        id: `ask-of-${project.id}`, permissionKey: 'fleet.job.shell.escalate', projectId: project.id,
+        actorType: 'SYSTEM', actorId: 'runner', origin: 'runner', correlationId: `corr-${project.id}`,
+        input: {}, inputHash: `hash-${project.id}`, requiredMode: 'agent', onTimeout: 'reject',
+        approverMustHoldAction: true, requireDistinctApprover: false, status: 'pending', expiresAt: at(3_600),
+      })),
+    });
+    await prisma.fleetApprovalAsk.createMany({
+      data: [...deleted, ...live].map((project) => ({
+        requestId: `ask-of-${project.id}`, kind: 'bash', projectId: project.id,
+        jobId: `job-of-${project.id}`, leaseEpoch: 1, naxAskId: `nax-of-${project.id}`,
+      })),
+    });
+
+    expect(await store.countPendingAllProjects()).toEqual([
+      { projectId: 'zz-live-1', slug: 'zz-live-one', pending: 1 },
+      { projectId: 'zz-live-2', slug: 'zz-live-two', pending: 1 },
+    ]);
   });
 });
