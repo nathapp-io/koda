@@ -97,10 +97,34 @@ export class PrismaApprovalRequestRepository extends AbstractPrismaRepository<Ap
   }
 
   async findDue(now: Date, limit: number): Promise<ApprovalRequestRecord[]> {
-    const rows = await this.prisma.client.approvalRequest.findMany({
-      where: { status: 'pending', expiresAt: { lte: now } }, orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }], take: limit,
-    });
+    // Job-end cancellation owns ended-job asks, even past their deadline. Filter BEFORE LIMIT so a
+    // large cancellation backlog cannot starve unrelated timeouts. All joins use primary keys.
+    const rows = await this.prisma.client.$queryRaw<ApprovalRequest[]>`
+      SELECT r.* FROM "ApprovalRequest" r
+      WHERE r."status" = 'pending' AND r."expiresAt" <= ${now}
+        AND NOT EXISTS (
+          SELECT 1 FROM "FleetApprovalAsk" a JOIN "FleetJob" j ON j."id" = a."jobId"
+          WHERE a."requestId" = r."id" AND a."kind" = 'bash' AND j."state" <> 'RUNNING'
+        )
+      ORDER BY r."expiresAt" ASC, r."id" ASC LIMIT ${limit}
+    `;
     return rows.map((row) => this.toDomain(row));
+  }
+
+  /**
+   * Recheck timeout ownership after locking the request; the due scan may predate a job's end.
+   * Lock order is request then job, like execution. Job transitions skip held requests, so they can
+   * commit while we wait for the job lock; we then see their committed state. Holding the job lock
+   * until settlement also prevents a RUNNING check racing a subsequent transition.
+   * No link (or a deleted job) retains normal engine expiry, as do budget and non-fleet requests.
+   */
+  async canSettleTimeout(requestId: string): Promise<boolean> {
+    const jobs = await this.prisma.client.$queryRaw<Array<{ state: string }>>`
+      SELECT j."state" FROM "FleetApprovalAsk" a JOIN "FleetJob" j ON j."id" = a."jobId"
+      WHERE a."requestId" = ${requestId} AND a."kind" = 'bash'
+      FOR UPDATE OF j
+    `;
+    return jobs.length === 0 || jobs[0]?.state === 'RUNNING';
   }
 
   async findStaleApproved(before: Date, limit: number): Promise<ApprovalRequestRecord[]> {

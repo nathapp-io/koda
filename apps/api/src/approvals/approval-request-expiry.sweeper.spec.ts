@@ -68,6 +68,7 @@ function build(over: BuildOptions = {}) {
       if (over.locked !== undefined) return over.locked;
       return due.find((row) => row.id === id) ?? null;
     }),
+    canSettleTimeout: vi.fn<(id: string) => Promise<boolean>>().mockResolvedValue(true),
     transition: vi.fn<
       (id: string, from: ApprovalRequestStatus, patch: Partial<ApprovalRequestRecord>) => Promise<ApprovalRequestRecord | null>
     >(async (id, _from, patch) => {
@@ -262,6 +263,18 @@ describe('ApprovalRequestExpirySweeper.tick', () => {
     expect(b.tx.run.mock.invocationCallOrder[0]).toBeLessThan(
       b.execution.execute.mock.invocationCallOrder[0] as number,
     );
+  });
+
+  it.each(['reject', 'approve'] as const)('defers %s-on-timeout to job-end cancellation after locking the request', async (onTimeout) => {
+    const b = build({ due: [request({ permissionKey: 'fleet.job.shell.escalate', onTimeout })] });
+    b.requests.canSettleTimeout.mockResolvedValue(false);
+    expect(await b.sweeper.tick(NOW)).toEqual({ expired: 0, approved: 0, failed: 0 });
+    expect(b.requests.canSettleTimeout).toHaveBeenCalledExactlyOnceWith('r1');
+    expect(b.requests.lockById.mock.invocationCallOrder[0]).toBeLessThan(b.requests.canSettleTimeout.mock.invocationCallOrder[0] as number);
+    expect(b.requests.transition).not.toHaveBeenCalled();
+    expect(b.events.record).not.toHaveBeenCalled();
+    expect(b.audit.record).not.toHaveBeenCalled();
+    expect(b.execution.execute).not.toHaveBeenCalled();
   });
 
   it('skips a request another writer settled between the scan and the lock', async () => {

@@ -29,7 +29,9 @@ export interface ApprovalRequestExpiryResult {
  * `onTimeout: 'reject'` (the default) expires the request; `onTimeout: 'approve'` moves it to
  * `approved` — as if a principal had approved it — and then runs the frozen command through
  * `ApprovalExecutionService` after the settling transaction commits. Each request owns its
- * transaction and row lock, so one failure costs only that request.
+ * transaction and row lock, so one failure costs only that request. Bash asks on ended jobs are
+ * excluded before the batch limit and rechecked under lock: the fleet's durable continuation owns
+ * their `cancelled`/`job_ended` settlement, regardless of deadline or timeout policy.
  *
  * The interval reuses the fleet approval sweep window (`fleetConfig.approvalSweepMs`, gated by
  * `fleetConfig.sweepEnabled`), and only this class settles these requests as a system writer: it
@@ -137,6 +139,8 @@ export class ApprovalRequestExpirySweeper implements OnModuleInit, OnModuleDestr
   private async settleOne(due: ApprovalRequestRecord, now: Date): Promise<ApprovalRequestRecord | null> {
     const locked = await this.requests.lockById(due.id);
     if (!locked || locked.status !== 'pending' || locked.expiresAt.getTime() > now.getTime()) return null;
+    // An ended job's cancellation backlog belongs to the fleet continuation, not timeout policy.
+    if (!await this.requests.canSettleTimeout(locked.id)) return null;
 
     const approved = locked.onTimeout === 'approve';
     const settled = await this.requests.transition(locked.id, 'pending', approved

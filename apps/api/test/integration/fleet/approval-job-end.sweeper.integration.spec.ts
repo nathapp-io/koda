@@ -4,8 +4,9 @@ import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { AuditRecorder } from '../../../src/audit/audit-recorder.service';
 import { ApprovalRequestExpirySweeper } from '../../../src/approvals/approval-request-expiry.sweeper';
+import { PrismaApprovalRequestRepository } from '../../../src/approvals/prisma-approval-request.repository';
 import { ApprovalCloser } from '../../../src/fleet/approvals/approval-closer';
-import { ApprovalJobEndSweeper } from '../../../src/fleet/approvals/approval-job-end.sweeper';
+import { ApprovalJobEndSweeper, MAX_ASKS_PER_TICK } from '../../../src/fleet/approvals/approval-job-end.sweeper';
 import { ApprovalLivePublisher } from '../../../src/fleet/approvals/approval-live.publisher';
 import { FleetApprovalAskStore } from '../../../src/fleet/approvals/fleet-approval-ask.store';
 import { FLEET_JOB_REPOSITORY } from '../../../src/fleet/jobs/domain/fleet-job.domain';
@@ -17,7 +18,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
 
 const describeDb = canRunDbTests() ? describe : describe.skip;
 
-describeDb('job-end continuation fairness and atomic audit (PG, fix round 4)', () => {
+describeDb('job-end continuation, expiry coordination and atomic audit (PG)', () => {
   let app: NathApplication;
   let db: PrismaClient;
   let world: Awaited<ReturnType<typeof seedFleetHttpWorld>>;
@@ -74,6 +75,80 @@ describeDb('job-end continuation fairness and atomic audit (PG, fix round 4)', (
     try { await fn(); } finally { release(); await holder; }
   }
 
+  it('F1 round 5: expiry cannot consume an ended-job backlog larger than a tick at its deadline', async () => {
+    const { jobId, ids } = await pending(MAX_ASKS_PER_TICK * 2 + 5);
+    const running = await pending(1, 'RUNNING');
+    const atDeadline = new Date(due.getTime());
+    // Older ended-job requests must not consume expiry's LIMIT and starve a live job's timeout.
+    await db.approvalRequest.updateMany({ where: { id: { in: ids } }, data: { expiresAt: new Date(due.getTime() - 1) } });
+    expect(await expiry().tick(atDeadline)).toEqual({ expired: 1, approved: 0, failed: 0 });
+    expect((await status(running.ids))[0]?.status).toBe('expired');
+    expect((await status(ids)).every((row) => row.status === 'pending')).toBe(true);
+    for (let i = 0; i < 3; i += 1) {
+      expect(await sweeper().tick(atDeadline)).toMatchObject({ closed: i < 2 ? MAX_ASKS_PER_TICK : 5, failed: 0 });
+      expect(await expiry().tick(atDeadline)).toEqual({ expired: 0, approved: 0, failed: 0 });
+    }
+    expect((await status(ids)).every((row) => row.status === 'cancelled' &&
+      (row.result as { closedBy?: string })?.closedBy === 'job_ended')).toBe(true);
+    expect(await db.fleetApprovalAsk.count({ where: { jobId, resolvedBy: 'job_ended' } })).toBe(ids.length);
+    expect(await db.fleetActivity.count({ where: { jobId, action: 'approval.cancelled' } })).toBe(ids.length);
+  }, 120_000);
+
+  it('F1 round 5: expiry rechecks a scanned ask after its job ends before settlement', async () => {
+    const { ids } = await pending(1);
+    const requests = get<PrismaApprovalRequestRepository>(PrismaApprovalRequestRepository);
+    // Model a due scan performed while the job was RUNNING; it has since committed its end.
+    const id = ids[0];
+    if (id === undefined) throw new Error('fixture did not create an ask');
+    const scanned = await requests.findById(id);
+    if (scanned === null) throw new Error('fixture request is missing');
+    vi.spyOn(requests, 'findDue').mockResolvedValue([scanned]);
+    expect(await expiry().tick(due)).toEqual({ expired: 0, approved: 0, failed: 0 });
+    expect((await status(ids))[0]?.status).toBe('pending');
+    await sweeper().tick(due);
+    expect((await status(ids))[0]?.status).toBe('cancelled');
+  });
+
+  it('F1 round 5: expiry preserves budget, unlinked and deleted-job timeout behaviour', async () => {
+    const budget = await pending(1);
+    const unlinked = await pending(1);
+    const orphan = await pending(1);
+    await db.fleetApprovalAsk.update({ where: { requestId: budget.ids[0] }, data: { kind: 'budget', jobId: null } });
+    await db.approvalRequest.update({ where: { id: budget.ids[0] }, data: { permissionKey: 'fleet.budget.override' } });
+    await db.fleetApprovalAsk.delete({ where: { requestId: unlinked.ids[0] } });
+    await db.fleetJob.delete({ where: { id: orphan.jobId } });
+    expect(await expiry().tick(due)).toEqual({ expired: 3, approved: 0, failed: 0 });
+    expect((await status([...budget.ids, ...unlinked.ids, ...orphan.ids])).every((row) => row.status === 'expired')).toBe(true);
+  });
+
+  it('F1 round 5: timeout recheck waits for an in-flight job end and observes its committed state', async () => {
+    const { jobId, ids } = await pending(1, 'RUNNING');
+    const requests = get<PrismaApprovalRequestRepository>(PrismaApprovalRequestRepository);
+    let release!: () => void;
+    let ready!: () => void;
+    let checked!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const locked = new Promise<void>((resolve) => { ready = resolve; });
+    const checking = new Promise<void>((resolve) => { checked = resolve; });
+    const original = requests.canSettleTimeout.bind(requests);
+    vi.spyOn(requests, 'canSettleTimeout').mockImplementation((id) => { checked(); return original(id); });
+    const holder = db.$transaction(async (tx) => {
+      // Fixture simulates the job-held half of a transition whose request close was skipped.
+      await tx.fleetJob.update({ where: { id: jobId }, data: { state: 'COMPLETED' } });
+      ready();
+      await released;
+    });
+    await locked;
+    const ticking = expiry().tick(due);
+    try {
+      await Promise.race([checking, ticking.then(() => { throw new Error('expiry never rechecked the job'); })]);
+    } finally { release(); await holder; }
+    expect(await ticking).toEqual({ expired: 0, approved: 0, failed: 0 });
+    expect((await status(ids))[0]?.status).toBe('pending');
+    await sweeper().tick(due);
+    expect((await status(ids))[0]?.status).toBe('cancelled');
+  });
+
   it('F1: 100 held requests do not hide later unlocked asks from job-end cancellation or expiry', async () => {
     const { ids } = await pending(102);
     const running = await pending(1, 'RUNNING');
@@ -81,9 +156,11 @@ describeDb('job-end continuation fairness and atomic audit (PG, fix round 4)', (
       await sweeper().tick();
       expect((await status(ids.slice(100))).map((row) => row.status)).toEqual(['cancelled', 'cancelled']);
       expect((await status(ids.slice(0, 100))).every((row) => row.status === 'pending')).toBe(true);
+      // Due expiry must neither wait for these held ended-job requests nor convert them to expired.
+      expect(await expiry().tick(due)).toMatchObject({ expired: 1, failed: 0 });
     });
     await sweeper().tick();
-    expect(await expiry().tick(new Date(due.getTime() + 1))).toMatchObject({ expired: 1, failed: 0 });
+    expect(await expiry().tick(new Date(due.getTime() + 1))).toMatchObject({ expired: 0, failed: 0 });
     expect((await status(running.ids))[0]?.status).toBe('expired');
     expect((await status(ids)).every((row) => row.status === 'cancelled' &&
       (row.result as { closedBy?: string })?.closedBy === 'job_ended')).toBe(true);
@@ -118,6 +195,7 @@ describeDb('job-end continuation fairness and atomic audit (PG, fix round 4)', (
     await sweeper().tick();
     expect((await status(broken.flatMap((job) => job.ids))).every((row) => row.status === 'pending')).toBe(true);
     expect((await status(healthy.ids))[0]?.status).toBe('pending'); // the first batch was entirely failing work
+    expect(await expiry().tick(due)).toEqual({ expired: 0, approved: 0, failed: 0 });
     // A new instance has no in-memory cursor; the database must carry the rotation past failed attempts.
     const restarted = new ApprovalJobEndSweeper(
       get(FleetApprovalAskStore), get(FLEET_JOB_REPOSITORY), get(ApprovalCloser), get(ApprovalLivePublisher),
