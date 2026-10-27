@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-fleet-core",
   "branchName": "feat/permissions-p3-approval-fleet-core",
   "createdAt": "2026-11-06T09:00:00.000Z",
-  "updatedAt": "2026-10-27T08:02:51.561Z",
+  "updatedAt": "2026-10-27T08:15:13.636Z",
   "userStories": [
     {
       "id": "US-001",
@@ -621,14 +621,17 @@
         "migration"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Adds a new schema/repository/store abstraction with uniqueness, cascade, joined pending queries and cycle-free module exports; it stores links but does not implement access-control decisions."
+        "reasoning": "Adds a new schema/repository/store abstraction with uniqueness, cascade, joined pending queries and cycle-free module exports; it stores links but does not implement access-control decisions.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/prisma/schema.prisma",
@@ -667,7 +670,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7f9fb0626b5c0eedc1cbfb6f07c3212bfbe6cea8"
     },
     {
       "id": "US-010",
