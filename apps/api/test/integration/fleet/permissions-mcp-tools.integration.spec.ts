@@ -192,7 +192,7 @@ describeIntegration('MCP tools/list lists only the tools whose key the agent hol
     expect(await prisma.fleetJob.count({ where: { feature } })).toBe(0);
     // The tool never ran, so neither a tool-call audit row nor an action names it.
     expect(await prisma.assistantToolCall.count({ where: { actorId: agentIds['viewer-agent'], tool: 'koda_dispatch_job' } })).toBe(0);
-    expect(await prisma.pendingAction.count({ where: { actorId: agentIds['viewer-agent'], tool: 'koda_dispatch_job' } })).toBe(0);
+    expect(await prisma.approvalRequest.count({ where: { actorId: agentIds['viewer-agent'], permissionKey: 'fleet.job.dispatch' } })).toBe(0);
   }, TIMEOUT);
 
   it('AC-6: a global admin binding lists every MCP descriptor name', async () => {

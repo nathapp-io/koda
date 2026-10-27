@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { committedEffect } from '../../common/committed-effects';
 import { randomUUID } from 'crypto';
 import type { LiveFleetJobEvent } from '../../live/live-event';
 import { ProjectEventBus } from '../../live/project-event-bus';
@@ -21,10 +22,12 @@ export class FleetJobLivePublisher {
   }
 
   publish(events: readonly FleetJobLiveEvent[]): void {
-    for (const event of events) {
-      const { threadEvents, ...fleetEvent } = event;
-      this.bus.publish(fleetEvent);
-      for (const threadEvent of threadEvents ?? []) this.threads.publish(threadEvent);
-    }
+    committedEffect(() => {
+      for (const event of events) {
+        const { threadEvents, ...fleetEvent } = event;
+        this.bus.publish(fleetEvent);
+        for (const threadEvent of threadEvents ?? []) this.threads.publish(threadEvent);
+      }
+    });
   }
 }

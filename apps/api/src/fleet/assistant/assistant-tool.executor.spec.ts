@@ -1,15 +1,17 @@
+import { gateDouble } from '../../../test/helpers/assistant-gate-double';
 import { createHash } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
 import { ProjectAccessService } from '../../projects/project-access.service';
-import { AssistantActionService } from './actions/assistant-action.service';
-import type { PendingActionRecord, ProposeInput, ProposeResult } from './actions/pending-action.domain';
+import { ApprovalGate } from '../../approvals/approval-gate.service';
+import { ApprovalPolicyResolver } from '../../approvals/approval-policy.resolver';
+import { ASSISTANT_ACTION_REQUEST_REPOSITORY } from './requests/assistant-action-request.domain';
 import { AssistantModule } from './assistant.module';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
-import { ToolInputError, type AssistantTool, type ToolContext } from './assistant-tool.types';
+import { ToolActionError, ToolInputError, type AssistantTool, type ToolContext } from './assistant-tool.types';
 import { ASSISTANT_TOOL_CALL_REPOSITORY, type AssistantToolCallRecord, type AssistantToolCallRepository, type ToolCallContext } from './assistant-tool-call.domain';
 import type { PermissionService } from '../../permissions/permission.service';
 import { stableStringify } from '../sync/stable-json';
@@ -22,15 +24,12 @@ const context = (over: Partial<ToolCallContext['creator']> = {}): ToolCallContex
   creator: { id: 'u1', email: 'u1@koda.test', role: 'MEMBER', disabled: false, ...over },
 });
 
-/**
- * The repository stub. 3-D12: `checkAction`/`executeAction` resolve the requester through `findUserActor`, so it
- * answers the same user the call-context stub carries — the thread creator every action fixture here names — unless
- * `actor` overrides it.
- */
-function makeRepo(ctx: ToolCallContext | null, actor: ToolCallContext['creator'] | null = ctx?.creator ?? null) {
+/** The repository stub for the tool-call ledger. */
+function makeRepo(ctx: ToolCallContext | null) {
   const rows: AssistantToolCallRecord[] = [];
   const repo: AssistantToolCallRepository = {
-    findUserActor: vi.fn(async (userId: string) => (actor?.id === userId ? actor : null)),
+    findAgentActor: vi.fn(async () => null), findProjectSlug: vi.fn(async () => null),
+    findUserActor: vi.fn(async () => null),
     findByCall: vi.fn(async (jobId, toolCallId) => rows.find((r) => r.jobId === jobId && r.toolCallId === toolCallId) ?? null),
     record: vi.fn(async (row) => { rows.push(row); }),
     findCallContext: vi.fn(async () => ctx),
@@ -71,8 +70,7 @@ interface SetupOptions {
   kind?: ToolCallContext['kind'];
   /** The permission decision the executor's key checks read (permissions P1 US-004); every key is allowed by default. */
   permissions?: PermissionsDouble;
-  /** The action's actor cannot be read at all (`findUserActor` answers null, as it does for a deleted user). */
-  noActor?: boolean;
+  approvalMode?: 'human' | 'none';
 }
 
 interface Setup {
@@ -81,10 +79,11 @@ interface Setup {
   repo: AssistantToolCallRepository;
   access: { findProjectIdBySlug: ReturnType<typeof vi.fn>; resolveMembership: ReturnType<typeof vi.fn> };
   permissions: PermissionsDouble;
+  approval: ReturnType<typeof gateDouble>;
 }
 
 function setup(tool: AssistantTool<unknown> | null, opts: SetupOptions = {}): Setup {
-  const { repo, rows } = makeRepo({ ...context(opts.creator), ...(opts.kind ? { kind: opts.kind } : {}) }, opts.noActor ? null : undefined);
+  const { repo, rows } = makeRepo({ ...context(opts.creator), ...(opts.kind ? { kind: opts.kind } : {}) });
   const access = {
     findProjectIdBySlug: vi.fn(async (slug: string) => {
       const id = PROJECT_IDS[slug];
@@ -99,26 +98,14 @@ function setup(tool: AssistantTool<unknown> | null, opts: SetupOptions = {}): Se
   const registry = new AssistantToolRegistry();
   if (tool) registry.register(tool as AssistantTool);
   const permissions = opts.permissions ?? permissionDouble();
+  const approval = gateDouble(opts.approvalMode ?? 'human');
   const executor = new AssistantToolExecutor(
-    registry, repo, access as unknown as ProjectAccessService, permissions as unknown as PermissionService,
-  );
-  return { executor, rows, repo, access, permissions };
+    registry, repo, access as unknown as ProjectAccessService, permissions as unknown as PermissionService, ...approval.deps);
+  return { executor, rows, repo, access, permissions, approval };
 }
 
 const call = (over: Partial<{ jobId: string; toolCallId: string; name: string; input: unknown }> = {}) => ({
   jobId: 'j1', toolCallId: 'c1', name: 'koda_fake', input: { ref: 'WEB-1' }, ...over,
-});
-
-/**
- * 2a-D8: one stored action. Its project (`p2`/`ops`) is deliberately not the thread's home project (`p1`/`web`),
- * so the context the executor builds for an approve can be told apart from the proposing call's (AC-21).
- */
-const pendingAction = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
-  actorType: 'user', actorId: 'u1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
-  id: 'a1', projectId: 'p2', projectSlug: 'ops', threadId: 't1', jobId: 'j1', toolCallId: 'c1', tool: 'koda_fake',
-  input: { ref: 'OPS-1' }, preview: 'Add a comment to OPS-1 "Fix"', status: 'PENDING',
-  approvalId: 'ap1', decidedAt: null, result: null, deliveredAt: null,
-  expiresAt: new Date('2026-10-24T09:00:00.000Z'), createdAt: new Date('2026-10-23T09:00:00.000Z'), ...over,
 });
 
 describe('AssistantToolExecutor', () => {
@@ -301,8 +288,7 @@ describe('AssistantToolExecutor', () => {
     registry.register(tool as AssistantTool);
     const executor = new AssistantToolExecutor(
       registry, repo, { resolveMembership: async () => 'DEVELOPER' } as unknown as ProjectAccessService,
-      permissionDouble() as unknown as PermissionService,
-    );
+      permissionDouble() as unknown as PermissionService, ...gateDouble().deps);
     expect(await executor.execute(call())).toEqual({ content: 'winner', isError: false });
     expect(rows).toHaveLength(0);
   });
@@ -323,30 +309,82 @@ function makeWriteTool(over: Partial<AssistantTool<unknown>> = {}): AssistantToo
   };
 }
 
-function makeProposer(result: ProposeResult = { actionId: 'a1' }) {
-  // 3-D14: the port carries the direct-action record too; this harness serves the propose path only.
-  return {
-    propose: vi.fn(async (_input: ProposeInput): Promise<ProposeResult> => result),
-    recordDirect: vi.fn(async (): Promise<{ actionId: string }> => ({ actionId: 'a1' })),
-  };
-}
-
-/** A write-tool harness with a proposer attached, as `AssistantActionService.onModuleInit` attaches it (2a-D1). */
+/** A write-tool harness using the request gate. */
 function writeSetup(
   over: Partial<AssistantTool<unknown>> = {},
   opts: SetupOptions = {},
-  result: ProposeResult = { actionId: 'a1' },
+  result?: { refused: true },
 ) {
   const tool = makeWriteTool(over);
   const base = setup(tool, opts);
-  const proposer = makeProposer(result);
-  base.executor.attachActions(proposer);
-  return { ...base, tool, proposer };
+  if (result?.refused) base.approval.links.countPendingInThread.mockResolvedValue(10);
+  return { ...base, tool };
 }
 
 const ACTION_FLEET_JOB: Partial<AssistantTool<unknown>> = { key: 'fleet.job.dispatch' };
 /** The harness option of every refused-write case: the dispatch key is not held in `web`. */
 const refusedDispatch = (): SetupOptions => ({ permissions: permissionDouble(['fleet.job.dispatch']) });
+
+describe('US-006 direct thread writes through the gate', () => {
+  const opts = { approvalMode: 'none' as const };
+
+  it('AC-3: calls gate directly without opening a transaction or locking the thread', async () => {
+    const { executor, approval, tool } = writeSetup({}, opts);
+    approval.gate.gate.mockResolvedValue({ status: 'executed', result: { text: 'direct result' } } as never);
+    expect(await executor.execute(call())).toEqual({ content: 'direct result', isError: false });
+    expect(approval.gate.gate).toHaveBeenCalledWith('ticket.read', {
+      projectId: 'p1', threadId: 't1', jobId: 'j1', args: call().input,
+    }, { projectId: 'p1' });
+    expect(approval.tx.run).not.toHaveBeenCalled();
+    expect(approval.links.lockThread).not.toHaveBeenCalled();
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it('AC-4: returns masked ToolActionError text as an error', async () => {
+    const { executor, approval } = writeSetup({}, opts);
+    approval.gate.gate.mockRejectedValue(new ToolActionError('linked SB-1 https://x\nfailed at link 2: not_found'));
+    expect(await executor.execute(call())).toEqual({ content: 'linked SB-1 https://x\nfailed at link 2: not_found', isError: true });
+  });
+
+  it('AC-5: maps a missing target to not_found', async () => {
+    const { executor, approval } = writeSetup({}, opts);
+    approval.gate.gate.mockRejectedValue(new NotFoundAppException({}, 'tickets'));
+    expect(await executor.execute(call())).toEqual({ content: 'not_found', isError: true });
+  });
+
+  it('AC-6: maps and logs an unexpected gate error', async () => {
+    const { executor, approval } = writeSetup({}, opts);
+    const error = new Error('broken');
+    approval.gate.gate.mockRejectedValue(error);
+    const logged = vi.spyOn(Logger.prototype, 'error'); logged.mockClear();
+    expect(await executor.execute(call())).toEqual({ content: 'error: koda_fake failed', isError: true });
+    expect(logged).toHaveBeenCalled();
+    expect(logged.mock.calls[0]?.[1]).toBe(error.stack);
+  });
+
+  it('AC-7: treats a concurrent duplicate link insert as a successful pending answer', async () => {
+    const { executor, approval } = writeSetup({}, opts);
+    approval.gate.gate.mockResolvedValue({ status: 'pending', request: { id: 'request-7' } } as never);
+    const { Prisma } = await import('../../generated/prisma/client');
+    approval.links.insert.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('duplicate', {
+      code: 'P2002', clientVersion: 'test', meta: { target: 'AssistantActionRequest_requestId_key' },
+    }));
+    approval.links.findByRequest.mockResolvedValueOnce(null).mockResolvedValue({ requestId: 'request-7' } as never);
+
+    expect(await executor.execute(call())).toEqual({ content: 'pending request-7: awaiting approval; do not retry', isError: false });
+    expect(approval.links.findByRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it('AC-7: links a policy-race pending result without a transaction or cap check', async () => {
+    const { executor, approval } = writeSetup({}, opts);
+    approval.gate.gate.mockResolvedValue({ status: 'pending', request: { id: 'request-7' } } as never);
+    expect(await executor.execute(call())).toEqual({ content: 'pending request-7: awaiting approval; do not retry', isError: false });
+    expect(approval.links.insert).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'request-7', threadId: 't1', toolCallId: 'c1' }));
+    expect(approval.links.countPendingInThread).not.toHaveBeenCalled();
+    expect(approval.tx.run).not.toHaveBeenCalled();
+    expect(approval.bus.publish).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ type: 'thread', threadId: 't1' }));
+  });
+});
 
 describe('S5b 2a-D2: a write tool proposes instead of writing', () => {
   it('AC-2: a write tool never calls execute', async () => {
@@ -364,17 +402,15 @@ describe('S5b 2a-D2: a write tool proposes instead of writing', () => {
 
   it('AC-4: propose receives the text preview answered as the preview', async () => {
     const preview = vi.fn(async () => 'exactly this preview');
-    const { executor, proposer } = writeSetup({ preview });
+    const { executor, approval } = writeSetup({ preview });
     await executor.execute(call());
-    expect(proposer.propose).toHaveBeenCalledWith(expect.objectContaining({ preview: 'exactly this preview' }));
+    expect(approval.links.insert).toHaveBeenCalledWith(expect.objectContaining({ preview: 'exactly this preview' }));
   });
 
   it('AC-5, AC-6 and AC-7: a WORKSPACE call proposes in the named project, without the project key, with the thread\'s own kind', async () => {
-    const { executor, proposer } = writeSetup({}, { kind: 'WORKSPACE' });
+    const { executor, approval } = writeSetup({}, { kind: 'WORKSPACE' });
     await executor.execute(call({ input: { project: 'b', text: 'x' } }));
-    expect(proposer.propose).toHaveBeenCalledWith(expect.objectContaining({
-      projectId: 'p2', input: { text: 'x' }, threadKind: 'WORKSPACE', threadProjectSlug: 'web',
-    }));
+    expect(approval.gate.gate).toHaveBeenCalledWith('ticket.read', { projectId: 'p2', threadId: 't1', jobId: 'j1', args: { text: 'x' } }, { projectId: 'p2' });
   });
 
   it('AC-8 (US-004): a write tool whose key is refused never previews or proposes', async () => {
@@ -390,10 +426,10 @@ describe('S5b 2a-D2: a write tool proposes instead of writing', () => {
   });
 
   it('AC-9 and AC-19: a refused write tool neither previews nor proposes', async () => {
-    const { executor, tool, proposer } = writeSetup(ACTION_FLEET_JOB, refusedDispatch());
+    const { executor, tool, approval } = writeSetup(ACTION_FLEET_JOB, refusedDispatch());
     await executor.execute(call());
     expect(tool.preview).not.toHaveBeenCalled();
-    expect(proposer.propose).not.toHaveBeenCalled();
+    expect(approval.gate.gate).not.toHaveBeenCalled();
   });
 
   it('AC-10: a preview raising NotFoundAppException answers not_found', async () => {
@@ -403,14 +439,14 @@ describe('S5b 2a-D2: a write tool proposes instead of writing', () => {
   });
 
   it('AC-11: a preview that finds no target proposes nothing', async () => {
-    const { executor, proposer } = writeSetup({ preview: vi.fn(async () => { throw new NotFoundAppException({}, 'tickets'); }) });
+    const { executor, approval } = writeSetup({ preview: vi.fn(async () => { throw new NotFoundAppException({}, 'tickets'); }) });
     await executor.execute(call());
-    expect(proposer.propose).not.toHaveBeenCalled();
+    expect(approval.gate.gate).not.toHaveBeenCalled();
   });
 
   it('AC-12 and AC-13: a proposed action answers pending, isError false, and the row records outcome pending', async () => {
     const { executor, rows } = writeSetup();
-    expect(await executor.execute(call())).toEqual({ content: 'pending a1: awaiting user approval; do not retry', isError: false });
+    expect(await executor.execute(call())).toEqual({ content: 'pending a1: awaiting approval; do not retry', isError: false });
     expect(rows[0]).toMatchObject({ outcome: 'pending', isError: false, tool: 'koda_fake' });
   });
 
@@ -422,168 +458,41 @@ describe('S5b 2a-D2: a write tool proposes instead of writing', () => {
     expect(rows[0]).toMatchObject({ outcome: 'refused', isError: true });
   });
 
-  it('AC-15, AC-20 and AC-21: with no proposer attached a write call is an error, a warning is logged and the row records error', async () => {
-    const tool = makeWriteTool({ descriptor: { name: 'w', description: 'd', inputSchema: {} } });
-    const { executor, rows } = setup(tool);
-    const warned = vi.spyOn(Logger.prototype, 'warn');
-    warned.mockClear();
-    expect(await executor.execute(call({ name: 'w' }))).toEqual({ content: 'error: w failed', isError: true });
-    expect(warned).toHaveBeenCalled();
-    expect(String(warned.mock.calls[0]?.[0])).toContain('no action proposer attached');
-    expect(rows[0]).toMatchObject({ outcome: 'error', isError: true });
+  it('waiting writes reach the request gate', async () => {
+    const { executor, approval } = setup(makeWriteTool());
+    expect(await executor.execute(call())).toEqual({ content: 'pending a1: awaiting approval; do not retry', isError: false });
+    expect(approval.gate.gate).toHaveBeenCalledTimes(1);
   });
 
   it('AC-16 and AC-17: a read tool still executes and never proposes', async () => {
     const tool = makeTool();
-    const { executor, proposer, rows } = closeOverRead(tool);
+    const { executor, approval, rows } = setup(tool);
     expect(await executor.execute(call())).toEqual({ content: 'tool text', isError: false });
     expect(tool.execute).toHaveBeenCalledTimes(1);
-    expect(proposer.propose).not.toHaveBeenCalled();
+    expect(approval.gate.gate).not.toHaveBeenCalled();
     expect(rows[0]).toMatchObject({ outcome: 'ok', isError: false });
   });
 
   it('an explicit kind: read is a read tool too', async () => {
     const tool = makeTool({ kind: 'read' });
-    const { executor, proposer } = closeOverRead(tool);
+    const { executor, approval } = setup(tool);
     await executor.execute(call());
     expect(tool.execute).toHaveBeenCalledTimes(1);
-    expect(proposer.propose).not.toHaveBeenCalled();
+    expect(approval.gate.gate).not.toHaveBeenCalled();
   });
 });
 
-/** A read tool with a proposer attached: proposing is a write path's job, so nothing may reach it. */
-function closeOverRead(tool: AssistantTool<unknown>) {
-  const base = setup(tool);
-  const proposer = makeProposer();
-  base.executor.attachActions(proposer);
-  return { ...base, proposer };
-}
-
-describe('S5b 2a-D8: checkAction and executeAction', () => {
-  it('AC-12: checkAction answers forbidden for a disabled requester', async () => {
-    const { executor } = setup(makeTool(), { creator: { disabled: true } });
-
-    expect(await executor.checkAction(pendingAction())).toBe('forbidden');
-  });
-
-  it('AC-8 (US-004): checkAction answers forbidden when the requester\'s tool key is refused in the action\'s project', async () => {
-    const permissions = permissionDouble(['comment.create']);
-    const tool = makeTool({ key: 'comment.create' });
-    const { executor } = setup(tool, { permissions });
-
-    expect(await executor.checkAction(pendingAction())).toBe('forbidden');
-    // The tool's own catalog key, asked for the requester under the action's project (never the thread's),
-    // and for the principal as it is — US-004 stopped decorating it with the project role.
-    expect(permissions.can).toHaveBeenCalledWith(expect.objectContaining({ id: 'u1' }), 'comment.create', { projectId: 'p2' });
-    expect(Object.prototype.hasOwnProperty.call(permissions.can.mock.calls[0]?.[0], 'projectRole')).toBe(false);
-  });
-
-  it('AC-8 boundary: the same action is approved when the requester holds the key', async () => {
-    const tool = makeTool({ key: 'comment.create' });
-    const { executor, permissions } = setup(tool);
-
-    expect(await executor.checkAction(pendingAction())).toBe('ok');
-    expect(permissions.can).toHaveBeenCalledWith(expect.anything(), 'comment.create', { projectId: 'p2' });
-  });
-
-  it('AC-12 boundary: checkAction answers forbidden for a requester who is not a member of the action\'s project', async () => {
-    const { executor, access } = setup(makeTool(), { membership: new ForbiddenAppException({}, 'projects') });
-
-    expect(await executor.checkAction(pendingAction())).toBe('forbidden');
-    expect(access.resolveMembership).toHaveBeenCalledWith('p2', expect.objectContaining({ id: 'u1' }));
-  });
-
-  it('checkAction answers forbidden for a tool that left the registry', async () => {
-    const { executor } = setup(makeTool());
-
-    expect(await executor.checkAction(pendingAction({ tool: 'koda_retired' }))).toBe('forbidden');
-  });
-
-  it('checkAction answers forbidden when the action\'s actor cannot be read', async () => {
-    const { executor } = setup(makeTool(), { noActor: true });
-
-    expect(await executor.checkAction(pendingAction())).toBe('forbidden');
-  });
-
-  it('AC-17: executeAction answers error: <tool> failed when the tool throws a plain Error', async () => {
-    const tool = makeTool({ execute: vi.fn(async () => { throw new Error('db down'); }) });
-    const { executor } = setup(tool);
-
-    expect(await executor.executeAction(pendingAction())).toEqual({ ok: false, text: 'error: koda_fake failed' });
-  });
-
-  it('AC-26: executeAction logs the stack of an ordinary error', async () => {
-    const boom = new Error('db down');
-    const tool = makeTool({ execute: vi.fn(async () => { throw boom; }) });
-    const { executor } = setup(tool);
-    const logged = vi.spyOn(Logger.prototype, 'error');
-    logged.mockClear();
-
-    await executor.executeAction(pendingAction());
-
-    expect(logged).toHaveBeenCalled();
-    expect(String(logged.mock.calls[0]?.[0])).toContain('a1');
-    expect(logged.mock.calls[0]?.[1]).toBe(boom.stack);
-  });
-
-  it('executeAction answers not_found when the tool raises NotFoundAppException', async () => {
-    const tool = makeTool({ execute: vi.fn(async () => { throw new NotFoundAppException({}, 'tickets'); }) });
-    const { executor } = setup(tool);
-
-    expect(await executor.executeAction(pendingAction())).toEqual({ ok: false, text: 'not_found' });
-  });
-
-  it('AC-21: executeAction runs the tool with the action\'s project slug, not the thread\'s home project', async () => {
-    let seen: ToolContext | undefined;
-    const tool = makeTool({ execute: async (ctx: ToolContext) => { seen = ctx; return 'comment c1'; } });
-    const { executor, access } = setup(tool);
-
-    expect(await executor.executeAction(pendingAction())).toEqual({ ok: true, text: 'comment c1' });
-    expect(seen).toMatchObject({
-      projectId: 'p2', projectSlug: 'ops', threadId: 't1', jobId: 'j1',
-      actor: { id: 'u1', actorType: 'user' },
-    });
-    expect(access.resolveMembership).toHaveBeenCalledWith('p2', expect.objectContaining({ id: 'u1' }));
-  });
-
-  it('AC-10 (US-004): an approved action runs with an actor that carries no projectRole property', async () => {
-    let seen: ToolContext | undefined;
-    const tool = makeTool({ execute: async (ctx: ToolContext) => { seen = ctx; return 'comment c1'; } });
-    const { executor, access } = setup(tool, { role: 'DEVELOPER' });
-
-    expect(await executor.executeAction(pendingAction())).toEqual({ ok: true, text: 'comment c1' });
-
-    // Membership was resolved for the requester, so the actor is still the requester — just not decorated.
-    expect(access.resolveMembership).toHaveBeenCalledWith('p2', expect.objectContaining({ id: 'u1' }));
-    expect(seen?.actor).toMatchObject({ id: 'u1', actorType: 'user' });
-    expect(Object.prototype.hasOwnProperty.call(seen?.actor, 'projectRole')).toBe(false);
-  });
-
-  it('executeAction re-parses the stored input and answers the tool text', async () => {
-    const parse = vi.fn((input: unknown) => String(input));
-    const execute = vi.fn(async () => 'comment c1 added to KODA-1');
-    const { executor } = setup(makeTool({ parse, execute }));
-
-    expect(await executor.executeAction(pendingAction({ input: { ref: 'KODA-1', body: 'hello' } })))
-      .toEqual({ ok: true, text: 'comment c1 added to KODA-1' });
-    expect(parse).toHaveBeenCalledWith({ ref: 'KODA-1', body: 'hello' });
-  });
-
-  it('executeAction answers error: <tool> failed when its own parser refuses the stored input', async () => {
-    const tool = makeTool({ parse: () => { throw new ToolInputError('ref'); } });
-    const { executor } = setup(tool);
-
-    expect(await executor.executeAction(pendingAction())).toEqual({ ok: false, text: 'error: koda_fake failed' });
-    expect(tool.execute).not.toHaveBeenCalled();
-  });
-});
-
-describe('S5b 2a-D1: the propose service attaches itself to the executor at init', () => {
+describe('waiting gate DI wiring', () => {
+  let approval: ReturnType<typeof gateDouble>;
   let module: TestingModule;
 
   beforeEach(async () => {
     const { repo } = makeRepo(context());
+    approval = gateDouble();
     module = await Test.createTestingModule({ imports: [GlobalStubsModule, AssistantModule] })
+      .overrideProvider(ApprovalGate).useValue(approval.gate)
+      .overrideProvider(ApprovalPolicyResolver).useValue(approval.resolver)
+      .overrideProvider(ASSISTANT_ACTION_REQUEST_REPOSITORY).useValue(approval.links)
       .overrideProvider(ASSISTANT_TOOL_CALL_REPOSITORY).useValue(repo)
       .overrideProvider(ProjectAccessService).useValue({ resolveMembership: async () => 'DEVELOPER' })
       .compile();
@@ -594,16 +503,15 @@ describe('S5b 2a-D1: the propose service attaches itself to the executor at init
     await module.close();
   });
 
-  it('AC-1: after init() a write tool call reaches AssistantActionService.propose and answers pending', async () => {
-    const propose = vi.spyOn(module.get(AssistantActionService), 'propose').mockResolvedValue({ actionId: 'a1' });
+  it('after init() a write tool call reaches ApprovalGate and answers pending', async () => {
     const tool = makeWriteTool();
     module.get(AssistantToolRegistry).register(tool);
 
     const result = await module.get(AssistantToolExecutor).execute(call());
 
-    expect(propose).toHaveBeenCalledTimes(1);
-    expect(propose).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p1', tool: 'koda_fake', preview: PREVIEW, actorId: 'u1' }));
-    expect(result).toEqual({ content: 'pending a1: awaiting user approval; do not retry', isError: false });
+    expect(approval.gate.gate).toHaveBeenCalledTimes(1);
+    expect(approval.links.insert).toHaveBeenCalledWith(expect.objectContaining({ tool: 'koda_fake', preview: PREVIEW }));
+    expect(result).toEqual({ content: 'pending a1: awaiting approval; do not retry', isError: false });
     expect(tool.execute).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { DELIVERY_HEADER, deliveryText, MAX_DELIVERED_NOTES } from './outcome-delivery';
+import { DELIVERABLE_STATUSES, DELIVERY_HEADER, deliveryText, MAX_DELIVERED_NOTES } from './outcome-delivery';
 
 /**
  * Fleet S5b 2aw US-001 — 2aw-D2: the text an agent is handed when it is given the outcome notes of the actions it
@@ -7,6 +7,12 @@ import { DELIVERY_HEADER, deliveryText, MAX_DELIVERED_NOTES } from './outcome-de
  */
 const HEADER = 'Updates on actions you proposed:';
 const LIMIT = 32_768;
+
+describe('DELIVERABLE_STATUSES (US-004 AC-1)', () => {
+  it('contains the five terminal approval-request statuses in order', () => {
+    expect(DELIVERABLE_STATUSES).toEqual(['executed', 'failed', 'rejected', 'expired', 'cancelled']);
+  });
+});
 
 describe('deliveryText (2aw-D2, US-001)', () => {
   it('AC-1: no notes returns the user text unchanged and delivers 0', () => {

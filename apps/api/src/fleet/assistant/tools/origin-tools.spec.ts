@@ -21,10 +21,10 @@ const guard = {
 const audit = { record: vi.fn(async (): Promise<void> => undefined) } as unknown as AuditRecorder;
 describe('origin-aware tools', () => {
   it('AC-9: MCP action lookup is actor-scoped, never thread-scoped', async () => {
-    const actions = { findScopedById: vi.fn(), findScopedByActor: vi.fn(async () => ({ id: 'a1', tool: 'koda_add_comment', status: 'EXECUTED', createdAt: new Date(), decidedAt: null, result: null })) };
+    const actions = { findScopedInThread: vi.fn(), findOwnRequest: vi.fn(async () => ({ id: 'a1', projectId: 'p1', actorType: 'AGENT', actorId: 'claude', permissionKey: 'comment.create', assistantAction: null, status: 'executed' as const, createdAt: new Date(), decidedAt: null, settledAt: null, result: null })) };
     await getActionTool(actions).execute(context(), { id: 'a1' });
-    expect(actions.findScopedByActor).toHaveBeenCalledWith('a1', 'p1', { type: 'agent', id: 'claude' });
-    expect(actions.findScopedById).not.toHaveBeenCalled();
+    expect(actions.findOwnRequest).toHaveBeenCalledWith('a1', 'p1', { type: 'AGENT', id: 'claude' });
+    expect(actions.findScopedInThread).not.toHaveBeenCalled();
   });
   it('AC-10: MCP memory records actor provenance', async () => {
     const upsert = vi.fn(async () => ({ id: 'm1' }));

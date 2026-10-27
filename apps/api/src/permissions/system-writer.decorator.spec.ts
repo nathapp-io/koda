@@ -4,7 +4,6 @@ import { SYSTEM_WRITER_METADATA, SystemWriter } from './system-writer.decorator'
 import { EmailDispatcher } from '../email/email-dispatcher';
 import { ApprovalExpirySweeper } from '../fleet/approvals/approval-expiry-sweeper';
 import { ApprovalRequestExpirySweeper } from '../approvals/approval-request-expiry.sweeper';
-import { PendingActionExpirySweeper } from '../fleet/assistant/actions/pending-action-expiry.sweeper';
 import { BudgetSweeper } from '../fleet/budgets/budget-sweeper';
 import { BundleIngestSweeper } from '../fleet/ingest/bundle-ingest.sweeper';
 import { KnowledgePoller } from '../fleet/knowledge/knowledge-poller';
@@ -35,6 +34,7 @@ import { FleetApprovalRequestedSubscriber } from '../notifications/fleet/fleet-a
 import { FleetBudgetIncidentSubscriber } from '../notifications/fleet/fleet-budget-incident.subscriber';
 import { FleetHealthAlertSubscriber } from '../notifications/fleet/fleet-health-alert.subscriber';
 import { FleetJobOutcomeSubscriber } from '../notifications/fleet/fleet-job-outcome.subscriber';
+import { AssistantActionOutcomeSubscriber } from '../fleet/assistant/requests/assistant-action-outcome.subscriber';
 import { ThreadIngestHook } from '../fleet/threads/ingest/thread-ingest.module';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
 
@@ -43,7 +43,6 @@ const writers = new Map<Function, string>([
   [ApprovalExpirySweeper, 'system.approval.expire'],
   // US-012: the approval engine's own expiry sweep; two classes may declare one key.
   [ApprovalRequestExpirySweeper, 'system.approval.expire'],
-  [PendingActionExpirySweeper, 'system.assistant-action.expire'],
   [BudgetSweeper, 'system.budget.window-reset'],
   [BundleIngestSweeper, 'system.ingest.drain'],
   [KnowledgePoller, 'system.knowledge.poll'],
@@ -75,6 +74,7 @@ const writers = new Map<Function, string>([
   [FleetHealthAlertSubscriber, 'system.notification.fleet'],
   [FleetJobOutcomeSubscriber, 'system.notification.fleet'],
   [ThreadIngestHook, 'system.thread.ingest'],
+  [AssistantActionOutcomeSubscriber, 'system.thread.ingest'],
   [FanOutPublisher, 'system.outbox.dispatch'],
 ]);
 

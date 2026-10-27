@@ -1,8 +1,8 @@
+import { ASSISTANT_ACTION_REQUEST_REPOSITORY } from '../requests/assistant-action-request.domain';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { CommentsService } from '../../../comments/comments.service';
 import { TicketsService } from '../../../tickets/tickets.service';
-import { PENDING_ACTION_REPOSITORY, type PendingActionRecord } from '../actions/pending-action.domain';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
 import { ToolInputError, type ToolContext } from '../assistant-tool.types';
 import { KODA_ADD_COMMENT, KODA_GET_ACTION, KODA_TOOL_DESCRIPTORS } from '../koda-tool-descriptors';
@@ -40,19 +40,19 @@ function commentDeps() {
 }
 
 /** An action row as the repository answers it, with the fields `koda_get_action` prints. */
-const action = (over: Partial<PendingActionRecord> = {}): PendingActionRecord => ({
+const baseAction = () => ({
   actorType: 'user', actorId: 'dev-1', origin: 'thread', approvalMode: 'human', approverType: null, approverId: null,
   id: 'a1', projectId: 'project-1', projectSlug: 'web', threadId: 'thread-1', jobId: 'job-1', toolCallId: 'c1',
   tool: 'koda_add_comment', input: { ref: 'KODA-1', body: 'hello' }, preview: 'Add a comment to KODA-1 "Fix login page":\n\nhello',
-  status: 'PENDING', approvalId: 'ap1', decidedAt: null, result: null,
+  status: 'PENDING', approvalId: 'ap1', decidedAt: null as Date | null, result: null as string | null,
   deliveredAt: null, expiresAt: new Date('2026-10-24T09:00:00.000Z'), createdAt: new Date('2026-10-23T09:00:00.000Z'),
-  ...over,
 });
+const action = (over: Partial<ReturnType<typeof baseAction>> = {}) => ({ ...baseAction(), ...over });
 
 /** The `koda_get_action` dependency: one scoped repository read. */
-function actionDeps(found: PendingActionRecord | null) {
-  const findScopedById = vi.fn(async () => found);
-  return { findScopedById, tool: getActionTool({ findScopedById, findScopedByActor: vi.fn(async () => null) }) };
+function actionDeps(found: ReturnType<typeof action> | null) {
+  const findScopedInThread = vi.fn(async () => found ? { tool: found.tool, request: { ...found, status: found.status.toLowerCase(), settledAt: null, result: found.result === null ? null : { text: found.result } } } : null);
+  return { findScopedInThread, tool: getActionTool({ findScopedInThread } as never) };
 }
 
 /** The `reason` a parser refuses with; fails loudly when it accepts or throws something else. */
@@ -181,7 +181,7 @@ describe('koda_get_action (US-003)', () => {
     const content = await tool.execute(ctx, { id: 'a1' });
 
     expect(content).toBe([
-      'action a1 koda_add_comment EXECUTED',
+      'action a1 koda_add_comment executed',
       'requested 2026-10-23T09:00:00.000Z',
       'decided 2026-10-23T09:30:00.000Z',
       'result:',
@@ -194,15 +194,15 @@ describe('koda_get_action (US-003)', () => {
 
     const content = await tool.execute(ctx, { id: 'a1' });
 
-    expect(content.split('\n')).toEqual(['action a1 koda_add_comment REJECTED', 'requested 2026-10-23T09:00:00.000Z']);
+    expect(content.split('\n')).toEqual(['action a1 koda_add_comment rejected', 'requested 2026-10-23T09:00:00.000Z']);
   });
 
   it('reads the action scoped by its id, the context\'s project and the context\'s thread', async () => {
-    const { findScopedById, tool } = actionDeps(action());
+    const { findScopedInThread, tool } = actionDeps(action());
 
     await tool.execute(ctx, { id: 'a1' });
 
-    expect(findScopedById).toHaveBeenCalledWith('a1', 'project-1', 'thread-1');
+    expect(findScopedInThread).toHaveBeenCalledWith('a1', 'project-1', 'thread-1');
   });
 
   it('throws not found for an action another thread, another project or no one proposed', async () => {
@@ -224,7 +224,7 @@ describe('ActionTools provider (US-003)', () => {
         AssistantToolRegistry,
         { provide: TicketsService, useValue: { findByRef: vi.fn() } },
         { provide: CommentsService, useValue: { create: vi.fn() } },
-        { provide: PENDING_ACTION_REPOSITORY, useValue: { findScopedById: vi.fn() } },
+        { provide: ASSISTANT_ACTION_REQUEST_REPOSITORY, useValue: { findScopedInThread: vi.fn() } },
       ],
     }).compile();
     await module.init();
@@ -239,5 +239,25 @@ describe('ActionTools provider (US-003)', () => {
     for (const name of ['koda_get_action', 'koda_add_comment']) {
       expect(registry.get(name)?.descriptor).toBe(KODA_TOOL_DESCRIPTORS.find((descriptor) => descriptor.name === name));
     }
+  });
+});
+
+describe('MCP action request reads', () => {
+  const mcpCtx = { ...ctx, threadId: null, jobId: null, actor: { actorType: 'agent', id: 'agent-1' } } as ToolContext;
+  it('reads only the agent own request and falls back to the permission key without a link', async () => {
+    const at = new Date('2026-11-01Z');
+    const findOwnRequest = vi.fn(async () => ({ id: 'r1', permissionKey: 'comment.create', status: 'executed', createdAt: at, decidedAt: at, settledAt: at, result: { text: 'done' }, assistantAction: null }));
+    const tool = getActionTool({ findOwnRequest } as never);
+    expect(await tool.execute(mcpCtx, { id: 'r1' })).toBe(['action r1 comment.create executed', `requested ${at.toISOString()}`, `decided ${at.toISOString()}`, `settled ${at.toISOString()}`, 'result:', data('done')].join('\n'));
+    expect(findOwnRequest).toHaveBeenCalledExactlyOnceWith('r1', 'project-1', { type: 'AGENT', id: 'agent-1' });
+  });
+  it('uses the linked tool name when present and omits non-text results', async () => {
+    const tool = getActionTool({ findOwnRequest: vi.fn(async () => ({ id: 'r1', permissionKey: 'comment.create', status: 'failed', createdAt: ctx.now, decidedAt: null, settledAt: null, result: { error: 'failed' }, assistantAction: { tool: 'koda_add_comment' } })) } as never);
+    expect(await tool.execute(mcpCtx, { id: 'r1' })).toBe(`action r1 koda_add_comment failed\nrequested ${ctx.now.toISOString()}`);
+  });
+  it('hides requests of another actor or project', async () => {
+    const findOwnRequest = vi.fn(async () => null);
+    await expect(getActionTool({ findOwnRequest } as never).execute(mcpCtx, { id: 'foreign' })).rejects.toBeInstanceOf(NotFoundAppException);
+    expect(findOwnRequest).toHaveBeenCalledWith('foreign', 'project-1', { type: 'AGENT', id: 'agent-1' });
   });
 });

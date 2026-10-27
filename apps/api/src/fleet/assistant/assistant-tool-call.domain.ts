@@ -61,6 +61,8 @@ export interface ToolCallContext {
 }
 
 export interface AssistantToolCallRepository {
+  findAgentActor(agentId: string): Promise<AgentToolCallCreator | null>;
+  findProjectSlug(projectId: string): Promise<string | null>;
   findUserActor(userId: string): Promise<UserToolCallCreator | null>;
   findByCall(jobId: string, toolCallId: string): Promise<AssistantToolCallRecord | null>;
   /** Inserts the row; a concurrent duplicate `(jobId, toolCallId)` surfaces as a unique violation on `toolCallId`. */

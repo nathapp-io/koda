@@ -19,8 +19,7 @@ const route = (ctx: ProjectContext): ApprovalRoute => ({ kind: 'project', projec
 /**
  * S1.5 §2.3 project routes, migrated onto permission keys by permissions P1d (US-006): a member reads
  * with `fleet.approval.read`; the decide route declares both type keys as metadata only, because
- * `ApprovalsService.decide` picks the one its approval's type needs after the row is loaded — and an
- * `assistant_action` ask has no key yet.
+ * `ApprovalsService.decide` picks the one its approval's type needs after the row is loaded.
  *
  * Every route declares `ProjectMembershipGuard, RequiresGuard` in one `@UseGuards`, so the membership
  * guard resolves `request.projectContext` before the key check and runs exactly once per request.

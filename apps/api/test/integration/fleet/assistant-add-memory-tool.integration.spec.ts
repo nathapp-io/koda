@@ -1,3 +1,5 @@
+import { findThreadAction } from '../../helpers/assistant-request';
+import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b 2b1 US-006 — `koda_add_memory` through the real runner tool route against PG, and the item it stores read
@@ -5,7 +7,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
  *
  * Every call enters at `POST /fleet/runner/jobs/:jobId/tools/<name>?leaseEpoch=<n>` with the real runner key of the
  * runner that holds a RUNNING REPO THREAD job, and every decide enters the real project route
- * `POST /projects/web/fleet/approvals/:approvalId/decide`, so the ACs drive the whole path: runner authentication,
+ * `POST /projects/web/fleet/approvals/:approvalId/decisions`, so the ACs drive the whole path: runner authentication,
  * the lease fence, the tool registry `MemoryWriteTools` filled at boot, the executor's write-tool branch, the propose
  * service and — on approve — `PrismaMemoryItemRepository.upsert` for real, whose row `koda_memory_search` then reads.
  * Each test proposes with its own `toolCallId`, and only the AC that approves writes a row.
@@ -34,7 +36,7 @@ const ENV = ['FLEET_THREADS_ENABLED'] as const;
 const WEB_KEY = 'KODA';
 const TOOL = 'koda_add_memory';
 const SEARCH_TOOL = 'koda_memory_search';
-const APPROVALS = '/api/projects/web/fleet/approvals';
+const APPROVALS = '/api/approvals';
 /** The item every AC of this story proposes: `bun` is the word the search reads it back by. */
 const ITEM = { kind: 'FACT', subject: 'api', predicate: 'runs on', object: 'bun' };
 /** The route's answer: `{ content, isError }` data, whatever the status. */
@@ -59,7 +61,7 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
 
   /** The stored action of one tool call, on the job the call entered through. */
   const actionOf = (toolCallId: string) =>
-    prisma.pendingAction.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId: repo.jobId, toolCallId } } });
+    findThreadAction(prisma, { jobId: repo.jobId, toolCallId });
 
   /** The active items of the key every AC uses. */
   const storedItems = () =>
@@ -83,7 +85,7 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
 
   /** `dev` decides one approval; answers the decide response. */
   const decide = (approvalId: string, decision: string) =>
-    request(server).post(`${APPROVALS}/${approvalId}/decide`).set({ Authorization: `Bearer ${world.tokens.dev}` }).send({ decision });
+    request(server).post(`${APPROVALS}/${approvalId}/decisions`).set({ Authorization: `Bearer ${world.tokens.dev}` }).send({ decision });
 
   beforeAll(async () => {
     saved['FLEET_THREADS_ENABLED'] = process.env['FLEET_THREADS_ENABLED'];
@@ -93,6 +95,7 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
     server = app.getHttpServer();
     prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
+    await grantKeys(prisma, { type: 'USER', id: world.ids.dev }, ['approval.decide'], world.projectId);
     await prisma.project.update({ where: { id: world.projectId }, data: { key: WEB_KEY } });
     const runner = await enrollRunner(server, world.tokens.root, 'add-memory-runner');
     await prisma.runner.update({
@@ -133,8 +136,8 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
     expect(isError).toBe(false);
     expect(content.startsWith('pending ')).toBe(true);
     const action = await actionOf('ac10');
-    expect(action).toMatchObject({ tool: TOOL, status: 'PENDING', actorType: 'user', actorId: world.ids.dev });
-    expect(content).toBe(`pending ${action.id}: awaiting user approval; do not retry`);
+    expect(action).toMatchObject({ tool: TOOL, status: 'pending', actorType: 'SYSTEM', actorId: 'assistant', onBehalfOfType: 'USER', onBehalfOfId: world.ids.dev });
+    expect(content).toBe(`pending ${action.id}: awaiting approval; do not retry`);
     // The stored preview is the text the user approves: the project slug, the key and the object, no replacement line.
     expect(action.preview).toBe('Remember in web: FACT api / runs on\nbun');
     // The audit row proves the call reached the registered tool rather than being refused by name.
@@ -147,7 +150,7 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
     const action = await propose('ac11');
 
     expect(await storedItems()).toEqual([]);
-    expect(action).toMatchObject({ status: 'PENDING' });
+    expect(action).toMatchObject({ status: 'pending' });
     // The preview saw no active item of that key: it carries no replacement line.
     expect(action.preview.split('\n')).toEqual(['Remember in web: FACT api / runs on', 'bun']);
   });
@@ -155,7 +158,7 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
   it('AC-12: after dev approves, koda_memory_search answers the memory:<id> of the stored item', async () => {
     const action = await propose('ac12');
 
-    await decide(action.approvalId, 'approve').expect(200);
+    await decide(action.id, 'approve').expect(200);
 
     const stored = await storedItems();
     expect(stored).toHaveLength(1);
@@ -164,8 +167,8 @@ describeIntegration('fleet assistant add memory tool (PG, US-006)', () => {
       kind: 'FACT', subject: 'api', predicate: 'runs on', object: 'bun',
       sourceType: 'thread', sourceId: repo.threadId, confidence: 0.8, ownerId: world.ids.dev,
     });
-    expect(await prisma.pendingAction.findUniqueOrThrow({ where: { id: action.id } }))
-      .toMatchObject({ status: 'EXECUTED', result: `memory:${item.id} saved` });
+    expect(await findThreadAction(prisma, { requestId: action.id }))
+      .toMatchObject({ status: 'executed', result: { text: `memory:${item.id} saved` } });
 
     const { content, isError } = resultOf(await callTool('ac12-search', { text: 'bun' }, SEARCH_TOOL).expect(200));
 

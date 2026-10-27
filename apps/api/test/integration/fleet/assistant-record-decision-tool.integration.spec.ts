@@ -1,3 +1,5 @@
+import { findThreadAction } from '../../helpers/assistant-request';
+import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b 2b1 US-007 — `koda_record_decision` through the real runner tool route against PG, and the decision it
@@ -5,7 +7,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
  *
  * Every call enters at `POST /fleet/runner/jobs/:jobId/tools/<name>?leaseEpoch=<n>` with the real runner key of the
  * runner that holds a RUNNING REPO THREAD job, and the decide enters the real project route
- * `POST /projects/web/fleet/approvals/:approvalId/decide`, so the ACs drive the whole path: runner authentication, the
+ * `POST /projects/web/fleet/approvals/:approvalId/decisions`, so the ACs drive the whole path: runner authentication, the
  * lease fence, the tool registry `MemoryWriteTools` filled at boot, the executor's write-tool branch, the propose
  * service and — on approve — `ExtractionService.recordDecision` for real, which writes the `DECISION` item through
  * `PrismaMemoryItemRepository` as the requester.
@@ -35,7 +37,7 @@ const ENV = ['FLEET_THREADS_ENABLED'] as const;
 /** The web project's key. */
 const WEB_KEY = 'KODA';
 const TOOL = 'koda_record_decision';
-const APPROVALS = '/api/projects/web/fleet/approvals';
+const APPROVALS = '/api/approvals';
 /** The decision every AC of this story proposes, and the topic it is recorded under. */
 const DECISION = { topic: 'db', decision: 'use postgres', rationale: 'one engine' };
 /** What the stored item's object is: the decision and its rationale, one blank line apart (2b1-D7). */
@@ -62,7 +64,7 @@ describeIntegration('fleet assistant record decision tool (PG, US-007)', () => {
 
   /** The stored action of one tool call, on the job the call entered through. */
   const actionOf = (toolCallId: string) =>
-    prisma.pendingAction.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId: repo.jobId, toolCallId } } });
+    findThreadAction(prisma, { jobId: repo.jobId, toolCallId });
 
   /** The active decisions of the topic every AC uses. */
   const storedDecisions = () =>
@@ -86,7 +88,7 @@ describeIntegration('fleet assistant record decision tool (PG, US-007)', () => {
 
   /** `dev` decides one approval; answers the decide response. */
   const decide = (approvalId: string, decision: string) =>
-    request(server).post(`${APPROVALS}/${approvalId}/decide`).set({ Authorization: `Bearer ${world.tokens.dev}` }).send({ decision });
+    request(server).post(`${APPROVALS}/${approvalId}/decisions`).set({ Authorization: `Bearer ${world.tokens.dev}` }).send({ decision });
 
   beforeAll(async () => {
     saved['FLEET_THREADS_ENABLED'] = process.env['FLEET_THREADS_ENABLED'];
@@ -96,6 +98,7 @@ describeIntegration('fleet assistant record decision tool (PG, US-007)', () => {
     server = app.getHttpServer();
     prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
+    await grantKeys(prisma, { type: 'USER', id: world.ids.dev }, ['approval.decide'], world.projectId);
     await prisma.project.update({ where: { id: world.projectId }, data: { key: WEB_KEY } });
     const runner = await enrollRunner(server, world.tokens.root, 'record-decision-runner');
     await prisma.runner.update({
@@ -136,8 +139,8 @@ describeIntegration('fleet assistant record decision tool (PG, US-007)', () => {
     expect(isError).toBe(false);
     expect(content.startsWith('pending ')).toBe(true);
     const action = await actionOf('us007-ac10');
-    expect(action).toMatchObject({ tool: TOOL, status: 'PENDING', actorType: 'user', actorId: world.ids.dev });
-    expect(content).toBe(`pending ${action.id}: awaiting user approval; do not retry`);
+    expect(action).toMatchObject({ tool: TOOL, status: 'pending', actorType: 'SYSTEM', actorId: 'assistant', onBehalfOfType: 'USER', onBehalfOfId: world.ids.dev });
+    expect(content).toBe(`pending ${action.id}: awaiting approval; do not retry`);
     // The stored preview is the text the user approves: the slug, the quoted topic, the decision and the rationale,
     // with no supersession line, because dev holds no active decision on `db` yet.
     expect(action.preview).toBe('Record a decision in web on "db": use postgres\nRationale: one engine');
@@ -152,7 +155,7 @@ describeIntegration('fleet assistant record decision tool (PG, US-007)', () => {
     // A proposal writes nothing: the decision exists only once the user decides.
     expect(await storedDecisions()).toEqual([]);
 
-    await decide(action.approvalId, 'approve').expect(200);
+    await decide(action.id, 'approve').expect(200);
 
     const stored = await storedDecisions();
     expect(stored).toHaveLength(1);
@@ -166,7 +169,7 @@ describeIntegration('fleet assistant record decision tool (PG, US-007)', () => {
       sourceType: 'decision_event',
       sourceId: `thread:${repo.threadId}`,
     });
-    expect(await prisma.pendingAction.findUniqueOrThrow({ where: { id: action.id } }))
-      .toMatchObject({ tool: TOOL, status: 'EXECUTED', result: `decision memory:${item.id} recorded` });
+    expect(await findThreadAction(prisma, { requestId: action.id }))
+      .toMatchObject({ tool: TOOL, status: 'executed', result: { text: `decision memory:${item.id} recorded` } });
   });
 });

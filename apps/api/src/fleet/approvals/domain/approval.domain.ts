@@ -1,7 +1,7 @@
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 
-export const APPROVAL_TYPES = ['budget_override_required', 'nax_bash_escalate', 'assistant_action'] as const;
+export const APPROVAL_TYPES = ['budget_override_required', 'nax_bash_escalate'] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
 export const APPROVAL_STATUSES = ['pending', 'approved', 'rejected', 'expired', 'cancelled'] as const;

@@ -3,11 +3,6 @@ import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module
 import { findCatalogEntry } from '../../permissions/catalog';
 import { MemoryGovernanceService } from '../../memory/memory-governance.service';
 import { ProjectsService } from '../../projects/projects.service';
-import { AssistantActionPort } from '../approvals/assistant-action.port';
-import { ApprovalsService } from '../approvals/approvals.service';
-import { AssistantActionDecisions } from './actions/assistant-action-decisions';
-import { PendingActionExpirySweeper } from './actions/pending-action-expiry.sweeper';
-import { PrismaPendingActionRepository } from './actions/prisma-pending-action.repository';
 import { AssistantModule } from './assistant.module';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
@@ -18,6 +13,20 @@ import { FleetWriteTools } from './tools/fleet-write-tools';
 import { KnowledgeTools } from './tools/knowledge-tools';
 import { MemoryWriteTools } from './tools/memory-write-tools';
 
+import { ApprovalCommandRegistry } from '../../approvals/approval-command.registry';
+
+const commandSamples: Record<string, unknown> = {
+  'comment.create': { ref: 'KODA-1', body: 'hello' },
+  'ticket.create': { tickets: [{ title: 'A ticket', type: 'TASK' }] },
+  'ticket.update': { ref: 'KODA-1', title: 'Updated' },
+  'ticket.link.add': { links: [{ ref: 'KODA-1', url: 'https://example.com' }] },
+  'memory.create': { kind: 'FACT', subject: 'subject', predicate: 'predicate', object: 'value' },
+  'memory.decision.record': { topic: 'topic', decision: 'decision' },
+  'fleet.job.dispatch': { repo: 'owner/repo', command: 'RUN', feature: 'feature', maxCostUsd: 1 },
+  'fleet.job.cancel': { jobId: 'j1' },
+  'fleet.job.requeue': { jobId: 'j1' },
+};
+
 describe('AssistantModule', () => {
   let module: TestingModule;
 
@@ -27,6 +36,20 @@ describe('AssistantModule', () => {
 
   afterEach(async () => {
     await module.close();
+  });
+
+  it('AC-1 / AC-7: registers exactly nine write commands whose parsers accept their own outputs', async () => {
+    await module.init();
+    const registry = module.get(ApprovalCommandRegistry);
+    const tools = module.get(AssistantToolRegistry).list().filter((tool) => tool.kind === 'write');
+    expect(tools.map((tool) => tool.key).sort()).toEqual(Object.keys(commandSamples).sort());
+    for (const tool of tools) {
+      const command = registry.get(tool.key);
+      expect(command, tool.key).toBeDefined();
+      if (!command) throw new Error(`missing command: ${tool.key}`);
+      const parsed = command.parse({ projectId: 'p1', threadId: null, jobId: null, args: commandSamples[tool.key] });
+      expect(command.parse(parsed), tool.key).toEqual(parsed);
+    }
   });
 
   it('AC-15: compiles and resolves AssistantToolExecutor', () => {
@@ -180,29 +203,4 @@ describe('AssistantModule', () => {
     expect(tool?.key).toBe('assistant.action.read');
   });
 
-  it('US-007: provides the action expiry sweeper, which resolves the decide handler and the action repository', () => {
-    const sweeper = module.get(PendingActionExpirySweeper);
-    expect(sweeper).toBeInstanceOf(PendingActionExpirySweeper);
-    expect((sweeper as unknown as { actions: unknown }).actions).toBeInstanceOf(PrismaPendingActionRepository);
-    expect((sweeper as unknown as { decisions: unknown }).decisions).toBeInstanceOf(AssistantActionDecisions);
-  });
-
-  it('US-005: ApprovalsService and AssistantActionDecisions share one AssistantActionPort instance', () => {
-    const port = module.get(AssistantActionPort);
-    expect(port).toBeInstanceOf(AssistantActionPort);
-    expect((module.get(ApprovalsService) as unknown as { assistantActions: unknown }).assistantActions).toBe(port);
-    expect((module.get(AssistantActionDecisions) as unknown as { port: unknown }).port).toBe(port);
-  });
-
-  it('US-005: init() registers the decide handler, so the port forwards to it', async () => {
-    const decisions = module.get(AssistantActionDecisions);
-    const decide = vi.spyOn(decisions, 'decide').mockResolvedValue({ id: 'a1' } as never);
-    const port = module.get(AssistantActionPort);
-    expect(() => port.decide({ id: 'u1' }, { id: 'a1' } as never, { decision: 'reject' }, new Date())).toThrow(expect.objectContaining({ prefix: 'threads.disabled' }));
-
-    await module.init();
-    await port.decide({ id: 'u1' }, { id: 'a1' } as never, { decision: 'reject' }, new Date());
-
-    expect(decide).toHaveBeenCalledTimes(1);
-  });
 });

@@ -1,16 +1,20 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { withCommittedEffects } from '../../common/committed-effects';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { isAgentPrincipal, type AgentPrincipal, type KodaAgentStatus, type UserPrincipal } from '../../auth/principal/koda-principal.types';
-import { runWithActionContext, type ActionActor, type ActionApproval } from '../../action-context/action-context';
+import { runWithActionContext, type ActionActor } from '../../action-context/action-context';
 import { isUniqueViolation } from '../../common/utils/prisma-errors';
 import { KeyedMutex } from '../../common/utils/keyed-mutex';
-import type { ApprovalMode } from '../../permissions/catalog';
 import { PermissionService } from '../../permissions/permission.service';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import { stableStringify } from '../sync/stable-json';
-import { MAX_PENDING_ACTIONS, type ActionProposer, type PendingActionRecord } from './actions/pending-action.domain';
-import { approvalModeFor } from './actions/approval-policy';
+import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
+import { ApprovalGate } from '../../approvals/approval-gate.service';
+import { ApprovalPolicyResolver } from '../../approvals/approval-policy.resolver';
+import { bookkeeping } from '../../action-context/audit-coverage';
+import { ThreadEventBus } from '../../live/thread-event-bus';
+import { ASSISTANT_ACTION_REQUEST_REPOSITORY, MAX_PENDING_ACTIONS, type AssistantActionRequestRepository } from './requests/assistant-action-request.domain';
 import { capText, fenceData, maskSecrets } from './assistant-tool-safety';
 import {
   ASSISTANT_TOOL_CALL_REPOSITORY, type AgentToolCallCreator, type AssistantToolCallRecord, type AssistantToolCallRepository,
@@ -32,25 +36,10 @@ export interface ToolCall {
   input: unknown;
 }
 
-/** 2a-D8 step 8: what running an approved action answered. `text` is what the action stores as its result. */
-export interface ActionOutcome {
-  ok: boolean;
-  text: string;
-}
-
-/** What an approved action runs with: the tool and the requester's own principal. */
-interface ActionScope {
-  tool: AssistantTool;
-  actor: UserPrincipal;
-}
-
 /** Fleet S5b §1 (US-002): runs a koda tool for the job's requester — a user, or an agent — with the permission they would have in the web. */
 @Injectable()
 export class AssistantToolExecutor {
   private readonly logger = new Logger(AssistantToolExecutor.name);
-
-  /** 2a-D1: attached by `AssistantActionService.onModuleInit`, which is how the two providers stay acyclic. */
-  private actions: ActionProposer | null = null;
 
   /** B1: one critical section per replay key, so a duplicate of a thread call awaits the winner instead of running it. */
   private readonly replayKeys = new KeyedMutex();
@@ -60,106 +49,12 @@ export class AssistantToolExecutor {
     @Inject(ASSISTANT_TOOL_CALL_REPOSITORY) private readonly calls: AssistantToolCallRepository,
     private readonly access: ProjectAccessService,
     private readonly permissions: PermissionService,
+    private readonly gate: ApprovalGate,
+    private readonly resolver: ApprovalPolicyResolver,
+    @Inject(ASSISTANT_ACTION_REQUEST_REPOSITORY) private readonly links: AssistantActionRequestRepository,
+    private readonly threadEvents: ThreadEventBus,
+    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
-
-  /** 2a-D1: the late binding of the propose side; the constructor is unchanged so no provider depends on the service. */
-  attachActions(actions: ActionProposer): void {
-    this.actions = actions;
-  }
-
-  /**
-   * 2a-D8 step 5 + 3-D12: whether the requester may still run this action's tool. The requester is the action's own
-   * actor — the principal that asked for the write, never the approver (3-R3) — re-read now, and their membership and
-   * catalog key are re-resolved against the project the action acts in (2a-D3; permissions P1 US-004), never the
-   * thread's home project. A tool that left the registry, an actor who is gone or disabled, an actor that is not a
-   * user (no code default produces one; koda #301), a requester outside that project and a requester who no longer
-   * holds the tool's key all answer `forbidden`, so an approve writes nothing for any of them.
-   */
-  async checkAction(action: PendingActionRecord): Promise<'ok' | 'forbidden'> {
-    return (await this.actionScope(action)) === null ? 'forbidden' : 'ok';
-  }
-
-  /**
-   * 2a-D8 step 8: runs an approved action's tool as the requester. The context is built fresh from the action — its
-   * project slug, its thread and job, a new fence — so nothing the proposing call held leaks in. The tool's own
-   * failures are data, not exceptions: `not_found` for a target that is gone, a `ToolActionError`'s text for a tool
-   * that failed partway (2b1-D2), `error: <tool> failed` for anything else, with the stack logged. A successful
-   * result is capped at `RESULT_CAP_BYTES` before it is stored, exactly as a partial outcome's text is; the two
-   * refusal texts are constants far below it.
-   *
-   * Both stored texts pass through `maskSecrets` first (branch review B2): whatever a tool echoes back — a URL a
-   * link wrote, a batch line quoting one — becomes the action's `result`, and from there the text of the thread's
-   * outcome note and of the next turn's delivery to the agent. Masking here is what keeps a credential a tool
-   * merely repeated out of all three.
-   */
-  async executeAction(action: PendingActionRecord): Promise<ActionOutcome> {
-    const scope = await this.actionScope(action);
-    if (!scope) return { ok: false, text: `error: ${action.tool} failed` };
-    try {
-      // Permissions P1 US-001 / P2 US-003: the approve path runs the tool inside the assistant's action context on
-      // behalf of the requester, carrying the action's own approval block, so a service the tool calls attributes its
-      // writes to that principal (`actorTypeFor` reads `onBehalfOf`) and an audit row can name the approval.
-      // `actionScope` admits users only, so the requester's type is USER; authority stays the requester's — the actor
-      // here changes attribution only.
-      const text = await runWithActionContext(
-        {
-          actor: ASSISTANT_ACTOR,
-          onBehalfOf: { type: 'USER', id: scope.actor.id },
-          origin: 'thread',
-          approval: approvalFor(action),
-        },
-        () => scope.tool.execute(this.actionContext(action, scope.actor), scope.tool.parse(action.input)),
-      );
-      return { ok: true, text: capText(maskSecrets(text), RESULT_CAP_BYTES) };
-    } catch (error) {
-      if (error instanceof NotFoundAppException) return { ok: false, text: 'not_found' };
-      // 2b1-D2: what the tool already wrote is the outcome, so it is answered as stored text and never logged as a
-      // failure of its own. The action's `result` gets the same cap, so a long batch result stays readable.
-      if (error instanceof ToolActionError) return { ok: false, text: capText(maskSecrets(error.text), RESULT_CAP_BYTES) };
-      this.logger.error(
-        `koda action ${action.id} tool ${action.tool} failed for job ${action.jobId}`,
-        error instanceof Error ? error.stack : String(error),
-      );
-      return { ok: false, text: `error: ${action.tool} failed` };
-    }
-  }
-
-  /**
-   * The tool and the requester an action runs as; null when the registry, actor, membership or key gate refuses.
-   */
-  private async actionScope(action: PendingActionRecord): Promise<ActionScope | null> {
-    const tool = this.registry.get(action.tool);
-    if (!tool) return null;
-    // 3-D12: the actor is the requesting principal (3-R3), so a non-user actor is refused before any read. Only MCP
-    // actions carry one today, and no default serves them yet (koda #301).
-    if (action.actorType !== 'user') return null;
-    const requester = await this.calls.findUserActor(action.actorId);
-    if (!requester || requester.disabled) return null;
-    const principal = userPrincipal(requester);
-    // The membership check still admits or refuses, but its display role no longer decorates the actor
-    // (permissions P1 US-004): the tool acts as the requester's own principal.
-    if ((await this.membership(action.projectId, principal)) === undefined) return null;
-    // Permissions P1 US-004: the approve re-checks the tool's catalog key in the action's own project, exactly as
-    // the proposing call checked it, so a requester who lost the key between the proposal and the approve writes
-    // nothing. An implicit key answers allowed, as it does on the call path.
-    if (!(await this.can(principal, tool.key, action.projectId))) return null;
-    return { tool, actor: principal };
-  }
-
-  /** The action's own scope, exactly as `propose` recorded it: its project, its thread, its job and a fresh fence. */
-  private actionContext(action: PendingActionRecord, actor: UserPrincipal): ToolContext {
-    const token = randomBytes(8).toString('hex');
-    return {
-      projectId: action.projectId,
-      projectSlug: action.projectSlug,
-      actor,
-      threadId: action.threadId,
-      jobId: action.jobId,
-      now: new Date(),
-      data: (text) => fenceData(maskSecrets(text), token),
-      can: (key) => this.can(actor, key, action.projectId),
-    };
-  }
 
   /**
    * The thread call path. Its replay key `(jobId, toolCallId)` is a critical section, not a read-then-write: a stored
@@ -355,21 +250,9 @@ export class AssistantToolExecutor {
     }
   }
 
-  /** 3-D13/15: resolve policy once, after permission and before preview. Only none and thread-human are served. */
+  /** Preview before resolving thread policy; only a waiting write takes the thread lock. */
   private async writeTool(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, ctx: ToolContext): Promise<RunOutcome> {
     const name = tool.descriptor.name;
-    // Permissions P1 US-001: the caller's type decides the code default — a user's thread write waits for a human, an
-    // agent's runs at once (and every MCP write runs at once, as before).
-    const mode = approvalModeFor(caller.origin, name, isAgentPrincipal(caller.principal) ? 'agent' : 'user');
-    if (mode !== 'none' && !(mode === 'human' && caller.origin.kind === 'thread')) {
-      this.logger.error(`koda write tool ${name} refused approval mode ${mode} for ${caller.origin.kind}`);
-      return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
-    }
-    const actions = this.actions;
-    if (!actions) {
-      this.logger.warn(`koda write tool ${name} has no action proposer attached; job ${call.jobId} answered error`);
-      return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
-    }
     const prepare = tool.preview;
     if (!prepare) {
       this.logger.error(`koda write tool ${name} declares no preview; job ${call.jobId} answered error`);
@@ -388,69 +271,91 @@ export class AssistantToolExecutor {
       this.logger.error(`koda tool ${name} failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
       return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
     }
-    if (mode === 'none') return this.directWrite(call, tool, caller, scope, ctx, actions, preview);
-    return this.proposeWrite(call, tool, caller, scope, ctx, actions, preview);
+    if (caller.origin.kind === 'mcp') return this.mcpWrite(call, tool, scope);
+    const mode = (await this.resolver.resolve({ key: tool.key, projectId: scope.id, subject: { type: 'ASSISTANT', id: 'assistant' } })).mode;
+    if (mode !== 'none') return this.waitingWrite(call, tool, caller, scope, preview);
+    return this.directThreadWrite(call, tool, caller, scope, preview);
   }
 
-  /** The existing human proposal path retains its thread, user and replay-key requirements. */
-  private async proposeWrite(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, ctx: ToolContext, actions: ActionProposer, preview: string): Promise<RunOutcome> {
+  /** MCP writes are the calling agent's own actions; pending requests need no thread bookkeeping. */
+  private async mcpWrite(call: RunCall, tool: AssistantTool, scope: ToolScope): Promise<RunOutcome> {
     const name = tool.descriptor.name;
-    const origin = caller.origin;
-    if (origin.kind !== 'thread' || call.jobId === null || call.toolCallId === null || isAgentPrincipal(caller.principal)) {
+    try {
+      const gated = await this.gate.gate<{ text: string }>(tool.key, {
+        projectId: scope.id, threadId: null, jobId: null, args: scope.input,
+      }, { projectId: scope.id });
+      if (gated.status === 'executed') return { outcome: 'ok', content: gated.result.text, projectId: scope.id };
+      return { ...refusal('pending', `pending ${gated.request.id}: awaiting approval; do not retry`), projectId: scope.id };
+    } catch (error) {
+      if (error instanceof NotFoundAppException) return { ...refusal('not_found', 'not_found'), projectId: scope.id };
+      if (error instanceof ToolActionError) return { ...refusal('error', capText(maskSecrets(error.text), RESULT_CAP_BYTES)), projectId: scope.id };
+      this.logger.error(`koda tool ${name} failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
       return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
     }
-    const proposed = await actions.propose({
-      projectId: scope.id,
-      threadId: origin.threadId,
-      threadKind: origin.threadKind,
-      threadProjectSlug: origin.homeProject.slug,
-      jobId: call.jobId,
-      toolCallId: call.toolCallId,
-      tool: name,
-      // 2a-D3: `PendingAction.input` is the parsed input, and a write tool's parser answers a JSON object.
-      input: scope.input as Record<string, unknown>,
-      preview,
-      actorId: caller.principal.id,
-      now: ctx.now,
-    });
-    if ('refused' in proposed) return { ...refusal('refused', REFUSED_CONTENT), projectId: scope.id };
-    return { ...refusal('pending', `pending ${proposed.actionId}: awaiting user approval; do not retry`), projectId: scope.id };
   }
 
-  /** 3-D15: the write stands even if recording fails; never retry it or turn it into a proposal. */
-  private async directWrite(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, ctx: ToolContext, actions: ActionProposer, preview: string): Promise<RunOutcome> {
+  /** A none-mode thread write executes through the gate without an enclosing transaction or thread lock. */
+  private async directThreadWrite(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, preview: string): Promise<RunOutcome> {
     const name = tool.descriptor.name;
-    let outcome: ToolCallOutcome = 'ok';
-    let text: string;
+    if (caller.origin.kind !== 'thread') return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
+    const thread = caller.origin;
     try {
-      text = await tool.execute(ctx, scope.input);
-    } catch (error) {
-      outcome = error instanceof NotFoundAppException ? 'not_found' : 'error';
-      if (error instanceof NotFoundAppException) text = 'not_found';
-      else if (error instanceof ToolActionError) text = error.text;
-      else {
-        this.logger.error(`koda tool ${name} failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
-        text = `error: ${name} failed`;
+      const gated = await this.gate.gate<{ text: string }>(tool.key, {
+        projectId: scope.id, threadId: thread.threadId, jobId: thread.jobId, args: scope.input,
+      }, { projectId: scope.id });
+      if (gated.status === 'executed') return { outcome: 'ok', content: gated.result.text, projectId: scope.id };
+      const requestId = gated.request.id;
+      if (!(await this.links.findByRequest(requestId))) {
+        try {
+          await bookkeeping('assistant.action-request-link', () => this.links.insert({
+            requestId, threadId: thread.threadId, jobId: thread.jobId,
+            toolCallId: call.toolCallId, tool: name, preview,
+          }));
+          this.threadEvents.publish({ id: randomUUID(), threadId: thread.threadId, type: 'thread', at: new Date().toISOString() });
+        } catch (error) {
+          // Another call may have linked the same pending request after our lookup. Treat only that requestId
+          // uniqueness race as success; unrelated insert failures must retain the normal error mapping.
+          if (!isUniqueViolation(error, 'requestId') || !(await this.links.findByRequest(requestId))) throw error;
+        }
       }
-    }
-    text = capText(maskSecrets(text), RESULT_CAP_BYTES - 64);
-    try {
-      const { actionId } = await actions.recordDirect({
-        projectId: scope.id,
-        tool: name,
-        input: scope.input,
-        preview,
-        actorType: isAgentPrincipal(caller.principal) ? 'agent' : 'user',
-        actorId: caller.principal.id,
-        origin: caller.origin.kind,
-        status: outcome === 'ok' ? 'EXECUTED' : 'FAILED',
-        result: text,
-        now: ctx.now,
-      });
-      return { outcome, content: `${text}\naction ${actionId}`, projectId: scope.id };
+      return { ...refusal('pending', `pending ${requestId}: awaiting approval; do not retry`), projectId: scope.id };
     } catch (error) {
-      this.logger.error(`koda tool ${name} action recording failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
-      return { ...refusal('error', `error: ${name} failed (the change was made but its action was not recorded)`), projectId: scope.id };
+      if (error instanceof NotFoundAppException) return { ...refusal('not_found', 'not_found'), projectId: scope.id };
+      if (error instanceof ToolActionError) return { ...refusal('error', capText(maskSecrets(error.text), RESULT_CAP_BYTES)), projectId: scope.id };
+      this.logger.error(`koda tool ${name} failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
+      return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
+    }
+  }
+
+  /** Waiting writes normally run no tool: the lock protects the cap and request link together. */
+  private async waitingWrite(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, preview: string): Promise<RunOutcome> {
+    const name = tool.descriptor.name;
+    const origin = caller.origin;
+    if (origin.kind !== 'thread') return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
+    try {
+      let linked = false;
+      const outcome = await withCommittedEffects(() => this.txManager.run(async (): Promise<RunOutcome> => {
+        if (!(await this.links.lockThread(origin.threadId))) return refusal('not_found', 'not_found');
+        if (await this.links.countPendingInThread(origin.threadId) >= MAX_PENDING_ACTIONS) return refusal('refused', REFUSED_CONTENT);
+        const gated = await this.gate.gate<{ text: string }>(tool.key, {
+          projectId: scope.id, threadId: origin.threadId, jobId: origin.jobId, args: scope.input,
+        }, { projectId: scope.id });
+        // Policy may have changed since resolution. An executed result is not a pending request.
+        if (gated.status === 'executed') return { outcome: 'ok', content: gated.result.text };
+        const requestId = gated.request.id;
+        if (!(await this.links.findByRequest(requestId))) {
+          await bookkeeping('assistant.action-request-link', () => this.links.insert({
+            requestId, threadId: origin.threadId, jobId: origin.jobId, toolCallId: call.toolCallId, tool: name, preview,
+          }));
+          linked = true;
+        }
+        return refusal('pending', `pending ${requestId}: awaiting approval; do not retry`);
+      }));
+      if (linked) this.threadEvents.publish({ id: randomUUID(), threadId: origin.threadId, type: 'thread', at: new Date().toISOString() });
+      return { ...outcome, projectId: scope.id };
+    } catch (error) {
+      this.logger.error(`koda tool ${name} failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
+      return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
     }
   }
 
@@ -482,32 +387,6 @@ type RunCall = { name: string; input: unknown; jobId: string | null; toolCallId:
 const ASSISTANT_ACTOR: ActionActor = Object.freeze({ type: 'SYSTEM', id: 'assistant' });
 
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
-
-/**
- * Permissions P2 US-003: the approval block an approved action carries — what policy demanded, how it was satisfied,
- * and who approved it. Before P3 sets a floor the only approval an assistant action carries is the approving human or
- * agent (`approvalMode`), and an action with no approver type records `satisfiedBy: 'none'` with no approver fields at
- * all: `approverType` and `approverId` are independently nullable, and an id without a type names nobody.
- */
-function approvalFor(action: PendingActionRecord): ActionApproval {
-  const approval: ActionApproval = {
-    requiredMode: action.approvalMode,
-    satisfiedBy: approverTier(action.approverType),
-    requestId: action.id,
-  };
-  if (action.approverType !== null) {
-    approval.approverType = action.approverType === 'user' ? 'USER' : 'AGENT';
-    if (action.approverId !== null) approval.approverId = action.approverId;
-  }
-  return approval;
-}
-
-/** A USER approver is a human decision, an AGENT approver an agent one; no approver met no floor. */
-function approverTier(approverType: 'user' | 'agent' | null): ApprovalMode {
-  if (approverType === 'user') return 'human';
-  if (approverType === 'agent') return 'agent';
-  return 'none';
-}
 
 /** B1: the audit's replay key as a mutex key. The `/` separator keeps `('j1', 'c/1')` apart from `('j1/c', '1')`. */
 const replayKey = (jobId: string, toolCallId: string): string => `${jobId}/${toolCallId}`;
@@ -567,7 +446,7 @@ function parseInput(tool: AssistantTool, input: unknown): { value: unknown } | {
 }
 
 /** The creator acts with the principal their login would produce. No project role decorates it (permissions P1 US-004). */
-function userPrincipal(creator: UserToolCallCreator): UserPrincipal {
+export function userPrincipal(creator: UserToolCallCreator): UserPrincipal {
   const role = creator.role === 'ADMIN' ? 'ADMIN' : 'MEMBER';
   return {
     actorType: 'user',
@@ -591,7 +470,7 @@ const isAgentCreator = (creator: ToolCallCreator): creator is AgentToolCallCreat
  * agent is blacklisted (the one status that removes access); `disabled` stays false because an agent's status is
  * liveness, not access.
  */
-function agentPrincipal(creator: AgentToolCallCreator): AgentPrincipal {
+export function agentPrincipal(creator: AgentToolCallCreator): AgentPrincipal {
   return {
     actorType: 'agent',
     id: creator.id,

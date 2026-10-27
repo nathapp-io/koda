@@ -8,7 +8,7 @@ export const MAX_DELIVERED_NOTES = 20;
  * 2a-D9: the statuses that have an `outcomeNote`, so the only ones `sendMessage` marks delivered (2aw-D3) and the
  * only ones `findThreadAssign` rebuilds the text from (2aw-D4).
  */
-export const DELIVERABLE_STATUSES = ['EXECUTED', 'FAILED', 'REJECTED', 'EXPIRED'] as const;
+export const DELIVERABLE_STATUSES = ['executed', 'failed', 'rejected', 'expired', 'cancelled'] as const;
 
 /**
  * 2aw-D2: the text the agent receives: the header, one note per line block, a blank line, then the user's text.

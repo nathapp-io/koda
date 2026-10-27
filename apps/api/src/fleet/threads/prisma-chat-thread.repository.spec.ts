@@ -1,8 +1,9 @@
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { Prisma } from '../../generated/prisma/client';
-import { MAX_PENDING_ACTIONS, type PendingActionStatus } from '../assistant/actions/pending-action.domain';
+import { MAX_PENDING_ACTIONS } from '../assistant/requests/assistant-action-request.domain';
 import { DELIVERABLE_STATUSES, DELIVERY_HEADER, deliveryText } from '../assistant/actions/outcome-delivery';
-import { outcomeNote } from '../assistant/actions/outcome-note';
+import { requestOutcomeNote } from '../assistant/requests/request-outcome-note';
+import type { ApprovalRequestStatus } from '../../../approvals/domain/approval.domain';
 import { THREAD_LIMITS } from '../common/thread-jobs';
 import { PrismaChatThreadRepository } from './prisma-chat-thread.repository';
 
@@ -302,28 +303,28 @@ describe('PrismaChatThreadRepository.pendingActions (S5b US-004)', () => {
   const expiresAt = new Date('2026-10-24T09:00:00.000Z');
 
   const actionRow = (over: Record<string, unknown> = {}) => ({
-    id: 'A1', projectId: 'P-web', approvalId: 'AP1', tool: 'koda_add_comment',
-    preview: 'Add a comment to KODA-1 "Fix login":\n\nhello', expiresAt, createdAt, ...over,
+    requestId: 'REQ1', tool: 'koda_add_comment', preview: 'Add a comment to KODA-1 "Fix login":\n\nhello', createdAt,
+    request: { id: 'REQ1', projectId: 'P-web', status: 'pending', expiresAt }, ...over,
   });
 
   function repoWith(rows: Array<Record<string, unknown>>, projects: Array<{ id: string; slug: string }>) {
-    const pendingFindMany = vi.fn(async () => rows);
+    const linkedFindMany = vi.fn(async () => rows);
     const projectFindMany = vi.fn(async () => projects);
-    const prisma = { client: { pendingAction: { findMany: pendingFindMany }, project: { findMany: projectFindMany } } } as never;
+    const prisma = { client: { assistantActionRequest: { findMany: linkedFindMany }, project: { findMany: projectFindMany } } } as never;
     const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder);
-    return { repo, pendingFindMany, projectFindMany };
+    return { repo, linkedFindMany, projectFindMany };
   }
 
-  it('AC-1: reads only the thread PENDING actions, oldest first, capped at MAX_PENDING_ACTIONS', async () => {
-    const { repo, pendingFindMany } = repoWith([actionRow()], []);
+  it('AC-1: reads linked pending requests in thread scope, oldest first, capped at MAX_PENDING_ACTIONS', async () => {
+    const { repo, linkedFindMany } = repoWith([actionRow()], []);
 
     await repo.pendingActions({ kind: 'project', projectId: 'P-web' }, 'T');
 
-    expect(pendingFindMany).toHaveBeenCalledWith({
-      where: { threadId: 'T', status: 'PENDING', thread: { projectId: 'P-web', kind: { not: 'WORKSPACE' } } },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    expect(linkedFindMany).toHaveBeenCalledWith({
+      where: { threadId: 'T', request: { status: 'pending' }, thread: { projectId: 'P-web', kind: { not: 'WORKSPACE' } } },
+      orderBy: [{ createdAt: 'asc' }, { requestId: 'asc' }],
       take: MAX_PENDING_ACTIONS,
-      select: { id: true, projectId: true, approvalId: true, tool: true, preview: true, expiresAt: true, createdAt: true },
+      select: { requestId: true, tool: true, preview: true, createdAt: true, request: { select: { id: true, projectId: true, expiresAt: true } } },
     });
   });
 
@@ -332,19 +333,19 @@ describe('PrismaChatThreadRepository.pendingActions (S5b US-004)', () => {
    * its own can never read a preview outside its scope.
    */
   it('M1: carries the workspace fence in the query, so only the owner\'s WORKSPACE thread matches', async () => {
-    const { repo, pendingFindMany } = repoWith([actionRow()], [{ id: 'P-web', slug: 'web' }]);
+    const { repo, linkedFindMany } = repoWith([actionRow()], [{ id: 'P-web', slug: 'web' }]);
 
     await repo.pendingActions({ kind: 'workspace', userId: 'U1' }, 'T');
 
-    expect(pendingFindMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { threadId: 'T', status: 'PENDING', thread: { createdById: 'U1', kind: 'WORKSPACE' } },
+    expect(linkedFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { threadId: 'T', request: { status: 'pending' }, thread: { createdById: 'U1', kind: 'WORKSPACE' } },
     }));
   });
 
   it('M1: a thread outside the caller\'s scope answers no previews, even with no prior get()', async () => {
-    const pendingFindMany = vi.fn(async ({ where }: { where: { thread: { projectId?: string } } }) =>
+    const linkedFindMany = vi.fn(async ({ where }: { where: { thread: { projectId?: string } } }) =>
       where.thread.projectId === 'P-other' ? [actionRow()] : []);
-    const prisma = { client: { pendingAction: { findMany: pendingFindMany }, project: { findMany: vi.fn(async () => []) } } } as never;
+    const prisma = { client: { assistantActionRequest: { findMany: linkedFindMany } } } as never;
     const repo = new PrismaChatThreadRepository(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, mockAuditRecorder);
 
     expect(await repo.pendingActions({ kind: 'project', projectId: 'P-mine' }, 'T')).toEqual([]);
@@ -356,34 +357,31 @@ describe('PrismaChatThreadRepository.pendingActions (S5b US-004)', () => {
     const [entry] = await repo.pendingActions({ kind: 'project', projectId: 'P-web' }, 'T');
 
     expect(entry).toEqual({
-      id: 'A1', approvalId: 'AP1', tool: 'koda_add_comment',
+      id: 'REQ1', approvalId: 'REQ1', tool: 'koda_add_comment',
       preview: 'Add a comment to KODA-1 "Fix login":\n\nhello', projectSlug: 'web', expiresAt, createdAt,
     });
     expect(Object.keys(entry as object).sort()).toEqual(['approvalId', 'createdAt', 'expiresAt', 'id', 'preview', 'projectSlug', 'tool']);
   });
 
-  it('AC-4: each entry carries its own action project slug, read as one join', async () => {
-    const { repo, projectFindMany } = repoWith(
-      [actionRow({ id: 'A1', projectId: 'P-ops' }), actionRow({ id: 'A2', projectId: 'P-web' })],
-      [{ id: 'P-ops', slug: 'ops' }, { id: 'P-web', slug: 'web' }],
-    );
+  it('AC-4: each entry carries the slug of its own request project', async () => {
+    const { repo } = repoWith([
+      actionRow({ requestId: 'REQ1', request: { id: 'REQ1', projectId: 'P-ops', status: 'pending', expiresAt } }),
+      actionRow({ requestId: 'REQ2', request: { id: 'REQ2', projectId: 'P-web', status: 'pending', expiresAt } }),
+    ], [{ id: 'P-ops', slug: 'ops' }, { id: 'P-web', slug: 'web' }]);
 
     const entries = await repo.pendingActions({ kind: 'project', projectId: 'P-ops' }, 'T');
 
     expect(entries.map((entry) => entry.projectSlug)).toEqual(['ops', 'web']);
-    expect(projectFindMany).toHaveBeenCalledWith({ where: { id: { in: ['P-ops', 'P-web'] } }, select: { id: true, slug: true } });
   });
 
-  it('AC-5: a thread with no pending action answers an empty array and reads no project', async () => {
-    const { repo, projectFindMany } = repoWith([], [{ id: 'P-web', slug: 'web' }]);
-
+  it('AC-5: a thread with no pending request answers an empty array', async () => {
+    const { repo } = repoWith([], []);
     expect(await repo.pendingActions({ kind: 'project', projectId: 'P-web' }, 'T')).toEqual([]);
-    expect(projectFindMany).not.toHaveBeenCalled();
   });
 
-  it('maps a missing approval link to a null approvalId', async () => {
-    const { repo } = repoWith([actionRow({ approvalId: null })], [{ id: 'P-web', slug: 'web' }]);
-    expect((await repo.pendingActions({ kind: 'project', projectId: 'P-web' }, 'T'))[0]?.approvalId).toBeNull();
+  it('uses the request id as both detail ids', async () => {
+    const { repo } = repoWith([actionRow()], []);
+    expect((await repo.pendingActions({ kind: 'project', projectId: 'P-web' }, 'T'))[0]).toMatchObject({ id: 'REQ1', approvalId: 'REQ1' });
   });
 });
 
@@ -451,7 +449,7 @@ describe('PrismaChatThreadRepository SESSION turn instructions (S5b US-003)', ()
         fleetThreadTurn: { findFirst: vi.fn(async () => null), create: turnCreate },
         fleetRepo: { findUnique: repoFindUnique, findFirst: anchorFindFirst },
         project: { findUnique: projectFindUnique },
-        pendingAction: { findMany: async () => [], updateMany: async () => ({ count: 0 }) },
+        assistantActionRequest: { findMany: async () => [], updateMany: async () => ({ count: 0 }) },
         $queryRaw: vi.fn(async () => [{ nextSeq: 1 }]),
       },
     };
@@ -543,27 +541,30 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
     deliveredAt: null, deliveredMessageId: null, createdAt: new Date('2026-01-01T00:00:00.000Z'), ...over,
   });
 
-  /** The note the delivered text carries, built with the real US-001 helper. */
-  const noteOf = (a: StoredAction): string =>
-    outcomeNote({ id: a.id, tool: a.tool, status: a.status as PendingActionStatus, result: a.result });
+  /** Maps the legacy-shaped fixture fields to ApprovalRequest's lowercase status/result contract. */
+  const requestStatus = (status: string) => status.toLowerCase();
+  const requestResult = (a: StoredAction): unknown => a.status === 'EXECUTED' ? { text: a.result ?? '' } : a.result;
+  const noteOf = (a: StoredAction): string => requestOutcomeNote({
+    requestId: a.id, tool: a.tool, status: requestStatus(a.status) as ApprovalRequestStatus, result: requestResult(a),
+  });
 
-  /** The `pendingAction` delegate over `rows`: the repository's `findMany` and `updateMany`, nothing else. */
+  /** AssistantActionRequest link delegate; request status/result are read through the joined request. */
   function pendingStore(rows: readonly StoredAction[]) {
     const all = [...rows];
     const findMany = vi.fn(async (args: {
-      where: { threadId: string; status: { in: string[] }; deliveredAt: null };
+      where: { threadId: string; deliveredAt: null; request: { status: { in: string[] } } };
       orderBy: readonly unknown[]; take: number;
     }) => all
-      .filter((row) => row.threadId === args.where.threadId && args.where.status.in.includes(row.status) && row.deliveredAt === null)
+      .filter((row) => row.threadId === args.where.threadId && args.where.request.status.in.includes(requestStatus(row.status)) && row.deliveredAt === null)
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))
       .slice(0, args.take)
-      .map((row) => ({ id: row.id, tool: row.tool, status: row.status, result: row.result })));
+      .map((row) => ({ requestId: row.id, tool: row.tool, request: { status: requestStatus(row.status), result: requestResult(row) } })));
     const updateMany = vi.fn(async (args: {
-      where: { id: { in: string[] } }; data: { deliveredAt: Date; deliveredMessageId: string };
+      where: { requestId: { in: string[] }; deliveredAt: null }; data: { deliveredAt: Date; deliveredMessageId: string };
     }) => {
       let count = 0;
       for (const row of all) {
-        if (args.where.id.in.includes(row.id)) {
+        if (args.where.requestId.in.includes(row.id) && row.deliveredAt === null) {
           row.deliveredAt = args.data.deliveredAt;
           row.deliveredMessageId = args.data.deliveredMessageId;
           count += 1;
@@ -620,7 +621,7 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
         project: { findUnique: vi.fn(async () => ({ slug: 'sandbox', brief: null })) },
         runner: { findUnique: vi.fn(async () => ({ lastSeenAt: new Date(), protocolVersion: 5 })) },
         fleetCommand: { findFirst: vi.fn(async () => null) },
-        pendingAction: { findMany: store.findMany, updateMany: store.updateMany },
+        assistantActionRequest: { findMany: store.findMany, updateMany: store.updateMany },
         $queryRaw: vi.fn(async () => [{ nextSeq: 2 }]),
       },
     };
@@ -684,7 +685,7 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
 
     expect(store.updateMany).toHaveBeenCalledTimes(1);
     expect(store.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ['A1'] } }, data: { deliveredAt: expect.any(Date), deliveredMessageId: 'M' },
+      where: { requestId: { in: ['A1'] }, deliveredAt: null }, data: { deliveredAt: expect.any(Date), deliveredMessageId: 'M' },
     });
     expect(executed.deliveredAt).not.toBeNull();
     expect(executed.deliveredMessageId).toBe('M');
@@ -720,12 +721,12 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
     await send(repo, 'hello');
 
     expect(store.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { threadId: 'T', status: { in: [...DELIVERABLE_STATUSES] }, deliveredAt: null },
+      where: { threadId: 'T', deliveredAt: null, request: { status: { in: [...DELIVERABLE_STATUSES] } } },
     }));
     expect(pending.deliveredAt).toBeNull();
     expect(pending.deliveredMessageId).toBeNull();
     expect(executed.deliveredMessageId).toBe('M');
-    expect(store.updateMany).toHaveBeenCalledWith({ where: { id: { in: ['A2'] } }, data: expect.anything() });
+    expect(store.updateMany).toHaveBeenCalledWith({ where: { requestId: { in: ['A2'] }, deliveredAt: null }, data: expect.anything() });
     expect(payloadTexts(commandCreate)).toEqual([`${DELIVERY_HEADER}\n${noteOf(executed)}\n\nhello`]);
   });
 
@@ -739,7 +740,7 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
     expect(approved.deliveredAt).toBeNull();
     expect(approved.deliveredMessageId).toBeNull();
     expect(executed.deliveredMessageId).toBe('M');
-    expect(store.updateMany).toHaveBeenCalledWith({ where: { id: { in: ['A2'] } }, data: expect.anything() });
+    expect(store.updateMany).toHaveBeenCalledWith({ where: { requestId: { in: ['A2'] }, deliveredAt: null }, data: expect.anything() });
     expect(payloadTexts(commandCreate)).toEqual([`${DELIVERY_HEADER}\n${noteOf(executed)}\n\nhello`]);
   });
 
@@ -751,7 +752,7 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
 
     expect(store.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ threadId: 'T' }) }));
     expect(elsewhere.deliveredAt).toBeNull();
-    expect(store.updateMany).toHaveBeenCalledWith({ where: { id: { in: ['A1'] } }, data: expect.anything() });
+    expect(store.updateMany).toHaveBeenCalledWith({ where: { requestId: { in: ['A1'] }, deliveredAt: null }, data: expect.anything() });
   });
 
   it('AC-9/AC-10: the 20 oldest notes go in age order and the newest of 21 stays undelivered', async () => {
@@ -766,7 +767,7 @@ describe('PrismaChatThreadRepository.sendMessage outcome hand-off (2aw US-002)',
     // `A20` has the latest createdAt, so it is the one that did not fit the cap.
     expect(store.all.filter((row) => row.deliveredAt === null).map((row) => row.id)).toEqual(['A20']);
     expect(store.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 20,
+      orderBy: [{ createdAt: 'asc' }, { requestId: 'asc' }], take: 20,
     }));
   });
 

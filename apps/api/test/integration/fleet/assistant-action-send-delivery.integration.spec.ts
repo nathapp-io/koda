@@ -19,8 +19,8 @@ import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { PrismaChatThreadRepository } from '../../../src/fleet/threads/prisma-chat-thread.repository';
 import { PrismaFleetJobRepository } from '../../../src/fleet/jobs/prisma-fleet-job.repository';
 import { DELIVERY_HEADER, deliveryText } from '../../../src/fleet/assistant/actions/outcome-delivery';
-import { outcomeNote } from '../../../src/fleet/assistant/actions/outcome-note';
-import type { PendingActionStatus } from '../../../src/fleet/assistant/actions/pending-action.domain';
+import { requestOutcomeNote } from '../../../src/fleet/assistant/requests/request-outcome-note';
+import type { ApprovalRequestStatus } from '../../../src/approvals/domain/approval.domain';
 import { THREAD_LIMITS } from '../../../src/fleet/common/thread-jobs';
 import { FLEET_CAPS } from '../../helpers/fleet-fixtures';
 import { bootHttpApp } from '../../helpers/http-app';
@@ -104,26 +104,30 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
     return { threadId: created.id, jobId: job.id };
   }
 
-  /** An undelivered action of `threadId`: what the probe service writes, minus the approval link. */
+  /** Seed the approval request and its assistant thread link, as the US-004 delivery path reads them. */
   async function seedAction(p: {
-    threadId: string; status: PendingActionStatus; createdAt: Date; result?: string | null;
+    threadId: string; status: ApprovalRequestStatus; createdAt: Date; result?: string | null;
   }) {
-    return prisma.pendingAction.create({
-      data: {
-        projectId, threadId: p.threadId, jobId: `job-${p.threadId}`, toolCallId: uid('tc'), tool: TOOL,
-        input: { ref: 'KODA-1', body: 'hello' } as Prisma.InputJsonValue, preview: 'Add a comment', status: p.status,
-        actorType: 'user', actorId: userId, result: p.result ?? null,
-        expiresAt: new Date(Date.now() + 3_600_000), createdAt: p.createdAt,
-      },
-    });
+    const result = p.status === 'executed' ? { text: p.result ?? '' } : null;
+    const request = await prisma.approvalRequest.create({ data: {
+      permissionKey: 'ticket.comment', projectId, actorType: 'AGENT', actorId: userId, origin: 'thread',
+      correlationId: uid('corr'), input: {}, inputHash: uid('hash'), requiredMode: 'human', onTimeout: 'reject',
+      approverMustHoldAction: true, requireDistinctApprover: false, status: p.status,
+      expiresAt: new Date(Date.now() + 3_600_000), result: result as Prisma.InputJsonValue | null,
+    } });
+    await prisma.assistantActionRequest.create({ data: {
+      requestId: request.id, threadId: p.threadId, jobId: `job-${p.threadId}`, toolCallId: uid('tc'),
+      tool: TOOL, preview: 'Add a comment', createdAt: p.createdAt,
+    } });
+    return { id: request.id, tool: TOOL, status: p.status, result, createdAt: p.createdAt };
   }
 
   const send = (threadId: string, text: string, clientMessageId: string) =>
     withTestActor({ type: 'USER', id: userId }, () =>
       threads.sendMessage({ scope, threadId, userId, text, clientMessageId }));
 
-  /** The one action of a due pair of assertions: the row as stored. */
-  const actionRow = (id: string) => prisma.pendingAction.findUniqueOrThrow({ where: { id } });
+  /** The link row carries once-only delivery marks; its id is the related request id. */
+  const actionRow = (requestId: string) => prisma.assistantActionRequest.findUniqueOrThrow({ where: { requestId } });
 
   /** The THREAD_INPUT a send queued: a job gets at most one per send, so the message id names it exactly. */
   async function inputPayload(jobId: string | null, messageId: string): Promise<{ messageId: string; text: string }> {
@@ -134,8 +138,8 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
     return command.payload as unknown as { messageId: string; text: string };
   }
 
-  const noteOf = (row: { id: string; tool: string; status: string; result: string | null }): string =>
-    outcomeNote({ id: row.id, tool: row.tool, status: row.status as PendingActionStatus, result: row.result });
+  const noteOf = (row: { id: string; tool: string; status: ApprovalRequestStatus; result: unknown }): string =>
+    requestOutcomeNote({ requestId: row.id, tool: row.tool, status: row.status, result: row.result });
 
   beforeAll(async () => {
     // S5a kill switch: without it every send answers `threads.disabled` before it can hand anything over.
@@ -166,7 +170,7 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
 
   it('AC-1: a live send queues a THREAD_INPUT whose text is the note block above the user text', async () => {
     const { threadId, jobId } = await seedThread();
-    const action = await seedAction({ threadId, status: 'EXECUTED', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'done' });
+    const action = await seedAction({ threadId, status: 'executed', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'done' });
 
     const { message } = await send(threadId, 'hello', uid('cm'));
 
@@ -177,9 +181,28 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
     expect(noteOf(action)).toContain('was approved and done: done');
   });
 
+  it('US-004 AC-2..AC-5: hands over terminal linked requests once and leaves a pending link untouched', async () => {
+    const { threadId, jobId } = await seedThread();
+    const executed = await seedAction({ threadId, status: 'executed', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'done' });
+    const cancelled = await seedAction({ threadId, status: 'cancelled', createdAt: new Date('2026-01-01T00:01:00.000Z') });
+    const pending = await seedAction({ threadId, status: 'pending', createdAt: new Date('2026-01-01T00:02:00.000Z') });
+
+    const first = await send(threadId, 'first input', uid('cm'));
+    const handoff = `${DELIVERY_HEADER}\n${noteOf(executed)}\n${noteOf(cancelled)}\n\nfirst input`;
+    expect(await inputPayload(jobId, first.message.id)).toEqual({ messageId: first.message.id, text: handoff });
+    expect((await actionRow(executed.id)).deliveredMessageId).toBe(first.message.id);
+    expect((await actionRow(cancelled.id)).deliveredMessageId).toBe(first.message.id);
+    expect((await actionRow(pending.id)).deliveredAt).toBeNull();
+    expect((await actionRow(pending.id)).deliveredMessageId).toBeNull();
+
+    await prisma.chatMessage.update({ where: { id: first.message.id }, data: { status: 'complete' } });
+    const second = await send(threadId, 'second input', uid('cm'));
+    expect(await inputPayload(jobId, second.message.id)).toEqual({ messageId: second.message.id, text: 'second input' });
+  });
+
   it('AC-2: the delivered action carries a deliveredAt', async () => {
     const { threadId } = await seedThread();
-    const action = await seedAction({ threadId, status: 'EXECUTED', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'done' });
+    const action = await seedAction({ threadId, status: 'executed', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'done' });
 
     await send(threadId, 'hello', uid('cm'));
 
@@ -188,7 +211,7 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
 
   it('AC-3: the delivered action names the new user message', async () => {
     const { threadId } = await seedThread();
-    const action = await seedAction({ threadId, status: 'EXECUTED', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'done' });
+    const action = await seedAction({ threadId, status: 'executed', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'done' });
 
     const { message } = await send(threadId, 'hello', uid('cm'));
 
@@ -197,7 +220,7 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
 
   it('AC-4: the stored user message keeps the plain text', async () => {
     const { threadId } = await seedThread();
-    await seedAction({ threadId, status: 'EXECUTED', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'done' });
+    await seedAction({ threadId, status: 'executed', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'done' });
 
     const { message } = await send(threadId, 'hello', uid('cm'));
 
@@ -206,7 +229,7 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
 
   it('AC-5: a second send after the first message is finished carries only the new text', async () => {
     const { threadId, jobId } = await seedThread();
-    await seedAction({ threadId, status: 'EXECUTED', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'done' });
+    await seedAction({ threadId, status: 'executed', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'done' });
     const first = await send(threadId, 'hello', uid('cm'));
     await prisma.chatMessage.update({ where: { id: first.message.id }, data: { status: 'complete' } });
 
@@ -217,8 +240,8 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
 
   it('AC-6: a PENDING action keeps deliveredAt null after a send', async () => {
     const { threadId } = await seedThread();
-    const pending = await seedAction({ threadId, status: 'PENDING', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: null });
-    const executed = await seedAction({ threadId, status: 'EXECUTED', createdAt: new Date('2026-01-01T00:01:00.000Z'), result: 'done' });
+    const pending = await seedAction({ threadId, status: 'pending', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: null });
+    const executed = await seedAction({ threadId, status: 'executed', createdAt: new Date('2026-01-01T00:01:00.000Z'), result: 'done' });
 
     await send(threadId, 'hello', uid('cm'));
 
@@ -229,8 +252,8 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
 
   it('AC-7: an APPROVED action keeps deliveredAt null after a send', async () => {
     const { threadId } = await seedThread();
-    const approved = await seedAction({ threadId, status: 'APPROVED', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: null });
-    const executed = await seedAction({ threadId, status: 'EXECUTED', createdAt: new Date('2026-01-01T00:01:00.000Z'), result: 'done' });
+    const approved = await seedAction({ threadId, status: 'approved', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: null });
+    const executed = await seedAction({ threadId, status: 'executed', createdAt: new Date('2026-01-01T00:01:00.000Z'), result: 'done' });
 
     await send(threadId, 'hello', uid('cm'));
 
@@ -240,9 +263,9 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
 
   it('AC-8: a terminal action of another thread keeps deliveredAt null after a send', async () => {
     const other = await seedThread();
-    const elsewhere = await seedAction({ threadId: other.threadId, status: 'EXECUTED', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'done' });
+    const elsewhere = await seedAction({ threadId: other.threadId, status: 'executed', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'done' });
     const { threadId } = await seedThread();
-    const mine = await seedAction({ threadId, status: 'EXECUTED', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'done' });
+    const mine = await seedAction({ threadId, status: 'executed', createdAt: new Date('2026-01-01T00:00:00.000Z'), result: 'done' });
 
     await send(threadId, 'hello', uid('cm'));
 
@@ -256,7 +279,7 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
     const rows = [] as Awaited<ReturnType<typeof seedAction>>[];
     for (let i = 0; i < 21; i += 1) {
       rows.push(await seedAction({
-        threadId, status: 'EXECUTED', result: 'ok', createdAt: new Date(Date.UTC(2026, 0, 1, 0, i)),
+        threadId, status: 'executed', result: 'ok', createdAt: new Date(Date.UTC(2026, 0, 1, 0, i)),
       }));
     }
     return rows;
@@ -268,7 +291,7 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
 
     await send(threadId, 'hello', uid('cm'));
 
-    expect(await prisma.pendingAction.count({ where: { threadId, deliveredAt: { not: null } } })).toBe(20);
+    expect(await prisma.assistantActionRequest.count({ where: { threadId, deliveredAt: { not: null } } })).toBe(20);
   });
 
   it('AC-10: the action with the latest createdAt keeps deliveredAt null', async () => {
@@ -286,8 +309,8 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
 
   it('AC-11: a note that does not fit the byte budget stays undelivered', async () => {
     const { threadId, jobId } = await seedThread();
-    const first = await seedAction({ threadId, status: 'EXECUTED', result: 'ok', createdAt: new Date('2026-01-01T00:00:00.000Z') });
-    const second = await seedAction({ threadId, status: 'FAILED', result: 'ok', createdAt: new Date('2026-01-01T00:01:00.000Z') });
+    const first = await seedAction({ threadId, status: 'executed', result: 'ok', createdAt: new Date('2026-01-01T00:00:00.000Z') });
+    const second = await seedAction({ threadId, status: 'failed', result: 'ok', createdAt: new Date('2026-01-01T00:01:00.000Z') });
     const notes = [noteOf(first), noteOf(second)];
     const oneNote = `${DELIVERY_HEADER}\n${notes[0]}\n\n`;
     // The user text is sized with the delivery helper: the whole text fills the budget with the first note only.
@@ -304,10 +327,10 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
 
   it('AC-12: a repeated clientMessageId delivers nothing, an action created between the sends included', async () => {
     const { threadId } = await seedThread();
-    const delivered = await seedAction({ threadId, status: 'EXECUTED', result: 'done', createdAt: new Date('2026-01-01T00:00:00.000Z') });
+    const delivered = await seedAction({ threadId, status: 'executed', result: 'done', createdAt: new Date('2026-01-01T00:00:00.000Z') });
     const clientMessageId = uid('cm');
     const first = await send(threadId, 'hello', clientMessageId);
-    const later = await seedAction({ threadId, status: 'EXECUTED', result: 'done', createdAt: new Date('2026-01-02T00:00:00.000Z') });
+    const later = await seedAction({ threadId, status: 'executed', result: 'done', createdAt: new Date('2026-01-02T00:00:00.000Z') });
 
     const repeated = await send(threadId, 'hello', clientMessageId);
 
@@ -319,7 +342,7 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
 
   it('AC-13: a new turn carries the delivered note above the user text', async () => {
     const { threadId } = await seedThread({ live: false });
-    const action = await seedAction({ threadId, status: 'REJECTED', result: null, createdAt: new Date('2026-01-01T00:00:00.000Z') });
+    const action = await seedAction({ threadId, status: 'rejected', result: null, createdAt: new Date('2026-01-01T00:00:00.000Z') });
 
     const { message, jobId } = await send(threadId, 'hi', uid('cm'));
 
@@ -329,12 +352,12 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
       messageId: message.id,
       text: `${DELIVERY_HEADER}\n${noteOf(action)}\n\nhi`,
     });
-    expect(noteOf(action)).toContain('was rejected by the user');
+    expect(noteOf(action)).toContain('was rejected.');
   });
 
   it('AC-14: the new turn\'s delivered action names the new user message', async () => {
     const { threadId } = await seedThread({ live: false });
-    const action = await seedAction({ threadId, status: 'REJECTED', result: null, createdAt: new Date('2026-01-01T00:00:00.000Z') });
+    const action = await seedAction({ threadId, status: 'rejected', result: null, createdAt: new Date('2026-01-01T00:00:00.000Z') });
 
     const { message } = await send(threadId, 'hi', uid('cm'));
 
@@ -344,7 +367,7 @@ describeIntegration('delivering outcome notes in sendMessage (PG, 2aw US-002)', 
   /** A live thread whose prior turn is still pending: `sendRefusal` answers `turnRunning` for the next send. */
   async function seedRefusingSend() {
     const { threadId, jobId } = await seedThread();
-    const action = await seedAction({ threadId, status: 'EXECUTED', result: 'done', createdAt: new Date('2026-01-01T00:00:00.000Z') });
+    const action = await seedAction({ threadId, status: 'executed', result: 'done', createdAt: new Date('2026-01-01T00:00:00.000Z') });
     await prisma.chatMessage.create({
       data: { threadId, seq: 50, jobId: null, role: 'user', status: 'pending', content: 'still running', authorUserId: userId },
     });

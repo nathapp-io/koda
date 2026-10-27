@@ -16,7 +16,6 @@ import { RunnerNotifier } from '../jobs/runner-notifier';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
 import { ApprovalCloser, jobSystemActor, userActor } from './approval-closer';
 import { ApprovalLivePublisher } from './approval-live.publisher';
-import { AssistantActionPort } from './assistant-action.port';
 import { checkBashDecision } from './bash-decision';
 import {
   APPROVAL_REPOSITORY, ApprovalStatus, ApprovalType, FleetApprovalRecord, IApprovalRepository, MAX_REQUEUE_CANDIDATES, RequeueCandidate,
@@ -75,7 +74,6 @@ export class ApprovalsService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Inject(FLEET_JOB_REPOSITORY) private readonly jobRepo: Pick<IFleetJobRepository, 'lockById' | 'createCommand'>,
     private readonly notifier: RunnerNotifier,
-    private readonly assistantActions: AssistantActionPort,
     private readonly permissions: PermissionService,
     private readonly audit: AuditRecorder,
   ) {}
@@ -97,9 +95,6 @@ export class ApprovalsService {
     // checked before the decision is validated, so an unauthorized caller gets 403 whatever they send,
     // and before txManager.run, so it takes no lock and writes nothing.
     if (current.type === 'nax_bash_escalate') return this.decideBash(caller, current, dto, now);
-    // 2a-D8: the creator-only handler owns its own gates, and it has no key yet
-    // (`fleet.approval.decide.assistant` belongs to permissions-p1-enforce-assistant).
-    if (current.type === 'assistant_action') return FleetApprovalDto.from(await this.assistantActions.decide(caller, current, dto, now));
     if (!(await this.mayDecide(caller.principal, DECIDE_KEYS.budget_override_required, current))) throw new ForbiddenAppException({}, 'permissions');
     if (!current.policyId) invalid('a budget approval with no policy cannot be decided'); // plan D236
     if (dto.decision !== 'keep_paused' && dto.decision !== 'raise_budget_and_resume') invalid(`${dto.decision} does not apply to a budget approval`);

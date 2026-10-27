@@ -1,3 +1,5 @@
+import { findThreadAction, pendingRequestId } from '../../helpers/assistant-request';
+import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b 2a US-003 — `koda_add_comment` and `koda_get_action` through the real runner tool route against PG.
@@ -64,8 +66,8 @@ describeIntegration('fleet assistant action tools (PG, US-003)', () => {
     const { content, isError } = resultOf(await callTool(jobId, 'koda_add_comment', toolCallId, input).expect(200));
     expect(isError).toBe(false);
     expect(content.startsWith('pending ')).toBe(true);
-    const action = await prisma.pendingAction.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId, toolCallId } } });
-    expect(content).toBe(`pending ${action.id}: awaiting user approval; do not retry`);
+    const action = await findThreadAction(prisma, { requestId: pendingRequestId(content) });
+    expect(content).toBe(`pending ${action.id}: awaiting approval; do not retry`);
     return action.id;
   };
 
@@ -73,7 +75,10 @@ describeIntegration('fleet assistant action tools (PG, US-003)', () => {
   const actionText = async (jobId: string, toolCallId: string, input: { id: string; project?: string }): Promise<ToolResultBody> =>
     resultOf(await callTool(jobId, 'koda_get_action', toolCallId, input).expect(200));
 
-  const actionOf = (jobId: string, toolCallId: string) => prisma.pendingAction.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId, toolCallId } } });
+  const actionOf = async (jobId: string, toolCallId: string) => {
+    const call = await prisma.assistantToolCall.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId, toolCallId } } });
+    return findThreadAction(prisma, { requestId: pendingRequestId(call.content) });
+  };
 
   beforeAll(async () => {
     saved['FLEET_THREADS_ENABLED'] = process.env['FLEET_THREADS_ENABLED'];
@@ -83,6 +88,7 @@ describeIntegration('fleet assistant action tools (PG, US-003)', () => {
     server = app.getHttpServer();
     prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
+    await grantKeys(prisma, { type: 'USER', id: world.ids.dev }, ['approval.decide'], world.projectId);
     // 2a-D13: the acceptance ref is `KODA-1`, so the web project answers the `KODA` key.
     await prisma.project.update({ where: { id: world.projectId }, data: { key: WEB_KEY } });
     ticketId = (await prisma.ticket.create({
@@ -134,7 +140,7 @@ describeIntegration('fleet assistant action tools (PG, US-003)', () => {
     const { content, isError } = resultOf(res);
     expect(isError).toBe(false);
     expect(content.startsWith('pending ')).toBe(true);
-    expect(await prisma.pendingAction.count({ where: { jobId: repo.jobId, toolCallId: 't1' } })).toBe(1);
+    expect(await prisma.assistantActionRequest.count({ where: { jobId: repo.jobId, toolCallId: 't1' } })).toBe(1);
   });
 
   it('AC-5: a proposed comment is not written to the ticket', async () => {
@@ -146,7 +152,7 @@ describeIntegration('fleet assistant action tools (PG, US-003)', () => {
   it('AC-6: the stored preview names the ticket and the body the user is asked to approve', async () => {
     const id = await propose(repo.jobId, 'ac6');
 
-    const { preview } = await prisma.pendingAction.findUniqueOrThrow({ where: { id } });
+    const { preview } = await findThreadAction(prisma, { requestId: id });
     expect(preview.startsWith(`Add a comment to KODA-1 "${TITLE}"`)).toBe(true);
     expect(preview).toBe(`Add a comment to KODA-1 "${TITLE}":\n\n${BODY}`);
   });
@@ -163,7 +169,7 @@ describeIntegration('fleet assistant action tools (PG, US-003)', () => {
   it('AC-8: a ref that matches no ticket of the project stores no action', async () => {
     await callTool(repo.jobId, 'koda_add_comment', 'ac8', { ref: 'KODA-99', body: BODY }).expect(200);
 
-    expect(await prisma.pendingAction.count({ where: { jobId: repo.jobId, toolCallId: 'ac8' } })).toBe(0);
+    expect(await prisma.assistantActionRequest.count({ where: { jobId: repo.jobId, toolCallId: 'ac8' } })).toBe(0);
     expect(await prisma.assistantToolCall.count({ where: { jobId: repo.jobId, toolCallId: 'ac8' } })).toBe(1);
     expect(await prisma.assistantToolCall.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId: repo.jobId, toolCallId: 'ac8' } } }))
       .toMatchObject({ outcome: 'not_found', isError: true, content: 'not_found', tool: 'koda_add_comment' });
@@ -175,7 +181,7 @@ describeIntegration('fleet assistant action tools (PG, US-003)', () => {
     );
 
     expect({ content, isError }).toEqual({ content: 'not_found', isError: true });
-    expect(await prisma.pendingAction.count({ where: { jobId: repo.jobId, toolCallId: 'ac8-foreign' } })).toBe(0);
+    expect(await prisma.assistantActionRequest.count({ where: { jobId: repo.jobId, toolCallId: 'ac8-foreign' } })).toBe(0);
   });
 
   it('AC-11: koda_get_action answers the pending action of the thread that proposed it', async () => {
@@ -186,14 +192,14 @@ describeIntegration('fleet assistant action tools (PG, US-003)', () => {
 
     expect(isError).toBe(false);
     expect(content.split('\n')).toEqual([
-      `action ${id} koda_add_comment PENDING`,
+      `action ${id} koda_add_comment pending`,
       `requested ${action.createdAt.toISOString()}`,
     ]);
   });
 
   it('AC-12: the id of an action of another thread in the same project answers not_found', async () => {
     const id = await propose(other.jobId, 'ac12');
-    expect((await prisma.pendingAction.findUniqueOrThrow({ where: { id } })).projectId).toBe(world.projectId);
+    expect((await findThreadAction(prisma, { requestId: id })).projectId).toBe(world.projectId);
 
     const { content, isError } = await actionText(repo.jobId, 'ac12-read', { id });
 
@@ -208,7 +214,7 @@ describeIntegration('fleet assistant action tools (PG, US-003)', () => {
 
     const own = await actionText(workspace.jobId, 'ac17-ops', { project: 'ops', id });
     expect(own).toEqual({
-      content: `action ${id} koda_add_comment PENDING\nrequested ${action.createdAt.toISOString()}`,
+      content: `action ${id} koda_add_comment pending\nrequested ${action.createdAt.toISOString()}`,
       isError: false,
     });
     const foreign = await actionText(workspace.jobId, 'ac17-web', { project: 'web', id });
@@ -229,7 +235,7 @@ describeIntegration('fleet assistant action tools (PG, US-003)', () => {
 
     expect(isError).toBe(true);
     expect(content).toBe('invalid_input: body');
-    expect(await prisma.pendingAction.count({ where: { jobId: repo.jobId, toolCallId: 'ac19' } })).toBe(0);
+    expect(await prisma.assistantActionRequest.count({ where: { jobId: repo.jobId, toolCallId: 'ac19' } })).toBe(0);
   });
 
   it('AC-20: a trimmed body longer than 10000 characters answers invalid_input: body', async () => {
@@ -241,7 +247,7 @@ describeIntegration('fleet assistant action tools (PG, US-003)', () => {
 
     expect(isError).toBe(true);
     expect(content).toBe('invalid_input: body');
-    expect(await prisma.pendingAction.count({ where: { jobId: repo.jobId, toolCallId: 'ac20' } })).toBe(0);
+    expect(await prisma.assistantActionRequest.count({ where: { jobId: repo.jobId, toolCallId: 'ac20' } })).toBe(0);
   });
 
   it('AC-21: an action id longer than 64 characters answers content exactly invalid_input: id', async () => {

@@ -6092,8 +6092,7 @@
               "type": "string",
               "enum": [
                 "budget_override_required",
-                "nax_bash_escalate",
-                "assistant_action"
+                "nax_bash_escalate"
               ]
             }
           },
@@ -6299,8 +6298,7 @@
               "type": "string",
               "enum": [
                 "budget_override_required",
-                "nax_bash_escalate",
-                "assistant_action"
+                "nax_bash_escalate"
               ]
             }
           },
@@ -16114,8 +16112,7 @@
           "type": {
             "enum": [
               "budget_override_required",
-              "nax_bash_escalate",
-              "assistant_action"
+              "nax_bash_escalate"
             ],
             "type": "string"
           },
@@ -20796,8 +20793,7 @@
             "type": "string",
             "enum": [
               "budget_override_required",
-              "nax_bash_escalate",
-              "assistant_action"
+              "nax_bash_escalate"
             ]
           },
           "projectId": {

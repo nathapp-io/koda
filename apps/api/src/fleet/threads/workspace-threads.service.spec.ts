@@ -166,7 +166,7 @@ describe('workspace read, cap and command scope', () => {
 
   it('US-004 AC-4: the workspace detail answers the repository\'s pending actions of that thread, unchanged', async () => {
     const action = {
-      id: 'a1', approvalId: 'ap1', tool: 'koda_add_comment', preview: 'Add a comment to KODA-1 "Fix login":\n\nhello',
+      id: 'ap1', approvalId: 'ap1', tool: 'koda_add_comment', preview: 'Add a comment to KODA-1 "Fix login":\n\nhello',
       projectSlug: 'ops', expiresAt: new Date('2026-10-24T09:00:00.000Z'), createdAt: new Date('2026-10-23T09:00:00.000Z'),
     };
     repository.pendingActions.mockResolvedValue([action]);

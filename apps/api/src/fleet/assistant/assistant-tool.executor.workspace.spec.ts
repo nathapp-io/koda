@@ -1,3 +1,4 @@
+import { gateDouble } from '../../../test/helpers/assistant-gate-double';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
@@ -27,6 +28,7 @@ function setup(tool: AssistantTool<unknown>, opts: Options = {}) {
     ...(opts.omitKind ? {} : { kind: opts.kind ?? 'WORKSPACE' }),
   };
   const repo: AssistantToolCallRepository = {
+    findAgentActor: vi.fn(async () => null), findProjectSlug: vi.fn(async () => null),
     findUserActor: vi.fn(async () => null),
     findByCall: vi.fn(async (jobId, toolCallId) => rows.find((r) => r.jobId === jobId && r.toolCallId === toolCallId) ?? null),
     record: vi.fn(async (row) => { rows.push(row); }),
@@ -51,7 +53,7 @@ function setup(tool: AssistantTool<unknown>, opts: Options = {}) {
   // Permissions P1 US-004: the tool's key is a `PermissionService` read now; every key is allowed here, so each case
   // stays about the project argument and the resolved scope.
   const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
-  const executor = new AssistantToolExecutor(registry, repo, access as unknown as ProjectAccessService, permissions);
+  const executor = new AssistantToolExecutor(registry, repo, access as unknown as ProjectAccessService, permissions, ...gateDouble().deps);
   return { executor, rows, access, roles, permissions };
 }
 

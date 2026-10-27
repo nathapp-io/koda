@@ -4,13 +4,11 @@ import { mountSfc, webFile } from '../helpers/mount-sfc'
 import { enI18n, toastRecorder, uiStubs } from '../helpers/fleet-harness'
 import { extractApiError } from '../../composables/useApi'
 import { countdownText, secondsLeft } from '../../lib/fleet-approvals'
-import type { ApprovalBase } from '../../lib/fleet-approvals'
 import type { PendingActionDto } from '../../lib/thread-types'
 
 /**
  * US-005 (S5b §2aw-D11): the thread's pending-action card. The card is the only place a requester decides an action from
- * the transcript, so these tests pin the two decision buttons to the `useFleetApprovals` of the project the ACTION acts in
- * — a WORKSPACE action may act in another project than the thread's home — and pin the preview to interpolation.
+ * the transcript, so these tests pin decisions to the action's ApprovalRequest id and pin the preview to interpolation.
  *
  * The card's own clock comes from its `now` prop (the timeline passes `useApprovalCountdown().now`), so every countdown
  * assertion here is a fixed instant.
@@ -44,17 +42,16 @@ function mount(
   opts: { canDecide?: boolean; now?: Date; decide?: jest.Mock } = {},
 ) {
   const decide = opts.decide ?? jest.fn(async () => ({}))
-  const bases: ApprovalBase[] = []
-  // The card asks for the approvals of the project its action acts in, and only calls decide on that result.
-  const useFleetApprovals = jest.fn((base: ApprovalBase) => {
-    bases.push(base)
-    return { decide }
-  })
+  const useApprovalRequests = jest.fn(() => ({ decide }))
+  const useFleetApprovals = jest.fn(() => ({ decide }))
   const toast = toastRecorder()
   const app = mountSfc(card, {
     components: uiStubs,
     props: { action: value, canDecide: opts.canDecide ?? true, now: opts.now ?? NOW },
-    alias: { '~/composables/useFleetApprovals': { useFleetApprovals } },
+    alias: {
+      '~/composables/useApprovalRequests': { useApprovalRequests },
+      '~/composables/useFleetApprovals': { useFleetApprovals },
+    },
     globals: { useI18n: () => enI18n(), useAppToast: () => toast },
   })
   const byId = (id: string) => app.find(`[data-testid="${id}"]`)
@@ -64,7 +61,7 @@ function mount(
   }
   const click = (id: string): void => { (byId(id)[0].props.onClick as () => void)() }
   const disabled = (id: string): unknown => byId(id)[0]?.props.disabled
-  return { app, bases, decide, useFleetApprovals, toast, byId, textOf, click, disabled, settle }
+  return { app, decide, useApprovalRequests, useFleetApprovals, toast, byId, textOf, click, disabled, settle }
 }
 
 describe('ThreadActionCard (S5b 2aw-D11, US-005)', () => {
@@ -101,28 +98,36 @@ describe('ThreadActionCard (S5b 2aw-D11, US-005)', () => {
     m.app.unmount()
   })
 
-  test('Approve decides the action through the approvals of the action\'s own project (AC-7)', async () => {
+  test('mounting does not invoke fleet approvals (AC-9)', async () => {
+    const m = mount(action())
+    await m.settle()
+
+    expect(m.useFleetApprovals).not.toHaveBeenCalled()
+    m.app.unmount()
+  })
+
+  test('Approve decides the action id, not its legacy approvalId (AC-4)', async () => {
     const m = mount(action())
     await m.settle()
 
     m.click('thread-action-approve')
     await m.settle()
 
-    expect(m.useFleetApprovals).toHaveBeenCalledWith({ kind: 'project', slug: 'acme' })
-    expect(m.bases).toEqual([{ kind: 'project', slug: 'acme' }])
-    expect(m.decide).toHaveBeenCalledWith('ap1', { decision: 'approve' })
+    expect(m.useApprovalRequests).toHaveBeenCalledTimes(1)
+    expect(m.decide).toHaveBeenCalledWith('a1', 'approve')
+    expect(m.useFleetApprovals).not.toHaveBeenCalled()
     m.app.unmount()
   })
 
-  test('Reject decides the action through the approvals of the action\'s own project (AC-8)', async () => {
+  test('Reject decides the action id, not its legacy approvalId (AC-5)', async () => {
     const m = mount(action({ projectSlug: 'other' }))
     await m.settle()
 
     m.click('thread-action-reject')
     await m.settle()
 
-    expect(m.useFleetApprovals).toHaveBeenCalledWith({ kind: 'project', slug: 'other' })
-    expect(m.decide).toHaveBeenCalledWith('ap1', { decision: 'reject' })
+    expect(m.decide).toHaveBeenCalledWith('a1', 'reject')
+    expect(m.useFleetApprovals).not.toHaveBeenCalled()
     m.app.unmount()
   })
 
@@ -171,6 +176,7 @@ describe('ThreadActionCard (S5b 2aw-D11, US-005)', () => {
     expect(m.toast.errors).toEqual(['This action is no longer pending.'])
     expect(m.byId('thread-action')).toHaveLength(1)
     expect(m.disabled('thread-action-approve')).toBe(false)
+    expect(m.disabled('thread-action-reject')).toBe(false)
     m.app.unmount()
   })
 
@@ -187,7 +193,7 @@ describe('ThreadActionCard (S5b 2aw-D11, US-005)', () => {
     await m.settle()
 
     expect(m.decide).toHaveBeenCalledTimes(2)
-    expect(m.decide).toHaveBeenLastCalledWith('ap1', { decision: 'approve' })
+    expect(m.decide).toHaveBeenLastCalledWith('a1', 'approve')
     expect(m.byId('thread-action')).toHaveLength(0)
     m.app.unmount()
   })

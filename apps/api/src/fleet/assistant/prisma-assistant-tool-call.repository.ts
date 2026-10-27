@@ -4,7 +4,7 @@ import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, Prisma
 import { bookkeeping } from '../../action-context/audit-coverage';
 import { AssistantToolCall as AssistantToolCallModel, PrismaClient } from '../../generated/prisma/client';
 import type {
-  AssistantToolCallRecord, AssistantToolCallRepository, ProjectCounts, ProjectCountsReader, ToolCallContext, ToolCallCreator,
+  AgentToolCallCreator, AssistantToolCallRecord, AssistantToolCallRepository, ProjectCounts, ProjectCountsReader, ToolCallContext, ToolCallCreator,
   ToolCallOutcome, UserToolCallCreator,
 } from './assistant-tool-call.domain';
 
@@ -76,6 +76,20 @@ export class PrismaAssistantToolCallRepository
   /** Permissions P2 US-007: the ledger row is the audit trail of a tool call; its whole write is uncounted. */
   async record(row: AssistantToolCallRecord): Promise<void> {
     await bookkeeping('assistant.tool-call-ledger', () => this.prisma.client.assistantToolCall.create({ data: this.toPersistenceCreate(row) }));
+  }
+
+  async findAgentActor(agentId: string): Promise<AgentToolCallCreator | null> {
+    const agent = await this.prisma.client.agent.findUnique({
+      where: { id: agentId }, select: { id: true, slug: true, status: true },
+    });
+    return agent === null ? null : { type: 'AGENT', ...agent };
+  }
+
+  async findProjectSlug(projectId: string): Promise<string | null> {
+    const project = await this.prisma.client.project.findUnique({
+      where: { id: projectId, deletedAt: null }, select: { slug: true },
+    });
+    return project?.slug ?? null;
   }
 
   async findUserActor(userId: string): Promise<UserToolCallCreator | null> {

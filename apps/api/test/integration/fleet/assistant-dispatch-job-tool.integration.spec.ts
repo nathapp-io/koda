@@ -1,10 +1,12 @@
+import { findThreadAction } from '../../helpers/assistant-request';
+import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b 2b2 US-003 — `koda_dispatch_job` through the real runner tool route against PG.
  *
  * Every call enters at `POST /fleet/runner/jobs/:jobId/tools/koda_dispatch_job?leaseEpoch=<n>` with the real runner
  * key of the runner that holds a RUNNING THREAD job, and every decide enters the real project route
- * `POST /projects/web/fleet/approvals/:approvalId/decide`, so the ACs drive the whole path: runner authentication,
+ * `POST /projects/web/fleet/approvals/:approvalId/decisions`, so the ACs drive the whole path: runner authentication,
  * the lease fence, the tool registry `FleetWriteTools` filled at boot, the executor's write-tool branch, the propose
  * service and — on approve — `FleetJobsService.dispatch` for real.
  *
@@ -30,7 +32,7 @@ vi.setConfig({ testTimeout: 30_000 });
 const ENV = ['FLEET_THREADS_ENABLED'] as const;
 
 const TOOL = 'koda_dispatch_job';
-const APPROVALS = '/api/projects/web/fleet/approvals';
+const APPROVALS = '/api/approvals';
 /** The nax feature name this test dispatches; no other spec uses it (`.nax/rules/api-test-isolation.md`). */
 const FEATURE = 'dispatch-tool-us003';
 /** The route's answer: `{ content, isError }` data, whatever the status. */
@@ -55,7 +57,7 @@ describeIntegration('fleet assistant dispatch job tool (PG, US-003)', () => {
   const resultOf = (res: request.Response): ToolResultBody => data<ToolResultBody>(res);
 
   const actionOf = (toolCallId: string) =>
-    prisma.pendingAction.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId: repo.jobId, toolCallId } } });
+    findThreadAction(prisma, { jobId: repo.jobId, toolCallId });
 
   /** The dispatched job of this test's feature, or null while no dispatch happened. */
   const jobWith = (feature: string) =>
@@ -63,7 +65,7 @@ describeIntegration('fleet assistant dispatch job tool (PG, US-003)', () => {
 
   /** `dev` decides one approval; answers the decide response. */
   const decide = (approvalId: string, decision: string) =>
-    request(server).post(`${APPROVALS}/${approvalId}/decide`).set({ Authorization: `Bearer ${world.tokens.dev}` }).send({ decision });
+    request(server).post(`${APPROVALS}/${approvalId}/decisions`).set({ Authorization: `Bearer ${world.tokens.dev}` }).send({ decision });
 
   beforeAll(async () => {
     saved['FLEET_THREADS_ENABLED'] = process.env['FLEET_THREADS_ENABLED'];
@@ -73,6 +75,7 @@ describeIntegration('fleet assistant dispatch job tool (PG, US-003)', () => {
     server = app.getHttpServer();
     prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
+    await grantKeys(prisma, { type: 'USER', id: world.ids.dev }, ['approval.decide'], world.projectId);
     const runner = await enrollRunner(server, world.tokens.root, 'dispatch-job-runner');
     await prisma.runner.update({
       where: { id: runner.runnerId }, data: { protocolVersion: 4, enabled: true, lastSeenAt: new Date() },
@@ -115,7 +118,7 @@ describeIntegration('fleet assistant dispatch job tool (PG, US-003)', () => {
     // The proposal waits: no job exists before the user decides.
     expect(await jobWith(FEATURE)).toBeNull();
 
-    await decide(action.approvalId, 'approve').expect(200);
+    await decide(action.id, 'approve').expect(200);
 
     const job = await jobWith(FEATURE);
     expect(job).toMatchObject({
@@ -124,7 +127,7 @@ describeIntegration('fleet assistant dispatch job tool (PG, US-003)', () => {
     expect(job?.maxCostUsd.toString()).toBe('0.5');
     // The action's result is what `execute` answered: the job it dispatched and the path a human can open. The state
     // is whatever placement left the job in, so only the shape is pinned.
-    expect((await prisma.pendingAction.findUniqueOrThrow({ where: { id: action.id } })).result)
+    expect(((await findThreadAction(prisma, { requestId: action.id })).result as { text: string }).text)
       .toMatch(new RegExp(`^dispatched ${job?.id as string}: [A-Z]+ /web/fleet/jobs/${job?.id as string}$`));
   });
 
@@ -134,7 +137,7 @@ describeIntegration('fleet assistant dispatch job tool (PG, US-003)', () => {
     }).expect(200));
 
     expect({ content, isError }).toEqual({ content: 'not_found', isError: true });
-    expect(await prisma.pendingAction.count({ where: { jobId: repo.jobId, toolCallId: 'ac15' } })).toBe(0);
+    expect(await prisma.assistantActionRequest.count({ where: { jobId: repo.jobId, toolCallId: 'ac15' } })).toBe(0);
     // The audit row proves the call reached the registered tool rather than being refused by name.
     expect(await prisma.assistantToolCall.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId: repo.jobId, toolCallId: 'ac15' } } }))
       .toMatchObject({ tool: TOOL, outcome: 'not_found', isError: true, content: 'not_found' });
@@ -151,7 +154,7 @@ describeIntegration('fleet assistant dispatch job tool (PG, US-003)', () => {
     expect(content.startsWith('pending ')).toBe(true);
 
     const action = await actionOf('ac-extra');
-    await decide(action.approvalId, 'approve').expect(200);
+    await decide(action.id, 'approve').expect(200);
 
     const job = await jobWith('dispatch-tool-us003-second');
     expect(job).toMatchObject({ requestedById: world.ids.dev, command: 'PLAN', repoId: world.repoId });

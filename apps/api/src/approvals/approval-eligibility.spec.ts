@@ -87,6 +87,24 @@ describe('decideEligibility', () => {
       .toEqual({ ok: true, satisfiedBy: 'human' });
   });
 
+  it.each(['human', 'agent'] as const)('on-behalf-of agents contribute self, not %s', (requiredMode) => {
+    const assistant = request({ actor: { type: 'SYSTEM', id: 'assistant' }, onBehalfOf: ACTOR, requiredMode });
+    expect(decideEligibility(assistant, ACTOR, keys('label.delete', 'approval.decide')))
+      .toEqual({ ok: false, reason: 'tier-too-low' });
+  });
+
+  it('on-behalf-of agents may confirm self without approval.decide', () => {
+    const assistant = request({ actor: { type: 'SYSTEM', id: 'assistant' }, onBehalfOf: ACTOR, requiredMode: 'self' });
+    expect(decideEligibility(assistant, ACTOR, keys('label.delete')))
+      .toEqual({ ok: true, satisfiedBy: 'self' });
+  });
+
+  it('distinct approval also refuses the on-behalf-of agent confirming self', () => {
+    const assistant = request({ actor: { type: 'SYSTEM', id: 'assistant' }, onBehalfOf: ACTOR, requiredMode: 'self', requireDistinctApprover: true });
+    expect(decideEligibility(assistant, ACTOR, keys('label.delete', 'approval.decide')))
+      .toEqual({ ok: false, reason: 'distinct-approver-required' });
+  });
+
   it('AC-13: a system decider is not a principal', () => {
     expect(decideEligibility(request(), { type: 'SYSTEM', id: 'expiry' }, keys('approval.decide', 'label.delete')))
       .toEqual({ ok: false, reason: 'not-a-principal' });
