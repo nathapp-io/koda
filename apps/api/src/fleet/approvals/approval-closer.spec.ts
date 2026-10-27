@@ -223,35 +223,3 @@ describe('bash (S1.5 2a)', () => {
     for (const extra of ['requestedById', 'threadPath', 'tool']) expect(payload).not.toHaveProperty(extra);
   });
 });
-
-describe('assistant action (S5b 2a)', () => {
-  const expiresAt = new Date(NOW.getTime() + 86_400_000);
-  const action = { id: 'act1', projectId: 'p1', threadId: 't1', jobId: 'j1', tool: 'koda_add_comment', actorId: 'u9', expiresAt };
-
-  it('AC-5, AC-6: opens one pending assistant_action approval expiring with the action and holding only the summary', async () => {
-    const { closer, repo, activity, webhooks, outbox } = fakes();
-
-    const r = await closer.openAssistant(action, '/web/threads/t1', NOW);
-
-    expect(r.approval).toEqual(expect.objectContaining({
-      type: 'assistant_action', status: 'pending', projectId: 'p1', jobId: 'j1', policyId: null, requestedAt: NOW, expiresAt,
-      payload: { actionId: 'act1', tool: 'koda_add_comment', threadId: 't1', threadPath: '/web/threads/t1', requestedById: 'u9' },
-    }));
-    expect(repo.create).toHaveBeenCalledTimes(1);
-    expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({
-      actorType: 'USER', actorId: 'u9', action: 'approval.requested', entityType: 'approval',
-      entityId: r.approval?.id, projectId: 'p1', jobId: 'j1', responsibleUserId: 'u9',
-      // approvalActivityPayload(approval, { threadId }): the preview and the input are nowhere on it.
-      payload: { type: 'assistant_action', status: 'pending', decision: null, resolvedBy: null, policyId: null, jobId: 'j1', threadId: 't1' },
-    }));
-    expect(webhooks.dispatch).toHaveBeenCalledWith('p1', 'fleet.approval.requested', expect.objectContaining({ approvalId: r.approval?.id, type: 'assistant_action' }));
-    expect(outbox.record).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'fleet_approval_requested',
-      payload: expect.objectContaining({
-        approvalId: r.approval?.id, projectId: 'p1', jobId: 'j1', requestedById: 'u9', threadPath: '/web/threads/t1', tool: 'koda_add_comment',
-      }),
-      metadata: { projectId: 'p1', eventId: r.approval?.id },
-    }));
-    expect(r.live).toHaveLength(1);
-  });
-});

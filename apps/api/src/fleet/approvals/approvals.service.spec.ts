@@ -73,10 +73,9 @@ function build(approval: FleetApprovalRecord | null, policyScope: 'project' | 'p
   const tx = { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) };
   const jobRepo = { lockById: vi.fn(), createCommand: vi.fn() };
   const notifier = { notify: vi.fn() };
-  const assistantActions = { decide: vi.fn() };
   const permissions = allowAllPermissions();
-  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, tx as never, jobRepo as never, notifier as never, assistantActions as never, permissions as never, mockAuditRecorder);
-  return { service, repo, budgets, jobs, budgetRepo, jobRepo, notifier, assistantActions, permissions, tx };
+  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, tx as never, jobRepo as never, notifier as never, permissions as never, mockAuditRecorder);
+  return { service, repo, budgets, jobs, budgetRepo, jobRepo, notifier, permissions, tx };
 }
 
 /**
@@ -112,9 +111,8 @@ function buildBash() {
   const tx = { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) };
   const jobRepo = { lockById: vi.fn(), createCommand: vi.fn() };
   const notifier = { notify: vi.fn() };
-  const assistantActions = { decide: vi.fn() };
   const permissions = allowAllPermissions();
-  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, tx as never, jobRepo as never, notifier as never, assistantActions as never, permissions as never, mockAuditRecorder);
+  const service = new ApprovalsService(repo as never, budgetRepo as never, budgets as never, jobs as never, closer as never, live as never, tx as never, jobRepo as never, notifier as never, permissions as never, mockAuditRecorder);
   // Defaults the brief's row literals leave out but the service/DTO touch (e.g. requestedAt).
   const seed = (a: Record<string, unknown> & { id: string }) => {
     rows.set(a.id, {
@@ -361,41 +359,6 @@ describe('ApprovalsService.get re-queue candidates', () => {
   it('an exact page is not flagged as truncated', async () => {
     const { service } = build(pendingBudget());
     expect(await service.get(PROJECT_ADMIN, 'a1')).toEqual(expect.objectContaining({ requeueCandidatesTruncated: false }));
-  });
-});
-
-describe('ApprovalsService.decide (assistant_action, 2a-D8)', () => {
-  const assistant = (over: Partial<FleetApprovalRecord> = {}) => pendingBudget({ type: 'assistant_action', policyId: null, payload: { actionId: 'act1', requestedById: 'u1' }, ...over });
-  const REQUESTER: ApprovalCaller & { principal: KodaPrincipal } = { id: 'u1', principal: userPrincipal('u1') };
-
-  it('AC-20: calls AssistantActionPort.decide with the caller, the approval and the dto, and answers its approval', async () => {
-    const approval = assistant();
-    const { service, assistantActions } = build(approval);
-    const decided = { ...approval, status: 'rejected' as const, decision: 'reject' as const, decidedById: 'u1', resolvedBy: 'user' as const };
-    assistantActions.decide.mockResolvedValue(decided);
-    const dto = { decision: 'reject' as const };
-
-    const answer = await service.decide(REQUESTER, PROJECT_DEV, 'a1', dto, NOW);
-
-    expect(assistantActions.decide).toHaveBeenCalledWith(REQUESTER, approval, dto, NOW);
-    expect(answer).toEqual(expect.objectContaining({ id: 'a1', type: 'assistant_action', status: 'rejected', decision: 'reject' }));
-  });
-
-  it('AC-21: never resumes a budget, and never takes the budget lock', async () => {
-    const { service, budgets, budgetRepo, assistantActions } = build(assistant());
-    assistantActions.decide.mockResolvedValue(assistant({ status: 'rejected' }));
-
-    await service.decide(REQUESTER, PROJECT_DEV, 'a1', { decision: 'reject' }, NOW);
-
-    expect(budgets.resume).not.toHaveBeenCalled();
-    expect(budgetRepo.lockById).not.toHaveBeenCalled();
-  });
-
-  it('does not apply the budget role gate: a project DEVELOPER reaches the handler', async () => {
-    const { service, assistantActions } = build(assistant());
-    assistantActions.decide.mockResolvedValue(assistant({ status: 'rejected' }));
-    await expect(service.decide(REQUESTER, PROJECT_DEV, 'a1', { decision: 'reject' }, NOW)).resolves.toBeDefined();
-    expect(assistantActions.decide).toHaveBeenCalledTimes(1);
   });
 });
 

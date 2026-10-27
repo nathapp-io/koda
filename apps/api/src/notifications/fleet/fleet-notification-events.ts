@@ -26,8 +26,6 @@ export interface FleetHealthAlertPayload { alertId: string; kind: HealthAlertKin
 /** The fields of approvalWebhookPayload (approvals/approval-payloads.ts) the consumer needs. */
 export interface FleetApprovalRequestedPayload {
   approvalId: string; type: string; projectId: string | null; jobId: string | null; policyId: string | null;
-  /** S5b 2a-D6: only an `assistant_action` ask carries these; absent on every other type. */
-  requestedById?: string; threadPath?: string; tool?: string;
 }
 
 const FAILURE_OUTCOME: Readonly<Record<string, JobOutcome>> = Object.freeze({
@@ -99,10 +97,5 @@ export function parseApprovalRequestedPayload(raw: unknown): FleetApprovalReques
   const parsed: FleetApprovalRequestedPayload = {
     approvalId, type, projectId: textOrNull(projectId), jobId: textOrNull(jobId), policyId: textOrNull(policyId),
   };
-  // S5b 2a-D6: the action ask's own fields. A key that is not a non-empty string is absent, not empty, so the
-  // consumer can tell a payload that lost the field from one that sent it blank.
-  if (isText(raw['requestedById'])) parsed.requestedById = raw['requestedById'];
-  if (isText(raw['threadPath'])) parsed.threadPath = raw['threadPath'];
-  if (isText(raw['tool'])) parsed.tool = raw['tool'];
   return parsed;
 }

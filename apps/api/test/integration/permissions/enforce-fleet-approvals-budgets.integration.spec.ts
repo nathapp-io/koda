@@ -282,6 +282,12 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
     expect(data<{ records: ApprovalItem[] }>(res).records.map((a) => a.id)).toEqual([approval.id]);
   }, TIMEOUT);
 
+  it('US-012 AC-1: a project member with fleet.approval.read cannot filter by assistant_action (400)', async () => {
+    // Prove this member reaches query validation rather than being refused by a guard.
+    await as('viewerBind', 'get', approvalsUrl(P1_SLUG)).expect(200);
+    await as('viewerBind', 'get', approvalsUrl(P1_SLUG, '?type=assistant_action')).expect(400);
+  }, TIMEOUT);
+
   it('AC-2: the roster-only agent reads one approval (200)', async () => {
     const { approval } = await bashAsk();
 

@@ -2,14 +2,12 @@ import { findThreadAction } from '../../helpers/assistant-request';
 import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
- * Fleet S5b US-003 (3-D12 / 3-R3) — the whole thread path over HTTP: `dev`'s REPO THREAD job proposes
- * `koda_add_comment` through the runner tool route, `dev` approves it through the project decide route, and the
- * comment exists on the ticket with the action `EXECUTED`.
+ * The whole thread path over HTTP: `dev`'s REPO THREAD job proposes `koda_add_comment` through the runner
+ * tool route, `dev` approves it through the approval-request decisions route, and the comment exists on the
+ * ticket with the request executed.
  *
- * Nothing is stubbed: the proposal enters the real route (runner authentication, the lease fence, the executor, the
- * tool registry the module fills at boot and `AssistantActionService.propose`) and the decision enters the real
- * project route (the guard, the DTO pipe, the late-bound `AssistantActionPort` and `AssistantActionDecisions`), so
- * the approve re-check and the approved run are the ones the executor ships.
+ * Nothing is stubbed: runner authentication, the lease fence, the executor, the tool registry and the approval
+ * gate handle the proposal; the approval-request engine re-checks and executes the approved command.
  *
  * The second test asks the two candidate reads apart: the proposal records `dev` as the action's actor, and the
  * thread is moved to the `viewer` — a member who may also comment — before the approve. A run that still read the

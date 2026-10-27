@@ -6,6 +6,8 @@
  * carries one.
  */
 import { Page } from '@nathapp/nestjs-common';
+import { validate } from 'class-validator';
+import { ListApprovalsQuery } from './dto/list-approvals.query';
 import type { ApprovalsService } from './approvals.service';
 import { ProjectFleetApprovalsController } from './project-fleet-approvals.controller';
 
@@ -19,6 +21,17 @@ describe('ProjectFleetApprovalsController (US-004)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     list.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
+  });
+
+  it('US-012 AC-1: the query validator rejects the removed assistant filter', async () => {
+    const errors = await validate(Object.assign(new ListApprovalsQuery(), { type: 'assistant_action' }));
+    expect(errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ property: 'type', constraints: expect.objectContaining({ isIn: expect.any(String) }) }),
+    ]));
+  });
+
+  it.each(['nax_bash_escalate', 'budget_override_required'])('still accepts the %s filter', async (type) => {
+    expect(await validate(Object.assign(new ListApprovalsQuery(), { type }))).toEqual([]);
   });
 
   it('AC-7: list calls approvals.list with exactly { kind: \'project\', projectId: \'p1\' }', async () => {
