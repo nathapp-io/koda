@@ -14,6 +14,7 @@ export interface FleetApprovalAskRecord {
   pendingClose: PersistedPolicyClose | null;
   /** US-009: the last engine status whose fleet outputs were recorded; a redelivery of it records nothing. */
   recordedStatus: string | null;
+  publishedStatus: string | null;
   createdAt: Date; updatedAt: Date;
 }
 
@@ -94,6 +95,7 @@ export interface IFleetApprovalAskRepository {
    */
   claimPendingPolicyAsks(limit: number): Promise<PolicyAskClose[]>;
   setResolvedBy(requestId: string, resolvedBy: ApprovalResolvedBy): Promise<FleetApprovalAskRecord>;
+  setPublishedStatus(requestId: string, publishedStatus: string): Promise<FleetApprovalAskRecord>;
   setRecordedStatus(requestId: string, recordedStatus: string): Promise<FleetApprovalAskRecord>;
   /** Replaces the outcome. */
   setOutcome(requestId: string, outcome: Record<string, unknown>): Promise<FleetApprovalAskRecord>;

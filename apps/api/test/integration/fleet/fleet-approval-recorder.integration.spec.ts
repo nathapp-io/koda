@@ -19,6 +19,7 @@ import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { ProjectEventBus } from '../../../src/live/project-event-bus';
 import type { LiveEvent } from '../../../src/live/live-event';
 import { APPROVAL_REQUEST_CHANGED } from '../../../src/approvals/approval-request-events';
+import { FleetApprovalAskStore } from '../../../src/fleet/approvals/fleet-approval-ask.store';
 
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
@@ -113,13 +114,12 @@ describeIntegration('fleet ask recorder (PG)', () => {
     expect(seen.filter((e) => e.type === 'fleet_approval')).toMatchObject([{ approvalId: requestId, status: 'approved' }]);
     expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } }))).toMatchObject({ recordedStatus: 'executed', resolvedBy: 'user' });
 
-    // A redelivery of the same status records nothing: the idempotency key is on the link. The live frame may repeat
-    // (it comes from its own durable-event consumer, fix round 3) but it is the same frame — same id — each time.
+    // Recording and live delivery have independent durable markers; neither repeats on redelivery.
     await deliver(APPROVAL_REQUEST_CHANGED);
     expect(await activity(requestId)).toHaveLength(1);
     expect(await resolvedWebhooks()).toBe(1);
     const frames = seen.filter((e) => e.type === 'fleet_approval');
-    expect(frames.length).toBeGreaterThanOrEqual(1);
+    expect(frames).toHaveLength(1);
     expect(new Set(frames.map((f) => f.id)).size).toBe(1);
   });
 
@@ -136,7 +136,58 @@ describeIntegration('fleet ask recorder (PG)', () => {
 
     expect(await activity(requestId)).toHaveLength(1);
     expect(await resolvedWebhooks()).toBe(1);
-    expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).recordedStatus).toBe('executed');
+    expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } }))).toMatchObject({ recordedStatus: 'executed', publishedStatus: 'executed' });
+    expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
+  });
+
+  it('F5 round 4: publication failure makes the relay retry without repeating committed outputs', async () => {
+    const { requestId } = await pendingBashAsk();
+    await decide(requestId).expect(200);
+    const fail = vi.spyOn(app.get(ProjectEventBus), 'publishRetryable').mockImplementationOnce(() => { throw new Error('live unavailable'); });
+    try {
+      await expect(deliver(APPROVAL_REQUEST_CHANGED)).rejects.toThrow('live unavailable');
+      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBeNull();
+      await deliver(APPROVAL_REQUEST_CHANGED);
+      await deliver(APPROVAL_REQUEST_CHANGED);
+      expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
+      expect(await activity(requestId)).toHaveLength(1);
+      expect(await resolvedWebhooks()).toBe(1);
+    } finally {
+      fail.mockRestore();
+    }
+  });
+
+  it('F5 round 4: a marker write failure retries without duplicating frames already delivered to consumers', async () => {
+    const { requestId } = await pendingBashAsk();
+    await decide(requestId).expect(200);
+    const fail = vi.spyOn(app.get(FleetApprovalAskStore), 'setPublishedStatus').mockRejectedValueOnce(new Error('marker unavailable'));
+    try {
+      await expect(deliver(APPROVAL_REQUEST_CHANGED)).rejects.toThrow('marker unavailable');
+      expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
+      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBeNull();
+      await deliver(APPROVAL_REQUEST_CHANGED);
+      expect(seen.filter((e) => e.type === 'fleet_approval')).toHaveLength(1);
+      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBe('executed');
+    } finally {
+      fail.mockRestore();
+    }
+  });
+
+  it('F6 round 4: an executed job_ended ask announces the cancelled fleet view, and a linkless ask emits nothing', async () => {
+    const { requestId } = await pendingBashAsk();
+    await prisma.approvalRequest.update({ where: { id: requestId }, data: { status: 'executed' } });
+    await prisma.fleetApprovalAsk.update({ where: { requestId }, data: { resolvedBy: 'job_ended' } });
+    const record = outboxRecord(APPROVAL_REQUEST_CHANGED, {
+      requestId, status: 'executed', projectId: world.projectId, permissionKey: 'fleet.job.shell.escalate',
+      requiredMode: 'agent', actorType: 'SYSTEM', actorId: 'runner', onBehalfOfType: 'USER', onBehalfOfId: world.ids.dev,
+      expiresAt: new Date().toISOString(),
+    });
+    await publisher.publish(record);
+    expect(seen.filter((e) => e.type === 'fleet_approval')).toMatchObject([{ approvalId: requestId, status: 'cancelled' }]);
+    await prisma.fleetApprovalAsk.delete({ where: { requestId } });
+    seen.length = 0;
+    await publisher.publish(record);
+    expect(seen.filter((e) => e.type === 'fleet_approval')).toEqual([]);
   });
 
   it('an expired ask records the expiry, fills the link timeout and answers to the system', async () => {

@@ -7,6 +7,9 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-approval-migration.integration.spec.ts
  */
 import request from 'supertest';
+import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
+import { ApprovalDecisionService } from '../../../src/approvals/approval-decision.service';
+import { ApprovalRequestExpirySweeper } from '../../../src/approvals/approval-request-expiry.sweeper';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { Prisma, type PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
@@ -109,6 +112,36 @@ describeIntegration('legacy fleet approvals migrate onto the engine (PG)', () =>
     expect(migrated.status).toBe('pending');
     expect(migrated.expiresAt.getTime()).toBeGreaterThan(Date.now());
     await request(app.getHttpServer()).post(`${PROJECT}/${row.id}/decide`).set(as(padmin)).send({ decision: 'deny' }).expect(200);
+  });
+
+  it('F4 round 4: a non-expiring legacy ask is still pending and decidable more than 24h after migration', async () => {
+    const { row } = await legacyBash();
+    await migrate();
+    const later = new Date(Date.now() + 7 * 86_400_000);
+    await app.get(ApprovalRequestExpirySweeper).tick(later);
+    expect((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: row.id } })).status).toBe('pending');
+    const decided = await withTestActor({ type: 'USER', id: padminId }, () =>
+      app.get(ApprovalDecisionService).decide(row.id, 'reject', null, later));
+    expect(decided.status).toBe('rejected');
+  });
+
+  it('F4 round 4: a failed copy durably moves behind later rows instead of starving the next batch', async () => {
+    const old = new Date('2020-01-01Z');
+    const first = await legacyBash({ createdAt: old, updatedAt: old });
+    const second = await legacyBash({ createdAt: old, updatedAt: new Date('2021-01-01Z') });
+    const tx = app.get<ITransactionManager>(TRANSACTION_MANAGER);
+    const fail = vi.spyOn(tx, 'run').mockRejectedValueOnce(new Error('permanent row failure'));
+    try {
+      expect(await withTestActor({ type: 'SYSTEM', id: 'seed' }, () => migrator.migrateBatch(1))).toBe(0);
+      expect((await prisma.fleetApproval.findUniqueOrThrow({ where: { id: first.row.id } })).updatedAt.getTime()).toBeGreaterThan(old.getTime());
+      expect(await withTestActor({ type: 'SYSTEM', id: 'seed' }, () => migrator.migrateBatch(1))).toBe(1);
+      expect(await prisma.fleetApprovalAsk.findUnique({ where: { requestId: first.row.id } })).toBeNull();
+      expect(await prisma.fleetApprovalAsk.findUnique({ where: { requestId: second.row.id } })).not.toBeNull();
+    } finally {
+      fail.mockRestore();
+    }
+    // A failed row remains in the durable source queue and is retried once the queue rotates.
+    expect(await migrate()).toBe(1);
   });
 
   it('F4 (fix round 3): the copy is one transaction, and a row left without its link is finished on the next pass', async () => {

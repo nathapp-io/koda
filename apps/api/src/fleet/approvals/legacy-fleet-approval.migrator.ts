@@ -39,10 +39,9 @@ interface LegacyRow {
  *   leaves no half-migrated ask);
  * - a row counts as migrated only when its **link** exists, so a row whose request survived an interrupted earlier
  *   attempt is finished on the next pass (`skipDuplicates` absorbs the request);
- * - a **pending** legacy ask never expired, so it is given a fresh default window from now instead of an expiry dated
- *   from its original creation (which would make an older ask undecidable the moment it arrived);
- * - it runs on boot *and* on a timer (the `approvalSweepMs` cadence, `FLEET_SWEEP_ENABLED`), so rows an old instance
- *   writes during a rolling deployment are picked up without waiting for a restart.
+ * - a pending row keeps its explicit deadline, or the legacy no-expiry sentinel; new asks still use policy timeouts;
+ * - it runs on boot and on a timer independently of FLEET_SWEEP_ENABLED;
+ * - each batch durably rotates attempts before copying, so poison rows cannot starve later rows even after a restart.
  *
  * `US-012` deletes this class with the table it reads.
  */
@@ -54,7 +53,7 @@ export class LegacyFleetApprovalMigrator implements OnApplicationBootstrap, OnMo
   constructor(
     private readonly prisma: PrismaService<PrismaClient>,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
-    @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'sweepEnabled' | 'approvalSweepMs'>,
+    @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'approvalSweepMs'>,
   ) {}
 
   private get db() {
@@ -72,7 +71,6 @@ export class LegacyFleetApprovalMigrator implements OnApplicationBootstrap, OnMo
 
   /** The durable continuation: a legacy row written after the boot pass is copied without a restart. */
   onModuleInit(): void {
-    if (!this.fleetConfig.sweepEnabled) return;
     this.timer = setInterval(() => {
       this.pass().catch((error: unknown) => this.logger.warn(`legacy fleet approval migration failed: ${reason(error)}`));
     }, this.fleetConfig.approvalSweepMs);
@@ -93,10 +91,10 @@ export class LegacyFleetApprovalMigrator implements OnApplicationBootstrap, OnMo
   async migrateAll(): Promise<number> {
     let total = 0;
     for (let batch = 0; batch < MAX_BATCHES_PER_PASS; batch += 1) {
-      const migrated = await this.migrateBatch();
-      total += migrated;
-      // A short batch is the end of the table (or a pass that failed on some rows: the next pass retries them).
-      if (migrated < MIGRATION_BATCH) break;
+      const result = await this.copyBatch(MIGRATION_BATCH);
+      total += result.migrated;
+      // Attempt count, not success count: failed rows must not hide the rest of the queue.
+      if (result.attempted < MIGRATION_BATCH) break;
     }
     if (total > 0) this.logger.log(`migrated ${total} legacy fleet approval(s) onto the approval engine`);
     return total;
@@ -104,11 +102,22 @@ export class LegacyFleetApprovalMigrator implements OnApplicationBootstrap, OnMo
 
   /** One bounded batch: the legacy rows whose link the engine does not have yet. */
   async migrateBatch(limit = MIGRATION_BATCH): Promise<number> {
+    return (await this.copyBatch(limit)).migrated;
+  }
+
+  private async copyBatch(limit: number): Promise<{ attempted: number; migrated: number }> {
+    // Autocommit scheduling statement, outside each copy transaction: a failed copy cannot roll back its queue position.
     const rows = await this.db.$queryRaw<LegacyRow[]>`
-      SELECT f.* FROM "FleetApproval" f
-      WHERE NOT EXISTS (SELECT 1 FROM "FleetApprovalAsk" a WHERE a."requestId" = f."id")
-      ORDER BY f."createdAt" ASC
-      LIMIT ${limit}
+      WITH next AS (
+        SELECT f."id" FROM "FleetApproval" f
+        WHERE NOT EXISTS (SELECT 1 FROM "FleetApprovalAsk" a WHERE a."requestId" = f."id")
+        ORDER BY f."updatedAt" ASC, f."id" ASC
+        LIMIT ${limit}
+        FOR UPDATE OF f SKIP LOCKED
+      )
+      UPDATE "FleetApproval" f SET "updatedAt" = clock_timestamp()
+      FROM next WHERE f."id" = next."id"
+      RETURNING f.*
     `;
     let migrated = 0;
     for (const row of rows) {
@@ -119,7 +128,7 @@ export class LegacyFleetApprovalMigrator implements OnApplicationBootstrap, OnMo
         this.logger.warn(`legacy approval ${row.id} was not migrated: ${reason(error)}`);
       }
     }
-    return migrated;
+    return { attempted: rows.length, migrated };
   }
 
   /**
@@ -159,8 +168,7 @@ export class LegacyFleetApprovalMigrator implements OnApplicationBootstrap, OnMo
           satisfiedBy: row.decidedById === null ? null : 'human',
           approverType: row.decidedById === null ? null : 'USER',
           approverId: row.decidedById,
-          // A pending legacy ask never expired: it gets a full default window from the migration, not an expiry dated
-          // from its creation (which would leave an older ask dead on arrival).
+          // Compatibility only: a null legacy deadline must not become a new 24h timeout.
           expiresAt: pendingExpiry(status, row),
           decidedAt: row.decidedById === null ? null : decidedAt,
           settledAt: settled ? decidedAt : null,
@@ -238,12 +246,12 @@ export class LegacyFleetApprovalMigrator implements OnApplicationBootstrap, OnMo
   }
 }
 
-/** A settled row keeps its own timeline; a pending one gets a fresh window, because it never expired before. */
+/** The engine requires a date. Reserve the end of the four-digit calendar for legacy no-expiry rows only. */
 function pendingExpiry(status: string, row: LegacyRow): Date {
-  if (status !== 'pending') return row.expiresAt ?? new Date(row.createdAt.getTime() + DEFAULT_APPROVAL_TIMEOUT_SEC * 1000);
-  const window = DEFAULT_APPROVAL_TIMEOUT_SEC * 1000;
-  const renewed = Date.now() + window;
-  return row.expiresAt === null || row.expiresAt.getTime() <= Date.now() ? new Date(renewed) : row.expiresAt;
+  if (row.expiresAt !== null) return row.expiresAt;
+  return status === 'pending'
+    ? new Date('9999-12-31T23:59:59.999Z')
+    : new Date(row.createdAt.getTime() + DEFAULT_APPROVAL_TIMEOUT_SEC * 1000);
 }
 
 const text = (value: unknown, fallback: string): string =>

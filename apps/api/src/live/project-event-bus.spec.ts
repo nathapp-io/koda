@@ -1,6 +1,6 @@
 import type { Mock } from 'vitest';
 import { Logger } from '@nestjs/common';
-import { ProjectEventBus } from './project-event-bus';
+import { MAX_RETRYABLE_FRAMES_PER_SUBSCRIPTION, ProjectEventBus } from './project-event-bus';
 import type { LiveEvent } from './live-event';
 
 const event = (projectId: string, id = 'evt-1'): LiveEvent => ({
@@ -76,6 +76,34 @@ describe('ProjectEventBus', () => {
     expect(() => bus.publish(event('p1'))).not.toThrow();
     expect(after).toHaveBeenCalledTimes(1);
     expect(Logger.prototype.error).toHaveBeenCalled();
+  });
+
+  it('retryable delivery rejects failures but deduplicates successful consumers on redelivery', () => {
+    const bus = new ProjectEventBus();
+    const good = vi.fn();
+    const bad = vi.fn().mockImplementationOnce(() => { throw new Error('socket failed'); });
+    bus.subscribe('p1', good);
+    bus.subscribe('p1', bad);
+    expect(() => bus.publishRetryable(event('p1'))).toThrow('socket failed');
+    expect(() => bus.publishRetryable(event('p1'))).not.toThrow();
+    bus.publishRetryable(event('p1'));
+    expect(good).toHaveBeenCalledTimes(1);
+    expect(bad).toHaveBeenCalledTimes(2);
+  });
+
+  it('bounds the short-term consumer cache; durable publication markers own older deduplication', () => {
+    const bus = new ProjectEventBus();
+    const listener = vi.fn();
+    const unsubscribe = bus.subscribe('p1', listener);
+    for (let i = 0; i <= MAX_RETRYABLE_FRAMES_PER_SUBSCRIPTION; i++) bus.publishRetryable(event('p1', String(i)));
+    listener.mockClear();
+    bus.publishRetryable(event('p1', String(MAX_RETRYABLE_FRAMES_PER_SUBSCRIPTION)));
+    expect(listener).not.toHaveBeenCalled();
+    bus.publishRetryable(event('p1', '0'));
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    bus.publishRetryable(event('p1', 'new'));
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 
   it('the same listener function subscribed twice gets two independent subscriptions', () => {

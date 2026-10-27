@@ -9,7 +9,7 @@ const NOW = new Date('2026-10-02T10:00:00.000Z');
 
 const link = (over: Partial<FleetApprovalAskRecord> = {}): FleetApprovalAskRecord => ({
   requestId: 'a1', kind: 'budget', projectId: 'p1', jobId: null, leaseEpoch: null, naxAskId: null, budgetPolicyId: 'pol',
-  resolvedBy: null, outcome: null, pendingClose: null, recordedStatus: null, createdAt: NOW, updatedAt: NOW, ...over,
+  resolvedBy: null, outcome: null, pendingClose: null, recordedStatus: null, publishedStatus: null, createdAt: NOW, updatedAt: NOW, ...over,
 });
 const view = (over: Partial<FleetApprovalRecord> = {}): FleetApprovalRecord => ({
   id: 'a1', type: 'budget_override_required', status: 'approved', projectId: 'p1', jobId: null, leaseEpoch: null, naxAskId: null,

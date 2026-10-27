@@ -70,7 +70,11 @@ export class FleetApprovalAskStore {
     return this.asks.setResolvedBy(requestId, resolvedBy);
   }
 
-  /** US-009: the idempotency key of the fleet outputs a settled ask records. */
+  /** The live publication acknowledgement, independent of the activity/webhook recorder. */
+  setPublishedStatus(requestId: string, publishedStatus: string): Promise<FleetApprovalAskRecord> {
+    return this.asks.setPublishedStatus(requestId, publishedStatus);
+  }
+
   setRecordedStatus(requestId: string, recordedStatus: string): Promise<FleetApprovalAskRecord> {
     return this.asks.setRecordedStatus(requestId, recordedStatus);
   }

@@ -52,7 +52,7 @@ function askStore() {
       const link: FleetApprovalAskRecord = {
         requestId: d.requestId, kind: d.kind, projectId: d.projectId, jobId: d.jobId ?? null, leaseEpoch: d.leaseEpoch ?? null,
         naxAskId: d.naxAskId ?? null, budgetPolicyId: d.budgetPolicyId ?? null, resolvedBy: null, outcome: null,
-        pendingClose: null, recordedStatus: null, createdAt: NOW, updatedAt: NOW,
+        pendingClose: null, recordedStatus: null, publishedStatus: null, createdAt: NOW, updatedAt: NOW,
       };
       links.set(link.requestId, link);
       views.set(link.requestId, {

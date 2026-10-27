@@ -948,6 +948,8 @@ model FleetApproval {
   @@index([status, expiresAt])
   @@index([jobId, status])
   @@index([policyId])
+  // Durable migration attempt order, so failing rows cannot starve the queue.
+  @@index([updatedAt, id])
 }
 
 /// S1b §3.1 C4 schedule: drives one feature to done with RUNs. repoId and pinnedRunnerId have no foreign key
@@ -1671,10 +1673,11 @@ model FleetApprovalAsk {
   /// settle (the request was held, or the call hit its bound) is drained later by the durable continuation with the same
   /// attribution and outcome, not just the reason.
   pendingClose   Json?
-  /// Permissions P3 US-009 (delivered early for US-007 fix round 2): the last engine status whose fleet outputs (the
-  /// activity row, the `fleet.approval.resolved` webhook and the live event) were recorded. Redelivery of the same
-  /// status records nothing.
+  /// Permissions P3 US-009: the last engine status whose activity row and resolved webhook were recorded.
+  /// Live publication has a separate acknowledgement so recording these outputs cannot lose a live frame.
   recordedStatus String?
+  /// Separate from output recording: successful live publication is deduplicated across relay retries.
+  publishedStatus String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   request        ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
