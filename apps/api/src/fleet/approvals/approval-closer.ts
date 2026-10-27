@@ -42,8 +42,8 @@ export interface PolicyClose {
 }
 
 /**
- * The only two actor shapes. Budgets, jobs and approvals all act on the same approval rows, so they
- * must not each build their own literal: a third copy is how the two lists drift apart.
+ * The actor shapes a close or a resolution can have. Budgets, jobs and approvals all act on the same approval
+ * rows, so they must not each build their own literal: one more copy is how these lists drift apart.
  */
 export const userActor = (id: string): ApprovalActor => ({ type: 'USER', id, responsibleUserId: id });
 /**
