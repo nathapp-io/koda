@@ -198,7 +198,9 @@ describe('ApprovalsService.decide over the engine (fix round 1)', () => {
 
   it.each([
     ['allow', 'approve', { choice: 'allow' }],
-    ['allow_for_job', 'approve', { choice: 'allow-remember' }],
+    // The engine's params carry the fleet's choice name; `allow-remember` is only how nax names the
+    // option the runner is answered with (`checked.choice`), never what `parseDecision` accepts.
+    ['allow_for_job', 'approve', { choice: 'allow_for_job' }],
     ['deny', 'reject', undefined],
   ] as const)('a bash %s is the engine %s', async (decision, engine, params) => {
     const { service, decisions } = build({

@@ -131,7 +131,11 @@ export class ApprovalsService {
       const checked = checkBashDecision(view.payload, dto.decision);
       // strictNullChecks is off: `in` narrows, `.ok` does not.
       if ('reason' in checked) invalid(checked.reason);
-      return checked.choice === 'deny' ? { decision: 'reject' } : { decision: 'approve', params: { choice: checked.choice } };
+      // The command's params name the fleet's choice (`allow` / `allow_for_job`), never nax's option:
+      // `checked.choice` is the option the runner is answered with (`allow-remember`), and passing it here
+      // made every `allow_for_job` decide a 400 in the command's `parseDecision`.
+      const choice: 'allow' | 'allow_for_job' = dto.decision === 'allow_for_job' ? 'allow_for_job' : 'allow';
+      return checked.choice === 'deny' ? { decision: 'reject' } : { decision: 'approve', params: { choice } };
     }
 
     if (dto.decision !== 'keep_paused' && dto.decision !== 'raise_budget_and_resume') invalid(`${dto.decision} does not apply to a budget approval`);
