@@ -48,8 +48,8 @@ integration('Approval decision params through AppModule', () => {
 
     return outcome.request;
   };
-  const decide = (id: string, decision: 'approve' | 'reject') =>
-    withTestActor(user, () => service.decide(id, decision, decision === 'reject' ? 'no' : null, now));
+  const decide = (id: string, decision: 'approve' | 'reject', params?: unknown) =>
+    withTestActor(user, () => service.decide(id, decision, decision === 'reject' ? 'no' : null, now, params));
 
   beforeAll(async () => {
     await resetDb();
@@ -99,6 +99,26 @@ integration('Approval decision params through AppModule', () => {
     const rows = await db.$queryRaw<Array<{ params: unknown }>>`SELECT "params" FROM "ApprovalDecision" WHERE "requestId" = ${request.id}`;
     expect(rows).toEqual([{ params: null }]);
     expect(await requests.findDecisions(request.id)).toEqual([expect.objectContaining({ decision: 'reject', params: null })]);
+  });
+
+  it('US-004 AC-1: an approval with params executes its command with the parsed decision', async () => {
+    await grantRole(db, user, 'project-admin', 'p1');
+    // The command freezes the decider's params into the decision the execution re-parses.
+    labels.state.parseDecision = { calls: [], result: { remember: true }, throws: false };
+    const request = await open(labels, 'p1');
+
+    const settled = await decide(request.id, 'approve', { remember: true });
+
+    expect(settled.status).toBe('executed');
+    expect(labels.state.decisions).toEqual([{ remember: true }]);
+    // Once at decide time, once from the stored column at execution: the same params both times.
+    expect(labels.state.parseDecision.calls).toEqual([
+      { decision: 'approve', params: { remember: true }, input: { labelId: 'l1' } },
+      { decision: 'approve', params: { remember: true }, input: { labelId: 'l1' } },
+    ]);
+    expect(await requests.findDecisions(request.id)).toEqual([
+      expect.objectContaining({ decision: 'approve', params: { remember: true } }),
+    ]);
   });
 
   it('AC-12: a throwing onReject rolls the whole decision back and propagates its error', async () => {

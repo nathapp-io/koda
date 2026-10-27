@@ -8,7 +8,7 @@ import type { PermissionService } from '../permissions/permission.service';
 import { ApprovalCommandRegistry } from './approval-command.registry';
 import { ApprovalExecutionService } from './approval-execution.service';
 import { approvalInputHash } from './approval-input';
-import type { ApprovalRequestRecord } from './domain/approval.domain';
+import type { ApprovalDecisionRecord, ApprovalRequestRecord } from './domain/approval.domain';
 import { ApprovalRequestNotPendingError } from './domain/approval.errors';
 import type { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
 import { configurableTestCommand } from './test-helpers/test-approval-command';
@@ -26,6 +26,13 @@ function approved(patch: Partial<ApprovalRequestRecord> = {}): ApprovalRequestRe
   };
 }
 
+function approving(patch: Partial<ApprovalDecisionRecord> = {}): ApprovalDecisionRecord {
+  return {
+    id: 'd1', requestId: 'r1', deciderType: 'USER', deciderId: 'u1', decision: 'approve',
+    comment: null, decidedAt: now, params: null, ...patch,
+  };
+}
+
 function setup(patch: Partial<ApprovalRequestRecord> = {}) {
   const request = approved(patch);
   const state = { current: request };
@@ -33,6 +40,7 @@ function setup(patch: Partial<ApprovalRequestRecord> = {}) {
   const repo = {
     findById: vi.fn().mockImplementation(async () => state.current),
     lockById: vi.fn().mockImplementation(async () => state.current),
+    findDecisions: vi.fn().mockResolvedValue([]),
     transition: vi.fn().mockImplementation(async (_id: string, _from: string, p: Partial<ApprovalRequestRecord>) => {
       reasons.push(currentBookkeepingReason());
       return { ...state.current, ...p };
@@ -171,6 +179,137 @@ describe('ApprovalExecutionService', () => {
     s.test.state.parseThrows = true;
     expect(await s.service.execute('r1', now)).toMatchObject({ status: 'failed', result: { error: 'invalid-input' } });
     expect(s.test.state.calls).toEqual([]);
+  });
+
+  it('AC-2: executes a request approved without params with what parseDecision answers for no params', async () => {
+    const s = setup();
+    s.test.state.parseDecision = { calls: [], result: { remember: false }, throws: false };
+    s.repo.findDecisions.mockResolvedValue([approving({ params: null })]);
+
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
+
+    expect(s.test.state.parseDecision.calls).toEqual([{ decision: 'approve', params: undefined, input }]);
+    expect(s.test.state.decisions).toEqual([{ remember: false }]);
+  });
+
+  it('AC-2: re-parses with no params when a timeout approval left no decision row', async () => {
+    const s = setup();
+    s.test.state.parseDecision = { calls: [], result: 'timeout', throws: false };
+    s.repo.findDecisions.mockResolvedValue([]);
+
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
+    expect(s.test.state.parseDecision.calls).toEqual([{ decision: 'approve', params: undefined, input }]);
+    expect(s.test.state.decisions).toEqual(['timeout']);
+  });
+
+  it('AC-3: re-parses the approving decision params before the command runs', async () => {
+    const s = setup();
+    s.test.state.parseDecision = { calls: [], result: 'ok', throws: false };
+    s.repo.findDecisions.mockResolvedValue([approving({ params: { remember: true } })]);
+
+    await s.service.execute('r1', now);
+
+    expect(s.repo.findDecisions).toHaveBeenCalledExactlyOnceWith('r1');
+    expect(s.test.state.parseDecision.calls).toEqual([{ decision: 'approve', params: { remember: true }, input }]);
+    expect(s.test.state.decisions).toEqual(['ok']);
+  });
+
+  it('AC-3: re-parses the last approving decision, ignoring earlier approvals and rejects', async () => {
+    const s = setup();
+    s.test.state.parseDecision = { calls: [], result: 'ok', throws: false };
+    s.repo.findDecisions.mockResolvedValue([
+      approving({ id: 'd1', params: { remember: true } }),
+      approving({ id: 'd2', decision: 'reject', decidedAt: new Date(now.getTime() + 1), params: { reason: 'no' } }),
+      approving({ id: 'd3', decidedAt: new Date(now.getTime() + 2), params: { remember: false } }),
+    ]);
+
+    await s.service.execute('r1', now);
+
+    expect(s.test.state.parseDecision.calls).toEqual([{ decision: 'approve', params: { remember: false }, input }]);
+  });
+
+  it('AC-4: settles invalid-decision when the stored params no longer parse, without running', async () => {
+    const s = setup();
+    s.test.state.parseDecision = { calls: [], result: undefined, throws: true };
+    s.repo.findDecisions.mockResolvedValue([approving({ params: { remember: true } })]);
+
+    const settled = await s.service.execute('r1', now);
+
+    expect(settled).toMatchObject({ status: 'failed', settledAt: now, result: { error: 'invalid-decision' } });
+    expect(s.test.state.calls).toEqual([]);
+    expect(s.test.state.decisions).toEqual([]);
+    expect(s.repo.transition).toHaveBeenCalledExactlyOnceWith('r1', 'approved', {
+      status: 'failed', settledAt: now, result: { error: 'invalid-decision' },
+    });
+    expect(s.reasons).toEqual(['approval.request-settle', 'approval.request-settle']);
+  });
+
+  it('AC-5: executes with an undefined decision without reading decisions when the command takes none', async () => {
+    const s = setup();
+
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
+
+    expect(s.test.state.decisions).toEqual([undefined]);
+    expect(s.repo.findDecisions).not.toHaveBeenCalled();
+  });
+
+  it('AC-6: runs afterCommit once with the parsed input, the decision and the raw result', async () => {
+    const s = setup();
+    s.test.state.parseDecision = { calls: [], result: { remember: true }, throws: false };
+    s.test.state.afterCommit = { calls: [], throws: null };
+    s.test.state.toResult = () => ({ deleted: 1 });
+    s.repo.findDecisions.mockResolvedValue([approving({ params: { remember: true } })]);
+
+    const settled = await s.service.execute('r1', now);
+
+    expect(settled).toMatchObject({ status: 'executed', result: { deleted: 1 } });
+    expect(s.test.state.afterCommit.calls).toEqual([{ input, decision: { remember: true }, result: 'done' }]);
+  });
+
+  it('AC-7: runs afterCommit after the execution transaction resolved', async () => {
+    const s = setup();
+    s.test.state.afterCommit = { calls: [], throws: null };
+    // Records how many afterCommit calls had happened when run() resolved: none, so the hook ran later.
+    const atRunResolved: number[] = [];
+    s.tx.run.mockImplementation(async (fn: () => Promise<unknown>) => {
+      const value = await fn();
+      atRunResolved.push(s.test.state.afterCommit?.calls.length ?? -1);
+      return value;
+    });
+
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
+
+    expect(atRunResolved).toEqual([0]);
+    expect(s.tx.run).toHaveBeenCalledOnce();
+    expect(s.test.state.afterCommit.calls).toHaveLength(1);
+  });
+
+  it('AC-8: a throwing afterCommit leaves the request executed and only warns', async () => {
+    const s = setup();
+    s.test.state.afterCommit = { calls: [], throws: new Error('requeue refused') };
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    warn.mockClear();
+
+    const settled = await s.service.execute('r1', now);
+
+    expect(settled).toMatchObject({ status: 'executed' });
+    expect(s.repo.transition).toHaveBeenCalledExactlyOnceWith('r1', 'approved', expect.objectContaining({ status: 'executed' }));
+    expect(s.test.state.afterCommit.calls).toHaveLength(1);
+    expect(warn.mock.calls[0]?.[0]).toBe('approval request r1 after-commit failed: requeue refused');
+  });
+
+  it('AC-9: never runs afterCommit when the command fails and the request settles failed', async () => {
+    const s = setup();
+    s.test.state.afterCommit = { calls: [], throws: null };
+    s.test.state.executeThrows = true;
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    warn.mockClear();
+
+    const settled = await s.service.execute('r1', now);
+
+    expect(settled).toMatchObject({ status: 'failed', result: { error: 'execution-failed', name: 'Error' } });
+    expect(s.test.state.afterCommit.calls).toEqual([]);
+    expect(warn.mock.calls[0]?.[0]).toBe('approval request r1 failed to execute: boom');
   });
 
   it('does not run when the locked re-read is no longer approved', async () => {

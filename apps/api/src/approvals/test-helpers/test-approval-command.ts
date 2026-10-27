@@ -6,8 +6,9 @@
  * the behaviour the case needs through `state`.
  *
  * The command's input is an object of string values (the shape most approvable keys take: an id, or
- * an id and a name). `execute` records the input and returns `'done'`, and can additionally write a
- * `Label` row and record an audit entry — both through the dependencies a database spec passes in:
+ * an id and a name). `execute` records the input and the decision it was handed, returns `'done'`,
+ * and can additionally write a `Label` row and record an audit entry — both through the dependencies
+ * a database spec passes in:
  *
  * ```ts
  * const { command, state, reset } = configurableTestCommand('label.delete', {
@@ -59,6 +60,14 @@ export interface TestParseDecisionState {
   throws: boolean;
 }
 
+/** The `afterCommit` switch: while set, the command carries the hook with this behaviour. */
+export interface TestAfterCommitState {
+  /** Every call, in order, with the arguments the execution service passed. */
+  calls: Array<{ input: TestCommandInput; decision: unknown; result: unknown }>;
+  /** The hook records its call, then throws this error. */
+  throws: Error | null;
+}
+
 /** The `onReject` switch: while set, the command carries the hook with this behaviour. */
 export interface TestRejectState {
   /** Every call, in order, with the arguments the decision service passed. */
@@ -74,6 +83,8 @@ export interface TestRejectState {
 export interface TestCommandState {
   /** Every input `execute` ran with, in order. */
   calls: TestCommandInput[];
+  /** The decision each `execute` received, in order (aligned with `calls`). */
+  decisions: unknown[];
   /** Every `parse` throws `TypeError('test parse refused')`. */
   parseThrows: boolean;
   /** `parse` calls after the n-th throw (`1` lets the gate's parse pass and fails the re-parse). */
@@ -91,6 +102,8 @@ export interface TestCommandState {
   parseDecision: TestParseDecisionState | null;
   /** Used as the command's `onReject` while set; the command carries none otherwise. */
   onReject: TestRejectState | null;
+  /** Used as the command's `afterCommit` while set; the command carries none otherwise. */
+  afterCommit: TestAfterCommitState | null;
 }
 
 export interface ConfigurableTestCommand {
@@ -113,8 +126,9 @@ export function configurableTestCommand(key: string, deps: TestCommandDeps = {})
 
       return copyOf(input);
     },
-    async execute(input: TestCommandInput): Promise<string> {
+    async execute(input: TestCommandInput, decision?: unknown): Promise<string> {
       state.calls.push({ ...input });
+      state.decisions.push(decision);
       if (state.writeLabel !== null) await writeLabel(deps, state.writeLabel);
       if (state.recordAudit) await recordAudit(deps, key);
       if (state.executeThrows) throw new Error(EXECUTION_FAILED);
@@ -148,6 +162,15 @@ export function configurableTestCommand(key: string, deps: TestCommandDeps = {})
         if (switchState.throws !== null) throw switchState.throws;
       };
     },
+    get afterCommit(): ((input: TestCommandInput, decision: unknown, result: unknown) => Promise<void>) | undefined {
+      const switchState = state.afterCommit;
+      if (switchState === null) return undefined;
+
+      return async (input, decision, result) => {
+        switchState.calls.push({ input, decision, result });
+        if (switchState.throws !== null) throw switchState.throws;
+      };
+    },
   };
 
   return {
@@ -163,6 +186,7 @@ export function configurableTestCommand(key: string, deps: TestCommandDeps = {})
 function freshState(): TestCommandState {
   return {
     calls: [],
+    decisions: [],
     parseThrows: false,
     parseThrowsAfter: null,
     parseReturnsUndefined: false,
@@ -172,6 +196,7 @@ function freshState(): TestCommandState {
     toResult: null,
     parseDecision: null,
     onReject: null,
+    afterCommit: null,
   };
 }
 

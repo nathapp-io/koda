@@ -41,6 +41,16 @@ describe('configurableTestCommand', () => {
     expect(state.calls).toEqual([{ labelId: 'l1' }, { labelId: 'l2' }]);
   });
 
+  it('records the decision each execute received, aligned with the recorded calls', async () => {
+    const { command, state } = configurableTestCommand('label.delete');
+
+    await command.execute({ labelId: 'l1' });
+    await command.execute({ labelId: 'l2' }, { remember: true });
+
+    expect(state.decisions).toEqual([undefined, { remember: true }]);
+    expect(state.calls).toHaveLength(state.decisions.length);
+  });
+
   it('honours parseThrows and parseReturnsUndefined', () => {
     const { command, state } = configurableTestCommand('label.delete');
 
@@ -121,6 +131,23 @@ describe('configurableTestCommand', () => {
     expect(command.onReject).toBeUndefined();
   });
 
+  it('carries afterCommit only while a case asks for one, recording each call and throwing when set', async () => {
+    const { command, state } = configurableTestCommand('label.delete');
+    expect(command.afterCommit).toBeUndefined();
+
+    state.afterCommit = { calls: [], throws: null };
+    await command.afterCommit?.({ labelId: 'l1' }, { remember: true }, 'done');
+    expect(state.afterCommit.calls).toEqual([{ input: { labelId: 'l1' }, decision: { remember: true }, result: 'done' }]);
+
+    const failure = new Error('after-commit refused');
+    state.afterCommit.throws = failure;
+    await expect(command.afterCommit?.({ labelId: 'l1' }, undefined, 'done')).rejects.toBe(failure);
+    expect(state.afterCommit.calls).toHaveLength(2);
+
+    state.afterCommit = null;
+    expect(command.afterCommit).toBeUndefined();
+  });
+
   it('turns every state field off on reset()', () => {
     const { state, reset } = configurableTestCommand('label.delete');
     Object.assign(state, {
@@ -133,12 +160,14 @@ describe('configurableTestCommand', () => {
       toResult: () => null,
       parseDecision: { calls: [], result: 'ok', throws: false },
       onReject: { calls: [], throws: null },
+      afterCommit: { calls: [], throws: null },
     });
 
     reset();
 
     expect(state).toEqual({
       calls: [],
+      decisions: [],
       parseThrows: false,
       parseThrowsAfter: null,
       parseReturnsUndefined: false,
@@ -148,6 +177,7 @@ describe('configurableTestCommand', () => {
       toResult: null,
       parseDecision: null,
       onReject: null,
+      afterCommit: null,
     });
   });
 
