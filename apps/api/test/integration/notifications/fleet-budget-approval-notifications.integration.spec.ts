@@ -110,7 +110,7 @@ describeIntegration('fleet budget and approval notifications (PG)', () => {
     expect(await events('fleet_approval_requested')).toHaveLength(0);
   });
 
-  it('hard stop: the override ask is announced keyed by the engine request, and a settled ask notifies nobody', async () => {
+  it('hard stop: the override ask reaches every global admin while pending, and a settled ask notifies nobody', async () => {
     const p = await policy({ hardStop: true });
     await spent(12);
     await evaluator.evaluate(p.id);
@@ -121,9 +121,12 @@ describeIntegration('fleet budget and approval notifications (PG)', () => {
     expect(ask).toMatchObject({ permissionKey: 'fleet.budget.override', status: 'pending', projectId: world.projectId });
     expect(row.projectId).toBe(world.projectId);
 
-    // An answered ask notifies nobody: the delivery re-reads the ask and acts only while it is pending. (The fleet's
-    // reader still looks a budget ask up in `FleetApproval` — US-011 moves it onto the engine — so this pins the
-    // subscriber's status gate, which is what keeps a resolved ask out of every admin's inbox.)
+    await deliver('fleet_approval_requested');
+    const pendingNote = (await notes(world.ids.root)).find((x) => x.kind === 'approval_requested');
+    expect(pendingNote).toMatchObject({ category: 'FLEET_NEEDS_YOU', link: '/admin/fleet/approvals', title: 'Approval needed: budget override on project WEB' });
+
+    // An answered ask notifies nobody: the delivery re-reads the ask and acts only while it is pending.
+    await prisma.notification.deleteMany();
     await prisma.approvalRequest.update({ where: { id: ask.id }, data: { status: 'executed', settledAt: new Date() } });
     await deliver('fleet_approval_requested');
     expect(await notes(world.ids.root)).toEqual([]);

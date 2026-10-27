@@ -27,6 +27,7 @@ import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor, ThreadJobSeed } from '../../helpers/thread-fixtures';
 import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
+import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -148,22 +149,17 @@ describeIntegration('fleet assistant fleet tools (PG, US-004)', () => {
     await cost(world.projectId, ids.completed, 'c-web-2', '1.0', { inputTokens: 0, outputTokens: 0 });
     await cost(world.opsProjectId, ids.opsFailed, 'c-ops-1', '9.9', { inputTokens: 0, outputTokens: 0 });
 
-    // AC-8: a pending web approval, a closed web approval and a pending ops approval.
-    ids.pendingApproval = (await prisma.fleetApproval.create({
-      data: {
-        type: 'nax_bash_escalate', projectId: world.projectId, jobId: ids.log, leaseEpoch: 1, naxAskId: 'ask-00000001',
-        payload: {}, requestedAt: minutesAgo(2),
-      },
-    })).id;
-    ids.approvedApproval = (await prisma.fleetApproval.create({
-      data: {
-        type: 'nax_bash_escalate', projectId: world.projectId, jobId: ids.log, leaseEpoch: 1, naxAskId: 'ask-00000002',
-        payload: {}, requestedAt: minutesAgo(2), status: 'approved',
-      },
-    })).id;
-    ids.opsApproval = (await prisma.fleetApproval.create({
-      data: { type: 'nax_bash_escalate', projectId: world.opsProjectId, jobId: ids.opsLog, leaseEpoch: 1, naxAskId: 'ask-00000003', payload: {}, requestedAt: minutesAgo(1) },
-    })).id;
+    // AC-8: a pending web approval, a closed web approval and a pending ops approval — on the engine, which is what
+    // the fleet approval list reads (permissions P3 US-007).
+    const ask = (projectId: string, jobId: string, naxAskId: string, createdAt: Date, status: 'pending' | 'executed' = 'pending') =>
+      seedFleetAsk(prisma, {
+        kind: 'bash', projectId, createdAt, status,
+        input: { jobId, leaseEpoch: 1, naxAskId, payload: {} },
+        link: { jobId, leaseEpoch: 1, naxAskId },
+      });
+    ids.pendingApproval = (await ask(world.projectId, ids.log, 'ask-00000001', minutesAgo(2))).requestId;
+    ids.approvedApproval = (await ask(world.projectId, ids.log, 'ask-00000002', minutesAgo(2), 'executed')).requestId;
+    ids.opsApproval = (await ask(world.opsProjectId, ids.opsLog, 'ask-00000003', minutesAgo(1))).requestId;
 
     // AC-10/AC-11: the run log of ids.log, appended and then completed through the runner route.
     const runLog = Buffer.from(line('info', 'starting') + line('error', 'boom one') + line('error', 'boom two'), 'utf8');

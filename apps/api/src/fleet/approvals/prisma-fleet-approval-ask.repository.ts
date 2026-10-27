@@ -158,12 +158,18 @@ export class PrismaFleetApprovalAskRepository
     `;
   }
 
-  async findPendingForPolicy(budgetPolicyId: string): Promise<FleetApprovalAskRecord | null> {
-    const row = await this.db.fleetApprovalAsk.findFirst({
-      where: { budgetPolicyId, request: { status: 'pending' } },
-      orderBy: [{ request: { createdAt: 'asc' } }, { requestId: 'asc' }],
+  async findPendingForPolicyPage(budgetPolicyId: string, afterRequestId?: string, limit = MAX_PENDING_ASKS_PER_JOB): Promise<FleetApprovalAskRecord[]> {
+    const rows = await this.db.fleetApprovalAsk.findMany({
+      where: {
+        budgetPolicyId,
+        request: { status: 'pending' },
+        // Keyset, not offset: closing a page removes it from the filter, so an offset would skip rows.
+        ...(afterRequestId === undefined ? {} : { requestId: { gt: afterRequestId } }),
+      },
+      orderBy: { requestId: 'asc' },
+      take: limit,
     });
-    return row ? this.toDomain(row) : null;
+    return rows.map((row) => this.toDomain(row));
   }
 
   async setResolvedBy(requestId: string, resolvedBy: ApprovalResolvedBy): Promise<FleetApprovalAskRecord> {

@@ -326,6 +326,32 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
     expect(await prisma.fleetActivity.count({ where: { entityType: 'approval', entityId: ask.id, action: 'approval.cancelled' } })).toBe(0);
   });
 
+  it('F3: a held ask does not leave another pending ask of the same policy behind', async () => {
+    const policy = await projectPolicy();
+    await job({ costSpentUsd: 10 });
+    await evaluate(policy.id);
+    // Reachable in production: an earlier close skipped this held request, and a later hard stop opened a newer ask.
+    const newer = await seedFleetAsk(prisma, {
+      kind: 'budget', projectId: world.projectId,
+      input: {
+        policyId: policy.id, scopeType: 'project', scopeId: world.projectId, windowKind: 'calendar_month_utc',
+        windowStart: new Date().toISOString(), spentUsd: '10', amountUsd: '10', requestedAt: new Date().toISOString(),
+      },
+      link: { budgetPolicyId: policy.id },
+    });
+    const asks = await asksOf(policy.id);
+    const held = asks.find(({ request }) => request.id !== newer.requestId) ?? asks[0];
+
+    expect(await prisma.approvalRequest.count({ where: { id: { in: asks.map(({ request }) => request.id) }, status: 'pending' } })).toBe(2);
+
+    await whileRequestHeld(held.request.id, () =>
+      request(app.getHttpServer()).delete(`${budgetRoute}/${policy.id}`).set(asRoot()).expect(204));
+
+    expect(await requestOf(held.request.id)).toMatchObject({ status: 'pending', result: null });
+    expect(await requestOf(newer.requestId)).toMatchObject({ status: 'cancelled', result: { closedBy: 'policy_deleted' } });
+    expect((await linkOf(newer.requestId)).resolvedBy).toBe('policy_deleted');
+  });
+
   it('a resume with an approvalId stamps it and closes nothing', async () => {
     const policy = await projectPolicy();
     await job({ costSpentUsd: 10 });

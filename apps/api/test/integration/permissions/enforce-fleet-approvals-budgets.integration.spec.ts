@@ -22,6 +22,7 @@ import { expectBindingOnlyFixtures, grantBaseline, grantRole } from '../../../sr
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
+import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -146,17 +147,22 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
       select: { id: true, leaseEpoch: true },
     });
 
-  /** A pending bash ask of a RUNNING job `over` describes. */
+  /**
+   * A pending bash ask of a RUNNING job `over` describes, on the approval engine: the ask is on behalf of the job's
+   * requester, which is what the self-decide rule reads.
+   */
   const bashAsk = async (over: Partial<Prisma.FleetJobUncheckedCreateInput> = {}) => {
     const job = await jobRow(over);
-    const approval = await prisma.fleetApproval.create({
-      data: {
-        type: 'nax_bash_escalate', projectId: p1Id, jobId: job.id, leaseEpoch: job.leaseEpoch, naxAskId: `ask-${(n += 1)}`,
-        payload: { command: 'bun run test', commandTruncated: false, options: ['allow', 'deny'] },
-        requestedAt: new Date(), expiresAt: new Date(Date.now() + 300_000),
-      },
+    const naxAskId = `ask-${(n += 1)}`;
+    const payload = { command: 'bun run test', commandTruncated: false, options: ['allow', 'deny'] };
+    const { requestId } = await seedFleetAsk(prisma, {
+      kind: 'bash', projectId: p1Id,
+      onBehalfOf: { type: over.requestedByType === 'AGENT' ? 'AGENT' : 'USER', id: over.requestedById ?? ids.other },
+      expiresAt: new Date(Date.now() + 300_000),
+      input: { jobId: job.id, leaseEpoch: job.leaseEpoch, naxAskId, payload },
+      link: { jobId: job.id, leaseEpoch: job.leaseEpoch, naxAskId },
     });
-    return { job, approval };
+    return { job, approval: { id: requestId, naxAskId } };
   };
 
   /**
@@ -175,16 +181,21 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
           amountUsd: new Prisma.Decimal(10), warnPercent: null, createdById: ids.root, updatedById: ids.root,
         },
     });
-    const approval = await prisma.fleetApproval.create({
-      data: {
-        type: 'budget_override_required', projectId, policyId: policy.id, requestedAt: new Date(),
-        payload: { scopeType: policy.scopeType, windowKind: policy.windowKind, spentUsd: '10', amountUsd: '10' },
+    const { requestId } = await seedFleetAsk(prisma, {
+      kind: 'budget', projectId,
+      input: {
+        policyId: policy.id, scopeType: policy.scopeType, scopeId: policy.scopeId, windowKind: policy.windowKind,
+        windowStart: new Date(0).toISOString(), spentUsd: '10', amountUsd: '10', requestedAt: new Date().toISOString(),
       },
+      link: { budgetPolicyId: policy.id },
     });
-    return { policy, approval };
+    return { policy, approval: { id: requestId } };
   };
 
-  const reloadApproval = (id: string) => prisma.fleetApproval.findUniqueOrThrow({ where: { id } });
+  /** The engine request and its last decision: what the fleet view of these assertions is built from. */
+  const reloadApproval = (id: string) => prisma.approvalRequest.findUniqueOrThrow({
+    where: { id }, include: { decisions: { orderBy: { decidedAt: 'desc' }, take: 1 } },
+  });
   const commandsFor = (jobId: string) => prisma.fleetCommand.findMany({ where: { jobId, type: 'APPROVAL_ANSWER' } });
 
   beforeAll(async () => {
@@ -240,7 +251,8 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
   });
 
   beforeEach(async () => {
-    await prisma.fleetApproval.deleteMany();
+    await prisma.fleetApprovalAsk.deleteMany();
+    await prisma.approvalRequest.deleteMany();
     await prisma.fleetCommand.deleteMany();
     await prisma.fleetJob.deleteMany();
     await prisma.chatThread.deleteMany();
@@ -324,7 +336,9 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
 
     await as('p1-approval-dev-agent', 'post', approvalsUrl(P1_SLUG, `/${approval.id}/decide`), { decision: 'allow' }).expect(200);
 
-    expect(await reloadApproval(approval.id)).toEqual(expect.objectContaining({ status: 'approved', decidedById: ids.devAgent }));
+    const decided = await reloadApproval(approval.id);
+    expect(decided.status).toBe('executed');
+    expect(decided.decisions[0]).toMatchObject({ decision: 'approve', deciderId: ids.devAgent, deciderType: 'AGENT' });
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
@@ -336,7 +350,7 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
 
     expectPermissionsRefusal(await as('viewerBind', 'post', approvalsUrl(P1_SLUG, `/${approval.id}/decide`), { decision: 'allow' }));
 
-    expect(await reloadApproval(approval.id)).toEqual(expect.objectContaining({ status: 'pending', decision: null, decidedById: null }));
+    expect(await reloadApproval(approval.id)).toEqual(expect.objectContaining({ status: 'pending', decisions: [] }));
     expect(await commandsFor(job.id)).toHaveLength(0);
   }, TIMEOUT);
 
@@ -345,7 +359,7 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
 
     expectPermissionsRefusal(await as('devBind', 'post', approvalsUrl(P1_SLUG, `/${approval.id}/decide`), { decision: 'keep_paused' }));
 
-    expect(await reloadApproval(approval.id)).toEqual(expect.objectContaining({ status: 'pending', decision: null }));
+    expect(await reloadApproval(approval.id)).toEqual(expect.objectContaining({ status: 'pending', decisions: [] }));
   }, TIMEOUT);
 
   it('AC-8: a project-admin binding decides the same budget ask (200)', async () => {
@@ -359,7 +373,9 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
 
     await as('adminBind', 'post', approvalsUrl(P1_SLUG, `/${approval.id}/decide`), { decision: 'keep_paused' }).expect(200);
 
-    expect(await reloadApproval(approval.id)).toEqual(expect.objectContaining({ status: 'rejected', decision: 'keep_paused', decidedById: ids.adminBind }));
+    const decided = await reloadApproval(approval.id);
+    expect(decided.status).toBe('rejected');
+    expect(decided.decisions[0]).toMatchObject({ decision: 'reject', deciderId: ids.adminBind });
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
@@ -387,7 +403,7 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
 
     expectPermissionsRefusal(await as('adminBind', 'post', `/api/fleet/approvals/${approval.id}/decide`, { decision: 'keep_paused' }));
 
-    expect(await reloadApproval(approval.id)).toEqual(expect.objectContaining({ status: 'pending', decision: null }));
+    expect(await reloadApproval(approval.id)).toEqual(expect.objectContaining({ status: 'pending', decisions: [] }));
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
@@ -494,7 +510,7 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
 
     await as('p1-approval-dev-agent', 'post', approvalsUrl(P1_SLUG, `/${approval.id}/decide`), { decision: 'allow' }).expect(403);
 
-    expect(await reloadApproval(approval.id)).toEqual(expect.objectContaining({ status: 'pending', decision: null, decidedById: null }));
+    expect(await reloadApproval(approval.id)).toEqual(expect.objectContaining({ status: 'pending', decisions: [] }));
     expect(await commandsFor(job.id)).toHaveLength(0);
   }, TIMEOUT);
 });

@@ -96,10 +96,20 @@ function askStore() {
       if (view) views.set(requestId, { ...view, outcome, ...(typeof resumedById === 'string' ? { decidedById: resumedById } : {}) });
       return link;
     }),
-    findPendingForPolicy: vi.fn(async (budgetPolicyId: string) => [...links.values()]
-      .find((l) => l.budgetPolicyId === budgetPolicyId && views.get(l.requestId)?.status === 'pending') ?? null),
+    // US-007 (fix round 1): the policy close pages too, so a held ask is stepped over instead of ending the call.
+    findPendingForPolicyPage: vi.fn(async (budgetPolicyId: string, after?: string, limit = MAX_PENDING_ASKS_PER_JOB) =>
+      pendingOfPolicy(budgetPolicyId).filter((id) => after === undefined || id > after).slice(0, limit)
+        .map((id) => links.get(id) as FleetApprovalAskRecord)),
     findProjectSlug: vi.fn(async () => 'web'),
   };
+
+  /** Pending links of one policy, in the page order (`requestId` ascending). */
+  function pendingOfPolicy(budgetPolicyId: string): string[] {
+    return [...links.values()]
+      .filter((l) => l.budgetPolicyId === budgetPolicyId && views.get(l.requestId)?.status === 'pending')
+      .map((l) => l.requestId)
+      .sort();
+  }
 
   /** Pending links of one job, in the page order (`requestId` ascending). */
   function pendingOf(jobId: string): string[] {
@@ -266,6 +276,36 @@ describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
     expect(store.setResolvedBy).not.toHaveBeenCalled();
     expect(store.setOutcome).not.toHaveBeenCalled();
     expect(activity.record).not.toHaveBeenCalled();
+  });
+
+  it('US-007 F3: a held ask does not stop the newer pending ask of the same policy from closing', async () => {
+    // Reachable in production: a close that skipped a held request leaves it pending, and a later hard stop
+    // opens a newer ask next to it. The resume, delete or superseding execute must still settle the newer one.
+    await store.insert({ requestId: 'req-1', kind: 'budget', projectId: 'p1', budgetPolicyId: 'pol' });
+    await store.insert({ requestId: 'req-2', kind: 'budget', projectId: 'p1', budgetPolicyId: 'pol' });
+    asks.close.mockImplementation(async (requestId: string) => (requestId === 'req-1' ? null : { id: requestId, status: 'cancelled' }));
+
+    const r = await closer.closeForPolicy('pol', { status: 'cancelled', resolvedBy: 'policy_deleted', actor: resumer }, NOW);
+
+    expect(asks.close.mock.calls.map(([requestId]) => requestId)).toEqual(['req-1', 'req-2']);
+    // The held ask keeps its state and its link untouched; the newer one is settled and reported.
+    expect(store.links.get('req-1')?.resolvedBy).toBeNull();
+    expect(store.links.get('req-2')?.resolvedBy).toBe('policy_deleted');
+    expect(r.approval).toEqual(expect.objectContaining({ id: 'req-2', status: 'cancelled' }));
+    expect(r.live).toEqual([{ approvalId: 'req-2', status: 'cancelled' }]);
+  });
+
+  it('US-007 F3: every pending ask of the policy is settled, not only the oldest', async () => {
+    await store.insert({ requestId: 'req-1', kind: 'budget', projectId: 'p1', budgetPolicyId: 'pol' });
+    await store.insert({ requestId: 'req-2', kind: 'budget', projectId: 'p1', budgetPolicyId: 'pol' });
+
+    const r = await closer.closeForPolicy('pol', { status: 'approved', resolvedBy: 'manual_resume', actor: resumer, outcome: { resumedAmountUsd: '20', requeueResults: [] } }, NOW);
+
+    expect(store.setResolvedBy.mock.calls).toEqual([['req-1', 'manual_resume'], ['req-2', 'manual_resume']]);
+    expect(store.setOutcome).toHaveBeenCalledWith('req-1', { resumedAmountUsd: '20', requeueResults: [], resumedById: 'u9' });
+    expect(store.setOutcome).toHaveBeenCalledWith('req-2', { resumedAmountUsd: '20', requeueResults: [], resumedById: 'u9' });
+    expect(r.approval).toEqual(expect.objectContaining({ id: 'req-1' }));
+    expect(r.live).toEqual([{ approvalId: 'req-1', status: 'approved' }, { approvalId: 'req-2', status: 'approved' }]);
   });
 });
 

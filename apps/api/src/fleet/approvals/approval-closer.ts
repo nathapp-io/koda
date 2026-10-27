@@ -135,27 +135,55 @@ export class ApprovalCloser {
   }
 
   /**
-   * Permissions P3 US-007: the pending ask of a policy closes on the engine. The engine status is always
+   * Permissions P3 US-007: every pending ask of a policy closes on the engine. The engine status is always
    * `cancelled` — a manual resume reports `approved` through the link's `manual_resume` resolution — and a request
    * another transaction holds is skipped, so the policy transaction completes without it. Callers read
-   * `approval?.id` for the incident's `approvalId`, which is null exactly when the close was skipped.
+   * `approval?.id` for the incident's `approvalId`, which is null exactly when no ask could be closed.
+   *
+   * The read is paged and bounded per call (fix round 1): one skipped (held) ask must not leave a newer pending ask
+   * of the same policy behind — reachable when an earlier close skipped a held request and a later hard stop opened
+   * another — and this runs inside the caller's transaction, so it settles at most `limit` asks, like the job-end
+   * close. A backlog left past the bound is drained by the next close of that policy (a hard stop supersedes it).
    */
-  async closeForPolicy(policyId: string, close: PolicyClose, now: Date): Promise<ApprovalChange> {
-    const link = await this.store.findPendingForPolicy(policyId);
-    if (!link) return { approval: null, live: [] };
-    const closed = await this.askService.close(link.requestId, { status: 'cancelled', reason: close.resolvedBy }, now);
-    if (closed === null) return { approval: null, live: [] };
+  async closeForPolicy(policyId: string, close: PolicyClose, now: Date, limit = MAX_ASKS_CLOSED_PER_CALL): Promise<ApprovalChange> {
+    const live: LiveFleetApprovalEvent[] = [];
+    let first: FleetApprovalRecord | null = null;
+    let after: string | undefined;
+    let processed = 0;
+    while (processed < limit) {
+      const take = Math.min(MAX_PENDING_ASKS_PER_JOB, limit - processed);
+      const links = await this.store.findPendingForPolicyPage(policyId, after, take);
+      if (links.length === 0) break;
+      for (const link of links) {
+        const closed = await this.closePolicyAsk(link.requestId, close, now);
+        if (closed === null) continue;
+        first ??= closed.approval;
+        live.push(...closed.live);
+      }
+      processed += links.length;
+      const next = links.at(-1);
+      if (links.length < take || next === undefined) return { approval: first, live };
+      after = next.requestId;
+    }
+    this.logger.warn(`Policy ${policyId}: close stopped at ${limit} asks; the next close of the policy drains the rest`);
+    return { approval: first, live };
+  }
 
-    await this.store.setResolvedBy(link.requestId, close.resolvedBy);
+  /** One policy ask, in the caller's transaction; answers null when the engine skipped it (request held). */
+  private async closePolicyAsk(requestId: string, close: PolicyClose, now: Date): Promise<ApprovalChange | null> {
+    const closed = await this.askService.close(requestId, { status: 'cancelled', reason: close.resolvedBy }, now);
+    if (closed === null) return null;
+
+    await this.store.setResolvedBy(requestId, close.resolvedBy);
     if (close.outcome !== undefined) {
-      await this.store.setOutcome(link.requestId, {
+      await this.store.setOutcome(requestId, {
         ...close.outcome,
         // The engine records the decider on the request; a manual resume's decider is the resumer in the outcome.
         ...(close.status === 'approved' ? { resumedById: close.actor.id } : {}),
       });
     }
-    const view = await this.store.findApproval(link.requestId);
-    if (view === null) throw new Error(`Fleet ask ${link.requestId} closed ${close.resolvedBy} but has no view`);
+    const view = await this.store.findApproval(requestId);
+    if (view === null) throw new Error(`Fleet ask ${requestId} closed ${close.resolvedBy} but has no view`);
     return { approval: view, live: await this.recordResolved(view, close.actor) };
   }
 

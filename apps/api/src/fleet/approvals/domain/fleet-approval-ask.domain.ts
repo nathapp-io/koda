@@ -59,7 +59,11 @@ export interface IFleetApprovalAskRepository {
    * commit this scheduling transaction before attempting closes, so failing closes cannot monopolize the queue.
    */
   claimEndedJobAsks(limit: number): Promise<JobEndAsk[]>;
-  findPendingForPolicy(budgetPolicyId: string): Promise<FleetApprovalAskRecord | null>;
+  /**
+   * US-007 (fix round 1): one page of a policy's pending links, keyset by `requestId` — the cursor is unique, so a
+   * held request is stepped over rather than met again, and a newer pending ask is still settled.
+   */
+  findPendingForPolicyPage(budgetPolicyId: string, afterRequestId?: string, limit?: number): Promise<FleetApprovalAskRecord[]>;
   setResolvedBy(requestId: string, resolvedBy: ApprovalResolvedBy): Promise<FleetApprovalAskRecord>;
   /** Replaces the outcome. */
   setOutcome(requestId: string, outcome: Record<string, unknown>): Promise<FleetApprovalAskRecord>;

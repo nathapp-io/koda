@@ -47,8 +47,12 @@ export class FleetApprovalAskStore {
     return this.asks.claimEndedJobAsks(limit);
   }
 
-  findPendingForPolicy(budgetPolicyId: string): Promise<FleetApprovalAskRecord | null> {
-    return this.asks.findPendingForPolicy(budgetPolicyId);
+  /**
+   * US-007 (fix round 1): one page of a policy's pending links, keyset by request id, so a held ask cannot hide a
+   * newer one. The close reads pages of these, never a single "the pending ask".
+   */
+  findPendingForPolicyPage(budgetPolicyId: string, afterRequestId?: string, limit?: number): Promise<FleetApprovalAskRecord[]> {
+    return this.asks.findPendingForPolicyPage(budgetPolicyId, afterRequestId, limit);
   }
 
   setResolvedBy(requestId: string, resolvedBy: ApprovalResolvedBy): Promise<FleetApprovalAskRecord> {
