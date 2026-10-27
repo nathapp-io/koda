@@ -1,0 +1,934 @@
+{
+  "project": "koda",
+  "feature": "permissions-p3-approval-fleet",
+  "branchName": "feat/permissions-p3-approval-fleet",
+  "createdAt": "2026-11-07T00:00:00Z",
+  "updatedAt": "2026-10-27T10:25:12.552Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Engine adjustments for fleet asks",
+      "description": "**Goal** — Make fleet close calls nonblocking against an in-flight engine decision and retain the fleet notification channel.\n\n**Motivation** — Two request models still exist: the engine's `ApprovalRequest` and the fleet's `FleetApproval`.\n\n**Approach** — `PrismaApprovalRequestRepository` gains:\n```ts\n/** SELECT ... FOR UPDATE SKIP LOCKED; null when the row is missing or held by another transaction. */\nlockByIdSkipLocked(id: string): Promise<ApprovalRequestRecord | null>;\n```\n`ApprovalAskService.close` calls it instead of `lockById`, and its `requests` pick gains the method. Its doc comment says that null also means \"held by an in-flight decide or execute\". Nothing else in `close` changes.\n\n`ApprovalRequestedSubscriber.handle` (`apps/api/src/notifications/approvals/approval-requested.subscriber.ts`): after the payload parse and before `queries.findById`, `if (Object.values(ASK_KEYS_BY_COMPONENT).includes(p.permissionKey)) return;`.\n\n- **Lock order is request first, then job or policy.**\n  - The engine's decide and execute lock the `ApprovalRequest` row, then run the command, which locks the job (bash) or the budget policy (budget).\n  - Every fleet close path holds the job or policy lock first and closes the request second.\n  - So that the two orders cannot deadlock, `ApprovalAskService.close` locks the request with `FOR UPDATE SKIP LOCKED` and answers null when another transaction holds it.\n  - A held request is being decided or executed, so it will not stay pending in the normal case, and skipping the close is the right outcome. The skip that matters is the job transition's, the evaluator's, the sweeper's and `BudgetsService.remove`'s: each holds the job or policy lock an executing command waits for.\n  - If the holder rolls back (a refused decide), the request stays pending. A bash ask then expires at its deadline, and a decided ask whose job or policy is gone settles through the command's own checks.\n- **The engine's notifier skips the fleet keys** (ruled). `ApprovalRequestedSubscriber` returns early when the payload's `permissionKey` is a value of `ASK_KEYS_BY_COMPONENT`.\n\n**Scope** — In: repository locking method, close wiring/doc comment and notifier early return, unit regression updates and real two-transaction lock tests. Out: producer/closer conversions (US-006/US-007), fleet event recorder (US-009), decide adapter (US-010); notifying fleet deciders through the engine is deferred to P3 web.\n\n**Interface** —\n```ts\n/** SELECT ... FOR UPDATE SKIP LOCKED; null when the row is missing or held by another transaction. */\nlockByIdSkipLocked(id: string): Promise<ApprovalRequestRecord | null>;\n```",
+      "acceptanceCriteria": [
+        "AC-1 [integration] While a second transaction holds SELECT ... FOR UPDATE on a pending ask's ApprovalRequest row, ApprovalAskService.close(id, { status: 'cancelled', reason: 'job_ended' }) inside its own transaction returns null within 2 seconds.",
+        "AC-2 [integration] After that second transaction rolls back, the request's status is still 'pending'.",
+        "AC-3 [integration] PrismaApprovalRequestRepository.lockByIdSkipLocked(id) inside a transaction returns the record of an unlocked pending request.",
+        "AC-4 [integration] lockByIdSkipLocked('missing') returns null.",
+        "AC-5 [unit] ApprovalAskService.close on a pending ask calls lockByIdSkipLocked with the id and never calls lockById.",
+        "AC-6 [unit] ApprovalRequestedSubscriber handling a pending payload with permissionKey: 'fleet.job.shell.escalate' calls neither queries.findById nor writer.deliver.",
+        "AC-7 [unit] ApprovalRequestedSubscriber handling a pending payload with permissionKey: 'fleet.budget.override' calls neither queries.findById nor writer.deliver.",
+        "AC-8 [unit] (regression pin) A pending payload for 'ticket.delete' whose request has one eligible user still calls writer.deliver once.",
+        "Failure handling [integration] ApprovalAskService.close returning null because another transaction holds the request records no new approval_request_changed outbox event."
+      ],
+      "tags": [
+        "api",
+        "approvals",
+        "concurrency",
+        "notifications"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Cross-module notification compatibility plus real concurrent transaction behavior and lock-order inversion prevention."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-ask.service.ts",
+        "apps/api/src/approvals/prisma-approval-request.repository.ts",
+        "apps/api/src/notifications/approvals/approval-requested.subscriber.ts",
+        "apps/api/test/integration/approvals/approval-ask.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/approvals/approval-ask-skip-locked.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/prisma-approval-request.repository.ts",
+          "reason": "gains `lockByIdSkipLocked`"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-ask.service.ts",
+          "reason": "`close` locks with `lockByIdSkipLocked`; the `requests` pick gains it"
+        },
+        {
+          "path": "apps/api/src/approvals/approval-ask.service.spec.ts",
+          "reason": "the `close` cases stub `lockByIdSkipLocked` instead of `lockById`; the assertions on the settled request are unchanged"
+        },
+        {
+          "path": "apps/api/src/notifications/approvals/approval-requested.subscriber.ts",
+          "reason": "returns early for the two fleet keys"
+        },
+        {
+          "path": "apps/api/src/notifications/approvals/approval-requested.subscriber.spec.ts",
+          "reason": "gains the two fleet-key cases"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "The fleet ask read model",
+      "description": "**Goal** — Provide the engine-backed fleet projection, bounded read facade and reusable request/link test fixture.\n\n**Motivation** — Two inboxes, two decide paths, two expiry sweepers and two permission checks decide the same kind of thing.\n\n**Approach** — `apps/api/src/fleet/approvals/domain/approval.domain.ts` keeps `APPROVAL_TYPES`, `APPROVAL_STATUSES`, `APPROVAL_DECISIONS`, `APPROVAL_RESOLVED_BY`, `MAX_REQUEUE_CANDIDATES`, `RequeueCandidate`, `PendingCount`, `ApprovalFilters` and `FleetApprovalRecord` (now the view), and gains:\n```ts\n/** The engine key of each fleet approval type. */\nexport const FLEET_ASK_KEY = { nax_bash_escalate: 'fleet.job.shell.escalate', budget_override_required: 'fleet.budget.override' } as const;\nexport const FLEET_ASK_KEYS: readonly string[] = Object.values(FLEET_ASK_KEY);\n/** A link resolution that makes the fleet status `cancelled` whatever the request status. */\nexport const CANCELLING_RESOLUTIONS: readonly ApprovalResolvedBy[] = ['job_ended', 'superseded', 'policy_deleted', 'window_reset'];\n```\n\n`apps/api/src/fleet/approvals/fleet-approval-view.ts` (new, pure):\n```ts\nexport interface FleetAskRow {\n  request: ApprovalRequestRecord;\n  link: FleetApprovalAskRecord;\n  /** The request's last decision row, or null. */\n  decision: ApprovalDecisionRecord | null;\n}\nexport function toFleetApproval(row: FleetAskRow): FleetApprovalRecord;\n/** The Prisma where for one fleet status over ApprovalRequest (relation `fleetAsk`). */\nexport function fleetStatusWhere(status: ApprovalStatus): Prisma.ApprovalRequestWhereInput;\n```\n\n`toFleetApproval` fields:\n\n| Field | Source |\n|:--|:--|\n| `id`, `projectId` | request |\n| `type` | `nax_bash_escalate` for `fleet.job.shell.escalate`, `budget_override_required` for `fleet.budget.override` |\n| `status`, `decision` | the mappings in Designer's calls |\n| `jobId`, `leaseEpoch`, `naxAskId` | link |\n| `policyId` | link `budgetPolicyId` |\n| `payload` | bash: `input.payload`; budget: `input` without `policyId` and `requestedAt` |\n| `outcome`, `updatedAt` | link |\n| `resolvedBy` | link `resolvedBy`; when null, `timeout` for an `expired` request and `user` for `rejected`, `executed` or `failed` (so a response never waits for the recorder) |\n| `requestedAt`, `createdAt` | request `createdAt` |\n| `expiresAt` | request `expiresAt` |\n| `decidedById` | manual resume: `link.outcome.resumedById`; else the decision's `deciderId`, or null |\n| `decidedAt` | the decision's `decidedAt`, else the request's `settledAt` |\n| `comment` | the decision's `comment`, or null |\n\n- **`FleetApprovalRecord` becomes a view.**\n  - The type keeps its name and fields, and is built by a pure function `toFleetApproval` from the request, its link and its last decision. Its `id` is the request id.\n  - `FleetApprovalDto.from`, `approvalActivityPayload` and `approvalWebhookPayload` take it unchanged, so every fleet output keeps its shape.\n- **Fleet status mapping, in this order.**\n  1. A link `resolvedBy` of `job_ended`, `superseded`, `policy_deleted` or `window_reset` gives `cancelled`; `manual_resume` gives `approved`.\n  2. Otherwise the request status decides: `pending` → `pending`, `approved` or `executed` → `approved`, `rejected` → `rejected`, `expired` → `expired`, `cancelled` or `failed` → `cancelled`.\n  - `fleetStatusWhere` encodes the same precedence, so a list filter never disagrees with the row it returns.\n- **Fleet decision mapping.**\n  - A manual resume gives `raise_budget_and_resume`.\n  - Otherwise the last decision row decides: a bash approve gives its params' `choice` (`allow` or `allow_for_job`), a bash reject `deny`, a budget approve `raise_budget_and_resume`, a budget reject `keep_paused`.\n  - No decision gives null.\n- **A bash approve with no params means `allow`.** The generic decide route (`POST /approvals/:id/decisions`) can then allow an ask without knowing the fleet's choice names. A bash reject takes no params.\n\n`fleetStatusWhere` rules:\n- Every branch also carries `permissionKey: { in: FLEET_ASK_KEYS }` and `fleetAsk: { isNot: null }` (merged with the branch's own `fleetAsk` filter), so a fleet-key request without a link is never listed or counted.\n- `notCancelling` is `{ OR: [{ resolvedBy: null }, { resolvedBy: { notIn: CANCELLING_RESOLUTIONS } }] }`. It spells out the null case because Prisma's `notIn` drops NULLs in SQL.\n\n| Status | Where |\n|:--|:--|\n| `pending` | `{ status: 'pending' }` |\n| `approved` | `OR [ { status: { in: ['approved','executed'] }, fleetAsk: notCancelling }, { fleetAsk: { resolvedBy: 'manual_resume' } } ]` |\n| `rejected` | `{ status: 'rejected', fleetAsk: notCancelling }` |\n| `expired` | `{ status: 'expired' }` |\n| `cancelled` | `OR [ { status: 'cancelled', fleetAsk: { OR: [{ resolvedBy: null }, { resolvedBy: { not: 'manual_resume' } }] } }, { status: 'failed' }, { status: { in: ['approved','executed','rejected'] }, fleetAsk: { resolvedBy: { in: CANCELLING_RESOLUTIONS } } } ]` |\n\n`PrismaFleetApprovalAskRepository` and `FleetApprovalAskStore` gain these methods with the same signatures (each store method delegates):\n```ts\nfindApproval(requestId: string): Promise<FleetApprovalRecord | null>;\n/** Fleet-key requests that have a link; newest createdAt first, then id. */\nfindPage(f: ApprovalFilters, page: IPageOption): Promise<IPageResult<FleetApprovalRecord>>;\ncountPending(projectIds: readonly string[]): Promise<PendingCount[]>;\ncountPendingAllProjects(): Promise<PendingCount[]>;\ncountPendingUnscoped(): Promise<number>;\ncountPendingByJob(jobIds: readonly string[]): Promise<Map<string, number>>;\nfindRequeueCandidates(policyId: string, since: Date, limit: number): Promise<RequeueCandidate[]>;\nfindProjectSlug(projectId: string): Promise<string | null>;\n```\n- `findApproval` and `findPage` read `approvalRequest` with `include: { fleetAsk: true, decisions: { orderBy: { decidedAt: 'desc' }, take: 1 } }` (the relation names in `schema.prisma`) and map rows with `toFleetApproval`. `findPage` goes through `Paginate` with the include, and applies `projectId`, `fleetStatusWhere(status)`, the type's key (`FLEET_ASK_KEY[type]`) and `fleetAsk: { jobId }`.\n- `countPending*` count `status: 'pending'` fleet-key requests that have a link. They keep the old repository's slug order, soft-delete rule (`countPendingAllProjects` only) and empty short-circuit.\n- `countPendingByJob` groups pending links by `jobId`.\n- `findRequeueCandidates` and `findProjectSlug` move unchanged from `PrismaApprovalRepository`.\n- Every read is bounded (`.nax/rules/api-data.md`): `findPage` by its page size, the groupings by the id lists they take.\n\n`apps/api/test/helpers/fleet-ask-fixtures.ts` (new) exports `seedFleetAsk(db, spec)`. It writes:\n- one `ApprovalRequest` (key from `kind`; actor `SYSTEM/runner` or `SYSTEM/budget`; frozen input and `inputHash` through `freezeApprovalInput` and `approvalInputHash`);\n- optional `ApprovalDecision` rows;\n- its `FleetApprovalAsk`.\n\n```ts\nexport interface SeedFleetAskSpec {\n  kind: 'bash' | 'budget';\n  projectId: string | null;\n  input: Record<string, unknown>;            // BashAskInput or BudgetAskInput, frozen as given\n  status?: ApprovalRequestStatus;             // default 'pending'\n  requiredMode?: ApprovalMode;                // default 'agent' (both fleet keys' catalog default)\n  onBehalfOf?: { type: 'USER' | 'AGENT'; id: string } | null;   // default null\n  createdAt?: Date;                           // default now\n  expiresAt?: Date;                           // default createdAt + 1 h\n  settledAt?: Date | null;                    // default null\n  result?: unknown;                           // default null\n  decisions?: Array<{ deciderType: 'USER' | 'AGENT'; deciderId: string; decision: 'approve' | 'reject'; params?: unknown; comment?: string | null; decidedAt?: Date }>;\n  link?: { jobId?: string; leaseEpoch?: number; naxAskId?: string; budgetPolicyId?: string; resolvedBy?: ApprovalResolvedBy | null; outcome?: Record<string, unknown> | null };\n}\nexport function seedFleetAsk(db: PrismaClient, spec: SeedFleetAskSpec): Promise<{ requestId: string }>;\n```\nThe fixture writes the request (`approverMustHoldAction: true`, `requireDistinctApprover: false`, `onTimeout: 'reject'`, `policyId: null`), the decisions and the link, and nothing else: the jobs, budget policies and re-queue candidate jobs an AC needs are created by that AC's own setup. Specs that seeded `FleetApproval` rows reseed through it.\n\n**Scope** — In: domain constants, pure mapper/status predicates, typed repository/store read delegation and fixture. Out: moving production readers (US-011), producers (US-006/US-007), recordedStatus (US-009) and legacy type/table deletion (US-012); no copying old history or new unfiltered-admin index.\n\n**Interface** — The FleetAskRow, mapper, status predicate, eight repository/store methods and SeedFleetAskSpec declarations above are the implementation contracts.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] toFleetApproval of a pending bash row returns an object matching { type: 'nax_bash_escalate', status: 'pending', payload: <the input's payload>, jobId, leaseEpoch, naxAskId, decision: null }, with the three ids taken from the link.",
+        "AC-2 [unit] An executed bash row whose last decision is an approve with params { choice: 'allow_for_job' } maps to an object matching { status: 'approved', decision: 'allow_for_job', decidedById: <the decider>, resolvedBy: 'user' } while the link's resolvedBy is null.",
+        "AC-3 [unit] A rejected bash row with a null link resolvedBy maps to an object matching { status: 'rejected', decision: 'deny', resolvedBy: 'user' }.",
+        "AC-4 [unit] An executed bash row whose link resolvedBy is 'job_ended' maps to status: 'cancelled'.",
+        "AC-5 [unit] A cancelled budget row whose link resolvedBy is 'manual_resume' and outcome resumedById: 'u1' maps to an object matching { status: 'approved', decision: 'raise_budget_and_resume', decidedById: 'u1' }.",
+        "AC-6 [unit] A pending budget row maps to an object whose payload is its input without policyId and requestedAt, and whose policyId is the link's budgetPolicyId.",
+        "AC-7 [unit] A failed row maps to status: 'cancelled'.",
+        "AC-8 [unit] An expired row with no decision maps to an object matching { status: 'expired', decidedAt: <the request's settledAt> }.",
+        "AC-9 [integration] FleetApprovalAskStore.findPage({ status: 'approved' }, page) over seeded asks returns exactly the executed bash ask resolved 'user' and the manual-resume budget ask.",
+        "AC-10 [integration] findPage({ status: 'cancelled' }) returns exactly a job_ended executed ask, a job_ended rejected ask, a failed ask and a superseded ask.",
+        "AC-11 [integration] findPage({ type: 'nax_bash_escalate', jobId }) returns exactly that job's two bash asks, newest first, with a pending ticket.delete request in the same project absent.",
+        "AC-12 [integration] countPending([p1, p2]) returns [{ projectId: p1, slug, pending: 2 }, { projectId: p2, slug, pending: 1 }] (slug order) for those projects' pending fleet asks, with settled asks uncounted.",
+        "AC-13 [integration] countPendingByJob([j1, j2]) returns a map equal to { j1 → 2 } when j2's only ask is settled.",
+        "AC-14 [integration] countPendingUnscoped() returns 1 for one pending budget ask with no project and one with a project.",
+        "AC-15 [integration] findRequeueCandidates(policyId, since, 10) returns exactly the jobs CANCELLED with the policy's budget reason, never started and finished at or after since, oldest queuedAt first."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approvals",
+        "read-model",
+        "persistence"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Introduces a shared projection and relation-aware query abstraction whose status/null semantics affect all later consumers."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/prisma-approval.repository.ts",
+        "apps/api/src/fleet/approvals/prisma-fleet-approval-ask.repository.ts",
+        "apps/api/src/fleet/approvals/fleet-approval-ask.store.ts",
+        "apps/api/src/fleet/approvals/domain/approval.domain.ts",
+        "apps/api/src/approvals/approval-input.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/approvals/fleet-approval-view.ts",
+        "apps/api/src/fleet/approvals/fleet-approval-view.spec.ts",
+        "apps/api/test/helpers/fleet-ask-fixtures.ts",
+        "apps/api/test/integration/fleet/fleet-ask-read-model.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/approvals/domain/approval.domain.ts",
+          "reason": "`FLEET_ASK_KEY`, `FLEET_ASK_KEYS`, `CANCELLING_RESOLUTIONS`; `FleetApprovalRecord` documented as the view"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/prisma-fleet-approval-ask.repository.ts",
+          "reason": "the eight read methods"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/fleet-approval-ask.store.ts",
+          "reason": "the eight read methods, delegating"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/fleet-approval-ask.store.spec.ts",
+          "reason": "the delegation cases for the new methods"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "The bash command",
+      "description": "**Goal** — Register the engine command that validates shell decisions and delivers allow/deny answers for live jobs.\n\n**Motivation** — Two inboxes, two decide paths, two expiry sweepers and two permission checks decide the same kind of thing.\n\n**Approach** — `apps/api/src/fleet/approvals/commands/fleet-shell-escalate.command.ts` (new):\n```ts\nexport interface BashAskInput { jobId: string; leaseEpoch: number; naxAskId: string; payload: Record<string, unknown> }\nexport interface BashDecision { choice: 'allow' | 'allow_for_job' | 'deny'; option: ApprovalOption }\nexport type BashResult = { answered: true; choice: BashDecision['choice'] } | { answered: false };\n\n@Injectable()\nexport class FleetShellEscalateCommand implements ApprovalCommand<BashAskInput, BashResult, BashDecision> {\n  readonly key = 'fleet.job.shell.escalate';\n  constructor(\n    @Inject(FLEET_JOB_REPOSITORY) private readonly jobs: Pick<IFleetJobRepository, 'lockById' | 'createCommand'>,\n    private readonly asks: FleetApprovalAskStore,\n    private readonly notifier: RunnerNotifier,\n    private readonly audit: AuditRecorder,\n  ) {}\n}\n```\n- **`parse(input)`:** needs an object with a non-empty string `jobId` and `naxAskId`, an integer `leaseEpoch >= 0` and a plain-object `payload`. Anything else throws. It answers those four fields only.\n- **`parseDecision('approve', params, input)`:**\n  - `params` undefined means choice `allow`. Otherwise `params` must be an object whose `choice` is `allow` or `allow_for_job` (other keys ignored), or it throws.\n  - `checked = checkBashDecision(input.payload, choice)` must be ok; otherwise it throws with `checked.reason`.\n  - It answers `{ choice, option: checked.choice }`, `checked.choice` being the nax option (`allow` or `allow-remember`). Its own output parses to itself.\n- **`parseDecision('reject', params)`:** `params` must be undefined, or an object whose `choice` is `deny`. It answers `{ choice: 'deny', option: 'deny' }`.\n- **`execute(input, decision)` and `onReject(input, decision)`** share one step, `answer(input, decision)`:\n  1. `requestId = currentContext()?.approval?.requestId`; when absent, throw `Error('fleet ask needs its request id')`.\n  2. `job = jobs.lockById(input.jobId)`. Lock order: the engine holds the request, so the job is second.\n  4. Otherwise:\n     - `jobs.createCommand({ runnerId, jobId, type: APPROVAL_ANSWER, leaseEpoch, payload: { approvalId: requestId, naxAskId, choice: decision.option } })`;\n     - audit `{ key: 'fleet.job.shell.escalate', resourceType: 'fleet-approval', resourceId: requestId, projectId: job.projectId, summary: 'answered <option>' }`;\n     - `committedEffect(() => notifier.notify(runnerId))`;\n     - answer `{ answered: true, choice: decision.choice }`.\n- **`toResult`** is the result itself.\n- **Registration:** `ApprovalsModule` registers the command in `onModuleInit` through `ApprovalCommandRegistry`, and imports `ApprovalEngineModule`.\n- **Split across two stories:** US-003 builds the command with step 4 for every job. US-004 adds step 3, the live-lease guard.\n\n- **A bash approve with no params means `allow`.** The generic decide route (`POST /approvals/:id/decisions`) can then allow an ask without knowing the fleet's choice names. A bash reject takes no params.\n- **The commands read the request id from the action context.** `ApprovalExecutionService` runs approve execution under the request's context with `approval.requestId`, `approverType` and `approverId`. The existing decide service gives a rejection's `onReject` an approval block with `requestId` but no approverType/approverId; it retains the decider's actor context. The bash answer step needs only `approval.requestId` for either decision. Do not require approval.approverId on rejection or change the engine's rejection attribution. The budget command needs the approver id only on approval execution.\n- **Audit.**\n  - The engine records `approval.decide` for every decision.\n  - The bash command records `fleet.job.shell.escalate` (summary `answered <option>`) when it writes an answer.\n  - `fleet.approval.decide.bash` and `.budget` are no longer audit keys.\n\n**Scope** — In: input/decision parsing, live-job answer step, rejection hook, committed runner wake, audit and module registration with unit DI and real-engine command tests. Out: live-lease/job-ended guard (US-004), relay production opening (US-006), delivery ack (US-008), compatibility decide route (US-010). Pinning the missing-request-id throw is excluded for US-003; implement the guard but do not add an acceptance test for an impossible production invocation outside the engine.\n\n**Interface** — The BashAskInput, BashDecision, BashResult and FleetShellEscalateCommand declarations above are binding; implement onReject with the existing ApprovalCommand Promise<void> hook contract while sharing the answer step.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] After ApprovalsModule initialises, ApprovalCommandRegistry.get('fleet.job.shell.escalate') returns a FleetShellEscalateCommand.",
+        "AC-2 [unit] parse of an input whose leaseEpoch is 1.5 throws.",
+        "AC-3 [unit] parseDecision('approve', undefined, input) with options: ['allow', 'deny'] returns { choice: 'allow', option: 'allow' }.",
+        "AC-4 [unit] parseDecision('approve', { choice: 'allow_for_job' }, input) with options including 'allow-remember' returns { choice: 'allow_for_job', option: 'allow-remember' }.",
+        "AC-5 [unit] parseDecision('approve', { choice: 'allow' }, input) with commandTruncated: true throws.",
+        "AC-6 [unit] parseDecision('approve', { choice: 'allow_for_job' }, input) with options: ['allow', 'deny'] throws.",
+        "AC-7 [unit] parseDecision('reject', { choice: 'allow' }, input) throws.",
+        "AC-8 [unit] parseDecision('reject', undefined, input) returns { choice: 'deny', option: 'deny' }.",
+        "AC-9 [unit] parseDecision('approve', output, input) returns output for output equal to the result of AC-4.",
+        "AC-10 [integration] Approving a pending bash ask of a RUNNING job through ApprovalDecisionService.decide(id, 'approve', null) writes one APPROVAL_ANSWER command with the job's runner and lease epoch and payload { approvalId: id, naxAskId, choice: 'allow' }.",
+        "AC-11 [integration] That approve settles the request 'executed' with result { answered: true, choice: 'allow' }.",
+        "AC-12 [integration] With a spied RunnerNotifier.notify, that approve calls notify once with the job's runner id.",
+        "AC-13 [integration] Rejecting the ask of a RUNNING job through decide(id, 'reject', null) writes one APPROVAL_ANSWER command with choice 'deny'.",
+        "AC-14 [integration] The approve of AC-10 records an audit entry with key 'fleet.job.shell.escalate', summary 'answered allow' and approval.requestId equal to the request id.",
+        "AC-15 [integration] The reject of AC-13 records an audit entry with key 'fleet.job.shell.escalate' and summary 'answered deny'."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approvals",
+        "commands",
+        "security"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "One command implements an existing engine extension contract plus module registration; strict isolation remains mandatory because its parsed choices authorize shell execution."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/approvals.service.ts",
+        "apps/api/src/fleet/approvals/bash-decision.ts",
+        "apps/api/src/approvals/approval-command.registry.ts",
+        "apps/api/src/fleet/assistant/tools/ticket-write-tools.ts",
+        "apps/api/src/common/committed-effects.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/approvals/commands/fleet-shell-escalate.command.ts",
+        "apps/api/src/fleet/approvals/commands/fleet-shell-escalate.command.spec.ts",
+        "apps/api/test/integration/fleet/fleet-shell-escalate-command.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.module.ts",
+          "reason": "imports `ApprovalEngineModule`, provides `FleetShellEscalateCommand`, registers it in `onModuleInit`"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.module.spec.ts",
+          "reason": "the compiled module's registry holds `fleet.job.shell.escalate`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Bash answers reach only the ask's live lease",
+      "description": "**Goal** — Fence approved and rejected bash answers to the exact running job lease that raised the ask.\n\n**Motivation** — Two request models still exist: the engine's `ApprovalRequest` and the fleet's `FleetApproval`.\n\n**Approach** — Add step 3 to the answer algorithm built by US-003:\n3. (US-004) If the job is missing, not `RUNNING`, on another `leaseEpoch`, or has no `runnerId`: `asks.setResolvedBy(requestId, 'job_ended')` and answer `{ answered: false }`.\n\n- **`execute(input, decision)` and `onReject(input, decision)`** share one step, `answer(input, decision)`:\n  1. `requestId = currentContext()?.approval?.requestId`; when absent, throw `Error('fleet ask needs its request id')`.\n  2. `job = jobs.lockById(input.jobId)`. Lock order: the engine holds the request, so the job is second.\n\nThe above guard precedes the existing command write, audit and committed runner notification. Both approve and reject must use it. The approve result remains `{ answered: false }` and the engine settles it `executed`; a rejection remains engine `rejected`. The link's `job_ended` resolution makes either view `cancelled`.\n\n**Scope** — In: extend the existing bash command and its unit/integration specs with the locked live-lease guard. Out: changing command parsing/registration (US-003), moving relay/job closers (US-006), or mapping job_ended to fleet route 409 (US-010).\n\n**Interface** —\n```ts\nexport interface BashAskInput { jobId: string; leaseEpoch: number; naxAskId: string; payload: Record<string, unknown> }\nexport interface BashDecision { choice: 'allow' | 'allow_for_job' | 'deny'; option: ApprovalOption }\nexport type BashResult = { answered: true; choice: BashDecision['choice'] } | { answered: false };\n```",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Approving when the job is COMPLETED produces an executed request with result { answered: false } and link resolvedBy 'job_ended', with no APPROVAL_ANSWER command written.",
+        "AC-2 [integration] Approving when the job's leaseEpoch is one above the ask's sets resolvedBy to 'job_ended', with no command written.",
+        "AC-3 [integration] Rejecting when the job is COMPLETED leaves the request 'rejected' and sets resolvedBy to 'job_ended', with no command written.",
+        "Failure handling [integration] An approve or reject for an ask whose job is missing, no longer RUNNING, on a different leaseEpoch or without runnerId emits no APPROVAL_ANSWER command and resolves the link as 'job_ended'."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approvals",
+        "lease-fencing",
+        "security"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small command extension but security-critical lease fencing must apply symmetrically to approval and rejection."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/commands/fleet-shell-escalate.command.ts",
+        "apps/api/src/fleet/approvals/commands/fleet-shell-escalate.command.spec.ts",
+        "apps/api/test/integration/fleet/fleet-shell-escalate-command.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "The budget command",
+      "description": "**Goal** — Register the budget override command that raises/resumes a paused policy and requeues selected candidates after commit.\n\n**Motivation** — Two inboxes, two decide paths, two expiry sweepers and two permission checks decide the same kind of thing.\n\n**Approach** — `apps/api/src/fleet/approvals/commands/fleet-budget-override.command.ts` (new):\n```ts\nexport interface BudgetAskInput {\n  policyId: string; scopeType: string; scopeId: string | null; windowKind: string;\n  windowStart: string; spentUsd: string; amountUsd: string; requestedAt: string;   // ISO dates, decimal strings\n}\nexport interface BudgetDecision { amountUsd: number; requeueJobIds: string[] }\nexport interface BudgetResult { resumedAmountUsd: string; requeue: RequeueCandidate[]; refused: string[] }\n\n@Injectable()\nexport class FleetBudgetOverrideCommand implements ApprovalCommand<BudgetAskInput, BudgetResult, BudgetDecision> {\n  readonly key = 'fleet.budget.override';\n  constructor(\n    @Inject(BUDGET_REPOSITORY) private readonly policies: Pick<IBudgetRepository, 'lockById'>,\n    private readonly budgets: BudgetsService,\n    private readonly jobs: FleetJobsService,\n    private readonly asks: FleetApprovalAskStore,\n    private readonly closer: ApprovalCloser,\n    private readonly live: ApprovalLivePublisher,\n    private readonly audit: AuditRecorder,\n    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,\n  ) {}\n}\n```\n- **`parse(input)`:** each field must be present with its type (`scopeId` a string or null). Anything else throws.\n- **`parseDecision('approve', params)`:**\n  - `params` must be an object with `amountUsd` a finite number above 0, at most `MAX_BUDGET_USD`, with at most 4 decimal places.\n  - It may carry a `requeueJobIds` array of at most `MAX_REQUEUE_CANDIDATES` strings, each 1 to 64 characters.\n  - Anything else throws.\n  - It answers `{ amountUsd, requeueJobIds }` with the ids de-duplicated in first-seen order (`[]` when absent). Its own output parses to itself.\n- **`parseDecision('reject', params)`:** `params` must be undefined. It answers undefined.\n- **`execute(input, decision)`:**\n  1. Take `requestId` and `approverId` from `currentContext()?.approval`; if either is absent, throw.\n  2. `policy = policies.lockById(input.policyId)`, second after the request. When it is missing, throw `ConflictAppException({}, 'fleet.approvalNotPending')`.\n  3. `candidates = asks.findRequeueCandidates(policy.id, new Date(input.requestedAt), MAX_REQUEUE_CANDIDATES)`. `requeue` is the decision's ids that are candidates; `refused` is the rest.\n  4. `budgets.resume(approverId, budgetRouteOf(policy), policy.id, decision.amountUsd, now, { approvalId: requestId })`. It joins the execution transaction; its errors propagate and settle the request `failed`.\n  6. `asks.setOutcome(requestId, { resumedAmountUsd, requeueResults: refused.map((jobId) => ({ jobId, ok: false, error: 'not a re-queue candidate' })) })`.\n  7. Audit `{ key: 'fleet.budget.override', resourceType: 'fleet-approval', resourceId: requestId, projectId: policy.projectId, summary: 'raised to <resumedAmountUsd> and resumed' }`.\n- **`toResult(result)`** answers `{ resumedAmountUsd }`, never the candidate rows.\n- **`afterCommit(input, decision, result)`:**\n  - For each `requeue` candidate, `jobs.requeue(approverId, c.projectId, c.jobId)` runs in its own transaction (plan D232), recording `{ jobId, ok: true }` or `{ jobId, ok: false, error: errorText(error) }`.\n  - Then, in one `txManager.run`, `asks.setOutcome(requestId, { ...current outcome, requeueResults: [...refused results, ...requeue results] })`.\n- **Helpers:** `budgetRouteOf` and `errorText` move unchanged from `approvals.service.ts` to `apps/api/src/fleet/approvals/fleet-ask-helpers.ts` (new).\n- **Registration:** `ApprovalsModule` registers the command in `onModuleInit`, next to the bash command.\n- **Split across two stories:** US-005 builds every step but 5, which US-007 adds once `closeForPolicy` is on the engine.\n\n- **A budget ask's input carries `requestedAt`.** The re-queue candidates are the jobs cancelled for the policy since the ask opened, so the frozen input records when.\n- **The decision params cap limits a raise.** The engine refuses params over 4 096 characters of canonical JSON (fleet-core), so a raise naming more than about 140 re-queue ids is refused (400). Today the route allowed 200. This is accepted; it is listed in Out of Scope.\n- **Re-queues after an approval run under the request's context.** `afterCommit` runs under the request's context, so `FleetJobsService.requeue`'s audit entry names actor `SYSTEM/budget` with the approver in its `approval` block. Today it named the user.\n- **Audit.**\n  - The engine records `approval.decide` for every decision.\n  - The budget command records `fleet.budget.override` (summary `raised to <amount> and resumed`).\n  - `fleet.approval.decide.bash` and `.budget` are no longer audit keys.\n\n**Scope** — In: budget parsing/params, policy-locked execution, outcome/result, isolated postcommit requeues, helpers extraction and registration. Out: supersede step 5 (US-007), budget producer/closer conversion (US-007), fleet route prevalidation/assertResumable (US-010). Do not increase the engine params cap or add a never-expiring budget ask; pinning the requeue audit actor is excluded for US-005 although engine context must be preserved. Registration must be safe whether independent US-003 has run yet or not.\n\n**Interface** — BudgetAskInput, BudgetDecision, BudgetResult and the injectable command above are binding. Preserve ApprovalCommand's optional rejection params hook returning undefined and result projection without candidate rows.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] After ApprovalsModule initialises, ApprovalCommandRegistry.get('fleet.budget.override') returns a FleetBudgetOverrideCommand.",
+        "AC-2 [unit] parseDecision('approve', { amountUsd: 12.5, requeueJobIds: ['a', 'a', 'b'] }, input) returns { amountUsd: 12.5, requeueJobIds: ['a', 'b'] }.",
+        "AC-3 [unit] parseDecision('approve', {}, input) throws.",
+        "AC-4 [unit] parseDecision('approve', { amountUsd: 0 }, input) throws.",
+        "AC-5 [unit] parseDecision('approve', { amountUsd: 1.23456 }, input) throws.",
+        "AC-6 [unit] parseDecision('approve', { amountUsd: 5, requeueJobIds: <201 ids> }, input) throws.",
+        "AC-7 [unit] parseDecision('reject', { amountUsd: 5 }, input) throws.",
+        "AC-8 [integration] Approving a pending budget ask of a paused policy with params { amountUsd: 20 } through ApprovalDecisionService.decide leaves the policy matching { amountUsd: '20', pausedAt: null }.",
+        "AC-9 [integration] That approve writes one resumed incident matching { approvalId: <the request id>, actorId: <the decider> }.",
+        "AC-10 [integration] With requeueJobIds naming one re-queue candidate, after decide returns the job is QUEUED and the link's outcome.requeueResults equals [{ jobId, ok: true }].",
+        "AC-11 [integration] With requeueJobIds: ['not-a-job'], the link's outcome.requeueResults equals [{ jobId: 'not-a-job', ok: false, error: 'not a re-queue candidate' }].",
+        "AC-12 [integration] Approving with an amountUsd not above the window spend produces a failed request with the policy still paused.",
+        "AC-13 [integration] Approving after the policy row was deleted settles the request 'failed'.",
+        "AC-14 [unit] afterCommit with two candidates, where FleetJobsService.requeue throws a ConflictAppException for the first, stores requeueResults with the first { ok: false, error: <JSON of its code and args> } and the second { ok: true }.",
+        "AC-15 [integration] The approve of AC-8 produces an audit entry with key 'fleet.budget.override' and summary 'raised to 20 and resumed', with request.result equal to { resumedAmountUsd: '20' }."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approvals",
+        "budgets",
+        "commands",
+        "security"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Approval-authorized monetary changes span policy locking, transactions, audit context and partial postcommit job requeue failure handling."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/approvals.service.ts",
+        "apps/api/src/fleet/budgets/budgets.service.ts",
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/approvals/approval-execution.service.ts",
+        "apps/api/src/fleet/approvals/approvals.module.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/approvals/fleet-ask-helpers.ts",
+        "apps/api/src/fleet/approvals/commands/fleet-budget-override.command.ts",
+        "apps/api/src/fleet/approvals/commands/fleet-budget-override.command.spec.ts",
+        "apps/api/test/integration/fleet/fleet-budget-override-command.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.module.ts",
+          "reason": "provides and registers `FleetBudgetOverrideCommand`"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.module.spec.ts",
+          "reason": "the compiled module's registry holds `fleet.budget.override`"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.service.ts",
+          "reason": "imports `budgetRouteOf` and `errorText` from the new helpers module instead of defining them"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Bash asks open and close on the engine",
+      "description": "**Goal** — Move runner-relayed bash ask creation and job-end closure to ApprovalAskService and FleetApprovalAsk.\n\n**Motivation** — P3 replaces `FleetApproval` with the engine (design §8), and the engine now has every piece the fleet asks need.\n\n**Approach** — `ApprovalCloser` gains `ApprovalAskService` and `FleetApprovalAskStore` beside its existing collaborators, and keeps `APPROVAL_REPOSITORY` for `expire` until US-012. `ApprovalStoreModule` imports `ApprovalEngineModule`. Its private `record`, `dispatch` and `enqueueRequested` take the view and read the project slug through `store.findProjectSlug` (US-006); they are otherwise unchanged. `BashAsk` and `BashJob` keep their shapes (`event-payloads.ts` imports `BashAsk`). `ApprovalChange` gains `answer?: { naxAskId: string; choice: ApprovalOption }`.\n\n**Bash: `openBash(job, ask, runnerId, now)` (US-006).**\n1. When `store.findByAsk(job.id, job.leaseEpoch, ask.naxAskId)` answers `{ ask: link }`, answer `{ approval: store.findApproval(link.requestId), live: [] }`.\n2. If the job is not `RUNNING`, `job.bashMode === 'raw'`, or `ask.deadlineAt <= now`: audit `runner.sync` on the job (`resourceType: 'fleet-job'`, summary `bash ask not opened: <reason>`) and answer `{ approval: null, live: [] }`.\n3. Call `askService.open({ key: 'fleet.job.shell.escalate', projectId: job.projectId, component: 'runner', onBehalfOf: { type: job.requestedByType ?? 'USER', id: job.requestedById }, origin: 'runner', input: { jobId, leaseEpoch, naxAskId, payload: ask.payload }, deadline: min(ask.deadlineAt, now + job.approvalTimeoutSec s) }, now)`.\n4. On `not-needed`: audit `runner.sync` with summary `bash ask answered <choice>: no approval needed`, and answer `{ approval: null, live: [], answer: { naxAskId, choice } }`. The choice is `allow` when `checkBashDecision(ask.payload, 'allow')` passes, else `deny`.\n   - `JobReportProcessor.applyOne` writes the command through its own `FLEET_JOB_REPOSITORY`, inside the report transaction: `createCommand({ runnerId, jobId, type: APPROVAL_ANSWER, leaseEpoch, payload: { approvalId: null, naxAskId, choice } })`.\n   - There is no runner wake: the runner reporting the ask is the one syncing, and it receives the command on its next sync.\n5. On `pending`:\n   - `store.insert({ requestId, kind: 'bash', projectId, jobId, leaseEpoch, naxAskId })`;\n   - `view = store.findApproval(requestId)`;\n   - as today: activity `approval.requested` (actor `runnerActor`), audit `runner.sync` `bash ask opened, pending`, webhook `fleet.approval.requested`, outbox `fleet_approval_requested`;\n   - answer `{ approval: view, live: livePublisher.event(view) }`.\n\n**Bash: `closeForJob(job, now)` (US-006).** For each `store.findPendingForJob(job.id)`:\n1. `askService.close(link.requestId, { status: 'cancelled', reason: 'job_ended' }, now)`. If it answers null, go to the next link.\n2. `store.setResolvedBy(link.requestId, 'job_ended')`.\n3. `view = await store.findApproval(link.requestId)`; append `recordResolved(view, jobSystemActor(job))` to the result.\n\n`closeForJob` answers the `LiveFleetApprovalEvent[]` accumulated over every closed link (`JobTransitionsService.leaveRunning` returns it), `[]` when none closed.\n\n- **An ask is not opened when nax cannot wait for it.**\n  - If the job is not `RUNNING`, the job is in `raw` bash mode, or the ask's deadline is at or before `now`, the relay opens no request and no link.\n  - It records `runner.sync` with summary `bash ask not opened: <reason>` (`job not running`, `raw mode`, `past deadline`).\n  - Today a closed row was written instead.\n- **A bash ask the policy resolves to `none` is answered at once.**\n  - No request is written (`open` answers `not-needed`).\n  - The report processor writes `APPROVAL_ANSWER` with `approvalId: null`, choice `allow` when `checkBashDecision(payload, 'allow')` passes and `deny` otherwise.\n  - The closer cannot write it: `FleetJobsModule` imports `ApprovalStoreModule`, so the job repository is out of the closer's reach.\n- **The bash deadline keeps today's cap.**\n  - `open` is given `deadline = min(ask.deadlineAt, now + job.approvalTimeoutSec seconds)`, so the engine's 24 h default never outlasts nax's own deadline.\n  - A policy whose `timeoutSec` is shorter still expires the ask earlier (new: a policy can now shorten a bash ask).\n\n- **The fleet keeps one closer class.**\n  - `ApprovalCloser` keeps its methods (`openBash`, `closeForJob`, `openBudget`, `closeForPolicy`, `recordResolved`) and the `ApprovalChange { approval, live }` return shape. Its callers (the job report processor, `JobTransitionsService`, `BudgetEvaluator`, `BudgetSweeper`, `BudgetsService`) do not change.\n  - The bodies move from `IApprovalRepository` to `ApprovalAskService` and `FleetApprovalAskStore`.\n  - The closer keeps `APPROVAL_REPOSITORY` only for `expire`, which `ApprovalExpirySweeper` and the old `ApprovalsService` still call until US-010 and US-012. US-012 deletes `expire` and the injection.\n\n**Scope** — In: bash half of closer conversion, shared recording slug lookups, store module engine DI and report processor immediate-answer command. Update closer/report unit specs, module DI spec, fleet-approval-relay.integration.spec.ts and audit-fleet-system-approvals.integration.spec.ts to read requests/links and use ApprovalRequestExpirySweeper.tick for expiry. Out: budget half (US-007), delivery (US-008), engine resolution recorder (US-009), decide/read adapters (US-010/US-011), and legacy expiry removal (US-012). Do not answer nax for not-opened inputs or pin the shorter policy timeout in US-006. Transitional integration failures reading FleetApproval after production relay are authorized until their owning adapter/reader stories.\n\n**Interface** —\n```ts\nexport interface ApprovalChange { approval: FleetApprovalRecord | null; live: LiveFleetApprovalEvent[]; answer?: { naxAskId: string; choice: ApprovalOption } }\n```\nRetain existing BashAsk/BashJob and method signatures; request-first locking in the engine is paired with skip-locked close from the job-held path.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] A runner sync (POST /fleet/runner/sync) whose report carries an approval_request event for a RUNNING job creates one ApprovalRequest matching { permissionKey: 'fleet.job.shell.escalate', status: 'pending', actor: SYSTEM/runner, onBehalfOf: <the job's requester>, origin: 'runner' }, and one FleetApprovalAsk with that job's id, lease epoch and nax ask id.",
+        "AC-2 [integration] With approvalTimeoutSec 60 and the ask's deadline 10 minutes away, the request's expiresAt is 60 seconds after the relay time.",
+        "AC-3 [integration] With approvalTimeoutSec 600 and the deadline 30 seconds away, expiresAt equals the deadline.",
+        "AC-4 [integration] A second sync re-reporting the same ask leaves one request and one link.",
+        "AC-5 [integration] An ask relayed for a job in raw bash mode creates no request and records a runner.sync audit entry with summary 'bash ask not opened: raw mode'.",
+        "AC-6 [integration] An ask whose deadline has passed creates no request and records summary 'bash ask not opened: past deadline'.",
+        "AC-7 [integration] An ask reported in the same sync as the job's move from RUNNING to COMPLETED, after the transition event, creates no request and records summary 'bash ask not opened: job not running'.",
+        "AC-8 [integration] With an approval policy that resolves fleet.job.shell.escalate to none in the project, the ask creates no request and one APPROVAL_ANSWER command whose payload matches { approvalId: null, choice: 'allow' }.",
+        "AC-9 [integration] With that policy and commandTruncated: true, the command's choice is 'deny'.",
+        "AC-10 [integration] The pending open of AC-1 records a fleet activity row 'approval.requested' with actor type RUNNER and responsibleUserId the job's user requester.",
+        "AC-11 [integration] The pending open dispatches fleet.approval.requested to a project webhook with approvalId equal to the request id.",
+        "AC-12 [integration] The pending open records an outbox event fleet_approval_requested whose metadata.eventId is the request id.",
+        "AC-13 [integration] A runner report moving the job from RUNNING to COMPLETED settles its pending ask 'cancelled' with result { closedBy: 'job_ended' }, and sets the link's resolvedBy to 'job_ended'.",
+        "AC-14 [integration] While another transaction holds the ask's request row, that COMPLETED report commits and the ask stays 'pending'.",
+        "AC-15 [integration] The job-end close of AC-13 records a fleet activity row 'approval.cancelled'."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approvals",
+        "runner",
+        "security",
+        "concurrency"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002",
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Existing closer/store and engine ports avoid a new architecture, but relay transaction ordering, policy-none answers and concurrent job closes span modules; shell authorization requires strict TDD isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/approval-closer.ts",
+        "apps/api/src/fleet/sync/job-report.processor.ts",
+        "apps/api/src/fleet/jobs/job-transitions.service.ts",
+        "apps/api/test/integration/fleet/fleet-approval-relay.integration.spec.ts",
+        "apps/api/src/fleet/approvals/approval-store.module.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.ts",
+          "reason": "`openBash` and `closeForJob` on the engine and the link; `ApprovalChange.answer`"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-store.module.ts",
+          "reason": "imports `ApprovalEngineModule` for `ApprovalAskService`"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-store.module.spec.ts",
+          "reason": "the compiled module provides the closer with `ApprovalAskService` resolved"
+        },
+        {
+          "path": "apps/api/src/fleet/sync/job-report.processor.ts",
+          "reason": "writes the `APPROVAL_ANSWER` command of a `not-needed` ask from `ApprovalChange.answer`"
+        },
+        {
+          "path": "apps/api/src/fleet/sync/job-report.processor.spec.ts",
+          "reason": "the `openBash` double answers an `ApprovalChange` whose `approval` is the view, and a case with `answer`"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.spec.ts",
+          "reason": "the bash cases assert the engine request, the link and the not-opened and not-needed paths instead of `FleetApproval` rows"
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approval-relay.integration.spec.ts",
+          "reason": "asserts the engine request and link where it read `FleetApproval`; the deny-at-expiry case runs `ApprovalRequestExpirySweeper.tick` instead of `ApprovalExpirySweeper`"
+        },
+        {
+          "path": "apps/api/test/integration/audit/audit-fleet-system-approvals.integration.spec.ts",
+          "reason": "its `openAsk` helper reads the engine request and link instead of `fleetApproval`; the job-end case asserts `closedBy: 'job_ended'`; the expiry cases run `ApprovalRequestExpirySweeper.tick`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Budget asks open and close on the engine",
+      "description": "**Goal** — Move hard-stop budget asks and policy lifecycle closes to the engine and supersede competing asks on override execution.\n\n**Motivation** — P3 replaces `FleetApproval` with the engine (design §8), and the engine now has every piece the fleet asks need.\n\n**Approach** — **Budget: `openBudget(policy, at, now)` (US-007).**\n1. `closeForPolicy(policy.id, { status: 'cancelled', resolvedBy: 'superseded', actor: systemActor(policy) }, now)`. This closes the stray ask, as today.\n2. Call `askService.open({ key: 'fleet.budget.override', projectId: policy.projectId, component: 'budget', onBehalfOf: null, origin: 'system', input: { policyId, scopeType, scopeId, windowKind, windowStart: at.windowStart.toISOString(), spentUsd: at.spentUsd, amountUsd: policy.amountUsd, requestedAt: now.toISOString() }, deadline: null }, now)`.\n   - `not-needed` throws `Error('budget override resolved to none')`. The floor `self` makes it unreachable.\n3. `store.insert({ requestId, kind: 'budget', projectId: policy.projectId, budgetPolicyId: policy.id })`; then, as today, activity `approval.requested` (`systemActor`), webhook, outbox and live event.\n\n**Budget: `closeForPolicy(policyId, close, now)` (US-007).**\n1. `link = store.findPendingForPolicy(policyId)`. With no link, answer `{ approval: null, live: [] }`.\n2. `askService.close(link.requestId, { status: 'cancelled', reason: close.resolvedBy }, now)`. If it answers null, answer `{ approval: null, live: [] }`.\n3. Otherwise `store.setResolvedBy(link.requestId, close.resolvedBy)`.\n4. When `close.outcome` is given, `store.setOutcome(link.requestId, { ...close.outcome, ...(close.status === 'approved' ? { resumedById: close.actor.id } : {}) })`.\n5. `view = await store.findApproval(link.requestId)`; answer `{ approval: view, live: await recordResolved(view, close.actor) }`. Callers read `approval?.id` for the incident's `approvalId` (`BudgetSweeper.resetWindow`, `BudgetsService.resume`), and it is null whenever the close was skipped.\n\nThe engine status is always `cancelled`; a manual resume shows as `approved` through the mapping. `PolicyClose` keeps its shape.\n\nAdd the budget command's deferred step 5 from US-005:\n5. (US-007) `closed = closer.closeForPolicy(policy.id, { status: 'cancelled', resolvedBy: 'superseded', actor: userActor(approverId) }, now)`, then `committedEffect(() => live.publish(closed.live))`. This closes the policy's other pending ask, if any. The executing request is not pending, so it is never the one closed.\n\n- **A budget ask now expires.**\n  - `open` caps a budget ask at the policy timeout (24 h without a policy).\n  - After it expires the scope stays paused, and the budgets page's resume still lifts it. Today a budget ask never expired.\n  - Its DTO `expiresAt` is now a date instead of null.\n- **A budget ask's input carries `requestedAt`.** The re-queue candidates are the jobs cancelled for the policy since the ask opened, so the frozen input records when.\n- **The budget command closes the policy's other pending ask.** A hard stop that lands while an approve is executing (its close of the executing request is skipped by the lock rule) opens a newer ask. The command closes it with `ApprovalCloser.closeForPolicy(..., resolvedBy: 'superseded', actor: userActor(approverId))`, so its activity row, webhook and live event are written, and queues the live events with `committedEffect`.\n\nRetain the shared closer/store module seam from US-006. All fleet close callers hold the job/policy lock before asking the engine to close; ApprovalAskService.close uses FOR UPDATE SKIP LOCKED and null means no link mutations, resolved outputs or incident approval id. BudgetEvaluator, BudgetSweeper and BudgetsService retain their existing close port and publication shapes. openBudget must carry forward the stray close's live events alongside its new pending event.\n\n**Scope** — In: openBudget/closeForPolicy conversion, command supersede step, policy lifecycle/audit/notification fixture updates and real delete/reset/resume/held-request verification. Extend the US-005 budget command and its integration spec. Update fleet-approval-budget-wiring.integration.spec.ts, audit-fleet-budgets.integration.spec.ts and fleet-budget-approval-notifications.integration.spec.ts to seed/read requests and links. Out: fleet decide prevalidation (US-010), reader conversion (US-011), legacy sweeper/table removal (US-012). Do not add a pending-policy unique index or never-expiring ask; pinning the unreachable none-resolution throw is excluded for US-007.\n\n**Interface** — Keep the existing close shapes:\n```ts\nexport interface ApprovalChange { approval: FleetApprovalRecord | null; live: LiveFleetApprovalEvent[]; answer?: { naxAskId: string; choice: ApprovalOption } }\n```\nRetain PolicyClose and BudgetEvaluator/BudgetSweeper/BudgetsService call signatures; the new action and link ids are ApprovalRequest ids.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] BudgetEvaluator.evaluate on a project policy whose window spend crosses its hard stop creates one ApprovalRequest matching { permissionKey: 'fleet.budget.override', status: 'pending', actor: SYSTEM/budget, onBehalfOf: null, origin: 'system' }, and one FleetApprovalAsk of kind 'budget' with the policy's id.",
+        "AC-2 [integration] That hard stop's hard_stop incident has approvalId equal to the request id.",
+        "AC-3 [integration] With no approval policy for the key, the request's expiresAt is 86 400 seconds after its createdAt.",
+        "AC-4 [integration] A second hard stop on the same policy settles the first ask 'cancelled' with result { closedBy: 'superseded' } and link resolvedBy 'superseded', leaving one pending ask.",
+        "AC-5 [integration] BudgetSweeper resetting a stale monthly pause settles the pending ask 'cancelled' with link resolvedBy 'window_reset', and the window_reset incident's approvalId is the request id.",
+        "AC-6 [integration] BudgetSweeper deleting a policy whose scope is gone settles its pending ask with link resolvedBy 'policy_deleted'.",
+        "AC-7 [integration] DELETE on the policy's budget route settles its pending ask with link resolvedBy 'policy_deleted', and records a fleet activity row 'approval.cancelled' with actor type USER.",
+        "AC-8 [integration] Resuming the paused policy through the budgets resume route settles the pending ask 'cancelled' with result { closedBy: 'manual_resume' } and link resolvedBy 'manual_resume'.",
+        "AC-9 [integration] That resume leaves the link outcome equal to { resumedAmountUsd, requeueResults: [], resumedById: <the caller> }.",
+        "AC-10 [integration] A hard stop on a global policy creates a request with projectId null and records no fleet_approval_requested event.",
+        "AC-11 [integration] While another transaction holds the pending ask's request row, the budgets DELETE commits and the ask stays 'pending'.",
+        "AC-12 [integration] When the policy has a second pending budget ask, approving the first through ApprovalDecisionService.decide settles the second with link resolvedBy 'superseded', and records a fleet activity row 'approval.cancelled' for it.",
+        "Failure handling [integration] ApprovalCloser.closeForPolicy inside the policy transaction returns { approval: null, live: [] } while another transaction still holds the pending request row lock."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approvals",
+        "budgets",
+        "concurrency",
+        "security"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002",
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Retaining the existing policy-close port limits architectural risk, while hard-stop/manual-resume/deletion flows and request-lock races remain cross-module; budget override authorization requires strict isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/approval-closer.ts",
+        "apps/api/src/fleet/budgets/budget-evaluator.ts",
+        "apps/api/src/fleet/budgets/budget-sweeper.ts",
+        "apps/api/src/fleet/budgets/budgets.service.ts",
+        "apps/api/src/fleet/approvals/commands/fleet-budget-override.command.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.ts",
+          "reason": "`openBudget` and `closeForPolicy` on the engine and the link"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.spec.ts",
+          "reason": "the budget cases assert the engine request and link"
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approval-budget-wiring.integration.spec.ts",
+          "reason": "reads and seeds budget asks as engine requests and links (`seedFleetAsk`) instead of `FleetApproval`"
+        },
+        {
+          "path": "apps/api/test/integration/audit/audit-fleet-budgets.integration.spec.ts",
+          "reason": "finds the budget ask as an engine request instead of `fleetApproval.findFirstOrThrow`"
+        },
+        {
+          "path": "apps/api/test/integration/notifications/fleet-budget-approval-notifications.integration.spec.ts",
+          "reason": "closes and resets budget asks through the engine request instead of `fleetApproval.updateMany`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Answer delivery on the link",
+      "description": "**Goal** — Persist runner answer acknowledgements on FleetApprovalAsk instead of the old approval row.\n\n**Motivation** — Two request models still exist: the engine's `ApprovalRequest` and the fleet's `FleetApproval`.\n\n**Approach** — `CommandAckProcessor` injects `FleetApprovalAskStore` instead of `APPROVAL_REPOSITORY`.\n- On an `APPROVAL_ANSWER` ack whose payload's `approvalId` is a string, it calls `link = store.lockByRequest(approvalId)`. The job is locked above, so the order is job, then link.\n- When a link is found, it calls `store.setOutcome(approvalId, { ...(link.outcome ?? {}), delivery: { result, detail, at } })` as bookkeeping `runner.command-ack`, exactly as today.\n- A null or unknown `approvalId` writes nothing.\n\n- **Answer delivery is stored on the link.** `APPROVAL_ANSWER`'s `approvalId` is the request id, and the command-ack processor writes `outcome.delivery` on the `FleetApprovalAsk` row.\n\n**Scope** — In: approval-answer ack dependency/locking/outcome merge and unit/integration ack cases using an answer produced by the engine. Preserve the existing 200-character detail truncation, null empty detail, ISO ack timestamp, fencing, idempotent ack handling and no approval live event. A null or unknown approvalId suppresses link/outcome writes only; normal command acknowledgement persistence still happens before that branch, as today. Out: producing commands (US-003/US-006), fleet resolution event subscriber (US-009), API decide/read adapters (US-010/US-011) and old repository deletion (US-012).\n\n**Interface** — Use the existing store contracts:\n```ts\nlockByRequest(requestId: string): Promise<FleetApprovalAskRecord | null>;\nsetOutcome(requestId: string, outcome: Record<string, unknown>): Promise<FleetApprovalAskRecord>;\n```",
+      "acceptanceCriteria": [
+        "AC-1 [integration] After a bash ask is allowed and the runner acks the APPROVAL_ANSWER with result 'ok', the link's outcome.delivery equals { result: 'ok', detail: null, at: <the ack time> }.",
+        "AC-2 [unit] An error ack with a 300-character detail stores delivery.detail as its first 200 characters.",
+        "AC-3 [unit] An ack on a link whose outcome already has resumedAmountUsd keeps that key beside delivery.",
+        "AC-4 [unit] An APPROVAL_ANSWER ack whose payload's approvalId is null calls neither lockByRequest nor setOutcome.",
+        "AC-5 [unit] An ack whose approvalId has no link calls no setOutcome."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approvals",
+        "runner",
+        "delivery"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Localized persistence adapter replacement preserves the existing fenced acknowledgement path and merges delivery bookkeeping on the link."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/sync/command-ack.processor.ts",
+        "apps/api/src/fleet/sync/command-ack.processor.spec.ts",
+        "apps/api/src/fleet/approvals/fleet-approval-ask.store.ts",
+        "apps/api/test/integration/fleet/fleet-approval-relay.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/sync/command-ack.processor.ts",
+          "reason": "`FleetApprovalAskStore` instead of `APPROVAL_REPOSITORY`"
+        },
+        {
+          "path": "apps/api/src/fleet/sync/command-ack.processor.spec.ts",
+          "reason": "the approval double becomes a store double with `lockByRequest` and `setOutcome`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "Fleet events for engine-side changes",
+      "description": "**Goal** — Adapt committed engine resolution events into idempotent fleet activity, webhook and live outputs.\n\n**Motivation** — Two inboxes, two decide paths, two expiry sweepers and two permission checks decide the same kind of thing.\n\n**Approach** — `apps/api/src/fleet/approvals/fleet-ask-events.subscriber.ts` (new):\n- Provided by `ApprovalsModule`, which imports `OutboxCoreModule` for `FanOutPublisher`.\n- Registers on `APPROVAL_REQUEST_CHANGED` in `onModuleInit`.\n- Keeps the relay's context. It has no `@SystemWriter` and never calls `runAsSystemWriter`.\n\n`handle(payload)`:\n1. Parse with `parseApprovalRequestChangedPayload`. When it answers null, warn `approval_request_changed: malformed payload skipped` and return.\n2. Return unless `permissionKey` is in `FLEET_ASK_KEYS` and `status` is `rejected`, `executed`, `failed` or `expired`.\n3. In `txManager.run`:\n   - `link = store.lockByRequest(requestId)`. If there is no link, or `link.recordedStatus === status`, return null.\n   - When `link.resolvedBy` is null, `setResolvedBy(requestId, status === 'expired' ? 'timeout' : 'user')`.\n   - `store.setRecordedStatus(requestId, status)`, a new store and repository method.\n   - `view = store.findApproval(requestId)`.\n   - `live = closer.recordResolved(view, actor)`. This writes the activity row and the webhook. `actor` is:\n     - expired: `{ type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId }`. `responsibleUserId` is the `onBehalfOf` id when it is a USER (bash), or the policy's `updatedById` (budget, `BUDGET_REPOSITORY.findById`; null when the policy is gone).\n     - otherwise: `userActor(decision.deciderId)`, as today's decide wrote for users and agents alike (`FleetActivityService` resolves an agent id to actor type `AGENT`).\n   - Answer `live`.\n4. After the transaction, publish `live` through `ApprovalLivePublisher.publish`.\n\nDatabase errors propagate, so the outbox relay retries.\n\nThe event payload contains request identifiers/status/onBehalfOf metadata, not input, result or decisions. Resolve any needed request through existing ApprovalRequestQueries.findById and the last decision through ApprovalRequestQueries.decisionsFor (ascending decidedAt/id, last row), rather than inventing a decision field on the payload. Use that decision's deciderId for the non-expiry actor; for an expired budget ask read its policy with link.budgetPolicyId and BUDGET_REPOSITORY.findById. These are existing query/repository APIs, not new helper abstractions.\n\nSchema: `FleetApprovalAsk` gains `recordedStatus String?`; a migration adds the column.\n\n- **One recorder for engine-side changes.**\n  - A new outbox subscriber, `FleetAskEventsSubscriber`, records the fleet activity row, the `fleet.approval.resolved` webhook and the `fleet_approval` live event for the four statuses the engine sets: `rejected`, `executed`, `failed`, `expired`.\n  - The statuses the fleet sets itself (`pending` at open, `cancelled` at close) are recorded by `ApprovalCloser` in the producer's transaction, as today.\n  - `approved` is skipped: `executed` or `failed` follows it.\n  - These three outputs now arrive through the outbox relay, after the decide or expiry commits, instead of in the same transaction.\n- **The recorder is idempotent per status.** `FleetApprovalAsk` gains `recordedStatus String?`, the last engine status whose events were recorded. A redelivered event with the same status records nothing.\n- **The recorder fills `resolvedBy`.** When the link's `resolvedBy` is null it becomes `timeout` for `expired` and `user` for the other three. A command that already set it (`job_ended`) is left alone. `toFleetApproval` derives the same value while the column is still null, so a decide response and a GET right after it already carry `resolvedBy` as today.\n- **The recorder runs in the outbox relay's context.** Like `AssistantActionOutcomeSubscriber`, it keeps the relay's `system:outbox` context (allowlisted in `audit-coverage.allowlist.ts`) and never opens `runAsSystemWriter`. Its writes (link columns, activity rows, the webhook's outbox row) are delivery bookkeeping of the change the engine already audited.\n\n**Scope** — In: subscriber, nullable recordedStatus migration/domain/repository/store setter, OutboxCoreModule/provider DI and event/idempotency tests. Update ApprovalsModule's unit compilation spec to resolve FleetAskEventsSubscriber. Out: pending/cancelled fleet-side outputs (US-006/US-007), generic engine notification filtering (US-001), adapters/readers (US-010/US-011) and old table removal (US-012). Do not add a SystemWriter annotation copied from the assistant example.\n\n**Interface** — `handle(payload)` consumes the existing parseApprovalRequestChangedPayload contract and delegates recorded output to ApprovalCloser.recordResolved. Add `setRecordedStatus` to the ask repository interface, implementation and store with the existing store-delegation pattern; the schema column is `recordedStatus String?`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] After a principal rejects a bash ask through ApprovalDecisionService.decide and the outbox relays the change, a fleet activity row 'approval.decided' exists with the decider's id and payload decision: 'deny'.",
+        "AC-2 [integration] After an approve executes and is relayed, the activity row's payload matches { status: 'approved', decision: 'allow' }.",
+        "AC-3 [integration] After ApprovalRequestExpirySweeper.tick expires a relayed bash ask and the change is relayed, the observed resolution is link resolvedBy 'timeout' with an 'approval.expired' activity row of actor type SYSTEM.",
+        "AC-4 [integration] The change of AC-1 dispatches fleet.approval.resolved with status: 'rejected'.",
+        "AC-5 [unit] With a spied ApprovalLivePublisher.publish, handling an executed change publishes one fleet_approval event with the mapped status after the transaction returns.",
+        "AC-6 [unit] Handling the same executed payload twice records one activity row (the second sees recordedStatus equal).",
+        "AC-7 [unit] A payload for ticket.delete writes nothing.",
+        "AC-8 [unit] A payload with status 'approved' writes nothing.",
+        "AC-9 [unit] A malformed payload logs the warning 'approval_request_changed: malformed payload skipped' and writes nothing.",
+        "AC-10 [unit] A fleet-key payload whose request has no link writes nothing.",
+        "AC-11 [unit] An executed change whose link resolvedBy is 'job_ended' records 'approval.cancelled' and leaves resolvedBy 'job_ended'.",
+        "Failure handling [unit] FleetAskEventsSubscriber writes nothing for a fleet-key event with status 'pending' or 'cancelled'."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approvals",
+        "outbox",
+        "events",
+        "migration"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "New outbox adapter spans transactional delivery idempotency, schema state, actor mapping and postcommit live publication without changing eligibility rules."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/requests/assistant-action-outcome.subscriber.ts",
+        "apps/api/src/fleet/assistant/assistant.module.ts",
+        "apps/api/src/approvals/approval-request-events.ts",
+        "apps/api/src/fleet/approvals/approval-closer.ts",
+        "apps/api/prisma/schema.prisma"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/approvals/fleet-ask-events.subscriber.ts",
+        "apps/api/src/fleet/approvals/fleet-ask-events.subscriber.spec.ts",
+        "apps/api/prisma/migrations/20261107090000_fleet_approval_ask_recorded_status/migration.sql"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "`FleetApprovalAsk.recordedStatus String?`"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/domain/fleet-approval-ask.domain.ts",
+          "reason": "`recordedStatus` on the record; `setRecordedStatus` on the interface"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/prisma-fleet-approval-ask.repository.ts",
+          "reason": "`setRecordedStatus`"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/fleet-approval-ask.store.ts",
+          "reason": "`setRecordedStatus`"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.module.ts",
+          "reason": "imports `OutboxCoreModule`; provides `FleetAskEventsSubscriber`"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.module.spec.ts",
+          "reason": "the compiled module resolves `FleetAskEventsSubscriber`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "The /fleet/approvals decide adapter",
+      "description": "**Goal** — Preserve fleet decide routes and errors while delegating authorization, decisions and execution to the approval engine.\n\n**Motivation** — Two inboxes, two decide paths, two expiry sweepers and two permission checks decide the same kind of thing.\n\n**Approach** — `ApprovalsService.decide(caller, route, id, dto, now)` runs these steps in order:\n1. `view = store.findApproval(id)`. When it is missing or not visible on the route, 404 `fleet.approvals`.\n2. When `view.status !== 'pending'`, 409 `fleet.approvalNotPending`.\n3. Eligibility before validation. `request = ApprovalRequestQueries.findById(id)`. The spec's caller-principal pseudocode must be adapted to the existing interfaces: KodaPrincipal carries lowercase `actorType`, whereas PermissionService.effectiveKeys and decideEligibility require an uppercase `type`. For a human or agent caller, build a local `decider` ref with `{ type: caller.principal.actorType === 'user' ? 'USER' : 'AGENT', id: caller.principal.id }`, typed as PrincipalRef. Do not map runner principals to AGENT; they cannot enter these domain routes. Use `scope = request.projectId === null ? 'global' : { projectId: request.projectId }`, `keys = permissions.effectiveKeys(decider, scope)` and `decideEligibility(request, decider, keys)`.\n   - When `decideEligibility(request, decider, keys)` refuses, answer 403 `fleet.approvalSelfDecide` if the reason is `tier-too-low` and the caller is the request's `onBehalfOf` agent; otherwise 403 `permissions`.\n4. Bash:\n   - When `amountUsd` or `requeueJobIds` is present, 400 `fleet.approvalInput`.\n   - When `checkBashDecision(view.payload, dto.decision)` is not ok, 400 `fleet.approvalDecisionInvalid`.\n   - Then `allow` or `allow_for_job` becomes engine `approve` with `params { choice }`, and `deny` becomes `reject`.\n5. Budget:\n   - A decision other than `keep_paused` or `raise_budget_and_resume` is 400 `fleet.approvalDecisionInvalid`.\n   - For a raise: a missing `amountUsd` is 400 `fleet.approvalDecisionInvalid`, and so is an id not in `findRequeueCandidates(policyId, requestedAt, MAX_REQUEUE_CANDIDATES)`. `BudgetsService.assertResumable(policyId, amountUsd, now)` throws its own 409 `fleet.budgetNotPaused` or 400 `fleet.budgetAmountNotAboveSpend`.\n   - Then a raise becomes `approve` with `params { amountUsd, requeueJobIds }`, and `keep_paused` becomes `reject`.\n6. `decisions.decide(id, engineDecision, dto.comment ?? null, now, params)`. Errors map as follows:\n\n   | Engine error | Adapter answer |\n   |:--|:--|\n   | `ApprovalRequestNotPendingError`, `ApprovalRequestExpiredError` | 409 `fleet.approvalNotPending` |\n   | `ApprovalDecideForbiddenError` | Mapped as in step 3 |\n   | `ApprovalDecisionParamsInvalidError` | 400 `fleet.approvalDecisionInvalid` |\n\n7. When the reloaded view of a bash ask has `resolvedBy` `job_ended` (approve answered nothing, or reject found the job ended), 409 `fleet.approvalNotPending`. This keeps today's decide on an ended job. Otherwise answer `FleetApprovalDto.from(view)`.\n\nThe constructor gains `FleetApprovalAskStore`, `ApprovalDecisionService` and `ApprovalRequestQueries`, keeps `PermissionService` and `BudgetsService`, and drops `BUDGET_REPOSITORY`, `FleetJobsService`, `ApprovalCloser`, `ApprovalLivePublisher`, `TRANSACTION_MANAGER`, `FLEET_JOB_REPOSITORY`, `RunnerNotifier` and `AuditRecorder`. `APPROVAL_REPOSITORY` stays for `list`, `get` and `counts` until US-011.\n\n`BudgetsService.assertResumable(policyId, amountUsd, now)` is new and read-only:\n- `repo.findById`; when missing, 404 `fleet.budgets`;\n- when not paused, 409 `fleet.budgetNotPaused`;\n- when `isAboveSpend(String(amountUsd), windowSpend(...))` is false, 400 `fleet.budgetAmountNotAboveSpend`.\n\n`resume` keeps its own checks.\n\n- **The adapter checks who may decide before what they sent.**\n  - Today an unauthorised caller gets 403 whatever it sends. The adapter keeps that by checking the request is pending (409 `fleet.approvalNotPending`), then running `decideEligibility` with the caller's effective keys (403), before any body validation.\n  - `ApprovalDecisionService` checks eligibility again under the request lock.\n- **The budget command re-checks what the adapter pre-checked.**\n  - Before deciding, the `/fleet/approvals` decide route checks that the re-queue ids are candidates (400 `fleet.approvalDecisionInvalid`) and that the amount is above the window spend (400 `fleet.budgetAmountNotAboveSpend`). Its callers therefore keep today's 400s with the ask still pending.\n  - At execution the command re-checks under the policy lock. An id that is no longer a candidate is reported in `requeueResults` as `{ ok: false, error: 'not a re-queue candidate' }`. An amount not above spend makes the request `failed`.\n- **The decide routes keep their guard metadata.** The project decide route still declares `fleet.approval.decide.bash` and `.budget` with `enforcedBy: 'service'` (metadata only), and the global decide route still guards `fleet.approval.read`.\n- **Agent self-approval keeps its error code.**\n  - The engine refuses an agent deciding an ask of a job it requested with `tier-too-low`: the agent contributes `self` to an `agent` default.\n  - The adapter maps a `tier-too-low` refusal to 403 `fleet.approvalSelfDecide` when the decider is the ask's `onBehalfOf` agent.\n  - Any other refusal becomes 403 `permissions`.\n\nThe user ruling keeps `fleet.approval.decide.bash` and `.budget` in the catalog/Developer seed as display hints only; no API path checks them any more. Engine eligibility (`approval.decide@<key>` plus the action key) decides. Do not strip route guard metadata or broaden self-decide error mapping. Eligibility-before-validation applies to the adapter's semantic decision validation after a body reaches the service; keep existing HTTP parsing and DecideApprovalDto structural validation unchanged. Exercise malformed semantic combinations with structurally valid DTOs, not invalid JSON or incorrectly typed transport fields.\n\n**Scope** — In: decide service adapter, error mapping, read-only assertResumable, rewritten decide doubles and engine-seeded API/permission/audit cases. The 403/200 matrix and route contracts asserted are unchanged. Audit now records approval.decide plus fleet.job.shell.escalate/fleet.budget.override rather than legacy decide audit keys. Out: list/get/counts conversion (US-011), producer/command changes already owned by US-003 through US-007, old repository removal (US-012). Pinning assertResumable's rare missing-policy 404 is excluded for US-010; keep implementation. No removal of catalog display hints, no client changes and no params-cap expansion.\n\n**Interface** —\n`ApprovalsService.decide(caller, route, id, dto, now)` returns `FleetApprovalDto`; use the existing `ApprovalDecisionService.decide(requestId, decision, comment, now?, params?)` contract and add `BudgetsService.assertResumable(policyId, amountUsd, now)` as a read-only precheck.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Posting decision: 'allow' to POST /projects/:slug/fleet/approvals/:id/decide on an ask that is already rejected returns 409 'fleet.approvalNotPending'.",
+        "AC-2 [integration] A Viewer posting decision: 'allow' with amountUsd: 5 returns 403 'permissions'.",
+        "AC-3 [integration] An agent posting decision: 'allow' on an ask of a job it requested returns 403 'fleet.approvalSelfDecide'.",
+        "AC-4 [integration] A Developer posting decision: 'allow' with amountUsd: 5 on a bash ask returns 400 'fleet.approvalInput'.",
+        "AC-5 [integration] Posting decision: 'allow' on an ask whose payload has commandTruncated: true returns 400 'fleet.approvalDecisionInvalid', and the request stays 'pending'.",
+        "AC-6 [integration] A Developer posting decision: 'allow' for a RUNNING job's ask returns 200 with status: 'approved', decision: 'allow' and resolvedBy: 'user', and writes one APPROVAL_ANSWER command.",
+        "AC-7 [integration] Posting decision: 'deny' for a RUNNING job's ask returns 200 with status: 'rejected'.",
+        "AC-8 [integration] Posting decision: 'allow' when the job has already COMPLETED returns 409 'fleet.approvalNotPending'.",
+        "AC-9 [integration] Posting decision: 'deny' when the job has already COMPLETED returns 409 'fleet.approvalNotPending'.",
+        "AC-10 [integration] An admin posting raise_budget_and_resume without amountUsd returns 400 'fleet.approvalDecisionInvalid', and the request stays 'pending'.",
+        "AC-11 [integration] Posting raise_budget_and_resume with requeueJobIds: ['not-a-job'] returns 400 'fleet.approvalDecisionInvalid', and the request stays 'pending'.",
+        "AC-12 [integration] Posting raise_budget_and_resume with an amountUsd not above the window spend returns 400 'fleet.budgetAmountNotAboveSpend', and the request stays 'pending'.",
+        "AC-13 [integration] Posting raise_budget_and_resume with amountUsd: 20 on a seeded pending budget ask whose policy is not paused returns 409 'fleet.budgetNotPaused', and the request stays 'pending'.",
+        "AC-14 [integration] Posting keep_paused returns 200 with status: 'rejected' and decision: 'keep_paused', and the policy stays paused.",
+        "AC-15 [integration] Posting raise_budget_and_resume with amountUsd: 20 returns 200 with status: 'approved', and the policy is no longer paused."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approvals",
+        "adapter",
+        "security",
+        "permissions"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-004",
+        "US-006",
+        "US-007"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The engine already owns decisions and eligibility, so this is a cross-module compatibility adapter rather than a new authorization architecture; principal normalization, error ordering and self-approval checks still require strict security TDD."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/approvals.service.ts",
+        "apps/api/src/fleet/approvals/project-fleet-approvals.controller.ts",
+        "apps/api/src/approvals/approval-decision.service.ts",
+        "apps/api/src/approvals/approval-eligibility.ts",
+        "apps/api/src/fleet/budgets/budgets.service.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.service.ts",
+          "reason": "`decide` as the adapter; the constructor changes listed in Design"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.service.spec.ts",
+          "reason": "the decide cases are rewritten against store, queries, permission and decision-service doubles; each case keeps its fleet input and expected fleet error or DTO, and asserts the engine call instead of `FleetApproval` writes"
+        },
+        {
+          "path": "apps/api/src/fleet/budgets/budgets.service.ts",
+          "reason": "`assertResumable`"
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approvals-api.integration.spec.ts",
+          "reason": "its `stopped` helper and the decide cases read the engine request (and seed with `seedFleetAsk`) instead of `fleetApproval`; the list, get and counts cases are left for US-011; the route contracts asserted are unchanged"
+        },
+        {
+          "path": "apps/api/test/integration/permissions/enforce-fleet-approvals-budgets.integration.spec.ts",
+          "reason": "the decide cases seed asks with `seedFleetAsk`; the list and counts cases are left for US-011; the 403/200 matrix is unchanged"
+        },
+        {
+          "path": "apps/api/test/integration/audit/audit-fleet-approvals.integration.spec.ts",
+          "reason": "`startPendingBudget` reads the engine request; a decide records `approval.decide` plus `fleet.job.shell.escalate` or `fleet.budget.override`, not `fleet.approval.decide.bash`/`.budget`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "Readers on the engine",
+      "description": "**Goal** — Read fleet approval lists, counts and contextual surfaces exclusively from engine requests and their fleet links.\n\n**Motivation** — Two request models still exist: the engine's `ApprovalRequest` and the fleet's `FleetApproval`.\n\n**Approach** —\n- **`ApprovalsService.list`, `get`, `counts`:** the store's `findPage`, `findApproval` (with `findRequeueCandidates` for a pending budget ask) and `countPending*`, with today's route visibility and DTO mapping. `APPROVAL_REPOSITORY` leaves the constructor.\n- **`FleetJobsService`:** its `APPROVAL_REPOSITORY` parameter becomes `FleetApprovalAskStore` (`countPendingByJob`), in the same position.\n- **`PrismaDashboardRepository.pendingSummaryByJob`:** `fleetApprovalAsk.groupBy({ by: ['jobId'], where: { jobId: { in }, request: { status: 'pending' } }, _count, _min: { createdAt } })`. `oldestRequestedAt` is the link's `_min.createdAt`, which is written in the same transaction as the request.\n- **`PrismaHomeRepository.findPendingApprovals` and `countPendingApprovals`:**\n  - read `approvalRequest` where `permissionKey in FLEET_ASK_KEYS`, `status: 'pending'` and today's project scope, with the link;\n  - `HomeApprovalRow` keeps `{ id, type, projectId, jobId, requestedAt, expiresAt }`: `type` comes from the key, `jobId` from the link, and `requestedAt` is `createdAt`.\n- **`PrismaAssistantToolCallRepository` project counts:** `approvalRequest.groupBy({ by: ['projectId'], where: { projectId: { in: ids }, status: 'pending', permissionKey: { in: FLEET_ASK_KEYS } } })`.\n- **`FleetNotificationReader.approvalContext(approvalId)`:** `approvalRequest.findUnique` for the status, and its link's `jobId`. `ctx.status` is the request status; only `pending` is acted on.\n\nFleet-key requests without links must not be surfaced as fleet rows; preserve the bounded query and empty-scope safeguards and existing request/view projection. Keep the existing notification behavior: the fleet's fleet_approval_requested notification goes to every global admin, linking /admin/fleet/approvals. The engine's ApprovalRequestedSubscriber skips these keys (US-001), so this cutover must not introduce duplicate engine notifications.\n\n**Scope** — In: ApprovalsService list/get/counts/store switch; job count dependency switch; dashboard, home, assistant and fleet notification readers; reseeding all affected integration suites through seedFleetAsk. Update home-api, fleet-dashboard-api/repository, assistant-workspace-tools, assistant-fleet-tools, fleet-approvals-api, enforce-fleet-approvals-budgets and membership-fleet-consumers cases; cleanup targets engine requests instead of the old table. Preserve the existing permission 403/200 matrix and cross-project 404 behavior. Out: decide adapter (US-010), producer/closer work (US-006/US-007), subscriber recorder (US-009), table/repository/sweeper deletion (US-012). No changes to web/CLI, notification recipient model, catalog hints or /fleet/approvals routes.\n\n**Interface** — Reuse the US-002 facade contracts verbatim:\n```ts\nfindApproval(requestId: string): Promise<FleetApprovalRecord | null>;\n/** Fleet-key requests that have a link; newest createdAt first, then id. */\nfindPage(f: ApprovalFilters, page: IPageOption): Promise<IPageResult<FleetApprovalRecord>>;\ncountPending(projectIds: readonly string[]): Promise<PendingCount[]>;\ncountPendingAllProjects(): Promise<PendingCount[]>;\ncountPendingUnscoped(): Promise<number>;\ncountPendingByJob(jobIds: readonly string[]): Promise<Map<string, number>>;\nfindRequeueCandidates(policyId: string, since: Date, limit: number): Promise<RequeueCandidate[]>;\nfindProjectSlug(projectId: string): Promise<string | null>;\n```",
+      "acceptanceCriteria": [
+        "AC-1 [integration] GET /projects/:slug/fleet/approvals lists a seeded pending bash ask as a FleetApprovalDto matching { id: <the request id>, type: 'nax_bash_escalate', status: 'pending', jobId: <the link's> }.",
+        "AC-2 [integration] GET /fleet/approvals?status=approved as an admin returns the executed bash ask and not the rejected one.",
+        "AC-3 [integration] GET /projects/:slug/fleet/approvals/:id of a pending budget ask includes requeueCandidates with one candidate and requeueCandidatesTruncated: false.",
+        "AC-4 [integration] GET /projects/:slug/fleet/approvals/:id of another project's ask returns 404 'fleet.approvals'.",
+        "AC-5 [integration] GET /fleet/approval-counts for an admin with one pending ask in each of two projects returns total 2 with one entry per project.",
+        "AC-6 [integration] GET /projects/:slug/fleet/jobs reports pendingApprovals: 1 for a job with one pending and one settled bash ask.",
+        "AC-7 [integration] GET /projects/:slug/fleet/jobs/:id reports pendingApprovals: 1 for that job.",
+        "AC-8 [integration] PrismaDashboardRepository.pendingSummaryByJob([jobId]) returns [{ jobId, count: 2, oldestRequestedAt: <the older link's createdAt> }] for two pending asks.",
+        "AC-9 [integration] GET /home for the job's requester lists the pending ask matching { id: <the request id>, type: 'nax_bash_escalate', jobId: <the link's> }.",
+        "AC-10 [integration] For a global admin, the home approvals count includes a pending budget ask with no project.",
+        "AC-11 [integration] The assistant's workspace project counts report pendingApprovals: 1 for a project with one pending fleet ask and one pending ticket.delete request.",
+        "AC-12 [integration] FleetNotificationReader.approvalContext(requestId) for a pending bash ask returns status 'pending' and the job's repo.",
+        "AC-13 [integration] approvalContext of a pending budget ask returns status 'pending' and repo null.",
+        "AC-14 [integration] Relaying a bash ask (as in US-006 AC-1) and running the outbox relay delivers one notification with kind: 'approval_requested' and sourceType: 'fleet_approval' to each global admin."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approvals",
+        "readers",
+        "security",
+        "compatibility"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-006",
+        "US-007",
+        "US-010"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module reader cutover must preserve permission-scoped visibility, global versus project counts and notification recipients without leaking another project's asks."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+        "apps/api/src/fleet/dashboard/prisma-dashboard.repository.ts",
+        "apps/api/src/home/prisma-home.repository.ts",
+        "apps/api/src/fleet/assistant/prisma-assistant-tool-call.repository.ts",
+        "apps/api/src/notifications/fleet/fleet-notification.reader.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.service.ts",
+          "reason": "`list`, `get`, `counts` over the store; `APPROVAL_REPOSITORY` leaves the constructor"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.service.spec.ts",
+          "reason": "the list, get and counts cases use the store double"
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/fleet-jobs.service.ts",
+          "reason": "`FleetApprovalAskStore` in place of `APPROVAL_REPOSITORY`"
+        },
+        {
+          "path": "apps/api/src/fleet/dashboard/prisma-dashboard.repository.ts",
+          "reason": "`pendingSummaryByJob` over the link"
+        },
+        {
+          "path": "apps/api/src/home/prisma-home.repository.ts",
+          "reason": "the pending approvals over the engine"
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/prisma-assistant-tool-call.repository.ts",
+          "reason": "project pending counts over the engine"
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-notification.reader.ts",
+          "reason": "`approvalContext` over the engine"
+        },
+        {
+          "path": "apps/api/test/integration/home/home-api.integration.spec.ts",
+          "reason": "seeds asks with `seedFleetAsk`"
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-dashboard-api.integration.spec.ts",
+          "reason": "seeds asks with `seedFleetAsk`"
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-dashboard-repository.integration.spec.ts",
+          "reason": "seeds asks with `seedFleetAsk`"
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-workspace-tools.integration.spec.ts",
+          "reason": "seeds the counted asks with `seedFleetAsk`"
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-fleet-tools.integration.spec.ts",
+          "reason": "seeds the rows the list tool reads with `seedFleetAsk`"
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approvals-api.integration.spec.ts",
+          "reason": "the list, get and counts cases seed with `seedFleetAsk` and read the engine instead of `fleetApproval`"
+        },
+        {
+          "path": "apps/api/test/integration/permissions/enforce-fleet-approvals-budgets.integration.spec.ts",
+          "reason": "the list and approval-counts cases seed asks with `seedFleetAsk`; the 403/200 matrix is unchanged"
+        },
+        {
+          "path": "apps/api/test/integration/permissions/membership-fleet-consumers.integration.spec.ts",
+          "reason": "`approvalRow` seeds with `seedFleetAsk` and the cleanup clears engine requests instead of `fleetApproval.deleteMany`"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-012",
+      "title": "Drop FleetApproval",
+      "description": "**Goal** — Delete the obsolete FleetApproval persistence model, repository and sweeper after all production consumers use the engine.\n\n**Motivation** — Two request models still exist: the engine's `ApprovalRequest` and the fleet's `FleetApproval`.\n\n**Approach** — US-012 deletes:\n- the `FleetApproval` model and table (migration `DROP TABLE \"FleetApproval\"`), and its partial index in `test/helpers/partial-indexes.ts`;\n- `PrismaApprovalRepository`, `APPROVAL_REPOSITORY`, `IApprovalRepository`, `NewFleetApproval` and `ApprovalResolution`;\n- `ApprovalExpirySweeper` and `ApprovalCloser.expire`, with the closer's `APPROVAL_REPOSITORY` injection;\n- the repository, schema and sweeper specs.\n\n`ApprovalStoreModule` and `ApprovalsModule` drop them. The `BudgetIncident.approvalId` comment becomes \"ApprovalRequest id (P3d); no FK\".\n\nVerification for the removals:\n- `bun run type-check` and `bun run lint` (repo root) pass;\n- `prisma migrate diff` from the migrations to the schema is empty.\n\nDeletion only. Retain the engine-backed domain constants/types/view and public FleetApprovalDto, facade, closer methods except expire, and fleet live publisher. The no-data-copy ruling deliberately drops settled history; do not backfill old rows or edit historical migrations.\n\nCleanup details from the specified change inventory: delete apps/api/src/fleet/approvals/prisma-approval.repository.ts, approval-expiry-sweeper.ts and approval-expiry-sweeper.spec.ts; delete test/integration/fleet/fleet-approval-repository.integration.spec.ts and fleet-approvals-schema.integration.spec.ts. Drop FleetApproval_pending_policy_key from test/helpers/partial-indexes.ts; remove closer expire cases/legacy repository doubles, module provider/export expectations, and the ApprovalExpirySweeper writer-map entry in permissions/system-writer.decorator.spec.ts (AC-4's toHaveLength(36) becomes 35). In audit-fleet-system-budgets.integration.spec.ts clear engine requests instead of fleetApproval.deleteMany. In assistant-thread-gate.integration.spec.ts drop only the fleetApproval.count assertion on the removed table. apps/api/test/integration/fleet/assistant-action-actor.integration.spec.ts needs no change: its raw FleetApproval statements run on a scratch schema built from the migrations before drop_pending_action (scratchSchemaBefore), where the table still exists.\n\n**Scope** — In: specified legacy removals, drop-table migration and cleanup, retaining the final relay → decide → ack → GET regression pin. These are compatibility checks of the deletion, not new adapter behavior. Out: changing behavior delivered by US-001 through US-011, removing compatibility routes/events/notifications/catalog hints or copying history. Do not remove approvalLive return fields/ApprovalLivePublisher or update the deferred permission-action inventory.\n\n**Interface** — No new public API. Existing fleet routes and DTO shapes remain adapters over ApprovalRequest plus FleetApprovalAsk; BudgetIncident.approvalId remains a nullable ApprovalRequest id with no FK.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] (regression pin) Relaying a bash ask, posting decision: 'allow' to POST /projects/:slug/fleet/approvals/:id/decide and acking the answer 'ok' leaves GET /projects/:slug/fleet/approvals/:id returning status: 'approved' with outcome.delivery.result 'ok'."
+      ],
+      "tags": [
+        "api",
+        "fleet",
+        "approvals",
+        "cleanup",
+        "migration"
+      ],
+      "dependencies": [
+        "US-008",
+        "US-009",
+        "US-010",
+        "US-011"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Destructive legacy-table cleanup spans schema/migrations, provider wiring, an old expiry writer and many fixtures; retain an end-to-end engine compatibility regression."
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/fleet/approvals/approval-store.module.ts",
+        "apps/api/src/fleet/approvals/approvals.module.ts",
+        "apps/api/src/fleet/approvals/approval-closer.ts",
+        "apps/api/test/helpers/partial-indexes.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261107090100_drop_fleet_approval/migration.sql"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "drops `FleetApproval`; the `BudgetIncident.approvalId` comment"
+        },
+        {
+          "path": "apps/api/test/helpers/partial-indexes.ts",
+          "reason": "drops `FleetApproval_pending_policy_key`"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/domain/approval.domain.ts",
+          "reason": "drops `NewFleetApproval`, `ApprovalResolution`, `APPROVAL_REPOSITORY`, `IApprovalRepository`"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/prisma-approval.repository.ts",
+          "reason": "deleted"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-expiry-sweeper.ts",
+          "reason": "deleted"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-expiry-sweeper.spec.ts",
+          "reason": "deleted with the sweeper"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.ts",
+          "reason": "`expire` and the `APPROVAL_REPOSITORY` injection deleted"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.spec.ts",
+          "reason": "drops the `expire` cases and the repository double"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-store.module.ts",
+          "reason": "drops the old repository and its exports"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-store.module.spec.ts",
+          "reason": "no longer resolves `APPROVAL_REPOSITORY` or `PrismaApprovalRepository`"
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.module.ts",
+          "reason": "drops `ApprovalExpirySweeper`"
+        },
+        {
+          "path": "apps/api/src/permissions/system-writer.decorator.spec.ts",
+          "reason": "the writer map loses `ApprovalExpirySweeper` and AC-4's `toHaveLength(36)` becomes 35"
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approval-repository.integration.spec.ts",
+          "reason": "deleted with the repository"
+        },
+        {
+          "path": "apps/api/test/integration/fleet/fleet-approvals-schema.integration.spec.ts",
+          "reason": "deleted with the table"
+        },
+        {
+          "path": "apps/api/test/integration/audit/audit-fleet-system-budgets.integration.spec.ts",
+          "reason": "clears engine requests instead of `fleetApproval.deleteMany`"
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-thread-gate.integration.spec.ts",
+          "reason": "drops the `fleetApproval.count` assertion on a table that no longer exists"
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "This is an API-only replacement of an existing persistence and decision subsystem, not a greenfield build. All twelve binding stories run in apps/api; no changes to apps/web, apps/cli or the runner protocol are authorized. The supplied stack autodetection is inaccurate: the app context identifies NestJS 12 with Fastify, Prisma 7, Nathapp platform modules and Vitest, not Express; the web is Nuxt rather than Next.js (.nax/mono/apps/api/context.md:23, .nax/mono/apps/api/context.md:38). Read the nathapp-nestjs-patterns skill before writing Nest code; it was not found among repository files during this planning session. codebase-memory MCP was not exposed, so discovery used direct file reads and text searches. Findings below distinguish verified current behavior from the target in the supplied specification.\n\nGoal and compatibility: eliminate FleetApproval as a second request model and use ApprovalRequest plus FleetApprovalAsk for both nax_bash_escalate/fleet.job.shell.escalate and budget_override_required/fleet.budget.override. Keep public fleet routes, FleetApprovalDto fields, pagination/envelopes, webhook payloads, fleet activity rows, fleet_approval live events and fleet_approval_requested notifications. The request id replaces the old approval id everywhere, including APPROVAL_ANSWER.payload.approvalId, BudgetIncident.approvalId and outbox metadata.eventId. Budget expiresAt becomes a date rather than null; bash asks may expire earlier under policy timeouts; settled old history is deliberately discarded. User rulings retain old decide catalog/Developer seed keys only as UI hints and route metadata, never API authorization. Generic engine notification links must not replace the existing /admin/fleet/approvals notification before P3 web. The two action keys remain command-only pending surfaces: do not add routes/tools/system writers declaring them or alter PENDING_SURFACE_KEYS.\n\nVerified engine seam: ApprovalAskService.open requires the caller's active transaction, checks registry and ASK_KEYS_BY_COMPONENT, parses input, resolves a principal-or-SYSTEM subject, returns not-needed for mode none, freezes/hashes the input and records a request event (apps/api/src/approvals/approval-ask.service.ts:48, apps/api/src/approvals/approval-ask.service.ts:69, apps/api/src/approvals/approval-ask.service.ts:139). close currently locks with lockById and settles only pending system asks with result.closedBy (apps/api/src/approvals/approval-ask.service.ts:106). PrismaApprovalRequestRepository.lockById uses parameterized SELECT FOR UPDATE and transition is a status CAS (apps/api/src/approvals/prisma-approval-request.repository.ts:75, apps/api/src/approvals/prisma-approval-request.repository.ts:101). US-001 adds a parallel SKIP LOCKED method and changes close only, leaving ordinary decide/execute locking unchanged. The engine notifier currently parses a pending event then reads eligibility/recipients; insert the fleet-key early return before findById (apps/api/src/notifications/approvals/approval-requested.subscriber.ts:29).\n\nVerified execution/authorization seam: ApprovalCommand has parse, optional parseDecision/onReject, execute, toResult and afterCommit; owning modules register onModuleInit (apps/api/src/approvals/approval-command.registry.ts:16). ApprovalDecisionService.decide commits record first, then executes approves; record locks the request, checks expiry and effective-key eligibility before params, caps canonical JSON at 4096 characters, freezes parsed params, records approval.decide and runs onReject inside its transaction with committed effects (apps/api/src/approvals/approval-decision.service.ts:32, apps/api/src/approvals/approval-decision.service.ts:67, apps/api/src/approvals/approval-decision.service.ts:127). Reject onReject returns Promise<void>; share the bash answer step without changing that engine contract. ApprovalExecutionService reconstructs request context, re-parses frozen input and decision params, locks the request before command.execute, settles executed/failed, then runs afterCommit under the same context (apps/api/src/approvals/approval-execution.service.ts:54, apps/api/src/approvals/approval-execution.service.ts:146, apps/api/src/approvals/approval-execution.service.ts:206, apps/api/src/approvals/approval-execution.service.ts:256). Non-assistant SYSTEM asks skip the asker's key recheck (apps/api/src/approvals/approval-execution.service.ts:248). No engine API redesign is needed. A bash approve with omitted params defaults to allow and the stored parsed decision must parse back to itself. decideEligibility orders distinct-approver/action/decide-pattern/tier refusals, with an onBehalfOf agent contributing self (apps/api/src/approvals/approval-eligibility.ts:51, apps/api/src/approvals/approval-eligibility.ts:94). Map only its own-job tier-too-low refusal to fleet.approvalSelfDecide; other refusals remain permissions. Treat adapter authorization, lease fencing and command decision paths as security critical and use three-session-tdd.\n\nVerified storage/read-model seam: ApprovalRequest already owns decisions and optional fleetAsk relations with indexes on (status, expiresAt) and (projectId, status, createdAt); FleetApprovalAsk has requestId primary key/cascade, unique (jobId, leaseEpoch, naxAskId), indexed job/policy references with deliberately no job/policy FK (apps/api/prisma/schema.prisma:1584, apps/api/prisma/schema.prisma:1612, apps/api/prisma/schema.prisma:1659). PrismaFleetApprovalAskRepository already provides insert, lookup, link lock, bounded pending-for-job and pending-for-policy reads, setResolvedBy and setOutcome, and handles nullable JSON using Prisma.DbNull (apps/api/src/fleet/approvals/prisma-fleet-approval-ask.repository.ts:39, apps/api/src/fleet/approvals/prisma-fleet-approval-ask.repository.ts:60, apps/api/src/fleet/approvals/prisma-fleet-approval-ask.repository.ts:93). FleetApprovalAskStore is the public delegating facade over its module-private repository (apps/api/src/fleet/approvals/fleet-approval-ask.store.ts:8). US-002 extends both repository and store with eight read methods; extend the repository interface in domain/fleet-approval-ask.domain.ts as needed so those delegations are typed. US-009 adds nullable recordedStatus and setRecordedStatus to schema/domain/repository/store. The pure fleet-approval-view mapper must map persistence records into engine domain records before building the fleet view; request persistence flattens actor/onBehalfOf, unlike ApprovalRequestRecord (apps/api/src/approvals/prisma-approval-request.repository.ts:26). Do not leak Prisma rows to services or duplicate engine policy logic.\n\nStatus/decision compatibility is the central read risk: cancelling link resolutions take precedence over approved/executed/rejected engine states; manual_resume projects engine cancelled to fleet approved and reads resumedById from outcome. Last decision drives the public choice; default bash approve is allow; pending has no decision. Derive resolvedBy user/timeout before the asynchronous recorder catches up. fleetStatusWhere must implement the specified branches, always restrict to fleet keys with a non-null link, and explicitly include NULL in notCancelling because SQL notIn alone drops NULL. Combine project/type/job filters without overwriting relation predicates. Preserve newest createdAt/id ordering, slug ordering, scoped empty-list short circuits, and soft-delete filtering only for all-project counts. Mirror old requeue candidate criteria exactly (CANCELLED, policy budget reason, startedAt null, finishedAt >= requestedAt, oldest queuedAt/id) from apps/api/src/fleet/approvals/prisma-approval.repository.ts:160; count/filter behavior is at apps/api/src/fleet/approvals/prisma-approval.repository.ts:104 and apps/api/src/fleet/approvals/prisma-approval.repository.ts:116. Every read must be page-, limit- or id-set-bounded (.nax/rules/api-data.md:116); the spec explicitly defers a new unfiltered-admin-list index.\n\nVerified producer/closer seam: ApprovalCloser currently owns legacy creates/resolutions, activity/webhook/outbox recording and live-event construction with stable BashAsk, BashJob, ApprovalChange and PolicyClose contracts (apps/api/src/fleet/approvals/approval-closer.ts:19, apps/api/src/fleet/approvals/approval-closer.ts:44, apps/api/src/fleet/approvals/approval-closer.ts:56). Its private dispatch/enqueueRequested read project slug through the legacy repository and only enqueue project-scoped notifications (apps/api/src/fleet/approvals/approval-closer.ts:154, apps/api/src/fleet/approvals/approval-closer.ts:164). Keep those outputs and move slug lookup to store. Keep legacy repo injection only for expire until US-012. openBash changes from born-closed legacy rows to no request/no link for non-running/raw/past-deadline inputs; audit runner.sync on the job with exact reason. A policy-none ask returns ApprovalChange.answer for JobReportProcessor to enqueue with approvalId null, not a command run by open. JobReportProcessor applies contiguous runner events after lease fencing, calls openBash with the current job state inside report processing (apps/api/src/fleet/sync/job-report.processor.ts:98, apps/api/src/fleet/sync/job-report.processor.ts:118). It already has the job repository, so write the immediate answer there, with no extra runner wake. JobTransitionsService, BudgetEvaluator, BudgetSweeper and BudgetsService all depend on ApprovalCloser, so retain their port shapes (apps/api/src/fleet/jobs/job-transitions.service.ts:41, apps/api/src/fleet/budgets/budget-evaluator.ts:49, apps/api/src/fleet/budgets/budget-sweeper.ts:42, apps/api/src/fleet/budgets/budgets.service.ts:45).\n\nConcurrency: decide/execute lock request then job/policy. Existing fleet transition/evaluator/sweeper/delete/resume paths hold job/policy first; close must use FOR UPDATE SKIP LOCKED to avoid inversion deadlocks. A skipped close writes no link resolution or events and incident approvalId is null. The holder may roll back, leaving a pending ask; bash expires at deadline, and later command checks settle asks with gone resources. Bash command must check missing job/non-RUNNING/epoch mismatch/no runner under the job lock for both approve and reject, set job_ended and write no answer; adapter returns 409 afterward. Server terminal transitions still withdraw pending answer commands before close. Budget command locks policy, rechecks spend and candidates, and closes another newer pending ask as superseded once approval resumes the policy; publish those live events via committedEffect. Requeue candidates use frozen input.requestedAt and decimal monetary comparisons, never floats for spend. Each post-approval requeue uses FleetJobsService.requeue in its own transaction, preserves per-id failures and proceeds; merge outcome afterCommit in one transaction. Audit actor becomes SYSTEM/budget with approval attribution, following engine context.\n\nVerified adapter/module impact: ApprovalsService currently mixes list/get/counts, legacy permission.can by DECIDE_KEYS, locks, runner commands, budget resume, requeue and audit in one service (apps/api/src/fleet/approvals/approvals.service.ts:32, apps/api/src/fleet/approvals/approvals.service.ts:66, apps/api/src/fleet/approvals/approvals.service.ts:97, apps/api/src/fleet/approvals/approvals.service.ts:152). Move command effects to registered classes and helpers first, then make decide an eligibility-first compatibility adapter. Keep legacy repo for list/get/counts through US-010, remove in US-011. BudgetsService.resume already accepts opts.approvalId to prevent a second close and inserts that id on the resumed incident; its own pause/spend checks remain (apps/api/src/fleet/budgets/budgets.service.ts:123). Add read-only assertResumable for prevalidation to preserve fleet 400/409 errors while leaving the ask pending. Preserve existing route guard metadata: project decide declares the two old keys with enforcedBy service (apps/api/src/fleet/approvals/project-fleet-approvals.controller.ts:56); global decide still guards fleet.approval.read. ApprovalStoreModule exports closer/store/live and currently also legacy repo; it must import ApprovalEngineModule without importing job services (apps/api/src/fleet/approvals/approval-store.module.ts:16). ApprovalsModule currently imports jobs/budgets/store and provides old sweeper/service; add engine import, both command providers/registration and OutboxCoreModule/subscriber there, then remove old sweeper in cleanup (apps/api/src/fleet/approvals/approvals.module.ts:15). Unit module-compilation tests must catch DI cycles and missing providers without a DB (apps/api/src/fleet/approvals/approvals.module.spec.ts:6).\n\nDelivery/events: CommandAckProcessor currently locks the job before the legacy approval and merges delivery { result, detail truncated to 200, at ISO } as runner.command-ack bookkeeping (apps/api/src/fleet/sync/command-ack.processor.ts:30, apps/api/src/fleet/sync/command-ack.processor.ts:65, apps/api/src/fleet/sync/command-ack.processor.ts:81). Change only approval delivery persistence to lockByRequest/setOutcome on the link; null/unknown ids are ignored. FleetAskEventsSubscriber records fleet resolved outputs only for rejected/executed/failed/expired through FanOutPublisher, after engine commit. It locks the link, skips recordedStatus duplicates, fills resolvedBy only when null, records mapped activity/webhook in transaction and publishes live afterward; DB errors propagate for retry. Approved is not a fleet resolution event because executed/failed follows. The relay context stays system:outbox: no @SystemWriter or runAsSystemWriter on the new subscriber. The existing assistant outcome subscriber demonstrates registration, transactional idempotency and relay context but has its own SystemWriter annotation that must NOT be copied (apps/api/src/fleet/assistant/requests/assistant-action-outcome.subscriber.ts:13, apps/api/src/fleet/assistant/requests/assistant-action-outcome.subscriber.ts:30). Events are now eventually consistent; immediate decide/get responses derive resolvedBy from request/decision without waiting.\n\nReaders and dependency impact verified by text search: FleetJobsService constructor uses APPROVAL_REPOSITORY for job pending counts (apps/api/src/fleet/jobs/fleet-jobs.service.ts:59). Dashboard groups legacy approvals/min requestedAt (apps/api/src/fleet/dashboard/prisma-dashboard.repository.ts:107); change to links grouped by job/min createdAt through pending requests. Home has pendingWhere with an empty-scope never-match guard, bounded list and count (apps/api/src/home/prisma-home.repository.ts:66, apps/api/src/home/prisma-home.repository.ts:73); retain scope semantics and public HomeApprovalRow while changing engine source/key filtering and joining links. Assistant project counts group legacy rows (apps/api/src/fleet/assistant/prisma-assistant-tool-call.repository.ts:171); generic ticket.delete requests must never inflate fleet counts. FleetNotificationReader reads legacy status/jobId (apps/api/src/notifications/fleet/fleet-notification.reader.ts:22); load request plus link so existing global-admin fleet notification subscriber continues working.\n\nMigration/rollout: stories US-001 and US-002 independently establish concurrency and projection seams; US-003/004 implement bash command and fencing, US-005 implements budget command, US-006/007 switch producers/closers, US-008 delivery, US-009 event recorder, US-010 decide, US-011 every reader, and US-012 removes legacy persistence/sweeper/types only after consumers move. Dependencies must match the binding table exactly, even where integration flows remain red between producer and adapter/reader conversion. Add 20261107090000_fleet_approval_ask_recorded_status/migration.sql before 20261107090100_drop_fleet_approval/migration.sql. Do not rewrite earlier migrations or copy old rows; the user accepted loss of six settled bash history rows and reported no pending rows on 2026-10-27. Old FleetApproval model/table is at apps/api/prisma/schema.prisma:925 and BudgetIncident's old comment at apps/api/prisma/schema.prisma:915. Drop its partial index from test/helpers/partial-indexes.ts and module exports, old repository/sweeper/schema tests, closer.expire, old writer-map entry (36 becomes 35) and remaining cleanup references. Historical SQL in assistant-action-actor.integration.spec.ts intentionally targets a pre-drop_pending_action scratch migration schema and must remain. Verify deletion completeness using root bun run type-check and bun run lint plus empty prisma migrate diff from migrations to schema, not as behavioral ACs. Regenerate Prisma client after schema changes. Contracts stay stable, so avoid controller/DTO changes and downstream OpenAPI/client churn; generated CLI files must never be edited.\n\nTest plan and existing coverage: unit specs next to ask service/notifier, closer/store/service, command-ack/report processors and module DI wiring are rewritten with vi doubles; new command/view/subscriber unit specs accompany behavior. SeedFleetAsk must freeze/hash input and insert only request, optional decisions and link, leaving jobs/policies/candidates to each test. Existing integration suites in test/integration/fleet cover relay, budget wiring, approvals API, dashboards, assistant tools; permission suites enforce-fleet-approvals-budgets and membership-fleet-consumers pin route authorization/visibility; audit suites pin system asks, budgets and new approval.decide plus command keys; home and notification suites pin counts and recipient compatibility. New PG suites exercise skip-locked timing/rollback, view/status-filter equivalence and commands through real ApprovalDecisionService. Keep each specified AC with its story and add failure-table rows that were not already covered as mandatory criteria in that same story. Run DB specs with bun run test:db:up and bun run test:scoped outside the sandbox, using KODA_DB_TESTS=1 and shared canRunDbTests gates; NAX_SANDBOXED=1 skips are not verification. Never run two reset-based DB runs on the same database concurrently; use a private container for another worktree. Generated acceptance stays under the feature .nax location and runs via vitest.nax.config.ts, not by copying tests. All observations and tests must preserve existing fleet errors/envelopes while asserting engine persistence, not fabricate compatibility FleetApproval writes.\n\nRefine self-audit: checked all 129 numbered spec ACs individually against the same story's acceptanceCriteria. Preservation ledger (each listed AC remains present, not moved): US-001 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8; US-002 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-003 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-004 AC-1, AC-2, AC-3; US-005 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-006 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-007 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12; US-008 AC-1, AC-2, AC-3, AC-4, AC-5; US-009 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11; US-010 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15; US-011 AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14; US-012 AC-1. Regression qualifiers remain attached: the link-sourced ids, null resolvedBy while recorder lags, manual resumedById, exact row subsets/order, unrelated ticket.delete exclusion, settled asks uncounted, still-pending rejections of invalid fleet inputs, already-settled/ended jobs, outcome-key preservation, duplicate recordedStatus parenthetical, post-transaction live timing and both explicit regression-pin labels. No deprecated file/grep/verbatim AC tags were present. All 18 feature-level Out of Scope items remain verbatim and in their original order; the story-prefixed exclusions really are under that feature-level heading, not story-local AC blocks. No binding dependency or workdir was changed; every referenced dependency id exists, and all 16 specified new-file outputs remain assigned to their original creators.\n\nAudit corrections grounded in fresh source reads: KodaPrincipal uses actorType user/agent/runner, not DeciderRef.type (apps/api/src/auth/principal/koda-principal.types.ts:8); effectiveKeys requires PrincipalRef plus PermissionScope (apps/api/src/permissions/permission.service.ts:82), while decideEligibility requires DeciderRef (apps/api/src/approvals/approval-eligibility.ts:94). US-010 now explicitly normalizes user/agent callers and uses global for a null project rather than passing a raw KodaPrincipal into engine APIs. The body-order criterion is semantic adapter validation, not a promise to override HTTP parsing/class-validator: DecideApprovalDto already structurally validates decision, amount and arrays (apps/api/src/fleet/approvals/dto/decide-approval.dto.ts:6). Generic engine route tests target the actual ApprovalRequestsController POST approvals/:id/decisions and its approvals.invalidDecisionParams mapping (apps/api/src/approvals/approval-requests.controller.ts:67, apps/api/src/approvals/approval-http-errors.ts:11). ApprovalDecisionService gives onReject requestId but no approver fields; only approved execution needs approverId, so bash rejection must not require it (apps/api/src/approvals/approval-decision.service.ts:97, apps/api/src/approvals/approval-decision.service.ts:106). US-009 resolves decider data using existing queries.decisionsFor instead of assuming decisions are in approval_request_changed, whose payload deliberately omits them (apps/api/src/approvals/approval-request.queries.ts:39, apps/api/src/approvals/approval-request-events.ts:8). Unknown/null approvalId suppresses link writes, not ordinary ackCommand bookkeeping (apps/api/src/fleet/sync/command-ack.processor.ts:71). Restored FleetJobsService as US-011's fifth-spec-list reader context by replacing the extra ApprovalsService context entry; its existing service remains explicitly in scope and described in the analysis.\n\nEvery story has an observable negative path: US-001 held/missing request; US-002 failed/cancelled mapping and non-fleet/settled exclusion; US-003 invalid shell params; US-004 ended or wrong lease; US-005 invalid raise, missing policy and candidate/requeue failures; US-006 invalid relay inputs and held close; US-007 held request/delete; US-008 null/unknown ack id; US-009 malformed/ignored/duplicate event; US-010 permission/domain refusals; US-011 cross-project 404; US-012 settled-request redecide 409 after legacy removal. The US-012 negative regression is added only to verify unchanged adapter behavior after deletion, not to expand its production scope. Supplementary failure-table criteria now also pin no new outbox event for a skipped engine close, no duplicate outputs on event redelivery, and the request staying pending on budgetNotPaused. These are the spec's failure behaviors, not new features. No quality gates became ACs. Existing engine/closer/module ports make US-006, US-007 and US-010 complex rather than expert; US-003 is a medium-sized command implementation. Security-critical routing retains three-session-tdd regardless of those lighter complexity labels. Root JSON parsing/execution tools are not exposed in this session; the audit used direct reads/searches and exact structured edits, not a claimed runtime validation run.",
+  "outOfScope": [
+    "Removing `fleet.approval.decide.bash`, `fleet.approval.decide.budget` and `fleet.approval.decide.assistant` from the catalog and the Developer seed: P3 web, with the pages that read them (ruled 2026-10-27).",
+    "Any change to `apps/web` or `apps/cli`.",
+    "The engine's `ApprovalRequestedSubscriber` notifying deciders of fleet asks: P3 web, with the `/approvals` page.",
+    "Removing the `fleet_approval_requested` outbox type, `FleetApprovalRequestedSubscriber` and the `/fleet/approvals` routes: P3 web.",
+    "Copying `FleetApproval` history into the engine (design decision 2).",
+    "A budget ask that never expires. It now expires after the policy timeout (designer call).",
+    "A raise whose params exceed the engine's 4 096-character cap (about 140 re-queue ids). It is refused with 400, whatever the route allowed before.",
+    "A unique index enforcing one pending budget ask per policy. The evaluator holds the policy lock when it opens one, and the old partial index goes with the table.",
+    "Removing the `approvalLive` return fields and `ApprovalLivePublisher`. They stay for the fleet-side open and close events.",
+    "Updating `docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv` for the deleted sweeper and decide paths.",
+    "Re-checking the asker's key at execution (fleet-core designer call).",
+    "An index for listing fleet-key requests without a project or status filter (admin `GET /fleet/approvals`); the read is page-bounded and uses the existing `(projectId, status, createdAt)` index whenever a filter is given.",
+    "US-005 only: pinning the re-queue audit actor (`SYSTEM/budget` with the approver in its approval block) and US-006 only: pinning a policy `timeoutSec` shorter than `approvalTimeoutSec`; both follow from the engine and are described in Designer's calls.",
+    "Mapping refusals other than an agent's own-job `tier-too-low` to `fleet.approvalSelfDecide`. A missing action key or a `requireDistinctApprover` policy answers `permissions`.",
+    "US-003 only: pinning the missing-request-id throw. It guards a command run outside the engine, which no production path does.",
+    "US-006 only: answering nax for an ask that was not opened (job not running, raw mode, past deadline). nax denies at its own deadline, as today.",
+    "US-007 only: pinning `openBudget`'s throw on a `none` resolution. The floor `self` of `fleet.budget.override` makes it unreachable.",
+    "US-010 only: pinning `assertResumable`'s 404. It is reachable only when the delete's close of the ask was skipped (its request was held by a decide that then rolled back), leaving a pending ask on a deleted policy until it expires."
+  ],
+  "routingProfile": "native-codex-ds"
+}
