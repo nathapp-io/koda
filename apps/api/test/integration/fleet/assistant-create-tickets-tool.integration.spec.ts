@@ -1,10 +1,12 @@
+import { findThreadAction } from '../../helpers/assistant-request';
+import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b 2b1 US-003 — `koda_create_tickets` through the real runner tool route against PG.
  *
  * Every call enters at `POST /fleet/runner/jobs/:jobId/tools/koda_create_tickets?leaseEpoch=<n>` with the real
  * runner key of the runner that holds a RUNNING THREAD job, and every decide enters the real project route
- * `POST /projects/web/fleet/approvals/:approvalId/decide`, so the ACs drive the whole path: runner authentication,
+ * `POST /projects/web/fleet/approvals/:approvalId/decisions`, so the ACs drive the whole path: runner authentication,
  * the lease fence, the tool registry `TicketWriteTools` filled at boot, the executor's write-tool branch, the propose
  * service and — on approve — `TicketsService.create` for real. Each test proposes its own batch with its own
  * `toolCallId` and its own titles, so it reads only what it wrote.
@@ -32,7 +34,7 @@ const ENV = ['FLEET_THREADS_ENABLED'] as const;
 /** The web project's key, so the first created ticket is `KODA-1`. */
 const WEB_KEY = 'KODA';
 const TOOL = 'koda_create_tickets';
-const APPROVALS = '/api/projects/web/fleet/approvals';
+const APPROVALS = '/api/approvals';
 /** The route's answer: `{ content, isError }` data, whatever the status. */
 interface ToolResultBody { content: string; isError: boolean }
 
@@ -55,7 +57,7 @@ describeIntegration('fleet assistant create tickets tool (PG, US-003)', () => {
   const resultOf = (res: request.Response): ToolResultBody => data<ToolResultBody>(res);
 
   const actionOf = (toolCallId: string) =>
-    prisma.pendingAction.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId: repo.jobId, toolCallId } } });
+    findThreadAction(prisma, { jobId: repo.jobId, toolCallId });
 
   /** One accepted proposal: answers the stored action, asserting the call itself was answered `pending`. */
   const propose = async (toolCallId: string, tickets: unknown[]) => {
@@ -67,7 +69,7 @@ describeIntegration('fleet assistant create tickets tool (PG, US-003)', () => {
 
   /** `dev` decides one approval; answers the decide response. */
   const decide = (approvalId: string, decision: string) =>
-    request(server).post(`${APPROVALS}/${approvalId}/decide`).set({ Authorization: `Bearer ${world.tokens.dev}` }).send({ decision });
+    request(server).post(`${APPROVALS}/${approvalId}/decisions`).set({ Authorization: `Bearer ${world.tokens.dev}` }).send({ decision });
 
   /** The project's tickets of the given titles, oldest first. */
   const ticketsTitled = (titles: string[]) =>
@@ -81,6 +83,7 @@ describeIntegration('fleet assistant create tickets tool (PG, US-003)', () => {
     server = app.getHttpServer();
     prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
+    await grantKeys(prisma, { type: 'USER', id: world.ids.dev }, ['approval.decide'], world.projectId);
     // The acceptance refs are `KODA-<n>`, so the web project answers the `KODA` key.
     await prisma.project.update({ where: { id: world.projectId }, data: { key: WEB_KEY } });
     const runner = await enrollRunner(server, world.tokens.root, 'create-tickets-runner');
@@ -118,8 +121,8 @@ describeIntegration('fleet assistant create tickets tool (PG, US-003)', () => {
     expect(isError).toBe(false);
     expect(content.startsWith('pending ')).toBe(true);
     const action = await actionOf('ac12');
-    expect(content).toBe(`pending ${action.id}: awaiting user approval; do not retry`);
-    expect(action).toMatchObject({ tool: TOOL, status: 'PENDING' });
+    expect(content).toBe(`pending ${action.id}: awaiting approval; do not retry`);
+    expect(action).toMatchObject({ tool: TOOL, status: 'pending' });
     // Nothing is created while the action waits for the user.
     expect(await prisma.ticket.count({ where: { projectId: world.projectId, title: { in: ['Add login', 'Fix logout'] } } })).toBe(0);
     expect(action.preview.split('\n')).toEqual([
@@ -136,7 +139,7 @@ describeIntegration('fleet assistant create tickets tool (PG, US-003)', () => {
       { type: 'QUESTION', title: titles[1], description: 'where does this live?' },
     ]);
 
-    await decide(action.approvalId, 'approve').expect(200);
+    await decide(action.id, 'approve').expect(200);
 
     const newest = await prisma.ticket.findMany({
       where: { projectId: world.projectId }, orderBy: { number: 'desc' }, take: 2,
@@ -151,7 +154,7 @@ describeIntegration('fleet assistant create tickets tool (PG, US-003)', () => {
       { type: 'TASK', title: titles[1], priority: 'LOW' },
     ]);
 
-    await decide(action.approvalId, 'approve').expect(200);
+    await decide(action.id, 'approve').expect(200);
 
     const created = await ticketsTitled(titles);
     expect(created).toHaveLength(2);
@@ -168,15 +171,15 @@ describeIntegration('fleet assistant create tickets tool (PG, US-003)', () => {
       { type: 'ENHANCEMENT', title: titles[1] },
     ]);
 
-    await decide(action.approvalId, 'approve').expect(200);
+    await decide(action.id, 'approve').expect(200);
 
     const created = await ticketsTitled(titles);
     const numbers = created.map((ticket) => ticket.number);
     expect(numbers[1]).toBe((numbers[0] ?? 0) + 1);
     const refs = numbers.map((number) => `${WEB_KEY}-${number}`);
-    expect(await prisma.pendingAction.findUniqueOrThrow({ where: { id: action.id } })).toMatchObject({
-      status: 'EXECUTED',
-      result: refs.map((ref) => `created ${ref} /web/tickets/${ref}`).join('\n'),
+    expect(await findThreadAction(prisma, { requestId: action.id })).toMatchObject({
+      status: 'executed',
+      result: { text: refs.map((ref) => `created ${ref} /web/tickets/${ref}`).join('\n') },
     });
     expect(created[0]).toMatchObject({ type: 'ENHANCEMENT', priority: 'HIGH', description: 'with okta\nand google' });
     expect(created[1]).toMatchObject({ type: 'ENHANCEMENT', priority: 'MEDIUM', description: null });
@@ -188,7 +191,7 @@ describeIntegration('fleet assistant create tickets tool (PG, US-003)', () => {
     }).expect(200));
 
     expect({ content, isError }).toEqual({ content: 'invalid_input: tickets[1].type', isError: true });
-    expect(await prisma.pendingAction.count({ where: { jobId: repo.jobId, toolCallId: 'ac-invalid' } })).toBe(0);
+    expect(await prisma.assistantActionRequest.count({ where: { jobId: repo.jobId, toolCallId: 'ac-invalid' } })).toBe(0);
     expect(await prisma.ticket.count({ where: { projectId: world.projectId, title: 'a' } })).toBe(0);
   });
 });

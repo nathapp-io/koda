@@ -1,3 +1,4 @@
+import { findThreadAction } from '../../helpers/assistant-request';
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Permissions P1 US-004 — every assistant and MCP tool checks its catalog key in the project it acts in, and an
@@ -42,7 +43,7 @@ const OFFLINE_AT = new Date('2020-01-01T00:00:00.000Z');
 const ACCEPT = 'application/json, text/event-stream';
 
 /** `projects` declares no 40003 sentence, so the i18n lookup answers the key itself (as elsewhere in the suite). */
-const PROJECTS_FORBIDDEN = 'projects.40003';
+
 
 /** The runner tool route's answer: `{ content, isError }` data, whatever the status. */
 interface ToolAnswer { content: string; isError: boolean }
@@ -284,7 +285,7 @@ describeIntegration('assistant tools check their key (US-004)', () => {
     const answer = answerOf(await callTool(jobId, 'koda_add_comment', 'ac3', { ref: `${P1_KEY}-1`, body: 'hello' }).expect(200));
 
     expect(answer).toEqual({ content: 'forbidden: koda_add_comment needs comment.create on p1', isError: true });
-    expect(await prisma.pendingAction.count({ where: { jobId, toolCallId: 'ac3' } })).toBe(0);
+    expect(await prisma.assistantActionRequest.count({ where: { jobId, toolCallId: 'ac3' } })).toBe(0);
     expect(await prisma.comment.count({ where: { ticketId: p1TicketId } })).toBe(0);
     // The audit row is the proof the call reached the registered tool rather than being refused by name.
     expect(await prisma.assistantToolCall.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId, toolCallId: 'ac3' } } }))
@@ -302,9 +303,9 @@ describeIntegration('assistant tools check their key (US-004)', () => {
       tickets: [{ type: 'TASK', title: 'Write the runbook' }],
     }).expect(200));
 
-    const action = await prisma.pendingAction.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId, toolCallId: 'ac4' } } });
-    expect(answer).toEqual({ content: `pending ${action.id}: awaiting user approval; do not retry`, isError: false });
-    expect(action).toMatchObject({ status: 'PENDING', tool: 'koda_create_tickets', actorId: ids.devBind });
+    const action = await findThreadAction(prisma, { jobId, toolCallId: 'ac4' });
+    expect(answer).toEqual({ content: `pending ${action.id}: awaiting approval; do not retry`, isError: false });
+    expect(action).toMatchObject({ status: 'pending', tool: 'koda_create_tickets', actorType: 'SYSTEM', actorId: 'assistant', onBehalfOfId: ids.devBind });
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
@@ -358,7 +359,7 @@ describeIntegration('assistant tools check their key (US-004)', () => {
   // AC-10 — an agent's thread write runs at once and is recorded against it
   // -------------------------------------------------------------------------
 
-  it('AC-10: an agent developer binding adds a comment at once, recorded as a thread-origin agent action', async () => {
+  it('AC-10: an agent developer binding waits, then approval creates a comment authored by the agent', async () => {
     const { jobId } = await threadJob('agent', 'p1-dev-agent');
 
     const answer = answerOf(await callTool(jobId, 'koda_add_comment', 'ac10', {
@@ -367,28 +368,24 @@ describeIntegration('assistant tools check their key (US-004)', () => {
 
     expect(answer.isError).toBe(false);
     expect(await prisma.comment.count({ where: { ticketId: p1TicketId, body: 'the login form is fixed', authorAgentId: ids['p1-dev-agent'] } }))
-      .toBe(1);
-    const action = await prisma.pendingAction.findFirstOrThrow({
-      where: { actorType: 'agent', actorId: ids['p1-dev-agent'], tool: 'koda_add_comment', origin: 'thread' },
-      orderBy: { createdAt: 'desc' },
-    });
-    // A direct action is stored with no job, toolCallId or thread (2a `insertDirect`), so it is found by its actor.
-    expect(action).toMatchObject({
-      status: 'EXECUTED', actorType: 'agent', actorId: ids['p1-dev-agent'], origin: 'thread', threadId: null,
-    });
+      .toBe(0);
+    const action = await findThreadAction(prisma, { jobId, toolCallId: 'ac10' });
+    expect(action).toMatchObject({ status: 'pending', actorType: 'SYSTEM', actorId: 'assistant', onBehalfOfType: 'AGENT', onBehalfOfId: ids['p1-dev-agent'] });
+    await as('root', 'post', `/api/approvals/${action.id}/decisions`, { decision: 'approve' }).expect(200);
+    expect(await prisma.comment.count({ where: { ticketId: p1TicketId, authorAgentId: ids['p1-dev-agent'] } })).toBe(1);
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
   // AC-11 — the approve re-check reads the key, not the membership
   // -------------------------------------------------------------------------
 
-  it('AC-11: the creator who lost comment.create is refused the approve with 403 projects and no comment is created', async () => {
+  it('AC-11: the creator who lost comment.create is refused approval with 403 and no comment is created', async () => {
     const { jobId } = await threadJob('user', 'demoted');
     const proposed = answerOf(await callTool(jobId, 'koda_add_comment', 'ac11', {
       ref: `${P1_KEY}-1`, body: 'approved too late',
     }).expect(200));
     expect(proposed.content.startsWith('pending ')).toBe(true);
-    const action = await prisma.pendingAction.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId, toolCallId: 'ac11' } } });
+    const action = await findThreadAction(prisma, { jobId, toolCallId: 'ac11' });
     const commentsBefore = await prisma.comment.count({ where: { ticketId: p1TicketId } });
 
     // The creator's only source in p1 becomes a custom role with thread.read, ticket.read and fleet.approval.read.
@@ -396,15 +393,15 @@ describeIntegration('assistant tools check their key (US-004)', () => {
     await bind({ type: 'USER', id: ids.demoted }, APPROVAL_READER_ROLE, p1Id);
     await membership.invalidatePermissions();
 
-    const res = await request(server).post(`/api/projects/${P1_SLUG}/fleet/approvals/${action.approvalId}/decide`)
+    const res = await request(server).post(`/api/approvals/${action.id}/decisions`)
       .set({ Authorization: `Bearer ${tokens.demoted}` })
       .send({ decision: 'approve' })
       .expect(403);
 
-    expect(res.body.ret).toBe(40003);
-    expect(res.body.message).toBe(PROJECTS_FORBIDDEN);
+    expect(res.body.ret).toBe(403);
+    expect(res.body.message).toContain('cannot decide');
     expect(await prisma.comment.count({ where: { ticketId: p1TicketId } })).toBe(commentsBefore);
-    expect((await prisma.pendingAction.findUniqueOrThrow({ where: { id: action.id } })).status).toBe('PENDING');
+    expect((await findThreadAction(prisma, { requestId: action.id })).status).toBe('pending');
   }, TIMEOUT);
 
   // -------------------------------------------------------------------------
@@ -430,7 +427,7 @@ describeIntegration('assistant tools check their key (US-004)', () => {
     }).expect(200));
 
     expect(answer).toEqual({ content: 'forbidden: koda_update_ticket needs ticket.transition.start on p1', isError: true });
-    expect(await prisma.pendingAction.count({ where: { jobId, toolCallId: 'ac13' } })).toBe(0);
+    expect(await prisma.assistantActionRequest.count({ where: { jobId, toolCallId: 'ac13' } })).toBe(0);
     expect((await prisma.ticket.findUniqueOrThrow({ where: { id: p1TicketId } })).status).toBe('CREATED');
   }, TIMEOUT);
 
@@ -447,6 +444,8 @@ describeIntegration('assistant tools check their key (US-004)', () => {
     }).expect(200));
 
     expect(answer.isError).toBe(false);
+    const action = await findThreadAction(prisma, { jobId, toolCallId: 'ac14' });
+    await as('root', 'post', `/api/approvals/${action.id}/decisions`, { decision: 'approve' }).expect(200);
     const job = await prisma.fleetJob.findFirstOrThrow({ where: { feature } });
     expect(job).toMatchObject({
       projectId: p1Id, requestedById: ids['p1-dev-agent'], requestedByType: 'AGENT', state: 'QUEUED',

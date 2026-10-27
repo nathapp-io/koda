@@ -1,3 +1,4 @@
+import { gateDouble } from '../../../test/helpers/assistant-gate-double';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { currentActor, currentContext, runAsSystem, type ActionContext } from '../../action-context/action-context';
 import type { AgentPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
@@ -26,7 +27,7 @@ function setup(workspace = false) {
   const access = { findProjectIdBySlug: vi.fn(async () => 'p1'), resolveMembership: vi.fn(async (): Promise<string | null> => null) };
   // Permissions P1 US-004: every key is allowed here, so each case stays about the caller's principal and origin.
   const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
-  return { executor: new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions), calls, rows, tool, access, permissions };
+  return { executor: new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions, ...gateDouble().deps), calls, rows, tool, access, permissions };
 }
 const mcpCall = { name: 'koda_get_ticket', input: { project: 'web', ref: 'WEB-1' } };
 describe('caller-based executor', () => {

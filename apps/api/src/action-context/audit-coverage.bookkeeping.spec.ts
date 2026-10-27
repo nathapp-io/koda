@@ -28,6 +28,7 @@ const EXPECTED_REASON_IDS = [
   'fleet.ingest-queue',
   'fleet.schedule-bookkeeping',
   'assistant.tool-call-ledger',
+  'assistant.action-request-link',
   'assistant.action-proposal',
   'assistant.direct-action-record',
   'assistant.action-finalize',

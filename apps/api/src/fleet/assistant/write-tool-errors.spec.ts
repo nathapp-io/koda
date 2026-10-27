@@ -1,3 +1,4 @@
+import { gateDouble } from '../../../test/helpers/assistant-gate-double';
 /**
  * US-001 (2b1-D1/D2): the three exception mappings the executor adds for write tools.
  *
@@ -77,7 +78,7 @@ function setup(over: Partial<AssistantTool<unknown>> = {}): Setup {
   // Permissions P1 US-004: the tool's key is a `PermissionService` read now; every key is allowed here, so the
   // refusal wording these cases pin stays the tool's own (input and preview failures), not a key refusal.
   const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
-  const executor = new AssistantToolExecutor(registry, repo, access as unknown as ProjectAccessService, permissions);
+  const executor = new AssistantToolExecutor(registry, repo, access as unknown as ProjectAccessService, permissions, ...gateDouble('none').deps);
   const proposer = makeProposer();
   executor.attachActions(proposer);
   return { executor, tool, proposer, rows };

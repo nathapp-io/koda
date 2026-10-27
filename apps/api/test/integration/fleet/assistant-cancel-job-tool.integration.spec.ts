@@ -1,10 +1,12 @@
+import { findThreadAction } from '../../helpers/assistant-request';
+import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b 2b2 US-005 — `koda_cancel_job` through the real runner tool route against PG.
  *
  * Every call enters at `POST /fleet/runner/jobs/:jobId/tools/koda_cancel_job?leaseEpoch=<n>` with the real runner
  * key of the runner that holds a RUNNING THREAD job, and every decide enters the real project route
- * `POST /projects/web/fleet/approvals/:approvalId/decide`, so the ACs drive the whole path: runner authentication,
+ * `POST /projects/web/fleet/approvals/:approvalId/decisions`, so the ACs drive the whole path: runner authentication,
  * the lease fence, the tool registry `FleetWriteTools` filled at boot, the executor's write-tool branch, the propose
  * service and — on approve — `FleetJobsService.cancel` for real.
  *
@@ -35,7 +37,7 @@ vi.setConfig({ testTimeout: 30_000 });
 const ENV = ['FLEET_THREADS_ENABLED'] as const;
 
 const TOOL = 'koda_cancel_job';
-const APPROVALS = '/api/projects/web/fleet/approvals';
+const APPROVALS = '/api/approvals';
 /** The route's answer: `{ content, isError }` data, whatever the status. */
 interface ToolResultBody { content: string; isError: boolean }
 
@@ -58,7 +60,7 @@ describeIntegration('fleet assistant cancel job tool (PG, US-005)', () => {
   const resultOf = (res: request.Response): ToolResultBody => data<ToolResultBody>(res);
 
   const actionOf = (toolCallId: string) =>
-    prisma.pendingAction.findUniqueOrThrow({ where: { jobId_toolCallId: { jobId: repo.jobId, toolCallId } } });
+    findThreadAction(prisma, { jobId: repo.jobId, toolCallId });
 
   /**
    * The RUN job this test acts on, written straight into PG the way `seedThreadJobFor` writes the THREAD job. Only
@@ -82,7 +84,7 @@ describeIntegration('fleet assistant cancel job tool (PG, US-005)', () => {
 
   /** `dev` decides one approval; answers the decide response. */
   const decide = (approvalId: string, decision: string) =>
-    request(server).post(`${APPROVALS}/${approvalId}/decide`).set({ Authorization: `Bearer ${world.tokens.dev}` }).send({ decision });
+    request(server).post(`${APPROVALS}/${approvalId}/decisions`).set({ Authorization: `Bearer ${world.tokens.dev}` }).send({ decision });
 
   beforeAll(async () => {
     saved['FLEET_THREADS_ENABLED'] = process.env['FLEET_THREADS_ENABLED'];
@@ -92,6 +94,7 @@ describeIntegration('fleet assistant cancel job tool (PG, US-005)', () => {
     server = app.getHttpServer();
     prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
+    await grantKeys(prisma, { type: 'USER', id: world.ids.dev }, ['approval.decide'], world.projectId);
     const runner = await enrollRunner(server, world.tokens.root, 'cancel-job-runner');
     await prisma.runner.update({
       where: { id: runner.runnerId }, data: { protocolVersion: 4, enabled: true, lastSeenAt: new Date() },
@@ -132,20 +135,20 @@ describeIntegration('fleet assistant cancel job tool (PG, US-005)', () => {
     // The proposal waits: the job is still the one the test wrote before the user decides.
     expect((await jobState(jobId)).state).toBe('QUEUED');
 
-    await decide(action.approvalId, 'approve').expect(200);
+    await decide(action.id, 'approve').expect(200);
 
     // 2b2-D6: the cancel really ran — a QUEUED job is cancelled server-side, so it is CANCELLED straight away and the
     // action's result is the cancelled form, not the request form.
     expect(await jobState(jobId)).toMatchObject({ state: 'CANCELLED', selectorLabels: ['no-such-label'] });
-    expect(await prisma.pendingAction.findUniqueOrThrow({ where: { id: action.id } }))
-      .toMatchObject({ status: 'EXECUTED', result: `cancelled ${jobId} /web/fleet/jobs/${jobId}` });
+    expect(await findThreadAction(prisma, { requestId: action.id }))
+      .toMatchObject({ status: 'executed', result: { text: `cancelled ${jobId} /web/fleet/jobs/${jobId}` } });
   });
 
   it('AC-12: cancelling the runner\'s own THREAD job answers invalid_input: command and stores no action', async () => {
     const { content, isError } = resultOf(await callTool('ac12', { jobId: repo.jobId }).expect(200));
 
     expect({ content, isError }).toEqual({ content: 'invalid_input: command: a THREAD job cannot be cancelled with this tool', isError: true });
-    expect(await prisma.pendingAction.count({ where: { jobId: repo.jobId, toolCallId: 'ac12' } })).toBe(0);
+    expect(await prisma.assistantActionRequest.count({ where: { jobId: repo.jobId, toolCallId: 'ac12' } })).toBe(0);
     // The thread's own job is untouched: a THREAD session ends through end-session, never through this tool (2b2-R5).
     expect((await jobState(repo.jobId)).state).toBe('RUNNING');
     // The audit row proves the call reached the registered tool rather than being refused by name.
@@ -159,7 +162,7 @@ describeIntegration('fleet assistant cancel job tool (PG, US-005)', () => {
     const { content, isError } = resultOf(await callTool('ac-state', { jobId }).expect(200));
 
     expect({ content, isError }).toEqual({ content: 'invalid_input: state: the job is COMPLETED and has already ended', isError: true });
-    expect(await prisma.pendingAction.count({ where: { jobId: repo.jobId, toolCallId: 'ac-state' } })).toBe(0);
+    expect(await prisma.assistantActionRequest.count({ where: { jobId: repo.jobId, toolCallId: 'ac-state' } })).toBe(0);
     expect((await jobState(jobId)).state).toBe('COMPLETED');
   });
 
@@ -171,7 +174,7 @@ describeIntegration('fleet assistant cancel job tool (PG, US-005)', () => {
     const { content, isError } = resultOf(await callTool('ac-foreign', { jobId: foreignJobId }).expect(200));
 
     expect({ content, isError }).toEqual({ content: 'not_found', isError: true });
-    expect(await prisma.pendingAction.count({ where: { jobId: repo.jobId, toolCallId: 'ac-foreign' } })).toBe(0);
+    expect(await prisma.assistantActionRequest.count({ where: { jobId: repo.jobId, toolCallId: 'ac-foreign' } })).toBe(0);
     expect((await jobState(foreignJobId)).state).toBe('QUEUED');
   });
 });

@@ -5,6 +5,7 @@ import { CommentsService } from '../../../comments/comments.service';
 import { CommentType } from '../../../common/enums';
 import { TicketsService } from '../../../tickets/tickets.service';
 import { PENDING_ACTION_REPOSITORY, type ActionStatusView, type PendingActionRepository } from '../actions/pending-action.domain';
+import { ASSISTANT_ACTION_REQUEST_REPOSITORY, type AssistantActionRequestRepository } from '../requests/assistant-action-request.domain';
 import { AssistantToolRegistry } from '../assistant-tool.registry';
 import { maskSecrets } from '../assistant-tool-safety';
 import { KODA_ADD_COMMENT, KODA_GET_ACTION } from '../koda-tool-descriptors';
@@ -81,7 +82,7 @@ export function addCommentTool(deps: { tickets: TicketsService; comments: Commen
  * caller's own project and its own thread — so an id of another thread (in this project or another) and an id that
  * does not exist answer exactly the same `not_found`.
  */
-export function getActionTool(actions: Pick<PendingActionRepository, 'findScopedById' | 'findScopedByActor'>): AssistantTool<GetActionInput> {
+export function getActionTool(actions: Pick<PendingActionRepository, 'findScopedById' | 'findScopedByActor'>, links: Pick<AssistantActionRequestRepository, 'findScopedInThread'>): AssistantTool<GetActionInput> {
   return {
     descriptor: KODA_GET_ACTION,
     // Permissions P1 US-004: implicit — every authenticated principal reads its own actions.
@@ -92,9 +93,17 @@ export function getActionTool(actions: Pick<PendingActionRepository, 'findScoped
       return { id };
     },
     async execute(ctx: ToolContext, input: GetActionInput): Promise<string> {
-      const action = ctx.threadId === null
-        ? await actions.findScopedByActor(input.id, ctx.projectId, { type: isAgentPrincipal(ctx.actor) ? 'agent' : 'user', id: ctx.actor.id })
-        : await actions.findScopedById(input.id, ctx.projectId, ctx.threadId);
+      if (ctx.threadId !== null) {
+        const link = await links.findScopedInThread(input.id, ctx.projectId, ctx.threadId);
+        if (!link) throw new NotFoundAppException({}, 'fleet.assistantAction');
+        const request = link.request;
+        const lines = [`action ${request.id} ${link.tool} ${request.status}`, `requested ${request.createdAt.toISOString()}`];
+        if (request.decidedAt) lines.push(`decided ${request.decidedAt.toISOString()}`);
+        if (request.settledAt) lines.push(`settled ${request.settledAt.toISOString()}`);
+        if (request.result !== null && typeof request.result === 'object' && 'text' in request.result && typeof request.result.text === 'string') lines.push('result:', ctx.data(request.result.text));
+        return lines.join('\n');
+      }
+      const action = await actions.findScopedByActor(input.id, ctx.projectId, { type: isAgentPrincipal(ctx.actor) ? 'agent' : 'user', id: ctx.actor.id });
       if (!action) throw new NotFoundAppException({}, 'fleet.assistantAction');
       return actionLines(ctx, action).join('\n');
     },
@@ -117,11 +126,12 @@ export class ActionTools implements OnModuleInit {
     private readonly tickets: TicketsService,
     private readonly comments: CommentsService,
     @Inject(PENDING_ACTION_REPOSITORY) private readonly actions: PendingActionRepository,
+    @Inject(ASSISTANT_ACTION_REQUEST_REPOSITORY) private readonly links: AssistantActionRequestRepository,
   ) {}
 
   onModuleInit(): void {
     this.registry.register(
-      getActionTool(this.actions),
+      getActionTool(this.actions, this.links),
       addCommentTool({ tickets: this.tickets, comments: this.comments }),
     );
   }

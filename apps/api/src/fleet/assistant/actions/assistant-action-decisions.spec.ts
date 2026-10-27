@@ -1,3 +1,4 @@
+import { gateDouble } from '../../../../test/helpers/assistant-gate-double';
 /**
  * Fleet S5b 2a US-005: the decide handler's gate order, its reject and expire-on-decide writes, and the post-commit
  * publication. US-006 extends the same handler with the approve branch: its re-check before the locked checks, the
@@ -83,7 +84,7 @@ function realExecutor(tool: AssistantTool<unknown>): AssistantToolExecutor {
   // Permissions P1 US-004: the approve re-checks the action's key through `PermissionService`; every key is allowed
   // here, so the cases stay about the decide handler's own refusals.
   const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
-  return new AssistantToolExecutor(registry, calls as never, access as never, permissions);
+  return new AssistantToolExecutor(registry, calls as never, access as never, permissions, ...gateDouble().deps);
 }
 
 const CONTEXT = {

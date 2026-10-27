@@ -21,6 +21,7 @@ export const BOOKKEEPING_REASONS = {
   'fleet.analytics-progress': 'The activity row reporting analytics deletion counts, including a deletion that found no rows.',
   'fleet.schedule-bookkeeping': "A schedule's fire claim, a skip or coalesce activity row, and the last dispatched job link.",
   'assistant.tool-call-ledger': 'The tool-call ledger row every assistant tool call stores, read or write.',
+  'assistant.action-request-link': "The thread link of a waiting assistant write: its thread, job, tool call, tool and preview; the request is `approval.request-open`.",
   'assistant.action-proposal': "A write tool's proposal: the pending action, its approval, the approval's activity and outbox rows, and the approval id link; the decide records `fleet.approval.decide.assistant`.",
   'assistant.direct-action-record': "The terminal ledger row of a direct-write tool call, failed calls included; the tool's own write records.",
   'assistant.action-finalize': "An approved assistant action's terminal status and outcome note; the decide and the tool recorded.",

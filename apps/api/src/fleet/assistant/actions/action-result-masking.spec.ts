@@ -1,3 +1,4 @@
+import { gateDouble } from '../../../../test/helpers/assistant-gate-double';
 /**
  * Branch review B2: whatever an approved tool answers becomes the action's stored `result`, the text of the thread's
  * outcome note and — through that note — part of the next turn's delivery to the agent. A tool that merely echoes
@@ -66,7 +67,7 @@ function executorFor(tool: AssistantTool<unknown>): AssistantToolExecutor {
   registry.register(tool);
   // Permissions P1 US-004: the tool's key is a `PermissionService` read now; every key is allowed here.
   const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
-  const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions);
+  const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions, ...gateDouble().deps);
   // 3-D14: the port carries `recordDirect` too; this harness only drives the thread propose path.
   executor.attachActions({
     propose: async (_input: ProposeInput): Promise<ProposeResult> => ({ actionId: 'a1' }),

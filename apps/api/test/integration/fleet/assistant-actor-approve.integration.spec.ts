@@ -1,3 +1,5 @@
+import { findThreadAction } from '../../helpers/assistant-request';
+import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S5b US-003 (3-D12 / 3-R3) — the whole thread path over HTTP: `dev`'s REPO THREAD job proposes
@@ -49,7 +51,7 @@ integration('an approved thread action runs as its actor (PG, US-003)', () => {
   const saved: Record<string, string | undefined> = {};
 
   const commentsOf = (ticketId: string) => db.comment.findMany({ where: { ticketId } });
-  const actionRow = (id: string) => db.pendingAction.findUniqueOrThrow({ where: { id } });
+  const actionRow = (id: string) => findThreadAction(db, { requestId: id });
 
   beforeAll(async () => {
     for (const key of ENV) saved[key] = process.env[key];
@@ -60,6 +62,7 @@ integration('an approved thread action runs as its actor (PG, US-003)', () => {
     server = app.getHttpServer();
     db = fixtureDb(app);
     world = await seedFleetHttpWorld(server, db);
+    await grantKeys(db, { type: 'USER', id: world.ids.dev }, ['approval.decide'], world.projectId);
     runner = await enrollRunner(server, world.tokens.root, 'actor-approve-runner', {
       capabilities: { ...FLEET_CAPS, kodaTools: true, threadBackends: { native: ['m1'], acp: [] }, threadWrite: true },
     });
@@ -97,14 +100,14 @@ integration('an approved thread action runs as its actor (PG, US-003)', () => {
       .set({ Authorization: `Bearer ${runner.apiKey}` })
       .send({ toolCallId: `tc-${seq}`, input: { ref: ticket.ref, body: BODY } })
       .expect(200);
-    const action = await db.pendingAction.findFirstOrThrow({ where: { jobId: thread.jobId } });
+    const action = await findThreadAction(db, { jobId: thread.jobId });
     return { action, ticket };
   }
 
   /** `dev` decides the proposal's approval; 200 is the only accepted answer. */
   const approve = (approvalId: string) =>
     request(server)
-      .post(`/api/projects/web/fleet/approvals/${approvalId}/decide`)
+      .post(`/api/approvals/${approvalId}/decisions`)
       .set({ Authorization: `Bearer ${world.tokens.dev}` })
       .send({ decision: 'approve' })
       .expect(200);
@@ -115,7 +118,7 @@ integration('an approved thread action runs as its actor (PG, US-003)', () => {
 
   it('AC-5: after dev approves the proposed action the comment exists on the ticket and the action is EXECUTED', async () => {
     const { action, ticket } = await propose();
-    expect(action).toMatchObject({ status: 'PENDING', actorType: 'user', actorId: world.ids.dev });
+    expect(action).toMatchObject({ status: 'pending', actorType: 'SYSTEM', actorId: 'assistant', onBehalfOfType: 'USER', onBehalfOfId: world.ids.dev });
     // 3-D12: the approve resolves the requester from the action's actor and never reads the job's call context. The
     // proposal above is what read that context, so both spies start clean here.
     const readActor = vi.spyOn(calls, 'findUserActor');
@@ -123,11 +126,11 @@ integration('an approved thread action runs as its actor (PG, US-003)', () => {
     readActor.mockClear();
     readContext.mockClear();
 
-    await approve(action.approvalId as string);
+    await approve(action.id as string);
 
     expect(readActor).toHaveBeenCalledWith(world.ids.dev);
     expect(readContext).not.toHaveBeenCalled();
-    expect(await actionRow(action.id)).toMatchObject({ status: 'EXECUTED', approverType: 'user', approverId: world.ids.dev });
+    expect(await actionRow(action.id)).toMatchObject({ status: 'executed', approverType: 'USER', approverId: world.ids.dev });
     const created = await commentsOf(ticket.id);
     expect(created).toHaveLength(1);
     expect(created[0]).toMatchObject({ body: BODY, authorUserId: world.ids.dev, authorAgentId: null });
@@ -139,9 +142,9 @@ integration('an approved thread action runs as its actor (PG, US-003)', () => {
     // tells a `findUserActor(action.actorId)` run apart from one that re-reads the job's thread creator.
     await db.chatThread.update({ where: { id: action.threadId as string }, data: { createdById: world.ids.viewer } });
 
-    await approve(action.approvalId as string);
+    await approve(action.id as string);
 
-    expect(await actionRow(action.id)).toMatchObject({ status: 'EXECUTED' });
+    expect(await actionRow(action.id)).toMatchObject({ status: 'executed' });
     const created = await commentsOf(ticket.id);
     expect(created).toHaveLength(1);
     expect(created[0]).toMatchObject({ body: BODY, authorUserId: world.ids.dev, authorAgentId: null });

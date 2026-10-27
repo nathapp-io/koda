@@ -1,11 +1,10 @@
+import { gateDouble } from '../../../test/helpers/assistant-gate-double';
 /**
  * Permissions P1 US-001 / P2 US-003 — a thread job runs its tools as its requester, attributed to the assistant.
  *
  * `findCallContext` answers the job's requester, which is an agent when an agent sent the message or called the
- * action. `execute` builds that requester's principal (`agentPrincipal` for an agent), passes its type to
- * `approvalModeFor`, and runs the tool inside the assistant's action context — actor `SYSTEM/assistant`, `onBehalfOf`
- * the requester, origin `thread` — so an agent's thread write executes at once and everything the tool records still
- * carries the requester's type through `actorTypeFor`.
+ * action. `execute` builds that requester's principal and opens a SYSTEM/assistant context on behalf of it.
+ * Both user and agent requesters wait through ApprovalGate by default; explicit none policies keep the direct path.
  *
  * Every case drives the real executor over a stub tool, a stub registry and a stub repository; the DB-backed
  * `findCallContext` reads are in test/integration/fleet/thread-creator-type.integration.spec.ts.
@@ -56,9 +55,10 @@ function setup(context: ToolCallContext | null, tool: AssistantTool) {
   const access = { findProjectIdBySlug: async () => 'p1', resolveMembership: async () => 'DEVELOPER' };
   // Permissions P1 US-004: the tool's key is a `PermissionService` read now; every key is allowed here.
   const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
-  const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions);
+  const approval = gateDouble();
+  const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions, ...approval.deps);
   executor.attachActions(actions);
-  return { executor, actions, rows };
+  return { executor, actions, rows, approval };
 }
 
 /**
@@ -82,9 +82,10 @@ function storingSetup(context: ToolCallContext, tool: AssistantTool) {
   };
   const access = { findProjectIdBySlug: async () => 'p1', resolveMembership: async () => 'DEVELOPER' };
   const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
-  const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions);
+  const approval = gateDouble();
+  const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions, ...approval.deps);
   executor.attachActions(actions);
-  return { executor, actions, rows };
+  return { executor, actions, rows, approval };
 }
 
 /** A read tool that answers its context to the caller, so a case can read what the executor passed. */
@@ -189,28 +190,15 @@ describe('AssistantToolExecutor as the assistant for a thread call (US-001, P2 U
     expect(context?.onBehalfOf).toEqual({ type: 'AGENT', id: 'a1' });
   });
 
-  it("AC-9: an AGENT creator's write runs at once and records a thread-origin agent action", async () => {
+  it.each([AGENT_CONTEXT, USER_CONTEXT])('a requester of either type waits through the gate', async (context) => {
     const tool = commentTool();
-    const { executor, actions } = setup(AGENT_CONTEXT, tool);
-    const result = await executor.execute({ ...CALL, name: 'koda_add_comment', input: { ref: 'WEB-1', body: 'x' } });
-
-    expect(actions.recordDirect).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      projectId: 'p1', tool: 'koda_add_comment', actorType: 'agent', actorId: 'a1', origin: 'thread', status: 'EXECUTED',
-    }));
+    const { executor, actions, approval } = setup(context, tool);
+    expect(await executor.execute({ ...CALL, name: 'koda_add_comment', input: { ref: 'WEB-1', body: 'x' } }))
+      .toEqual({ content: 'pending a1: awaiting approval; do not retry', isError: false });
+    expect(approval.gate.gate).toHaveBeenCalledTimes(1);
     expect(actions.propose).not.toHaveBeenCalled();
-    expect(tool.execute).toHaveBeenCalledTimes(1);
-    expect(result.isError).toBe(false);
-  });
-
-  it("AC-10: a USER creator's write is proposed and never run directly", async () => {
-    const tool = commentTool();
-    const { executor, actions } = setup(USER_CONTEXT, tool);
-    const result = await executor.execute({ ...CALL, name: 'koda_add_comment', input: { ref: 'WEB-1', body: 'x' } });
-
-    expect(actions.propose).toHaveBeenCalledTimes(1);
     expect(actions.recordDirect).not.toHaveBeenCalled();
     expect(tool.execute).not.toHaveBeenCalled();
-    expect(result.content).toContain('pending pa1');
   });
 
   it('AC-13: a call for a job whose requesting agent is gone answers 404 fleet.jobs', async () => {
@@ -235,7 +223,8 @@ describe('AssistantToolExecutor as the assistant for a thread call (US-001, P2 U
       await new Promise((resolve) => setTimeout(resolve, 10));
       return 'comment c1 added to WEB-1';
     });
-    const { executor, actions, rows } = storingSetup(AGENT_CONTEXT, tool);
+    const { executor, actions, rows, approval } = storingSetup(AGENT_CONTEXT, tool);
+    approval.resolver.resolve.mockResolvedValue({ mode: 'none' });
     const input = { ref: 'WEB-1', body: 'x' };
 
     const [first, second] = await Promise.all([
@@ -253,7 +242,8 @@ describe('AssistantToolExecutor as the assistant for a thread call (US-001, P2 U
 
   it('B1: a stored call replayed after the concurrent winner never runs the tool again', async () => {
     const tool = commentTool();
-    const { executor, rows } = storingSetup(AGENT_CONTEXT, tool);
+    const { executor, rows, approval } = storingSetup(AGENT_CONTEXT, tool);
+    approval.resolver.resolve.mockResolvedValue({ mode: 'none' });
     const input = { ref: 'WEB-1', body: 'x' };
 
     const first = await executor.execute({ ...CALL, name: 'koda_add_comment', input });

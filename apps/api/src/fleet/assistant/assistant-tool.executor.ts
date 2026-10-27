@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { isAgentPrincipal, type AgentPrincipal, type KodaAgentStatus, type UserPrincipal } from '../../auth/principal/koda-principal.types';
@@ -9,7 +9,13 @@ import type { ApprovalMode } from '../../permissions/catalog';
 import { PermissionService } from '../../permissions/permission.service';
 import { ProjectAccessService } from '../../projects/project-access.service';
 import { stableStringify } from '../sync/stable-json';
-import { MAX_PENDING_ACTIONS, type ActionProposer, type PendingActionRecord } from './actions/pending-action.domain';
+import { type ActionProposer, type PendingActionRecord } from './actions/pending-action.domain';
+import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
+import { ApprovalGate } from '../../approvals/approval-gate.service';
+import { ApprovalPolicyResolver } from '../../approvals/approval-policy.resolver';
+import { bookkeeping } from '../../action-context/audit-coverage';
+import { ThreadEventBus } from '../../live/thread-event-bus';
+import { ASSISTANT_ACTION_REQUEST_REPOSITORY, MAX_PENDING_ACTIONS, type AssistantActionRequestRepository } from './requests/assistant-action-request.domain';
 import { approvalModeFor } from './actions/approval-policy';
 import { capText, fenceData, maskSecrets } from './assistant-tool-safety';
 import {
@@ -60,9 +66,14 @@ export class AssistantToolExecutor {
     @Inject(ASSISTANT_TOOL_CALL_REPOSITORY) private readonly calls: AssistantToolCallRepository,
     private readonly access: ProjectAccessService,
     private readonly permissions: PermissionService,
+    private readonly gate: ApprovalGate,
+    private readonly resolver: ApprovalPolicyResolver,
+    @Inject(ASSISTANT_ACTION_REQUEST_REPOSITORY) private readonly links: AssistantActionRequestRepository,
+    private readonly threadEvents: ThreadEventBus,
+    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
-  /** 2a-D1: the late binding of the propose side; the constructor is unchanged so no provider depends on the service. */
+  /** Legacy direct-action recording stays late-bound until the direct path is migrated. */
   attachActions(actions: ActionProposer): void {
     this.actions = actions;
   }
@@ -355,19 +366,14 @@ export class AssistantToolExecutor {
     }
   }
 
-  /** 3-D13/15: resolve policy once, after permission and before preview. Only none and thread-human are served. */
+  /** Preview before resolving thread policy; only a waiting write takes the thread lock. */
   private async writeTool(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, ctx: ToolContext): Promise<RunOutcome> {
     const name = tool.descriptor.name;
-    // Permissions P1 US-001: the caller's type decides the code default — a user's thread write waits for a human, an
-    // agent's runs at once (and every MCP write runs at once, as before).
-    const mode = approvalModeFor(caller.origin, name, isAgentPrincipal(caller.principal) ? 'agent' : 'user');
-    if (mode !== 'none' && !(mode === 'human' && caller.origin.kind === 'thread')) {
-      this.logger.error(`koda write tool ${name} refused approval mode ${mode} for ${caller.origin.kind}`);
-      return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
-    }
-    const actions = this.actions;
-    if (!actions) {
-      this.logger.warn(`koda write tool ${name} has no action proposer attached; job ${call.jobId} answered error`);
+    // MCP remains on its existing policy/direct path until US-009.
+    const mcpMode = caller.origin.kind === 'mcp'
+      ? approvalModeFor(caller.origin, name, isAgentPrincipal(caller.principal) ? 'agent' : 'user') : 'none';
+    if (mcpMode !== 'none') {
+      this.logger.error(`koda write tool ${name} refused approval mode ${mcpMode} for mcp`);
       return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
     }
     const prepare = tool.preview;
@@ -388,33 +394,45 @@ export class AssistantToolExecutor {
       this.logger.error(`koda tool ${name} failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
       return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
     }
-    if (mode === 'none') return this.directWrite(call, tool, caller, scope, ctx, actions, preview);
-    return this.proposeWrite(call, tool, caller, scope, ctx, actions, preview);
+    const mode = caller.origin.kind === 'thread'
+      ? (await this.resolver.resolve({ key: tool.key, projectId: scope.id, subject: { type: 'ASSISTANT', id: 'assistant' } })).mode
+      : mcpMode;
+    if (mode !== 'none') return this.waitingWrite(call, tool, caller, scope, preview);
+    const actions = this.actions;
+    if (!actions) return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
+    return this.directWrite(call, tool, caller, scope, ctx, actions, preview);
   }
 
-  /** The existing human proposal path retains its thread, user and replay-key requirements. */
-  private async proposeWrite(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, ctx: ToolContext, actions: ActionProposer, preview: string): Promise<RunOutcome> {
+  /** Waiting writes normally run no tool: the lock protects the cap and request link together. */
+  private async waitingWrite(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, preview: string): Promise<RunOutcome> {
     const name = tool.descriptor.name;
     const origin = caller.origin;
-    if (origin.kind !== 'thread' || call.jobId === null || call.toolCallId === null || isAgentPrincipal(caller.principal)) {
+    if (origin.kind !== 'thread') return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
+    try {
+      let linked = false;
+      const outcome = await this.txManager.run(async (): Promise<RunOutcome> => {
+        if (!(await this.links.lockThread(origin.threadId))) return refusal('not_found', 'not_found');
+        if (await this.links.countPendingInThread(origin.threadId) >= MAX_PENDING_ACTIONS) return refusal('refused', REFUSED_CONTENT);
+        const gated = await this.gate.gate<{ text: string }>(tool.key, {
+          projectId: scope.id, threadId: origin.threadId, jobId: origin.jobId, args: scope.input,
+        }, { projectId: scope.id });
+        // Policy may have changed since resolution. An executed result is not a pending request.
+        if (gated.status === 'executed') return { outcome: 'ok', content: gated.result.text };
+        const requestId = gated.request.id;
+        if (!(await this.links.findByRequest(requestId))) {
+          await bookkeeping('assistant.action-request-link', () => this.links.insert({
+            requestId, threadId: origin.threadId, jobId: origin.jobId, toolCallId: call.toolCallId, tool: name, preview,
+          }));
+          linked = true;
+        }
+        return refusal('pending', `pending ${requestId}: awaiting approval; do not retry`);
+      });
+      if (linked) this.threadEvents.publish({ id: randomUUID(), threadId: origin.threadId, type: 'thread', at: new Date().toISOString() });
+      return { ...outcome, projectId: scope.id };
+    } catch (error) {
+      this.logger.error(`koda tool ${name} failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
       return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
     }
-    const proposed = await actions.propose({
-      projectId: scope.id,
-      threadId: origin.threadId,
-      threadKind: origin.threadKind,
-      threadProjectSlug: origin.homeProject.slug,
-      jobId: call.jobId,
-      toolCallId: call.toolCallId,
-      tool: name,
-      // 2a-D3: `PendingAction.input` is the parsed input, and a write tool's parser answers a JSON object.
-      input: scope.input as Record<string, unknown>,
-      preview,
-      actorId: caller.principal.id,
-      now: ctx.now,
-    });
-    if ('refused' in proposed) return { ...refusal('refused', REFUSED_CONTENT), projectId: scope.id };
-    return { ...refusal('pending', `pending ${proposed.actionId}: awaiting user approval; do not retry`), projectId: scope.id };
   }
 
   /** 3-D15: the write stands even if recording fails; never retry it or turn it into a proposal. */

@@ -1,3 +1,4 @@
+import { gateDouble } from '../../../test/helpers/assistant-gate-double';
 /**
  * Fleet S5b 3-D12 / 3-R3: the approval check and the approved run read the requester from the action's actor.
  *
@@ -64,8 +65,7 @@ function setup(users: Record<string, UserRow> = {}, opts: { membership?: Error }
     // assertions here stay about the actor the approval resolves.
     executor: new AssistantToolExecutor(
       registry, calls, access as unknown as ProjectAccessService,
-      { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService,
-    ),
+      { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService, ...gateDouble().deps),
     tool,
     readUser,
     readContext,

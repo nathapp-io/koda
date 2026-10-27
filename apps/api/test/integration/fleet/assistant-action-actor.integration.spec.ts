@@ -1,3 +1,5 @@
+import { findThreadAction } from '../../helpers/assistant-request';
+import { AssistantActionService } from '../../../src/fleet/assistant/actions/assistant-action.service';
 import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
@@ -57,11 +59,21 @@ integration('assistant action actors (PG)', () => {
     decidedAt: new Date(), expiresAt: new Date(),
   } });
 
-  async function propose() {
+  async function requestInThread() {
     const seed = await seedThreadJobFor(db, world, runner, { feature: `actor-${++seq}` });
     await request(app.getHttpServer()).post(`/api/fleet/runner/jobs/${seed.jobId}/tools/koda_add_comment?leaseEpoch=1`)
       .set('Authorization', `Bearer ${runner.apiKey}`).send({ toolCallId: `actor-${seq}`, input: { ref: 'WEB-1', body: 'x' } }).expect(200);
-    return db.pendingAction.findFirstOrThrow({ where: { jobId: seed.jobId } });
+    return findThreadAction(db, { jobId: seed.jobId, toolCallId: `actor-${seq}` });
+  }
+  // Legacy PendingAction repository/expiry cases below still seed that storage directly until US-011.
+  async function propose() {
+    const seed = await seedThreadJobFor(db, world, runner, { feature: `legacy-actor-${++seq}` });
+    const result = await withTestActor({ type: 'USER', id: world.ids.dev }, () => app.get(AssistantActionService, { strict: false }).propose({
+      projectId: world.projectId, threadId: seed.threadId, threadKind: 'REPO', threadProjectSlug: 'web', jobId: seed.jobId,
+      toolCallId: `legacy-${seq}`, tool: 'koda_add_comment', input: { ref: 'WEB-1', body: 'x' }, preview: 'preview', actorId: world.ids.dev, now: new Date(),
+    }));
+    if ('refused' in result) throw new Error('legacy fixture refused');
+    return db.pendingAction.findUniqueOrThrow({ where: { id: result.actionId } });
   }
   async function decide(id: string, decision: string) {
     await request(app.getHttpServer()).post(`/api/projects/web/fleet/approvals/${id}/decide`)
@@ -85,12 +97,11 @@ integration('assistant action actors (PG)', () => {
     }
   });
   it('AC-9: runner proposal derives thread actor and approval mode', async () => {
-    const row = await propose();
-    expect(row).toMatchObject({ actorType: 'user', actorId: world.ids.dev, origin: 'thread', approvalMode: 'human' });
-    expect(await actions.findById(row.id)).toMatchObject({ actorType: 'user', actorId: world.ids.dev, origin: 'thread', approvalMode: 'human', approverType: null, approverId: null });
+    const row = await requestInThread();
+    expect(row).toMatchObject({ actorType: 'SYSTEM', actorId: 'assistant', onBehalfOfType: 'USER', onBehalfOfId: world.ids.dev, origin: 'thread', requiredMode: 'human', status: 'pending' });
   });
   it('AC-10: runner audit records the thread creator', async () => {
-    const row = await propose();
+    const row = await requestInThread();
     expect(await calls.findByCall(row.jobId as string, row.toolCallId as string)).toMatchObject({ actorType: 'user', actorId: world.ids.dev });
   });
   it.each([['AC-11', 'approve', 'EXECUTED'], ['AC-12', 'reject', 'REJECTED']])('%s: records the human approver on %s', async (_ac, decision, status) => {

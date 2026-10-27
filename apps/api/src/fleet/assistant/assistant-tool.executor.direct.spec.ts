@@ -1,3 +1,4 @@
+import { gateDouble } from '../../../test/helpers/assistant-gate-double';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import type { AgentPrincipal } from '../../auth/principal/koda-principal.types';
 import type { PermissionService } from '../../permissions/permission.service';
@@ -28,7 +29,7 @@ function setup() {
   const actions: ActionProposer = { propose: vi.fn(async () => ({ actionId: 'p1' })), recordDirect: vi.fn(async () => ({ actionId: 'a1' })) };
   // Permissions P1 US-004: the tool's key is a `PermissionService` read now; every key is allowed here.
   const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
-  const executor = new AssistantToolExecutor(registry, calls, { findProjectIdBySlug: async () => 'p1', resolveMembership: async () => null } as unknown as ProjectAccessService, permissions);
+  const executor = new AssistantToolExecutor(registry, calls, { findProjectIdBySlug: async () => 'p1', resolveMembership: async () => null } as unknown as ProjectAccessService, permissions, ...gateDouble('none').deps);
   executor.attachActions(actions);
   return { executor, tool, preview, actions, rows, permissions };
 }

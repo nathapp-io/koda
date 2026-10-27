@@ -1,3 +1,4 @@
+import { gateDouble } from '../../../../test/helpers/assistant-gate-double';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import type { PermissionService } from '../../../permissions/permission.service';
 import type { ProjectAccessService } from '../../../projects/project-access.service';
@@ -104,7 +105,7 @@ function harness(opts: { answer?: Partial<KnowledgeSearchResult>; doc?: Knowledg
   };
   // Permissions P1 US-004: the tools' keys are `PermissionService` reads now; kb.search and kb.read are held here.
   const permissions = { can: vi.fn(async (_actor: unknown, key: string) => ({ allowed: ['kb.search', 'kb.read'].includes(key), reason: 'granted' })) } as unknown as PermissionService;
-  const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions);
+  const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions, ...gateDouble().deps);
   let callId = 0;
   return {
     search, readDoc, readOutcome, resolveProjectRepo, rows,

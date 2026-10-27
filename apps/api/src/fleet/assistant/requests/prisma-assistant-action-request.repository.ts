@@ -41,7 +41,7 @@ export class PrismaAssistantActionRequestRepository extends AbstractPrismaReposi
     return this.db.assistantActionRequest.count({ where: { threadId, request: { status: 'pending' } } });
   }
   async findScopedInThread(requestId: string, projectId: string, threadId: string): Promise<LinkedApprovalRequest | null> {
-    return this.db.assistantActionRequest.findFirst({ where: { requestId, threadId, request: { projectId } }, include: { request: { select: { id: true, projectId: true, status: true } } } }) as Promise<LinkedApprovalRequest | null>;
+    return this.db.assistantActionRequest.findFirst({ where: { requestId, threadId, request: { projectId } }, include: { request: { select: { id: true, projectId: true, status: true, createdAt: true, decidedAt: true, settledAt: true, result: true } } } }) as Promise<LinkedApprovalRequest | null>;
   }
   async findOwnRequest(requestId: string, projectId: string, actor: { type: 'USER' | 'AGENT'; id: string }): Promise<OwnApprovalRequest | null> {
     const row = await this.db.approvalRequest.findFirst({ where: { id: requestId, projectId, actorType: actor.type, actorId: actor.id }, include: { assistantAction: true } });
