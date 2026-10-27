@@ -5,6 +5,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { createMockPrismaService, PrismaService } from '@nathapp/nestjs-prisma';
 import { ApprovalEngineModule } from './approval-engine.module';
+import { ApprovalAskService } from './approval-ask.service';
 import { ApprovalGate } from './approval-gate.service';
 import { ApprovalDecisionService } from './approval-decision.service';
 import { ApprovalExecutionService } from './approval-execution.service';
@@ -53,6 +54,7 @@ class EngineConsumer {
     readonly policies: ApprovalPolicyService,
     readonly commands: ApprovalCommandRegistry,
     readonly queries: ApprovalRequestQueries,
+    readonly asks: ApprovalAskService,
   ) {}
 }
 @Module({ imports: [ApprovalEngineModule], providers: [PolicyConsumer, RegistryConsumer, EngineConsumer] })
@@ -113,5 +115,12 @@ describe('ApprovalEngineModule', () => {
     expect(consumer.policies).toBeInstanceOf(ApprovalPolicyService);
     expect(consumer.commands).toBeInstanceOf(ApprovalCommandRegistry);
     expect(consumer.queries).toBeInstanceOf(ApprovalRequestQueries);
+  });
+  it('US-006: an importing module injects ApprovalAskService from the engine', async () => {
+    moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ConsumerModule] }).compile();
+
+    const consumer = moduleRef.get(EngineConsumer);
+    expect(consumer.asks).toBeInstanceOf(ApprovalAskService);
+    expect(consumer.asks).toBe(moduleRef.get(ApprovalAskService));
   });
 });
