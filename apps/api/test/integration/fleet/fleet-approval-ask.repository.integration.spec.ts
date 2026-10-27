@@ -26,6 +26,7 @@ describeDb('FleetApprovalAsk repository (PG)', () => {
   beforeAll(async () => {
     scratch = await scratchSchemaBefore(process.env.DATABASE_URL as string, 'fleet_ask_repo', MIGRATION);
     await applyMigration(scratch.db, MIGRATION);
+    await applyMigration(scratch.db, '20261106100000_job_end_ask_queue');
     db = scratch.db;
     // The repository reads `prisma.client`, the transaction-aware proxy: route it through the real
     // transaction manager so `FOR UPDATE` runs inside a real PG transaction.
@@ -36,6 +37,15 @@ describeDb('FleetApprovalAsk repository (PG)', () => {
 
   afterAll(async () => {
     await scratch?.drop();
+  });
+
+  it('F1 round 4: the shipped migration indexes the durable attempt order and unique tie-breaker', async () => {
+    const rows = await db.$queryRaw<Array<{ indexdef: string }>>`
+      SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema()
+      AND indexname = 'FleetApprovalAsk_updatedAt_requestId_idx'
+    `;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.indexdef).toContain('USING btree ("updatedAt", "requestId")');
   });
 
   /** A stored approval request; the link table's request row must exist, its project need not. */

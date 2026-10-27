@@ -205,17 +205,7 @@ export class ApprovalCloser {
       const take = Math.min(MAX_PENDING_ASKS_PER_JOB, limit - processed);
       const links = await this.store.findPendingForJobPage(job.id, after, take);
       if (links.length === 0) return live;
-      for (const link of links) {
-        const closed = await this.askService.close(link.requestId, { status: 'cancelled', reason: 'job_ended' }, now);
-        if (closed === null) continue;
-        await this.store.setResolvedBy(link.requestId, 'job_ended');
-        const view = await this.store.findApproval(link.requestId);
-        if (view === null) {
-          this.logger.warn(`Fleet ask ${link.requestId} closed job_ended but has no view`);
-          continue;
-        }
-        live.push(...(await this.recordResolved(view, jobSystemActor(job))));
-      }
+      for (const link of links) live.push(...(await this.closeJobAsk(job, link.requestId, now)).live);
       processed += links.length;
       const next = links.at(-1);
       if (links.length < take || next === undefined) return live;
@@ -223,6 +213,20 @@ export class ApprovalCloser {
     }
     this.logger.warn(`Job ${job.id}: job-end close stopped at ${limit} asks; the rest is drained by the job-end sweeper`);
     return live;
+  }
+
+  /** One job-end cancellation, in the caller's transaction; also used by the durable fair continuation. */
+  async closeJobAsk(
+    job: Pick<FleetJobRecord, 'id' | 'requestedById' | 'requestedByType'>,
+    requestId: string,
+    now: Date,
+  ): Promise<ApprovalChange> {
+    const closed = await this.askService.close(requestId, { status: 'cancelled', reason: 'job_ended' }, now);
+    if (closed === null) return { approval: null, live: [] };
+    await this.store.setResolvedBy(requestId, 'job_ended');
+    const view = await this.store.findApproval(requestId);
+    if (view === null) throw new Error(`Fleet ask ${requestId} closed job_ended but has no view`);
+    return { approval: view, live: await this.recordResolved(view, jobSystemActor(job)) };
   }
 
   /** Spec §2.4: nax has already denied by its own timeout. The caller re-checked `pending` under the lock. */

@@ -3,7 +3,7 @@ import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import type { ApprovalFilters, ApprovalResolvedBy, FleetApprovalRecord, PendingCount, RequeueCandidate } from './domain/approval.domain';
 import {
-  FLEET_APPROVAL_ASK_REPOSITORY, FleetApprovalAskRecord, FleetAskWithStatus, IFleetApprovalAskRepository, NewFleetApprovalAsk,
+  FLEET_APPROVAL_ASK_REPOSITORY, FleetApprovalAskRecord, FleetAskWithStatus, IFleetApprovalAskRepository, JobEndAsk, NewFleetApprovalAsk,
 } from './domain/fleet-approval-ask.domain';
 
 /**
@@ -42,9 +42,9 @@ export class FleetApprovalAskStore {
     return this.asks.findPendingForJobPage(jobId, afterRequestId, limit);
   }
 
-  /** US-006 (F1 round 3): the jobs a bounded job-end close left with pending asks. */
-  findEndedJobPendingAsks(limit: number): Promise<string[]> {
-    return this.asks.findEndedJobPendingAsks(limit);
+  /** An audited, durable scheduling attempt that rotates past failing asks and skips held rows. */
+  claimEndedJobAsks(limit: number): Promise<JobEndAsk[]> {
+    return this.asks.claimEndedJobAsks(limit);
   }
 
   findPendingForPolicy(budgetPolicyId: string): Promise<FleetApprovalAskRecord | null> {

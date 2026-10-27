@@ -12,7 +12,7 @@ import type {
 import { FLEET_ASK_KEY, FLEET_ASK_KEYS } from './domain/approval.domain';
 import {
   FleetApprovalAskRecord, FleetAskKind, FleetAskWithStatus, IFleetApprovalAskRepository, MAX_COUNTED_PROJECTS,
-  MAX_PENDING_ASKS_PER_JOB, NewFleetApprovalAsk,
+  MAX_PENDING_ASKS_PER_JOB, JobEndAsk, NewFleetApprovalAsk,
 } from './domain/fleet-approval-ask.domain';
 import { fleetStatusWhere, toFleetApproval, type FleetAskRow } from './fleet-approval-view';
 
@@ -132,22 +132,30 @@ export class PrismaFleetApprovalAskRepository
   }
 
   /**
-   * US-006 (F1 round 3): the backlog a bounded job-end close leaves. `FleetApprovalAsk.jobId` has no foreign key to
-   * `FleetJob` (a deleted job must not delete the ask record), so the state filter is one bounded join, oldest ask
-   * first, capped by the caller's `limit`.
+   * A durable fair queue over individual asks, not the oldest ten jobs. Holding a request must not consume a
+   * batch slot; a failing close must not reset the queue position. The caller commits this audited scheduling
+   * write separately, then closes each selected request in its own audited transaction. A crash just delays a
+   * selected ask until the queue rotates. No job lock is held and request locks are always skip-locked.
+   *
+   * updatedAt is the link's last scheduling/mutation time (resolved links leave the queue). Database time, not
+   * tick(now), keeps attempts ordered even when a caller supplies a future expiry-test clock.
    */
-  async findEndedJobPendingAsks(limit: number): Promise<string[]> {
-    const rows = await this.db.$queryRaw<Array<{ jobId: string }>>`
-      SELECT a."jobId" AS "jobId"
-      FROM "FleetApprovalAsk" a
-      JOIN "ApprovalRequest" r ON r."id" = a."requestId"
-      JOIN "FleetJob" j ON j."id" = a."jobId"
-      WHERE r."status" = 'pending' AND j."state" <> 'RUNNING'
-      GROUP BY a."jobId"
-      ORDER BY MIN(a."createdAt") ASC
-      LIMIT ${limit}
+  claimEndedJobAsks(limit: number): Promise<JobEndAsk[]> {
+    return this.db.$queryRaw<JobEndAsk[]>`
+      WITH next AS (
+        SELECT a."requestId"
+        FROM "FleetApprovalAsk" a
+        JOIN "ApprovalRequest" r ON r."id" = a."requestId"
+        JOIN "FleetJob" j ON j."id" = a."jobId"
+        WHERE a."kind" = 'bash' AND r."status" = 'pending' AND j."state" <> 'RUNNING'
+        ORDER BY a."updatedAt" ASC, a."requestId" ASC
+        LIMIT ${limit}
+        FOR UPDATE OF r, a SKIP LOCKED
+      )
+      UPDATE "FleetApprovalAsk" a SET "updatedAt" = clock_timestamp()
+      FROM next WHERE a."requestId" = next."requestId"
+      RETURNING a."requestId", a."jobId", a."projectId"
     `;
-    return rows.map((row) => row.jobId);
   }
 
   async findPendingForPolicy(budgetPolicyId: string): Promise<FleetApprovalAskRecord | null> {

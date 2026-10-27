@@ -1673,4 +1673,6 @@ model FleetApprovalAsk {
   @@unique([jobId, leaseEpoch, naxAskId])
   @@index([jobId])
   @@index([budgetPolicyId])
+  // Durable least-recently-attempted ordering for the job-end continuation.
+  @@index([updatedAt, requestId])
 }

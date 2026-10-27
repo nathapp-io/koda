@@ -18,6 +18,9 @@ export type NewFleetApprovalAsk = Pick<FleetApprovalAskRecord, 'requestId' | 'ki
 /** A link joined with its request's status. */
 export interface FleetAskWithStatus { ask: FleetApprovalAskRecord; status: ApprovalRequestStatus }
 
+/** One durable scheduling attempt; updatedAt on the link is its least-recently-attempted queue position. */
+export interface JobEndAsk { requestId: string; jobId: string; projectId: string | null }
+
 export const FLEET_APPROVAL_ASK_REPOSITORY = Symbol('FLEET_APPROVAL_ASK_REPOSITORY');
 
 /** The `take` bound of `findPendingForJob` (`.nax/rules/api-data.md`: every findMany is bounded). */
@@ -51,10 +54,11 @@ export interface IFleetApprovalAskRepository {
    */
   findPendingForJobPage(jobId: string, afterRequestId?: string, limit?: number): Promise<FleetApprovalAskRecord[]>;
   /**
-   * US-006 (F1 round 3): the jobs that still have a pending ask but are no longer RUNNING, oldest ask first, at most
-   * `limit`. This is the backlog a bounded job-end close leaves behind, which `ApprovalJobEndSweeper` drains.
+   * Claim a bounded, least-recently-attempted batch of pending bash asks on ended jobs. Skips held request/link
+   * rows and durably moves selected links to the queue's tail via updatedAt. Call in an audited transaction;
+   * commit this scheduling transaction before attempting closes, so failing closes cannot monopolize the queue.
    */
-  findEndedJobPendingAsks(limit: number): Promise<string[]>;
+  claimEndedJobAsks(limit: number): Promise<JobEndAsk[]>;
   findPendingForPolicy(budgetPolicyId: string): Promise<FleetApprovalAskRecord | null>;
   setResolvedBy(requestId: string, resolvedBy: ApprovalResolvedBy): Promise<FleetApprovalAskRecord>;
   /** Replaces the outcome. */
