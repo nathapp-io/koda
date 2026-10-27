@@ -58,10 +58,46 @@ integration('fleet shell escalation command through ApprovalDecisionService', ()
   afterAll(async () => { await app?.close(); });
   afterEach(() => { vi.restoreAllMocks(); });
   beforeEach(async () => {
+    await db.fleetJob.update({ where: { id: jobId }, data: { state: 'RUNNING', leaseEpoch: 3, runnerId } });
     await db.fleetCommand.deleteMany({ where: { jobId } });
     await db.auditEntry.deleteMany({ where: { resourceId: { in: [requestId].filter((id): id is string => Boolean(id)) } } });
     await db.approvalRequest.deleteMany();
     requestId = await seedAsk();
+  });
+
+  it('AC-1: approving a completed job settles without writing an answer command', async () => {
+    await db.fleetJob.update({ where: { id: jobId }, data: { state: 'COMPLETED' } });
+    const settled = await withTestActor({ type: 'USER', id: userId }, () => service.decide(requestId, 'approve', null, now));
+
+    expect(settled).toMatchObject({ status: 'executed', result: { answered: false } });
+    expect(await db.fleetCommand.count({ where: { jobId, type: 'APPROVAL_ANSWER' } })).toBe(0);
+    expect(await db.fleetApprovalAsk.findUnique({ where: { requestId } })).toMatchObject({ resolvedBy: 'job_ended' });
+  });
+
+  it('AC-2: approving an ask from an old lease settles without writing an answer command', async () => {
+    await db.fleetJob.update({ where: { id: jobId }, data: { leaseEpoch: 4 } });
+    const settled = await withTestActor({ type: 'USER', id: userId }, () => service.decide(requestId, 'approve', null, now));
+
+    expect(settled).toMatchObject({ status: 'executed', result: { answered: false } });
+    expect(await db.fleetCommand.count({ where: { jobId, type: 'APPROVAL_ANSWER' } })).toBe(0);
+    expect(await db.fleetApprovalAsk.findUnique({ where: { requestId } })).toMatchObject({ resolvedBy: 'job_ended' });
+  });
+
+  it('AC-3: rejecting a completed job remains rejected and resolves the link', async () => {
+    await db.fleetJob.update({ where: { id: jobId }, data: { state: 'COMPLETED' } });
+    const settled = await withTestActor({ type: 'USER', id: userId }, () => service.decide(requestId, 'reject', null, now));
+
+    expect(settled.status).toBe('rejected');
+    expect(await db.fleetCommand.count({ where: { jobId, type: 'APPROVAL_ANSWER' } })).toBe(0);
+    expect(await db.fleetApprovalAsk.findUnique({ where: { requestId } })).toMatchObject({ resolvedBy: 'job_ended' });
+  });
+
+  it('AC-4: a job without a runner resolves the ask without writing an answer command', async () => {
+    await db.fleetJob.update({ where: { id: jobId }, data: { runnerId: null } });
+    await withTestActor({ type: 'USER', id: userId }, () => service.decide(requestId, 'approve', null, now));
+
+    expect(await db.fleetCommand.count({ where: { jobId, type: 'APPROVAL_ANSWER' } })).toBe(0);
+    expect(await db.fleetApprovalAsk.findUnique({ where: { requestId } })).toMatchObject({ resolvedBy: 'job_ended' });
   });
 
   it('AC-10/11/12/14: approves, settles, writes the answer, wakes runner and audits', async () => {

@@ -65,8 +65,10 @@ export class FleetShellEscalateCommand implements ApprovalCommand<BashAskInput, 
     const requestId = currentContext()?.approval?.requestId;
     if (!requestId) throw new Error('fleet ask needs its request id');
     const job = await this.jobs.lockById(input.jobId);
-    // US-004 adds the lease/state guard. US-003 writes for every existing job.
-    if (!job || job.runnerId === null) throw new Error('bash ask job is unavailable');
+    if (!job || job.state !== 'RUNNING' || job.leaseEpoch !== input.leaseEpoch || job.runnerId === null) {
+      await this.asks.setResolvedBy(requestId, 'job_ended');
+      return { answered: false };
+    }
     const runnerId = job.runnerId;
     await this.jobs.createCommand({
       runnerId, jobId: job.id, type: FleetCommandType.APPROVAL_ANSWER, leaseEpoch: input.leaseEpoch,
