@@ -11,8 +11,7 @@ import { ACTIVE_STATES, RUNNER_HELD_STATES } from './job-state';
 import type { ThreadAssign } from '../common/thread-jobs';
 import { PROJECT_CODE_LIMITS, THREAD_LIMITS } from '../common/thread-jobs';
 import { DELIVERABLE_STATUSES, deliveryText, MAX_DELIVERED_NOTES } from '../assistant/actions/outcome-delivery';
-import { outcomeNote } from '../assistant/actions/outcome-note';
-import type { PendingActionStatus } from '../assistant/actions/pending-action.domain';
+import { requestOutcomeNote } from '../assistant/requests/request-outcome-note';
 import type { ConfigJobResult } from '../common/config-jobs';
 import {
   ActiveJobRef, DuplicateActiveJobError, FleetArtifactRecord, FleetCommandRecord, FleetJobEventRecord, FleetJobFilters,
@@ -254,14 +253,18 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
    * the same job answers the same text — including the assign after a requeue.
    */
   private async initialMessageText(message: { id: string; content: string }): Promise<string> {
-    const actions = await this.db.pendingAction.findMany({
-      where: { deliveredMessageId: message.id, status: { in: [...DELIVERABLE_STATUSES] } },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    const links = await this.db.assistantActionRequest.findMany({
+      where: { deliveredMessageId: message.id, request: { status: { in: [...DELIVERABLE_STATUSES] } } },
+      orderBy: [{ createdAt: 'asc' }, { requestId: 'asc' }],
       take: MAX_DELIVERED_NOTES,
-      select: { id: true, tool: true, status: true, result: true },
+      select: { requestId: true, tool: true, request: { select: { status: true, result: true } } },
     });
-    // The status filter above pins every row to a deliverable status, which is the only shape `outcomeNote` accepts.
-    const notes = actions.map((a) => outcomeNote({ ...a, status: a.status as PendingActionStatus }));
+    const notes = links.map((link) => requestOutcomeNote({
+      requestId: link.requestId,
+      tool: link.tool,
+      status: link.request.status as (typeof DELIVERABLE_STATUSES)[number],
+      result: link.request.result,
+    }));
     return deliveryText(notes, message.content, THREAD_LIMITS.messageMaxBytes).text;
   }
 

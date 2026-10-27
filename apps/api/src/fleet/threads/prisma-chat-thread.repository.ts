@@ -24,9 +24,9 @@ import { buildWorkspaceThreadInstructions, buildProjectThreadInstructions, build
 import { sendRefusal, type ThreadSendRefusal } from './thread-send-rules';
 import { allocateThreadSeq, repoThreadFields, type ChatMessageRecord, type ChatThreadPendingAction, type ChatThreadRecord, type ChatThreadRepository, type ThreadScope, type ThreadSession, type ThreadWriteResult } from './domain/chat-thread.domain';
 import type { ThreadSkillSource } from '../../skills/skill-catalog.domain';
-import { MAX_PENDING_ACTIONS, type PendingActionStatus } from '../assistant/actions/pending-action.domain';
+import { MAX_PENDING_ACTIONS } from '../assistant/actions/pending-action.domain';
 import { DELIVERABLE_STATUSES, MAX_DELIVERED_NOTES, deliveryText } from '../assistant/actions/outcome-delivery';
-import { outcomeNote } from '../assistant/actions/outcome-note';
+import { requestOutcomeNote } from '../assistant/requests/request-outcome-note';
 import type { ChatThreadKind, ThreadAction, ThreadBackend } from '../common/thread-jobs';
 import { THREAD_LIMITS } from '../common/thread-jobs';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
@@ -427,18 +427,22 @@ export class PrismaChatThreadRepository implements ChatThreadRepository {
    * runner path carries: `userText` itself when no note fits or none is undelivered.
    */
   private async deliverOutcomeNotes(threadId: string, messageId: string, userText: string): Promise<string> {
-    const actions = await this.prisma.client.pendingAction.findMany({
-      where: { threadId, status: { in: [...DELIVERABLE_STATUSES] }, deliveredAt: null },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    const links = await this.prisma.client.assistantActionRequest.findMany({
+      where: { threadId, deliveredAt: null, request: { status: { in: [...DELIVERABLE_STATUSES] } } },
+      orderBy: [{ createdAt: 'asc' }, { requestId: 'asc' }],
       take: MAX_DELIVERED_NOTES,
-      select: { id: true, tool: true, status: true, result: true },
+      select: { requestId: true, tool: true, request: { select: { status: true, result: true } } },
     });
-    // The status filter pins every row to a deliverable status, the only shape `outcomeNote` accepts.
-    const notes = actions.map((action) => outcomeNote({ ...action, status: action.status as PendingActionStatus }));
+    const notes = links.map((link) => requestOutcomeNote({
+      requestId: link.requestId,
+      tool: link.tool,
+      status: link.request.status as (typeof DELIVERABLE_STATUSES)[number],
+      result: link.request.result,
+    }));
     const { text, delivered } = deliveryText(notes, userText, THREAD_LIMITS.messageMaxBytes);
     if (delivered > 0) {
-      await this.prisma.client.pendingAction.updateMany({
-        where: { id: { in: actions.slice(0, delivered).map((action) => action.id) } },
+      await this.prisma.client.assistantActionRequest.updateMany({
+        where: { requestId: { in: links.slice(0, delivered).map((link) => link.requestId) }, deliveredAt: null },
         data: { deliveredAt: new Date(), deliveredMessageId: messageId },
       });
     }

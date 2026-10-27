@@ -1,7 +1,7 @@
 import { PrismaFleetJobRepository } from './prisma-fleet-job.repository';
 import { DELIVERY_HEADER } from '../assistant/actions/outcome-delivery';
-import { outcomeNote } from '../assistant/actions/outcome-note';
-import type { PendingActionStatus } from '../assistant/actions/pending-action.domain';
+import { requestOutcomeNote } from '../assistant/requests/request-outcome-note';
+import type { ApprovalRequestStatus } from '../../../approvals/domain/approval.domain';
 
 /**
  * US-001 AC-13: findThreadAssign returns the thread's title on the ASSIGN's thread block.
@@ -80,8 +80,10 @@ describe('PrismaFleetJobRepository.findThreadAssign kind (US-005 AC-13)', () => 
  * message. The PG round-trip lives in test/integration/fleet/assistant-action-delivery.integration.spec.ts.
  */
 describe('PrismaFleetJobRepository.findThreadAssign delivery text (2aw US-001)', () => {
-  const noteRow = (over: Partial<{ id: string; tool: string; status: PendingActionStatus; result: string | null }> = {}) => ({
-    id: 'a1', tool: 'koda_add_comment', status: 'REJECTED' as PendingActionStatus, result: null, ...over,
+  const noteRow = (over: Partial<{ requestId: string; tool: string; status: ApprovalRequestStatus; result: unknown }> = {}) => ({
+    requestId: over.requestId ?? 'a1',
+    tool: over.tool ?? 'koda_add_comment',
+    request: { status: over.status ?? 'rejected', result: over.result ?? null },
   });
 
   const stub = (opts: { initialMessageId: string | null; delivered?: ReturnType<typeof noteRow>[]; content?: string }) => {
@@ -103,32 +105,32 @@ describe('PrismaFleetJobRepository.findThreadAssign delivery text (2aw US-001)',
         return Object.fromEntries(Object.keys(args.select).map((k) => [k, row[k]]));
       }),
     };
-    const pendingAction = { findMany: vi.fn(async () => opts.delivered ?? []) };
-    const repo = new PrismaFleetJobRepository({ client: { fleetThreadTurn, chatThread, chatMessage, pendingAction } } as never);
-    return { repo, pendingAction };
+    const assistantActionRequest = { findMany: vi.fn(async () => opts.delivered ?? []) };
+    const repo = new PrismaFleetJobRepository({ client: { fleetThreadTurn, chatThread, chatMessage, assistantActionRequest } } as never);
+    return { repo, assistantActionRequest };
   };
 
   it('delivers the notes of the actions delivered on the initial message, in order, above the content', async () => {
-    const first = noteRow({ id: 'a1', status: 'EXECUTED', result: 'did it' });
-    const second = noteRow({ id: 'a2', status: 'REJECTED' });
+    const first = noteRow({ requestId: 'a1', status: 'executed', result: { text: 'did it' } });
+    const second = noteRow({ requestId: 'a2', status: 'rejected' });
     const { repo } = stub({ initialMessageId: 'm1', delivered: [first, second] });
 
     const assign = await repo.findThreadAssign('j1');
 
     expect(assign?.initialMessage).toEqual({
       messageId: 'm1',
-      text: `${DELIVERY_HEADER}\n${outcomeNote(first)}\n${outcomeNote(second)}\n\ngo`,
+      text: `${DELIVERY_HEADER}\n${requestOutcomeNote({ requestId: first.requestId, tool: first.tool, status: first.request.status, result: first.request.result })}\n${requestOutcomeNote({ requestId: second.requestId, tool: second.tool, status: second.request.status, result: second.request.result })}\n\ngo`,
     });
   });
 
   it('reads the actions delivered on that message, oldest first, and only the deliverable statuses', async () => {
-    const { repo, pendingAction } = stub({ initialMessageId: 'm1', delivered: [] });
+    const { repo, assistantActionRequest } = stub({ initialMessageId: 'm1', delivered: [] });
 
     await repo.findThreadAssign('j1');
 
-    expect(pendingAction.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ deliveredMessageId: 'm1', status: { in: ['EXECUTED', 'FAILED', 'REJECTED', 'EXPIRED'] } }),
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    expect(assistantActionRequest.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { deliveredMessageId: 'm1', request: { status: { in: ['executed', 'failed', 'rejected', 'expired', 'cancelled'] } } },
+      orderBy: [{ createdAt: 'asc' }, { requestId: 'asc' }],
     }));
   });
 
@@ -139,14 +141,14 @@ describe('PrismaFleetJobRepository.findThreadAssign delivery text (2aw US-001)',
   });
 
   it('AC-12: answers the same text on every assign, writing nothing', async () => {
-    const { repo, pendingAction } = stub({ initialMessageId: 'm1', delivered: [noteRow()] });
+    const { repo, assistantActionRequest } = stub({ initialMessageId: 'm1', delivered: [noteRow()] });
 
     const first = await repo.findThreadAssign('j1');
     const second = await repo.findThreadAssign('j1');
 
     expect(second?.initialMessage).toEqual(first?.initialMessage);
-    expect(pendingAction.findMany).toHaveBeenCalledTimes(2);
-    expect(pendingAction).not.toHaveProperty('update');
+    expect(assistantActionRequest.findMany).toHaveBeenCalledTimes(2);
+    expect(assistantActionRequest).not.toHaveProperty('update');
   });
 
   it('AC-10: reads no actions and answers initialMessage null when the turn has no initial message', async () => {
