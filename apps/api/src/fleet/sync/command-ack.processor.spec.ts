@@ -41,7 +41,7 @@ function makeProcessor(commandRecord: FleetCommandRecord) {
   const transitions = { apply: vi.fn(async () => ({ job: runningJob, live: JOB_LIVE, approvalLive: [APPROVAL_LIVE] })) };
   const fence = { holds: vi.fn(() => true), abandon: vi.fn() };
   const activity = { record: vi.fn() };
-  const approvals = { lockById: vi.fn(), setOutcome: vi.fn() };
+  const approvals = { lockByRequest: vi.fn(), setOutcome: vi.fn() };
   const tx = { run: (fn: () => unknown) => fn() };
   const processor = new CommandAckProcessor(repo as never, transitions as never, fence as never, activity as never, approvals as never, tx as never, mockAuditRecorder);
   const seedCommand = (c: FleetCommandRecord) => { cmd = c; };
@@ -147,7 +147,7 @@ describe('APPROVAL_ANSWER acks (spec §3, plan D268)', () => {
     const { processor, approvals, transitions, seedCommand, seedJob } = makeProcessor(command({ type: 'APPROVAL_ANSWER', leaseEpoch: 2, payload: { approvalId: 'a1', naxAskId: 'ask-1', choice: 'allow' } }));
     seedCommand({ id: 'c1', type: 'APPROVAL_ANSWER', runnerId: 'r1', jobId: 'j1', leaseEpoch: 2, payload: { approvalId: 'a1', naxAskId: 'ask-1', choice: 'allow' }, createdAt: NOW, deliveredAt: NOW, ackedAt: null, ackResult: null });
     seedJob({ ...runningJob, id: 'j1', runnerId: 'r1', leaseEpoch: 2, state: 'RUNNING' });
-    approvals.lockById.mockResolvedValue({ id: 'a1', outcome: null });
+    approvals.lockByRequest.mockResolvedValue({ requestId: 'a1', outcome: null });
     approvals.setOutcome.mockImplementation(async () => {
       expect(currentBookkeepingReason()).toBe('runner.command-ack');
     });
@@ -155,5 +155,48 @@ describe('APPROVAL_ANSWER acks (spec §3, plan D268)', () => {
     expect(approvals.setOutcome).toHaveBeenCalledWith('a1', { delivery: { result, detail: detail ?? null, at: NOW.toISOString() } });
     expect(out.live).toEqual([]);
     expect(transitions.apply).not.toHaveBeenCalled();
+  });
+
+  it('AC-2: truncates an error detail to 200 characters', async () => {
+    const { processor, approvals } = makeProcessor(command({ type: 'APPROVAL_ANSWER', payload: { approvalId: 'request-1' } }));
+    approvals.lockByRequest.mockResolvedValue({ requestId: 'request-1', outcome: null });
+    const detail = 'x'.repeat(300);
+
+    await processor.process('r1', 'boot-1', [{ commandId: 'cmd-1', leaseEpoch: 1, result: 'rejected', detail }], NOW);
+
+    expect(approvals.setOutcome).toHaveBeenCalledWith('request-1', {
+      delivery: { result: 'rejected', detail: 'x'.repeat(200), at: NOW.toISOString() },
+    });
+  });
+
+  it('AC-3: preserves existing link outcome fields', async () => {
+    const { processor, approvals } = makeProcessor(command({ type: 'APPROVAL_ANSWER', payload: { approvalId: 'request-2' } }));
+    approvals.lockByRequest.mockResolvedValue({ requestId: 'request-2', outcome: { resumedAmountUsd: '12.50' } });
+
+    await processor.process('r1', 'boot-1', [{ commandId: 'cmd-1', leaseEpoch: 1, result: 'ok' }], NOW);
+
+    expect(approvals.setOutcome).toHaveBeenCalledWith('request-2', {
+      resumedAmountUsd: '12.50', delivery: { result: 'ok', detail: null, at: NOW.toISOString() },
+    });
+  });
+
+  it('AC-4: does not look up or write a link for a null approvalId, but persists the ack', async () => {
+    const { processor, approvals, repo } = makeProcessor(command({ type: 'APPROVAL_ANSWER', payload: { approvalId: null } }));
+
+    await processor.process('r1', 'boot-1', [{ commandId: 'cmd-1', leaseEpoch: 1, result: 'ok' }], NOW);
+
+    expect(approvals.lockByRequest).not.toHaveBeenCalled();
+    expect(approvals.setOutcome).not.toHaveBeenCalled();
+    expect(repo.ackCommand).toHaveBeenCalledWith('cmd-1', 'ok', NOW);
+  });
+
+  it('AC-5: does not write an outcome when approvalId has no link', async () => {
+    const { processor, approvals } = makeProcessor(command({ type: 'APPROVAL_ANSWER', payload: { approvalId: 'unknown' } }));
+    approvals.lockByRequest.mockResolvedValue(null);
+
+    await processor.process('r1', 'boot-1', [{ commandId: 'cmd-1', leaseEpoch: 1, result: 'ok' }], NOW);
+
+    expect(approvals.lockByRequest).toHaveBeenCalledWith('unknown');
+    expect(approvals.setOutcome).not.toHaveBeenCalled();
   });
 });

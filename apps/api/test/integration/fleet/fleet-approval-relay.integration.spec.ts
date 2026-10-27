@@ -450,8 +450,14 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
 
     const answer = (await sync()).commands.find((c) => c.type === 'APPROVAL_ANSWER' && c.jobId === jobId);
     expect(answer?.payload).toEqual({ approvalId: link!.requestId, naxAskId: 'ask-00000019', choice: 'allow' });
+    const ackedAt = new Date();
     await sync({ commandAcks: [{ commandId: answer!.commandId, leaseEpoch, result: 'ok' }] });
     expect((await requestOf(link!.requestId)).status).toBe('executed');
+    expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId: link!.requestId } })).outcome)
+      .toEqual({ delivery: { result: 'ok', detail: null, at: expect.any(String) } });
+    const delivery = (await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId: link!.requestId } })).outcome as { delivery: { at: string } };
+    expect(new Date(delivery.delivery.at).getTime()).toBeGreaterThanOrEqual(ackedAt.getTime());
+    expect(new Date(delivery.delivery.at).getTime()).toBeLessThanOrEqual(Date.now());
 
     await finish(jobId, leaseEpoch, 3);
   });

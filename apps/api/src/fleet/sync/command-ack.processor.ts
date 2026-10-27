@@ -5,7 +5,7 @@ import { FleetCommandAckResult, FleetCommandType, FleetJobState } from '../../co
 import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
-import { APPROVAL_REPOSITORY, type IApprovalRepository } from '../approvals/domain/approval.domain';
+import { FleetApprovalAskStore } from '../approvals/fleet-approval-ask.store';
 import type { CommandAck } from '../common/protocol';
 import { canTransition } from '../jobs/job-state';
 import { JobTransitionsService } from '../jobs/job-transitions.service';
@@ -27,7 +27,7 @@ export class CommandAckProcessor {
     private readonly transitions: JobTransitionsService,
     private readonly fence: FenceService,
     private readonly activity: FleetActivityService,
-    @Inject(APPROVAL_REPOSITORY) private readonly approvals: Pick<IApprovalRepository, 'lockById' | 'setOutcome'>,
+    private readonly approvalAsks: FleetApprovalAskStore,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly audit: AuditRecorder,
     private readonly threadEffects?: ThreadJobEffects,
@@ -77,11 +77,13 @@ export class CommandAckProcessor {
     const detail = (ack.detail ?? '').slice(0, 200);
 
     if (command.type === FleetCommandType.APPROVAL_ANSWER) {
-      // Spec §3 / plan D268: the delivery result is shown on the approval; no transition, no live event.
+      // US-008: delivery is recorded on the fleet link; the job is locked above.
       const { approvalId } = command.payload as { approvalId?: unknown };
-      const approval = typeof approvalId === 'string' ? await this.approvals.lockById(approvalId) : null;   // job locked above
-      if (approval) {
-        await bookkeeping('runner.command-ack', () => this.approvals.setOutcome(approval.id, { ...(approval.outcome ?? {}), delivery: { result: ack.result, detail: ack.detail ? detail : null, at: now.toISOString() } }));
+      if (typeof approvalId === 'string') {
+        const link = await this.approvalAsks.lockByRequest(approvalId);
+        if (link) {
+          await bookkeeping('runner.command-ack', () => this.approvalAsks.setOutcome(approvalId, { ...(link.outcome ?? {}), delivery: { result: ack.result, detail: ack.detail ? detail : null, at: now.toISOString() } }));
+        }
       }
       return NO_CHANGE;
     }
