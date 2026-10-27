@@ -330,8 +330,9 @@ export class PrismaFleetJobRepository implements IFleetJobRepository {
     return r ? toCommand(r) : null;
   }
 
-  async ackCommand(id: string, result: string, now: Date): Promise<void> {
-    await this.db.fleetCommand.updateMany({ where: { id, ackedAt: null }, data: { ackedAt: now, ackResult: result } });
+  async ackCommand(id: string, result: string, now: Date): Promise<boolean> {
+    const { count } = await this.db.fleetCommand.updateMany({ where: { id, ackedAt: null }, data: { ackedAt: now, ackResult: result } });
+    return count > 0;
   }
 
   async findPendingCommand(f: { jobId: string; type: FleetCommandType; runnerId?: string; leaseEpoch?: number }): Promise<FleetCommandRecord | null> {

@@ -32,7 +32,7 @@ function makeProcessor(commandRecord: FleetCommandRecord) {
   const repo = {
     findCommand: vi.fn(async () => cmd),
     lockById: vi.fn(async () => job),
-    ackCommand: vi.fn(),
+    ackCommand: vi.fn(async () => true),
     findRunnerHeld: vi.fn(async () => []),
     findPendingCommand: vi.fn(async () => null),
     update: vi.fn(),
@@ -74,7 +74,7 @@ describe('CommandAckProcessor live lists (S1.5 2a)', () => {
 
   it('marks the exact command ack write as runner.command-ack', async () => {
     const { processor, repo } = makeProcessor(command({ type: 'ASSIGN' }));
-    repo.ackCommand.mockImplementation(async () => { expect(currentBookkeepingReason()).toBe('runner.command-ack'); });
+    repo.ackCommand.mockImplementation(async () => { expect(currentBookkeepingReason()).toBe('runner.command-ack'); return true; });
     await processor.process('r1', 'boot-1', [{ commandId: 'cmd-1', leaseEpoch: 1, result: 'ok' }], NOW);
     expect(repo.ackCommand).toHaveBeenCalledTimes(1);
   });
@@ -155,6 +155,23 @@ describe('APPROVAL_ANSWER acks (spec §3, plan D268)', () => {
     expect(approvals.setOutcome).toHaveBeenCalledWith('a1', { delivery: { result, detail: detail ?? null, at: NOW.toISOString() } });
     expect(out.live).toEqual([]);
     expect(transitions.apply).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite delivery when a concurrent duplicate ack loses the conditional ack write', async () => {
+    const { processor, approvals, repo } = makeProcessor(command({ type: 'APPROVAL_ANSWER', payload: { approvalId: 'request-race' } }));
+    approvals.lockByRequest.mockResolvedValue({ requestId: 'request-race', outcome: null });
+    repo.ackCommand.mockImplementation(async (_id, result) => result === 'ok');
+
+    await Promise.all([
+      processor.process('r1', 'boot-1', [{ commandId: 'cmd-1', leaseEpoch: 1, result: 'ok' }], NOW),
+      processor.process('r1', 'boot-1', [{ commandId: 'cmd-1', leaseEpoch: 1, result: 'rejected', detail: 'late duplicate' }], new Date(NOW.getTime() + 1_000)),
+    ]);
+
+    expect(repo.ackCommand).toHaveBeenCalledTimes(2);
+    expect(approvals.setOutcome).toHaveBeenCalledTimes(1);
+    expect(approvals.setOutcome).toHaveBeenCalledWith('request-race', {
+      delivery: { result: 'ok', detail: null, at: NOW.toISOString() },
+    });
   });
 
   it('AC-2: truncates an error detail to 200 characters', async () => {

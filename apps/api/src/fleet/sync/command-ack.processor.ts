@@ -63,11 +63,12 @@ export class CommandAckProcessor {
     }
     const job = await this.repo.lockById(command.jobId);
     if (!job || !this.fence.holds(job, runnerId, command.leaseEpoch)) {
-      await bookkeeping('runner.command-ack', () => this.repo.ackCommand(command.id, FleetCommandAckResult.STALE, now));
-      if (job) await this.fence.abandon(runnerId, job, command.leaseEpoch);
+      const acknowledged = await bookkeeping('runner.command-ack', () => this.repo.ackCommand(command.id, FleetCommandAckResult.STALE, now));
+      if (acknowledged && job) await this.fence.abandon(runnerId, job, command.leaseEpoch);
       return NO_CHANGE;
     }
-    await bookkeeping('runner.command-ack', () => this.repo.ackCommand(command.id, ack.result, now));
+    const acknowledged = await bookkeeping('runner.command-ack', () => this.repo.ackCommand(command.id, ack.result, now));
+    if (!acknowledged) return NO_CHANGE;
     if (command.type === FleetCommandType.THREAD_INPUT || command.type === FleetCommandType.THREAD_ANSWER || command.type === FleetCommandType.THREAD_PUBLISH) {
       const threadEffects = this.threadEffects;
       if (threadEffects) await bookkeeping('thread.input-ack', () => threadEffects.onInputAck(command, ack.result, (ack.detail ?? '').slice(0, 200)));

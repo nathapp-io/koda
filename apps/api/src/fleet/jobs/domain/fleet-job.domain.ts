@@ -266,7 +266,8 @@ export interface IFleetJobRepository {
   findPendingCommands(runnerId: string): Promise<FleetCommandRecord[]>;
   markDelivered(ids: readonly string[], now: Date): Promise<void>;
   findCommand(id: string): Promise<FleetCommandRecord | null>;
-  ackCommand(id: string, result: string, now: Date): Promise<void>;
+  /** Conditionally acknowledges a pending command; false means another ack/withdrawal already won. */
+  ackCommand(id: string, result: string, now: Date): Promise<boolean>;
   findPendingCommand(filter: { jobId: string; type: FleetCommandType; runnerId?: string; leaseEpoch?: number }): Promise<FleetCommandRecord | null>;
   /** Plan D4: marks the job's pending non-ABANDON commands withdrawn; returns how many. With `types`, only those types (plan D263: RUNNING -> UPLOADING). */
   withdrawPendingCommands(jobId: string, now: Date, opts?: { types?: readonly FleetCommandType[] }): Promise<number>;
