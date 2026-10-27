@@ -1645,6 +1645,7 @@ model ApprovalDecision {
   deciderId   String
   decision    String          // approve | reject
   comment     String?
+  params      Json?           // the decider's choice, as the command's parseDecision froze it
   decidedAt   DateTime        @default(now())
   request     ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
 

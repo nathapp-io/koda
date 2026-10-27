@@ -49,6 +49,24 @@ export interface TestCommandDeps {
   audit?: TestCommandAudit;
 }
 
+/** The `parseDecision` switch: while set, the command carries the hook with this behaviour. */
+export interface TestParseDecisionState {
+  /** Every call, in order, with the arguments the decision service passed. */
+  calls: Array<{ decision: 'approve' | 'reject'; params: unknown; input: TestCommandInput }>;
+  /** The value the hook answers; `undefined` answers undefined. */
+  result: unknown;
+  /** The hook throws `TypeError('test parse refused')` instead of answering. */
+  throws: boolean;
+}
+
+/** The `onReject` switch: while set, the command carries the hook with this behaviour. */
+export interface TestRejectState {
+  /** Every call, in order, with the arguments the decision service passed. */
+  calls: Array<{ input: TestCommandInput; decision: unknown }>;
+  /** The hook records its call, then throws this error. */
+  throws: Error | null;
+}
+
 /**
  * The switches a case flips. `reset()` turns every one of them off (and empties `calls`), so a case
  * never inherits the previous case's behaviour.
@@ -69,6 +87,10 @@ export interface TestCommandState {
   recordAudit: boolean;
   /** Used as the command's `toResult` while set; the command carries none otherwise. */
   toResult: ((result: string) => unknown) | null;
+  /** Used as the command's `parseDecision` while set; the command carries none otherwise. */
+  parseDecision: TestParseDecisionState | null;
+  /** Used as the command's `onReject` while set; the command carries none otherwise. */
+  onReject: TestRejectState | null;
 }
 
 export interface ConfigurableTestCommand {
@@ -104,6 +126,28 @@ export function configurableTestCommand(key: string, deps: TestCommandDeps = {})
     get toResult(): ((result: string) => unknown) | undefined {
       return state.toResult ?? undefined;
     },
+    // Getters for the same reason as `toResult`: the decision service refuses params unless the
+    // command carries `parseDecision`, and only calls `onReject` when the command carries one.
+    get parseDecision(): ((decision: 'approve' | 'reject', params: unknown, input: TestCommandInput) => unknown) | undefined {
+      const switchState = state.parseDecision;
+      if (switchState === null) return undefined;
+
+      return (decision, params, input) => {
+        switchState.calls.push({ decision, params, input });
+        if (switchState.throws) throw new TypeError(PARSE_REFUSED);
+
+        return switchState.result;
+      };
+    },
+    get onReject(): ((input: TestCommandInput, decision: unknown) => Promise<void>) | undefined {
+      const switchState = state.onReject;
+      if (switchState === null) return undefined;
+
+      return async (input, decision) => {
+        switchState.calls.push({ input, decision });
+        if (switchState.throws !== null) throw switchState.throws;
+      };
+    },
   };
 
   return {
@@ -126,6 +170,8 @@ function freshState(): TestCommandState {
     writeLabel: null,
     recordAudit: false,
     toResult: null,
+    parseDecision: null,
+    onReject: null,
   };
 }
 

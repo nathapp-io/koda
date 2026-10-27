@@ -48,4 +48,6 @@ export interface ApprovalRequestRecord {
 export interface ApprovalDecisionRecord {
   id: string; requestId: string; deciderType: 'USER' | 'AGENT'; deciderId: string;
   decision: 'approve' | 'reject'; comment: string | null; decidedAt: Date;
+  /** The decider's choice as the command's `parseDecision` froze it; null when the decision carried none. */
+  params: unknown;
 }

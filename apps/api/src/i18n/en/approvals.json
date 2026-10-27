@@ -10,6 +10,7 @@
   "notPending": { "409": "The approval request is already {status}" },
   "expired": { "409": "The approval request has expired" },
   "decideForbidden": { "403": "You cannot decide this approval request: {reason}" },
+  "invalidDecisionParams": { "400": "Invalid decision params: {reason}", "-2": "Invalid decision params: {reason}" },
   "cancelForbidden": {
     "403": "Only the requester can cancel this approval request",
     "40003": "Only the requester can cancel this approval request"

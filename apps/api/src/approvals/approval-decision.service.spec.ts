@@ -3,6 +3,7 @@ import { decideEligibility } from './approval-eligibility';
 import { currentContext, runWithActionContext } from '../action-context/action-context';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
 import type { ApprovalExecutionService } from './approval-execution.service';
+import type { ApprovalCommandRegistry } from './approval-command.registry';
 import type { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
 import type { PermissionService } from '../permissions/permission.service';
 import type { AuditRecorder } from '../audit/audit-recorder.service';
@@ -29,11 +30,13 @@ function setup() {
   const tx = { run: vi.fn((fn: () => Promise<unknown>) => fn()), getClient: vi.fn(), isInTransaction: vi.fn(() => true) };
   const execution = { execute: vi.fn().mockImplementation(async () => ({ ...request, status: 'executed' })) };
   const events = { record: vi.fn().mockResolvedValue(undefined) };
+  const registry = { get: vi.fn().mockReturnValue(undefined) };
   const service = new ApprovalDecisionService(tx as ITransactionManager, repo as unknown as PrismaApprovalRequestRepository,
-    permissions as unknown as PermissionService, audit as unknown as AuditRecorder, execution as unknown as ApprovalExecutionService, events as never);
+    permissions as unknown as PermissionService, audit as unknown as AuditRecorder, execution as unknown as ApprovalExecutionService, events as never,
+    registry as unknown as ApprovalCommandRegistry);
   const decide = (decision: 'approve' | 'reject' = 'approve') => runWithActionContext(
     { actor: { type: 'USER', id: 'u1' }, origin: 'rest' }, () => service.decide('r1', decision, decision === 'reject' ? 'no' : null, now));
-  return { request, repo, keys, permissions, audit, approvals, tx, execution, events, service, decide };
+  return { request, repo, keys, permissions, audit, approvals, tx, execution, events, registry, service, decide };
 }
 
 beforeEach(() => { vi.mocked(decideEligibility).mockReset().mockReturnValue({ ok: true, satisfiedBy: 'human' }); });
@@ -61,7 +64,7 @@ it('records rejection and its approval context in the same transaction', async (
   const s = setup();
   expect(await s.decide('reject')).toMatchObject({ status: 'rejected', decidedAt: now });
   expect(s.tx.run).toHaveBeenCalledTimes(1);
-  expect(s.repo.createDecision).toHaveBeenCalledWith({ requestId: 'r1', deciderType: 'USER', deciderId: 'u1', decision: 'reject', comment: 'no', decidedAt: now });
+  expect(s.repo.createDecision).toHaveBeenCalledWith({ requestId: 'r1', deciderType: 'USER', deciderId: 'u1', decision: 'reject', comment: 'no', decidedAt: now, params: null });
   expect(s.approvals).toEqual([{ requiredMode: 'agent', satisfiedBy: 'none', requestId: 'r1' }]);
   expect(s.events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'r1', status: 'rejected' }));
   expect(s.audit.record).toHaveBeenCalledWith({ key: 'approval.decide', resourceType: 'approval-request', resourceId: 'r1', projectId: 'p1', summary: 'rejected label.delete' });

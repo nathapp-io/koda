@@ -10,6 +10,7 @@
   "notPending": { "409": "审批请求已{status}" },
   "expired": { "409": "审批请求已过期" },
   "decideForbidden": { "403": "您不能决定此审批请求：{reason}" },
+  "invalidDecisionParams": { "400": "无效的决定参数：{reason}", "-2": "无效的决定参数：{reason}" },
   "cancelForbidden": {
     "403": "只有请求者可以取消此审批请求",
     "40003": "只有请求者可以取消此审批请求"

@@ -89,6 +89,38 @@ describe('configurableTestCommand', () => {
     expect(command.toResult?.('done')).toEqual({ deleted: 1 });
   });
 
+  it('carries parseDecision only while a case asks for one, recording each call and its answer', () => {
+    const { command, state } = configurableTestCommand('label.delete');
+    expect(command.parseDecision).toBeUndefined();
+
+    state.parseDecision = { calls: [], result: { remember: true }, throws: false };
+    expect(command.parseDecision?.('approve', { remember: true }, { labelId: 'l1' })).toEqual({ remember: true });
+    expect(state.parseDecision.calls).toEqual([{ decision: 'approve', params: { remember: true }, input: { labelId: 'l1' } }]);
+
+    state.parseDecision.throws = true;
+    expect(() => command.parseDecision?.('reject', undefined, { labelId: 'l1' })).toThrow('test parse refused');
+
+    state.parseDecision = null;
+    expect(command.parseDecision).toBeUndefined();
+  });
+
+  it('carries onReject only while a case asks for one, recording each call and throwing when set', async () => {
+    const { command, state } = configurableTestCommand('label.delete');
+    expect(command.onReject).toBeUndefined();
+
+    state.onReject = { calls: [], throws: null };
+    await command.onReject?.({ labelId: 'l1' }, { choice: 'deny' });
+    expect(state.onReject.calls).toEqual([{ input: { labelId: 'l1' }, decision: { choice: 'deny' } }]);
+
+    const failure = new Error('reject refused');
+    state.onReject.throws = failure;
+    await expect(command.onReject?.({ labelId: 'l1' }, undefined)).rejects.toBe(failure);
+    expect(state.onReject.calls).toHaveLength(2);
+
+    state.onReject = null;
+    expect(command.onReject).toBeUndefined();
+  });
+
   it('turns every state field off on reset()', () => {
     const { state, reset } = configurableTestCommand('label.delete');
     Object.assign(state, {
@@ -99,6 +131,8 @@ describe('configurableTestCommand', () => {
       writeLabel: { projectId: 'p1', name: 'bug' },
       recordAudit: true,
       toResult: () => null,
+      parseDecision: { calls: [], result: 'ok', throws: false },
+      onReject: { calls: [], throws: null },
     });
 
     reset();
@@ -112,6 +146,8 @@ describe('configurableTestCommand', () => {
       writeLabel: null,
       recordAudit: false,
       toResult: null,
+      parseDecision: null,
+      onReject: null,
     });
   });
 
