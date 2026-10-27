@@ -139,4 +139,27 @@ integration('fleet budget override command through ApprovalDecisionService', () 
     expect(await approve({ amountUsd: 20 }))
       .toMatchObject({ status: 'failed', result: { error: 'execution-failed', name: 'ConflictAppException' } });
   });
+
+  it('AC-12 (US-007): approving one ask supersedes the policy\'s other pending ask and records its cancellation', async () => {
+    const otherId = (await seedFleetAsk(db, {
+      kind: 'budget', projectId, expiresAt: new Date('2030-01-01T00:00:00Z'),
+      input: {
+        policyId, scopeType: 'project', scopeId: projectId, windowKind: 'lifetime',
+        windowStart: '1970-01-01T00:00:00.000Z', spentUsd: '10', amountUsd: '10', requestedAt: requestedAt.toISOString(),
+      },
+      link: { budgetPolicyId: policyId },
+    })).requestId;
+
+    await approve({ amountUsd: 20 });
+
+    // The executing request is `approved` by then, so the closer found the other one — the ask a hard stop opened
+    // while this approve was executing, whose own close was skipped by the lock rule.
+    expect(await db.approvalRequest.findUniqueOrThrow({ where: { id: otherId } }))
+      .toMatchObject({ status: 'cancelled', result: { closedBy: 'superseded' } });
+    expect((await db.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId: otherId } })).resolvedBy).toBe('superseded');
+    expect(await db.fleetActivity.findMany({ where: { entityType: 'approval', entityId: otherId, action: 'approval.cancelled' } }))
+      .toMatchObject([{ actorType: 'USER', actorId: userId }]);
+    // The ask this approve executed is untouched by its own supersede step.
+    expect(await db.approvalRequest.findUniqueOrThrow({ where: { id: requestId } })).toMatchObject({ status: 'executed' });
+  });
 });

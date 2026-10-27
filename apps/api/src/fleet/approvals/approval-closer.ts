@@ -82,9 +82,9 @@ const closedAction = (a: Pick<FleetApprovalRecord, 'status'>): string =>
  * S1.5 §2.1: the narrow port budgets and jobs use to open and close approvals inside their own transactions. Budget
  * callers hold the BudgetPolicy lock, bash callers the FleetJob lock (lock order, spec §1.4).
  *
- * Permissions P3 (US-006): the bash half is an ask on the approval engine — `ApprovalAskService` decides whether it
- * needs approval at all — linked back to the job by `FleetApprovalAskStore`. The budget half and `expire` still use
- * the legacy `IApprovalRepository` until US-007 and US-012.
+ * Permissions P3 (US-006, US-007): both halves are asks on the approval engine — `ApprovalAskService` decides whether
+ * one is needed at all — linked back to the job or budget policy by `FleetApprovalAskStore`. Only `expire` still uses
+ * the legacy `IApprovalRepository`, which US-012 removes.
  */
 @Injectable()
 export class ApprovalCloser {
@@ -104,29 +104,59 @@ export class ApprovalCloser {
   async openBudget(policy: BudgetPolicyRecord, at: { windowStart: Date; spentUsd: string }, now: Date): Promise<ApprovalChange> {
     const system = systemActor(policy);
     const stray = await this.closeForPolicy(policy.id, { status: 'cancelled', resolvedBy: 'superseded', actor: system }, now);
-    const approval = await this.repo.create({
-      type: 'budget_override_required', projectId: policy.projectId, policyId: policy.id, requestedAt: now,
-      payload: {
-        scopeType: policy.scopeType, scopeId: policy.scopeId, windowKind: policy.windowKind,
+    // Permissions P3 US-007: the ask is the engine's, so it expires with the policy timeout (24 h without one) and a
+    // decider works the policy through the registered `fleet.budget.override` command.
+    const outcome = await this.askService.open({
+      key: 'fleet.budget.override',
+      projectId: policy.projectId,
+      component: 'budget',
+      onBehalfOf: null,
+      origin: 'system',
+      input: {
+        policyId: policy.id, scopeType: policy.scopeType, scopeId: policy.scopeId, windowKind: policy.windowKind,
         windowStart: at.windowStart.toISOString(), spentUsd: at.spentUsd, amountUsd: policy.amountUsd,
+        // The re-queue candidates are the jobs cancelled for the policy from here on.
+        requestedAt: now.toISOString(),
       },
-    });
-    await this.record(approval, system, 'approval.requested');
-    await this.dispatch(approval, 'fleet.approval.requested');
-    await this.enqueueRequested(approval);
-    return { approval, live: [...stray.live, ...this.livePublisher.event(approval)] };
+      deadline: null,
+    }, now);
+    // `fleet.budget.override`'s floor is `self`, so a policy can never resolve this ask to `none`: a hard stop that
+    // asked nobody would pause every job with nothing to resume it.
+    if (outcome.status === 'not-needed') throw new Error('budget override resolved to none');
+
+    const requestId = outcome.request.id;
+    await this.store.insert({ requestId, kind: 'budget', projectId: policy.projectId, budgetPolicyId: policy.id });
+    const view = await this.store.findApproval(requestId);
+    if (view === null) throw new Error(`fleet budget ask ${requestId} has no ask link`);
+    await this.record(view, system, 'approval.requested');
+    await this.dispatch(view, 'fleet.approval.requested');
+    await this.enqueueRequested(view);
+    return { approval: view, live: [...stray.live, ...this.livePublisher.event(view)] };
   }
 
+  /**
+   * Permissions P3 US-007: the pending ask of a policy closes on the engine. The engine status is always
+   * `cancelled` — a manual resume reports `approved` through the link's `manual_resume` resolution — and a request
+   * another transaction holds is skipped, so the policy transaction completes without it. Callers read
+   * `approval?.id` for the incident's `approvalId`, which is null exactly when the close was skipped.
+   */
   async closeForPolicy(policyId: string, close: PolicyClose, now: Date): Promise<ApprovalChange> {
-    const pending = await this.repo.findPendingForPolicy(policyId);
-    if (!pending || !(await this.repo.lockById(pending.id))) return { approval: null, live: [] };
-    const decided = close.status === 'approved';
-    const approval = await this.repo.resolve(pending.id, {
-      status: close.status, resolvedBy: close.resolvedBy, decidedAt: now,
-      decision: decided ? close.decision ?? null : null, decidedById: decided && close.actor.type === 'USER' ? close.actor.id : null,
-      ...(close.outcome !== undefined ? { outcome: close.outcome } : {}),
-    });
-    return { approval, live: await this.recordResolved(approval, close.actor) };
+    const link = await this.store.findPendingForPolicy(policyId);
+    if (!link) return { approval: null, live: [] };
+    const closed = await this.askService.close(link.requestId, { status: 'cancelled', reason: close.resolvedBy }, now);
+    if (closed === null) return { approval: null, live: [] };
+
+    await this.store.setResolvedBy(link.requestId, close.resolvedBy);
+    if (close.outcome !== undefined) {
+      await this.store.setOutcome(link.requestId, {
+        ...close.outcome,
+        // The engine records the decider on the request; a manual resume's decider is the resumer in the outcome.
+        ...(close.status === 'approved' ? { resumedById: close.actor.id } : {}),
+      });
+    }
+    const view = await this.store.findApproval(link.requestId);
+    if (view === null) throw new Error(`Fleet ask ${link.requestId} closed ${close.resolvedBy} but has no view`);
+    return { approval: view, live: await this.recordResolved(view, close.actor) };
   }
 
   async recordResolved(approval: FleetApprovalRecord, actor: ApprovalActor): Promise<LiveFleetApprovalEvent[]> {

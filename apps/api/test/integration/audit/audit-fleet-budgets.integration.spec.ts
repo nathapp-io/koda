@@ -34,7 +34,8 @@ describeDb('fleet budget audit HTTP', () => {
   }, 60_000);
   afterAll(async () => { await app?.close(); });
   beforeEach(async () => {
-    await db.fleetApproval.deleteMany();
+    await db.fleetApprovalAsk.deleteMany();
+    await db.approvalRequest.deleteMany();
     await db.fleetJob.deleteMany();
     await db.budgetPolicy.deleteMany();
     await db.auditEntry.deleteMany();
@@ -79,7 +80,7 @@ describeDb('fleet budget audit HTTP', () => {
     expect(await entries(paused.id, 'fleet.budget.delete')).toEqual([expect.objectContaining({ projectId: null, summary: 'deleted while paused' })]);
   });
 
-  it('AC-11: approval decision records only the approval audit, not a route resume', async () => {
+  it('AC-11: a budget decision records only the approval audit, not a route resume', async () => {
     const policy = await db.budgetPolicy.create({ data: {
       scopeType: 'project', scopeId: world.projectId, scopeKey: `project:${world.projectId}`, projectId: world.projectId,
       windowKind: 'calendar_month_utc', amountUsd: new Prisma.Decimal(10), warnPercent: null,
@@ -95,10 +96,14 @@ describeDb('fleet budget audit HTTP', () => {
       maxCostUsd: new Prisma.Decimal(20), selectorLabels: [], requestedById: world.ids.dev, state: 'QUEUED',
     } });
     await withTestActor({ type: 'SYSTEM', id: 'budget' }, () => app.get(BudgetEvaluator).evaluate(policy.id));
-    const approval = await db.fleetApproval.findFirstOrThrow({ where: { policyId: policy.id, status: 'pending' } });
-    await request(app.getHttpServer()).post(`/api/fleet/approvals/${approval.id}/decide`).set(auth('root')).send({ decision: 'raise_budget_and_resume', amountUsd: 20 }).expect(200);
+    // Permissions P3 US-007: the hard stop opens an engine ask, so the decision goes through the engine's route —
+    // the fleet decide adapter still serves `FleetApproval` until US-010.
+    const link = await db.fleetApprovalAsk.findFirstOrThrow({ where: { budgetPolicyId: policy.id } });
+    await request(app.getHttpServer()).post(`/api/approvals/${link.requestId}/decisions`).set(auth('root'))
+      .send({ decision: 'approve', params: { amountUsd: 20 } }).expect(200);
+    // The raise resumed the policy through the command, so the route's own resume audit must not appear.
     expect(await entries(policy.id, 'fleet.budget.resume')).toHaveLength(0);
-    expect(await entries(approval.id, 'fleet.approval.decide.budget')).toHaveLength(1);
+    expect(await entries(link.requestId, 'fleet.budget.override')).toHaveLength(1);
   });
 
   it('AC-9/10: records only a successful budget-page resume', async () => {

@@ -15,19 +15,30 @@ const ids = (count: number): string[] => Array.from({ length: count }, (_, index
 const candidate = (jobId: string): RequeueCandidate =>
   ({ jobId, projectId: 'project-1', feature: `f-${jobId}`, queuedAt: new Date('2026-11-01T00:00:00.000Z') });
 
-/** The command with every collaborator a double; only the members US-005 uses are meaningful. */
+/** The locked policy row `execute` reads: a project-scope policy, so its route is the project's. */
+const policyRecord = {
+  id: 'policy-1', scopeType: 'project', scopeId: 'project-1', scopeKey: 'project:project-1', projectId: 'project-1',
+  windowKind: 'calendar_month_utc', amountUsd: '10', warnPercent: null, hardStop: true, runningJobs: 'finish',
+  pausedAt: new Date('2026-11-01T00:00:00.000Z'), pausedWindowStart: new Date('2026-11-01T00:00:00.000Z'),
+  createdById: 'creator-1', updatedById: 'editor-1',
+  createdAt: new Date('2026-11-01T00:00:00.000Z'), updatedAt: new Date('2026-11-01T00:00:00.000Z'),
+};
+
+/** The command with every collaborator a double; only the members each case exercises are meaningful. */
 function build() {
   const mocks = {
     policies: { lockById: vi.fn() },
     budgets: { resume: vi.fn() },
     jobs: { requeue: vi.fn() },
     asks: { findRequeueCandidates: vi.fn().mockResolvedValue([]), findByRequest: vi.fn().mockResolvedValue(null), setOutcome: vi.fn() },
+    closer: { closeForPolicy: vi.fn().mockResolvedValue({ approval: null, live: [] }) },
+    live: { publish: vi.fn() },
     audit: { record: vi.fn() },
     txManager: { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) },
   };
   const command = new FleetBudgetOverrideCommand(
     mocks.policies as never, mocks.budgets as never, mocks.jobs as never, mocks.asks as never,
-    {} as never, {} as never, mocks.audit as never, mocks.txManager as never,
+    mocks.closer as never, mocks.live as never, mocks.audit as never, mocks.txManager as never,
   );
   return { command, mocks };
 }
@@ -149,5 +160,33 @@ describe('FleetBudgetOverrideCommand', () => {
     const { command } = build();
 
     expect(command.toResult({ resumedAmountUsd: '20', requeue: [candidate('job-a')], refused: ['gone'] })).toEqual({ resumedAmountUsd: '20' });
+  });
+
+  it('US-007 AC-12: execute closes the policy\'s other pending ask as superseded and queues its live events', async () => {
+    const { command, mocks } = build();
+    mocks.policies.lockById.mockResolvedValue(policyRecord);
+    mocks.budgets.resume.mockResolvedValue({ amountUsd: '20' });
+    const closed = { approval: { id: 'other-1' }, live: [{ approvalId: 'other-1', status: 'cancelled' }] };
+    mocks.closer.closeForPolicy.mockResolvedValue(closed);
+
+    await under(decided(), () => command.execute(input, { amountUsd: 20, requeueJobIds: [] }));
+
+    // The executing request is `approved` by now, so it is never the ask the closer finds pending.
+    expect(mocks.closer.closeForPolicy).toHaveBeenCalledWith('policy-1', {
+      status: 'cancelled', resolvedBy: 'superseded', actor: { type: 'USER', id: 'approver-1', responsibleUserId: 'approver-1' },
+    }, expect.any(Date));
+    expect(mocks.live.publish).toHaveBeenCalledWith(closed.live);
+  });
+
+  it('US-007: execute still records the new cap when the policy had no other pending ask', async () => {
+    const { command, mocks } = build();
+    mocks.policies.lockById.mockResolvedValue(policyRecord);
+    mocks.budgets.resume.mockResolvedValue({ amountUsd: '20' });
+
+    const result = await under(decided(), () => command.execute(input, { amountUsd: 20, requeueJobIds: [] }));
+
+    expect(result.resumedAmountUsd).toBe('20');
+    expect(mocks.asks.setOutcome).toHaveBeenCalledWith('request-1', { resumedAmountUsd: '20', requeueResults: [] });
+    expect(mocks.live.publish).toHaveBeenCalledWith([]);
   });
 });

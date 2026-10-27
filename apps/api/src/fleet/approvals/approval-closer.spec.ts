@@ -14,7 +14,7 @@ const policy = (over: Partial<BudgetPolicyRecord> = {}): BudgetPolicyRecord => (
   createdById: 'u0', updatedById: 'u1', createdAt: NOW, updatedAt: NOW, ...over,
 });
 
-/** The legacy `FleetApproval` repository: the budget half and `expire` still use it until US-007/US-012. */
+/** The legacy `FleetApproval` repository: only `expire` still uses it, until US-012. */
 function legacyRepo() {
   const rows = new Map<string, FleetApprovalRecord>();
   let seq = 0;
@@ -37,8 +37,10 @@ function legacyRepo() {
 }
 
 /**
- * US-006: the engine link table, as `FleetApprovalAskStore` publishes it. `insert` is the only write that creates a
- * row, so a test asserts on the link and on the view the closer reads back with the same store.
+ * US-006/US-007: the engine link table, as `FleetApprovalAskStore` publishes it. `insert` is the only write that
+ * creates a row, so a test asserts on the link and on the view the closer reads back with the same store. The view
+ * follows the two mapping rules the closer depends on: a cancelling link resolution reads `cancelled`, a
+ * `manual_resume` one reads `approved` and reports the resumer the outcome records.
  */
 function askStore() {
   const links = new Map<string, FleetApprovalAskRecord>();
@@ -54,10 +56,10 @@ function askStore() {
       };
       links.set(link.requestId, link);
       views.set(link.requestId, {
-        id: link.requestId, type: 'nax_bash_escalate', status: 'pending', projectId: link.projectId, jobId: link.jobId,
-        leaseEpoch: link.leaseEpoch, naxAskId: link.naxAskId, policyId: link.budgetPolicyId, payload: {}, outcome: null,
-        requestedAt: NOW, expiresAt: null, decision: null, decidedById: null, decidedAt: null, resolvedBy: null,
-        comment: null, createdAt: NOW, updatedAt: NOW,
+        id: link.requestId, type: d.kind === 'budget' ? 'budget_override_required' : 'nax_bash_escalate',
+        status: 'pending', projectId: link.projectId, jobId: link.jobId, leaseEpoch: link.leaseEpoch, naxAskId: link.naxAskId,
+        policyId: link.budgetPolicyId, payload: {}, outcome: null, requestedAt: NOW, expiresAt: null, decision: null,
+        decidedById: null, decidedAt: null, resolvedBy: null, comment: null, createdAt: NOW, updatedAt: NOW,
       });
       return link;
     }),
@@ -76,10 +78,26 @@ function askStore() {
       const link = { ...(links.get(requestId) as FleetApprovalAskRecord), resolvedBy };
       links.set(requestId, link);
       const view = views.get(requestId);
-      // The real view maps a cancelling link resolution to the fleet status `cancelled`.
-      if (view) views.set(requestId, { ...view, resolvedBy, status: resolvedBy === 'manual_resume' ? 'approved' : 'cancelled' });
+      // The real view maps a cancelling link resolution to the fleet status `cancelled`, and a manual resume to
+      // `approved` with the resumer's decision.
+      if (view) {
+        views.set(requestId, resolvedBy === 'manual_resume'
+          ? { ...view, resolvedBy, status: 'approved', decision: 'raise_budget_and_resume' }
+          : { ...view, resolvedBy, status: 'cancelled', decision: null });
+      }
       return link;
     }),
+    setOutcome: vi.fn(async (requestId: string, outcome: Record<string, unknown>) => {
+      const link = { ...(links.get(requestId) as FleetApprovalAskRecord), outcome };
+      links.set(requestId, link);
+      const view = views.get(requestId);
+      // `toFleetApproval` reports the resolved request's decider from the outcome's `resumedById`.
+      const resumedById = outcome['resumedById'];
+      if (view) views.set(requestId, { ...view, outcome, ...(typeof resumedById === 'string' ? { decidedById: resumedById } : {}) });
+      return link;
+    }),
+    findPendingForPolicy: vi.fn(async (budgetPolicyId: string) => [...links.values()]
+      .find((l) => l.budgetPolicyId === budgetPolicyId && views.get(l.requestId)?.status === 'pending') ?? null),
     findProjectSlug: vi.fn(async () => 'web'),
   };
 
@@ -93,7 +111,7 @@ function askStore() {
 }
 
 /** The engine's `ApprovalAskService`, as the closer uses it: it decides the ask and writes the request. */
-function askService() {
+function askService(store: ReturnType<typeof askStore>) {
   let seq = 0;
   const opened: Array<Record<string, unknown>> = [];
   const closed: Array<{ requestId: string; close: unknown }> = [];
@@ -104,8 +122,12 @@ function askService() {
       opened.push(ask);
       return { status: 'pending' as const, request: { id: `req-${++seq}` } };
     }),
+    /** Null when the request is gone or no longer pending, which is what a held request answers. */
     close: vi.fn(async (requestId: string, close: unknown) => {
       closed.push({ requestId, close });
+      const view = store.views.get(requestId);
+      if (!view || view.status !== 'pending') return null;
+      store.views.set(requestId, { ...view, status: 'cancelled' });
       return { id: requestId, status: 'cancelled' };
     }),
   };
@@ -114,7 +136,7 @@ function askService() {
 function fakes() {
   const repo = legacyRepo();
   const store = askStore();
-  const asks = askService();
+  const asks = askService(store);
   const activity = { record: vi.fn(async () => undefined) };
   const webhooks = { dispatch: vi.fn(async () => undefined) };
   const live = { event: vi.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
@@ -127,36 +149,55 @@ function fakes() {
   return { closer, repo, store, asks, activity, webhooks, outbox };
 }
 
-describe('ApprovalCloser budget half (legacy store until US-007)', () => {
-  it('opens a budget approval with the stop snapshot, activity, webhook and live event', async () => {
-    const { closer, activity, webhooks } = fakes();
-    const r = await closer.openBudget(policy(), { windowStart: NOW, spentUsd: '10.5' }, NOW);
+describe('ApprovalCloser budget half on the approval engine (US-007)', () => {
+  let closer!: ReturnType<typeof fakes>['closer'];
+  let store!: ReturnType<typeof fakes>['store'];
+  let asks!: ReturnType<typeof fakes>['asks'];
+  let activity!: ReturnType<typeof fakes>['activity'];
+  let webhooks!: ReturnType<typeof fakes>['webhooks'];
+  let outbox!: ReturnType<typeof fakes>['outbox'];
+  beforeEach(() => { ({ closer, store, asks, activity, webhooks, outbox } = fakes()); });
+  const stop = { windowStart: NOW, spentUsd: '10.5' };
+  const system = { type: 'SYSTEM' as const, id: 'system', responsibleUserId: 'u1' };
+  const resumer = { type: 'USER' as const, id: 'u9', responsibleUserId: 'u9' };
+
+  it('opens the ask on the engine as fleet.budget.override for the stop snapshot, then links it and announces the view', async () => {
+    const r = await closer.openBudget(policy(), stop, NOW);
+
+    expect(asks.open).toHaveBeenCalledWith({
+      key: 'fleet.budget.override', projectId: 'p1', component: 'budget', onBehalfOf: null, origin: 'system',
+      input: {
+        policyId: 'pol', scopeType: 'project', scopeId: 'p1', windowKind: 'calendar_month_utc',
+        windowStart: NOW.toISOString(), spentUsd: '10.5', amountUsd: '10', requestedAt: NOW.toISOString(),
+      },
+      deadline: null,
+    }, NOW);
+    expect(store.insert).toHaveBeenCalledWith({ requestId: 'req-1', kind: 'budget', projectId: 'p1', budgetPolicyId: 'pol' });
     expect(r.approval).toEqual(expect.objectContaining({
-      type: 'budget_override_required', status: 'pending', projectId: 'p1', policyId: 'pol', requestedAt: NOW,
-      payload: { scopeType: 'project', scopeId: 'p1', windowKind: 'calendar_month_utc', windowStart: NOW.toISOString(), spentUsd: '10.5', amountUsd: '10' },
+      id: 'req-1', type: 'budget_override_required', status: 'pending', projectId: 'p1', policyId: 'pol', requestedAt: NOW,
     }));
     expect(activity.record).toHaveBeenCalledWith(expect.objectContaining({
-      actorType: 'SYSTEM', action: 'approval.requested', entityType: 'approval', entityId: r.approval?.id, projectId: 'p1', responsibleUserId: 'u1',
+      actorType: 'SYSTEM', action: 'approval.requested', entityType: 'approval', entityId: 'req-1', projectId: 'p1', responsibleUserId: 'u1',
     }));
-    expect(webhooks.dispatch).toHaveBeenCalledWith('p1', 'fleet.approval.requested', expect.objectContaining({ approvalId: r.approval?.id, path: `/web/fleet/approvals?id=${r.approval?.id}` }));
-    expect(r.live).toHaveLength(1);
+    expect(webhooks.dispatch).toHaveBeenCalledWith('p1', 'fleet.approval.requested', expect.objectContaining({ approvalId: 'req-1', path: '/web/fleet/approvals?id=req-1' }));
+    expect(r.live).toEqual([{ approvalId: 'req-1', status: 'pending' }]);
   });
 
   it('enqueues a fleet_approval_requested outbox event for every fresh project budget ask (#208)', async () => {
-    const { closer, outbox } = fakes();
-    const r = await closer.openBudget(policy(), { windowStart: NOW, spentUsd: '10.5' }, NOW);
+    await closer.openBudget(policy(), stop, NOW);
     expect(outbox.record).toHaveBeenCalledWith(expect.objectContaining({
       type: 'fleet_approval_requested',
-      payload: expect.objectContaining({ approvalId: r.approval?.id, projectId: 'p1', path: `/web/fleet/approvals?id=${r.approval?.id}` }),
-      metadata: { projectId: 'p1', eventId: r.approval?.id },
+      payload: expect.objectContaining({ approvalId: 'req-1', projectId: 'p1', path: '/web/fleet/approvals?id=req-1' }),
+      metadata: { projectId: 'p1', eventId: 'req-1' },
     }));
   });
 
-  it('supersedes a stray pending approval before opening a new one', async () => {
-    const { closer, repo } = fakes();
-    const first = await closer.openBudget(policy(), { windowStart: NOW, spentUsd: '10' }, NOW);
-    const second = await closer.openBudget(policy(), { windowStart: NOW, spentUsd: '11' }, NOW);
-    expect(repo.rows.get(first.approval?.id as string)).toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'superseded' }));
+  it('supersedes the stray pending ask on the engine before opening the new one and carries both live frames', async () => {
+    const first = await closer.openBudget(policy(), stop, NOW);
+    const second = await closer.openBudget(policy(), { ...stop, spentUsd: '11' }, NOW);
+
+    expect(asks.close).toHaveBeenCalledWith('req-1', { status: 'cancelled', reason: 'superseded' }, NOW);
+    expect(store.links.get('req-1')).toEqual(expect.objectContaining({ resolvedBy: 'superseded' }));
     expect(second.approval?.status).toBe('pending');
     // The stray's live frame is carried forward alongside the new one; the caller publishes both after commit.
     expect(second.live).toEqual([
@@ -165,34 +206,66 @@ describe('ApprovalCloser budget half (legacy store until US-007)', () => {
     ]);
   });
 
-  it('sends no webhook and no live event for a policy with no project', async () => {
-    const { closer, webhooks, outbox } = fakes();
-    const r = await closer.openBudget(policy({ scopeType: 'global', scopeId: null, projectId: null }), { windowStart: NOW, spentUsd: '1' }, NOW);
+  it('opens a global policy ask with no project, and sends no webhook, outbox row or live event', async () => {
+    const r = await closer.openBudget(policy({ scopeType: 'global', scopeId: null, projectId: null }), stop, NOW);
+
+    expect(asks.open.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ projectId: null }));
+    expect(r.approval).toEqual(expect.objectContaining({ projectId: null }));
     expect(webhooks.dispatch).not.toHaveBeenCalled();
-    expect(r.live).toEqual([]);
     expect(outbox.record).not.toHaveBeenCalled();
+    expect(r.live).toEqual([]);
   });
 
-  it('closes the pending approval of a policy, or does nothing when there is none', async () => {
-    const { closer, activity, webhooks } = fakes();
-    expect(await closer.closeForPolicy('pol', { status: 'cancelled', resolvedBy: 'window_reset', actor: { type: 'SYSTEM', id: 'system', responsibleUserId: 'u1' } }, NOW))
+  it('a hard stop whose ask the engine resolves to none throws rather than pausing with no ask', async () => {
+    asks.open.mockResolvedValueOnce({ status: 'not-needed' });
+
+    await expect(closer.openBudget(policy(), stop, NOW)).rejects.toThrow('budget override resolved to none');
+    expect(store.insert).not.toHaveBeenCalled();
+  });
+
+  it('closes the pending ask of a policy on the engine and stamps the link, or answers nothing when there is none', async () => {
+    expect(await closer.closeForPolicy('pol', { status: 'cancelled', resolvedBy: 'window_reset', actor: system }, NOW))
       .toEqual({ approval: null, live: [] });
-    await closer.openBudget(policy(), { windowStart: NOW, spentUsd: '10' }, NOW);
+    expect(asks.close).not.toHaveBeenCalled();
+
+    await closer.openBudget(policy(), stop, NOW);
+    const r = await closer.closeForPolicy('pol', { status: 'cancelled', resolvedBy: 'policy_deleted', actor: resumer }, NOW);
+
+    expect(asks.close).toHaveBeenLastCalledWith('req-1', { status: 'cancelled', reason: 'policy_deleted' }, NOW);
+    expect(store.links.get('req-1')?.resolvedBy).toBe('policy_deleted');
+    expect(r.approval).toEqual(expect.objectContaining({ status: 'cancelled', decidedById: null, decision: null }));
+    expect(activity.record).toHaveBeenLastCalledWith(expect.objectContaining({ actorType: 'USER', actorId: 'u9', action: 'approval.cancelled' }));
+    expect(webhooks.dispatch).toHaveBeenLastCalledWith('p1', 'fleet.approval.resolved', expect.objectContaining({ status: 'cancelled' }));
+  });
+
+  it('a manual resume closes the ask cancelled on the engine and reports approved through the link, with the resumer in the outcome', async () => {
+    await closer.openBudget(policy(), stop, NOW);
     const r = await closer.closeForPolicy('pol', {
-      status: 'approved', resolvedBy: 'manual_resume', decision: 'raise_budget_and_resume',
-      actor: { type: 'USER', id: 'u9', responsibleUserId: 'u9' }, outcome: { resumedAmountUsd: '20', requeueResults: [] },
+      status: 'approved', resolvedBy: 'manual_resume', decision: 'raise_budget_and_resume', actor: resumer,
+      outcome: { resumedAmountUsd: '20', requeueResults: [] },
     }, NOW);
-    expect(r.approval).toEqual(expect.objectContaining({ status: 'approved', resolvedBy: 'manual_resume', decidedById: 'u9', decidedAt: NOW, outcome: { resumedAmountUsd: '20', requeueResults: [] } }));
+
+    // The engine status is always `cancelled`; the fleet reports `approved` through the link's resolution.
+    expect(asks.close).toHaveBeenLastCalledWith('req-1', { status: 'cancelled', reason: 'manual_resume' }, NOW);
+    expect(store.setOutcome).toHaveBeenCalledWith('req-1', { resumedAmountUsd: '20', requeueResults: [], resumedById: 'u9' });
+    expect(r.approval).toEqual(expect.objectContaining({
+      status: 'approved', resolvedBy: 'manual_resume', decision: 'raise_budget_and_resume', decidedById: 'u9',
+      outcome: { resumedAmountUsd: '20', requeueResults: [], resumedById: 'u9' },
+    }));
     expect(activity.record).toHaveBeenLastCalledWith(expect.objectContaining({ actorType: 'USER', actorId: 'u9', action: 'approval.decided' }));
     expect(webhooks.dispatch).toHaveBeenLastCalledWith('p1', 'fleet.approval.resolved', expect.objectContaining({ status: 'approved' }));
   });
 
-  it('records a cancelled close as approval.cancelled with no decider', async () => {
-    const { closer, activity } = fakes();
-    await closer.openBudget(policy(), { windowStart: NOW, spentUsd: '10' }, NOW);
-    const r = await closer.closeForPolicy('pol', { status: 'cancelled', resolvedBy: 'policy_deleted', actor: { type: 'USER', id: 'u9', responsibleUserId: 'u9' } }, NOW);
-    expect(r.approval).toEqual(expect.objectContaining({ status: 'cancelled', decidedById: null, decision: null }));
-    expect(activity.record).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'approval.cancelled' }));
+  it('a close the engine skipped (request held elsewhere) answers nothing and writes nothing', async () => {
+    await closer.openBudget(policy(), stop, NOW);
+    asks.close.mockResolvedValueOnce(null);
+    activity.record.mockClear();
+
+    expect(await closer.closeForPolicy('pol', { status: 'cancelled', resolvedBy: 'policy_deleted', actor: resumer }, NOW))
+      .toEqual({ approval: null, live: [] });
+    expect(store.setResolvedBy).not.toHaveBeenCalled();
+    expect(store.setOutcome).not.toHaveBeenCalled();
+    expect(activity.record).not.toHaveBeenCalled();
   });
 });
 

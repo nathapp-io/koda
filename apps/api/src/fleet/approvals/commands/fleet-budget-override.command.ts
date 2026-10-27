@@ -3,12 +3,13 @@ import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-d
 import { currentContext } from '../../../action-context/action-context';
 import type { ApprovalCommand } from '../../../approvals/approval-command.registry';
 import { AuditRecorder } from '../../../audit/audit-recorder.service';
+import { committedEffect } from '../../../common/committed-effects';
 import { ConflictAppException } from '../../../common/exceptions/conflict-app.exception';
 import { BudgetsService } from '../../budgets/budgets.service';
 import { BUDGET_REPOSITORY, type IBudgetRepository } from '../../budgets/domain/budget.domain';
 import { MAX_BUDGET_USD } from '../../budgets/dto/create-budget-policy.dto';
 import { FleetJobsService } from '../../jobs/fleet-jobs.service';
-import { ApprovalCloser } from '../approval-closer';
+import { ApprovalCloser, userActor } from '../approval-closer';
 import { ApprovalLivePublisher } from '../approval-live.publisher';
 import { MAX_REQUEUE_CANDIDATES, type RequeueCandidate } from '../domain/approval.domain';
 import { FleetApprovalAskStore } from '../fleet-approval-ask.store';
@@ -112,6 +113,13 @@ export class FleetBudgetOverrideCommand implements ApprovalCommand<BudgetAskInpu
     // spend, throws here and the engine settles the request `failed`.
     const resumed = await this.budgets.resume(approverId, budgetRouteOf(policy), policy.id, decision.amountUsd, now, { approvalId: requestId });
     const resumedAmountUsd = resumed.amountUsd;
+    // Permissions P3 US-007: a hard stop that landed while this approve was executing opened a newer ask (its close
+    // of the executing request was skipped by the lock rule). The raise answers the policy, so that ask is moot.
+    // The executing request is `approved` by now, so it is never the one closed.
+    const closed = await this.closer.closeForPolicy(policy.id, {
+      status: 'cancelled', resolvedBy: 'superseded', actor: userActor(approverId),
+    }, now);
+    committedEffect(() => this.live.publish(closed.live));
     await this.asks.setOutcome(requestId, { resumedAmountUsd, requeueResults: refusedResults(refused) });
     await this.audit.record({
       key: this.key, resourceType: 'fleet-approval', resourceId: requestId, projectId: policy.projectId,
