@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { APPROVAL_REQUEST_CHANGED, type ApprovalRequestChangedPayload } from '../../approvals/approval-request-events';
 import type { ApprovalDecisionRecord, ApprovalRequestRecord } from '../../approvals/domain/approval.domain';
+import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 import { ApprovalLivePublisher } from './approval-live.publisher';
 import { FleetAskEventsSubscriber } from './fleet-ask-events.subscriber';
@@ -64,6 +65,7 @@ function build(over: Overrides = {}) {
       return state;
     }),
     setPublishedStatus: vi.fn(async (_id: string, publishedStatus: string) => {
+      order.push('marker');
       state = state === null ? null : { ...state, publishedStatus };
       return state;
     }),
@@ -72,7 +74,12 @@ function build(over: Overrides = {}) {
     findById: vi.fn(async () => (over.request === undefined ? request() : over.request)),
     decisionsFor: vi.fn(async () => over.decisions ?? [decision()]),
   };
-  const bus = { publish: vi.fn() };
+  const bus = {
+    publish: vi.fn(),
+    // The labels let a case assert the publish → marker → acknowledge order.
+    publishRetryable: vi.fn((event: LiveFleetApprovalEvent) => { order.push(`publish:${event.id}`); }),
+    acknowledgeRetryable: vi.fn((event: LiveFleetApprovalEvent) => { order.push(`ack:${event.id}`); }),
+  };
   const live = new ApprovalLivePublisher(bus as never);
   const publish = vi.spyOn(live, 'publish');
   const closer = { recordResolved: vi.fn(async (v: FleetApprovalRecord) => live.event(v)) };
@@ -96,16 +103,46 @@ function build(over: Overrides = {}) {
 describe('FleetAskEventsSubscriber (US-009)', () => {
   it('AC-5: publishes one fleet_approval event with the mapped status, after the transaction commits', async () => {
     const { handle, publish, order } = build({ view: view({ status: 'approved' }) });
-    publish.mockImplementation(() => { order.push('publish'); });
 
     await handle(payload({ status: 'executed' }));
 
     // The frame leaves only once the transaction that recorded the outputs has returned.
-    expect(order.slice(0, 2)).toEqual(['commit', 'publish']);
+    expect(order.slice(0, 2)).toEqual(['commit', 'publish:a1:executed:fleet']);
     expect(publish).toHaveBeenCalledTimes(1);
-    expect(publish.mock.calls[0]?.[0]).toMatchObject([
-      { type: 'fleet_approval', approvalId: 'a1', projectId: 'p1', status: 'approved' },
-    ]);
+    expect(publish).toHaveBeenCalledWith(
+      [expect.objectContaining({ type: 'fleet_approval', approvalId: 'a1', projectId: 'p1', status: 'approved' })],
+      { retryable: true },
+    );
+  });
+
+  it('acknowledges the delivered ids only after the publication marker commits', async () => {
+    const { handle, order } = build();
+
+    await handle(payload({ status: 'executed' }));
+
+    const at = (label: string) => order.indexOf(label);
+    expect(at('publish:a1:executed:fleet')).toBeGreaterThan(-1);
+    expect(at('marker')).toBeGreaterThan(at('publish:a1:executed:fleet'));
+    expect(at('ack:a1:executed:fleet')).toBeGreaterThan(at('marker'));
+  });
+
+  it('a failed listener rejects, keeps the frame owed and releases nothing until the retry succeeds', async () => {
+    const { handle, store, closer, bus, publish } = build();
+    bus.publishRetryable.mockImplementationOnce(() => { throw new Error('socket unavailable'); });
+
+    await expect(handle(payload({ status: 'executed' }))).rejects.toThrow('socket unavailable');
+    // The outputs are already recorded; only the frame is owed, and nothing was marked or released.
+    expect(closer.recordResolved).toHaveBeenCalledTimes(1);
+    expect(store.setPublishedStatus).not.toHaveBeenCalled();
+    expect(bus.acknowledgeRetryable).not.toHaveBeenCalled();
+
+    await handle(payload({ status: 'executed' }));
+
+    // The retry republishes the frame (the bus skips the listeners that already had it) and records no second row.
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect(closer.recordResolved).toHaveBeenCalledTimes(1);
+    expect(store.setPublishedStatus).toHaveBeenCalledWith('a1', 'executed');
+    expect(bus.acknowledgeRetryable).toHaveBeenCalledTimes(1);
   });
 
   it('gives the frame a durable id, so a republished retry is the same frame', async () => {
@@ -117,11 +154,13 @@ describe('FleetAskEventsSubscriber (US-009)', () => {
   });
 
   it('republishes an undelivered frame under a separate acknowledgement, without repeating the outputs', async () => {
-    const { handle, store, closer, publish } = build();
+    const { handle, store, closer, publish, bus } = build();
     // A crash between the publish and its acknowledgement: the relay redelivers the event.
     store.setPublishedStatus.mockRejectedValueOnce(new Error('ack unavailable'));
 
     await expect(handle(payload({ status: 'executed' }))).rejects.toThrow('ack unavailable');
+    // The frame reached its listeners, but the marker did not commit, so their ids are not released yet.
+    expect(bus.acknowledgeRetryable).not.toHaveBeenCalled();
     await handle(payload({ status: 'executed' }));
 
     // The activity row and the webhook are recorded once; only the frame is published again, with the same id.
@@ -130,6 +169,7 @@ describe('FleetAskEventsSubscriber (US-009)', () => {
     expect(publish).toHaveBeenCalledTimes(2);
     expect(publish.mock.calls[1]?.[0]).toMatchObject([{ id: 'a1:executed:fleet', status: 'approved' }]);
     expect(store.setPublishedStatus).toHaveBeenLastCalledWith('a1', 'executed');
+    expect(bus.acknowledgeRetryable).toHaveBeenCalledTimes(1);
   });
 
   it('publishes nothing for a frame the link already acknowledged', async () => {
@@ -206,7 +246,7 @@ describe('FleetAskEventsSubscriber (US-009)', () => {
     expect(store.setResolvedBy).not.toHaveBeenCalled();
     // The closer reads the status off the view, so the activity row is the cancelled one.
     expect(closer.recordResolved).toHaveBeenCalledWith(expect.objectContaining({ id: 'a1', status: 'cancelled' }), expect.anything());
-    expect(publish).toHaveBeenCalledWith([expect.objectContaining({ type: 'fleet_approval', status: 'cancelled' })]);
+    expect(publish.mock.calls[0]?.[0]).toMatchObject([{ type: 'fleet_approval', status: 'cancelled' }]);
   });
 
   it('AC-12: a fleet-key payload with status pending or cancelled writes nothing', async () => {

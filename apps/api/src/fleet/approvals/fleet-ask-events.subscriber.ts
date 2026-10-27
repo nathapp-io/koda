@@ -36,7 +36,9 @@ const liveFrameId = (requestId: string, status: string): string => `${requestId}
  * Recording and live delivery carry independent acknowledgements (`recordedStatus`, `publishedStatus`): an undelivered
  * frame is republished by the next delivery even though its activity row and webhook are already written, and a
  * delivered frame is not published twice. The frame leaves only after the transaction that recorded it returned, so a
- * reader never sees a frame for a rollback.
+ * reader never sees a frame for a rollback, and it is published *retryably*: a listener that failed keeps the
+ * publication unacknowledged, so the relay's retry reaches it — the listeners that already had the frame (same id) are
+ * skipped.
  *
  * The relay runs this handler inside `runAsSystem('outbox')`, so the writes are delivery bookkeeping of the change the
  * engine already audited: no `@SystemWriter`, no audit rows of its own.
@@ -70,12 +72,14 @@ export class FleetAskEventsSubscriber implements OnModuleInit {
 
     const live = await this.record(p.requestId, p.status);
     if (live.length === 0) return;
-    // Publication first, acknowledgement second: a crash or a throw here leaves `publishedStatus` behind, so the
-    // relay's next delivery republishes the frame under the same id instead of losing it.
-    this.live.publish(live);
+    // Retryable publication: a listener that fails makes this throw, the relay retries the event, and the listeners
+    // that already had the frame skip it. The marker is written only once every listener succeeded, and the delivered
+    // ids are released only once that marker committed — so a crash at either point leaves the frame retryable.
+    this.live.publish(live, { retryable: true });
     await this.txManager.run(async () => {
       await this.store.setPublishedStatus(p.requestId, p.status);
     });
+    this.live.acknowledge(live);
   };
 
   /**
