@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-fleet-core",
   "branchName": "feat/permissions-p3-approval-fleet-core",
   "createdAt": "2026-11-06T09:00:00.000Z",
-  "updatedAt": "2026-10-27T08:19:10.669Z",
+  "updatedAt": "2026-10-27T08:28:41.046Z",
   "userStories": [
     {
       "id": "US-001",
@@ -432,14 +432,17 @@
         "US-001",
         "US-010"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Introduces a privileged system ask path with component pinning, policy subjects, ambient transaction ownership and outbox bookkeeping; strict security isolation is mandatory."
+        "reasoning": "Introduces a privileged system ask path with component pinning, policy subjects, ambient transaction ownership and outbox bookkeeping; strict security isolation is mandatory.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-gate.service.ts",
@@ -472,7 +475,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "60fd0d4b98cc76be7a1f441613a440cc874a8134"
     },
     {
       "id": "US-007",
