@@ -7,7 +7,7 @@ import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import { FanOutPublisher } from '../../outbox/fan-out-publisher';
 import { BUDGET_REPOSITORY, type IBudgetRepository } from '../budgets/domain/budget.domain';
 import { SYSTEM_ACTOR } from '../common/system-actor';
-import { ApprovalCloser, userActor, type ApprovalActor } from './approval-closer';
+import { ApprovalCloser, deciderActor, type ApprovalActor } from './approval-closer';
 import { ApprovalLivePublisher } from './approval-live.publisher';
 import { FLEET_ASK_KEYS, type FleetApprovalRecord } from './domain/approval.domain';
 import type { FleetApprovalAskRecord } from './domain/fleet-approval-ask.domain';
@@ -21,15 +21,25 @@ import { FleetApprovalAskStore } from './fleet-approval-ask.store';
 const RECORDED_STATUSES: ReadonlySet<string> = new Set(['rejected', 'executed', 'failed', 'expired']);
 
 /**
+ * The live frame's durable identity. A retry of a publication that was never acknowledged republishes this same id,
+ * so a consumer can recognise the frame it already has instead of reporting the settlement twice.
+ */
+const liveFrameId = (requestId: string, status: string): string => `${requestId}:${status}:fleet`;
+
+/**
  * Permissions P3 US-009: the fleet's three outputs for the statuses the *engine* sets — the activity row, the
  * `fleet.approval.resolved` webhook and the `fleet_approval` live event — are recorded from the durable outbox event
  * `ApprovalRequestEvents` writes in the deciding (or expiring) transaction, instead of after it committed. A crash
  * between that commit and the outputs therefore loses nothing: the relay redelivers the event, and
  * `FleetApprovalAsk.recordedStatus` makes the redelivery a no-op.
  *
+ * Recording and live delivery carry independent acknowledgements (`recordedStatus`, `publishedStatus`): an undelivered
+ * frame is republished by the next delivery even though its activity row and webhook are already written, and a
+ * delivered frame is not published twice. The frame leaves only after the transaction that recorded it returned, so a
+ * reader never sees a frame for a rollback.
+ *
  * The relay runs this handler inside `runAsSystem('outbox')`, so the writes are delivery bookkeeping of the change the
- * engine already audited: no `@SystemWriter`, no audit rows of its own. The live frame is built inside the transaction
- * from the committed view but published only after it, so a reader never sees a frame for a rollback.
+ * engine already audited: no `@SystemWriter`, no audit rows of its own.
  */
 @Injectable()
 export class FleetAskEventsSubscriber implements OnModuleInit {
@@ -59,31 +69,46 @@ export class FleetAskEventsSubscriber implements OnModuleInit {
     if (!RECORDED_STATUSES.has(p.status) || !FLEET_ASK_KEYS.includes(p.permissionKey)) return;
 
     const live = await this.record(p.requestId, p.status);
-    if (live.length > 0) this.live.publish(live);
+    if (live.length === 0) return;
+    // Publication first, acknowledgement second: a crash or a throw here leaves `publishedStatus` behind, so the
+    // relay's next delivery republishes the frame under the same id instead of losing it.
+    this.live.publish(live);
+    await this.txManager.run(async () => {
+      await this.store.setPublishedStatus(p.requestId, p.status);
+    });
   };
 
   /**
    * One settle's outputs, in one transaction with its `recordedStatus`, under a `FOR UPDATE` lock on the link. The lock
-   * is what makes the marker a claim: two concurrent deliveries of the same event serialise here, and the loser sees the
-   * recorded status and writes nothing. Answers the live frames the caller publishes once this transaction returned.
+   * is what makes each marker a claim: two concurrent deliveries of the same event serialise here, and the loser sees the
+   * recorded status and writes nothing. Answers the frames still to publish — the fresh ones, or the ones an earlier
+   * delivery recorded but never acknowledged — and the caller publishes them once this transaction returned.
    */
   private record(requestId: string, status: string): Promise<LiveFleetApprovalEvent[]> {
     return this.txManager.run(async () => {
       const link = await this.store.lockByRequest(requestId);
-      // A non-fleet request, a request with no link, or this status already recorded: nothing to write.
-      if (link === null || link.recordedStatus === status) return [];
+      // A non-fleet request, a request with no link, or an event whose outputs and frame are both already settled.
+      if (link === null) return [];
+      const record = link.recordedStatus !== status;
+      const publish = link.publishedStatus !== status;
+      if (!record && !publish) return [];
       const request = await this.queries.findById(requestId);
       if (request === null) return [];
       // Legacy repair can restore a wrongly expired ask while its old outbox event is still awaiting delivery.
       if (status === 'expired' && request.status !== 'expired') return [];
 
       // The fleet fills the resolution while the column is still null, exactly as the view derives it.
-      if (link.resolvedBy === null) await this.store.setResolvedBy(requestId, status === 'expired' ? 'timeout' : 'user');
-      await this.store.setRecordedStatus(requestId, status);
+      if (record && link.resolvedBy === null) await this.store.setResolvedBy(requestId, status === 'expired' ? 'timeout' : 'user');
+      if (record) await this.store.setRecordedStatus(requestId, status);
+      if (!publish) return [];
       const view = await this.store.findApproval(requestId);
       if (view === null) return [];
-      // `recordResolved` writes the activity row and the webhook, and answers the live frame of the fleet status.
-      return this.closer.recordResolved(view, await this.actorFor(link, request, status));
+      // `recordResolved` writes the activity row and the webhook, and answers the live frame of the fleet status. A
+      // redelivery that only owes the frame builds it from the view instead, so the outputs stay written once.
+      const frames = record
+        ? await this.closer.recordResolved(view, await this.actorFor(link, request, status))
+        : this.live.event(view);
+      return frames.map((frame) => ({ ...frame, id: liveFrameId(requestId, status) }));
     });
   }
 
@@ -95,10 +120,9 @@ export class FleetAskEventsSubscriber implements OnModuleInit {
   private async actorFor(link: FleetApprovalAskRecord, request: ApprovalRequestRecord, status: string): Promise<ApprovalActor> {
     if (status !== 'expired') {
       const decision = (await this.queries.decisionsFor(request.id)).at(-1);
-      // The fleet activity vocabulary has no agent actor: a decision is attributed to the decider as a user, which is
-      // what the adapter wrote before the recorder moved into the outbox (P3 keeps that attribution).
+      // The relay runs as `system:outbox`: nothing downstream can infer the decider's type, so the decision carries it.
       if (decision === undefined) return { type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId: null };
-      return userActor(decision.deciderId);
+      return deciderActor(decision);
     }
     const onBehalfOf = request.onBehalfOf;
     if (onBehalfOf?.type === 'USER') return { type: 'SYSTEM', id: SYSTEM_ACTOR.id, responsibleUserId: onBehalfOf.id };

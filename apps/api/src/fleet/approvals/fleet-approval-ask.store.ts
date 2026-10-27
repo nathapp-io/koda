@@ -70,12 +70,12 @@ export class FleetApprovalAskStore {
     return this.asks.setResolvedBy(requestId, resolvedBy);
   }
 
-  /** The live publication acknowledgement, independent of the activity/webhook recorder (unused since US-009). */
+  /** US-009: the acknowledgement that the frame was published — written after the publish, so an undelivered one retries. */
   setPublishedStatus(requestId: string, publishedStatus: string): Promise<FleetApprovalAskRecord> {
     return this.asks.setPublishedStatus(requestId, publishedStatus);
   }
 
-  /** US-009: the claim that makes a redelivered engine event a no-op. */
+  /** US-009: the claim that makes a redelivered engine event's activity row and webhook a no-op. */
   setRecordedStatus(requestId: string, recordedStatus: string): Promise<FleetApprovalAskRecord> {
     return this.asks.setRecordedStatus(requestId, recordedStatus);
   }

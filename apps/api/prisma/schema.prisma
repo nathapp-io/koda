@@ -1676,8 +1676,8 @@ model FleetApprovalAsk {
   /// Permissions P3 US-009: the last engine status whose fleet outputs — the activity row, the resolved webhook and the
   /// live event — were recorded. A redelivery of that status records nothing; the table goes with US-012.
   recordedStatus String?
-  /// Written by the retired live subscriber of the US-007 fix rounds; left for the legacy repair and dropped with the
-  /// table in US-012.
+  /// US-009: the last engine status whose live frame was published, written only after the publication. Independent of
+  /// `recordedStatus`, so an undelivered frame is republished on the next delivery.
   publishedStatus String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt

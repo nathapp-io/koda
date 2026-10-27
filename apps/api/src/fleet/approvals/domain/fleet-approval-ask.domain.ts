@@ -1,5 +1,6 @@
 import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
+import type { FleetActorType } from '../../../common/enums';
 import type { ApprovalRequestStatus } from '../../../approvals/domain/approval.domain';
 import type { ApprovalFilters, ApprovalResolvedBy, FleetApprovalRecord, PendingCount, RequeueCandidate } from './approval.domain';
 
@@ -25,7 +26,7 @@ export interface FleetApprovalAskRecord {
 export interface PersistedPolicyClose {
   resolvedBy: ApprovalResolvedBy;
   status: 'approved' | 'cancelled';
-  actor: { type: 'USER' | 'SYSTEM' | 'RUNNER'; id: string; responsibleUserId: string | null };
+  actor: { type: FleetActorType; id: string; responsibleUserId: string | null };
   outcome?: Record<string, unknown>;
 }
 

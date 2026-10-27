@@ -33,6 +33,7 @@ integration('fleet ask events recorded from the engine (PG)', () => {
   let runnerId: string;
   let requestId: string;
   const userId = 'ask-decider';
+  const agentId = 'ask-deciding-agent';
   const naxAskId = 'nax-ask-events';
 
   const seedAsk = async (expiresAt = new Date('2030-01-01T00:00:00Z')): Promise<string> => (await seedFleetAsk(db, {
@@ -79,6 +80,8 @@ integration('fleet ask events recorded from the engine (PG)', () => {
       runnerId, state: 'RUNNING', leaseEpoch: 3, bashMode: 'escalate', firstStartedAt: now,
     } })).id;
     await grantKeys(db, { type: 'USER', id: userId }, ['fleet.job.shell.escalate', 'approval.decide@fleet.job.shell.escalate'], projectId);
+    await db.agent.create({ data: { id: agentId, name: 'Ask decider', slug: 'ask-decider-agent', apiKeyHash: 'ask-agent-key-hash' } });
+    await grantKeys(db, { type: 'AGENT', id: agentId }, ['fleet.job.shell.escalate', 'approval.decide@fleet.job.shell.escalate'], projectId);
     // A subscription is what turns a `fleet.approval.resolved` dispatch into a webhook outbox row.
     await db.webhook.create({ data: {
       projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32),
@@ -155,5 +158,30 @@ integration('fleet ask events recorded from the engine (PG)', () => {
     expect(await activity(requestId)).toHaveLength(1);
     expect(await resolvedWebhooks()).toHaveLength(1);
     expect((await db.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).recordedStatus).toBe('executed');
+  });
+
+  it('AC-11: an executed job_ended ask records approval.cancelled and keeps the job_ended resolution', async () => {
+    // The ask was cancelled when its job ended, and the engine executed it afterwards: the change the
+    // engine recorded is the `executed` one, never a fleet-side close of its own.
+    await db.approvalRequest.update({ where: { id: requestId }, data: { status: 'executed', settledAt: now, approverId: userId } });
+    await db.fleetApprovalAsk.update({ where: { requestId }, data: { resolvedBy: 'job_ended' } });
+    await publisher.publish(outboxRecord(APPROVAL_REQUEST_CHANGED, {
+      requestId, status: 'executed', projectId, permissionKey: 'fleet.job.shell.escalate', requiredMode: 'agent',
+      actorType: 'SYSTEM', actorId: 'runner', onBehalfOfType: 'USER', onBehalfOfId: userId, expiresAt: now.toISOString(),
+    }));
+
+    // The fleet status comes from the link's resolution, so the closer records the cancelled action.
+    expect(await activity(requestId)).toMatchObject([{ action: 'approval.cancelled', entityType: 'approval' }]);
+    expect((await db.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).resolvedBy).toBe('job_ended');
+  });
+
+  it('an agent decider records its activity as an AGENT, which the relay context cannot infer', async () => {
+    await withTestActor({ type: 'AGENT', id: agentId }, () => decisions.decide(requestId, 'reject', null, now));
+
+    await relay();
+
+    expect(await activity(requestId)).toMatchObject([
+      { action: 'approval.decided', actorType: 'AGENT', actorId: agentId, responsibleUserId: agentId },
+    ]);
   });
 });

@@ -3,6 +3,8 @@ import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { runAsSystem } from '../../action-context/action-context';
 import { OutboxService } from '@nathapp/nestjs-outbox';
 import { ApprovalAskService } from '../../approvals/approval-ask.service';
+import type { ApprovalDecisionRecord } from '../../approvals/domain/approval.domain';
+import type { FleetActorType } from '../../common/enums';
 import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
 import { FleetActivityService } from '../activity/fleet-activity.service';
@@ -21,7 +23,7 @@ import { MAX_PENDING_ASKS_PER_JOB, type PersistedPolicyClose } from './domain/fl
 import { FleetApprovalAskStore } from './fleet-approval-ask.store';
 
 /** US-002: `responsibleUserId` is null when the job the approval belongs to was requested by an agent. */
-export interface ApprovalActor { type: 'USER' | 'SYSTEM' | 'RUNNER'; id: string; responsibleUserId: string | null }
+export interface ApprovalActor { type: FleetActorType; id: string; responsibleUserId: string | null }
 /**
  * Permissions P3 US-006: `answer` is the ask the engine resolved to `none`, which the fleet must answer itself —
  * the caller writes the `APPROVAL_ANSWER` command, since the closer holds no job repository.
@@ -44,6 +46,13 @@ export interface PolicyClose {
  * must not each build their own literal: a third copy is how the two lists drift apart.
  */
 export const userActor = (id: string): ApprovalActor => ({ type: 'USER', id, responsibleUserId: id });
+/**
+ * A decision's decider, carrying the decision's own type. The outbox relay writes in a `system:outbox` context, where
+ * `FleetActivityService` cannot infer the decider's type from the acting principal, so an agent's decision must say
+ * `AGENT` itself (US-009 fix round 1).
+ */
+export const deciderActor = (decision: Pick<ApprovalDecisionRecord, 'deciderType' | 'deciderId'>): ApprovalActor =>
+  ({ type: decision.deciderType, id: decision.deciderId, responsibleUserId: decision.deciderId });
 /** The close as the continuation needs it: what to write, for whom, and with which outcome. */
 const persistedClose = (close: PolicyClose): PersistedPolicyClose => ({
   resolvedBy: close.resolvedBy,

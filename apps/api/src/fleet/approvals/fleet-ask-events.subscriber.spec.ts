@@ -63,6 +63,10 @@ function build(over: Overrides = {}) {
       state = state === null ? null : { ...state, recordedStatus };
       return state;
     }),
+    setPublishedStatus: vi.fn(async (_id: string, publishedStatus: string) => {
+      state = state === null ? null : { ...state, publishedStatus };
+      return state;
+    }),
   };
   const queries = {
     findById: vi.fn(async () => (over.request === undefined ? request() : over.request)),
@@ -96,11 +100,46 @@ describe('FleetAskEventsSubscriber (US-009)', () => {
 
     await handle(payload({ status: 'executed' }));
 
-    expect(order).toEqual(['commit', 'publish']);
+    // The frame leaves only once the transaction that recorded the outputs has returned.
+    expect(order.slice(0, 2)).toEqual(['commit', 'publish']);
     expect(publish).toHaveBeenCalledTimes(1);
     expect(publish.mock.calls[0]?.[0]).toMatchObject([
       { type: 'fleet_approval', approvalId: 'a1', projectId: 'p1', status: 'approved' },
     ]);
+  });
+
+  it('gives the frame a durable id, so a republished retry is the same frame', async () => {
+    const { handle, publish } = build();
+
+    await handle(payload({ status: 'executed' }));
+
+    expect(publish.mock.calls[0]?.[0]).toMatchObject([{ id: 'a1:executed:fleet' }]);
+  });
+
+  it('republishes an undelivered frame under a separate acknowledgement, without repeating the outputs', async () => {
+    const { handle, store, closer, publish } = build();
+    // A crash between the publish and its acknowledgement: the relay redelivers the event.
+    store.setPublishedStatus.mockRejectedValueOnce(new Error('ack unavailable'));
+
+    await expect(handle(payload({ status: 'executed' }))).rejects.toThrow('ack unavailable');
+    await handle(payload({ status: 'executed' }));
+
+    // The activity row and the webhook are recorded once; only the frame is published again, with the same id.
+    expect(closer.recordResolved).toHaveBeenCalledTimes(1);
+    expect(store.setRecordedStatus).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect(publish.mock.calls[1]?.[0]).toMatchObject([{ id: 'a1:executed:fleet', status: 'approved' }]);
+    expect(store.setPublishedStatus).toHaveBeenLastCalledWith('a1', 'executed');
+  });
+
+  it('publishes nothing for a frame the link already acknowledged', async () => {
+    const { handle, store, closer, publish } = build({ link: link({ recordedStatus: 'executed', publishedStatus: 'executed' }) });
+
+    await handle(payload({ status: 'executed' }));
+
+    expect(store.findApproval).not.toHaveBeenCalled();
+    expect(closer.recordResolved).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
   });
 
   it('AC-6: a redelivered executed change records the outputs once', async () => {
@@ -201,14 +240,14 @@ describe('FleetAskEventsSubscriber (US-009)', () => {
     expect(closer.recordResolved).toHaveBeenCalledWith(expect.anything(), { type: 'USER', id: 'u-last', responsibleUserId: 'u-last' });
   });
 
-  it('an agent decider keeps the fleet’s user-actor attribution', async () => {
-    // FleetActivityService labels the write AGENT when the decider is the acting principal; the recorder
-    // only states the id, exactly as the decide adapter wrote it before the outputs moved into the relay.
+  it('an agent decider is recorded as an AGENT, which the outbox relay context cannot infer', async () => {
+    // The relay runs as `system:outbox`, so `FleetActivityService` sees no agent principal: the decision's own
+    // `deciderType` has to travel with the actor.
     const { handle, closer } = build({ decisions: [decision({ deciderType: 'AGENT', deciderId: 'ag-1' })] });
 
     await handle(payload({ status: 'executed' }));
 
-    expect(closer.recordResolved).toHaveBeenCalledWith(expect.anything(), { type: 'USER', id: 'ag-1', responsibleUserId: 'ag-1' });
+    expect(closer.recordResolved).toHaveBeenCalledWith(expect.anything(), { type: 'AGENT', id: 'ag-1', responsibleUserId: 'ag-1' });
   });
 
   it('an expired bash ask resolves the link timeout and answers to its on-behalf-of user', async () => {
