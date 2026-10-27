@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { OutboxCoreModule } from '../../outbox/outbox-core.module';
 import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
 import { mcpConfig } from '../../config/mcp.config';
 import { CommentsModule } from '../../comments/comments.module';
@@ -19,6 +20,7 @@ import { RunnersModule } from '../runners/runners.module';
 import { SyncModule } from '../sync/sync.module';
 import { AssistantActionDecisions } from './actions/assistant-action-decisions';
 import { ASSISTANT_ACTION_REQUEST_REPOSITORY } from './requests/assistant-action-request.domain';
+import { AssistantActionOutcomeSubscriber } from './requests/assistant-action-outcome.subscriber';
 import { PrismaAssistantActionRequestRepository } from './requests/prisma-assistant-action-request.repository';
 import { AssistantActionService } from './actions/assistant-action.service';
 import { PendingActionExpirySweeper } from './actions/pending-action-expiry.sweeper';
@@ -45,6 +47,7 @@ import { WorkspaceTools } from './tools/workspace-tools';
 @Module({
   imports: [
     ApprovalEngineModule,
+    OutboxCoreModule,
     ProjectAccessModule, TicketsModule, CommentsModule, TicketLinksModule,
     // US-004: the services the fleet read tools call (each module exports its service only).
     FleetJobsModule, AnalyticsModule, ApprovalsModule, RunnersModule, LogsModule,
@@ -66,6 +69,7 @@ import { WorkspaceTools } from './tools/workspace-tools';
   controllers: [RunnerToolController, McpController],
   providers: [
     AssistantToolRegistry,
+    AssistantActionOutcomeSubscriber,
     PrismaAssistantActionRequestRepository,
     { provide: ASSISTANT_ACTION_REQUEST_REPOSITORY, useExisting: PrismaAssistantActionRequestRepository },
     PrismaAssistantToolCallRepository,

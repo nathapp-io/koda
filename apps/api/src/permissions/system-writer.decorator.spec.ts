@@ -35,6 +35,7 @@ import { FleetApprovalRequestedSubscriber } from '../notifications/fleet/fleet-a
 import { FleetBudgetIncidentSubscriber } from '../notifications/fleet/fleet-budget-incident.subscriber';
 import { FleetHealthAlertSubscriber } from '../notifications/fleet/fleet-health-alert.subscriber';
 import { FleetJobOutcomeSubscriber } from '../notifications/fleet/fleet-job-outcome.subscriber';
+import { AssistantActionOutcomeSubscriber } from '../fleet/assistant/requests/assistant-action-outcome.subscriber';
 import { ThreadIngestHook } from '../fleet/threads/ingest/thread-ingest.module';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
 
@@ -75,6 +76,7 @@ const writers = new Map<Function, string>([
   [FleetHealthAlertSubscriber, 'system.notification.fleet'],
   [FleetJobOutcomeSubscriber, 'system.notification.fleet'],
   [ThreadIngestHook, 'system.thread.ingest'],
+  [AssistantActionOutcomeSubscriber, 'system.thread.ingest'],
   [FanOutPublisher, 'system.outbox.dispatch'],
 ]);
 
@@ -100,7 +102,7 @@ describe('@SystemWriter', () => {
   it('AC-4: reads the complete class-to-key declaration map', () => {
     const actual = new Map([...writers].map(([writer]) => [writer.name, reflector.get<string>(SYSTEM_WRITER_METADATA, writer)]));
     const expected = new Map([...writers].map(([writer, key]) => [writer.name, key]));
-    expect(writers).toHaveLength(36);
+    expect(writers).toHaveLength(37);
     expect(actual).toEqual(expected);
   });
 
