@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { extractApiError } from '~/composables/useApi'
-import { useFleetApprovals } from '~/composables/useFleetApprovals'
-import { countdownText, secondsLeft, toActionBody } from '~/lib/fleet-approvals'
+import { useApprovalRequests } from '~/composables/useApprovalRequests'
+import { countdownText, secondsLeft } from '~/lib/fleet-approvals'
 import type { PendingActionDto } from '~/lib/thread-types'
 
 /**
@@ -22,7 +22,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const toast = useAppToast()
-const approvals = useFleetApprovals({ kind: 'project', slug: props.action.projectSlug })
+const approvals = useApprovalRequests()
 
 /** A decided card leaves the transcript at once; the thread's live `thread` frame then reloads `pendingActions`. */
 const decided = ref(false)
@@ -40,7 +40,7 @@ async function decide(decision: 'approve' | 'reject'): Promise<void> {
   if (props.action.approvalId === null || deciding.value) return
   deciding.value = true
   try {
-    await approvals.decide(props.action.approvalId, toActionBody(decision, ''))
+    await approvals.decide(props.action.id, decision)
     decided.value = true
   } catch (err: unknown) {
     toast.error(extractApiError(err))
