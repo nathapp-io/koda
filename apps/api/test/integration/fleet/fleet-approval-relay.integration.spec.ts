@@ -151,6 +151,21 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     if (saved === undefined) delete process.env.FLEET_SYNC_WAIT_MS;
     else process.env.FLEET_SYNC_WAIT_MS = saved;
   });
+  /**
+   * Placement refuses a job whose repo, or whose runner slot, is already busy (`busy_repo` / `capacity`), so a test
+   * that dies before its `finish` used to turn every later test of this file into a misleading `no ASSIGN` failure
+   * (review fix round 1). Closing whatever a test left non-terminal keeps the failure count naming real failures.
+   * This is fixture hygiene, not a job transition: no runner report produces it, and `finish` is still the path every
+   * passing test takes.
+   */
+  afterEach(async () => {
+    const active = await prisma.fleetJob.findMany({
+      where: { state: { in: ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING'] } },
+      select: { id: true },
+    });
+    if (active.length === 0) return;
+    await prisma.fleetJob.updateMany({ where: { id: { in: active.map((job) => job.id) } }, data: { state: 'CANCELLED' } });
+  });
 
   it('writes need an action context', async () => {
     await expect(expectGuardActive(app)).resolves.toBeUndefined();
@@ -473,7 +488,8 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
   it('US-012 AC-1: a relayed ask allowed on the fleet route and acked ok reads back approved with delivery ok', async () => {
     await enableRelay();
     const { jobId, leaseEpoch } = await startRunning('fleet-pin');
-    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-0000001b') }] }] });
+    // A nax ask id of its own: US-011 AC-14 relays `ask-0000001b` on its own job (fix round 1).
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000020') }] }] });
     const [link] = await linksOf(jobId);
 
     const decided = data<{ id: string; status: string; decision: string }>(await request(server)
@@ -482,7 +498,7 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     expect(decided).toEqual(expect.objectContaining({ id: link!.requestId, status: 'approved', decision: 'allow' }));
 
     const answer = (await sync()).commands.find((c) => c.type === 'APPROVAL_ANSWER' && c.jobId === jobId);
-    expect(answer?.payload).toEqual({ approvalId: link!.requestId, naxAskId: 'ask-0000001b', choice: 'allow' });
+    expect(answer?.payload).toEqual({ approvalId: link!.requestId, naxAskId: 'ask-00000020', choice: 'allow' });
     await sync({ commandAcks: [{ commandId: answer!.commandId, leaseEpoch, result: 'ok' }] });
 
     const read = data<{ status: string; outcome: { delivery: { result: string } } }>(await request(server)
