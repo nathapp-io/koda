@@ -120,6 +120,35 @@ describe('ApprovalPolicyResolver', () => {
     findCandidates.mockResolvedValue([policy('all', { mode: 'human' })]);
     expect((await resolver.resolve({ ...input, subject: { type: 'USER', id: 'u1' } })).mode).toBe('human');
   });
+  it('AC-1: SYSTEM matches a project pattern-only policy', async () => {
+    const chosen = policy('pattern', { projectId: 'p1', permissionPattern: 'fleet.budget.override', mode: 'human' });
+    findCandidates.mockResolvedValue([chosen]);
+    expect(await resolver.resolve({ key: 'fleet.budget.override', projectId: 'p1', subject: { type: 'SYSTEM', id: 'budget' } }))
+      .toMatchObject({ mode: 'human', policy: chosen, source: 'policy' });
+  });
+  it('AC-2: SYSTEM ignores role policies and uses the catalog default', async () => {
+    findCandidates.mockResolvedValue([policy('role', { projectId: 'p1', permissionPattern: 'fleet.budget.override', roleId: 'r1', mode: 'human' })]);
+    expect(await resolver.resolve({ key: 'fleet.budget.override', projectId: 'p1', subject: { type: 'SYSTEM', id: 'budget' } }))
+      .toEqual({ mode: 'agent', floor: 'self', policy: null, source: 'default' });
+  });
+  it('AC-3: SYSTEM ignores type policies and uses the catalog default', async () => {
+    findCandidates.mockResolvedValue([policy('type', { projectId: 'p1', permissionPattern: 'fleet.budget.override', principalType: 'AGENT', mode: 'human' })]);
+    expect(await resolver.resolve({ key: 'fleet.budget.override', projectId: 'p1', subject: { type: 'SYSTEM', id: 'budget' } }))
+      .toEqual({ mode: 'agent', floor: 'self', policy: null, source: 'default' });
+  });
+  it('AC-4: SYSTEM ignores principal policies and uses the catalog default', async () => {
+    findCandidates.mockResolvedValue([policy('principal', { projectId: 'p1', permissionPattern: 'fleet.budget.override', principalType: 'AGENT', principalId: 'budget', mode: 'human' })]);
+    expect(await resolver.resolve({ key: 'fleet.budget.override', projectId: 'p1', subject: { type: 'SYSTEM', id: 'budget' } }))
+      .toEqual({ mode: 'agent', floor: 'self', policy: null, source: 'default' });
+  });
+  it('AC-5: SYSTEM without a policy uses the catalog default', async () => {
+    expect(await resolver.resolve({ key: 'fleet.budget.override', projectId: 'p1', subject: { type: 'SYSTEM', id: 'budget' } }))
+      .toEqual({ mode: 'agent', floor: 'self', policy: null, source: 'default' });
+  });
+  it('AC-6: does not look up roles for a SYSTEM subject', async () => {
+    await resolver.resolve({ key: 'fleet.budget.override', projectId: 'p1', subject: { type: 'SYSTEM', id: 'budget' } });
+    expect(roleIdsAt).not.toHaveBeenCalled();
+  });
   it('propagates repository and membership read failures', async () => {
     findCandidates.mockRejectedValue(new Error('policies unavailable'));
     await expect(resolver.resolve(input)).rejects.toThrow('policies unavailable');
