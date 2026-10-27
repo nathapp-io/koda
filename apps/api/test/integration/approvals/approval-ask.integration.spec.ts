@@ -58,6 +58,8 @@ const budgetAsk = (patch: Partial<OpenAsk> = {}): OpenAsk => ({
   const open = (ask: OpenAsk) =>
     withTestActor({ type: 'RUNNER', id: 'r1' }, () => txManager.run(() => asks.open(ask, now)));
   const openBash = (ask: OpenAsk = bashAsk()) => open(ask);
+  const close = (id: string, status: 'cancelled' | 'expired', reason: string) =>
+    withTestActor({ type: 'RUNNER', id: 'r1' }, () => txManager.run(() => asks.close(id, { status, reason }, now)));
   /** The opened request, refusing an outcome the case does not expect. */
   const opened = async (ask: OpenAsk): Promise<ApprovalRequestRecord> => {
     const outcome = await open(ask);
@@ -163,6 +165,49 @@ const budgetAsk = (patch: Partial<OpenAsk> = {}): OpenAsk => ({
     expect(await db.approvalRequest.count()).toBe(0);
     expect(await db.outboxEvent.count({ where: { type: 'approval_request_changed' } })).toBe(0);
     expect(shell.state.calls).toEqual([]);
+  });
+
+  it('AC-1: closes a pending ask as cancelled inside the caller transaction', async () => {
+    const request = await opened(bashAsk());
+
+    const result = await close(request.id, 'cancelled', 'job_ended');
+
+    expect(result).toMatchObject({ id: request.id, status: 'cancelled' });
+  });
+
+  it('AC-2: persists the close timestamp and bounded reason result', async () => {
+    const request = await opened(bashAsk());
+
+    await close(request.id, 'cancelled', 'job_ended');
+
+    expect(await db.approvalRequest.findUniqueOrThrow({ where: { id: request.id } }))
+      .toMatchObject({ status: 'cancelled', settledAt: now, result: { closedBy: 'job_ended' } });
+  });
+
+  it('AC-3: closes an overdue pending ask as expired', async () => {
+    const request = await opened(bashAsk());
+
+    const result = await close(request.id, 'expired', 'timeout');
+
+    expect(result).toMatchObject({ id: request.id, status: 'expired' });
+  });
+
+  it('AC-4: writes one status-change outbox event for close', async () => {
+    const request = await opened(bashAsk());
+
+    await close(request.id, 'cancelled', 'job_ended');
+
+    expect(await db.outboxEvent.count({
+      where: { type: 'approval_request_changed', eventId: `${request.id}:cancelled` },
+    })).toBe(1);
+  });
+
+  it('AC-5: close writes no audit entry', async () => {
+    const request = await opened(bashAsk());
+
+    await close(request.id, 'cancelled', 'job_ended');
+
+    expect(await db.auditEntry.count({ where: { resourceType: 'approval-request', resourceId: request.id } })).toBe(0);
   });
 
   it('US-007 AC-4: a budget ask with no requester still needs a decide permission', async () => {

@@ -2,7 +2,7 @@ import type { ITransactionManager } from '@nathapp/nestjs-data';
 import { ApprovalAskService, type OpenAsk } from './approval-ask.service';
 import { ApprovalCommandRegistry } from './approval-command.registry';
 import { DEFAULT_APPROVAL_TIMEOUT_SEC, type ApprovalPolicyRecord, type ApprovalRequestRecord, type ApprovalRequestStatus } from './domain/approval.domain';
-import { UnregisteredApprovalCommandError } from './domain/approval.errors';
+import { ApprovalRequestNotPendingError, UnregisteredApprovalCommandError } from './domain/approval.errors';
 import { approvalInputHash } from './approval-input';
 import type { ResolvedApproval } from './approval-policy.resolver';
 import { configurableTestCommand } from './test-helpers/test-approval-command';
@@ -231,6 +231,67 @@ describe('ApprovalAskService', () => {
     await asks.open(bashAsk(), now);
 
     expect(created().correlationId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  const pendingRecord = async (): Promise<ApprovalRequestRecord> => {
+    await asks.open(bashAsk(), now);
+    return created();
+  };
+
+  it('AC-6: returns null when the request is gone without transitioning', async () => {
+    const result = await asks.close('missing', { status: 'cancelled', reason: 'job_ended' }, now);
+
+    expect(result).toBeNull();
+    expect(requests.lockById).toHaveBeenCalledExactlyOnceWith('missing');
+    expect(requests.transition).not.toHaveBeenCalled();
+  });
+
+  it('AC-7: returns null for a non-pending request without transitioning', async () => {
+    const record = await pendingRecord();
+    requests.lockById.mockResolvedValue({ ...record, status: 'executed' });
+
+    await expect(asks.close(record.id, { status: 'cancelled', reason: 'job_ended' }, now)).resolves.toBeNull();
+    expect(requests.transition).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['AC-8: assistant system request is not an ask', { type: 'SYSTEM', id: 'assistant' } as const],
+    ['AC-9: principal request is not an ask', { type: 'AGENT', id: 'a1' } as const],
+  ])('%s', async (_title, actor) => {
+    const record = await pendingRecord();
+    requests.lockById.mockResolvedValue({ ...record, actor });
+
+    await expect(asks.close(record.id, { status: 'cancelled', reason: 'job_ended' }, now))
+      .rejects.toThrow('approval ask close: not an ask');
+    expect(requests.transition).not.toHaveBeenCalled();
+  });
+
+  it.each(['', 'x'.repeat(65)])('AC-10/11: rejects invalid reason %j', async (reason) => {
+    const record = await pendingRecord();
+    requests.lockById.mockResolvedValue(record);
+
+    await expect(asks.close(record.id, { status: 'cancelled', reason }, now))
+      .rejects.toThrow('approval ask close: invalid reason');
+    expect(requests.transition).not.toHaveBeenCalled();
+  });
+
+  it('AC-12: throws when transition loses despite the locked pending row', async () => {
+    const record = await pendingRecord();
+    requests.lockById.mockResolvedValue(record);
+    requests.transition.mockResolvedValue(null);
+    events.record.mockClear();
+
+    await expect(asks.close(record.id, { status: 'cancelled', reason: 'job_ended' }, now))
+      .rejects.toEqual(new ApprovalRequestNotPendingError('pending'));
+    expect(events.record).not.toHaveBeenCalled();
+  });
+
+  it('AC-13: refuses to close outside the caller transaction', async () => {
+    transactions.isInTransaction.mockReturnValue(false);
+
+    await expect(asks.close('r1', { status: 'cancelled', reason: 'job_ended' }, now))
+      .rejects.toThrow("approval ask needs the caller's transaction");
+    expect(requests.lockById).not.toHaveBeenCalled();
   });
 });
 

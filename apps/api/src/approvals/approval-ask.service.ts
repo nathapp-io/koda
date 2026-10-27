@@ -13,7 +13,7 @@ import {
   DEFAULT_APPROVAL_TIMEOUT_SEC,
   type ApprovalRequestRecord,
 } from './domain/approval.domain';
-import { UnregisteredApprovalCommandError } from './domain/approval.errors';
+import { ApprovalRequestNotPendingError, UnregisteredApprovalCommandError } from './domain/approval.errors';
 import type { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
 
 /**
@@ -99,7 +99,36 @@ export class ApprovalAskService {
     return { status: 'pending', request };
   }
 
-  // `close` (US-008) joins this service with the same transaction contract.
+  /** Inside the caller's transaction; null when the request is gone or not pending. */
+  async close(
+    requestId: string,
+    close: { status: 'cancelled' | 'expired'; reason: string },
+    now: Date = new Date(),
+  ): Promise<ApprovalRequestRecord | null> {
+    if (!this.txManager.isInTransaction()) {
+      throw new Error("approval ask needs the caller's transaction");
+    }
+
+    const locked = await this.requests.lockById(requestId);
+    if (!locked || locked.status !== 'pending') return null;
+    if (locked.actor.type !== 'SYSTEM' || locked.actor.id === 'assistant') {
+      throw new Error('approval ask close: not an ask');
+    }
+    if (close.reason.length === 0 || close.reason.length > 64) {
+      throw new Error('approval ask close: invalid reason');
+    }
+
+    return bookkeeping('approval.request-settle', async () => {
+      const settled = await this.requests.transition(locked.id, 'pending', {
+        status: close.status,
+        settledAt: now,
+        result: { closedBy: close.reason },
+      });
+      if (!settled) throw new ApprovalRequestNotPendingError(locked.status);
+      await this.events.record(settled);
+      return settled;
+    });
+  }
 }
 
 function newAsk(ask: OpenAsk, parsed: unknown, resolved: ResolvedApproval, now: Date): ApprovalRequestRecord {
