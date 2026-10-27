@@ -1,6 +1,6 @@
 import type { Mock } from 'vitest';
 import { Logger } from '@nestjs/common';
-import { MAX_RETRYABLE_FRAMES_PER_SUBSCRIPTION, ProjectEventBus } from './project-event-bus';
+import { ProjectEventBus } from './project-event-bus';
 import type { LiveEvent } from './live-event';
 
 const event = (projectId: string, id = 'evt-1'): LiveEvent => ({
@@ -91,19 +91,37 @@ describe('ProjectEventBus', () => {
     expect(bad).toHaveBeenCalledTimes(2);
   });
 
-  it('bounds the short-term consumer cache; durable publication markers own older deduplication', () => {
+  it.each(['publication', 'acknowledgement'])('retains an unacknowledged frame through >1024 intervening frames after %s failure', (failure) => {
+    const bus = new ProjectEventBus();
+    const good = vi.fn();
+    const bad = vi.fn((frame: LiveEvent) => {
+      if (failure === 'publication' && frame.id === 'held') throw new Error('socket failed');
+    });
+    bus.subscribe('p1', good);
+    bus.subscribe('p1', bad);
+    try { bus.publishRetryable(event('p1', 'held')); } catch (error) {
+      expect(failure).toBe('publication');
+      expect(error).toBeInstanceOf(AggregateError);
+    }
+    for (let i = 0; i < 1100; i++) bus.publishRetryable(event('p1', String(i)));
+    good.mockClear();
+    bad.mockImplementation(() => undefined);
+    bus.publishRetryable(event('p1', 'held'));
+    expect(good).not.toHaveBeenCalled();
+  });
+
+  it('releases deduplication state only after durable acknowledgement or unsubscribe', () => {
     const bus = new ProjectEventBus();
     const listener = vi.fn();
     const unsubscribe = bus.subscribe('p1', listener);
-    for (let i = 0; i <= MAX_RETRYABLE_FRAMES_PER_SUBSCRIPTION; i++) bus.publishRetryable(event('p1', String(i)));
-    listener.mockClear();
-    bus.publishRetryable(event('p1', String(MAX_RETRYABLE_FRAMES_PER_SUBSCRIPTION)));
-    expect(listener).not.toHaveBeenCalled();
-    bus.publishRetryable(event('p1', '0'));
-    expect(listener).toHaveBeenCalledTimes(1);
+    bus.publishRetryable(event('p1'));
+    bus.acknowledgeRetryable(event('p1'));
+    // The producer's durable marker now prevents retries; the bus no longer owns this id.
+    bus.publishRetryable(event('p1'));
+    expect(listener).toHaveBeenCalledTimes(2);
     unsubscribe();
-    bus.publishRetryable(event('p1', 'new'));
-    expect(listener).toHaveBeenCalledTimes(1);
+    bus.publishRetryable(event('p1'));
+    expect(listener).toHaveBeenCalledTimes(2);
   });
 
   it('the same listener function subscribed twice gets two independent subscriptions', () => {

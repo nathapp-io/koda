@@ -12,19 +12,19 @@ function build(status = 'approved') {
   const handlers = new Map<string, (payload: unknown) => void | Promise<void>>();
   const registry = { register: vi.fn((type: string, handler: (p: unknown) => void | Promise<void>) => handlers.set(type, handler)) };
   const published: LiveEvent[] = [];
-  const bus = { publishRetryable: vi.fn((event: LiveEvent) => { published.push(event); }) };
+  const bus = { publishRetryable: vi.fn((event: LiveEvent) => { published.push(event); }), acknowledgeRetryable: vi.fn() };
   const link = { publishedStatus: null as string | null };
   const store = {
     lockByRequest: vi.fn(async () => link),
     findApproval: vi.fn(async () => ({ id: 'a1', projectId: 'p1', status })),
     setPublishedStatus: vi.fn(async (_id: string, value: string) => { link.publishedStatus = value; }),
   };
-  const tx = { run: vi.fn(async (fn: () => Promise<void>) => fn()) };
+  const tx = { run: vi.fn(async (fn: () => Promise<unknown>) => fn()) };
   const subscriber = new FleetApprovalLiveSubscriber(registry as never, bus as never, store as never, tx as never);
   subscriber.onModuleInit();
   const handle = handlers.get(APPROVAL_REQUEST_CHANGED);
   if (handle === undefined) throw new Error('the subscriber did not register');
-  return { handle, published, bus, store, link };
+  return { handle, published, bus, store, link, tx };
 }
 
 describe('FleetApprovalLiveSubscriber', () => {
@@ -74,6 +74,34 @@ describe('FleetApprovalLiveSubscriber', () => {
     expect(store.setPublishedStatus).not.toHaveBeenCalled();
     await handle(payload());
     expect(published).toHaveLength(1);
+  });
+
+  it('F5 round 5: releases consumer dedup state only after the marker transaction commits', async () => {
+    const { handle, bus, tx } = build();
+    tx.run.mockImplementationOnce(async (fn) => {
+      const result = await fn();
+      expect(bus.acknowledgeRetryable).not.toHaveBeenCalled();
+      return result;
+    });
+    await handle(payload());
+    expect(bus.acknowledgeRetryable).toHaveBeenCalledWith(expect.objectContaining({ id: 'a1:executed:fleet', projectId: 'p1' }));
+  });
+
+  it('F5 round 5: a commit failure retains consumer dedup state', async () => {
+    const { handle, bus, tx } = build();
+    tx.run.mockImplementationOnce(async (fn) => {
+      await fn();
+      throw new Error('commit failed');
+    });
+    await expect(handle(payload())).rejects.toThrow('commit failed');
+    expect(bus.acknowledgeRetryable).not.toHaveBeenCalled();
+  });
+
+  it('F4 round 5: ignores a delayed expiry event after legacy validity was repaired', async () => {
+    const { handle, published, store } = build('pending');
+    await handle(payload({ status: 'expired' }));
+    expect(published).toEqual([]);
+    expect(store.setPublishedStatus).not.toHaveBeenCalled();
   });
 
   it('F5: a view lookup failure also rejects for relay retry', async () => {

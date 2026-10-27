@@ -107,6 +107,14 @@ describe('FleetAskEventsSubscriber (US-007 fix round 2, US-009)', () => {
   });
 
 
+  it('F4 round 5: a delayed expiry event cannot reapply timeout to a repaired legacy ask', async () => {
+    const { handle, closer, store } = build({ request: request({ status: 'pending' }), view: view({ status: 'pending' }) });
+    await handle(payload({ status: 'expired' }));
+    expect(closer.recordResolved).not.toHaveBeenCalled();
+    expect(store.setResolvedBy).not.toHaveBeenCalled();
+    expect(store.setRecordedStatus).not.toHaveBeenCalled();
+  });
+
   it('a malformed payload is skipped, never a crash the relay would retry forever', async () => {
     const { handle, store } = build();
 

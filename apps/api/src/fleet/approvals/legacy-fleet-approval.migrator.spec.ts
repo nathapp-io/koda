@@ -4,8 +4,8 @@ import { LegacyFleetApprovalMigrator, MIGRATION_BATCH, MAX_BATCHES_PER_PASS } fr
 function build() {
   const base = createMockPrismaService({ fn: vi.fn });
   const prisma = { client: { ...base.client,
-    approvalRequest: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
-    fleetApprovalAsk: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    approvalRequest: { createMany: vi.fn().mockResolvedValue({ count: 1 }), updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    fleetApprovalAsk: { createMany: vi.fn().mockResolvedValue({ count: 1 }), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
   } };
   const tx = { run: vi.fn(async (fn: () => Promise<void>) => fn()) };
   const config = { sweepEnabled: false, approvalSweepMs: 1000 };

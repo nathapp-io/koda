@@ -8,9 +8,6 @@ interface Subscription {
   readonly delivered: Set<string>;
 }
 
-/** Consumer-side protection for partial fan-out / failed marker commits; durable producers own long-term dedup. */
-export const MAX_RETRYABLE_FRAMES_PER_SUBSCRIPTION = 1024;
-
 /**
  * In-process fan-out of live events to open SSE streams, keyed by project.
  * Single API instance by design (spec constraint: no Redis). publish() never
@@ -45,15 +42,19 @@ export class ProjectEventBus {
       try {
         subscription.listener(event);
         subscription.delivered.add(event.id);
-        if (subscription.delivered.size > MAX_RETRYABLE_FRAMES_PER_SUBSCRIPTION) {
-          const oldest = subscription.delivered.values().next().value;
-          if (oldest !== undefined) subscription.delivered.delete(oldest);
-        }
       } catch (error) {
         failures.push(error);
       }
     }
     if (failures.length > 0) throw new AggregateError(failures, failures.map((e) => e instanceof Error ? e.message : String(e)).join('; '));
+  }
+
+  /**
+   * Eviction boundary: call only after the producer's publication marker durably commits. Until then every delivered
+   * id must survive unrelated traffic, even during a prolonged outage. Unsubscribe releases all of a consumer's ids.
+   */
+  acknowledgeRetryable(event: Pick<LiveEvent, 'projectId' | 'id'>): void {
+    for (const subscription of this.forProject(event.projectId)) subscription.delivered.delete(event.id);
   }
 
   listenerCount(projectId: string): number {
@@ -65,6 +66,7 @@ export class ProjectEventBus {
   }
 
   private remove(projectId: string, subscription: Subscription): void {
+    subscription.delivered.clear();
     const remaining = this.forProject(projectId).filter((s) => s !== subscription);
     const next = new Map(this.subscriptions);
     if (remaining.length > 0) next.set(projectId, remaining);

@@ -70,6 +70,8 @@ export class FleetAskEventsSubscriber implements OnModuleInit {
       const request = await this.queries.findById(requestId);
       const view = await this.store.findApproval(requestId);
       if (request === null || view === null) return false;
+      // Legacy repair can restore a wrongly expired ask while its old outbox event is still awaiting delivery.
+      if (status === 'expired' && request.status !== 'expired') return false;
 
       // The fleet fills the resolution while the column is still null, exactly as the view derives it.
       if (link.resolvedBy === null) await this.store.setResolvedBy(requestId, status === 'expired' ? 'timeout' : 'user');

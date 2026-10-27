@@ -17,6 +17,10 @@ import { bootHttpApp, data, loginToken, TEST_PASSWORD } from '../../helpers/http
 import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { LegacyFleetApprovalMigrator } from '../../../src/fleet/approvals/legacy-fleet-approval.migrator';
 import { fixtureDb, withTestActor } from '../../helpers/action-context';
+import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
+import { outboxRecord } from '../../helpers/outbox-record';
+import { APPROVAL_REQUEST_CHANGED } from '../../../src/approvals/approval-request-events';
+import { ProjectEventBus } from '../../../src/live/project-event-bus';
 
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 vi.setConfig({ testTimeout: 30_000 });
@@ -123,6 +127,56 @@ describeIntegration('legacy fleet approvals migrate onto the engine (PG)', () =>
     const decided = await withTestActor({ type: 'USER', id: padminId }, () =>
       app.get(ApprovalDecisionService).decide(row.id, 'reject', null, later));
     expect(decided.status).toBe('rejected');
+  });
+
+  it('F4 round 5: repairs linked non-expiring asks copied with a finite deadline, including expired asks', async () => {
+    const active = await legacyBash();
+    const expired = await legacyBash();
+    const decided = await legacyBash();
+    const explicit = await legacyBash({ expiresAt: new Date('2020-01-01Z') });
+    await migrate();
+    await request(app.getHttpServer()).post(`${PROJECT}/${decided.row.id}/decide`).set(as(padmin)).send({ decision: 'deny' }).expect(200);
+    const badDeadline = new Date(Date.now() - 86_400_000);
+    for (const id of [active.row.id, expired.row.id, decided.row.id]) {
+      await prisma.approvalRequest.update({ where: { id }, data: { expiresAt: badDeadline } });
+    }
+    await app.get(ApprovalRequestExpirySweeper).tick();
+    await prisma.approvalRequest.update({ where: { id: active.row.id }, data: { status: 'pending', settledAt: null } });
+    // An expiry already recorded by the fleet must not keep the restored view expired.
+    await prisma.fleetApprovalAsk.update({ where: { requestId: expired.row.id }, data: {
+      resolvedBy: 'timeout', recordedStatus: 'expired', publishedStatus: 'expired',
+    } });
+
+    expect(await migrate()).toBe(2);
+    expect(await migrate()).toBe(0);
+    // Deliver the erroneous expiry's durable event after repair: it must not re-stamp timeout or publish an expiry.
+    const seen = vi.fn();
+    const unsubscribe = app.get(ProjectEventBus).subscribe(world.projectId, (frame) => {
+      if (frame.type === 'fleet_approval') seen(frame);
+    });
+    try {
+      const events = await prisma.outboxEvent.findMany({ where: {
+        type: APPROVAL_REQUEST_CHANGED, payload: { contains: expired.row.id },
+      } });
+      expect(events).toHaveLength(1);
+      for (const event of events) await app.get(FanOutPublisher).publish(outboxRecord(event.type, JSON.parse(event.payload)));
+      expect(seen).not.toHaveBeenCalled();
+    } finally { unsubscribe(); }
+    for (const id of [active.row.id, expired.row.id]) {
+      expect(await prisma.approvalRequest.findUniqueOrThrow({ where: { id } })).toMatchObject({
+        status: 'pending', expiresAt: new Date('9999-12-31T23:59:59.999Z'), settledAt: null,
+      });
+      expect(await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId: id } })).toMatchObject({
+        resolvedBy: null, recordedStatus: null, publishedStatus: null,
+      });
+    }
+    expect((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: decided.row.id } })).status).toBe('rejected');
+    expect((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: explicit.row.id } })).expiresAt).toEqual(explicit.row.expiresAt);
+    const later = new Date(Date.now() + 7 * 86_400_000);
+    await app.get(ApprovalRequestExpirySweeper).tick(later);
+    const result = await withTestActor({ type: 'USER', id: padminId }, () =>
+      app.get(ApprovalDecisionService).decide(expired.row.id, 'reject', null, later));
+    expect(result.status).toBe('rejected');
   });
 
   it('F4 round 4: a failed copy durably moves behind later rows instead of starving the next batch', async () => {

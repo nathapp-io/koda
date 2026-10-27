@@ -2,6 +2,7 @@ import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { parseApprovalRequestChangedPayload, APPROVAL_REQUEST_CHANGED } from '../../approvals/approval-request-events';
 import { ProjectEventBus } from '../../live/project-event-bus';
+import type { LiveEvent } from '../../live/live-event';
 import { FanOutPublisher } from '../../outbox/fan-out-publisher';
 import { FLEET_ASK_KEYS } from './domain/approval.domain';
 import { FleetApprovalAskStore } from './fleet-approval-ask.store';
@@ -31,20 +32,26 @@ export class FleetApprovalLiveSubscriber implements OnModuleInit {
     const p = parseApprovalRequestChangedPayload(payload);
     if (!p || p.projectId === null || !FLEET_ASK_KEYS.includes(p.permissionKey) || !LIVE_STATUSES.has(p.status)) return;
 
-    await this.txManager.run(async () => {
+    const frame = await this.txManager.run(async () => {
       const link = await this.store.lockByRequest(p.requestId);
       if (link === null || link.publishedStatus === p.status) return;
       const view = await this.store.findApproval(p.requestId);
       if (view === null || view.projectId === null) return;
-      this.bus.publishRetryable({
+      // A repaired legacy ask may have a delayed expiry event left in the outbox. It is no longer expired.
+      if (p.status === 'expired' && view.status !== 'expired') return;
+      const event: LiveEvent = {
         id: `${p.requestId}:${p.status}:fleet`,
         type: 'fleet_approval',
         projectId: view.projectId,
         approvalId: view.id,
         status: view.status,
         at: new Date().toISOString(),
-      });
+      };
+      this.bus.publishRetryable(event);
       await this.store.setPublishedStatus(p.requestId, p.status);
+      return event;
     });
+    // A failed write OR commit must retain consumer deduplication state for the next outbox attempt.
+    if (frame) this.bus.acknowledgeRetryable(frame);
   };
 }

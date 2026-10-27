@@ -173,6 +173,42 @@ describeIntegration('fleet ask recorder (PG)', () => {
     }
   });
 
+  it.each(['publication', 'acknowledgement'])('F5 round 5: %s retry after 1100 other acknowledged frames never repeats a delivered frame', async (failure) => {
+    const { requestId } = await pendingBashAsk();
+    await decide(requestId).expect(200);
+    const bus = app.get(ProjectEventBus);
+    const frameId = `${requestId}:executed:fleet`;
+    const unsubscribe = bus.subscribe(world.projectId, (frame) => {
+      if (failure === 'publication' && frame.id === frameId) throw new Error('socket unavailable');
+    });
+    const fail = vi.spyOn(app.get(FleetApprovalAskStore), 'setPublishedStatus');
+    if (failure === 'acknowledgement') fail.mockRejectedValueOnce(new Error('marker unavailable'));
+    try {
+      await expect(deliver(APPROVAL_REQUEST_CHANGED)).rejects.toThrow('unavailable');
+      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBeNull();
+      const otherFrames: LiveEvent[] = [];
+      for (let i = 0; i < 1100; i++) {
+        const other: LiveEvent = {
+          id: `other-${i}`, type: 'ticket', action: 'created', projectId: world.projectId,
+          ticketId: 'other-ticket', actorId: world.ids.dev, at: new Date().toISOString(),
+        };
+        bus.publishRetryable(other);
+        otherFrames.push(other);
+      }
+      for (const other of otherFrames) bus.acknowledgeRetryable(other);
+      unsubscribe();
+      await deliver(APPROVAL_REQUEST_CHANGED);
+      await deliver(APPROVAL_REQUEST_CHANGED);
+      expect(seen.filter((frame) => frame.id === frameId)).toHaveLength(1);
+      expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId } })).publishedStatus).toBe('executed');
+      expect(await activity(requestId)).toHaveLength(1);
+      expect(await resolvedWebhooks()).toBe(1);
+    } finally {
+      unsubscribe();
+      fail.mockRestore();
+    }
+  });
+
   it('F6 round 4: an executed job_ended ask announces the cancelled fleet view, and a linkless ask emits nothing', async () => {
     const { requestId } = await pendingBashAsk();
     await prisma.approvalRequest.update({ where: { id: requestId }, data: { status: 'executed' } });

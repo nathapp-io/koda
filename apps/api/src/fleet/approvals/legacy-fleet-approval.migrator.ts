@@ -21,6 +21,7 @@ const STATUS_MAP: Readonly<Record<string, string>> = {
 
 /** The decisions the fleet gave that mean "no". */
 const REJECTING_DECISIONS: ReadonlySet<string> = new Set(['deny', 'keep_paused', 'reject']);
+const LEGACY_NO_EXPIRY = new Date('9999-12-31T23:59:59.999Z');
 
 interface LegacyRow {
   id: string; type: string; projectId: string | null; jobId: string | null; leaseEpoch: number | null; naxAskId: string | null;
@@ -40,6 +41,7 @@ interface LegacyRow {
  * - a row counts as migrated only when its **link** exists, so a row whose request survived an interrupted earlier
  *   attempt is finished on the next pass (`skipDuplicates` absorbs the request);
  * - a pending row keeps its explicit deadline, or the legacy no-expiry sentinel; new asks still use policy timeouts;
+ * - linked pending/expired requests with an erroneous finite deadline are repaired too, without undoing decisions;
  * - it runs on boot and on a timer independently of FLEET_SWEEP_ENABLED;
  * - each batch durably rotates attempts before copying, so poison rows cannot starve later rows even after a restart.
  *
@@ -100,7 +102,7 @@ export class LegacyFleetApprovalMigrator implements OnApplicationBootstrap, OnMo
     return total;
   }
 
-  /** One bounded batch: the legacy rows whose link the engine does not have yet. */
+  /** One bounded batch: missing links and requests copied with an erroneous legacy timeout. */
   async migrateBatch(limit = MIGRATION_BATCH): Promise<number> {
     return (await this.copyBatch(limit)).migrated;
   }
@@ -111,6 +113,12 @@ export class LegacyFleetApprovalMigrator implements OnApplicationBootstrap, OnMo
       WITH next AS (
         SELECT f."id" FROM "FleetApproval" f
         WHERE NOT EXISTS (SELECT 1 FROM "FleetApprovalAsk" a WHERE a."requestId" = f."id")
+          OR (f."status" = 'pending' AND f."expiresAt" IS NULL AND EXISTS (
+            SELECT 1 FROM "ApprovalRequest" r
+            WHERE r."id" = f."id" AND r."correlationId" = f."id" AND r."actorType" = 'SYSTEM'
+              AND r."status" IN ('pending', 'expired') AND r."expiresAt" <> ${LEGACY_NO_EXPIRY}
+              AND NOT EXISTS (SELECT 1 FROM "ApprovalDecision" d WHERE d."requestId" = r."id")
+          ))
         ORDER BY f."updatedAt" ASC, f."id" ASC
         LIMIT ${limit}
         FOR UPDATE OF f SKIP LOCKED
@@ -194,6 +202,24 @@ export class LegacyFleetApprovalMigrator implements OnApplicationBootstrap, OnMo
         skipDuplicates: true,
       });
 
+      // Earlier versions imposed a finite deadline even on non-expiring legacy asks. The link's existence must not
+      // hide those rows, including ones already expired by the engine. CAS under the request lock preserves a decision
+      // or lifecycle close that won the race; only a migration-owned, undecided pending/expired request can be restored.
+      if (row.status === 'pending' && row.expiresAt === null) {
+        const repaired = await this.db.approvalRequest.updateMany({
+          where: {
+            id: row.id, correlationId: row.id, actorType: 'SYSTEM', status: { in: ['pending', 'expired'] },
+            expiresAt: { not: LEGACY_NO_EXPIRY }, decisions: { none: {} },
+          },
+          data: { expiresAt: LEGACY_NO_EXPIRY, status: 'pending', settledAt: null, result: Prisma.DbNull },
+        });
+        if (repaired.count > 0) {
+          await this.db.fleetApprovalAsk.updateMany({ where: { requestId: row.id, resolvedBy: 'timeout' }, data: { resolvedBy: null } });
+          await this.db.fleetApprovalAsk.updateMany({ where: { requestId: row.id, recordedStatus: 'expired' }, data: { recordedStatus: null } });
+          await this.db.fleetApprovalAsk.updateMany({ where: { requestId: row.id, publishedStatus: 'expired' }, data: { publishedStatus: null } });
+        }
+      }
+
       if (row.decision !== null && row.decidedById !== null) {
         await this.db.approvalDecision.createMany({
           data: [{
@@ -250,7 +276,7 @@ export class LegacyFleetApprovalMigrator implements OnApplicationBootstrap, OnMo
 function pendingExpiry(status: string, row: LegacyRow): Date {
   if (row.expiresAt !== null) return row.expiresAt;
   return status === 'pending'
-    ? new Date('9999-12-31T23:59:59.999Z')
+    ? LEGACY_NO_EXPIRY
     : new Date(row.createdAt.getTime() + DEFAULT_APPROVAL_TIMEOUT_SEC * 1000);
 }
 
