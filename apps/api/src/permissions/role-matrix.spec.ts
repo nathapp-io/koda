@@ -225,6 +225,11 @@ describe('the seeded-role allow/deny matrix', () => {
     }
   });
 
+  it('AC-8/9: Developer can decide shell escalation only in a project', () => {
+    expect(matrix.developer['approval.decide'][0]).toBe('not-granted');
+    expect(matrix.developer['approval.decide'][1]).toBe('granted');
+  });
+
   it('US-001 AC-8/9/10/11: fleet ask permissions follow the seeded role patterns', () => {
     expect(matrix.developer['fleet.job.shell.escalate'][1]).toBe('granted');
     expect(matrix.developer['fleet.budget.override'][1]).toBe('not-granted');
@@ -260,7 +265,7 @@ describe('the seeded-role allow/deny matrix', () => {
       member: 'not-granted',
       agent: 'not-granted',
       'project-admin': 'granted',
-      developer: 'not-granted',
+      developer: 'granted',
       reviewer: 'granted',
       verifier: 'not-granted',
       triager: 'not-granted',

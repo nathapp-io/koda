@@ -1340,7 +1340,7 @@
     "role.manage": ["not-granted","not-granted"],
     "role.binding.global": ["not-granted","not-granted"],
     "role.binding.owner": ["not-granted","not-granted"],
-    "approval.decide": ["not-granted","not-granted"],
+    "approval.decide": ["not-granted","granted"],
     "approval.request.cancel": ["implicit","implicit"],
     "approval.policy.read": ["no-project","granted"],
     "approval.policy.manage": ["not-granted","not-granted"],

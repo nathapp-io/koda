@@ -3,6 +3,7 @@ import {
   ScopeMismatchEntryError,
   UnknownPermissionEntryError,
 } from './entry-matcher';
+import { SYSTEM_ROLES } from './system-roles';
 
 function captureThrow(act: () => void): unknown {
   try {
@@ -14,6 +15,17 @@ function captureThrow(act: () => void): unknown {
 }
 
 describe('expandEntries', () => {
+  it('AC-1/2/3: Developer can decide the narrowed fleet shell escalation ask', () => {
+    const developer = SYSTEM_ROLES.find((role) => role.key === 'developer');
+    expect(developer).toBeDefined();
+    expect(developer?.permissions).toContain('approval.decide@fleet.job.shell.escalate');
+    expect(developer?.permissions).toContain('fleet.approval.decide.bash');
+    expect(() => expandEntries(developer?.permissions ?? [], 'PROJECT')).not.toThrow();
+    expect(expandEntries(developer?.permissions ?? [], 'PROJECT').has(
+      'approval.decide@fleet.job.shell.escalate',
+    )).toBe(true);
+  });
+
   it('AC-24: expands a prefix wildcard to the fitting role-grantable keys under it', () => {
     const result = expandEntries(['ticket.*'], 'PROJECT');
 
