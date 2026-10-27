@@ -10,12 +10,13 @@ describe('FleetShellEscalateCommand', () => {
     expect(() => command.parse({ ...input, leaseEpoch: 1.5 })).toThrow();
   });
   it('parses bash approvals, including an idempotent parsed decision', () => {
-    const result = { choice: 'allow_for_job', option: 'allow-remember' } as const;
-    expect(command.parseDecision('approve', undefined, input)).toEqual({ choice: 'allow', option: 'allow' });
+    const result = command.parseDecision('approve', { choice: 'allow_for_job' }, input);
+    expect(result).toEqual({ choice: 'allow_for_job', option: 'allow-remember' });
     expect(command.parseDecision('approve', result, input)).toEqual(result);
+    expect(command.parseDecision('approve', undefined, input)).toEqual({ choice: 'allow', option: 'allow' });
   });
   it('rejects unavailable choices, truncated commands and malformed rejects', () => {
-    expect(() => command.parseDecision('approve', { choice: 'allow' }, { ...input, payload: { commandTruncated: true } })).toThrow();
+    expect(() => command.parseDecision('approve', { choice: 'allow' }, { ...input, payload: { commandTruncated: true, options: ['allow'] } })).toThrow();
     expect(() => command.parseDecision('approve', { choice: 'allow_for_job' }, { ...input, payload: { options: ['allow'] } })).toThrow();
     expect(() => command.parseDecision('reject', { choice: 'allow' }, input)).toThrow();
     expect(command.parseDecision('reject', undefined, input)).toEqual({ choice: 'deny', option: 'deny' });
