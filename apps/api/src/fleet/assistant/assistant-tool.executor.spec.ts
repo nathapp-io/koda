@@ -12,7 +12,7 @@ import type { PendingActionRecord, ProposeInput, ProposeResult } from './actions
 import { AssistantModule } from './assistant.module';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
-import { ToolInputError, type AssistantTool, type ToolContext } from './assistant-tool.types';
+import { ToolActionError, ToolInputError, type AssistantTool, type ToolContext } from './assistant-tool.types';
 import { ASSISTANT_TOOL_CALL_REPOSITORY, type AssistantToolCallRecord, type AssistantToolCallRepository, type ToolCallContext } from './assistant-tool-call.domain';
 import type { PermissionService } from '../../permissions/permission.service';
 import { stableStringify } from '../sync/stable-json';
@@ -77,6 +77,7 @@ interface SetupOptions {
   permissions?: PermissionsDouble;
   /** The action's actor cannot be read at all (`findUserActor` answers null, as it does for a deleted user). */
   noActor?: boolean;
+  approvalMode?: 'human' | 'none';
 }
 
 interface Setup {
@@ -104,7 +105,7 @@ function setup(tool: AssistantTool<unknown> | null, opts: SetupOptions = {}): Se
   const registry = new AssistantToolRegistry();
   if (tool) registry.register(tool as AssistantTool);
   const permissions = opts.permissions ?? permissionDouble();
-  const approval = gateDouble();
+  const approval = gateDouble(opts.approvalMode ?? 'human');
   const executor = new AssistantToolExecutor(
     registry, repo, access as unknown as ProjectAccessService, permissions as unknown as PermissionService, ...approval.deps);
   return { executor, rows, repo, access, permissions, approval };
@@ -352,6 +353,53 @@ function writeSetup(
 const ACTION_FLEET_JOB: Partial<AssistantTool<unknown>> = { key: 'fleet.job.dispatch' };
 /** The harness option of every refused-write case: the dispatch key is not held in `web`. */
 const refusedDispatch = (): SetupOptions => ({ permissions: permissionDouble(['fleet.job.dispatch']) });
+
+describe('US-006 direct thread writes through the gate', () => {
+  const opts = { approvalMode: 'none' as const };
+
+  it('AC-3: calls gate directly without opening a transaction or locking the thread', async () => {
+    const { executor, approval, tool } = writeSetup({}, opts);
+    approval.gate.gate.mockResolvedValue({ status: 'executed', result: { text: 'direct result' } } as never);
+    expect(await executor.execute(call())).toEqual({ content: 'direct result', isError: false });
+    expect(approval.gate.gate).toHaveBeenCalledWith('ticket.read', {
+      projectId: 'p1', threadId: 't1', jobId: 'j1', args: call().input,
+    }, { projectId: 'p1' });
+    expect(approval.tx.run).not.toHaveBeenCalled();
+    expect(approval.links.lockThread).not.toHaveBeenCalled();
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it('AC-4: returns masked ToolActionError text as an error', async () => {
+    const { executor, approval } = writeSetup({}, opts);
+    approval.gate.gate.mockRejectedValue(new ToolActionError('linked SB-1 https://x\nfailed at link 2: not_found'));
+    expect(await executor.execute(call())).toEqual({ content: 'linked SB-1 https://x\nfailed at link 2: not_found', isError: true });
+  });
+
+  it('AC-5: maps a missing target to not_found', async () => {
+    const { executor, approval } = writeSetup({}, opts);
+    approval.gate.gate.mockRejectedValue(new NotFoundAppException({}, 'tickets'));
+    expect(await executor.execute(call())).toEqual({ content: 'not_found', isError: true });
+  });
+
+  it('AC-6: maps and logs an unexpected gate error', async () => {
+    const { executor, approval } = writeSetup({}, opts);
+    const error = new Error('broken');
+    approval.gate.gate.mockRejectedValue(error);
+    const logged = vi.spyOn(Logger.prototype, 'error'); logged.mockClear();
+    expect(await executor.execute(call())).toEqual({ content: 'error: koda_fake failed', isError: true });
+    expect(logged).toHaveBeenCalled();
+    expect(logged.mock.calls[0]?.[1]).toBe(error.stack);
+  });
+
+  it('AC-7: links a policy-race pending result without a transaction or cap check', async () => {
+    const { executor, approval } = writeSetup({}, opts);
+    approval.gate.gate.mockResolvedValue({ status: 'pending', request: { id: 'request-7' } } as never);
+    expect(await executor.execute(call())).toEqual({ content: 'pending request-7: awaiting approval; do not retry', isError: false });
+    expect(approval.links.insert).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'request-7', threadId: 't1', toolCallId: 'c1' }));
+    expect(approval.links.countPendingInThread).not.toHaveBeenCalled();
+    expect(approval.tx.run).not.toHaveBeenCalled();
+  });
+});
 
 describe('S5b 2a-D2: a write tool proposes instead of writing', () => {
   it('AC-2: a write tool never calls execute', async () => {

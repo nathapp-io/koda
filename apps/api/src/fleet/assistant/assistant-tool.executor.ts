@@ -398,9 +398,36 @@ export class AssistantToolExecutor {
       ? (await this.resolver.resolve({ key: tool.key, projectId: scope.id, subject: { type: 'ASSISTANT', id: 'assistant' } })).mode
       : mcpMode;
     if (mode !== 'none') return this.waitingWrite(call, tool, caller, scope, preview);
+    if (caller.origin.kind === 'thread') return this.directThreadWrite(call, tool, caller, scope, preview);
     const actions = this.actions;
     if (!actions) return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
     return this.directWrite(call, tool, caller, scope, ctx, actions, preview);
+  }
+
+  /** A none-mode thread write executes through the gate without an enclosing transaction or thread lock. */
+  private async directThreadWrite(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, preview: string): Promise<RunOutcome> {
+    const name = tool.descriptor.name;
+    if (caller.origin.kind !== 'thread') return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
+    const thread = caller.origin;
+    try {
+      const gated = await this.gate.gate<{ text: string }>(tool.key, {
+        projectId: scope.id, threadId: thread.threadId, jobId: thread.jobId, args: scope.input,
+      }, { projectId: scope.id });
+      if (gated.status === 'executed') return { outcome: 'ok', content: gated.result.text, projectId: scope.id };
+      const requestId = gated.request.id;
+      if (!(await this.links.findByRequest(requestId))) {
+        await bookkeeping('assistant.action-request-link', () => this.links.insert({
+          requestId, threadId: thread.threadId, jobId: thread.jobId,
+          toolCallId: call.toolCallId, tool: name, preview,
+        }));
+      }
+      return { ...refusal('pending', `pending ${requestId}: awaiting approval; do not retry`), projectId: scope.id };
+    } catch (error) {
+      if (error instanceof NotFoundAppException) return { ...refusal('not_found', 'not_found'), projectId: scope.id };
+      if (error instanceof ToolActionError) return { ...refusal('error', capText(maskSecrets(error.text), RESULT_CAP_BYTES)), projectId: scope.id };
+      this.logger.error(`koda tool ${name} failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
+      return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
+    }
   }
 
   /** Waiting writes normally run no tool: the lock protects the cap and request link together. */
