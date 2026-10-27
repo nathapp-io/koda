@@ -177,6 +177,8 @@ describe('toFleetApproval', () => {
 
 describe('fleetStatusWhere', () => {
   const base = { permissionKey: { in: [...FLEET_ASK_KEYS] }, fleetAsk: { isNot: null } };
+  /** The link resolutions that leave the request status in charge, spelled out because `in` drops NULLs. */
+  const statusInCharge = { OR: [{ resolvedBy: null }, { resolvedBy: { in: ['user', 'timeout'] } }] };
 
   it('every status carries the fleet keys and the link existence, so a link-less ask is never listed', () => {
     for (const status of ['pending', 'approved', 'rejected', 'expired', 'cancelled'] as const) {
@@ -184,34 +186,30 @@ describe('fleetStatusWhere', () => {
     }
   });
 
-  it('pending and expired are the request status alone', () => {
-    expect(fleetStatusWhere('pending').AND).toEqual([{ status: 'pending' }]);
-    expect(fleetStatusWhere('expired').AND).toEqual([{ status: 'expired' }]);
+  it('pending and expired keep the request status only while the link has not overridden it', () => {
+    expect(fleetStatusWhere('pending').AND).toEqual([{ status: 'pending', fleetAsk: statusInCharge }]);
+    expect(fleetStatusWhere('expired').AND).toEqual([{ status: 'expired', fleetAsk: statusInCharge }]);
   });
 
-  it('approved takes an approved or executed request the link has not cancelled, or a manual resume', () => {
-    const and = fleetStatusWhere('approved').AND as unknown[];
-    expect(and).toEqual([
-      { OR: [
-        { status: { in: ['approved', 'executed'] }, fleetAsk: { OR: [{ resolvedBy: null }, { resolvedBy: { notIn: [...CANCELLING_RESOLUTIONS] } }] } },
+  it('approved is a manual resume of any status, or a decided request no cancellation rewrote', () => {
+    expect(fleetStatusWhere('approved').AND).toEqual([{
+      OR: [
+        { status: { in: ['approved', 'executed'] }, fleetAsk: statusInCharge },
         { fleetAsk: { resolvedBy: 'manual_resume' } },
-      ] },
-    ]);
+      ],
+    }]);
   });
 
-  it('rejected is a rejected request the link has not cancelled', () => {
-    expect(fleetStatusWhere('rejected')).toEqual(expect.objectContaining({
-      AND: [{ status: 'rejected', fleetAsk: { OR: [{ resolvedBy: null }, { resolvedBy: { notIn: [...CANCELLING_RESOLUTIONS] } }] } }],
-    }));
+  it('rejected is a rejected request the link has not overridden', () => {
+    expect(fleetStatusWhere('rejected').AND).toEqual([{ status: 'rejected', fleetAsk: statusInCharge }]);
   });
 
-  it('cancelled covers a cancelled request, a failed one and a decided one the link cancelled', () => {
-    expect(fleetStatusWhere('cancelled').AND).toEqual([
-      { OR: [
-        { status: 'cancelled', fleetAsk: { OR: [{ resolvedBy: null }, { resolvedBy: { not: 'manual_resume' } }] } },
-        { status: 'failed' },
-        { status: { in: ['approved', 'executed', 'rejected'] }, fleetAsk: { resolvedBy: { in: [...CANCELLING_RESOLUTIONS] } } },
-      ] },
-    ]);
+  it('cancelled is any cancelling resolution, or a request the engine gave up on', () => {
+    expect(fleetStatusWhere('cancelled').AND).toEqual([{
+      OR: [
+        { fleetAsk: { resolvedBy: { in: [...CANCELLING_RESOLUTIONS] } } },
+        { status: { in: ['cancelled', 'failed'] }, fleetAsk: statusInCharge },
+      ],
+    }]);
   });
 });

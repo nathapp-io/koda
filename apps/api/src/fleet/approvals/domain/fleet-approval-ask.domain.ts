@@ -24,6 +24,13 @@ export const FLEET_APPROVAL_ASK_REPOSITORY = Symbol('FLEET_APPROVAL_ASK_REPOSITO
 export const MAX_PENDING_ASKS_PER_JOB = 100;
 
 /**
+ * The most projects one all-project pending count answers (US-002). A global badge read must not group
+ * and hydrate an unbounded installation: past this many projects with a pending ask the tail is left
+ * out and the read is logged as truncated, so callers see a bounded list rather than an OOM.
+ */
+export const MAX_COUNTED_PROJECTS = 500;
+
+/**
  * Permissions P3d-1. The link table's storage contract: `ApprovalStoreModule` provides it behind the
  * module-private token and publishes it as `FleetApprovalAskStore`, never as this interface.
  */
@@ -46,6 +53,7 @@ export interface IFleetApprovalAskRepository {
   /** Fleet-key requests that have a link; newest createdAt first, then id. */
   findPage(f: ApprovalFilters, page: IPageOption): Promise<IPageResult<FleetApprovalRecord>>;
   countPending(projectIds: readonly string[]): Promise<PendingCount[]>;
+  /** Every live project's pending asks, bounded by MAX_COUNTED_PROJECTS (truncation is logged). */
   countPendingAllProjects(): Promise<PendingCount[]>;
   countPendingUnscoped(): Promise<number>;
   /** Pending ask count per job id; jobs with none are absent. */

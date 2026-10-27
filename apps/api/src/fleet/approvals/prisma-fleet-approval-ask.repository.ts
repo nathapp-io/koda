@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AbstractPrismaRepository, Paginate, PrismaService, type PrismaModelDelegate } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER, type IPageResult, type ITransactionManager } from '@nathapp/nestjs-data';
 import type { IPageOption } from '@nathapp/nestjs-common';
@@ -11,8 +11,8 @@ import type {
 } from './domain/approval.domain';
 import { FLEET_ASK_KEY, FLEET_ASK_KEYS } from './domain/approval.domain';
 import {
-  FleetApprovalAskRecord, FleetAskKind, FleetAskWithStatus, IFleetApprovalAskRepository, MAX_PENDING_ASKS_PER_JOB,
-  NewFleetApprovalAsk,
+  FleetApprovalAskRecord, FleetAskKind, FleetAskWithStatus, IFleetApprovalAskRepository, MAX_COUNTED_PROJECTS,
+  MAX_PENDING_ASKS_PER_JOB, NewFleetApprovalAsk,
 } from './domain/fleet-approval-ask.domain';
 import { fleetStatusWhere, toFleetApproval, type FleetAskRow } from './fleet-approval-view';
 
@@ -40,6 +40,8 @@ type RequestWithAsk = Prisma.ApprovalRequestGetPayload<{ include: typeof ASK_INC
 export class PrismaFleetApprovalAskRepository
   extends AbstractPrismaRepository<FleetApprovalAskRecord, AskModel, string>
   implements IFleetApprovalAskRepository {
+  private readonly logger = new Logger(PrismaFleetApprovalAskRepository.name);
+
   constructor(@Inject(TRANSACTION_MANAGER) tx: ITransactionManager, private readonly prisma: PrismaService<PrismaClient>) {
     super(tx);
   }
@@ -170,14 +172,23 @@ export class PrismaFleetApprovalAskRepository
 
   /**
    * US-006: every project's pending fleet asks for a caller with a global `fleet.approval.read` grant.
-   * A soft-deleted project is excluded, so a project that is gone never shows a badge.
+   * A soft-deleted project is excluded, so a project that is gone never shows a badge. Bounded by
+   * MAX_COUNTED_PROJECTS: past that many projects the tail is dropped and the truncation is logged.
    */
   async countPendingAllProjects(): Promise<PendingCount[]> {
     const groups = await this.db.approvalRequest.groupBy({
       by: ['projectId'],
       where: pendingWhere({ projectId: { not: null } }),
       _count: { _all: true },
+      // The bound needs a deterministic order, or two reads of the same installation disagree.
+      orderBy: { projectId: 'asc' },
+      take: MAX_COUNTED_PROJECTS,
     });
+    if (groups.length === MAX_COUNTED_PROJECTS) {
+      this.logger.warn(
+        `countPendingAllProjects: more than ${MAX_COUNTED_PROJECTS} projects have a pending fleet ask; the tail is not counted`,
+      );
+    }
     return this.toPendingCounts(groups, true);
   }
 

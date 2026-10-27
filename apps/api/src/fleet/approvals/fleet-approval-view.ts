@@ -1,8 +1,8 @@
 import type { Prisma } from '../../generated/prisma/client';
-import type { ApprovalDecisionRecord, ApprovalRequestRecord, ApprovalRequestStatus } from '../../approvals/domain/approval.domain';
+import type { ApprovalDecisionRecord, ApprovalRequestRecord } from '../../approvals/domain/approval.domain';
 import type { FleetApprovalAskRecord } from './domain/fleet-approval-ask.domain';
 import {
-  CANCELLING_RESOLUTIONS, FLEET_ASK_KEY, FLEET_ASK_KEYS,
+  APPROVAL_RESOLVED_BY, CANCELLING_RESOLUTIONS, FLEET_ASK_KEY, FLEET_ASK_KEYS,
   type ApprovalDecision, type ApprovalResolvedBy, type ApprovalStatus, type FleetApprovalRecord,
 } from './domain/approval.domain';
 
@@ -109,12 +109,25 @@ export function toFleetApproval(row: FleetAskRow): FleetApprovalRecord {
 }
 
 /**
- * `resolvedBy` is null for a link that never recorded a resolution. `notIn` drops NULLs in SQL, so the
- * null case is spelled out: without it a pending link would fall out of every comparison.
+ * The link resolutions the mapper's precedence applies *first*: a manual resume makes the row approved
+ * and a cancelling resolution makes it cancelled, whatever the request status. The rest — `user`,
+ * `timeout` — leave the request status in charge, and so does an unresolved link.
  */
-const NOT_CANCELLING: Prisma.FleetApprovalAskWhereInput = {
-  OR: [{ resolvedBy: null }, { resolvedBy: { notIn: [...CANCELLING_RESOLUTIONS] } }],
+const STATUS_IN_CHARGE: readonly ApprovalResolvedBy[] = APPROVAL_RESOLVED_BY.filter(
+  (resolvedBy) => resolvedBy !== 'manual_resume' && !CANCELLING_RESOLUTIONS.includes(resolvedBy),
+);
+
+/**
+ * "The request status decides": a link that never resolved, or resolved without overriding the status.
+ * The null case is spelled out because `in` drops NULLs in SQL, so a pending link would otherwise fall
+ * out of every comparison.
+ */
+const STATUS_IN_CHARGE_FILTER: Prisma.FleetApprovalAskWhereInput = {
+  OR: [{ resolvedBy: null }, { resolvedBy: { in: [...STATUS_IN_CHARGE] } }],
 };
+
+const MANUAL_RESUME_FILTER: Prisma.FleetApprovalAskWhereInput = { resolvedBy: 'manual_resume' };
+const CANCELLING_FILTER: Prisma.FleetApprovalAskWhereInput = { resolvedBy: { in: [...CANCELLING_RESOLUTIONS] } };
 
 /** A link that exists. The branch's own relation filter is merged beside it, never instead of it. */
 const BASE = {
@@ -122,28 +135,28 @@ const BASE = {
   fleetAsk: { isNot: null },
 } satisfies Prisma.ApprovalRequestWhereInput;
 
-/** The engine statuses each fleet status can come from, before the link has its say. */
-const DECIDED: readonly ApprovalRequestStatus[] = ['approved', 'executed', 'rejected'];
-
+/**
+ * One fleet status, mirroring `fleetStatusOf` exactly: every alternative carries the same link
+ * precedence the mapper applies, so a status filter lists precisely the rows that map to it.
+ */
 const branch = (status: ApprovalStatus): Prisma.ApprovalRequestWhereInput => {
   switch (status) {
-    case 'pending': return { status: 'pending' };
-    case 'expired': return { status: 'expired' };
+    case 'pending': return { status: 'pending', fleetAsk: STATUS_IN_CHARGE_FILTER };
+    case 'expired': return { status: 'expired', fleetAsk: STATUS_IN_CHARGE_FILTER };
     case 'approved':
       return {
         OR: [
-          { status: { in: ['approved', 'executed'] }, fleetAsk: NOT_CANCELLING },
-          { fleetAsk: { resolvedBy: 'manual_resume' } },
+          { status: { in: ['approved', 'executed'] }, fleetAsk: STATUS_IN_CHARGE_FILTER },
+          { fleetAsk: MANUAL_RESUME_FILTER },
         ],
       };
-    case 'rejected': return { status: 'rejected', fleetAsk: NOT_CANCELLING };
+    case 'rejected': return { status: 'rejected', fleetAsk: STATUS_IN_CHARGE_FILTER };
     case 'cancelled':
       return {
         OR: [
-          // A request the engine cancelled, unless the fleet resumed it by hand.
-          { status: 'cancelled', fleetAsk: { OR: [{ resolvedBy: null }, { resolvedBy: { not: 'manual_resume' } }] } },
-          { status: 'failed' },
-          { status: { in: [...DECIDED] }, fleetAsk: { resolvedBy: { in: [...CANCELLING_RESOLUTIONS] } } },
+          // A cancelling resolution wins over the request status, a manual resume included.
+          { fleetAsk: CANCELLING_FILTER },
+          { status: { in: ['cancelled', 'failed'] }, fleetAsk: STATUS_IN_CHARGE_FILTER },
         ],
       };
   }

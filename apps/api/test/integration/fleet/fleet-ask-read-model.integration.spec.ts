@@ -5,11 +5,14 @@ import { canRunDbTests } from '../../helpers/test-environment';
  * re-queue candidates it moved off the legacy repository.
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-ask-read-model.integration.spec.ts
  */
+import { Logger } from '@nestjs/common';
 import { NathApplication } from '@nathapp/nestjs-app';
+import type { Mock } from 'vitest';
 import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { FleetJobState } from '../../../src/common/enums';
 import { budgetReason } from '../../../src/fleet/budgets/budget-rules';
 import { FleetApprovalAskStore } from '../../../src/fleet/approvals/fleet-approval-ask.store';
+import { MAX_COUNTED_PROJECTS } from '../../../src/fleet/approvals/domain/fleet-approval-ask.domain';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
@@ -226,6 +229,33 @@ describeDb('fleet ask read model (PG)', () => {
     expect(await store.findRequeueCandidates(POLICY_15, T0, 1)).toHaveLength(1);
   });
 
+  it('every status filter answers exactly the rows the mapper gives that status, over every combination', async () => {
+    const requestStatuses = ['pending', 'approved', 'executed', 'rejected', 'expired', 'cancelled', 'failed'] as const;
+    const resolutions = [null, 'user', 'timeout', 'manual_resume', 'job_ended', 'superseded', 'policy_deleted', 'window_reset'] as const;
+    let seconds = 0;
+    for (const status of requestStatuses) {
+      for (const resolvedBy of resolutions) {
+        await bashAsk({ status, createdAt: at(++seconds), settledAt: at(seconds + 1_000), link: { resolvedBy } });
+      }
+    }
+    const everyAsk = await store.findPage({}, { current: 1, size: 100 });
+    expect(everyAsk.total).toBe(requestStatuses.length * resolutions.length);
+
+    // What the mapper says, per status, is the only expectation the filters may answer.
+    const byStatus = new Map<string, string[]>();
+    for (const row of everyAsk.records) byStatus.set(row.status, [...(byStatus.get(row.status) ?? []), row.id]);
+
+    let counted = 0;
+    for (const status of ['pending', 'approved', 'rejected', 'expired', 'cancelled'] as const) {
+      const page = await store.findPage({ status }, { current: 1, size: 100 });
+      counted += page.total;
+      expect({ status, ids: page.records.map((r) => r.id).sort() })
+        .toEqual({ status, ids: (byStatus.get(status) ?? []).sort() });
+    }
+    // The five filters partition the asks: a row is in exactly one of them, whatever the link resolved.
+    expect(counted).toBe(everyAsk.total);
+  });
+
   it('findApproval answers the mapped view of one ask, and null for a request that is not a fleet ask', async () => {
     const created = await bashAsk({
       input: bashInput('job-16', 'ask-16', { command: 'make deploy', options: ['allow'] }),
@@ -259,5 +289,43 @@ describeDb('fleet ask read model (PG)', () => {
     ]);
     expect(await store.findProjectSlug(world.projectId)).toBe('web');
     expect(await store.findProjectSlug('missing')).toBeNull();
+  });
+
+  it('countPendingAllProjects stays bounded on a larger installation, keeping a stable prefix of projects', async () => {
+    const total = MAX_COUNTED_PROJECTS + 2;
+    const projects = Array.from({ length: total }, (_, index) => ({
+      id: `cap-project-${String(index).padStart(4, '0')}`,
+      name: `cap${index}`,
+      slug: `cap-${String(index).padStart(4, '0')}`,
+      key: `C${index}`,
+    }));
+    await prisma.project.createMany({ data: projects });
+    await prisma.approvalRequest.createMany({
+      data: projects.map((project, index) => ({
+        id: `cap-request-${index}`, permissionKey: 'fleet.job.shell.escalate', projectId: project.id,
+        actorType: 'SYSTEM', actorId: 'runner', origin: 'runner', correlationId: `corr-cap-${index}`,
+        input: {}, inputHash: `hash-cap-${index}`, requiredMode: 'agent', onTimeout: 'reject',
+        approverMustHoldAction: true, requireDistinctApprover: false, status: 'pending', expiresAt: at(3_600),
+      })),
+    });
+    await prisma.fleetApprovalAsk.createMany({
+      data: projects.map((project, index) => ({
+        requestId: `cap-request-${index}`, kind: 'bash', projectId: project.id,
+        jobId: `cap-job-${index}`, leaseEpoch: 1, naxAskId: `cap-ask-${index}`,
+      })),
+    });
+
+    const warn = Logger.prototype.warn as unknown as Mock;
+    warn.mockClear();
+    const counts = await store.countPendingAllProjects();
+
+    // Bounded, not exhaustive: one bounded group query, one bounded project lookup.
+    expect(counts).toHaveLength(MAX_COUNTED_PROJECTS);
+    expect(new Set(counts.map((c) => c.projectId)).size).toBe(MAX_COUNTED_PROJECTS);
+    expect(counts.every((c) => c.pending === 1)).toBe(true);
+    // A truncated read says so instead of quietly under-reporting the installation.
+    expect(warn.mock.calls.map(([message]) => String(message)).join('\n')).toContain(`more than ${MAX_COUNTED_PROJECTS} projects`);
+    // The bound is deterministic, so two reads of a growing installation answer the same rows.
+    expect(await store.countPendingAllProjects()).toEqual(counts);
   });
 });
