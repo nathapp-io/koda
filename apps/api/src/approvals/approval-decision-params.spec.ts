@@ -11,6 +11,7 @@ import { ApprovalDecisionService } from './approval-decision.service';
 import { decideEligibility } from './approval-eligibility';
 import type { ApprovalCommand, ApprovalCommandRegistry } from './approval-command.registry';
 import { canonicalJson } from './canonical-json';
+import { committedEffect } from '../common/committed-effects';
 import { runWithActionContext } from '../action-context/action-context';
 import { configurableTestCommand } from './test-helpers/test-approval-command';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
@@ -231,6 +232,57 @@ it('AC-11: calls onReject with the parsed input and undefined when the command h
 
   expect(state.onReject.calls).toEqual([{ input, decision: undefined }]);
   expect(s.repo.createDecision).toHaveBeenCalledWith(expect.objectContaining({ params: null }));
+});
+
+/**
+ * B1: the decide transaction owns its committed effects. A rejection's hook queues one (the fleet's
+ * `APPROVAL_ANSWER` wake for the runner is a `committedEffect`), and the decision row it belongs to
+ * must be durable before anybody is told: a rollback or a failing commit publishes nothing.
+ */
+describe('rejection effects wait for the decision to commit', () => {
+  /** A command whose rejection queues one committed effect, as the fleet's bash command will. */
+  const rejecting = (queue: () => void, fail?: () => never): ApprovalCommand => ({
+    key: 'label.delete',
+    parse: (value) => value,
+    onReject: async () => {
+      committedEffect(queue);
+      fail?.();
+    },
+    execute: async () => 'done',
+  });
+
+  it('runs the effect after the decide transaction returns', async () => {
+    const order: string[] = [];
+    const s = setup(rejecting(() => order.push('runner wake')));
+    s.tx.run.mockImplementation(async (fn: () => Promise<unknown>) => {
+      const result = await fn();
+      order.push('committed');
+      return result;
+    });
+
+    expect(await s.decide('reject')).toMatchObject({ status: 'rejected' });
+    expect(order).toEqual(['committed', 'runner wake']);
+  });
+
+  it('discards the effect when the callback rolls back', async () => {
+    const notify = vi.fn();
+    const s = setup(rejecting(notify, () => { throw new Error('runner command refused'); }));
+
+    await expect(s.decide('reject')).rejects.toThrow('runner command refused');
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('discards the effect when the commit fails', async () => {
+    const notify = vi.fn();
+    const s = setup(rejecting(notify));
+    s.tx.run.mockImplementation(async (fn: () => Promise<unknown>) => {
+      await fn();
+      throw new Error('commit failed');
+    });
+
+    await expect(s.decide('reject')).rejects.toThrow('commit failed');
+    expect(notify).not.toHaveBeenCalled();
+  });
 });
 
 describe('PrismaApprovalRequestRepository decision params', () => {

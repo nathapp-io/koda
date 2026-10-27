@@ -27,7 +27,11 @@ export interface ApprovalCommand<TInput = unknown, TResult = unknown, TDecision 
    * execution re-parses the value stored on the approving decision. Throws to refuse.
    */
   parseDecision?(decision: 'approve' | 'reject', params: unknown, input: TInput): TDecision;
-  /** Runs inside the decide transaction after a principal's reject is recorded; a throw rolls it back. */
+  /**
+   * Runs inside the decide transaction after a principal's reject is recorded; a throw rolls it back.
+   * It writes rows and may queue `committedEffect`s (the fleet answer's runner wake): the decision
+   * service owns that transaction, so those effects run only once the decision and these rows commit.
+   */
   onReject?(input: TInput, decision: TDecision | undefined): Promise<void>;
   /** `decision` is the approving decision's parsed params, or undefined when none were parsed. */
   execute(input: TInput, decision?: TDecision): Promise<TResult>;

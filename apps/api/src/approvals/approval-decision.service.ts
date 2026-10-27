@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
+import { withCommittedEffects } from '../common/committed-effects';
 import { currentContext, runWithActionContext, type ActionApproval } from '../action-context/action-context';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import { PermissionService } from '../permissions/permission.service';
@@ -62,7 +63,11 @@ export class ApprovalDecisionService {
   }
 
   private record(requestId: string, decision: 'approve' | 'reject', comment: string | null, now: Date, params: unknown): Promise<ApprovalRequestRecord> {
-    return this.txManager.run(async () => {
+    // The decide transaction's OWNER. A rejection's command hook may queue a committed effect (the
+    // fleet's runner wake, a live publication); wrapping the complete `run()`, not its callback, is
+    // what holds those effects until the decision and the rows the hook wrote have really committed,
+    // and drops them when the callback rolls back or the commit fails.
+    return withCommittedEffects(() => this.txManager.run(async () => {
       const request = await this.requests.lockById(requestId);
       if (!request) throw new ApprovalRequestNotFoundError(requestId);
       if (request.status !== 'pending') throw new ApprovalRequestNotPendingError(request.status);
@@ -108,7 +113,7 @@ export class ApprovalDecisionService {
         if (decision === 'reject' && command?.onReject !== undefined) await command.onReject(parsedInput, parsed);
       });
       return updated;
-    });
+    }));
   }
 }
 
