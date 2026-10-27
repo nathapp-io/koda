@@ -103,7 +103,13 @@ function buildBash() {
   const webhooks = { dispatch: vi.fn(async () => undefined) };
   const closerLive = { event: vi.fn((a: FleetApprovalRecord) => (a.projectId ? [{ approvalId: a.id, status: a.status }] : [])) };
   const closerOutbox = { record: vi.fn(async (e: { type: string }) => ({ id: 'ob', ...e })) };
-  const closer = new ApprovalCloser(repo as never, activity as never, webhooks as never, closerLive as never, closerOutbox as never, mockAuditRecorder);
+  // US-006: the bash half of the closer runs on the engine; this spec only exercises `expire`/`recordResolved`
+  // on the legacy rows, so the engine collaborators stay unused stubs.
+  const closerStore = { findProjectSlug: vi.fn(async () => 'web') };
+  const closerAsks = { open: vi.fn(), close: vi.fn() };
+  const closer = new ApprovalCloser(
+    repo as never, closerStore as never, closerAsks as never, activity as never, webhooks as never, closerLive as never, closerOutbox as never, mockAuditRecorder,
+  );
   const live = { publish: vi.fn() };
   const budgetRepo = { lockById: vi.fn() };
   const budgets = { resume: vi.fn() };

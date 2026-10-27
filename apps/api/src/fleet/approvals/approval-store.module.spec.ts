@@ -1,6 +1,8 @@
 import { Inject, Injectable, Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { GlobalStubsModule } from '../../common/test-helpers/global-stubs.module';
+import { ApprovalAskService } from '../../approvals/approval-ask.service';
+import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
 import { ApprovalCloser } from './approval-closer';
 import { ApprovalLivePublisher } from './approval-live.publisher';
 import { APPROVAL_REPOSITORY } from './domain/approval.domain';
@@ -45,6 +47,18 @@ describe('ApprovalStoreModule', () => {
       expect(moduleRef.get(ApprovalCloser)).toBeDefined();
       expect(moduleRef.get(ApprovalLivePublisher)).toBeDefined();
       expect(moduleRef.get(APPROVAL_REPOSITORY)).toBeDefined();
+    } finally {
+      await moduleRef.close();
+    }
+  });
+
+  it('US-006: imports the approval engine, so the closer can open and close bash asks on it', async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [GlobalStubsModule, ApprovalStoreModule] }).compile();
+    try {
+      const imported = (Reflect.getMetadata('imports', ApprovalStoreModule) ?? []) as unknown[];
+      expect(imported).toContain(ApprovalEngineModule);
+      // The closer's engine collaborator resolves through that import; without it the module does not compile.
+      expect(moduleRef.get(ApprovalAskService, { strict: false })).toBeInstanceOf(ApprovalAskService);
     } finally {
       await moduleRef.close();
     }
