@@ -333,7 +333,6 @@ const INVENTORY_SCOPE_ROWS: Readonly<Record<string, readonly InventoryScope[]>> 
   'assistant.action.read': ['implicit'],
   'system.email.dispatch': ['system'],
   'system.approval.expire': ['system'],
-  'system.assistant-action.expire': ['system'],
   'system.budget.window-reset': ['system'],
   'system.ingest.drain': ['system'],
   'system.knowledge.poll': ['system'],

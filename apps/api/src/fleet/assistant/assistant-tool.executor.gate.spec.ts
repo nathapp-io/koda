@@ -24,7 +24,6 @@ function setup(agent = false) {
   const registry = new AssistantToolRegistry(); registry.register(tool);
   const calls = { findByCall: vi.fn(async () => null), record: vi.fn(), findCallContext: vi.fn(async () => ({ project: { id: 'p', slug: 'web' }, threadId: 't', creator: agent ? { type: 'AGENT', id: 'requester', name: 'agent', status: 'ACTIVE', roles: [], capabilities: [] } : { id: 'requester', email: 'a@b.test', role: 'MEMBER', disabled: false } })) };
   const executor = new AssistantToolExecutor(registry, calls as never, { resolveMembership: vi.fn(async () => null) } as never, { can: vi.fn(async () => ({ allowed: true })) } as never, gate as never, resolver as never, links as never, bus as never, tx as never);
-  executor.attachActions({ propose: vi.fn(async () => ({ actionId: 'old' })), recordDirect: vi.fn() });
   const run = (toolCallId = 'c') => executor.execute({ jobId: 'j', toolCallId, name: tool.descriptor.name, input: { ref: 'WEB-1', body: 'hello' } });
   return { executor, run, links, gate, resolver, bus, tx, tool, order, isInside: () => inside };
 }

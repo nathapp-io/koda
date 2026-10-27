@@ -1,18 +1,16 @@
+import { applyMigration, scratchSchemaBefore, type ScratchSchema } from '../../helpers/migration-schema';
 import { findThreadAction } from '../../helpers/assistant-request';
-import { AssistantActionService } from '../../../src/fleet/assistant/actions/assistant-action.service';
 import { canRunDbTests } from '../../helpers/test-environment';
 import request from 'supertest';
 import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { NathApplication } from '@nathapp/nestjs-app';
 import { PrismaClient } from '../../../src/generated/prisma/client';
-import { PrismaPendingActionRepository } from '../../../src/fleet/assistant/actions/prisma-pending-action.repository';
 import { PrismaAssistantToolCallRepository } from '../../../src/fleet/assistant/prisma-assistant-tool-call.repository';
-import { PendingActionExpirySweeper } from '../../../src/fleet/assistant/actions/pending-action-expiry.sweeper';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor } from '../../helpers/thread-fixtures';
-import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
+import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const integration = canRunDbTests() ? describe : describe.skip;
@@ -22,7 +20,6 @@ integration('assistant action actors (PG)', () => {
   let db: PrismaClient;
   let world: FleetHttpWorld;
   let runner: { runnerId: string; apiKey: string };
-  let actions: PrismaPendingActionRepository;
   let calls: PrismaAssistantToolCallRepository;
   let seq = 0;
   const env = ['FLEET_THREADS_ENABLED', 'FLEET_SWEEP_ENABLED'] as const;
@@ -39,7 +36,6 @@ integration('assistant action actors (PG)', () => {
     runner = await enrollRunner(app.getHttpServer(), world.tokens.root, 'actor-runner', {
       capabilities: { ...FLEET_CAPS, kodaTools: true, threadBackends: { native: ['m1'], acp: [] }, threadWrite: true },
     });
-    actions = app.get(PrismaPendingActionRepository, { strict: false });
     calls = app.get(PrismaAssistantToolCallRepository, { strict: false });
     await db.ticket.create({ data: { projectId: world.projectId, number: 1, title: 'Actor ticket', type: 'BUG', status: 'CREATED', priority: 'HIGH', createdByUserId: world.ids.dev } });
   }, 120_000);
@@ -52,41 +48,16 @@ integration('assistant action actors (PG)', () => {
     }
   });
 
-  const direct = () => db.pendingAction.create({ data: {
-    projectId: world.projectId, threadId: null, jobId: null, toolCallId: null,
-    actorType: 'agent', actorId: 'agent-1', origin: 'mcp', approvalMode: 'none',
-    tool: 'koda_add_comment', input: {}, preview: 'direct', status: 'EXECUTED', result: 'ok',
-    decidedAt: new Date(), expiresAt: new Date(),
-  } });
-
   async function requestInThread() {
     const seed = await seedThreadJobFor(db, world, runner, { feature: `actor-${++seq}` });
     await request(app.getHttpServer()).post(`/api/fleet/runner/jobs/${seed.jobId}/tools/koda_add_comment?leaseEpoch=1`)
       .set('Authorization', `Bearer ${runner.apiKey}`).send({ toolCallId: `actor-${seq}`, input: { ref: 'WEB-1', body: 'x' } }).expect(200);
     return findThreadAction(db, { jobId: seed.jobId, toolCallId: `actor-${seq}` });
   }
-  // Legacy PendingAction repository/expiry cases below still seed that storage directly until US-011.
-  async function propose() {
-    const seed = await seedThreadJobFor(db, world, runner, { feature: `legacy-actor-${++seq}` });
-    const result = await withTestActor({ type: 'USER', id: world.ids.dev }, () => app.get(AssistantActionService, { strict: false }).propose({
-      projectId: world.projectId, threadId: seed.threadId, threadKind: 'REPO', threadProjectSlug: 'web', jobId: seed.jobId,
-      toolCallId: `legacy-${seq}`, tool: 'koda_add_comment', input: { ref: 'WEB-1', body: 'x' }, preview: 'preview', actorId: world.ids.dev, now: new Date(),
-    }));
-    if ('refused' in result) throw new Error('legacy fixture refused');
-    return db.pendingAction.findUniqueOrThrow({ where: { id: result.actionId } });
-  }
-  async function decide(id: string, decision: string) {
-    await request(app.getHttpServer()).post(`/api/projects/web/fleet/approvals/${id}/decide`)
-      .set('Authorization', `Bearer ${world.tokens.dev}`).send({ decision }).expect(200);
-  }
-
   it('writes need an action context', async () => {
     await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
 
-  it('AC-7: permits an agent direct action with null thread fields', async () => {
-    expect(await direct()).toMatchObject({ actorType: 'agent', threadId: null, jobId: null, toolCallId: null });
-  });
   it('AC-8: permits multiple agent audit rows with null replay and project fields', async () => {
     for (let i = 0; i < 2; i++) {
       const row = await db.assistantToolCall.create({ data: {
@@ -103,17 +74,6 @@ integration('assistant action actors (PG)', () => {
   it('AC-10: runner audit records the thread creator', async () => {
     const row = await requestInThread();
     expect(await calls.findByCall(row.jobId as string, row.toolCallId as string)).toMatchObject({ actorType: 'user', actorId: world.ids.dev });
-  });
-  it.each([['AC-11', 'approve', 'EXECUTED'], ['AC-12', 'reject', 'REJECTED']])('%s: records the human approver on %s', async (_ac, decision, status) => {
-    const row = await propose();
-    await decide(row.approvalId as string, decision);
-    expect(await actions.findById(row.id)).toMatchObject({ status, approverType: 'user', approverId: world.ids.dev });
-  });
-  it('AC-13: sweeper expiry has no approver', async () => {
-    const row = await propose();
-    await db.pendingAction.update({ where: { id: row.id }, data: { expiresAt: new Date(0) } });
-    expect(await app.get(PendingActionExpirySweeper, { strict: false }).tick()).toMatchObject({ failed: 0 });
-    expect(await actions.findById(row.id)).toMatchObject({ status: 'EXPIRED', approverType: null, approverId: null });
   });
   it('AC-14: finds user identity including disabled, or null', async () => {
     const user = await db.user.findUniqueOrThrow({ where: { id: world.ids.dev } });
@@ -132,32 +92,32 @@ integration('assistant action actors (PG)', () => {
 
     expect(await calls.findUserActor(user.id)).toMatchObject({ role: 'ADMIN' });
   });
-  it('AC-15: actor status reads are scoped by actor type, id and project', async () => {
-    const row = await direct();
-    expect(await actions.findScopedByActor(row.id, world.projectId, { type: 'agent', id: 'agent-1' })).toEqual({
-      id: row.id, tool: row.tool, status: row.status, createdAt: row.createdAt, decidedAt: row.decidedAt, result: row.result,
-    });
-    expect(await actions.findScopedByActor(row.id, world.projectId, { type: 'agent', id: 'agent-2' })).toBeNull();
-    expect(await actions.findScopedByActor(row.id, world.projectId, { type: 'user', id: 'agent-1' })).toBeNull();
-    expect(await actions.findScopedByActor(row.id, 'other-project', { type: 'agent', id: 'agent-1' })).toBeNull();
-  });
-  it('thread reads and writes exclude direct actions', async () => {
-    const row = await direct();
-    expect(await actions.findById(row.id)).toBeNull();
-    expect(await actions.lockById(row.id)).toBeNull();
-    // A direct action's origin is not `thread`: the repository's own `origin: 'thread'` filter is what makes the
-    // update match nothing, so the rejection must be Prisma's record-not-found, not any error the write path throws.
-    // `resolve` is written from the decide request (`AssistantActionDecisions.decide` -> `settle`), so it runs as
-    // the user deciding — the same `dev` whose `decide` helper posts the approve/reject route above.
-    await expect(withTestActor({ type: 'USER', id: world.ids.dev }, () =>
-      actions.resolve(row.id, { status: 'FAILED', decidedAt: new Date() }))).rejects.toMatchObject({ code: 'P2025' });
-    expect((await db.pendingAction.findUniqueOrThrow({ where: { id: row.id } })).status).toBe('EXECUTED');
-    await db.pendingAction.update({ where: { id: row.id }, data: { status: 'PENDING', expiresAt: new Date(0) } });
-    expect((await actions.findDue(new Date(), 100)).map((a) => a.id)).not.toContain(row.id);
-  });
-  it('fails closed on malformed thread-origin rows with null thread fields', async () => {
-    const row = await direct();
-    await db.pendingAction.update({ where: { id: row.id }, data: { origin: 'thread' } });
-    await expect(actions.findById(row.id)).rejects.toThrow();
+});
+
+integration('PendingAction drop migration (scratch schema)', () => {
+  const migration = '20261105090100_drop_pending_action';
+  let scratch: ScratchSchema;
+
+  beforeAll(async () => {
+    scratch = await scratchSchemaBefore(process.env.DATABASE_URL as string, 'pending_action_drop_mig', migration);
+  }, 120_000);
+  afterAll(async () => { await scratch?.drop(); });
+
+  it('AC-1: deletes only assistant_action fleet approvals and drops PendingAction', async () => {
+    const db = scratch.db;
+    await db.$executeRawUnsafe(`INSERT INTO "FleetApproval" ("id", "type", "payload", "requestedAt", "updatedAt") VALUES
+      ('assistant', 'assistant_action', '{}', now(), now()),
+      ('budget', 'budget_override_required', '{}', now(), now()),
+      ('bash', 'nax_bash_escalate', '{}', now(), now())`);
+    await db.$executeRawUnsafe(`INSERT INTO "PendingAction" ("id", "projectId", "tool", "input", "preview", "actorType", "actorId", "expiresAt")
+      VALUES ('discarded', 'project', 'koda_add_comment', '{}', 'preview', 'user', 'requester', now())`);
+
+    await applyMigration(db, migration);
+
+    expect(await db.$queryRawUnsafe('SELECT "id", "type" FROM "FleetApproval" ORDER BY "id"')).toEqual([
+      { id: 'bash', type: 'nax_bash_escalate' },
+      { id: 'budget', type: 'budget_override_required' },
+    ]);
+    expect(await db.$queryRawUnsafe(`SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'PendingAction'`)).toEqual([]);
   });
 });

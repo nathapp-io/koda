@@ -51,9 +51,6 @@ const refusalSentence = (file: string, key: string): string =>
 
 /** `fleet.approvalSelfDecide`, the refusal an agent gets for its own job's ask. */
 const SELF_DECIDE = refusalSentence('fleet', 'approvalSelfDecide');
-/** `threads.notCreator`, the unchanged refusal of an `assistant_action` ask. */
-const NOT_CREATOR = refusalSentence('threads', 'notCreator');
-
 interface ApprovalItem { id: string; type: string; status: string; decision: string | null; decidedById: string | null }
 interface Counts {
   total: number;
@@ -187,33 +184,6 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
     return { policy, approval };
   };
 
-  /** A pending `assistant_action` ask whose requesting user is `requesterId`. */
-  const assistantAsk = async (requesterId: string) => {
-    // The handler reads the action back through the thread repository, which rejects a row without its
-    // thread fields, so the ask is anchored on a real thread and job like the assistant's own writes are.
-    const thread = await prisma.chatThread.create({
-      data: {
-        projectId: p1Id, kind: 'REPO', repoId, title: `us006-thread-${(n += 1)}`, createdById: requesterId,
-        backend: { kind: 'native' } as Prisma.InputJsonValue, skills: [] as Prisma.InputJsonValue,
-      },
-      select: { id: true },
-    });
-    const job = await jobRow({ threadId: thread.id });
-    const action = await prisma.pendingAction.create({
-      data: {
-        projectId: p1Id, threadId: thread.id, jobId: job.id, toolCallId: `tc-${(n += 1)}`,
-        tool: 'koda_add_comment', input: { ref: 'X-1', body: 'hi' } as Prisma.InputJsonValue,
-        preview: 'Add a comment', status: 'PENDING', expiresAt: new Date(Date.now() + 3_600_000), actorType: 'user', actorId: requesterId,
-      },
-    });
-    return prisma.fleetApproval.create({
-      data: {
-        type: 'assistant_action', projectId: p1Id, jobId: job.id, requestedAt: new Date(), expiresAt: new Date(Date.now() + 3_600_000),
-        payload: { actionId: action.id, tool: 'koda_add_comment', threadId: thread.id, threadPath: `/threads/${thread.id}`, requestedById: requesterId },
-      },
-    });
-  };
-
   const reloadApproval = (id: string) => prisma.fleetApproval.findUniqueOrThrow({ where: { id } });
   const commandsFor = (jobId: string) => prisma.fleetCommand.findMany({ where: { jobId, type: 'APPROVAL_ANSWER' } });
 
@@ -272,7 +242,6 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
   beforeEach(async () => {
     await prisma.fleetApproval.deleteMany();
     await prisma.fleetCommand.deleteMany();
-    await prisma.pendingAction.deleteMany();
     await prisma.fleetJob.deleteMany();
     await prisma.chatThread.deleteMany();
     await prisma.budgetIncident.deleteMany();
@@ -412,21 +381,6 @@ describeIntegration('fleet approval and budget keys (US-006)', () => {
 
     expectPermissionsRefusal(await as('adminBind', 'post', `/api/fleet/approvals/${approval.id}/decide`, { decision: 'keep_paused' }));
 
-    expect(await reloadApproval(approval.id)).toEqual(expect.objectContaining({ status: 'pending', decision: null }));
-  }, TIMEOUT);
-
-  // -------------------------------------------------------------------------
-  // AC-13 — an assistant_action ask keeps its creator-only handler
-  // -------------------------------------------------------------------------
-
-  it('AC-13: a user who is not the ask\'s creator is refused with threads.notCreator and it stays pending', async () => {
-    expect(NOT_CREATOR).not.toBe('');
-    const approval = await assistantAsk(ids.other);
-
-    const res = await as('devBind', 'post', approvalsUrl(P1_SLUG, `/${approval.id}/decide`), { decision: 'reject' });
-
-    expect(res.status).toBe(403);
-    expect(res.body.message).toBe(NOT_CREATOR);
     expect(await reloadApproval(approval.id)).toEqual(expect.objectContaining({ status: 'pending', decision: null }));
   }, TIMEOUT);
 

@@ -322,7 +322,7 @@ describeIntegration('assistant tools check their key (US-004)', () => {
     expect(textOf(answer)).toBe('forbidden: koda_dispatch_job needs fleet.job.dispatch on p1');
     expect(answer.isError).toBe(true);
     expect(await prisma.fleetJob.count({ where: { feature } })).toBe(0);
-    expect(await prisma.pendingAction.count({ where: { actorId: ids['p1-mcp-viewer-agent'], tool: 'koda_dispatch_job' } })).toBe(0);
+    expect(await prisma.approvalRequest.count({ where: { actorId: ids['p1-mcp-viewer-agent'], permissionKey: 'fleet.job.dispatch' } })).toBe(0);
   }, TIMEOUT);
 
   it('AC-6: an MCP dispatch naming p1 by a developer binding creates a QUEUED job requested by the agent', async () => {

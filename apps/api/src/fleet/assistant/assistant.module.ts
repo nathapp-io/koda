@@ -11,21 +11,15 @@ import { TicketLinksModule } from '../../ticket-links/ticket-links.module';
 import { TicketsModule } from '../../tickets/tickets.module';
 import { LiveModule } from '../../live/live.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
-import { ApprovalStoreModule } from '../approvals/approval-store.module';
 import { ApprovalsModule } from '../approvals/approvals.module';
 import { FleetJobsModule } from '../jobs/fleet-jobs.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { LogsModule } from '../logs/logs.module';
 import { RunnersModule } from '../runners/runners.module';
 import { SyncModule } from '../sync/sync.module';
-import { AssistantActionDecisions } from './actions/assistant-action-decisions';
 import { ASSISTANT_ACTION_REQUEST_REPOSITORY } from './requests/assistant-action-request.domain';
 import { AssistantActionOutcomeSubscriber } from './requests/assistant-action-outcome.subscriber';
 import { PrismaAssistantActionRequestRepository } from './requests/prisma-assistant-action-request.repository';
-import { AssistantActionService } from './actions/assistant-action.service';
-import { PendingActionExpirySweeper } from './actions/pending-action-expiry.sweeper';
-import { PENDING_ACTION_REPOSITORY } from './actions/pending-action.domain';
-import { PrismaPendingActionRepository } from './actions/prisma-pending-action.repository';
 import { ASSISTANT_TOOL_CALL_REPOSITORY, PROJECT_COUNTS_READER } from './assistant-tool-call.domain';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
@@ -60,9 +54,7 @@ import { WorkspaceTools } from './tools/workspace-tools';
     // US-003: `koda_my_projects` reaches its projects through ProjectsService (already in this graph via
     // MemoryModule); the import is what makes the service injectable here.
     ProjectsModule,
-    // S5b 2a: the propose service publishes on ThreadEventBus (LiveModule) and opens its summary approval
-    // through ApprovalCloser (ApprovalStoreModule, one shared instance for both importers — 2a-D1).
-    LiveModule, ApprovalStoreModule,
+    LiveModule,
     // S5b US-007: the MCP route reads MCP_ENABLED through its own namespaced config (3-D19).
     ConfigModule.forFeature(mcpConfig),
   ],
@@ -93,15 +85,6 @@ import { WorkspaceTools } from './tools/workspace-tools';
     // the repository MemoryModule already exports.
     MemoryWriteTools,
     AssistantToolCommands,
-    // S5b 2a US-001: propose storage. The repository stays module-private behind its token.
-    PrismaPendingActionRepository,
-    { provide: PENDING_ACTION_REPOSITORY, useExisting: PrismaPendingActionRepository },
-    AssistantActionService,
-    // S5b 2a US-005: the creator-only decide handler; it registers with AssistantActionPort on init (2a-D1).
-    AssistantActionDecisions,
-    // S5b 2a US-007: the interval that expires the actions nobody decided (2a-D10). It reuses the handler's
-    // `expireLocked`, so the sweep and a decide past `expiresAt` write the same terminal state and note.
-    PendingActionExpirySweeper,
   ],
   exports: [AssistantToolRegistry, AssistantToolExecutor],
 })

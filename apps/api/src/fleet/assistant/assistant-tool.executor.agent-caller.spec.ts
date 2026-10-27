@@ -13,7 +13,6 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { currentActor, currentContext, type ActionContext } from '../../action-context/action-context';
 import type { PermissionService } from '../../permissions/permission.service';
 import type { ProjectAccessService } from '../../projects/project-access.service';
-import type { ActionProposer } from './actions/pending-action.domain';
 import { AssistantToolExecutor } from './assistant-tool.executor';
 import { AssistantToolRegistry } from './assistant-tool.registry';
 import type { AssistantToolCallRecord, AssistantToolCallRepository, ToolCallContext } from './assistant-tool-call.domain';
@@ -48,17 +47,12 @@ function setup(context: ToolCallContext | null, tool: AssistantTool) {
   };
   const registry = new AssistantToolRegistry();
   registry.register(tool);
-  const actions: ActionProposer = {
-    propose: vi.fn(async () => ({ actionId: 'pa1' })),
-    recordDirect: vi.fn(async () => ({ actionId: 'da1' })),
-  };
   const access = { findProjectIdBySlug: async () => 'p1', resolveMembership: async () => 'DEVELOPER' };
   // Permissions P1 US-004: the tool's key is a `PermissionService` read now; every key is allowed here.
   const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
   const approval = gateDouble();
   const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions, ...approval.deps);
-  executor.attachActions(actions);
-  return { executor, actions, rows, approval };
+  return { executor, rows, approval };
 }
 
 /**
@@ -76,16 +70,11 @@ function storingSetup(context: ToolCallContext, tool: AssistantTool) {
   };
   const registry = new AssistantToolRegistry();
   registry.register(tool);
-  const actions: ActionProposer = {
-    propose: vi.fn(async () => ({ actionId: 'pa1' })),
-    recordDirect: vi.fn(async () => ({ actionId: 'da1' })),
-  };
   const access = { findProjectIdBySlug: async () => 'p1', resolveMembership: async () => 'DEVELOPER' };
   const permissions = { can: vi.fn(async () => ({ allowed: true, reason: 'granted' })) } as unknown as PermissionService;
   const approval = gateDouble();
   const executor = new AssistantToolExecutor(registry, calls, access as unknown as ProjectAccessService, permissions, ...approval.deps);
-  executor.attachActions(actions);
-  return { executor, actions, rows, approval };
+  return { executor, rows, approval };
 }
 
 /** A read tool that answers its context to the caller, so a case can read what the executor passed. */
@@ -192,12 +181,10 @@ describe('AssistantToolExecutor as the assistant for a thread call (US-001, P2 U
 
   it.each([AGENT_CONTEXT, USER_CONTEXT])('a requester of either type waits through the gate', async (context) => {
     const tool = commentTool();
-    const { executor, actions, approval } = setup(context, tool);
+    const { executor, approval } = setup(context, tool);
     expect(await executor.execute({ ...CALL, name: 'koda_add_comment', input: { ref: 'WEB-1', body: 'x' } }))
       .toEqual({ content: 'pending a1: awaiting approval; do not retry', isError: false });
     expect(approval.gate.gate).toHaveBeenCalledTimes(1);
-    expect(actions.propose).not.toHaveBeenCalled();
-    expect(actions.recordDirect).not.toHaveBeenCalled();
     expect(tool.execute).not.toHaveBeenCalled();
   });
 
@@ -214,7 +201,7 @@ describe('AssistantToolExecutor as the assistant for a thread call (US-001, P2 U
    */
   it('B1: concurrent calls with one replay key gate once and answer its stored row', async () => {
     const tool = commentTool();
-    const { executor, actions, rows, approval } = storingSetup(AGENT_CONTEXT, tool);
+    const { executor, rows, approval } = storingSetup(AGENT_CONTEXT, tool);
     approval.resolver.resolve.mockResolvedValue({ mode: 'none' });
     approval.gate.gate.mockResolvedValue({ status: 'executed', result: { text: 'comment c1 added to WEB-1' } } as never);
     const input = { ref: 'WEB-1', body: 'x' };
@@ -226,7 +213,6 @@ describe('AssistantToolExecutor as the assistant for a thread call (US-001, P2 U
 
     expect(approval.gate.gate).toHaveBeenCalledTimes(1);
     expect(tool.execute).not.toHaveBeenCalled();
-    expect(actions.recordDirect).not.toHaveBeenCalled();
     expect(rows).toHaveLength(1);
     expect(first.content).toContain('comment c1 added to WEB-1');
     expect(second).toEqual(first);
