@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { withCommittedEffects } from '../common/committed-effects';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { runWithActionContext, type ActionApproval, type ActionContextInput } from '../action-context/action-context';
@@ -101,7 +102,7 @@ export class ApprovalExecutionService {
       // the callback succeeded, is reported to the caller and never settles the request.
       let callbackFailure: { error: unknown } | undefined;
       try {
-        return await this.txManager.run(async () => {
+        return await withCommittedEffects(() => this.txManager.run(async () => {
           try {
             const locked = await this.requests.lockById(request.id);
             if (!locked) throw new ApprovalRequestNotFoundError(request.id);
@@ -123,7 +124,7 @@ export class ApprovalExecutionService {
             callbackFailure = { error };
             throw error;
           }
-        });
+        }));
       } catch (error) {
         if (callbackFailure === undefined || error instanceof ApprovalRequestNotPendingError) throw error;
 

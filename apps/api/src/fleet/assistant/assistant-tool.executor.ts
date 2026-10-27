@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { withCommittedEffects } from '../../common/committed-effects';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { isAgentPrincipal, type AgentPrincipal, type KodaAgentStatus, type UserPrincipal } from '../../auth/principal/koda-principal.types';
@@ -310,6 +311,7 @@ export class AssistantToolExecutor {
             requestId, threadId: thread.threadId, jobId: thread.jobId,
             toolCallId: call.toolCallId, tool: name, preview,
           }));
+          this.threadEvents.publish({ id: randomUUID(), threadId: thread.threadId, type: 'thread', at: new Date().toISOString() });
         } catch (error) {
           // Another call may have linked the same pending request after our lookup. Treat only that requestId
           // uniqueness race as success; unrelated insert failures must retain the normal error mapping.
@@ -332,7 +334,7 @@ export class AssistantToolExecutor {
     if (origin.kind !== 'thread') return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
     try {
       let linked = false;
-      const outcome = await this.txManager.run(async (): Promise<RunOutcome> => {
+      const outcome = await withCommittedEffects(() => this.txManager.run(async (): Promise<RunOutcome> => {
         if (!(await this.links.lockThread(origin.threadId))) return refusal('not_found', 'not_found');
         if (await this.links.countPendingInThread(origin.threadId) >= MAX_PENDING_ACTIONS) return refusal('refused', REFUSED_CONTENT);
         const gated = await this.gate.gate<{ text: string }>(tool.key, {
@@ -348,7 +350,7 @@ export class AssistantToolExecutor {
           linked = true;
         }
         return refusal('pending', `pending ${requestId}: awaiting approval; do not retry`);
-      });
+      }));
       if (linked) this.threadEvents.publish({ id: randomUUID(), threadId: origin.threadId, type: 'thread', at: new Date().toISOString() });
       return { ...outcome, projectId: scope.id };
     } catch (error) {

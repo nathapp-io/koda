@@ -1,4 +1,7 @@
 import { findThreadAction } from '../../helpers/assistant-request';
+import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
+import { ApprovalRequestEvents } from '../../../src/approvals/approval-request-events';
+import { ProjectEventBus } from '../../../src/live/project-event-bus';
 import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
@@ -142,6 +145,33 @@ describeIntegration('fleet assistant cancel job tool (PG, US-005)', () => {
     expect(await jobState(jobId)).toMatchObject({ state: 'CANCELLED', selectorLabels: ['no-such-label'] });
     expect(await findThreadAction(prisma, { requestId: action.id }))
       .toMatchObject({ status: 'executed', result: { text: `cancelled ${jobId} /web/fleet/jobs/${jobId}` } });
+  });
+
+  it.each([false, true])('B2: cancel publications follow the outer settlement (rollback=%s)', async (rollback) => {
+    const jobId = await seedRunJob({ feature: `cancel-commit-${rollback}`, state: 'QUEUED', selectorLabels: ['no-such-label'] });
+    await callTool(`commit-${rollback}`, { jobId }).expect(200);
+    const action = await actionOf(`commit-${rollback}`);
+    const tx = app.get<ITransactionManager>(TRANSACTION_MANAGER);
+    const bus = app.get(ProjectEventBus, { strict: false });
+    const publish = vi.spyOn(bus, 'publish');
+    const observed: boolean[] = [];
+    const originalPublish = bus.publish.bind(bus);
+    publish.mockImplementation(event => {
+      if (event.type === 'fleet_job' && event.jobId === jobId) observed.push(tx.isInTransaction());
+      originalPublish(event);
+    });
+    const events = app.get(ApprovalRequestEvents, { strict: false });
+    const originalRecord = events.record.bind(events);
+    const record = vi.spyOn(events, 'record').mockImplementation(async row => {
+      if (rollback && row.id === action.id && row.status === 'executed') throw new Error('force settlement rollback');
+      return originalRecord(row);
+    });
+    try {
+      await decide(action.id, 'approve').expect(200);
+      expect((await jobState(jobId)).state).toBe(rollback ? 'QUEUED' : 'CANCELLED');
+      expect(await prisma.approvalRequest.findUniqueOrThrow({ where: { id: action.id } })).toMatchObject({ status: rollback ? 'failed' : 'executed' });
+      expect(observed).toEqual(rollback ? [] : [false]);
+    } finally { record.mockRestore(); publish.mockRestore(); }
   });
 
   it('AC-12: cancelling the runner\'s own THREAD job answers invalid_input: command and stores no action', async () => {

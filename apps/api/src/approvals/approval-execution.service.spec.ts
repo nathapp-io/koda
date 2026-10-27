@@ -1,4 +1,6 @@
 import { Logger } from '@nestjs/common';
+import { FleetJobLivePublisher } from '../fleet/jobs/fleet-job-live.publisher';
+import { RunnerNotifier } from '../fleet/jobs/runner-notifier';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
 import { currentContext, type ActionContext } from '../action-context/action-context';
 import { currentBookkeepingReason } from '../action-context/audit-coverage';
@@ -66,6 +68,51 @@ describe('ApprovalExecutionService', () => {
     });
     expect(s.repo.transition).toHaveBeenCalledExactlyOnceWith('r1', 'approved', { status: 'executed', settledAt: now, result: { deleted: 1 } });
     expect(s.reasons).toEqual(['approval.request-settle', 'approval.request-settle']);
+  });
+
+  it.each(['commit', 'rollback', 'commit-failure'] as const)('fleet publications and runner wakes follow settlement %s', async (outcome) => {
+    const s = setup();
+    const project = { publish: vi.fn() };
+    const threads = { publish: vi.fn() };
+    const publisher = new FleetJobLivePublisher(project as never, threads as never);
+    const notifier = new RunnerNotifier();
+    const woke = vi.fn();
+    const waiting = notifier.wait('runner', 1000, async () => false).then(woke);
+    let inTransaction = false;
+    s.tx.run.mockImplementation(async (fn: () => Promise<unknown>) => {
+      // Nested domain runs join the settlement transaction.
+      if (inTransaction) return fn();
+      inTransaction = true;
+      try {
+        const value = await fn();
+        expect(project.publish).not.toHaveBeenCalled();
+        expect(threads.publish).not.toHaveBeenCalled();
+        expect(woke).not.toHaveBeenCalled();
+        if (outcome === 'commit-failure') throw new Error('commit failed');
+        return value;
+      } finally { inTransaction = false; }
+    });
+    const original = s.test.command.execute;
+    s.test.command.execute = async (value) => {
+      await s.tx.run(async () => undefined);
+      publisher.publish([{ ...publisher.event({ id: 'job', projectId: 'p1', state: 'RUNNING' }), threadEvents: [
+        { id: 'thread-event', type: 'thread', threadId: 't1', at: now.toISOString() },
+      ] }]);
+      notifier.notify('runner');
+      if (outcome === 'rollback') throw new Error('settlement rolled back');
+      return original(value);
+    };
+    project.publish.mockImplementation(() => expect(inTransaction).toBe(false));
+    if (outcome === 'commit-failure') await expect(s.service.execute('r1', now)).rejects.toThrow('commit failed');
+    else expect(await s.service.execute('r1', now)).toMatchObject({ status: outcome === 'commit' ? 'executed' : 'failed' });
+    await Promise.resolve();
+    expect(project.publish).toHaveBeenCalledTimes(outcome === 'commit' ? 1 : 0);
+    expect(threads.publish).toHaveBeenCalledTimes(outcome === 'commit' ? 1 : 0);
+    if (outcome !== 'commit') {
+      expect(woke).not.toHaveBeenCalled();
+      notifier.notify('runner'); // release the test waiter, not a transaction effect
+    }
+    await waiting;
   });
 
   it('stores null when the command has no toResult', async () => {

@@ -47,8 +47,10 @@ function isSamePrincipal(one: PrincipalKind, other: PrincipalKind | null): boole
 
 /** The mode the decider itself contributes to the ladder. */
 function contributedMode(decider: DeciderRef, isActor: boolean, isOnBehalf: boolean): ApprovalMode {
-  if (isActor) return 'self';
-  if (isOnBehalf) return 'human';
+  // Only a human requester gets the assistant exception. An agent confirming its own delegated
+  // action contributes self, exactly as it would over MCP, never agent or human.
+  if (isOnBehalf && decider.type === 'USER') return 'human';
+  if (isActor || isOnBehalf) return 'self';
   return decider.type === 'USER' ? 'human' : 'agent';
 }
 
@@ -88,7 +90,9 @@ export function decideEligibility(
   const isOnBehalf = isSamePrincipal(request.actor, ASSISTANT)
     && isSamePrincipal(decider, request.onBehalfOf);
 
-  if (request.requireDistinctApprover && isActor) return refuse('distinct-approver-required');
+  if (request.requireDistinctApprover && (isActor || (isOnBehalf && decider.type === 'AGENT'))) {
+    return refuse('distinct-approver-required');
+  }
 
   const isOwnRequest = isActor || isOnBehalf;
   if ((isOwnRequest || request.approverMustHoldAction)

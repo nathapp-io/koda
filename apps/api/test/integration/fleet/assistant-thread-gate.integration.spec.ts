@@ -8,7 +8,7 @@ import { canRunDbTests } from '../../helpers/test-environment';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { fixtureDb } from '../../helpers/action-context';
 import { resetDb } from '../../helpers/reset-db';
-import { enrollRunner, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { enrollRunner, seedFleetHttpAgent, rosterFleetAgent, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor, type ThreadJobSeed } from '../../helpers/thread-fixtures';
 
 const integration = canRunDbTests() ? describe : describe.skip;
@@ -67,6 +67,25 @@ integration('waiting assistant thread writes through ApprovalGate (PG)', () => {
     const answer = await call('agent', args);
     expect(await db.approvalRequest.findUniqueOrThrow({ where: { id: requestId(answer.content) } })).toMatchObject({ actorType: 'SYSTEM', actorId: 'assistant', onBehalfOfType: 'AGENT', onBehalfOfId: agent.id, requiredMode: 'human', status: 'pending' });
   });
+  it('B1: an agent cannot approve or reject its own human-required thread write', async () => {
+    const agent = await seedFleetHttpAgent(app.getHttpServer(), world.tokens.root);
+    await rosterFleetAgent(db, agent.id, world.projectId);
+    await db.fleetJob.update({ where: { id: seed.jobId }, data: { requestedById: agent.id, requestedByType: 'AGENT' } });
+    const answer = await call('agent-decide', { ...args, body: 'must wait for a human' });
+    const id = requestId(answer.content);
+    for (const decision of ['approve', 'reject']) {
+      const response = await request(app.getHttpServer()).post(`/api/approvals/${id}/decisions`)
+        .set('Authorization', `Bearer ${agent.apiKey}`).send({ decision }).expect(403);
+      expect(response.body.message).toContain('tier-too-low');
+      expect(await db.approvalRequest.findUniqueOrThrow({ where: { id } })).toMatchObject({ status: 'pending', approverId: null });
+    }
+    expect(await db.comment.count({ where: { body: 'must wait for a human' } })).toBe(0);
+    await request(app.getHttpServer()).post(`/api/approvals/${id}/decisions`)
+      .set('Authorization', `Bearer ${world.tokens.root}`).send({ decision: 'approve' }).expect(200);
+    expect(await db.approvalRequest.findUniqueOrThrow({ where: { id } })).toMatchObject({ status: 'executed', satisfiedBy: 'human' });
+    expect(await db.comment.findFirstOrThrow({ where: { body: 'must wait for a human' } })).toMatchObject({ authorAgentId: agent.id });
+  });
+
   it('AC-13,14: thread reads are scoped and print the request timestamp', async () => {
     const answer = await call('open', args); const id = requestId(answer.content);
     const row = await db.approvalRequest.findUniqueOrThrow({ where: { id } });

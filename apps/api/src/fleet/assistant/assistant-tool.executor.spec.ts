@@ -382,6 +382,7 @@ describe('US-006 direct thread writes through the gate', () => {
     expect(approval.links.insert).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'request-7', threadId: 't1', toolCallId: 'c1' }));
     expect(approval.links.countPendingInThread).not.toHaveBeenCalled();
     expect(approval.tx.run).not.toHaveBeenCalled();
+    expect(approval.bus.publish).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ type: 'thread', threadId: 't1' }));
   });
 });
 

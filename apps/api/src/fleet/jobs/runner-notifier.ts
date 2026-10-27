@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { committedEffect } from '../../common/committed-effects';
 
 /**
  * In-process long-poll wake-ups keyed by runner id (spec §3.2; single API instance).
@@ -10,7 +11,9 @@ export class RunnerNotifier {
   private waiters: ReadonlyMap<string, ReadonlySet<() => void>> = new Map();
 
   notify(runnerId: string): void {
-    for (const wake of this.waiters.get(runnerId) ?? []) wake();
+    committedEffect(() => {
+      for (const wake of this.waiters.get(runnerId) ?? []) wake();
+    });
   }
 
   waiterCount(runnerId: string): number {

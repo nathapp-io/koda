@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { createMockPrismaService, type PrismaService } from '@nathapp/nestjs-prisma';
+import { applyMigration, scratchSchemaBefore, type ScratchSchema } from '../../helpers/migration-schema';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { canRunDbTests } from '../../helpers/test-environment';
 import { bootHttpApp } from '../../helpers/http-app';
@@ -10,6 +12,36 @@ import { PrismaAssistantActionRequestRepository } from '../../../src/fleet/assis
 
 const describeDb = canRunDbTests() ? describe : describe.skip;
 const write = <T>(fn: () => Promise<T>) => withTestActor({ type: 'USER', id: 'assistant-link-test' }, fn);
+
+describeDb('AssistantActionRequest committed migration (PG)', () => {
+  let scratch: ScratchSchema;
+  beforeAll(async () => {
+    scratch = await scratchSchemaBefore(process.env.DATABASE_URL as string, `assistant_link_${randomUUID().replaceAll('-', '')}`, '20261105090000_assistant_action_request');
+    await applyMigration(scratch.db, '20261105090000_assistant_action_request');
+  }, 120_000);
+  afterAll(async () => { await scratch?.drop(); });
+
+  it('AC-1: repository insert/read and cascade work after SQL migrations, not db push', async () => {
+    const db = scratch.db;
+    const prisma = createMockPrismaService({ fn: vi.fn });
+    prisma.client = db;
+    const tx = { run: vi.fn((fn: () => Promise<unknown>) => fn()), getClient: () => db, isInTransaction: () => false };
+    const repo = new PrismaAssistantActionRequestRepository(tx as ITransactionManager, prisma as unknown as PrismaService<PrismaClient>);
+    const project = await db.project.create({ data: { name: 'Migrated links', slug: 'migrated-links', key: 'MIG' } });
+    const thread = await db.chatThread.create({ data: { projectId: project.id, kind: 'REPO', title: 'Migrated', createdById: 'requester', backend: { kind: 'native', model: 'test' }, skills: [] } });
+    const approval = await db.approvalRequest.create({ data: {
+      permissionKey: 'comment.create', projectId: project.id, actorType: 'SYSTEM', actorId: 'assistant', origin: 'thread', correlationId: 'migration',
+      input: {}, inputHash: 'hash', requiredMode: 'human', onTimeout: 'reject', approverMustHoldAction: true, requireDistinctApprover: false,
+      status: 'pending', expiresAt: new Date(Date.now() + 60_000),
+    } });
+    const link = { requestId: approval.id, threadId: thread.id, jobId: 'job', toolCallId: 'call', tool: 'koda_add_comment', preview: 'p' };
+    await repo.insert(link);
+    expect(await repo.findByRequest(approval.id)).toMatchObject({ ...link, notedAt: null, deliveredAt: null, deliveredMessageId: null });
+    await db.chatThread.delete({ where: { id: thread.id } });
+    expect(await repo.findByRequest(approval.id)).toBeNull();
+    expect(await db.approvalRequest.findUnique({ where: { id: approval.id } })).toMatchObject({ status: 'pending' });
+  });
+});
 
 describeDb('PrismaAssistantActionRequestRepository (PG)', () => {
   let app: NathApplication;
