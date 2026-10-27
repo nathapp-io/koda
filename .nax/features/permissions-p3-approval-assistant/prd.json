@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-assistant",
   "branchName": "feat/permissions-p3-approval-assistant",
   "createdAt": "2026-10-26T00:00:00.000Z",
-  "updatedAt": "2026-10-27T04:22:00.613Z",
+  "updatedAt": "2026-10-27T04:35:25.932Z",
   "userStories": [
     {
       "id": "US-001",
@@ -551,14 +551,17 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Updates one executor branch using the existing gate and error-mapping patterns; policy-race and transaction-boundary behavior remains authorization-sensitive and uses strict isolation."
+        "reasoning": "Updates one executor branch using the existing gate and error-mapping patterns; policy-race and transaction-boundary behavior remains authorization-sensitive and uses strict isolation.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
@@ -586,7 +589,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "6bf6360ae00cb3a5d28f1a17caa8ec1f93be5d0c"
     },
     {
       "id": "US-007",
