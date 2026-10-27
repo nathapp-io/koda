@@ -27,6 +27,7 @@ describeDb('FleetApprovalAsk repository (PG)', () => {
     scratch = await scratchSchemaBefore(process.env.DATABASE_URL as string, 'fleet_ask_repo', MIGRATION);
     await applyMigration(scratch.db, MIGRATION);
     await applyMigration(scratch.db, '20261106100000_job_end_ask_queue');
+    await applyMigration(scratch.db, '20261106110000_ask_close_intent_and_recorded_status');
     db = scratch.db;
     // The repository reads `prisma.client`, the transaction-aware proxy: route it through the real
     // transaction manager so `FOR UPDATE` runs inside a real PG transaction.
@@ -37,6 +38,16 @@ describeDb('FleetApprovalAsk repository (PG)', () => {
 
   afterAll(async () => {
     await scratch?.drop();
+  });
+
+  it('US-007 fix round 2: the shipped migration adds the close intent and the recorder idempotency key', async () => {
+    const rows = await db.$queryRaw<Array<{ column_name: string }>>`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'FleetApprovalAsk'
+        AND column_name IN ('pendingResolvedBy', 'recordedStatus')
+      ORDER BY column_name
+    `;
+    expect(rows.map((r) => r.column_name)).toEqual(['pendingResolvedBy', 'recordedStatus']);
   });
 
   it('F1 round 4: the shipped migration indexes the durable attempt order and unique tie-breaker', async () => {
@@ -176,14 +187,14 @@ describeDb('FleetApprovalAsk repository (PG)', () => {
     expect(await repository.findPendingForJobPage('job-f1-page', undefined, 3)).toHaveLength(3);
   });
 
-  it('AC-6: findPendingForPolicy returns the pending link and ignores an expired request', async () => {
+  it('AC-6: findPendingForPolicyPage returns the pending link and ignores an expired request', async () => {
     const pending = await request();
     const expired = await request('expired');
     await repository.insert(ask(pending, { kind: 'budget', jobId: null, leaseEpoch: null, naxAskId: null, budgetPolicyId: 'policy-6' }));
     await repository.insert(ask(expired, { kind: 'budget', jobId: null, leaseEpoch: null, naxAskId: null, budgetPolicyId: 'policy-6-expired' }));
 
-    expect(await repository.findPendingForPolicy('policy-6')).toMatchObject({ requestId: pending, budgetPolicyId: 'policy-6' });
-    expect(await repository.findPendingForPolicy('policy-6-expired')).toBeNull();
+    expect(await repository.findPendingForPolicyPage('policy-6')).toMatchObject([{ requestId: pending, budgetPolicyId: 'policy-6' }]);
+    expect(await repository.findPendingForPolicyPage('policy-6-expired')).toEqual([]);
   });
 
   it('AC-7: lockByRequest returns the locked link inside a transaction and null without one', async () => {

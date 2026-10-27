@@ -52,7 +52,7 @@ function askStore() {
       const link: FleetApprovalAskRecord = {
         requestId: d.requestId, kind: d.kind, projectId: d.projectId, jobId: d.jobId ?? null, leaseEpoch: d.leaseEpoch ?? null,
         naxAskId: d.naxAskId ?? null, budgetPolicyId: d.budgetPolicyId ?? null, resolvedBy: null, outcome: null,
-        createdAt: NOW, updatedAt: NOW,
+        pendingResolvedBy: null, recordedStatus: null, createdAt: NOW, updatedAt: NOW,
       };
       links.set(link.requestId, link);
       views.set(link.requestId, {
@@ -95,6 +95,17 @@ function askStore() {
       const resumedById = outcome['resumedById'];
       if (view) views.set(requestId, { ...view, outcome, ...(typeof resumedById === 'string' ? { decidedById: resumedById } : {}) });
       return link;
+    }),
+    // US-007 (fix round 2): the close stamps its intent on every pending ask of the policy before it starts, and the
+    // durable continuation reads it back.
+    markPendingPolicyAsks: vi.fn(async (budgetPolicyId: string, resolvedBy: FleetApprovalAskRecord['resolvedBy']) => {
+      let count = 0;
+      for (const [id, link] of links) {
+        if (link.budgetPolicyId !== budgetPolicyId || views.get(id)?.status !== 'pending') continue;
+        links.set(id, { ...link, pendingResolvedBy: resolvedBy });
+        count += 1;
+      }
+      return count;
     }),
     // US-007 (fix round 1): the policy close pages too, so a held ask is stepped over instead of ending the call.
     findPendingForPolicyPage: vi.fn(async (budgetPolicyId: string, after?: string, limit = MAX_PENDING_ASKS_PER_JOB) =>

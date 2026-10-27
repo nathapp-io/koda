@@ -9,7 +9,17 @@ export type FleetAskKind = 'bash' | 'budget';
 export interface FleetApprovalAskRecord {
   requestId: string; kind: FleetAskKind; projectId: string | null; jobId: string | null; leaseEpoch: number | null;
   naxAskId: string | null; budgetPolicyId: string | null; resolvedBy: ApprovalResolvedBy | null;
-  outcome: Record<string, unknown> | null; createdAt: Date; updatedAt: Date;
+  outcome: Record<string, unknown> | null;
+  /** US-007 (fix round 2): the resolution a policy close intended for this ask, drained later if it could not settle it. */
+  pendingResolvedBy: ApprovalResolvedBy | null;
+  /** US-009: the last engine status whose fleet outputs were recorded; a redelivery of it records nothing. */
+  recordedStatus: string | null;
+  createdAt: Date; updatedAt: Date;
+}
+
+/** One policy ask the durable continuation claimed: the resolution its close intended, and where it belongs. */
+export interface PolicyAskClose {
+  requestId: string; budgetPolicyId: string | null; projectId: string | null; pendingResolvedBy: ApprovalResolvedBy;
 }
 
 export type NewFleetApprovalAsk = Pick<FleetApprovalAskRecord, 'requestId' | 'kind' | 'projectId'>
@@ -64,7 +74,16 @@ export interface IFleetApprovalAskRepository {
    * held request is stepped over rather than met again, and a newer pending ask is still settled.
    */
   findPendingForPolicyPage(budgetPolicyId: string, afterRequestId?: string, limit?: number): Promise<FleetApprovalAskRecord[]>;
+  /** Stamps the resolution a close intends for every pending ask of the policy (US-007 fix round 2). */
+  markPendingPolicyAsks(budgetPolicyId: string, resolvedBy: ApprovalResolvedBy): Promise<number>;
+  /**
+   * Claim a bounded, least-recently-attempted batch of pending policy asks that have an intended resolution. Skips held
+   * request/link rows and durably moves the selected links to the queue's tail via updatedAt, so neither a held ask nor
+   * a failing close can hide later work. Call in its own transaction, before attempting the closes.
+   */
+  claimPendingPolicyAsks(limit: number): Promise<PolicyAskClose[]>;
   setResolvedBy(requestId: string, resolvedBy: ApprovalResolvedBy): Promise<FleetApprovalAskRecord>;
+  setRecordedStatus(requestId: string, recordedStatus: string): Promise<FleetApprovalAskRecord>;
   /** Replaces the outcome. */
   setOutcome(requestId: string, outcome: Record<string, unknown>): Promise<FleetApprovalAskRecord>;
 

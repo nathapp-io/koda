@@ -12,7 +12,7 @@ import type {
 import { FLEET_ASK_KEY, FLEET_ASK_KEYS } from './domain/approval.domain';
 import {
   FleetApprovalAskRecord, FleetAskKind, FleetAskWithStatus, IFleetApprovalAskRepository, MAX_COUNTED_PROJECTS,
-  MAX_PENDING_ASKS_PER_JOB, JobEndAsk, NewFleetApprovalAsk,
+  MAX_PENDING_ASKS_PER_JOB, JobEndAsk, NewFleetApprovalAsk, PolicyAskClose,
 } from './domain/fleet-approval-ask.domain';
 import { fleetStatusWhere, toFleetApproval, type FleetAskRow } from './fleet-approval-view';
 
@@ -170,6 +170,44 @@ export class PrismaFleetApprovalAskRepository
       take: limit,
     });
     return rows.map((row) => this.toDomain(row));
+  }
+
+  /**
+   * US-007 (fix round 2): stamp the close's intent on every pending ask of the policy before the close starts, so an
+   * ask it cannot settle (held, or past the call's bound) keeps the reason that action chose.
+   */
+  async markPendingPolicyAsks(budgetPolicyId: string, resolvedBy: ApprovalResolvedBy): Promise<number> {
+    const { count } = await this.db.fleetApprovalAsk.updateMany({
+      where: { budgetPolicyId, request: { status: 'pending' } },
+      data: { pendingResolvedBy: resolvedBy },
+    });
+    return count;
+  }
+
+  /**
+   * The durable policy-close queue: individual asks, ordered by the link's last update, skip-locking held rows and
+   * moving the selected batch to the tail before any close is attempted. A crash after scheduling just delays the ask.
+   */
+  claimPendingPolicyAsks(limit: number): Promise<PolicyAskClose[]> {
+    return this.db.$queryRaw<PolicyAskClose[]>`
+      WITH next AS (
+        SELECT a."requestId"
+        FROM "FleetApprovalAsk" a
+        JOIN "ApprovalRequest" r ON r."id" = a."requestId"
+        WHERE a."kind" = 'budget' AND a."pendingResolvedBy" IS NOT NULL AND r."status" = 'pending'
+        ORDER BY a."updatedAt" ASC, a."requestId" ASC
+        LIMIT ${limit}
+        FOR UPDATE OF r, a SKIP LOCKED
+      )
+      UPDATE "FleetApprovalAsk" a SET "updatedAt" = clock_timestamp()
+      FROM next WHERE a."requestId" = next."requestId"
+      RETURNING a."requestId", a."budgetPolicyId", a."projectId", a."pendingResolvedBy"
+    `;
+  }
+
+  async setRecordedStatus(requestId: string, recordedStatus: string): Promise<FleetApprovalAskRecord> {
+    const row = await this.db.fleetApprovalAsk.update({ where: { requestId }, data: { recordedStatus } });
+    return this.toDomain(row);
   }
 
   async setResolvedBy(requestId: string, resolvedBy: ApprovalResolvedBy): Promise<FleetApprovalAskRecord> {
@@ -337,6 +375,7 @@ const toAskRecord = (model: AskModel): FleetApprovalAskRecord => ({
   ...model,
   kind: model.kind as FleetAskKind,
   resolvedBy: model.resolvedBy as ApprovalResolvedBy | null,
+  pendingResolvedBy: model.pendingResolvedBy as ApprovalResolvedBy | null,
   outcome: asObject(model.outcome),
 });
 

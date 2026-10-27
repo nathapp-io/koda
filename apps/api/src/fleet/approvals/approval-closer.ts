@@ -143,20 +143,27 @@ export class ApprovalCloser {
    * The read is paged and bounded per call (fix round 1): one skipped (held) ask must not leave a newer pending ask
    * of the same policy behind — reachable when an earlier close skipped a held request and a later hard stop opened
    * another — and this runs inside the caller's transaction, so it settles at most `limit` asks, like the job-end
-   * close. A backlog left past the bound is drained by the next close of that policy (a hard stop supersedes it).
+   * close.
+   *
+   * Fix round 2: the intent is stamped on every pending ask of the policy *before* the first close
+   * (`store.markPendingPolicyAsks`), so whatever this call leaves behind — a held request, an ask past the bound — is
+   * drained later by `PolicyAskCloseSweeper` with the resolution this action chose, even after the policy row is gone.
    */
   async closeForPolicy(policyId: string, close: PolicyClose, now: Date, limit = MAX_ASKS_CLOSED_PER_CALL): Promise<ApprovalChange> {
     const live: LiveFleetApprovalEvent[] = [];
     let first: FleetApprovalRecord | null = null;
+    const intended = await this.store.markPendingPolicyAsks(policyId, close.resolvedBy);
+    if (intended === 0) return { approval: null, live };
+
     let after: string | undefined;
     let processed = 0;
     while (processed < limit) {
       const take = Math.min(MAX_PENDING_ASKS_PER_JOB, limit - processed);
       const links = await this.store.findPendingForPolicyPage(policyId, after, take);
-      if (links.length === 0) break;
+      if (links.length === 0) return { approval: first, live };
       for (const link of links) {
         const closed = await this.closePolicyAsk(link.requestId, close, now);
-        if (closed === null) continue;
+        if (closed.approval === null) continue;
         first ??= closed.approval;
         live.push(...closed.live);
       }
@@ -165,14 +172,17 @@ export class ApprovalCloser {
       if (links.length < take || next === undefined) return { approval: first, live };
       after = next.requestId;
     }
-    this.logger.warn(`Policy ${policyId}: close stopped at ${limit} asks; the next close of the policy drains the rest`);
+    this.logger.warn(`Policy ${policyId}: close stopped at ${limit} asks; the continuation sweeper drains the rest`);
     return { approval: first, live };
   }
 
-  /** One policy ask, in the caller's transaction; answers null when the engine skipped it (request held). */
-  private async closePolicyAsk(requestId: string, close: PolicyClose, now: Date): Promise<ApprovalChange | null> {
+  /**
+   * One policy ask, in the caller's transaction. Answers `{ approval: null, live: [] }` when the engine skipped it
+   * (the request is held); the intent stamped by `closeForPolicy` keeps it in the sweeper's queue.
+   */
+  async closePolicyAsk(requestId: string, close: PolicyClose, now: Date): Promise<ApprovalChange> {
     const closed = await this.askService.close(requestId, { status: 'cancelled', reason: close.resolvedBy }, now);
-    if (closed === null) return null;
+    if (closed === null) return { approval: null, live: [] };
 
     await this.store.setResolvedBy(requestId, close.resolvedBy);
     if (close.outcome !== undefined) {

@@ -13,8 +13,6 @@ import {
 } from '../../approvals/domain/approval.errors';
 import { PermissionService } from '../../permissions/permission.service';
 import { BudgetsService } from '../budgets/budgets.service';
-import { ApprovalCloser, userActor } from './approval-closer';
-import { ApprovalLivePublisher } from './approval-live.publisher';
 import { checkBashDecision } from './bash-decision';
 import {
   ApprovalStatus, ApprovalType, FleetApprovalRecord, MAX_REQUEUE_CANDIDATES, RequeueCandidate,
@@ -57,8 +55,6 @@ export class ApprovalsService {
     private readonly decisions: ApprovalDecisionService,
     private readonly budgets: BudgetsService,
     private readonly permissions: PermissionService,
-    private readonly closer: ApprovalCloser,
-    private readonly live: ApprovalLivePublisher,
   ) {}
 
   async list(route: ApprovalRoute, q: { status?: ApprovalStatus; type?: ApprovalType; jobId?: string }, page: IPageOption): Promise<IPageResult<FleetApprovalDto>> {
@@ -99,10 +95,10 @@ export class ApprovalsService {
     if (view === null) throw new NotFoundAppException({}, 'fleet.approvals');
     // Step 7: an answer that found the job ended closes the link `job_ended` without answering nax.
     if (view.type === 'nax_bash_escalate' && view.resolvedBy === 'job_ended') throw new ConflictAppException({}, 'fleet.approvalNotPending');
-    // The fleet's own outputs of a decision (activity row, `fleet.approval.resolved` webhook, live event) stay here
-    // until the engine's `FleetAskEventsSubscriber` records them from the outbox (permissions P3 US-009, which owns
-    // the `recordedStatus` idempotency key); the decision itself has already committed.
-    this.live.publish(await this.closer.recordResolved(view, userActor(caller.id)));
+    // The fleet's outputs of this decision (activity row, `fleet.approval.resolved` webhook, live event) are recorded by
+    // `FleetAskEventsSubscriber` from the durable `approval_request_changed` event the engine wrote in the deciding
+    // transaction, once per engine status (permissions P3 US-009): a crash here loses nothing and a redelivery is a
+    // no-op, which a write in this adapter could not promise.
     return FleetApprovalDto.from(view);
   }
 

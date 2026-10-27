@@ -19,6 +19,7 @@ import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 import { BudgetsService } from '../../../src/fleet/budgets/budgets.service';
 import { BudgetSweeper } from '../../../src/fleet/budgets/budget-sweeper';
 import { ApprovalCloser, userActor } from '../../../src/fleet/approvals/approval-closer';
+import { PolicyAskCloseSweeper } from '../../../src/fleet/approvals/policy-ask-close.sweeper';
 import { ProjectEventBus } from '../../../src/live/project-event-bus';
 import type { LiveEvent } from '../../../src/live/live-event';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
@@ -37,6 +38,7 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
   let budgets: BudgetsService;
   let sweeper: BudgetSweeper;
   let closer: ApprovalCloser;
+  let policySweeper: PolicyAskCloseSweeper;
   let txManager: ITransactionManager;
   const seen: LiveEvent[] = [];
   let n = 0;
@@ -111,6 +113,7 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
     budgets = app.get(BudgetsService);
     sweeper = app.get(BudgetSweeper);
     closer = app.get(ApprovalCloser);
+    policySweeper = app.get(PolicyAskCloseSweeper);
     txManager = app.get<ITransactionManager>(TRANSACTION_MANAGER, { strict: false });
     project.projectId = world.projectId;
     app.get(ProjectEventBus).subscribe(world.projectId, (e) => seen.push(e));
@@ -350,6 +353,68 @@ describeIntegration('budget approval wiring on the approval engine (PG)', () => 
     expect(await requestOf(held.request.id)).toMatchObject({ status: 'pending', result: null });
     expect(await requestOf(newer.requestId)).toMatchObject({ status: 'cancelled', result: { closedBy: 'policy_deleted' } });
     expect((await linkOf(newer.requestId)).resolvedBy).toBe('policy_deleted');
+  });
+
+  it('F3 (fix round 2): the continuation closes a held ask after the policy is gone', async () => {
+    const policy = await projectPolicy();
+    await job({ costSpentUsd: 10 });
+    await evaluate(policy.id);
+    const [{ request: ask }] = await asksOf(policy.id);
+
+    // The delete skips the held ask; the policy row is gone before the close can be retried.
+    await whileRequestHeld(ask.id, () =>
+      request(app.getHttpServer()).delete(`${budgetRoute}/${policy.id}`).set(asRoot()).expect(204));
+    expect(await requestOf(ask.id)).toMatchObject({ status: 'pending', result: null });
+
+    const swept = await policySweeper.tick();
+
+    expect(swept.closed).toBe(1);
+    expect(await requestOf(ask.id)).toMatchObject({ status: 'cancelled', result: { closedBy: 'policy_deleted' } });
+    expect((await linkOf(ask.id)).resolvedBy).toBe('policy_deleted');
+  });
+
+  it('F3 (fix round 2): the continuation drains a close that stopped at its bound', async () => {
+    const policy = await projectPolicy();
+    await job({ costSpentUsd: 10 });
+    await evaluate(policy.id);
+    const newer = await seedFleetAsk(prisma, {
+      kind: 'budget', projectId: world.projectId,
+      input: {
+        policyId: policy.id, scopeType: 'project', scopeId: world.projectId, windowKind: 'calendar_month_utc',
+        windowStart: new Date().toISOString(), spentUsd: '10', amountUsd: '10', requestedAt: new Date().toISOString(),
+      },
+      link: { budgetPolicyId: policy.id },
+    });
+    const ids = (await asksOf(policy.id)).map(({ request }) => request.id);
+
+    // One ask per call, as a caller inside a short transaction would run it.
+    const first = await withTestActor({ type: 'USER', id: world.ids.root }, () =>
+      txManager.run(() => closer.closeForPolicy(policy.id, { status: 'cancelled', resolvedBy: 'policy_deleted', actor: userActor(world.ids.root) }, new Date(), 1)));
+    expect(first.approval).not.toBeNull();
+    expect(await prisma.approvalRequest.count({ where: { id: { in: ids }, status: 'pending' } })).toBe(1);
+
+    expect((await policySweeper.tick()).closed).toBe(1);
+
+    expect(await prisma.approvalRequest.count({ where: { id: { in: ids }, status: 'pending' } })).toBe(0);
+    const closed = await prisma.fleetApprovalAsk.findMany({ where: { requestId: { in: ids } } });
+    expect(closed.map((l) => l.resolvedBy)).toEqual(['policy_deleted', 'policy_deleted']);
+    expect(newer.requestId).toBeDefined();
+  });
+
+  it('F3 (fix round 2): an ask the resume could not close is drained as manual_resume, not as a cancellation', async () => {
+    const policy = await projectPolicy();
+    await job({ costSpentUsd: 10 });
+    await evaluate(policy.id);
+    const [{ request: ask }] = await asksOf(policy.id);
+
+    await whileRequestHeld(ask.id, () =>
+      request(app.getHttpServer()).post(`${budgetRoute}/${policy.id}/resume`).set(asRoot()).send({ amountUsd: 20 }).expect(200));
+    expect(await requestOf(ask.id)).toMatchObject({ status: 'pending' });
+
+    expect((await policySweeper.tick()).closed).toBe(1);
+    expect(await requestOf(ask.id)).toMatchObject({ status: 'cancelled', result: { closedBy: 'manual_resume' } });
+    // The fleet reads the link's manual-resume resolution as an approved ask.
+    expect((await linkOf(ask.id)).resolvedBy).toBe('manual_resume');
   });
 
   it('a resume with an approvalId stamps it and closes nothing', async () => {

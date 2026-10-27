@@ -20,6 +20,8 @@ import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers
 import enFleet from '../../../src/i18n/en/fleet.json';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
+import { outboxRecord } from '../../helpers/outbox-record';
+import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -43,6 +45,7 @@ describeIntegration('fleet approvals API (PG)', () => {
   let approvals: ApprovalsService;
   let padmin: string;
   let padminId: string;
+  let publisher: FanOutPublisher;
   let n = 0;
   const as = (token: string) => ({ Authorization: `Bearer ${token}` });
   const tok = (who: keyof FleetHttpWorld['tokens']) => as(world.tokens[who]);
@@ -53,6 +56,17 @@ describeIntegration('fleet approvals API (PG)', () => {
   });
   /** One evaluation as the budget sweeper runs it: the wrapped entry production reaches `evaluate` from. */
   const evaluate = (policyId: string) => withTestActor({ type: 'SYSTEM', id: 'budget' }, () => evaluator.evaluate(policyId));
+  /**
+   * Runs the outbox relay over the pending events of one type. The fleet's decision outputs are recorded from
+   * `approval_request_changed` (US-009 / fix round 2), so a test that asserts them has to deliver the event.
+   */
+  const deliver = async (type: string): Promise<void> => {
+    for (const row of await prisma.outboxEvent.findMany({ where: { type }, orderBy: { createdAt: 'asc' } })) {
+      await publisher.publish(outboxRecord(row.type, JSON.parse(row.payload), {
+        id: row.id, metadata: { projectId: row.projectId, eventId: row.eventId },
+      }));
+    }
+  };
   const PROJECT = '/api/projects/web/fleet/approvals';
   const ADMIN = '/api/fleet/approvals';
 
@@ -105,6 +119,7 @@ describeIntegration('fleet approvals API (PG)', () => {
     ).items.map((a) => a.slug)).toContain(agent.slug);
     evaluator = app.get(BudgetEvaluator);
     approvals = app.get(ApprovalsService);
+    publisher = app.get(FanOutPublisher);
     await request(server).post('/api/admin/users').set(tok('root')).send({ email: 'padmin@koda.test', name: 'padmin', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
     await request(server).post('/api/projects/web/members').set(tok('root')).send({ email: 'padmin@koda.test', roleKey: 'project-admin' }).expect(201);
     padmin = await loginToken(server, 'padmin@koda.test');
@@ -230,6 +245,8 @@ describeIntegration('fleet approvals API (PG)', () => {
     expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: queued.id } })).state).toBe('QUEUED');
     // The resumed incident still names the ask it answered: the close answers the request id.
     expect((await prisma.budgetIncident.findFirstOrThrow({ where: { policyId: policy.id, kind: 'resumed' } })).approvalId).toBe(approvalId);
+    // The decision's fleet outputs come from the durable outbox event (permissions P3 US-009).
+    await deliver('approval_request_changed');
     expect(await prisma.outboxEvent.count({ where: { payload: { contains: '"event":"fleet.approval.resolved"' } } })).toBe(1);
   });
 

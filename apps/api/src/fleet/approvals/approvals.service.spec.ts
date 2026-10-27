@@ -75,14 +75,10 @@ function build(over: {
   const decisions = { decide: vi.fn(async () => engineRequest({ status: 'executed' })) };
   const budgets = { assertResumable: vi.fn(async () => undefined), resume: vi.fn() };
   const permissions = { effectiveKeys: vi.fn(async () => new Set(over.keys ?? DECIDE_KEYS)) };
-  const resolved = [{ approvalId: before?.id ?? 'a1', status: 'approved' }];
-  const closer = { recordResolved: vi.fn(async () => resolved) };
-  const live = { publish: vi.fn() };
   const service = new ApprovalsService(
     store as unknown as FleetApprovalAskStore, queries as never, decisions as never, budgets as never, permissions as never,
-    closer as never, live as never,
   );
-  return { service, store, queries, decisions, budgets, permissions, closer, live };
+  return { service, store, queries, decisions, budgets, permissions };
 }
 
 /** `AppException` carries its HTTP status in the `httpStatus` getter; 0 = resolved. */
@@ -145,17 +141,15 @@ describe('ApprovalsService reads over the ask store (fix round 1)', () => {
 
 describe('ApprovalsService.decide over the engine (fix round 1)', () => {
   it('keep_paused is the engine reject with no params, and the answer is the reloaded view', async () => {
-    const { service, decisions, budgets, closer, live } = build({ after: { status: 'rejected', decision: 'keep_paused', decidedById: 'root', comment: 'later', resolvedBy: 'user' } });
+    const { service, decisions, budgets } = build({ after: { status: 'rejected', decision: 'keep_paused', decidedById: 'root', comment: 'later', resolvedBy: 'user' } });
 
     const dto = await service.decide(ADMIN_CALLER, PROJECT, 'a1', { decision: 'keep_paused', comment: 'later' }, NOW);
 
     expect(decisions.decide).toHaveBeenCalledWith('a1', 'reject', 'later', NOW, undefined);
     expect(budgets.resume).not.toHaveBeenCalled();
     expect(dto).toEqual(expect.objectContaining({ status: 'rejected', decision: 'keep_paused', resolvedBy: 'user', decidedById: 'root', comment: 'later' }));
-    // The fleet still announces the resolution: activity row, webhook and live event, as the legacy path did. The
-    // engine's own recorder owns them from US-009 on.
-    expect(closer.recordResolved).toHaveBeenCalledWith(expect.objectContaining({ id: 'a1', status: 'rejected' }), { type: 'USER', id: 'root', responsibleUserId: 'root' });
-    expect(live.publish).toHaveBeenCalledWith([{ approvalId: 'a1', status: 'approved' }]);
+    // The fleet's outputs of the decision are the outbox recorder's (`FleetAskEventsSubscriber`), not this adapter's:
+    // the adapter only translates the decision and answers the reloaded view.
   });
 
   it('raise_budget_and_resume becomes the engine approve with the amount and the de-duplicated candidate ids', async () => {

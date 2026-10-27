@@ -3,7 +3,8 @@ import type { IPageOption } from '@nathapp/nestjs-common';
 import type { IPageResult } from '@nathapp/nestjs-data';
 import type { ApprovalFilters, ApprovalResolvedBy, FleetApprovalRecord, PendingCount, RequeueCandidate } from './domain/approval.domain';
 import {
-  FLEET_APPROVAL_ASK_REPOSITORY, FleetApprovalAskRecord, FleetAskWithStatus, IFleetApprovalAskRepository, JobEndAsk, NewFleetApprovalAsk,
+  FLEET_APPROVAL_ASK_REPOSITORY, FleetApprovalAskRecord, FleetAskWithStatus, IFleetApprovalAskRepository, JobEndAsk,
+  NewFleetApprovalAsk, PolicyAskClose,
 } from './domain/fleet-approval-ask.domain';
 
 /**
@@ -55,8 +56,23 @@ export class FleetApprovalAskStore {
     return this.asks.findPendingForPolicyPage(budgetPolicyId, afterRequestId, limit);
   }
 
+  /** US-007 (fix round 2): stamp the intent of a policy close on every pending ask of the policy. */
+  markPendingPolicyAsks(budgetPolicyId: string, resolvedBy: ApprovalResolvedBy): Promise<number> {
+    return this.asks.markPendingPolicyAsks(budgetPolicyId, resolvedBy);
+  }
+
+  /** The durable policy-close queue: one bounded, skip-locked, least-recently-attempted batch. */
+  claimPendingPolicyAsks(limit: number): Promise<PolicyAskClose[]> {
+    return this.asks.claimPendingPolicyAsks(limit);
+  }
+
   setResolvedBy(requestId: string, resolvedBy: ApprovalResolvedBy): Promise<FleetApprovalAskRecord> {
     return this.asks.setResolvedBy(requestId, resolvedBy);
+  }
+
+  /** US-009: the idempotency key of the fleet outputs a settled ask records. */
+  setRecordedStatus(requestId: string, recordedStatus: string): Promise<FleetApprovalAskRecord> {
+    return this.asks.setRecordedStatus(requestId, recordedStatus);
   }
 
   setOutcome(requestId: string, outcome: Record<string, unknown>): Promise<FleetApprovalAskRecord> {
