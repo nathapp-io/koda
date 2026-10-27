@@ -153,9 +153,10 @@ describeIntegration('fleet assistant cancel job tool (PG, US-005)', () => {
     const action = await actionOf(`commit-${rollback}`);
     const tx = app.get<ITransactionManager>(TRANSACTION_MANAGER);
     const bus = app.get(ProjectEventBus, { strict: false });
+    // Bind before spying: binding the spy would recurse from mockImplementation.
+    const originalPublish = bus.publish.bind(bus);
     const publish = vi.spyOn(bus, 'publish');
     const observed: boolean[] = [];
-    const originalPublish = bus.publish.bind(bus);
     publish.mockImplementation(event => {
       if (event.type === 'fleet_job' && event.jobId === jobId) observed.push(tx.isInTransaction());
       originalPublish(event);
