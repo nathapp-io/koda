@@ -1216,6 +1216,7 @@ model ChatThread {
   turns          FleetThreadTurn[]
   jobs           FleetJob[]
   pendingActions PendingAction[]
+  assistantActionRequests AssistantActionRequest[]
 
   @@index([projectId, lastActivityAt])
   @@index([runnerId, status])
@@ -1647,10 +1648,32 @@ model ApprovalRequest {
   updatedAt               DateTime  @updatedAt
 
   decisions ApprovalDecision[]
+  assistantAction AssistantActionRequest?
 
   @@index([status, expiresAt])
   @@index([projectId, status, createdAt])
   @@index([actorType, actorId, onBehalfOfId, permissionKey, inputHash, status])
+}
+
+model AssistantActionRequest {
+  requestId          String   @id
+  threadId           String?
+  jobId              String?
+  toolCallId         String?
+  tool               String
+  preview            String   @db.Text
+  noteMessageId      String?
+  notedAt            DateTime?
+  deliveredAt        DateTime?
+  deliveredMessageId String?
+  createdAt          DateTime @default(now())
+
+  request ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  thread  ChatThread?     @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId])
+  @@index([threadId, deliveredAt])
+  @@index([deliveredMessageId])
 }
 
 model ApprovalDecision {

@@ -18,6 +18,8 @@ import { LogsModule } from '../logs/logs.module';
 import { RunnersModule } from '../runners/runners.module';
 import { SyncModule } from '../sync/sync.module';
 import { AssistantActionDecisions } from './actions/assistant-action-decisions';
+import { ASSISTANT_ACTION_REQUEST_REPOSITORY } from './requests/assistant-action-request.domain';
+import { PrismaAssistantActionRequestRepository } from './requests/prisma-assistant-action-request.repository';
 import { AssistantActionService } from './actions/assistant-action.service';
 import { PendingActionExpirySweeper } from './actions/pending-action-expiry.sweeper';
 import { PENDING_ACTION_REPOSITORY } from './actions/pending-action.domain';
@@ -63,6 +65,8 @@ import { WorkspaceTools } from './tools/workspace-tools';
   controllers: [RunnerToolController, McpController],
   providers: [
     AssistantToolRegistry,
+    PrismaAssistantActionRequestRepository,
+    { provide: ASSISTANT_ACTION_REQUEST_REPOSITORY, useExisting: PrismaAssistantActionRequestRepository },
     PrismaAssistantToolCallRepository,
     { provide: ASSISTANT_TOOL_CALL_REPOSITORY, useExisting: PrismaAssistantToolCallRepository },
     // 1d2-D7: the same repository answers the workspace tool's counts through its own interface.
