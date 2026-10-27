@@ -8,9 +8,11 @@ import { ApprovalExecutionService } from './approval-execution.service';
 import type { ApprovalRequestRecord } from './domain/approval.domain';
 import { ApprovalRequestNotPendingError } from './domain/approval.errors';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
+import { ApprovalRequestEvents } from './approval-request-events';
 
 /** At most this many requests settle in one tick; a longer backlog waits for the next one. */
 export const MAX_PER_TICK = 100;
+export const STALE_APPROVED_AFTER_MS = 300_000;
 
 export interface ApprovalRequestExpiryResult {
   /** Settled `expired` because nobody decided in time. */
@@ -45,14 +47,22 @@ export class ApprovalRequestExpirySweeper implements OnModuleInit, OnModuleDestr
     private readonly audit: AuditRecorder,
     private readonly execution: ApprovalExecutionService,
     @Inject(FLEET_CFG) private readonly fleetConfig: Pick<IFleetConfig, 'sweepEnabled' | 'approvalSweepMs'>,
+    private readonly events: ApprovalRequestEvents,
   ) {}
 
   onModuleInit(): void {
     if (!this.fleetConfig.sweepEnabled) return;
-    this.timer = setInterval(() => {
-      this.tick().catch((error: unknown) => {
+    this.timer = setInterval(async () => {
+      try {
+        await this.tick();
+      } catch (error) {
         this.logger.error(`Approval request expiry sweep failed: ${reason(error)}`);
-      });
+      }
+      try {
+        await this.retryStale();
+      } catch (error) {
+        this.logger.error(`Approval request stale retry failed: ${reason(error)}`);
+      }
     }, this.fleetConfig.approvalSweepMs);
     this.timer.unref();
   }
@@ -68,6 +78,26 @@ export class ApprovalRequestExpirySweeper implements OnModuleInit, OnModuleDestr
    */
   tick(now = new Date()): Promise<ApprovalRequestExpiryResult> {
     return runAsSystemWriter(this, () => this.settleDue(now));
+  }
+
+  retryStale(now = new Date()): Promise<{ retried: number; failed: number }> {
+    return runAsSystemWriter(this, async () => {
+      const result = { retried: 0, failed: 0 };
+      const stale = await this.requests.findStaleApproved(
+        new Date(now.getTime() - STALE_APPROVED_AFTER_MS), MAX_PER_TICK,
+      );
+      for (const request of stale) {
+        try {
+          await this.execution.execute(request.id, now);
+          result.retried += 1;
+        } catch (error) {
+          if (error instanceof ApprovalRequestNotPendingError) continue;
+          result.failed += 1;
+          this.logger.warn(`Approval request ${request.id} stale retry failed: ${reason(error)}`);
+        }
+      }
+      return result;
+    });
   }
 
   private async settleDue(now: Date): Promise<ApprovalRequestExpiryResult> {
@@ -116,6 +146,7 @@ export class ApprovalRequestExpirySweeper implements OnModuleInit, OnModuleDestr
     // The row is locked by this transaction, so a lost transition means a broken boundary: throw so the
     // transaction rolls back, instead of recording an entry for a settlement that did not happen.
     if (!settled) throw new ApprovalRequestNotPendingError(locked.status);
+    await this.events.record(settled);
 
     await this.audit.record({
       key: 'system.approval.expire',

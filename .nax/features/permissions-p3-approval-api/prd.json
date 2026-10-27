@@ -1,0 +1,1166 @@
+{
+  "project": "koda",
+  "feature": "permissions-p3-approval-api",
+  "branchName": "feat/permissions-p3-approval-api",
+  "createdAt": "2026-10-26T00:00:00.000Z",
+  "updatedAt": "2026-10-26T17:34:40.938Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "The change event and the gate's open",
+      "description": "**Goal** — Record the gate's newly opened approval requests as transactional, content-free outbox events.\n\n**Motivation** — `permissions-p3-approval-core` (PR #338, `38d435cb`) built the policy model, the resolver, the gate, deciding, executing and expiry, but it exposes services only.\n\n**Approach** — `src/approvals/approval-request-events.ts`:\n\n```ts\nexport const APPROVAL_REQUEST_CHANGED = 'approval_request_changed';\n\n/** The outbox payload. Never the frozen input or the result (they may carry user content). */\nexport interface ApprovalRequestChangedPayload {\n  requestId: string;\n  status: ApprovalRequestStatus;\n  projectId: string | null;\n  permissionKey: string;\n  requiredMode: ApprovalMode;\n  actorType: 'USER' | 'AGENT' | 'SYSTEM';\n  actorId: string;\n  onBehalfOfType: 'USER' | 'AGENT' | null;\n  onBehalfOfId: string | null;\n  expiresAt: string;               // ISO 8601\n}\n\n/** null when `raw` is not an object, or requestId, status, permissionKey or actorId is not a non-empty string. */\nexport function parseApprovalRequestChangedPayload(raw: unknown): ApprovalRequestChangedPayload | null;\n\n@Injectable()\nexport class ApprovalRequestEvents {\n  constructor(private readonly outbox: OutboxService) {}\n  /** Records one approval_request_changed outbox event. Must run inside the transaction that wrote the status. */\n  record(request: ApprovalRequestRecord): Promise<void>;\n}\n```\n\n`record` calls `outbox.record({ type: APPROVAL_REQUEST_CHANGED, payload, metadata })`, where `metadata` is `{ eventId: '<request id>:<status>' }` plus `projectId` when the request has one. `OutboxService` comes from `@nathapp/nestjs-outbox`, provided globally, as `ApprovalCloser` injects it (`src/fleet/approvals/approval-closer.ts`).\n\n`GLOBAL_OUTBOX_TYPES` (`src/outbox/global-outbox-types.ts`) gains `APPROVAL_REQUEST_CHANGED`.\n\nCall sites. Each is inside the transaction, and inside the same `bookkeeping` callback where there is one, right after the write that set the status:\n\n| Service | Where | Status recorded |\n|:--|:--|:--|\n| `ApprovalGate.gate` | step 7, after the request row is created (not for a returned duplicate, nor when the command runs at once) | `pending` |\n\nThe gate constructor gains a last parameter `events: ApprovalRequestEvents`. `ApprovalEngineModule` provides `ApprovalRequestEvents`; the exports are unchanged. Both direct `new ApprovalGate(...)` calls in approval-gate.service.spec.ts gain a last events stub with a record spy, preserving every existing expectation. The ExternalStubsModule in approval-engine.module.spec.ts provides and exports an OutboxService stub, preserving every existing expectation. Integration specs register configurableTestCommand('label.delete', …) once per file, reset it before each case, use fresh principals and the shared database gate, and clear approval decisions, requests and policies before each case.\n\n**Scope** — In: event constant, payload/parser/recorder, global outbox allowlist, pending-open transaction hook and associated unit/integration seams. Out: status changes in decision/execution/expiry (US-002), cancellation (US-006), live and notification fan-out (US-011), and production gate adoption.\n\n**Interface** — `ApprovalRequestEvents.record(request: ApprovalRequestRecord): Promise<void>`; `parseApprovalRequestChangedPayload(raw: unknown): ApprovalRequestChangedPayload | null`; the full payload contract is embedded above.",
+      "acceptanceCriteria": [
+        "[unit] ApprovalRequestEvents.record with a request of project p1 and status pending calls OutboxService.record exactly once, with type: 'approval_request_changed'.",
+        "[unit] That call's metadata equals { eventId: '<request id>:pending', projectId: 'p1' }.",
+        "[unit] For a request with projectId null and status expired, the call's metadata equals { eventId: '<request id>:expired' }, with no projectId key.",
+        "[unit] That call's payload equals { requestId, status, projectId, permissionKey, requiredMode, actorType, actorId, onBehalfOfType, onBehalfOfId, expiresAt } built from the record, with expiresAt as its ISO string, and nothing else.",
+        "[unit] GLOBAL_OUTBOX_TYPES.has('approval_request_changed') is true.",
+        "[unit] parseApprovalRequestChangedPayload returns null for a payload without requestId.",
+        "[unit] parseApprovalRequestChangedPayload returns an object equal to the payload record produced.",
+        "[unit] ApprovalGate.gate on its wait path, with no pending duplicate, calls events.record once with the created record (status pending) before its txManager.run callback returns.",
+        "[unit] ApprovalGate.gate returning a pending duplicate does not call events.record.",
+        "[unit] ApprovalGate.gate for a USER actor (the command runs at once) does not call events.record.",
+        "[integration] After an agent's ApprovalGate.gate('label.delete', …) opens a request, exactly one outbox event of type approval_request_changed exists whose payload requestId is that request's id.",
+        "[integration] An agent's ApprovalGate.gate whose command parse throws (state.parseThrows) leaves no approval_request_changed outbox event.",
+        "[unit] Compiling ApprovalEngineModule with its outside providers stubbed resolves an ApprovalRequestEvents instance.",
+        "[integration] When a transaction containing an ApprovalRequest status change rolls back, no approval_request_changed outbox event exists for that change."
+      ],
+      "tags": [
+        "permissions-p3-approval-api",
+        "api",
+        "approvals",
+        "outbox"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Four additive source changes reuse the existing outbox and transaction patterns; strict security TDD remains appropriate because the hook changes the approval gate's atomic write path.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-gate.service.ts",
+        "apps/api/src/approvals/approval-engine.module.ts",
+        "apps/api/src/fleet/approvals/approval-closer.ts",
+        "apps/api/src/outbox/global-outbox-types.ts",
+        "apps/api/src/approvals/approval-engine.module.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/approvals/approval-request-events.ts",
+        "apps/api/src/approvals/approval-request-events.spec.ts",
+        "apps/api/test/integration/approvals/approval-request-events.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-gate.service.ts",
+          "reason": "the constructor gains a last parameter events: ApprovalRequestEvents, and step 7 calls events.record(created) inside the open transaction; nothing else in gate changes."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-engine.module.ts",
+          "reason": "provides ApprovalRequestEvents; the exports are unchanged."
+        },
+        {
+          "path": "apps/api/src/outbox/global-outbox-types.ts",
+          "reason": "GLOBAL_OUTBOX_TYPES gains APPROVAL_REQUEST_CHANGED; the two fleet types stay."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-gate.service.spec.ts",
+          "reason": "both new ApprovalGate(...) calls pass a stub events object with a record spy as the new last argument; every existing expectation stays."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-engine.module.spec.ts",
+          "reason": "its ExternalStubsModule also provides and exports an OutboxService stub, because ApprovalRequestEvents injects it; every existing expectation stays."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "7230ece5a52690c8ca4703fa098ce722200a1107"
+    },
+    {
+      "id": "US-002",
+      "title": "Decisions, executions and expiry record their changes",
+      "description": "**Goal** — Emit one transactional approval_request_changed event for each decision, execution and expiry status transition.\n\n**Motivation** — The later features (assistant, fleet, gate) each move a surface onto `ApprovalGate`.\n\n**Approach** — Call sites. Each is inside the transaction, and inside the same `bookkeeping` callback where there is one, right after the write that set the status:\n\n| Service | Where | Status recorded |\n|:--|:--|:--|\n| `ApprovalDecisionService.decide` | after `transition(id, 'pending', …)` | `approved` or `rejected` |\n| `ApprovalExecutionService.execute` | after each `transition(id, 'approved', …)`: the pre-check settle, the run's settle, and the failure settle; inside the `txManager.run` closure (which the private `settle` wraps in `bookkeeping`), and only when `transition` returned a record | `failed` or `executed` |\n| `ApprovalRequestExpirySweeper.tick` | after each transition | `expired`, or `approved` on timeout |\n\nThe decision, execution and sweeper constructors gain a last parameter `events: ApprovalRequestEvents`. US-001 already supplies the gate parameter and module provider. Retain decision-before-execution commit ordering, command rollback/failure settlement, every tick result shape and every existing expectation. Record only a transition's returned record, never an attempted/lost transition.\n\n- `apps/api/src/approvals/approval-decision.service.spec.ts` — new ApprovalDecisionService(...) passes a stub events object with a record spy as the new last argument; existing expectations stay, and the new record cases are added here.\n- `apps/api/src/approvals/approval-execution.service.spec.ts` — both new ApprovalExecutionService(...) calls pass a stub events object with a record spy as the new last argument; existing expectations stay, and the new record cases are added here.\n- `apps/api/src/approvals/approval-request-expiry.sweeper.spec.ts` — new ApprovalRequestExpirySweeper(...) passes a stub events object with a record spy as the new last argument; every tick result expectation stays, and the new record cases are added here.\n- `apps/api/test/integration/approvals/approval-execute.integration.spec.ts` — the bare new ApprovalExecutionService(...) passes app.get(ApprovalRequestEvents, { strict: false }) as the new last argument; its expectations stay.\n\nAdd the end-to-end event-order integration case to an existing approval integration spec. Use the P approver fixture: a fresh user bound to the seeded approver role in P AND granted label.delete in P, since approverMustHoldAction defaults to true. Existing service unit tests drive each entry point and assert the events stub receives the actual transitioned status.\n\n**Scope** — In: decision, execution and expiry transaction hooks and updates to existing constructor test seams. Out: event abstraction/open hook (US-001), visibility/routes (US-003–US-005), cancellation (US-006), retry scheduling (US-007) and event consumers (US-011).\n\n**Interface** — `record(request: ApprovalRequestRecord): Promise<void>` on `ApprovalRequestEvents`; each affected constructor appends `events: ApprovalRequestEvents` as its last parameter.",
+      "acceptanceCriteria": [
+        "[unit] ApprovalDecisionService.decide(id, 'reject', null) calls events.record once with a record whose status is rejected.",
+        "[unit] ApprovalDecisionService.decide(id, 'approve', null) calls events.record with a record whose status is approved before it calls execute.",
+        "[unit] ApprovalExecutionService.execute whose command succeeds calls events.record with a record whose status is executed.",
+        "[unit] ApprovalExecutionService.execute whose command throws calls events.record with a record whose status is failed.",
+        "[unit] ApprovalExecutionService.execute with no registered command (no-command) calls events.record with a record whose status is failed.",
+        "[unit] ApprovalRequestExpirySweeper.tick on a due onTimeout: 'reject' request calls events.record with a record whose status is expired.",
+        "[unit] ApprovalRequestExpirySweeper.tick on a due onTimeout: 'approve' request calls events.record with a record whose status is approved.",
+        "[integration] After an approver's decide(id, 'approve', null) on a pending label.delete request, the request's approval_request_changed outbox events have the statuses pending, approved and executed, in that order of creation.",
+        "[unit] ApprovalRequestExpirySweeper.tick(now) with one due onTimeout: 'reject' request still returns { expired: 1, approved: 0, failed: 0 }, preserving its existing result shape and counts after event recording is added."
+      ],
+      "tags": [
+        "permissions-p3-approval-api",
+        "api",
+        "approvals",
+        "outbox",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Three existing services append one shared provider and record at established transition seams, without a new abstraction; approval execution and transaction integrity require the strict security strategy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-decision.service.ts",
+        "apps/api/src/approvals/approval-execution.service.ts",
+        "apps/api/src/approvals/approval-request-expiry.sweeper.ts",
+        "apps/api/src/approvals/approval-request-events.ts",
+        "apps/api/test/integration/approvals/approval-execute.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-decision.service.ts",
+          "reason": "the constructor gains a last parameter events: ApprovalRequestEvents, and decide calls events.record after its transition, inside the same transaction."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-execution.service.ts",
+          "reason": "the constructor gains a last parameter events: ApprovalRequestEvents, and each of the three settle transitions calls events.record inside its bookkeeping callback."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-request-expiry.sweeper.ts",
+          "reason": "the constructor gains a last parameter events: ApprovalRequestEvents, and each transition in tick calls events.record inside its transaction; tick's result shape is unchanged."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-decision.service.spec.ts",
+          "reason": "new ApprovalDecisionService(...) passes a stub events object with a record spy as the new last argument; existing expectations stay, and the new record cases are added here."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-execution.service.spec.ts",
+          "reason": "both new ApprovalExecutionService(...) calls pass a stub events object with a record spy as the new last argument; existing expectations stay, and the new record cases are added here."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-request-expiry.sweeper.spec.ts",
+          "reason": "new ApprovalRequestExpirySweeper(...) passes a stub events object with a record spy as the new last argument; every tick result expectation stays, and the new record cases are added here."
+        },
+        {
+          "path": "apps/api/test/integration/approvals/approval-execute.integration.spec.ts",
+          "reason": "the bare new ApprovalExecutionService(...) passes app.get(ApprovalRequestEvents, { strict: false }) as the new last argument; its expectations stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "437b12e6db33868086b7999da8a2cd9445b8e95b"
+    },
+    {
+      "id": "US-003",
+      "title": "Who sees a request",
+      "description": "**Goal** — Expose service-level approval inbox/detail reads filtered to decide scopes and the request's own principals.\n\n**Motivation** — Each needs these routes, the inbox reads and the notifications to exist first, so that a request they open can be seen and decided.\n\n**Approach** — `PermissionService` gains:\n\n```ts\n/** 'all' = holds approval.decide; otherwise the <pattern> of every approval.decide@<pattern> held, ascending. */\nexport type DecidePatterns = 'all' | readonly string[];\nexport interface DecideScopes {\n  everywhere: boolean;                                                // a global Owner or Admin binding\n  global: DecidePatterns;                                             // from effectiveKeys(principal, 'global')\n  projects: ReadonlyArray<{ projectId: string; patterns: DecidePatterns }>;\n}\napprovalDecideScopes(principal: PrincipalRef): Promise<DecideScopes>;\n```\n\n- `everywhere` is true when `findEffectiveBindings(principal, null)` has a row `isGlobalAdminBinding` accepts. In that case `global` is `'all'` and `projects` is `[]`.\n- Otherwise `global` comes from `effectiveKeys(principal, 'global')`. `projects` has one entry per id of `findAccessibleProjectIds(principal)` (ascending) whose `effectiveKeys(principal, { projectId })` yields non-empty patterns.\n- Patterns from a key set: `'all'` when the set has `approval.decide`. Otherwise the suffixes after `approval.decide@`, ascending and distinct. An empty array when there are none.\n\n`src/approvals/approval-eligibility.ts` exports its existing `matchesDecidePattern(pattern, permissionKey)` unchanged.\n\n`src/approvals/approval-request.queries.ts`:\n\n```ts\nexport interface ApprovalRequestFilter {\n  status?: ApprovalRequestStatus;\n  projectId?: string;\n  permissionKey?: string;\n  mine?: boolean;                 // only requests whose actor or on-behalf-of principal is the caller\n}\nexport interface ApprovalRequestDetail { request: ApprovalRequestRecord; decisions: ApprovalDecisionRecord[] }\n\n@Injectable()\nexport class ApprovalRequestQueries {\n  list(principal: PrincipalRef, filter: ApprovalRequestFilter, page: { current: number; size: number }): Promise<IPageResult<ApprovalRequestRecord>>;\n  /** Throws ApprovalRequestNotFoundError when the request is missing or the principal cannot see it. */\n  get(principal: PrincipalRef, id: string): Promise<ApprovalRequestDetail>;\n  /** Unscoped, for system readers (the notification subscriber). null when missing. */\n  findById(id: string): Promise<ApprovalRequestRecord | null>;\n}\n```\n\nA request is visible to `principal` when any of these holds:\n- it is the request's own: the request's `actor` equals the principal, or its `onBehalfOf` does;\n- `scopes.everywhere`;\n- `scopes.global` matches its key (whatever the request's project: a GLOBAL role applies in every project);\n- the request's project is `p`, and the patterns of `scopes.projects` for `p` match its key.\n\nPatterns match a key when they are `'all'`, or when one of them satisfies `matchesDecidePattern(pattern, key)`.\n\n`PrismaApprovalRequestRepository` gains `findVisiblePage(visibility, filter, page): Promise<IPageResult<ApprovalRequestRecord>>`. `visibility` is `{ principal: PrincipalRef; scopes: DecideScopes }`. The global patterns produce key clauses with no project condition, and each project's patterns produce key clauses ANDed with `projectId`. It builds one Prisma `where`: the filter fields ANDed with an OR of the visibility clauses. A pattern `p.*` becomes `permissionKey: { startsWith: 'p.' }`, an exact pattern `permissionKey: p`, and `'all'` no key condition. `mine: true` replaces the OR with the own clauses only. Rows are ordered `createdAt desc, id desc`, through `Paginate` as `PrismaApprovalPolicyRepository.findPage` does.\n\n`ApprovalEngineModule` provides and exports `ApprovalRequestQueries`. The repository stays unexported (`.nax/rules/api-data.md`).\n\nIntegration fixtures use fresh principals and clear all ApprovalDecision, ApprovalRequest and ApprovalPolicy rows before each case. The P approver is bound to seeded approver AND granted label.delete in P. Open P/Q label.delete requests through the registered configurable test command and gate. Requests for keys with no registered command (`ticket.delete` in AC-6, `role.manage` with no project in AC-7) are inserted directly as pending ApprovalRequest rows with future expiresAt through fixtureDb. Preserve can/effectiveKeys and all existing repository methods unchanged.\n\n**Scope** — In: decide-scope extraction, exported unchanged pattern matcher, repository-filtered pagination and public queries. Out: HTTP DTOs/routes/error mapping (US-004–US-006), notifications (US-011) and MCP handlers (US-012–US-013). No visibility indexes or per-project key-read optimization are added.\n\n**Interface** — The complete `DecidePatterns`, `DecideScopes`, `approvalDecideScopes`, `ApprovalRequestFilter`, `ApprovalRequestDetail`, and query-service signatures are embedded above; repository signature: `findVisiblePage(visibility, filter, page): Promise<IPageResult<ApprovalRequestRecord>>`.",
+      "acceptanceCriteria": [
+        "[unit] approvalDecideScopes for a principal whose effective global bindings include a global owner binding returns exactly { everywhere: true, global: 'all', projects: [] }.",
+        "[integration] For a user bound to the seeded approver role in project P only, approvalDecideScopes returns exactly { everywhere: false, global: [], projects: [{ projectId: P, patterns: 'all' }] }.",
+        "[integration] For a user granted ['approval.decide@label.*'] in project P (grantKeys), approvalDecideScopes returns projects equal to [{ projectId: P, patterns: ['label.*'] }].",
+        "[integration] For a user granted ['approval.decide'] through a non-admin GLOBAL role (grantKeys with projectId null), approvalDecideScopes returns global 'all' and projects [].",
+        "[integration] ApprovalRequestQueries.list for the P approver returns exactly the ids of the requests opened in P, with a request opened in project Q present in the fixture.",
+        "[integration] list for the user holding approval.decide@label.* in P returns exactly the label.delete request in P, with a ticket.delete request in P present in the fixture.",
+        "[integration] list for the global non-admin decider returns exactly the request with no project (key role.manage, inserted directly) and the P request.",
+        "[integration] list for the agent that opened the P request, holding no decide key, returns exactly that request.",
+        "[integration] list for a global Owner returns exactly the P request and the Q request.",
+        "[integration] list with mine: true for the P approver returns no request, because the approver is neither actor nor on-behalf-of principal of any.",
+        "[integration] list with status: 'rejected' returns exactly the rejected requests the caller can see.",
+        "[integration] list returns visible requests ordered newest createdAt first.",
+        "[integration] get(approverRef, id) on a request with two decisions returns a detail whose decisions ids are the two decision ids in ascending decidedAt order.",
+        "[integration] get for a principal that cannot see the request throws ApprovalRequestNotFoundError.",
+        "[integration] findById(id) returns the request record for an id that exists, whoever opened it."
+      ],
+      "tags": [
+        "permissions-p3-approval-api",
+        "api",
+        "approvals",
+        "security",
+        "visibility"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Introduces cross-scope access-control queries, pattern matching and non-disclosure behavior; strict security TDD is mandatory.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/permission.service.ts",
+        "apps/api/src/approvals/approval-eligibility.ts",
+        "apps/api/src/approvals/prisma-approval-request.repository.ts",
+        "apps/api/src/approvals/prisma-approval-policy.repository.ts",
+        "apps/api/src/approvals/approval-engine.module.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/approvals/approval-request.queries.ts",
+        "apps/api/test/integration/approvals/approval-request-visibility.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/permission.service.ts",
+          "reason": "gains approvalDecideScopes(principal); can, effectiveKeys and the other methods are unchanged."
+        },
+        {
+          "path": "apps/api/src/permissions/permission.service.spec.ts",
+          "reason": "gains the approvalDecideScopes global-admin case with stubbed bindings; existing cases keep their expectations."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-eligibility.ts",
+          "reason": "matchesDecidePattern becomes exported; its body and decideEligibility are unchanged."
+        },
+        {
+          "path": "apps/api/src/approvals/prisma-approval-request.repository.ts",
+          "reason": "gains findVisiblePage; existing methods are unchanged."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-engine.module.ts",
+          "reason": "provides and exports ApprovalRequestQueries."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0432710b6d402c81b49b9ffcf7ecec79358f3362"
+    },
+    {
+      "id": "US-004",
+      "title": "Listing and reading requests over REST",
+      "description": "**Goal** — Add authenticated REST list/detail routes with service-enforced visibility, summary/detail DTOs and localized 404 errors.\n\n**Motivation** — The route permission checks (`approval.policy.manage`, the decide route's key): the services check only policy validity, anti-escalation and decide eligibility.\n\n**Approach** — `src/approvals/approval-requests.controller.ts`: `@ApiTags('approvals') @ApiBearerAuth() @Controller('approvals') export class ApprovalRequestsController`, with `@UseGuards(RequiresGuard)` on each route. Every route of this feature's controllers carries `@ApiOperation` and `@ApiResponse` for each status it answers (`.nax/rules/api-controllers.md`). The principal ref is `{ type: principal.actorType === 'user' ? 'USER' : 'AGENT', id: principal.id }`; a runner principal never reaches these routes, because `CombinedAuthGuard` admits runner keys only on `@RunnerRoute()` routes.\n\n| Route | `@Requires` | Handler | Answer |\n|:--|:--|:--|:--|\n| `GET /approvals` (`list`) | `'approval.decide', { enforcedBy: 'service' }` | `queries.list(ref, filter, page)` | 200, page of `ApprovalRequestSummaryDto` |\n| `GET /approvals/:id` (`get`) | same | `queries.get(ref, id)` | 200, `ApprovalRequestDto` |\n\nDTOs in `src/approvals/dto/`:\n- `ListApprovalRequestsQuery extends KodaPageQuery`: `status?` (one of the seven statuses, `@IsIn`), `projectId?` (non-empty string), `permissionKey?` (non-empty string, at most 200), and `mine?: boolean`, documented with `@ApiPropertyOptional({ type: Boolean })` and turned from the query strings `'true'`/`'false'` into a boolean by a `toBoolean` transform like `src/tickets/dto/list-tickets.query.ts` (so the generated CLI type is `boolean`). Any other value is a 400. The controller passes the raw query through `parseQuery`.\n- `ApprovalRequestSummaryDto.from(record)` has `id`, `permissionKey`, `projectId`, `actorType`, `actorId`, `onBehalfOfType`, `onBehalfOfId`, `origin`, `requiredMode`, `status`, `satisfiedBy`, `approverType`, `approverId`, `expiresAt`, `decidedAt`, `settledAt` and `createdAt` (dates as ISO strings). It has no `input` and no `result`.\n- `ApprovalRequestDto.from(detail)` has the summary's fields plus `input`, `result` and `decisions: ApprovalDecisionDto[]` (`id`, `deciderType`, `deciderId`, `decision`, `comment`, `decidedAt`).\n\n`src/approvals/approval-http-errors.ts` exports `rethrowApprovalError(error: unknown): never`. Every handler in this feature's approval and policy controllers catches and passes errors through it:\n\n| Domain error | HTTP |\n|:--|:--|\n| `ApprovalRequestNotFoundError` | `NotFoundAppException({}, 'approvals.requestNotFound')` (404) |\n| anything else | rethrown unchanged |\n\n`src/i18n/en/approvals.json` and `src/i18n/zh/approvals.json` hold the messages, with `-2` and `400` keys for the validation codes, as `permissions.json` does. The English templates are fixed, and the args reach the client only through them (the global filter answers `JsonResponse.Error(code, message)` with no args):\n- `requestNotFound.404`: `Approval request not found`\n\nThe `zh` file has the same keys and placeholders. The integration ACs compare `message` with the rendered template, as `roles-api.integration.spec.ts`'s `sentence()` helper does. Add only requestNotFound in this story. Use JsonResponse.Ok envelopes and map page records to summary DTOs while retaining the shared page fields. All response DTO properties carry Swagger metadata.\n\n`src/approvals/approval-api.module.ts`: `ApprovalApiModule` imports `ApprovalEngineModule` and `ProjectAccessModule` (the project policy routes' `ProjectMembershipGuard` needs `ProjectAccessService`, as `src/fleet/approvals/approvals.module.ts` imports it) and declares `ApprovalRequestsController` (and the two policy controllers from US-008 and US-010). `AppModule` imports it. The two policy controllers are added by their owning stories, not prematurely here.\n\n`PENDING_SURFACE_KEYS` loses `approval.decide` (US-004). Update permission-contract.spec.ts expectedPending accordingly, keeping the other pending keys. Add an Approval requests block to test/e2e/api-endpoint/endpoint.e2e.spec.ts: GET /api/approvals with the admin token answers 200, and without credentials answers 401; existing blocks are unchanged. Add a DB-free approval-api.module.spec.ts compilation case using GlobalStubsModule, not a database integration wiring test. Integration fixtures create fresh users/REST agents and clear all approval decisions, requests and policies per case; open label.delete requests via configurableTestCommand and ApprovalGate.\n\n**Scope** — In: REST list/get, list and response DTOs, requestNotFound mapping/i18n, module wiring and declaration of approval.decide. Out: decide route/body/errors (US-005), cancel (US-006), policy controllers (US-008–US-010) and production gated writes.\n\n**Interface** — `rethrowApprovalError(error: unknown): never`; `ApprovalRequestSummaryDto.from(record)`; `ApprovalRequestDto.from(detail)`; `ListApprovalRequestsQuery extends KodaPageQuery`; `GET /approvals` and `GET /approvals/:id` use the query service from US-003.",
+      "acceptanceCriteria": [
+        "[integration] GET /api/approvals as the P approver answers 200 with page records in data.records whose ids are exactly the P requests, with a Q request present in the fixture.",
+        "[integration] No item of the GET /api/approvals page has an input or a result field.",
+        "[integration] GET /api/approvals?status=bogus answers 400.",
+        "[integration] GET /api/approvals?mine=yes answers 400.",
+        "[integration] GET /api/approvals?mine=true as the REST agent that opened the P request answers exactly that request.",
+        "[integration] GET /api/approvals/:id as the P approver answers 200 with the request's frozen input and a decisions array.",
+        "[integration] GET /api/approvals/:id as a user with no binding in P answers 404 with the approvals.requestNotFound message.",
+        "[unit] PENDING_SURFACE_KEYS.has('approval.decide') is false.",
+        "[unit] Compiling ApprovalApiModule with GlobalStubsModule resolves ApprovalRequestsController.",
+        "[integration] GET /api/approvals without credentials answers 401.",
+        "[integration] GET /api/approvals?projectId=<Q id> as the P approver answers an empty page, with the Q request present in the fixture."
+      ],
+      "tags": [
+        "permissions-p3-approval-api",
+        "api",
+        "rest",
+        "security",
+        "approvals"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Adds authenticated data-disclosure surfaces with service-enforced permissions, DTO validation and cross-module DI; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/audit/audit.controller.ts",
+        "apps/api/src/approvals/approval-request.queries.ts",
+        "apps/api/src/i18n/en/permissions.json",
+        "apps/api/test/integration/audit/audit-route.integration.spec.ts",
+        "apps/api/src/tickets/dto/list-tickets.query.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/approvals/approval-requests.controller.ts",
+        "apps/api/src/approvals/approval-http-errors.ts",
+        "apps/api/src/approvals/approval-api.module.ts",
+        "apps/api/src/approvals/approval-api.module.spec.ts",
+        "apps/api/src/approvals/dto/list-approval-requests.query.ts",
+        "apps/api/src/approvals/dto/approval-request.dto.ts",
+        "apps/api/src/i18n/en/approvals.json",
+        "apps/api/src/i18n/zh/approvals.json",
+        "apps/api/test/integration/approvals/approval-request-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/app.module.ts",
+          "reason": "imports ApprovalApiModule; no other import changes."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "PENDING_SURFACE_KEYS loses 'approval.decide'; no key is added or removed from the catalog."
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "expectedPending loses 'approval.decide', because the request routes now declare it; the other pending keys stay."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "gains an 'Approval requests' block: GET /api/approvals with the admin token answers 200, and without credentials answers 401 (.nax/rules/api-testing.md); existing blocks are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "4e7aae2a19a9d4d10f655b7db9df7edaa97f5ce6"
+    },
+    {
+      "id": "US-005",
+      "title": "Deciding a request over REST",
+      "description": "**Goal** — Add the authenticated decision route, delegating visibility and decision eligibility to the existing services.\n\n**Motivation** — The route permission checks (`approval.policy.manage`, the decide route's key): the services check only policy validity, anti-escalation and decide eligibility.\n\n**Approach** — Extend `src/approvals/approval-requests.controller.ts` with the decide route:\n\n| Route | `@Requires` | Handler | Answer |\n|:--|:--|:--|:--|\n| `POST /approvals/:id/decisions` (`decide`), `@HttpCode(200)` | `'approval.decide', { enforcedBy: 'service' }` | `queries.get(ref, id)`, then `decisions.decide(id, dto.decision, dto.comment ?? null)` | 200, `ApprovalRequestDto` of the returned request with its decisions |\n\n- `DecideApprovalRequestDto`: `decision` (`'approve' | 'reject'`, `@IsIn`) and `comment?` (string, at most 2000 characters).\n\n`src/approvals/approval-http-errors.ts` exports `rethrowApprovalError(error: unknown): never`. Every handler in this feature's approval and policy controllers catches and passes errors through it:\n\n| Domain error | HTTP |\n|:--|:--|\n| `ApprovalRequestNotFoundError` | `NotFoundAppException({}, 'approvals.requestNotFound')` (404) |\n| `ApprovalRequestNotPendingError(status)` | `ConflictAppException({ status }, 'approvals.notPending')` (409) |\n| `ApprovalRequestExpiredError` | `ConflictAppException({}, 'approvals.expired')` (409) |\n| `ApprovalDecideForbiddenError(reason)` | `ForbiddenAppException({ reason }, 'approvals.decideForbidden')` (403) |\n| anything else | rethrown unchanged |\n\nThe English templates are fixed, and the args reach the client only through them (the global filter answers `JsonResponse.Error(code, message)` with no args):\n- `notPending.409`: `The approval request is already {status}`\n- `expired.409`: `The approval request has expired`\n- `decideForbidden.403`: `You cannot decide this approval request: {reason}`\n\nThe `zh` file has the same keys and placeholders. The integration ACs compare `message` with the rendered template, as `roles-api.integration.spec.ts`'s `sentence()` helper does. Keep the requestNotFound mapping from US-004. Use the app's existing ConflictAppException if no platform equivalent exists. Each route has @UseGuards(RequiresGuard), @ApiOperation and @ApiResponse for every answered status; return the JsonResponse.Ok detail, including the returned request and its current decisions. The principal ref is `{ type: principal.actorType === 'user' ? 'USER' : 'AGENT', id: principal.id }`.\n\nUS-005 only: the decide route checks visibility, then calls `decide`, in two steps; a request that becomes invisible between them (a binding removed) is still decided under `decide`'s own eligibility check, which re-reads the decider's keys.\n\nUse real HTTP integration tests with fresh principals/REST agents, per-case decision/request/policy deletion and a registered/reset configurable label.delete command. The P approver has seeded approver plus label.delete in P. The global non-admin decider sees the project request but lacks the project action key: return the engine's missing-action-permission 403, not a visibility 404.\n\n**Scope** — In: decide endpoint, request body DTO, three new mappings and matching en/zh templates. Out: changing core decide/execute eligibility or event hooks (approval-core/US-002), cancellation (US-006), policy writes (US-008–US-010), and combining visibility/decision into a new transaction.\n\n**Interface** — `POST /approvals/:id/decisions`; `decisions.decide(id, dto.decision, dto.comment ?? null)`; `DecideApprovalRequestDto` accepts `decision: 'approve' | 'reject'` and `comment?: string`; `rethrowApprovalError(error: unknown): never`.",
+      "acceptanceCriteria": [
+        "[integration] POST /api/approvals/:id/decisions with { \"decision\": \"approve\" } as the P approver answers 200 with status executed.",
+        "[integration] After that approve, the test command has recorded exactly one call.",
+        "[integration] POST /api/approvals/:id/decisions with { \"decision\": \"reject\", \"comment\": \"no\" } answers 200 with status rejected.",
+        "[integration] After that reject, the answer's decisions holds one decision whose comment is no and whose decision is reject.",
+        "[integration] A decide by a user with no binding in P answers 404.",
+        "[integration] After that refused decide, the request is still pending.",
+        "[integration] The REST agent that opened a request requiring agent, deciding it with approve, answers 403 with the message rendered from approvals.decideForbidden.403 with reason tier-too-low.",
+        "[integration] Deciding a request that is already rejected answers 409 with the approvals.notPending message.",
+        "[integration] Deciding a pending request whose expiresAt is in the past answers 409 with the approvals.expired message.",
+        "[integration] POST /api/approvals/:id/decisions with { \"decision\": \"maybe\" } answers 400.",
+        "[integration] POST /api/approvals/:id/decisions with a 2001-character comment answers 400.",
+        "[integration] The global non-admin decider (a user granted ['approval.decide'] through a non-admin GLOBAL role) approving the P request answers 403 with the message rendered from approvals.decideForbidden.403 with reason missing-action-permission, not 404.",
+        "[integration] Deciding a missing request answers 404 with approvals.requestNotFound.",
+        "[integration] A decide refused because its request is missing or invisible writes nothing."
+      ],
+      "tags": [
+        "permissions-p3-approval-api",
+        "api",
+        "rest",
+        "approvals",
+        "security"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A standard endpoint addition, but it exposes an authorization-sensitive action execution path and must retain eligibility and non-disclosure guarantees.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/fleet-approvals.controller.ts",
+        "apps/api/src/i18n/en/approvals.json",
+        "apps/api/src/approvals/approval-requests.controller.ts",
+        "apps/api/src/approvals/approval-http-errors.ts",
+        "apps/api/src/approvals/approval-decision.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/approvals/dto/decide-approval-request.dto.ts",
+        "apps/api/test/integration/approvals/approval-decide-route.integration.spec.ts"
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "17235708f94d78c5a9d0b1a3dee0cd7768d1e282"
+    },
+    {
+      "id": "US-006",
+      "title": "Cancelling one's own request",
+      "description": "**Goal** — Let a requester withdraw its pending approval under a new implicit permission with atomic event and audit recording.\n\n**Motivation** — Cancelling a request (the actor withdrawing it).\n\n**Approach** — **Catalog.** `NEW_KEY_SCOPES` gains `'approval.request.cancel': 'any'`, and `IMPLICIT_KEYS` gains `'approval.request.cancel'`. It is not role-grantable and not approvable (access `implicit`).\n\n**Error.** `src/approvals/domain/approval.errors.ts` gains `export class ApprovalCancelForbiddenError extends Error { constructor(readonly id: string) }`, in the same shape as its siblings.\n\n**Service.** `ApprovalDecisionService.cancel(requestId: string, now?: Date): Promise<ApprovalRequestRecord>`. The caller is the current context's actor. In one `txManager.run`:\n1. `lockById(requestId)`. When it is missing, throw `ApprovalRequestNotFoundError`.\n2. A status other than `pending` throws `ApprovalRequestNotPendingError(status)`.\n3. The caller must be a `USER` or `AGENT` equal to the request's actor, or equal to its `onBehalfOf` when the actor is `SYSTEM/assistant`. Otherwise throw `ApprovalCancelForbiddenError(requestId)`. A `SYSTEM` or `RUNNER` caller is always refused.\n4. `transition(id, 'pending', { status: 'cancelled', settledAt: now })`.\n5. `events.record(cancelled)`.\n6. `AuditRecorder.record({ key: 'approval.request.cancel', resourceType: 'approval-request', resourceId: id, projectId, summary: 'cancelled <permissionKey>' })`.\n\nNothing is written when a step refuses.\n\n| Route | `@Requires` | Handler | Answer |\n|:--|:--|:--|:--|\n| `POST /approvals/:id/cancel` (`cancel`), `@HttpCode(200)` (US-006) | `'approval.request.cancel'` | `queries.get(ref, id)`, then `decisions.cancel(id)` | 200, `ApprovalRequestDto` |\n\nEvery route uses @UseGuards(RequiresGuard), @ApiOperation and @ApiResponse for each status. The principal ref is `{ type: principal.actorType === 'user' ? 'USER' : 'AGENT', id: principal.id }`. Load the detail through the query service before mutation so missing/invisible requests are 404, then return JsonResponse.Ok with the cancelled request and its decisions. Extend rethrowApprovalError with `ApprovalCancelForbiddenError` → `ForbiddenAppException({}, 'approvals.cancelForbidden')` (403); retain requestNotFound and notPending mappings, and rethrow unknown errors unchanged.\n\n- `cancelForbidden.403`: `Only the requester can cancel this approval request`\n\nAdd this exact English template to en/approvals.json and matching zh keys/placeholders. A pending request past expiresAt may still be cancelled.\n\nUpdate catalog.spec.ts's NEW_KEY_SCOPES copy and IMPLICIT_KEY_LIST, so its catalog-equals-derivation and length assertions hold with one more key. Regenerate permissions/__snapshots__/role-matrix.json with the role-matrix spec's update mode: every role gains only the approval.request.cancel implicit column in both cells, as session.logout has; no other cell changes. Extend approval-decision.service.spec.ts without changing its existing decide expectations. Integration cases use REST agents created by POST /api/agents, fresh principals, per-case approval cleanup and the registered/reset label.delete command.\n\n**Scope** — In: implicit catalog key/snapshot, cancel error/service/route, transactional event/audit, localization and cancellation behavior. Out: decide changes (US-005), stale retry (US-007), admin cancellation of another's request and testing the cancellation race itself.\n\n**Interface** — `ApprovalDecisionService.cancel(requestId: string, now?: Date): Promise<ApprovalRequestRecord>`; `export class ApprovalCancelForbiddenError extends Error { constructor(readonly id: string) }`; `POST /approvals/:id/cancel`.",
+      "acceptanceCriteria": [
+        "[unit] findCatalogEntry('approval.request.cancel'), reduced to its access and scope, equals { access: 'implicit', scope: 'any' }.",
+        "[integration] The REST agent that opened a pending request calling POST /api/approvals/:id/cancel answers 200 with status cancelled.",
+        "[integration] After that cancel, the request's audit entries reduced to { key, actorType, summary } equal exactly [{ key: 'approval.request.cancel', actorType: 'AGENT', summary: 'cancelled label.delete' }].",
+        "[unit] ApprovalDecisionService.cancel on a pending request whose actor is the context's actor calls events.record with a record whose status is cancelled.",
+        "[unit] ApprovalDecisionService.cancel on a pending request whose actor is SYSTEM/assistant and whose onBehalfOf is user U returns a cancelled record when the context's actor is U.",
+        "[integration] The P approver (not the actor) calling cancel answers 403 with the approvals.cancelForbidden message.",
+        "[integration] After that refused cancel, the request is still pending.",
+        "[integration] A user with no binding in P calling cancel on the P request answers 404.",
+        "[integration] Cancelling a request that is already executed answers 409 with the approvals.notPending message.",
+        "[integration] Cancelling an unknown id answers 404.",
+        "[unit] ApprovalDecisionService.cancel with a SYSTEM actor in the context throws ApprovalCancelForbiddenError.",
+        "[unit] That refused cancel calls no transition.",
+        "[integration] After a cancel, deciding the same request answers 409.",
+        "[integration] The REST agent cancelling its own expired request (still pending) answers 200 with status cancelled.",
+        "[integration] A cancel refused because its request is missing or invisible writes nothing."
+      ],
+      "tags": [
+        "permissions-p3-approval-api",
+        "api",
+        "rest",
+        "approvals",
+        "security",
+        "audit"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-005"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Adds ownership authorization and a permission key across catalog, atomic state mutation, audit and HTTP behavior; strict security TDD applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/i18n/en/approvals.json",
+        "apps/api/src/approvals/approval-decision.service.ts",
+        "apps/api/src/approvals/approval-requests.controller.ts",
+        "apps/api/src/approvals/approval-http-errors.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/approvals/approval-cancel.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "NEW_KEY_SCOPES gains 'approval.request.cancel': 'any' and IMPLICIT_KEYS gains 'approval.request.cancel'; no other key changes."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.spec.ts",
+          "reason": "its own NEW_KEY_SCOPES copy gains 'approval.request.cancel': 'any' and its IMPLICIT_KEY_LIST gains 'approval.request.cancel', so the catalog-equals-derivation and length assertions hold with one more key."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "every role's row gains an 'approval.request.cancel' column with the implicit reason in both cells, as 'session.logout' has; regenerated with the role-matrix spec's update mode, and no other cell changes."
+        },
+        {
+          "path": "apps/api/src/approvals/domain/approval.errors.ts",
+          "reason": "gains ApprovalCancelForbiddenError; the existing errors are unchanged."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-decision.service.ts",
+          "reason": "gains cancel(requestId, now); decide is unchanged."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-decision.service.spec.ts",
+          "reason": "gains the cancel unit cases; existing expectations stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ed368d8c5f3a16bb944b170438255fd797ff22d4"
+    },
+    {
+      "id": "US-007",
+      "title": "Retrying a stale approval",
+      "description": "**Goal** — Recover approved requests left unexecuted after a process stop using the existing expiry sweeper interval.\n\n**Motivation** — A retry path for a request left `approved` when the process stopped between the decide commit and `execute`.\n\n**Approach** — `PrismaApprovalRequestRepository.findStaleApproved(before: Date, limit: number)` answers requests with status `approved` and `decidedAt <= before`, oldest `decidedAt` first, at most `limit`.\n\n`ApprovalRequestExpirySweeper` gains:\n```ts\nexport const STALE_APPROVED_AFTER_MS = 300_000;\nretryStale(now = new Date()): Promise<{ retried: number; failed: number }>;\n```\n`retryStale` opens its own `runAsSystemWriter(this, …)` scope, as `tick` does, and inside it reads `findStaleApproved(new Date(now.getTime() - STALE_APPROVED_AFTER_MS), MAX_PER_TICK)` and calls `execution.execute(id, now)` for each request, one after another:\n- `execute` returns (any terminal status): `retried + 1`.\n- `execute` throws `ApprovalRequestNotPendingError` (someone else settled it): no count, and the loop continues.\n- Any other throw: `failed + 1`, a `warn` log with the request id, and the loop continues.\n\nThe interval that `onModuleInit` starts runs `tick()`, then `retryStale()`, each with its errors caught and logged as today.\n\nThe retry runs in the expiry sweeper. It uses the same interval and the same `@SystemWriter('system.approval.expire')` class: that writer already settles requests. `retryStale` is a second method, so `tick`'s result shape is unchanged. 5 minutes (`STALE_APPROVED_AFTER_MS = 300_000`) is long past any in-flight execution.\n\nKeep tick and existing repository methods unchanged apart from the US-002 event hooks already present. Add retry unit/fake-timer cases to approval-request-expiry.sweeper.spec.ts, including a findStaleApproved stub, while preserving every tick expectation. DB integration cases use a registered/reset label.delete test command and requests opened by a fresh permitted agent before setting approved/decidedAt through fixtureDb. Clear decisions, requests and policies before each case. No schema/index migration is added.\n\n**Scope** — In: bounded stale-approved query, sequential retry loop and timer chaining under the existing system writer. Out: changing expiry outcomes/events (US-002), cancellation (US-006), distributed retries beyond execute's row lock, or adding another scheduler.\n\n**Interface** — `PrismaApprovalRequestRepository.findStaleApproved(before: Date, limit: number)`; `export const STALE_APPROVED_AFTER_MS = 300_000;`; `retryStale(now = new Date()): Promise<{ retried: number; failed: number }>`.",
+      "acceptanceCriteria": [
+        "[unit] retryStale(now) calls findStaleApproved with before = now minus 300000 ms and limit = MAX_PER_TICK.",
+        "[unit] retryStale calls execution.execute(id, now) once for each request findStaleApproved returns.",
+        "[unit] When both of two stale requests execute, retryStale answers { retried: 2, failed: 0 }.",
+        "[unit] When execute throws ApprovalRequestNotPendingError for the only stale request, retryStale answers { retried: 0, failed: 0 }.",
+        "[unit] When execute throws Error('boom') for the first of two requests, retryStale still executes the second and answers { retried: 1, failed: 1 }.",
+        "[unit] With sweepEnabled true and fake timers, one approvalSweepMs after onModuleInit the sweeper has called tick and then retryStale.",
+        "[integration] A request set to approved with decidedAt 10 minutes before now is executed after retryStale(now).",
+        "[integration] After that retry, the test command has recorded exactly one call.",
+        "[integration] A request set to approved with decidedAt 1 minute before now is still approved after retryStale(now).",
+        "[integration] findStaleApproved(before, 10) returns no pending or executed request, whatever its decidedAt.",
+        "[unit] When execute throws an error other than ApprovalRequestNotPendingError, retryStale logs warn with that request's id.",
+        "[unit] With sweepEnabled false, onModuleInit starts no timer, preserving the existing disabled-sweeper behavior after retry scheduling is added."
+      ],
+      "tags": [
+        "permissions-p3-approval-api",
+        "api",
+        "approvals",
+        "recovery",
+        "security"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two source files add a bounded scan and sequential delegation to the existing executor from the existing timer; strict TDD applies because retry establishes a system-writer scope for authorized execution.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-request-expiry.sweeper.ts",
+        "apps/api/src/approvals/prisma-approval-request.repository.ts",
+        "apps/api/src/approvals/approval-execution.service.ts",
+        "apps/api/src/approvals/approval-request-expiry.sweeper.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/approvals/approval-retry.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-request-expiry.sweeper.ts",
+          "reason": "gains STALE_APPROVED_AFTER_MS and retryStale; the interval runs tick then retryStale; tick is unchanged."
+        },
+        {
+          "path": "apps/api/src/approvals/prisma-approval-request.repository.ts",
+          "reason": "gains findStaleApproved; existing methods are unchanged."
+        },
+        {
+          "path": "apps/api/src/approvals/approval-request-expiry.sweeper.spec.ts",
+          "reason": "gains retryStale cases and the interval case with a findStaleApproved stub; every tick expectation stays."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "774217fa708e09da55a038c4752594facd09794f"
+    },
+    {
+      "id": "US-008",
+      "title": "Global policy reads and creation",
+      "description": "**Goal** — Expose globally guarded policy pagination, approvable-key metadata and policy creation with localized domain errors.\n\n**Motivation** — The route permission checks (`approval.policy.manage`, the decide route's key): the services check only policy validity, anti-escalation and decide eligibility.\n\n**Approach** — `ApprovalPolicyService` gains:\n- `page(filter: ApprovalPolicyFilter, page: { current; size }): Promise<IPageResult<ApprovalPolicyRecord>>`, which returns `findPage` as it is (US-008).\n\nDTOs in `src/approvals/dto/`:\n- `ApprovalPolicySubjectDto`: `kind` (`'all' | 'type' | 'role' | 'principal'`, `@IsIn`), `principalType?` (`'USER' | 'AGENT' | 'ASSISTANT'`), `roleId?` and `principalId?` (non-empty strings).\n- `CreateApprovalPolicyDto`:\n  - `permissionPattern` (string, 1 to 200 characters);\n  - `appliesTo` (`ApprovalPolicySubjectDto`, `@ValidateNested`);\n  - `mode` (one of the four modes);\n  - `timeoutSec?` (integer or null);\n  - `onTimeout?` (`'reject' | 'approve'`);\n  - `requiredApprovals?` (integer);\n  - `approverMustHoldAction?` and `requireDistinctApprover?` (booleans).\n- `ApprovalPolicyDto.from(record)`: every `ApprovalPolicyRecord` field, with dates as ISO strings.\n- `ApprovableKeyDto`: `key`, `scope`, `risk`, `floor` and `default`.\n- `ListApprovalPoliciesQuery extends KodaPageQuery`: `permissionPattern?`.\n\n`toPolicySubject(dto: ApprovalPolicySubjectDto)` (`src/approvals/dto/approval-policy-subject.dto.ts`) maps to `ApprovalPolicyInput['appliesTo']`:\n- `all` → `{ kind: 'all' }`;\n- `type` with a `principalType` → `{ kind: 'type', principalType }`;\n- `role` with a `roleId` → `{ kind: 'role', roleId }`;\n- `principal` with a `principalType` of `USER` or `AGENT` and a `principalId` → `{ kind: 'principal', … }`.\n\nAny other combination throws `InvalidApprovalPolicyError('subject')`.\n\n`approvableKeys(): ApprovableKeyDto[]` (`src/approvals/approvable-keys.ts`) maps every `PERMISSION_CATALOG` entry with `approval.approvable === true` to its DTO, sorted by key.\n\n**Global routes** (US-008: `list`, `keys`, `create`; US-009: `update`, `remove`). `src/approvals/approval-policies.controller.ts`, `@Controller('approval-policies') export class ApprovalPoliciesController`. Every route uses `@UseGuards(RequiresGuard)` and resolves no project, so the key is checked at global scope:\n\n| Route | `@Requires` | Handler | Answer |\n|:--|:--|:--|:--|\n| `GET /approval-policies` (`list`) | `approval.policy.manage` | `policies.page({ projectId: null, permissionPattern }, page)` | 200, page of `ApprovalPolicyDto` |\n| `GET /approval-policies/keys` (`keys`) | `approval.policy.manage` | `approvableKeys()` | 200, `{ keys: ApprovableKeyDto[] }` |\n| `POST /approval-policies` (`create`), `@HttpCode(201)` | `approval.policy.manage` | `policies.create({ ...dto, appliesTo: toPolicySubject(dto.appliesTo), projectId: null })` | 201, `ApprovalPolicyDto` |\n\nEvery handler catches and passes errors through rethrowApprovalError. Extend its mappings:\n\n| Domain error | HTTP |\n|:--|:--|\n| `InvalidApprovalPolicyError(violation)` (US-008) | `ValidationAppException({ violation }, 'approvals.invalidPolicy')` (400) |\n| `ApprovalPolicyConflictError` (US-008) | `ConflictAppException({}, 'approvals.policyConflict')` (409) |\n| `ApprovalPolicySelfApplicationError` (US-008) | `ForbiddenAppException({}, 'approvals.policySelfApplication')` (403) |\n| anything else | rethrown unchanged |\n\nThe English templates are fixed, and the args reach the client only through them (the global filter answers `JsonResponse.Error(code, message)` with no args):\n- `invalidPolicy.400` and `invalidPolicy.-2`: `Invalid approval policy: {violation}`\n- `policyConflict.409`: `An approval policy for this pattern and subject already exists`\n- `policySelfApplication.403`: `An agent cannot change an approval policy that applies to itself`\n\nThe `zh` file has the same keys and placeholders. The integration ACs compare `message` with the rendered template, as `roles-api.integration.spec.ts`'s `sentence()` helper does. Preserve previously added mappings. Register ApprovalPoliciesController in ApprovalApiModule. Every REST route carries @ApiTags/@ApiBearerAuth, @ApiOperation and status-specific @ApiResponse; DTO fields use @ApiProperty. Parse list queries through parseQuery and return JsonResponse.Ok with mapped page records. Keep policy validity, floors, requiredApprovals: 1 and agent anti-self-application in ApprovalPolicyService unchanged.\n\n`PENDING_SURFACE_KEYS` loses `approval.policy.manage` (US-008). Update permission-contract.spec.ts expectedPending, keeping the other pending keys. Place CreateApprovalPolicyDto, ApprovalPolicyDto and ApprovableKeyDto in the new approval-policy.dto.ts output; subject conversion and list query have their named separate files. Integration fixtures use fresh principals/REST agents and per-case deletion of ApprovalDecision, ApprovalRequest and ApprovalPolicy. A global policy is `{ permissionPattern: 'label.delete', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human' }` created by the admin's action context; a project fixture adds projectId.\n\n**Scope** — In: global list/keys/create, DTOs/subject conversion/catalog helper, public page service, three policy error mappings and removal of pending manage. Out: get/update/delete and empty patch handling (US-009), project scope filtering/routes and OpenAPI export (US-010), CLI policy commands (US-015), and a policy preview route.\n\n**Interface** — `page(filter: ApprovalPolicyFilter, page: { current; size }): Promise<IPageResult<ApprovalPolicyRecord>>`; `toPolicySubject(dto: ApprovalPolicySubjectDto)` returns `ApprovalPolicyInput['appliesTo']`; `approvableKeys(): ApprovableKeyDto[]`; the DTO contracts and global route handlers are embedded above.",
+      "acceptanceCriteria": [
+        "[integration] GET /api/approval-policies as a global Admin answers 200 with data.records ids exactly the global policies, with a project policy present in the fixture.",
+        "[integration] GET /api/approval-policies as a user bound only to project-admin in P answers 403.",
+        "[integration] GET /api/approval-policies/keys as a global Admin answers a keys entry { key: 'label.delete', scope, risk, floor: 'none', default: 'agent' } with the catalog's scope and risk.",
+        "[integration] That keys answer has no entry for label.read.",
+        "[integration] POST /api/approval-policies with { \"permissionPattern\": \"label.delete\", \"appliesTo\": { \"kind\": \"type\", \"principalType\": \"AGENT\" }, \"mode\": \"human\" } as a global Admin answers 201 with projectId null.",
+        "[integration] POST /api/approval-policies with pattern role.manage, appliesTo { kind: 'all' } and mode none answers 400 with the message rendered from approvals.invalidPolicy.400 with violation below-floor.",
+        "[integration] A second POST with the same pattern and appliesTo answers 409 with the approvals.policyConflict message.",
+        "[integration] POST with appliesTo { kind: 'bogus' } answers 400.",
+        "[unit] toPolicySubject({ kind: 'type' }) (no principalType) throws InvalidApprovalPolicyError with violation subject.",
+        "[unit] toPolicySubject({ kind: 'principal', principalType: 'ASSISTANT', principalId: 'x' }) throws InvalidApprovalPolicyError with violation subject.",
+        "[unit] toPolicySubject({ kind: 'role', roleId: 'r1' }) returns { kind: 'role', roleId: 'r1' }.",
+        "[integration] A REST agent granted approval.policy.manage globally posting the global policy body (label.delete, appliesTo { kind: 'type', principalType: 'AGENT' }, mode human) answers 403 with the approvals.policySelfApplication message.",
+        "[unit] PENDING_SURFACE_KEYS.has('approval.policy.manage') is false.",
+        "[unit] approvableKeys() returns entries sorted by key, every one with an approvable catalog key.",
+        "[integration] ApprovalPolicyService.list({ projectId: null }, page) continues to return matching global policy records as an array, not a page envelope, preserving the existing list contract."
+      ],
+      "tags": [
+        "permissions-p3-approval-api",
+        "api",
+        "rest",
+        "policies",
+        "security"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Adds globally privileged policy surfaces, nested subject validation, anti-escalation error mapping and catalog exposure; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-policy.service.ts",
+        "apps/api/src/approvals/domain/approval.domain.ts",
+        "apps/api/src/i18n/en/approvals.json",
+        "apps/api/src/approvals/approval-http-errors.ts",
+        "apps/api/src/approvals/approval-api.module.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/approvals/approval-policies.controller.ts",
+        "apps/api/src/approvals/approvable-keys.ts",
+        "apps/api/src/approvals/dto/approval-policy-subject.dto.ts",
+        "apps/api/src/approvals/dto/approval-policy.dto.ts",
+        "apps/api/src/approvals/dto/list-approval-policies.query.ts",
+        "apps/api/test/integration/approvals/approval-policy-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-policy.service.ts",
+          "reason": "gains page(filter, page); create, update, remove and list are unchanged."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "PENDING_SURFACE_KEYS loses 'approval.policy.manage'."
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "expectedPending loses 'approval.policy.manage', because the global policy routes now declare it; the other pending keys stay."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "dc19c8e7230cd868a1143364949d6e90886847ef"
+    },
+    {
+      "id": "US-009",
+      "title": "Global policy updates and deletion",
+      "description": "**Goal** — Add global-only policy mutation routes that hide out-of-scope rows and reject empty patches.\n\n**Motivation** — The route permission checks (`approval.policy.manage`, the decide route's key): the services check only policy validity, anti-escalation and decide eligibility.\n\n**Approach** — `ApprovalPolicyService` gains:\n- `get(id: string): Promise<ApprovalPolicyRecord>`, which throws `ApprovalPolicyNotFoundError` for an unknown id (US-009).\n\nDTOs in `src/approvals/dto/`:\n- `UpdateApprovalPolicyDto` (US-009): the same fields as `CreateApprovalPolicyDto` from `mode` on, all optional. A body that sets none of them is refused with `ValidationAppException({}, 'approvals.emptyPolicyPatch')` (400); `timeoutSec: null` counts as set (it clears the timeout).\n\nThe mutable fields are mode, timeoutSec, onTimeout, requiredApprovals, approverMustHoldAction and requireDistinctApprover. Use the same validation and Swagger field metadata as CreateApprovalPolicyDto: four modes, integer-or-null timeoutSec, reject/approve onTimeout, integer requiredApprovals and booleans for the two flags. Add UpdateApprovalPolicyDto to the existing approval-policy.dto.ts; selector fields are not mutable. Keep create/update/remove/list/page implementation semantics unchanged apart from adding public get.\n\n**Global routes** (US-008: `list`, `keys`, `create`; US-009: `update`, `remove`). `src/approvals/approval-policies.controller.ts`, `@Controller('approval-policies') export class ApprovalPoliciesController`. Every route uses `@UseGuards(RequiresGuard)` and resolves no project, so the key is checked at global scope:\n\n| Route | `@Requires` | Handler | Answer |\n|:--|:--|:--|:--|\n| `PATCH /approval-policies/:id` (`update`) | `approval.policy.manage` | `policies.get(id)`; a row whose `projectId` is not null throws `ApprovalPolicyNotFoundError`; then `policies.update(id, dto)` | 200, `ApprovalPolicyDto` |\n| `DELETE /approval-policies/:id` (`remove`), `@HttpCode(204)` | `approval.policy.manage` | the same `get` and project check, then `policies.remove(id)` | 204 |\n\nEvery route has @ApiOperation and @ApiResponse for each status it answers. Every handler catches and passes errors through rethrowApprovalError; add `ApprovalPolicyNotFoundError` → `NotFoundAppException({}, 'approvals.policyNotFound')` (404), retaining existing policy validity/conflict/self-application mappings and unchanged rethrow of other errors.\n\nThe English templates are fixed, and the args reach the client only through them (the global filter answers `JsonResponse.Error(code, message)` with no args):\n- `policyNotFound.404`: `Approval policy not found`\n- `emptyPolicyPatch.400` and `emptyPolicyPatch.-2`: `The policy update sets no field`\n\nThe `zh` file has the same keys and placeholders. The integration ACs compare `message` with the rendered template, as `roles-api.integration.spec.ts`'s `sentence()` helper does. Return JsonResponse.Ok for the updated DTO and no body on 204. Integration tests use fresh principals and global/project policy fixtures under the admin action context, clearing decisions, requests and policies before each case.\n\n**Scope** — In: public get, optional update DTO, nonempty-patch check, global-row guards on update/delete and two new localization codes. Out: initial policy list/create/keys (US-008), project routes and document generation (US-010), policy selector edits and domain rule changes.\n\n**Interface** — `get(id: string): Promise<ApprovalPolicyRecord>`; `UpdateApprovalPolicyDto`; `PATCH /approval-policies/:id`; `DELETE /approval-policies/:id`.",
+      "acceptanceCriteria": [
+        "[integration] PATCH /api/approval-policies/:id with { mode: 'agent' } on a global policy answers 200 with mode agent.",
+        "[integration] PATCH /api/approval-policies/:id with {} answers 400 with the approvals.emptyPolicyPatch message.",
+        "[integration] PATCH /api/approval-policies/:id naming a project policy's id answers 404.",
+        "[integration] After that refused patch, the project policy's mode is unchanged.",
+        "[integration] PATCH /api/approval-policies/:id with an unknown id answers 404 with the approvals.policyNotFound message.",
+        "[integration] DELETE /api/approval-policies/:id of a global policy answers 204.",
+        "[integration] A second DELETE of the same id answers 404.",
+        "[integration] DELETE /api/approval-policies/:id naming a project policy's id answers 404.",
+        "[integration] ApprovalPolicyService.get with an unknown id throws ApprovalPolicyNotFoundError."
+      ],
+      "tags": [
+        "permissions-p3-approval-api",
+        "api",
+        "rest",
+        "policies",
+        "security"
+      ],
+      "dependencies": [
+        "US-008"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Extends standard CRUD but enforces privileged global-row scope and policy mutation permissions; strict security TDD applies.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-policy.service.ts",
+        "apps/api/src/approvals/approval-policies.controller.ts",
+        "apps/api/src/approvals/approval-http-errors.ts",
+        "apps/api/src/i18n/en/approvals.json",
+        "apps/api/src/approvals/dto/approval-policy.dto.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/approvals/approval-policy-update-routes.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a global policy with a configured timeout is patched with { timeoutSec: null }, the response's timeoutSec is null rather than rejecting the patch as empty."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-policy.service.ts",
+          "reason": "gains get(id); the other methods are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "697766b84225a03ab82731c85b7201c63e2dabb4"
+    },
+    {
+      "id": "US-010",
+      "title": "Project policy routes and the OpenAPI document",
+      "description": "**Goal** — Expose project-scoped policy CRUD and inherited global reads, then export the complete approval REST contract.\n\n**Motivation** — Each needs these routes, the inbox reads and the notifications to exist first, so that a request they open can be seen and decided.\n\n**Approach** — `ApprovalPolicyFilter` (`prisma-approval-policy.repository.ts`) gains `projectIds?: (string | null)[]` (US-010). When it is set, `findPage` replaces it with an OR of `{ projectId: id }` per entry (null included) instead of passing it as a column. `list` is unchanged.\n\n**Project routes** (US-010). `src/approvals/project-approval-policies.controller.ts`, `@Controller('projects/:slug/approval-policies') export class ProjectApprovalPoliciesController`. Every route uses `@UseGuards(ProjectMembershipGuard, RequiresGuard)`, and `projectId` is `ctx.project.id` from `@CurrentProject()`:\n\n| Route | `@Requires` | Handler |\n|:--|:--|:--|\n| `GET` (`list`) | `approval.policy.read` | `policies.page({ projectIds: [projectId, null], permissionPattern }, page)` |\n| `GET keys` (`keys`) | `approval.policy.read` | `approvableKeys()` |\n| `POST` (`create`) | `approval.policy.manage` | `policies.create({ …, projectId })` |\n| `PATCH :id` (`update`) | `approval.policy.manage` | `policies.get(id)`; a row whose `projectId` is not this project (another project's, or a global row) throws `ApprovalPolicyNotFoundError`; then `update` |\n| `DELETE :id` (`remove`) | `approval.policy.manage` | the same check, then `remove` |\n\nThe answers are the same as on the global routes. `openapi.json` is regenerated with `bun run api:export-spec` after US-010, the last REST change of the feature.\n\nProject policy reads include the global policies. A global policy applies in every project, so `GET /projects/:slug/approval-policies` lists the project's rows and the global rows (each with its `projectId`, null for global). Writes through the project routes reach only that project's rows. A global row answers 404 there.\n\nThe approvable keys list is a policy read. `GET /approval-policies/keys` (global `approval.policy.manage`) and `GET /projects/:slug/approval-policies/keys` (`approval.policy.read`) answer every catalog entry with `approval.approvable === true`: key, scope, risk, floor and default. The P3 web pages build \"floor, default and current mode\" from it and the policy list.\n\nThe project controller carries `@ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })` as `ProjectFleetApprovalsController` does. Every route carries @ApiOperation and @ApiResponse for each status it answers, with @ApiTags/@ApiBearerAuth on the controller and Swagger properties on DTOs. Reuse the policy DTOs/subject conversion and error mapper from US-008/US-009; every handler catches and passes errors through rethrowApprovalError. List and update answer 200 with mapped DTO/page; keys answer 200 with { keys }; create is @HttpCode(201); delete is @HttpCode(204) with no body. Raw list queries pass through parseQuery, and an empty patch uses approvals.emptyPolicyPatch, including the timeoutSec:null-as-set rule.\n\nRegister ProjectApprovalPoliciesController in ApprovalApiModule; its existing ProjectAccessModule import supplies ProjectMembershipGuard's ProjectAccessService. `PENDING_SURFACE_KEYS` loses `approval.policy.read`; permission-contract.spec.ts expectedPending retains only fleet.approval.decide.assistant and member.remove. Add an Approval policies block to test/e2e/api-endpoint/endpoint.e2e.spec.ts: GET /api/approval-policies with admin token returns 200 and without credentials returns 401; existing blocks are unchanged. Regenerate root openapi.json after these changes; it gains approval request and policy operations and changes no existing operation. Although the binding workdir is apps/api, execute `bun run api:export-spec` from the repository root. API type-check and lint are verification steps, not behavioral acceptance criteria.\n\nIntegration cases create fresh P/Q principals and global/P/Q policies, delete all approval decisions, requests and policies before each case, and assert scope isolation through HTTP and repository pagination.\n\n**Scope** — In: projectIds OR filtering, project policy controller, route guards/module registration, pending-read declaration, endpoint smoke coverage and root OpenAPI generation. Out: global route creation (US-008–US-009), CLI client/commands (US-014–US-015), web policy pages and a preview route.\n\n**Interface** — `projectIds?: (string | null)[]` on `ApprovalPolicyFilter`; `ProjectApprovalPoliciesController` methods `list`, `keys`, `create`, `update`, `remove` use the handlers in the table above.",
+      "acceptanceCriteria": [
+        "[integration] GET /api/projects/<P slug>/approval-policies as P's Project Admin answers 200 with data.records ids exactly P's policy and the global policy, with project Q's policy present in the fixture.",
+        "[integration] The same route as a user bound to viewer in P answers 200.",
+        "[integration] The same route as a user with no binding in P answers 403.",
+        "[integration] POST /api/projects/<P slug>/approval-policies as a user bound to developer in P answers 403.",
+        "[integration] POST /api/projects/<P slug>/approval-policies with a valid body as P's Project Admin answers 201 with projectId = P's id.",
+        "[integration] PATCH /api/projects/<P slug>/approval-policies/:id naming a global policy's id answers 404.",
+        "[integration] PATCH on P's route naming project Q's policy id answers 404.",
+        "[integration] DELETE /api/projects/<P slug>/approval-policies/:id of P's policy answers 204.",
+        "[integration] GET /api/projects/<P slug>/approval-policies/keys as a user bound to viewer in P answers 200 with a keys entry for label.delete.",
+        "[integration] ApprovalPolicyService.page({ projectIds: [P, null] }, …) returns exactly P's rows and the global rows, with a row of project Q present.",
+        "[integration] ApprovalPolicyService.page({ projectId: P }, …) (no projectIds) returns exactly P's rows.",
+        "[unit] PENDING_SURFACE_KEYS equals the set { 'fleet.approval.decide.assistant', 'member.remove' }.",
+        "[integration] GET /api/approval-policies without credentials answers 401.",
+        "[integration] DELETE on P's project policy route naming a global or Q policy id answers 404."
+      ],
+      "tags": [
+        "permissions-p3-approval-api",
+        "api",
+        "rest",
+        "policies",
+        "security",
+        "openapi"
+      ],
+      "dependencies": [
+        "US-006",
+        "US-009"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The project controller mirrors completed global CRUD and established project guards, with one repository filter extension; project isolation and role checks mandate strict security TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/prisma-approval-policy.repository.ts",
+        "apps/api/src/fleet/approvals/project-fleet-approvals.controller.ts",
+        "apps/api/src/approvals/approval-policies.controller.ts",
+        "apps/api/src/approvals/approval-api.module.ts",
+        "apps/api/src/projects/project-membership.guard.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/approvals/project-approval-policies.controller.ts",
+        "apps/api/test/integration/approvals/project-approval-policy-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/prisma-approval-policy.repository.ts",
+          "reason": "ApprovalPolicyFilter gains projectIds, which findPage turns into an OR of projectId equalities (null included); a filter without it queries as before."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "PENDING_SURFACE_KEYS loses 'approval.policy.read'."
+        },
+        {
+          "path": "apps/api/src/permissions/test-helpers/permission-contract.spec.ts",
+          "reason": "expectedPending loses 'approval.policy.read', because the project policy routes now declare it; it keeps 'fleet.approval.decide.assistant' and 'member.remove'."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "gains an 'Approval policies' block: GET /api/approval-policies with the admin token answers 200, and without credentials answers 401 (.nax/rules/api-testing.md); existing blocks are unchanged."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated with bun run api:export-spec from the repo root after this story's changes; it gains the approval request and policy operations and changes no existing operation."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "c48888ecc39905cf2f6cde35c0e6331e39c8ac66"
+    },
+    {
+      "id": "US-011",
+      "title": "Live events and notifications for requests",
+      "description": "**Goal** — Fan out approval changes as content-free project live events and opened-request notifications to eligible human deciders.\n\n**Motivation** — Each needs these routes, the inbox reads and the notifications to exist first, so that a request they open can be seen and decided.\n\n**Approach** — **Live.** `src/live/live-event.ts` gains:\n```ts\n/** P3b: content-free approval request change; the inbox refetches. Only requests with a project are published. */\nexport interface LiveApprovalRequestEvent {\n  id: string; type: 'approval_request'; projectId: string; requestId: string; status: string; at: string;\n}\n```\nIt also adds the event to the `LiveEvent` union.\n\n`src/live/approval-request-live.subscriber.ts`: `ApprovalRequestLiveSubscriber`, in the shape of `TicketLiveSubscriber`, provided in `LiveModule`. In `onModuleInit` it registers a `FanOutPublisher` handler for `APPROVAL_REQUEST_CHANGED`. The handler parses the payload and publishes one event on `ProjectEventBus`, with `id` = the outbox event id `'<requestId>:<status>'` and `at` = now. A malformed payload or a null `projectId` publishes nothing. The handler never throws: a failure is logged at `warn`.\n\n**Notifications.** `NotificationSourceType` gains `'approval_request'`. `src/notifications/approvals/approval-request-drafts.ts`:\n```ts\nexport function approvalRequestDrafts(userIds: readonly string[],\n  r: { requestId: string; projectId: string | null; permissionKey: string }): NotificationDraft[];\n```\nEach draft has:\n- `userId`: the recipient, and `projectId`: the request's project (null for none);\n- `category: 'FLEET_NEEDS_YOU'`, `kind: 'approval_request'` (not the fleet kind `approval_requested`, which the web renders from `{ kind, repo }`);\n- `title: 'Approval needed: <permissionKey>'` (truncated to `TITLE_MAX`), `body: null`;\n- `link: '/approvals?id=<requestId>'`;\n- `params: { key: permissionKey }`;\n- `sourceType: 'approval_request'`, `sourceId: requestId`, `actorId: null`.\n\n`src/notifications/approvals/approval-requested.subscriber.ts`: `@Injectable() @SystemWriter('system.notification.fleet') export class ApprovalRequestedSubscriber implements OnModuleInit`, provided in `NotificationsModule`, whose imports gain `ApprovalEngineModule`. It registers a handler for `APPROVAL_REQUEST_CHANGED`, which runs in whatever context the outbox relay gives fan-out handlers, as `FleetApprovalRequestedSubscriber.handle` does:\n1. `parseApprovalRequestChangedPayload`. A malformed payload logs `warn` and stops without throwing. A status other than `pending` stops.\n2. `queries.findById(requestId)`. When it is missing or no longer `pending`, stop.\n3. Candidates: `PermissionService.principalIdsWithKey('USER', projectId, 'approval.decide')` for a project request, or `NotificationEligibility.findGlobalAdminIds()` for a request with no project.\n4. Keep each candidate `u` for whom `decideEligibility(request, { type: 'USER', id: u }, effectiveKeys({ type: 'USER', id: u }, scope)).ok` is true, where `scope` is `{ projectId }`, or `'global'` for a request with no project.\n5. `NotificationWriter.deliver(approvalRequestDrafts(kept, …))`, called only when `kept` is non-empty.\n\nFanOutPublisher invokes handlers with payload only; reconstruct the stable event id from requestId/status, not an assumed second metadata argument. Keep the existing LiveEvent members and toLiveEvent unchanged. Do not create a new notification category or insert directly into persistence: NotificationWriter owns eligibility/preferences, idempotency and user live publication. The subscriber's SystemWriter metadata does not replace the relay's action context. Capture the registered handlers in unit tests and invoke those handlers to verify publish/deliver seams; malformed payloads explicitly warn in both consumers. Live failures never escape; notification database failures retain outbox retry semantics, while missing/nonpending sources stop without delivery.\n\n**Scope** — In: LiveApprovalRequestEvent and live subscriber, notification source type/drafts/subscriber, module registrations and eligible-human selection. Out: event production (US-001–US-002), REST/MCP consumers (US-004–US-013), narrowed-only recipient enumeration, actor/on-behalf-of outcome notifications, null-project live channels, outbound webhooks, web inbox/rendering and a special 60-second email delay.\n\n**Interface** — `LiveApprovalRequestEvent` and `approvalRequestDrafts(userIds: readonly string[], r: { requestId: string; projectId: string | null; permissionKey: string }): NotificationDraft[]` are embedded above; both subscribers register `APPROVAL_REQUEST_CHANGED` on `FanOutPublisher` in `onModuleInit`.",
+      "acceptanceCriteria": [
+        "[unit] On module init, ApprovalRequestLiveSubscriber registers a handler for approval_request_changed on FanOutPublisher.",
+        "[unit] That handler, given a payload for request r1 of project p1 with status approved, calls ProjectEventBus.publish once with an event { type: 'approval_request', projectId: 'p1', requestId: 'r1', status: 'approved', id: 'r1:approved' } plus an ISO at.",
+        "[unit] That handler, given a payload with projectId null, does not call publish.",
+        "[unit] That handler, given { foo: 1 }, does not call publish and returns without throwing.",
+        "[unit] approvalRequestDrafts(['u1'], { requestId: 'r1', projectId: 'p1', permissionKey: 'label.delete' }) returns exactly one draft, equal to { userId: 'u1', projectId: 'p1', category: 'FLEET_NEEDS_YOU', kind: 'approval_request', title: 'Approval needed: label.delete', body: null, link: '/approvals?id=r1', params: { key: 'label.delete' }, sourceType: 'approval_request', sourceId: 'r1', actorId: null }.",
+        "[unit] On module init, ApprovalRequestedSubscriber registers a handler for approval_request_changed on FanOutPublisher.",
+        "[unit] Given a pending payload for a project request with approverMustHoldAction: true, with principalIdsWithKey answering ['u1', 'u2'] and only u1's effective keys holding label.delete and approval.decide, the handler calls NotificationWriter.deliver once with exactly one draft, for u1.",
+        "[unit] Given a payload whose status is approved, the handler calls neither findById nor deliver.",
+        "[unit] Given a pending payload whose request findById answers with status cancelled, the handler does not call deliver.",
+        "[unit] Given a pending payload with projectId null, the handler reads its candidates from NotificationEligibility.findGlobalAdminIds and does not call principalIdsWithKey.",
+        "[unit] When no candidate is eligible, the handler does not call deliver.",
+        "[unit] Given { foo: 1 }, the notification handler calls neither findById nor deliver, and returns without throwing.",
+        "[unit] Given a malformed approval_request_changed payload, the live handler logs at warn level.",
+        "[unit] Given a malformed approval_request_changed payload, the notification handler logs at warn level."
+      ],
+      "tags": [
+        "permissions-p3-approval-api",
+        "api",
+        "approvals",
+        "live",
+        "notifications",
+        "security"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module outbox fan-out includes authorization-sensitive recipient eligibility and content-disclosure constraints; security override applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/live/ticket-live.subscriber.ts",
+        "apps/api/src/live/live-event.ts",
+        "apps/api/src/notifications/fleet/fleet-approval-requested.subscriber.ts",
+        "apps/api/src/notifications/notifications.module.ts",
+        "apps/api/src/approvals/approval-request-events.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/live/approval-request-live.subscriber.ts",
+        "apps/api/src/live/approval-request-live.subscriber.spec.ts",
+        "apps/api/src/notifications/approvals/approval-request-drafts.ts",
+        "apps/api/src/notifications/approvals/approval-requested.subscriber.ts",
+        "apps/api/src/notifications/approvals/approval-requested.subscriber.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/live/live-event.ts",
+          "reason": "gains LiveApprovalRequestEvent and adds it to the LiveEvent union; the existing members and toLiveEvent are unchanged."
+        },
+        {
+          "path": "apps/api/src/live/live.module.ts",
+          "reason": "provides ApprovalRequestLiveSubscriber."
+        },
+        {
+          "path": "apps/api/src/notifications/notification.types.ts",
+          "reason": "NotificationSourceType gains 'approval_request'; the categories are unchanged."
+        },
+        {
+          "path": "apps/api/src/notifications/notifications.module.ts",
+          "reason": "imports ApprovalEngineModule and provides ApprovalRequestedSubscriber."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "1435d0043a4a5c32518e693254c9d21932487427"
+    },
+    {
+      "id": "US-012",
+      "title": "The MCP list tool and the server wiring",
+      "description": "**Goal** — Register an MCP-only approval inbox tool for every authenticated agent and append it after the assistant registrations.\n\n**Motivation** — Each needs these routes, the inbox reads and the notifications to exist first, so that a request they open can be seen and decided.\n\n**Approach** — `src/approvals/mcp/approval-mcp-tools.ts`: `@Injectable() export class ApprovalMcpTools`, with constructor `(queries: ApprovalRequestQueries, decisions: ApprovalDecisionService)`. `ApprovalEngineModule` provides and exports it.\n\n```ts\nregistrations(principal: AgentPrincipal): McpToolRegistration[];\n```\n\nAt this story's stage registrations returns only koda_list_approvals, matching AC-1; US-013 extends it to [koda_list_approvals, koda_decide_approval] in that order. Do not add a decide stub or expose a thread assistant tool in this story.\n\nEach handler runs inside `runWithActionContext({ actor: { type: 'AGENT', id: principal.id }, origin: 'mcp' }, …)`, and answers `toMcpToolResult({ content, isError })`. The principal ref is `{ type: 'AGENT', id: principal.id }`.\n\n- **`koda_list_approvals`**:\n  - Input schema `{ status?: one of the seven statuses, mine?: boolean, page?: integer >= 1 }`, `additionalProperties: false`.\n  - It calls `queries.list(ref, { status, mine }, { current: page ?? 1, size: 20 })`.\n  - The content has one line per request: `<id> <status> <permissionKey> project=<projectId or global> actor=<actorType>/<actorId> requires=<requiredMode> expires=<expiresAt ISO>`.\n  - When more pages exist, the content ends with `next page: <n>`. An empty page answers `no approval requests`.\n  - The tool checks its own input (the server passes every argument through): `status` outside the seven statuses answers `invalid_input: status`, `page` that is not an integer >= 1 answers `invalid_input: page`, and `mine` that is not a boolean answers `invalid_input: mine`, each with `isError: true` and no `queries.list` call. Any other error is logged at `error` and answered as `error: koda_list_approvals failed`.\n\nThe tool descriptions:\n- `koda_list_approvals`: \"List approval requests this agent can decide or opened itself, newest first, 20 per page. Each line names the request id, its status, the permission key it needs approval for, its project, who asked, the mode it requires and when it expires.\"\n\n`McpController` gains a constructor parameter `approvalTools: ApprovalMcpTools`, placed last. Its handler factory builds `createKodaMcpServer([...kodaMcpToolRegistrations(executor, principal, visible), ...approvalTools.registrations(principal)])`. `AssistantModule` imports `ApprovalEngineModule`.\n\nThe approval list tool is registered beside the assistant tools, not through them. Keep existing MCP_ENABLED, agent-only and route authentication behavior. The server delegates validation, so the tool must reject its invalid status/page/mine before queries.list. Both future approval tools are MCP-only and visible to every agent at the final feature state; the service refuses what an agent may not do.\n\nUpdate mcp.controller.routes.spec.ts's module to provide an ApprovalMcpTools stub whose registrations returns [], preserving existing route cases, and add the server ordering seam using a nonempty registration stub. At this story's stage, update test/integration/fleet/mcp-route.integration.spec.ts AC-5 to append koda_list_approvals after MCP descriptor names. Update test/integration/fleet/permissions-mcp-tools.integration.spec.ts AC-3 bare-agent list to ['koda_my_projects', 'koda_get_action', 'koda_list_approvals'] and AC-6 admin list to DESCRIPTOR_NAMES followed by koda_list_approvals. US-013 will extend these assertions again. Integration tests call tools/list and tools/call through POST /api/mcp with MCP_ENABLED true and a REST agent API key, opening its own request via the registered/reset label.delete test command. Use fresh principals and delete decisions/requests/policies per case.\n\n**Scope** — In: ApprovalMcpTools list registration, input checks/format/errors/context, engine export, controller factory append and AssistantModule import. Out: decide tool and final two-tool ordering (US-013), assistant-tool-registry permission visibility, thread tools, PendingAction/FleetApproval migration and production gate adoption.\n\n**Interface** — `constructor(queries: ApprovalRequestQueries, decisions: ApprovalDecisionService)`; `registrations(principal: AgentPrincipal): McpToolRegistration[]`; the list tool's input/output/error contracts and server-factory call are embedded above.",
+      "acceptanceCriteria": [
+        "[unit] ApprovalMcpTools.registrations(agent) returns registrations whose names are exactly ['koda_list_approvals'].",
+        "[unit] The koda_list_approvals handler with { status: 'pending', mine: true, page: 2 } calls queries.list({ type: 'AGENT', id: <agent id> }, { status: 'pending', mine: true }, { current: 2, size: 20 }).",
+        "[unit] The context captured inside queries.list during that call, reduced to { actorType, actorId, origin }, equals { actorType: 'AGENT', actorId: <agent id>, origin: 'mcp' }.",
+        "[unit] For a page holding one request with more pages after it, the handler answers a result whose content[0].text is exactly that request's line '<id> <status> <permissionKey> project=<projectId or global> actor=<actorType>/<actorId> requires=<requiredMode> expires=<expiresAt ISO>', a newline, and 'next page: 3'.",
+        "[unit] For an empty page, the handler answers a result equal to { content: [{ type: 'text', text: 'no approval requests' }], isError: false }.",
+        "[unit] The handler with { status: 'bogus' } answers a result whose text is invalid_input: status and whose isError is true.",
+        "[unit] The handler with { page: 0 } answers invalid_input: page.",
+        "[unit] The handler with { mine: 'yes' } answers invalid_input: mine.",
+        "[unit] Across the three invalid calls above, queries.list is never called.",
+        "[unit] When queries.list throws Error('db down'), the handler answers error: koda_list_approvals failed with isError true.",
+        "[unit] McpController's server factory, given an ApprovalMcpTools stub whose registrations answers one registration named koda_list_approvals, registers it after every assistant registration.",
+        "[integration] With MCP_ENABLED true, tools/list through POST /api/mcp for a REST agent holding no decide key lists koda_list_approvals as the last tool.",
+        "[integration] tools/call koda_list_approvals through POST /api/mcp by the REST agent that opened the P request answers text whose first line starts with that request's id.",
+        "[unit] Given an ApprovalMcpTools stub whose registrations returns [], McpController's factory registers exactly the existing kodaMcpToolRegistrations(executor, principal, visible) in their existing order."
+      ],
+      "tags": [
+        "permissions-p3-approval-api",
+        "api",
+        "mcp",
+        "approvals",
+        "security"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Integrates a new authenticated protocol surface with per-agent action attribution and service-enforced visibility; strict security TDD applies.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/mcp/mcp-server.factory.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp.controller.ts",
+        "apps/api/src/fleet/assistant/assistant.module.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp.controller.routes.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/approvals/mcp/approval-mcp-tools.ts",
+        "apps/api/src/approvals/mcp/approval-mcp-tools.spec.ts",
+        "apps/api/test/integration/approvals/approval-mcp.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-engine.module.ts",
+          "reason": "provides and exports ApprovalMcpTools."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/mcp/mcp.controller.ts",
+          "reason": "the constructor gains a last parameter approvalTools: ApprovalMcpTools, and the server factory appends approvalTools.registrations(principal) after the assistant registrations."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.ts",
+          "reason": "imports ApprovalEngineModule."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/mcp/mcp.controller.routes.spec.ts",
+          "reason": "its testing module provides an ApprovalMcpTools stub whose registrations answers [], so the existing route cases keep their expectations."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/mcp-route.integration.spec.ts",
+          "reason": "AC-5's tools/list expectation becomes the MCP descriptor names followed by 'koda_list_approvals' (and, after US-013, 'koda_decide_approval'), because the approval tools are registered after the assistant tools for every agent."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/permissions-mcp-tools.integration.spec.ts",
+          "reason": "AC-3's bare-agent list becomes ['koda_my_projects', 'koda_get_action', 'koda_list_approvals'] and AC-6's admin list becomes DESCRIPTOR_NAMES followed by 'koda_list_approvals', because every agent sees the approval tools after the assistant tools."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "3c4cd5b01060af3f23f7256040db95006ccc21e8"
+    },
+    {
+      "id": "US-013",
+      "title": "The MCP decide tool",
+      "description": "**Goal** — Add the second MCP-only approval tool for deciding visible requests with explicit validation and stable tool-level errors.\n\n**Motivation** — `permissions-p3-approval-core` (PR #338, `38d435cb`) built the policy model, the resolver, the gate, deciding, executing and expiry, but it exposes services only.\n\n**Approach** — Extend `src/approvals/mcp/approval-mcp-tools.ts`, provided and exported by ApprovalEngineModule, so:\n\n```ts\nregistrations(principal: AgentPrincipal): McpToolRegistration[];   // [koda_list_approvals, koda_decide_approval], in this order\n```\n\nEach handler runs inside `runWithActionContext({ actor: { type: 'AGENT', id: principal.id }, origin: 'mcp' }, …)`, and answers `toMcpToolResult({ content, isError })`. The principal ref is `{ type: 'AGENT', id: principal.id }`.\n\n- **`koda_decide_approval`**:\n  - Input schema `{ id: string 1..64, decision: 'approve' | 'reject', comment?: string <= 2000 }`, required `id` and `decision`.\n  - It calls `queries.get(ref, id)`, then `decisions.decide(id, decision, comment ?? null)`, and answers `<id> <status>` with `isError: false`.\n  - The tool answers these errors with `isError: true`:\n    - `invalid_input: id`, `invalid_input: decision` or `invalid_input: comment`, for input that breaks the schema. The tool checks the input itself, because the server passes every argument through (`DELEGATE_VALIDATION_TO_EXECUTOR`).\n    - `not_found` for `ApprovalRequestNotFoundError`.\n    - `not_pending: <status>` and `expired`.\n    - `forbidden: <reason>` for `ApprovalDecideForbiddenError`.\n    - Any other error is logged at `error` and answered as `error: koda_decide_approval failed`.\n\nThe tool descriptions:\n- `koda_decide_approval`: \"Approve or reject one pending approval request by its id. An approval runs the requested action at once; the answer is the request's new status. This agent may decide a request only when its permissions and the request's policy allow it; it may confirm its own request only when the request requires `self`.\"\n\nKeep the US-012 list handler and controller wiring, but update intermediate list-only test expectations to the final two-tool ordering when they assert full registrations or the last tool. The US-012 list tool still remains after every assistant tool; koda_decide_approval is now after it. test/integration/fleet/mcp-route.integration.spec.ts AC-5's tools/list expectation also ends with koda_decide_approval. test/integration/fleet/permissions-mcp-tools.integration.spec.ts AC-3's and AC-6's expected lists also end with koda_decide_approval. Both registrations are offered to every agent independently of assistant tool permission visibility; queries.get and decisions.decide enforce visibility and eligibility. Do not route these calls through AssistantToolExecutor or expose them to the thread assistant.\n\nIntegration tests enable MCP_ENABLED and use a REST agent granted label.delete and approval.decide in P to decide a request opened by another agent through the registered/reset test command. Verify the stored request through fixtureDb after tools/call. Use fresh principals and clear all approval decisions, requests and policies per case. Missing/invisible and malformed-input failures must never call decide or mutate the request.\n\n**Scope** — In: decide registration/validation/action context, visibility-before-decision, stable errors and final MCP tool ordering. Out: reimplementing engine authorization, changing the list format (US-012), per-tool permission visibility, assistant thread approval tools and moving PendingAction/FleetApproval.\n\n**Interface** — `registrations(principal: AgentPrincipal): McpToolRegistration[];   // [koda_list_approvals, koda_decide_approval], in this order`; `queries.get(ref, id)` precedes `decisions.decide(id, decision, comment ?? null)`; schema/result/errors are embedded above.",
+      "acceptanceCriteria": [
+        "[unit] ApprovalMcpTools.registrations(agent) returns registrations whose names are exactly ['koda_list_approvals', 'koda_decide_approval'].",
+        "[unit] The koda_decide_approval handler with { id: 'r1', decision: 'approve' } calls decisions.decide('r1', 'approve', null).",
+        "[unit] The context captured inside decide during that call, reduced to { actorType, actorId, origin }, equals { actorType: 'AGENT', actorId: <agent id>, origin: 'mcp' }.",
+        "[unit] When decide returns a request with status executed, the handler answers a result equal to { content: [{ type: 'text', text: 'r1 executed' }], isError: false }.",
+        "[unit] The handler with { id: 'r1', decision: 'maybe' } answers a result whose text is invalid_input: decision and whose isError is true.",
+        "[unit] The handler with { id: '', decision: 'approve' } answers invalid_input: id.",
+        "[unit] The handler with a 2001-character comment answers invalid_input: comment.",
+        "[unit] When queries.get throws ApprovalRequestNotFoundError, the handler answers a result whose text is not_found and whose isError is true.",
+        "[unit] Across the three invalid calls and the not-found call above, decide is never called, and for the three invalid inputs queries.get is not called either.",
+        "[unit] When decide throws ApprovalDecideForbiddenError('tier-too-low'), the handler answers text forbidden: tier-too-low.",
+        "[unit] When decide throws ApprovalRequestNotPendingError('rejected'), the handler answers text not_pending: rejected.",
+        "[unit] When decide throws ApprovalRequestExpiredError, the handler answers text expired.",
+        "[unit] When decide throws Error('boom'), the handler answers text error: koda_decide_approval failed with isError true.",
+        "[integration] With MCP_ENABLED true, a REST agent granted label.delete and approval.decide in P calling tools/call koda_decide_approval through POST /api/mcp on another agent's pending P request leaves that request executed.",
+        "[integration] tools/list through POST /api/mcp for a REST agent holding no decide key lists koda_decide_approval as the last tool."
+      ],
+      "tags": [
+        "permissions-p3-approval-api",
+        "api",
+        "mcp",
+        "approvals",
+        "security"
+      ],
+      "dependencies": [
+        "US-012"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Adds a protocol handler on existing wiring but permits authorized action execution and must prevent invisible/invalid requests from reaching decide; security override applies.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/mcp/approval-mcp-tools.ts",
+        "apps/api/src/approvals/approval-decision.service.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts",
+        "apps/api/test/integration/fleet/mcp-route.integration.spec.ts",
+        "apps/api/test/integration/fleet/permissions-mcp-tools.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/approvals/mcp/approval-mcp-decide.spec.ts",
+        "apps/api/test/integration/approvals/approval-mcp-decide.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/integration/fleet/mcp-route.integration.spec.ts",
+          "reason": "AC-5's tools/list expectation also ends with 'koda_decide_approval'."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/permissions-mcp-tools.integration.spec.ts",
+          "reason": "AC-3's and AC-6's expected lists also end with 'koda_decide_approval'."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "4720ce2de3488f271b2452cc4f07f52fd3b1afba"
+    },
+    {
+      "id": "US-014",
+      "title": "The `koda approval` request commands",
+      "description": "**Goal** — Add the top-level approval request CLI commands using the generated REST client and stable human/JSON output.\n\n**Motivation** — `permissions-p3-approval-core` (PR #338, `38d435cb`) built the policy model, the resolver, the gate, deciding, executing and expiry, but it exposes services only.\n\n**Approach** — New `apps/cli/src/commands/approval.ts` exporting `approvalCommand(program: Command): void`, called from `src/index.ts` beside the other command modules. It sets up the client with `withContext({}, { requireProject: false })`. `--project <slug>` resolves the id with `projectsControllerFindBySlug`. The generated functions follow the controller and method names above: `approvalRequestsControllerList`, `…Get`, `…Decide`, `…Cancel`, `approvalPoliciesControllerList`, `…Keys`, `…Create`, `…Update`, `…Remove`, and `projectApprovalPoliciesControllerList`, `…Keys`, `…Create`, `…Update`, `…Remove`.\n\n**Requests** (US-014):\n\n| Command | Calls | Output (non-`--json`) |\n|:--|:--|:--|\n| `approval list [--status <s>] [--project <slug>] [--key <permissionKey>] [--mine] [--page <n>] [--size <n>] [--json]` | `approvalRequestsControllerList({ query: { current, size, status?, projectId?, permissionKey?, mine? } })`, with `mine: true` only when `--mine` is given | `table(['ID', 'Status', 'Key', 'Project', 'Actor', 'Requires', 'Expires'], …)`, with `projectId ?? 'global'` and `<actorType>/<actorId>`; `Next: --page <n>` when `hasNext` |\n| `approval show <id> [--json]` | `approvalRequestsControllerGet({ path: { id } })` | one `key: value` line per summary field, then `input:` and the input as indented JSON, then one line per decision `<decidedAt> <decision> by <deciderType>/<deciderId>[: <comment>]` |\n| `approval approve <id> [--comment <text>] [--json]` | `approvalRequestsControllerDecide({ path: { id }, body: { decision: 'approve', comment? } })` | `<id> <status>` |\n| `approval reject <id> [--comment <text>] [--json]` | the same with `decision: 'reject'` | `<id> <status>` |\n| `approval cancel <id> [--json]` | `approvalRequestsControllerCancel({ path: { id } })` | `<id> <status>` |\n\n- `--json` prints the unwrapped response.\n\n`apps/cli/src/generated/` is regenerated with `bun run generate:cli` (repo root) from the US-010 `openapi.json`. The directory is gitignored, and no generated file is edited by hand.\n\nUse default page=1 and size=20, and only send explicitly supplied optional filters; mine is a boolean true rather than a string or absent false filter. Existing unwrap, table, pageHint and handleApiError utilities own envelope/output/error conventions. Always resolve context without requiring a project; do not let local project config implicitly filter approval list. Request show prints summary fields in DTO order: id, permissionKey, projectId, actorType, actorId, onBehalfOfType, onBehalfOfId, origin, requiredMode, status, satisfiedBy, approverType, approverId, expiresAt, decidedAt, settledAt, createdAt. After them print input and decision lines exactly as the table says, not an extra result section in non-JSON mode. JSON returns the complete unwrapped detail including result. Omit comment in the generated body when absent.\n\nErrors go through the existing handleApiError unchanged (401/403 exit 2, validation exit 3, others exit 1); src/utils/error.ts is not edited. ApiError here labels the received error shape; do not invent or import a nonexistent generated ApiError class. Unit tests mock ../generated at the client boundary and assert exact function arguments, unwrapped JSON, output and process exits; use fleet-approval.spec.ts as the Jest pattern. Verify CLI type-check/lint after regeneration, without turning quality gates into acceptance criteria.\n\n**Scope** — In: generated client regeneration, top-level approval registration and list/show/approve/reject/cancel commands, and the command tests. Out: policy subcommands (US-015), API permission/business rules (US-003–US-010), MCP tools (US-012–US-013), changes to default error semantics for existing callers, hand-edited generated code and production gate adoption.\n\n**Interface** — `approvalCommand(program: Command): void`; generated request functions and their call shapes are embedded in the table above.",
+      "acceptanceCriteria": [
+        "[unit] approval list calls approvalRequestsControllerList with query { current: 1, size: 20 } when no option is given.",
+        "[unit] approval list --status pending --key label.delete --mine calls it with a query equal to { current: 1, size: 20, status: 'pending', permissionKey: 'label.delete', mine: true }.",
+        "[unit] approval list --project web resolves the id with projectsControllerFindBySlug and calls the list with that projectId.",
+        "[unit] approval list prints a table with the headers ID, Status, Key, Project, Actor, Requires and Expires.",
+        "[unit] approval list prints global in the Project column for a request with no project.",
+        "[unit] approval list --json prints the unwrapped page as JSON.",
+        "[unit] approval show r1 calls approvalRequestsControllerGet({ path: { id: 'r1' } }).",
+        "[unit] approval show r1, for a request whose input is { labelId: 'l1' } with one reject decision, prints output whose lines after the summary fields are exactly input:, the indented input JSON, and that decision's line in the Design's format.",
+        "[unit] approval approve r1 --comment ok calls approvalRequestsControllerDecide({ path: { id: 'r1' }, body: { decision: 'approve', comment: 'ok' } }).",
+        "[unit] approval approve r1 prints r1 executed for an answer whose status is executed.",
+        "[unit] approval reject r1 calls approvalRequestsControllerDecide with body: { decision: 'reject' }.",
+        "[unit] approval cancel r1 calls approvalRequestsControllerCancel({ path: { id: 'r1' } }).",
+        "[unit] approval cancel r1 prints r1 cancelled for an answer whose status is cancelled.",
+        "[unit] An ApiError with status 403 from approvalRequestsControllerDecide goes through handleApiError, and the process exits with code 2 (the CLI's auth-error exit, apps/cli/src/utils/error.ts).",
+        "[unit] The program built by src/index.ts has an approval command."
+      ],
+      "tags": [
+        "permissions-p3-approval-api",
+        "cli",
+        "approvals",
+        "generated-client"
+      ],
+      "dependencies": [
+        "US-010"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Existing Commander, withContext and generated-client patterns cover registration, arguments and output; this story changes neither credential resolution nor access-control decisions, so mocked-client single-session TDD is sufficient.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/fleet-approval.ts",
+        "apps/cli/src/index.ts",
+        "apps/cli/src/utils/error.ts",
+        "apps/cli/src/commands/fleet-approval.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/cli/src/commands/approval.ts",
+        "apps/cli/src/commands/approval.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/cli/src/index.ts",
+          "reason": "calls approvalCommand(program) beside the other command modules."
+        }
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0363914128a875e9bb242292e2b436f41e07a4b8"
+    },
+    {
+      "id": "US-015",
+      "title": "The `koda approval policy` commands",
+      "description": "**Goal** — Extend the approval CLI with global/project policy commands and preflight validation of conflicting or empty options.\n\n**Motivation** — The later features (assistant, fleet, gate) each move a surface onto `ApprovalGate`.\n\n**Approach** — Extend `apps/cli/src/commands/approval.ts`, created by US-014. Set up the client with `withContext({}, { requireProject: false })`. Use generated policy functions from the US-010 OpenAPI contract; never hand-edit src/generated or issue handwritten HTTP calls.\n\n**Policies** (US-015). `--project` selects the project routes, and no `--project` selects the global routes:\n\n| Command | Calls | Output (non-`--json`) |\n|:--|:--|:--|\n| `approval policy list [--project <slug>] [--pattern <p>] [--page <n>] [--size <n>] [--json]` | `…List` with `query: { current, size, permissionPattern? }` | `table(['ID', 'Pattern', 'Applies to', 'Mode', 'Project', 'Timeout'], …)`, where \"Applies to\" is `all`, `type:<T>`, `role:<id>` or `<T>:<id>`, and Project is `projectId ?? 'global'` |\n| `approval policy keys [--project <slug>] [--json]` | `…Keys` | `table(['Key', 'Scope', 'Risk', 'Floor', 'Default'], …)` |\n| `approval policy set --pattern <p> --mode <m> [--project <slug>] [--type <USER\\|AGENT\\|ASSISTANT> \\| --role <roleId> \\| --user <userId> \\| --agent <agentSlug>] [--timeout <sec>] [--on-timeout <reject\\|approve>] [--approver-need-not-hold] [--distinct-approver] [--json]` | `--agent` resolves the id with `agentsControllerFindBySlug`; then `…Create` with `body: { permissionPattern, mode, appliesTo, timeoutSec?, onTimeout?, approverMustHoldAction: false when --approver-need-not-hold, requireDistinctApprover: true when --distinct-approver }`; `appliesTo` is `{ kind: 'all' }` when no subject option is given | `Set policy <id>: <pattern> <mode>` |\n| `approval policy update <id> [--project <slug>] [--mode <m>] [--timeout <sec>] [--no-timeout] [--on-timeout <reject\\|approve>] [--json]` | `…Update` with only the given fields (`timeoutSec: null` for `--no-timeout`) | `Updated policy <id>` |\n| `approval policy delete <id> [--project <slug>] [--json]` | `…Remove` | `Deleted policy <id>` |\n\n- Two subject options together (for example `--type` and `--role`) report `Choose at most one of --type, --role, --user or --agent` through `handleApiError(new Error(...), { validationError: true })` (exit 3), and no API function is called.\n- `--mode` and `--on-timeout` values are passed through. The API answers 400 for an unknown one, which goes through `handleApiError` (exit 3).\n- `update` with no field option reports `Nothing to update` through `handleApiError(new Error(...), { validationError: true })` (exit 3), and no API function is called.\n- `--json` prints the unwrapped response (`delete`: `{ \"deleted\": \"<id>\" }`).\n\nThe generated functions follow the controller and method names above: `approvalPoliciesControllerList`, `…Keys`, `…Create`, `…Update`, `…Remove`, and `projectApprovalPoliciesControllerList`, `…Keys`, `…Create`, `…Update`, `…Remove`.\n\nProject calls pass path { slug } or { slug, id } directly and do not infer project selection from local context. Global calls have no slug path; update/remove have path { id }. Subject mapping is all when absent; --type gives {kind:'type',principalType}; --role gives {kind:'role',roleId}; --user gives {kind:'principal',principalType:'USER',principalId}; --agent resolves a slug and gives {kind:'principal',principalType:'AGENT',principalId}. Validate exclusivity before context-triggered lookups or any API call, as role-binding.ts does. Only send explicitly provided optional fields; timeout seconds are numeric, and --no-timeout must remain explicit null, not disappear as undefined. Use default pagination current=1,size=20 and existing table/unwrap/error helpers. The API owns policy modes, floors, eligibility and anti-self-application; do not duplicate those checks in the CLI. Unit tests mock ../generated and assert both global/project calls, bodies, output and no-call exit-3 paths.\n\n**Scope** — In: policy list/keys/set/update/delete commands, route selection, subject resolution, option validation and output. Out: request commands (US-014), new generated client operations (US-010/US-014), API policy validation/permissions (US-008–US-010), web policy pages and a preview API.\n\n**Interface** — Extend `approvalCommand(program: Command): void`; all generated function calls, path/body/query shapes and command signatures are embedded above.",
+      "acceptanceCriteria": [
+        "[unit] approval policy list calls approvalPoliciesControllerList.",
+        "[unit] approval policy list --project web calls projectApprovalPoliciesControllerList with path: { slug: 'web' }.",
+        "[unit] approval policy list prints type:AGENT in the Applies to column for a policy whose principalType is AGENT with no role and no principal id.",
+        "[unit] approval policy keys calls approvalPoliciesControllerKeys.",
+        "[unit] approval policy set --pattern label.delete --mode human --type AGENT calls approvalPoliciesControllerCreate with body { permissionPattern: 'label.delete', mode: 'human', appliesTo: { kind: 'type', principalType: 'AGENT' } }.",
+        "[unit] approval policy set --pattern label.delete --mode agent (no subject option) sends appliesTo: { kind: 'all' }.",
+        "[unit] approval policy set … --agent reviewer-bot resolves the id with agentsControllerFindBySlug and sends appliesTo: { kind: 'principal', principalType: 'AGENT', principalId: <that id> }.",
+        "[unit] approval policy set --pattern label.delete --mode human --approver-need-not-hold --distinct-approver --timeout 600 --on-timeout reject sends a body equal to { permissionPattern: 'label.delete', mode: 'human', appliesTo: { kind: 'all' }, approverMustHoldAction: false, requireDistinctApprover: true, timeoutSec: 600, onTimeout: 'reject' }.",
+        "[unit] approval policy set … --type AGENT --role r1 exits with code 3.",
+        "[unit] That conflicting set calls no API function.",
+        "[unit] approval policy update p1 --no-timeout calls approvalPoliciesControllerUpdate({ path: { id: 'p1' }, body: { timeoutSec: null } }).",
+        "[unit] approval policy update p1 with no field option exits with code 3.",
+        "[unit] That empty update calls no API function.",
+        "[unit] approval policy delete p1 --project web calls projectApprovalPoliciesControllerRemove({ path: { slug: 'web', id: 'p1' } }).",
+        "[unit] approval policy set --pattern label.delete --mode human --project web calls projectApprovalPoliciesControllerCreate with path: { slug: 'web' }."
+      ],
+      "tags": [
+        "permissions-p3-approval-api",
+        "cli",
+        "policies",
+        "generated-client"
+      ],
+      "dependencies": [
+        "US-014"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "One command module adds standard generated-client CRUD calls, presentation and exclusive-option validation; the API alone enforces permissions and policy rules, so ordinary mocked-client TDD is the lightest realistic strategy.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/approval.ts",
+        "apps/cli/src/commands/role-binding.ts",
+        "apps/cli/src/utils/error.ts",
+        "apps/cli/src/commands/fleet-approval.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/cli/src/commands/approval-policy.spec.ts"
+      ],
+      "workdir": "apps/cli",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b9e21498a2c62fa7b97d92afe8921153e9f19dab"
+    }
+  ],
+  "analysis": "Goal and completion: expose the existing P3 approval engine through REST, MCP and the thin CLI; add transactional status-change outbox events, scoped inbox visibility, requester cancellation, stale-approved retry, policy CRUD, project live refetch signals and eligible-human notifications. Completion is the fifteen binding stories with their stated behavior, not production gating or a web inbox. Preserve their exact workdirs and dependency edges, including US-010's root openapi.json generation despite its binding apps/api workdir. No application implementation is part of this PRD-writing task.\n\nNavigation and authoritative context: codebase-memory MCP is unavailable in this session, so discovery used direct file reads and literal/regex search in the supplied repository root. The detected Express/Next.js labels are not the architecture authority: .nax/mono/apps/api/context.md:18 specifies NestJS 12 + Fastify, Prisma 7, Nathapp platform modules and Vitest; .nax/mono/apps/cli/context.md:21 specifies Commander, generated Axios client and Jest. The API integration helper intentionally defaults to an Express adapter while allowing Fastify (apps/api/test/helpers/http-app.ts:15 and :35); that does not change production's Fastify architecture. Read the nathapp-nestjs-patterns skill before implementing NestJS code, as required by app guidance; no matching skill file was exposed by repository glob during planning. Never edit generated AGENTS.md or .nax/rules/ and .nax/mono/ guidance for this feature.\n\nExisting engine and mutation seams: apps/api/src/approvals/approval-engine.module.ts:20 currently exports ApprovalPolicyService, ApprovalCommandRegistry, ApprovalGate, ApprovalDecisionService and ApprovalExecutionService and keeps both repository providers/tokens private. Add the events provider, then public query and MCP services; never export repositories (.nax/rules/api-data.md:28). AppModule already imports ApprovalEngineModule at apps/api/src/app.module.ts:149; add ApprovalApiModule without removing or duplicating the singleton registry. ApprovalGate's constructor is at apps/api/src/approvals/approval-gate.service.ts:29; gate parses first, applies direct-human satisfaction and delegates non-human waits to openRequest. openRequest performs pending duplicate lookup before its bookkeeping-wrapped transaction (same file:132-140). Record pending only after the create inside that existing callback, never for duplicates, parse failures or immediate execution. Do not otherwise change approval-core behavior. ApprovalDecisionService.decide commits record() before calling execute (apps/api/src/approvals/approval-decision.service.ts:22-26). record() locks, checks pending/expiry, re-reads effective keys, checks decideEligibility, inserts a decision, transitions and audits within txManager.run (same file:29-64). Events must be awaited in that same transaction. Cancellation is an additive method on this service, not a change to decide eligibility.\n\nExecution and retry risk: apps/api/src/approvals/approval-execution.service.ts:43-58 checks approved and reconstructs the original action context. Precheck covers no-command, hash mismatch, revoked action permission and invalid input (same file:61-77). The successful command transaction wraps the transition in bookkeeping (same file:108-121); failure settles in a separate transaction (same file:127-134 and :153-164). Put events inside each corresponding bookkeeping/transaction closure and only after a non-null transition; otherwise audit coverage or atomicity breaks. Preserve the distinction between callback failure and commit failure: a failed commit leaves approved for retry, rather than falsely marking failed. Preserve the per-request in-process serialization and database row lock. ApprovalRequestExpirySweeper is @SystemWriter('system.approval.expire'), MAX_PER_TICK is 100, its timer currently runs tick alone and unrefs/clears on shutdown (apps/api/src/approvals/approval-request-expiry.sweeper.ts:13, :35-65). tick has its own system scope and returns {expired, approved, failed}; per-request transactions and post-commit execution are at :78-103, and transitions/audit at :111-128. Add event recording without changing tick counts. Add separate retryStale using decidedAt <= now-300000, sequential execution, skip ApprovalRequestNotPendingError, warn and continue on other exceptions. Chain tick then retryStale with independent top-level error handling, retaining sweepEnabled and timer cleanup.\n\nVisibility is access control, not full decision eligibility: apps/api/src/approvals/approval-eligibility.ts:63-76 currently keeps matchesDecidePattern private. Export its unchanged exact-or-prefix matcher; never change decideEligibility's refusal ordering or tier rules (:78-107). Visibility includes actor/onBehalfOf identity even without a decide key; otherwise it checks scoped decide patterns only, not action permission or policy tier. PermissionService.effectiveKeys caches per principal and project (apps/api/src/permissions/permission.service.ts:75-83). computeKeys and appliesIn recognize global bindings in every scope (:152-171 and :183-186); global Owner/Admin additionally get project keys everywhere, with isGlobalAdminBinding at :189. A custom GLOBAL decide grant must expose project requests too, even though deciding them can later fail missing-action-permission. Add approvalDecideScopes without changing can, effectiveKeys or principalIdsWithKey. The new method enumerates accessible project ids in ascending order and extracts sorted unique suffix patterns, with 'all' taking precedence. Global-admin short-circuit is based on effective global bindings, not just global key possession. Empty decide patterns must yield own-only queries, not an accidentally unbounded OR. Request filter fields AND visibility; mine replaces decider visibility with actor/onBehalfOf clauses. Prefix p.* translates to startsWith 'p.', not startsWith 'p' without its separating dot. Repository pagination orders createdAt desc then id desc and applies filtering before counting/paging.\n\nPersistence boundaries: apps/api/src/approvals/prisma-approval-request.repository.ts:15-40 maps flat Prisma actor/onBehalfOf columns to domain objects; :43-46 owns SELECT FOR UPDATE, :60-63 owns compare-and-set transitions, :65-72 creates and orders decisions (decidedAt asc, id asc, take 50). Add bounded visible-page and stale-approved queries here, not in controllers or notification subscribers. Domain request/policy/decision records and all seven statuses already exist in apps/api/src/approvals/domain/approval.domain.ts:25-51. apps/api/src/approvals/prisma-approval-policy.repository.ts:43-46 supplies the existing Paginate/remap pattern. ApprovalPolicyFilter currently has only projectId and permissionPattern (:9). Translate projectIds to OR equalities and remove the pseudo-field before calling Prisma; keep single-project filtering and list semantics unchanged. ApprovalPolicyService already validates floors, requiredApprovals, selectors and anti-self-application, transactions, immutable selector identity and audit (apps/api/src/approvals/approval-policy.service.ts:26-88, :99-140). Add page and non-locking public get while retaining the existing private locked requirePolicy for writes. Do not duplicate these business rules in controllers or CLI. Prisma schema already contains ApprovalPolicy, ApprovalRequest and ApprovalDecision (apps/api/prisma/schema.prisma:1597, :1621, :1656), with request indexes at :1651-1653. No new schema, data migration, indexes or production backfill are specified. Use the generated Prisma 7 client only at repository boundaries and existing isUniqueViolation logic, not raw meta.target.\n\nREST wiring and contract: mirror apps/api/src/audit/audit.controller.ts:12-24 for parseQuery, JsonResponse.Ok and toPageResult. KodaPageQuery defaults to current=1, size=20, caps size=100 and explains the non-transforming global pipe (apps/api/src/common/dto/koda-page.query.ts:9-36); parseQuery strips undeclared properties (:58-67), and remapPage preserves the page envelope (:75-77). Boolean transformation must match apps/api/src/tickets/dto/list-tickets.query.ts:7-9 so invalid strings survive transformation and IsBoolean rejects them. Summary DTOs intentionally exclude input/result; detail DTOs flatten actors and include decisions. Every new REST route has RequiresGuard, ApiOperation and status-specific ApiResponse metadata; every response field needs ApiProperty (.nax/rules/api-controllers.md:12-21). RequiresGuard passes service-enforced metadata without performing a global decide grant check (apps/api/src/permissions/requires.guard.ts:30-35), which is essential for own self requests; the service handles visibility and the engine handles eligibility. Runner keys remain excluded by CombinedAuthGuard, never opt these routes into RunnerRoute. Project policy controllers mirror the ordered ProjectMembershipGuard, RequiresGuard chain and CurrentProject context in apps/api/src/fleet/approvals/project-fleet-approvals.controller.ts:34-70, including ApiParam for slug. ApprovalApiModule must import ProjectAccessModule as well as ApprovalEngineModule so DI can resolve the membership guard. Catch domain errors in every controller handler through rethrowApprovalError; preserve unknown errors unchanged. Add only each story's introduced approvals namespace codes in en/zh, using exact English templates and matching placeholder names; validation uses both -2 and 400 as illustrated at apps/api/src/i18n/en/permissions.json:11-18. Rendered client messages, not hidden args, are the assertions.\n\nPermission-contract impact: apps/api/src/permissions/catalog.ts:64-69 currently leaves approval.decide, approval.policy.read and approval.policy.manage pending alongside fleet.approval.decide.assistant and member.remove. Remove each only in the story introducing its declared surface, and update expectedPending in permission-contract.spec.ts at the same step. Add approval.request.cancel to NEW_KEY_SCOPES and IMPLICIT_KEYS (catalog.ts:73 and :117), not to grantable/approvable roles. Update catalog.spec.ts's independent expected derivation and regenerate only the new implicit column in permissions/__snapshots__/role-matrix.json. Permission contract and route endpoint tests are regression anchors; do not rewrite unrelated expectations.\n\nTransactional outbox and consumers: OutboxService injection is established by apps/api/src/fleet/approvals/approval-closer.ts:74-82. GLOBAL_OUTBOX_TYPES currently contains only the two fleet types (apps/api/src/outbox/global-outbox-types.ts:7); add the new constant so null-project requests are accepted. Event payloads never carry frozen input or result. FanOutPublisher handlers receive payload only, not outbox metadata; it registers in onModuleInit, runs each handler under runAsSystem('outbox') and aggregates errors for retry (apps/api/src/outbox/fan-out-publisher.ts:7, :56-60, :74-93). Consequently the live handler reconstructs the stable '<requestId>:<status>' id from the parsed payload. Mirror TicketLiveSubscriber's registration and nonthrowing warn boundary (apps/api/src/live/ticket-live.subscriber.ts:21-32), while explicitly warning for malformed approval payloads. Extend the four-member LiveEvent union without changing ticket conversion (apps/api/src/live/live-event.ts:71-97). Only project requests publish; the frame contains no key, actor or content. Notifications mirror FleetApprovalRequestedSubscriber's registration, pending reread and system-writer declaration (apps/api/src/notifications/fleet/fleet-approval-requested.subscriber.ts:24-66). NotificationsModule currently imports OutboxModule, LiveModule, ProjectAccessModule, BudgetStoreModule (apps/api/src/notifications/notifications.module.ts:34); add ApprovalEngineModule and the subscriber without reversing dependencies. Query through ApprovalRequestQueries.findById, enumerate exact-key human candidates using principalIdsWithKey (permission.service.ts:126-150) or global admins, then run decideEligibility with current effective keys for each. Narrowed-only deciders remain visible in the inbox but are intentionally not notification candidates. Use NotificationWriter.deliver as the sole insert path, keeping its idempotency and preference filtering. Nonpending/missing sources stop quietly; database errors should retain relay retry behavior rather than being swallowed as malformed input.\n\nMCP seams and staged expectations: apps/api/src/fleet/assistant/mcp/mcp-server.factory.ts:22-34 deliberately bypasses SDK argument validation; registrations must self-validate unknown input before calling a service. McpToolRegistration is at :38-43; existing assistant registration order and toMcpToolResult error conversion are at :97-124. McpController currently constructs the server with assistant registrations only (apps/api/src/fleet/assistant/mcp/mcp.controller.ts:49-70), enforces MCP_ENABLED and agent-only at :89-91, then supplies request-local principal/visibility through authInfo.extra. Add ApprovalMcpTools as the last constructor dependency and append its registrations, unfiltered by assistant visibleMcpToolNames. AssistantModule imports the engine (apps/api/src/fleet/assistant/assistant.module.ts:41-59); do not register these tools in AssistantToolRegistry or the thread executor and do not move PendingAction. Each approval handler owns a runWithActionContext AGENT/mcp scope. US-012 deliberately has only koda_list_approvals at its stage; US-013 then adds koda_decide_approval after it and updates the relevant earlier tool-list expectations. Preserve US-012's criteria in this PRD but understand the exact single-tool/last-tool assertions as that story's intermediate state, superseded by US-013's final two-tool ordering, not as incompatible final-state requirements.\n\nCLI and generation: mirror generated function calls, envelope unwrapping, paging, output and error handling in apps/cli/src/commands/fleet-approval.ts:1-50, :118-156 and :160-240; add a separate top-level approval command, not more fleet approval commands. apps/cli/src/commands/role-binding.ts:40-50 demonstrates explicit slug-to-id lookup and :124-128 validates exclusive options before any context/lookup/network operation. Always set up with withContext({}, {requireProject:false}); local project config must never implicitly select a policy scope. Request --project resolves a project id; policy --project selects slug routes. Use the generated API shapes and boolean mine, never ad-hoc HTTP or duplicated domain validation. package.json:20-23 defines root api:export-spec, generate:cli and generate; generate openapi.json after US-010 and regenerate CLI after that, without manually editing generated files. The feature specifies generated CLI output as gitignored; app context describes it as source-controlled, but .gitignore:21-25 explicitly ignores apps/cli/src/generated/ except .gitkeep. Regenerate instead of hand-editing or force-adding generated output; verify actual tracked-state conventions during generation. IMPORTANT baseline discrepancy: apps/cli/src/utils/error.ts:104-137 currently maps recognized 401/403 to exit 2 and unknown API errors to 1, but US-014 AC-14 explicitly requires an ApiError status-403 decision failure to pass through handleApiError and exit 1. The AC is authoritative for this new command; do not silently change it to exit 2 or globally alter unrelated command behavior. CLI errors go through the existing handleApiError unchanged (401/403 exit 2); src/utils/error.ts is not edited. The existing apps/cli/src/utils/error.spec.ts is the regression seam for that default. No new ApiError class is required. Policy invalid options/empty patches are explicitly exit 3, with validation before every API call.\n\nTest impact and rollout: constructor additions break direct instantiations unless updated together. Existing direct calls were located in approval-gate.service.spec.ts:48/:57, approval-decision.service.spec.ts:31, approval-execution.service.spec.ts:44/:83, approval-request-expiry.sweeper.spec.ts:89 and test/integration/approvals/approval-execute.integration.spec.ts:142. Add the last events stub/instance at each seam while preserving existing assertions. The DB-free engine compilation fixture provides global external stubs but not OutboxService yet (apps/api/src/approvals/approval-engine.module.spec.ts:21-32); add and export its stub. Add the API module compilation test under src/approvals/, not integration. Existing approval integration patterns register configurableTestCommand once, reset state before each case, use withTestActor/fixtureDb and shared DB gates (apps/api/test/integration/approvals/approval-decide.integration.spec.ts:16-53); its :113-125 rollback regression must continue passing. For these new specs, delete ApprovalDecision, ApprovalRequest and ApprovalPolicy rows in beforeEach, use fresh principals and the seeded approver plus explicit label.delete grant. Create REST/MCP agents via POST /api/agents with admin credentials and use their returned Bearer API key; do not confuse withTestActor ids with authenticated principals. Insert visibility-only ticket.delete/global role.manage requests directly when no registered command exists. Keep requests' expiresAt in the future except explicit expiry cases. Outbox events must be inspected by request id/type and ordered by creation; no outbox row should survive a rollback. Subscribers are tested by invoking captured FanOutPublisher handlers. MCP is exercised through POST /api/mcp with MCP_ENABLED enabled. Jest CLI specs mock ../generated, context and process/console boundaries as apps/cli/src/commands/fleet-approval.spec.ts:1-64 does. DB-mode tests require KODA_DB_TESTS=1 outside NAX_SANDBOXED=1; shared test setup may force-reset the test database, so do not run DB suites concurrently against one database. Skipped sandbox tests are not verification. Generated acceptance tests remain in app-local .nax feature locations and must not be edited or copied into source. Type checking, lint, scoped unit/integration and app acceptance commands are implementation verification, not additional stories or acceptance criteria. The API remains the sole owner of all decisions, policy invariants and permission evaluation throughout this additive rollout.\n\nRefine-pass preservation audit (manual, against .nax/features/permissions-p3-approval-api/spec.md:751-993): all 189 numbered spec ACs remain in their owning stories, at the same leading ordinal; added criteria follow them. Enumerated checked spec AC ordinals: US-001 [1,2,3,4,5,6,7,8,9,10,11,12,13]; US-002 [1,2,3,4,5,6,7,8]; US-003 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-004 [1,2,3,4,5,6,7,8,9,10,11]; US-005 [1,2,3,4,5,6,7,8,9,10,11,12]; US-006 [1,2,3,4,5,6,7,8,9,10,11,12,13,14]; US-007 [1,2,3,4,5,6,7,8,9,10]; US-008 [1,2,3,4,5,6,7,8,9,10,11,12,13,14]; US-009 [1,2,3,4,5,6,7,8,9]; US-010 [1,2,3,4,5,6,7,8,9,10,11,12,13]; US-011 [1,2,3,4,5,6,7,8,9,10,11,12]; US-012 [1,2,3,4,5,6,7,8,9,10,11,12,13]; US-013 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-014 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]; US-015 [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]. Qualifying clauses were retained, including no pending duplicate, before callback return, no projectId key, and nothing else, only/with competing project fixtures, holding no decide key, whoever opened it, already rejected/executed, whatever decidedAt, no projectIds, and the final not-404 distinction. No deprecated file-check tags occur. Clarifications preserve the assertions while using actual data flow: REST page rows live in data.records; MCP list text lives in content[0].text, because toMcpToolResult wraps strings in a text-content array (apps/api/src/fleet/assistant/mcp/mcp-tool-catalog.ts:102-106).\n\nRefine-pass negative-path inventory: US-001 AC-6/9/12; US-002 AC-4/5; US-003 AC-10/14; US-004 AC-3/4/7/10/11; US-005 AC-5 through AC-12; US-006 AC-6 through AC-12; US-007 AC-4/5/9/10; US-008 AC-2/4/6 through AC-10/12; US-009 AC-2 through AC-5/7 through AC-9; US-010 AC-3/4/6/7/13; US-011 AC-3/4/8/9/11/12; US-012 AC-6 through AC-10; US-013 AC-5 through AC-13; US-014 AC-14; US-015 AC-9/10/12/13. Thus every story already has at least one observable refusal/error/skip behavior, and failure-table-specific supplemental assertions remain. Added regression anchors cover unchanged tick counts, the exported matcher's old semantics, disabled-sweep lifecycle, the legacy policy list array, ticket live conversion, assistant registration order with an empty approval-tools stub, the existing fleet CLI group and request-command siblings. The concrete existing seams are approval-request-expiry.sweeper.spec.ts:104-180, approval-eligibility.ts:63-68, approval-policy.service.ts:87-89, live/live-event.ts:76-97 and mcp.controller.routes.spec.ts:64-118. These checks do not authorize unrelated refactors or new runtime helpers.\n\nRefine-pass structure/scope audit: all fifteen binding ids, workdirs and dependency arrays are unchanged, every dependency resolves to one of those ids, and every spec-recommended Context Files entry fits within its story's five-file limit and is retained. Optional extra context remains existing code or an upstream output; newly authored files occur only in expectedFiles. US-014's fifth optional context now points to the existing error utility regression spec because its opt-in compatibility change is required to reconcile the authoritative exit-1 AC with current default exit 2. All 21 feature-level Out of Scope items from spec.md:439-462 remain verbatim in the top-level array; there are no story-local deferral blocks to hoist. The list-only MCP expectations are intermediate US-012 assertions, superseded only where US-013 explicitly adds its second tool, rather than contradictory instructions within one story. Complexity was reduced for standard additive event hooks, bounded retry and the project controller mirror; strict API TDD remains for access-control paths, while thin generated-client CLI formatting uses ordinary mocked-client TDD because it implements no permission or credential-resolution rules. No runtime parser or shell was available to execute a machine validation in this session, so this audit does not claim one.",
+  "outOfScope": [
+    "No production code calls `ApprovalGate.gate` yet: `permissions-p3-approval-assistant`, `permissions-p3-approval-fleet` and `permissions-p3-approval-gate` move their surfaces onto it. Until then the request routes, MCP tools and CLI commands answer empty lists outside tests.",
+    "The policy pages and the unified inbox are `permissions-p3-web`; the notification link `/approvals?id=<id>` points at that inbox and has no page until it ships.",
+    "Notifying users who hold only a narrowed `approval.decide@<pattern>` is not built: `principalIdsWithKey` matches the exact key, and such users still see and decide the request in the inbox.",
+    "Notifying the actor or the on-behalf-of user when a request is decided, executed, failed or expired is not built; the live event and `GET /approvals/:id` report the change.",
+    "Outbound project webhooks for approval requests (as `fleet.approval.requested` has) are not added.",
+    "Requests with no project publish no live event, as fleet approvals with no project publish none.",
+    "A preview route that resolves which policy and mode would apply to a key, project and subject is not added; the web computes \"current mode\" from `GET …/keys` and the policy list.",
+    "An admin cancelling someone else's request is not built: a decider rejects instead.",
+    "US-005 only: the decide route checks visibility, then calls `decide`, in two steps; a request that becomes invisible between them (a binding removed) is still decided under `decide`'s own eligibility check, which re-reads the decider's keys.",
+    "US-007 only: the retry is not distributed-safe beyond `execute`'s row lock; koda runs one API instance.",
+    "US-012, US-013 only: the MCP tools have no per-tool permission visibility; both are registered for every agent and the services refuse what the agent may not do.",
+    "The thread assistant does not get approval tools: the assistant never satisfies a mode above `none`.",
+    "Moving `PendingAction` and `FleetApproval` onto `ApprovalRequest`, and closing #301, are the assistant and fleet features.",
+    "Editing `.nax/rules/` or `.nax/mono/` context files is not part of any story.",
+    "US-006 only: a cancel racing a decide or the expiry sweeper is serialised by `lockById` (the loser sees a non-pending status and gets `ApprovalRequestNotPendingError`, as decide does in approval-core); the race itself is not tested here.",
+    "No index is added for the visibility filter on `onBehalfOfType`/`onBehalfOfId` or the stale-approved scan on `status`/`decidedAt`: `ApprovalRequest` stays small (one row per gated write, no production writer yet), and the existing `[actorType, actorId, onBehalfOfId, permissionKey, inputHash, status]` and `[status, expiresAt]` indexes lead with columns these queries filter on.",
+    "US-003 only: `approvalDecideScopes` reads `effectiveKeys` once per accessible project (cached per principal and scope); a principal with a project binding in every project of a very large install pays one cached read per project per list call.",
+    "The MCP approval tools are not in the permission contract test's tool-key check, which reads only the assistant tool registry; their services enforce the keys.",
+    "Web rendering of the `approval_request` notification kind is `permissions-p3-web`; until then the web shows the draft's English title.",
+    "The `approval_request` kind does not get the 60 s email delay that `APPROVAL_REQUESTED_KIND` (`approval_requested`, `src/email/email.constants.ts`) gets; it uses the default delay.",
+    "The project live event carries the request id and status to every subscriber of the project stream, including members who cannot see the request: it is content-free (no key, no actor, no input), and the inbox refetch answers only what the caller may see."
+  ],
+  "routingProfile": "native-codex"
+}

@@ -4,6 +4,7 @@ import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-d
 import { bookkeeping } from '../action-context/audit-coverage';
 import { currentContext, runWithActionContext, type ActionApproval, type ActionContext } from '../action-context/action-context';
 import { findCatalogEntry } from '../permissions/catalog';
+import { ApprovalRequestEvents } from './approval-request-events';
 import { ApprovalCommandRegistry } from './approval-command.registry';
 import { approvalInputHash, freezeApprovalInput } from './approval-input';
 import { ApprovalPolicyResolver, type ApprovalSubject, type ResolvedApproval } from './approval-policy.resolver';
@@ -32,6 +33,7 @@ export class ApprovalGate {
     @Inject(ApprovalPolicyResolver) private readonly resolver: Pick<ApprovalPolicyResolver, 'resolve'>,
     @Inject(APPROVAL_REQUEST_REPOSITORY) private readonly requests: RequestStore,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly events: ApprovalRequestEvents,
   ) {}
 
   async gate<TResult>(
@@ -124,9 +126,11 @@ export class ApprovalGate {
 
     // The ApprovalRequest row is itself the record of the ask, so opening it is bookkeeping: no
     // audit entry, and the write does not count against the entry point's audit coverage.
-    return bookkeeping('approval.request-open', () => this.txManager.run(async () => this.requests.create(
-      newRequest({ key, projectId, resolved, context, actorType, input, inputHash }, now),
-    )));
+    return bookkeeping('approval.request-open', () => this.txManager.run(async () => {
+      const created = await this.requests.create(newRequest({ key, projectId, resolved, context, actorType, input, inputHash }, now));
+      await this.events.record(created);
+      return created;
+    }));
   }
 }
 

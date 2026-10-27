@@ -17,10 +17,14 @@ import { SYSTEM_WRITER_METADATA } from '../permissions/system-writer.decorator';
 import { APPROVAL_POLICY_REPOSITORY, APPROVAL_REQUEST_REPOSITORY } from './domain/approval.domain';
 import { PrismaApprovalPolicyRepository } from './prisma-approval-policy.repository';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
+import { OutboxService } from '@nathapp/nestjs-outbox';
+import { ApprovalRequestEvents } from './approval-request-events';
+import { ApprovalRequestQueries } from './approval-request.queries';
 
 @Global()
 @Module({ providers: [
   { provide: AuditRecorder, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
+  { provide: OutboxService, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
   { provide: PermissionService, useValue: { roleIdsAt: vi.fn().mockResolvedValue([]), roleIdsAnywhere: vi.fn().mockResolvedValue([]) } },
   { provide: PrismaService, useValue: createMockPrismaService({ fn: vi.fn }) },
   { provide: TRANSACTION_MANAGER, useValue: {
@@ -28,7 +32,7 @@ import { PrismaApprovalRequestRepository } from './prisma-approval-request.repos
   } },
   // The sweeper reads the fleet sweep window; a stub keeps the module DB-free and starts no timer.
   { provide: FLEET_CFG, useValue: { sweepEnabled: false, approvalSweepMs: 15_000 } },
-], exports: [PrismaService, TRANSACTION_MANAGER, PermissionService, AuditRecorder, FLEET_CFG] })
+], exports: [PrismaService, TRANSACTION_MANAGER, PermissionService, AuditRecorder, OutboxService, FLEET_CFG] })
 class ExternalStubsModule {}
 
 @Injectable()
@@ -39,7 +43,7 @@ class PolicyConsumer {
 class RegistryConsumer {
   constructor(readonly commands: ApprovalCommandRegistry, readonly gate: ApprovalGate) {}
 }
-/** The five services the module promises to an importing module (US-012 AC-11). */
+/** Public engine services must be injectable by an importing module. */
 @Injectable()
 class EngineConsumer {
   constructor(
@@ -48,6 +52,7 @@ class EngineConsumer {
     readonly executions: ApprovalExecutionService,
     readonly policies: ApprovalPolicyService,
     readonly commands: ApprovalCommandRegistry,
+    readonly queries: ApprovalRequestQueries,
   ) {}
 }
 @Module({ imports: [ApprovalEngineModule], providers: [PolicyConsumer, RegistryConsumer, EngineConsumer] })
@@ -61,6 +66,10 @@ describe('ApprovalEngineModule', () => {
     expect(moduleRef.get(PolicyConsumer).policies).toBeInstanceOf(ApprovalPolicyService);
     expect(moduleRef.get(PolicyConsumer).decisions).toBeInstanceOf(ApprovalDecisionService);
     expect(moduleRef.get(PolicyConsumer).executions).toBeInstanceOf(ApprovalExecutionService);
+  });
+  it('AC-13: provides ApprovalRequestEvents with the outbox stub', async () => {
+    moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ApprovalEngineModule] }).compile();
+    expect(moduleRef.get(ApprovalRequestEvents)).toBeInstanceOf(ApprovalRequestEvents);
   });
   it('provides a resolver wired to policy and permission providers', async () => {
     moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ApprovalEngineModule] }).compile();
@@ -94,7 +103,7 @@ describe('ApprovalEngineModule', () => {
     // The instance's constructor is what `runAsSystemWriter` reads the key from.
     expect(Reflect.getMetadata(SYSTEM_WRITER_METADATA, sweeper.constructor)).toBe('system.approval.expire');
   });
-  it('US-012 AC-11: an importing module injects all five exported services', async () => {
+  it('US-012 AC-11 and visibility: an importing module injects all exported services', async () => {
     moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ConsumerModule] }).compile();
 
     const consumer = moduleRef.get(EngineConsumer);
@@ -103,5 +112,6 @@ describe('ApprovalEngineModule', () => {
     expect(consumer.executions).toBeInstanceOf(ApprovalExecutionService);
     expect(consumer.policies).toBeInstanceOf(ApprovalPolicyService);
     expect(consumer.commands).toBeInstanceOf(ApprovalCommandRegistry);
+    expect(consumer.queries).toBeInstanceOf(ApprovalRequestQueries);
   });
 });

@@ -99,6 +99,7 @@ const user = { type: 'USER', id: 'u1' } as const;
   afterAll(async () => { await app?.close(); });
   beforeEach(async () => {
     labels.reset();
+    await db.approvalDecision.deleteMany();
     await db.approvalRequest.deleteMany();
     await db.approvalPolicy.deleteMany();
     await db.auditEntry.deleteMany();
@@ -214,6 +215,36 @@ const user = { type: 'USER', id: 'u1' } as const;
     ]);
     expect((await stored(first.id)).status).toBe('pending');
     expect((await stored(second.id)).status).toBe('expired');
+  });
+
+  it('US-007 AC-7/8: retries a stale approved request and records exactly one command call', async () => {
+    const opened = await open();
+    const old = new Date(NOW.getTime() - 10 * 60_000);
+    await db.approvalRequest.update({ where: { id: opened.id }, data: { status: 'approved', decidedAt: old } });
+
+    expect(await sweeper.retryStale(NOW)).toEqual({ retried: 1, failed: 0 });
+    expect((await stored(opened.id)).status).toBe('executed');
+    expect(labels.state.calls).toEqual([{ labelId: 'l1' }]);
+  });
+
+  it('US-007 AC-9: does not retry an approval newer than five minutes', async () => {
+    const opened = await open();
+    await db.approvalRequest.update({
+      where: { id: opened.id }, data: { status: 'approved', decidedAt: new Date(NOW.getTime() - 60_000) },
+    });
+
+    expect(await sweeper.retryStale(NOW)).toEqual({ retried: 0, failed: 0 });
+    expect((await stored(opened.id)).status).toBe('approved');
+    expect(labels.state.calls).toEqual([]);
+  });
+
+  it('US-007 AC-10: stale-approved query excludes pending and executed rows', async () => {
+    const pending = await open('l1');
+    await db.approvalRequest.update({ where: { id: pending.id }, data: { decidedAt: new Date(NOW.getTime() - 20 * 60_000) } });
+    const executed = await open('l2');
+    await db.approvalRequest.update({ where: { id: executed.id }, data: { status: 'executed', decidedAt: new Date(NOW.getTime() - 20 * 60_000) } });
+
+    expect(await requests.findStaleApproved(NOW, 10)).toEqual([]);
   });
 
   it('AC-8: 101 due requests settle exactly 100 in one tick', async () => {

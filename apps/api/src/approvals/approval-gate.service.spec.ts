@@ -32,6 +32,7 @@ describe('ApprovalGate', () => {
   };
   let transactions: { run: ReturnType<typeof vi.fn> };
   let gate: ApprovalGate;
+  let events: { record: ReturnType<typeof vi.fn> };
   const asActor = <T>(actor: ActionActor, fn: () => T) => runWithActionContext({ actor, origin: 'rest' }, fn);
   const agent = <T>(fn: () => T) => asActor({ type: 'AGENT', id: 'a1' }, fn);
 
@@ -45,7 +46,8 @@ describe('ApprovalGate', () => {
       findPendingDuplicate: vi.fn().mockResolvedValue(null),
     };
     transactions = { run: vi.fn(<T>(fn: () => Promise<T>) => fn()) };
-    gate = new ApprovalGate(registry, { resolve }, requests, transactions as unknown as ITransactionManager);
+    events = { record: vi.fn().mockResolvedValue(undefined) };
+    gate = new ApprovalGate(registry, { resolve }, requests, transactions as unknown as ITransactionManager, events as never);
   });
   const untouched = () => {
     expect(resolve).not.toHaveBeenCalled();
@@ -54,7 +56,7 @@ describe('ApprovalGate', () => {
     expect(requests.create).not.toHaveBeenCalled();
   };
   it('AC-1: refuses an unregistered key before checking context', async () => {
-    gate = new ApprovalGate(new ApprovalCommandRegistry(), { resolve }, requests, transactions as unknown as ITransactionManager);
+    gate = new ApprovalGate(new ApprovalCommandRegistry(), { resolve }, requests, transactions as unknown as ITransactionManager, events as never);
     await expect(gate.gate('label.delete', input, opts)).rejects.toEqual(new UnregisteredApprovalCommandError('label.delete'));
     untouched();
   });
@@ -121,6 +123,7 @@ describe('ApprovalGate', () => {
     });
     expect(executionApproval).toEqual(approval);
     expect(testCommand.state.calls).toEqual([input]);
+    expect(events.record).not.toHaveBeenCalled();
     expect(requests.findPendingDuplicate).not.toHaveBeenCalled();
     expect(requests.create).not.toHaveBeenCalled();
   });
@@ -131,6 +134,10 @@ describe('ApprovalGate', () => {
       expect(currentBookkeepingReason()).toBe('approval.request-open');
       return record;
     });
+    transactions.run.mockImplementation(<T>(fn: () => Promise<T>) => fn().then((result) => {
+      expect(events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ status: 'pending' }));
+      return result;
+    }));
 
     const outcome = await runWithActionContext(
       { actor: { type: 'AGENT', id: 'a1' }, origin: 'rest', correlationId: 'correlation' },
@@ -152,6 +159,7 @@ describe('ApprovalGate', () => {
       expiresAt: new Date(now.getTime() + DEFAULT_APPROVAL_TIMEOUT_SEC * 1000),
     }));
     expect(testCommand.state.calls).toEqual([]);
+    expect(events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ status: 'pending', permissionKey: 'label.delete' }));
   });
 
   it('returns the still-pending duplicate instead of opening a second request', async () => {
@@ -162,6 +170,7 @@ describe('ApprovalGate', () => {
     await expect(agent(() => gate.gate('label.delete', input, opts, now)))
       .resolves.toEqual({ status: 'pending', request: existing });
     expect(requests.create).not.toHaveBeenCalled();
+    expect(events.record).not.toHaveBeenCalled();
     expect(testCommand.state.calls).toEqual([]);
   });
 

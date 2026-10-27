@@ -346,6 +346,72 @@ describeIntegration('API Integration Tests', () => {
   // 2. Agent Registration & Auth
   // ─────────────────────────────────────────────────────────────────
 
+  describe('Approval requests', () => {
+    it('GET /api/approvals with the admin token returns 200', async () => {
+      const res = await request(httpServer).get('/api/approvals')
+        .set('Authorization', `Bearer ${userAccessToken}`).expect(200);
+      expect(body(res)).toMatchObject({ current: 1, size: 20, records: expect.any(Array) });
+    });
+    it('GET /api/approvals without credentials returns 401', async () => {
+      await request(httpServer).get('/api/approvals').expect(401);
+    });
+    it('POST /api/approvals/:id/cancel withdraws an own request and refuses a second cancellation', async () => {
+      const row = await prismaClient().approvalRequest.create({ data: {
+        permissionKey: 'label.delete', actorType: 'USER', actorId: adminUserId,
+        origin: 'rest', correlationId: 'cancel-endpoint', input: {}, inputHash: 'cancel-endpoint',
+        requiredMode: 'agent', onTimeout: 'reject', approverMustHoldAction: true,
+        requireDistinctApprover: false, expiresAt: new Date(Date.now() + 60_000),
+      } });
+      try {
+        const res = await request(httpServer).post(`/api/approvals/${row.id}/cancel`)
+          .set('Authorization', `Bearer ${userAccessToken}`).send({}).expect(200);
+        expect(body(res)).toMatchObject({ id: row.id, status: 'cancelled', decisions: [] });
+        const again = await request(httpServer).post(`/api/approvals/${row.id}/cancel`)
+          .set('Authorization', `Bearer ${userAccessToken}`).send({}).expect(409);
+        refusal(again, 'approvals.notPending.409', { status: 'cancelled' });
+      } finally { await prismaClient().approvalRequest.delete({ where: { id: row.id } }); }
+    });
+    it('POST /api/approvals/:id/cancel without credentials returns 401', async () => {
+      await request(httpServer).post('/api/approvals/unknown/cancel').send({}).expect(401);
+    });
+  });
+
+  describe('Global approval policies', () => {
+    it('GET /api/approval-policies with the admin token returns 200', async () => {
+      const res = await request(httpServer).get('/api/approval-policies')
+        .set('Authorization', `Bearer ${userAccessToken}`).expect(200);
+      expect(body(res)).toMatchObject({ current: 1, size: 20, records: expect.any(Array) });
+    });
+    it('GET /api/approval-policies without credentials returns 401', async () => {
+      await request(httpServer).get('/api/approval-policies').expect(401);
+    });
+    it('lists global policies and approvable keys for the admin', async () => {
+      const res = await request(httpServer).get('/api/approval-policies')
+        .set('Authorization', `Bearer ${userAccessToken}`).expect(200);
+      expect(body(res)).toMatchObject({ current: 1, size: 20, records: expect.any(Array) });
+      const keys = await request(httpServer).get('/api/approval-policies/keys')
+        .set('Authorization', `Bearer ${userAccessToken}`).expect(200);
+      expect(body<{ keys: { key: string }[] }>(keys).keys.map(({ key }) => key)).toContain('label.delete');
+    });
+    it('creates a global policy and rejects a duplicate', async () => {
+      const policy = { permissionPattern: 'label.delete', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human' };
+      const res = await request(httpServer).post('/api/approval-policies')
+        .set('Authorization', `Bearer ${userAccessToken}`).send(policy).expect(201);
+      const row = body<{ id: string; projectId: string | null }>(res);
+      try {
+        expect(row.projectId).toBeNull();
+        const duplicate = await request(httpServer).post('/api/approval-policies')
+          .set('Authorization', `Bearer ${userAccessToken}`).send(policy).expect(409);
+        refusal(duplicate, 'approvals.policyConflict.409');
+      } finally { await prismaClient().approvalPolicy.delete({ where: { id: row.id } }); }
+    });
+    it('requires credentials on all three routes', async () => {
+      await request(httpServer).get('/api/approval-policies').expect(401);
+      await request(httpServer).get('/api/approval-policies/keys').expect(401);
+      await request(httpServer).post('/api/approval-policies').send({}).expect(401);
+    });
+  });
+
   describe('Audit log', () => {
     it('AC-15: GET /api/audit with the admin token returns 200', async () => {
       const res = await request(httpServer).get('/api/audit')
@@ -3139,10 +3205,17 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('AC9: a removed agent is denied project ticket access', async () => {
-      await request(httpServer)
+      const project = await prismaClient().project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      expect(await viewerBinding(rosterAgentId, project.id)).toBeNull();
+      const res = await request(httpServer)
         .get(`/api/projects/${projectSlug}/tickets`)
-        .set('Authorization', `Bearer ${rosterAgentApiKey}`)
-        .expect(403);
+        .set('Authorization', `Bearer ${rosterAgentApiKey}`);
+      // Keep status failures as Vitest assertions with the response attached: an upstream proxy
+      // refusal (e.g. 407) must not be mistaken for an application authorization response.
+      expect(res.status, JSON.stringify({ headers: res.headers, body: res.body, text: res.text })).toBe(403);
+      expect(res.headers['content-type']).toMatch(/json/);
+      expect(res.body).toMatchObject({ ret: expect.any(Number), message: expect.any(String) });
+      expect(res.body.ret).not.toBe(0);
     });
   });
 

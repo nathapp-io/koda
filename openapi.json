@@ -11749,6 +11749,995 @@
           "audit"
         ]
       }
+    },
+    "/api/approvals": {
+      "get": {
+        "operationId": "ApprovalRequestsController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                "expired",
+                "cancelled",
+                "executed",
+                "failed"
+              ]
+            }
+          },
+          {
+            "name": "projectId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "permissionKey",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "name": "mine",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of approval request summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ret",
+                    "data"
+                  ],
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "total",
+                        "current",
+                        "size",
+                        "hasNext",
+                        "hasPrev",
+                        "records"
+                      ],
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "current": {
+                          "type": "number"
+                        },
+                        "size": {
+                          "type": "number"
+                        },
+                        "hasNext": {
+                          "type": "boolean"
+                        },
+                        "hasPrev": {
+                          "type": "boolean"
+                        },
+                        "records": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid list query"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List visible approval requests",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/approvals/{id}": {
+      "get": {
+        "operationId": "ApprovalRequestsController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approval request with frozen input, result and decisions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ret",
+                    "data"
+                  ],
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "description": "Approval request missing or invisible"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read a visible approval request and its decisions",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/approvals/{id}/decisions": {
+      "post": {
+        "operationId": "ApprovalRequestsController_decide",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideApprovalRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Approval request with its current decisions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ret",
+                    "data"
+                  ],
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid decision body"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "The principal cannot decide this request"
+          },
+          "404": {
+            "description": "Approval request missing or invisible"
+          },
+          "409": {
+            "description": "Request is not pending or has expired"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Decide a visible approval request",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/approvals/{id}/cancel": {
+      "post": {
+        "operationId": "ApprovalRequestsController_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled approval request with its decisions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ret",
+                    "data"
+                  ],
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Only the requester may cancel"
+          },
+          "404": {
+            "description": "Approval request missing or invisible"
+          },
+          "409": {
+            "description": "Request is not pending"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cancel your own pending approval request",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/approval-policies": {
+      "get": {
+        "operationId": "ApprovalPoliciesController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "permissionPattern",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of global policies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "current": {
+                          "type": "number"
+                        },
+                        "size": {
+                          "type": "number"
+                        },
+                        "hasNext": {
+                          "type": "boolean"
+                        },
+                        "hasPrev": {
+                          "type": "boolean"
+                        },
+                        "records": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ApprovalPolicyDto"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Global policy management permission required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List global approval policies",
+        "tags": [
+          "approvals"
+        ]
+      },
+      "post": {
+        "operationId": "ApprovalPoliciesController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApprovalPolicyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created global policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalPolicyDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid approval policy"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Permission denied or self-applying agent policy"
+          },
+          "409": {
+            "description": "Policy pattern and subject already exist"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a global approval policy",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/approval-policies/keys": {
+      "get": {
+        "operationId": "ApprovalPoliciesController_keys",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Approvable keys and their approval floors and defaults",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "keys": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ApprovableKeyDto"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Global policy management permission required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List approvable permission keys",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/approval-policies/{id}": {
+      "patch": {
+        "operationId": "ApprovalPoliciesController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateApprovalPolicyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated global policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalPolicyDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or empty policy update"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Global policy management permission required"
+          },
+          "404": {
+            "description": "Policy not found"
+          },
+          "409": {
+            "description": "Invalid policy conflict"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update a global approval policy",
+        "tags": [
+          "approvals"
+        ]
+      },
+      "delete": {
+        "operationId": "ApprovalPoliciesController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Global policy deleted"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Global policy management permission required"
+          },
+          "404": {
+            "description": "Policy not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a global approval policy",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/projects/{slug}/approval-policies": {
+      "get": {
+        "operationId": "ProjectApprovalPoliciesController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "permissionPattern",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of project and global policies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "current": {
+                          "type": "number"
+                        },
+                        "size": {
+                          "type": "number"
+                        },
+                        "hasNext": {
+                          "type": "boolean"
+                        },
+                        "hasPrev": {
+                          "type": "boolean"
+                        },
+                        "records": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ApprovalPolicyDto"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Project access or approval.policy.read permission required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List project and inherited global approval policies",
+        "tags": [
+          "approvals"
+        ]
+      },
+      "post": {
+        "operationId": "ProjectApprovalPoliciesController_create",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApprovalPolicyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created project policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalPolicyDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid approval policy"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Permission denied or self-applying agent policy"
+          },
+          "409": {
+            "description": "Policy pattern and subject already exist"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a project approval policy",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/projects/{slug}/approval-policies/keys": {
+      "get": {
+        "operationId": "ProjectApprovalPoliciesController_keys",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approvable keys and their approval floors and defaults",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "keys": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ApprovableKeyDto"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Project access or approval.policy.read permission required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List approvable permission keys for this project",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/api/projects/{slug}/approval-policies/{id}": {
+      "patch": {
+        "operationId": "ProjectApprovalPoliciesController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateApprovalPolicyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated project policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalPolicyDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or empty policy update"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Project policy management permission required"
+          },
+          "404": {
+            "description": "Policy not found in this project"
+          },
+          "409": {
+            "description": "Invalid policy conflict"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update a project approval policy",
+        "tags": [
+          "approvals"
+        ]
+      },
+      "delete": {
+        "operationId": "ProjectApprovalPoliciesController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Project policy deleted"
+          },
+          "401": {
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "description": "Project policy management permission required"
+          },
+          "404": {
+            "description": "Policy not found in this project"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a project approval policy",
+        "tags": [
+          "approvals"
+        ]
+      }
     }
   },
   "info": {
@@ -20477,6 +21466,584 @@
           "principals",
           "ownable"
         ]
+      },
+      "ApprovalRequestSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "permissionKey": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "actorType": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "AGENT",
+              "SYSTEM"
+            ]
+          },
+          "actorId": {
+            "type": "string"
+          },
+          "onBehalfOfType": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "onBehalfOfId": {
+            "type": "string",
+            "nullable": true
+          },
+          "origin": {
+            "type": "string"
+          },
+          "requiredMode": {
+            "type": "string",
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "expired",
+              "cancelled",
+              "executed",
+              "failed"
+            ]
+          },
+          "satisfiedBy": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ]
+          },
+          "approverType": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "approverId": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "settledAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "permissionKey",
+          "projectId",
+          "actorType",
+          "actorId",
+          "onBehalfOfType",
+          "onBehalfOfId",
+          "origin",
+          "requiredMode",
+          "status",
+          "satisfiedBy",
+          "approverType",
+          "approverId",
+          "expiresAt",
+          "decidedAt",
+          "settledAt",
+          "createdAt"
+        ]
+      },
+      "ApprovalDecisionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "deciderType": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "deciderId": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "reject"
+            ]
+          },
+          "comment": {
+            "type": "string",
+            "nullable": true
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "deciderType",
+          "deciderId",
+          "decision",
+          "comment",
+          "decidedAt"
+        ]
+      },
+      "ApprovalRequestDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "permissionKey": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "actorType": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "AGENT",
+              "SYSTEM"
+            ]
+          },
+          "actorId": {
+            "type": "string"
+          },
+          "onBehalfOfType": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "onBehalfOfId": {
+            "type": "string",
+            "nullable": true
+          },
+          "origin": {
+            "type": "string"
+          },
+          "requiredMode": {
+            "type": "string",
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "expired",
+              "cancelled",
+              "executed",
+              "failed"
+            ]
+          },
+          "satisfiedBy": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ]
+          },
+          "approverType": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "approverId": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "settledAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "input": {
+            "type": "object",
+            "nullable": true
+          },
+          "result": {
+            "type": "object",
+            "nullable": true
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApprovalDecisionDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "permissionKey",
+          "projectId",
+          "actorType",
+          "actorId",
+          "onBehalfOfType",
+          "onBehalfOfId",
+          "origin",
+          "requiredMode",
+          "status",
+          "satisfiedBy",
+          "approverType",
+          "approverId",
+          "expiresAt",
+          "decidedAt",
+          "settledAt",
+          "createdAt",
+          "input",
+          "result",
+          "decisions"
+        ]
+      },
+      "DecideApprovalRequestDto": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "type": "string"
+          },
+          "comment": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "ApprovalPolicyDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "permissionPattern": {
+            "type": "string"
+          },
+          "principalType": {
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT",
+              "ASSISTANT"
+            ],
+            "type": "string"
+          },
+          "roleId": {
+            "type": "string",
+            "nullable": true
+          },
+          "principalId": {
+            "type": "string",
+            "nullable": true
+          },
+          "mode": {
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ],
+            "type": "string"
+          },
+          "timeoutSec": {
+            "type": "number",
+            "nullable": true
+          },
+          "onTimeout": {
+            "enum": [
+              "reject",
+              "approve"
+            ],
+            "type": "string"
+          },
+          "requiredApprovals": {
+            "type": "number"
+          },
+          "approverMustHoldAction": {
+            "type": "boolean"
+          },
+          "requireDistinctApprover": {
+            "type": "boolean"
+          },
+          "updatedByType": {
+            "type": "string"
+          },
+          "updatedById": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "selector",
+          "projectId",
+          "permissionPattern",
+          "principalType",
+          "roleId",
+          "principalId",
+          "mode",
+          "timeoutSec",
+          "onTimeout",
+          "requiredApprovals",
+          "approverMustHoldAction",
+          "requireDistinctApprover",
+          "updatedByType",
+          "updatedById",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "ApprovableKeyDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "global",
+              "project",
+              "any"
+            ],
+            "type": "string"
+          },
+          "risk": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "type": "string"
+          },
+          "floor": {
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ],
+            "type": "string"
+          },
+          "default": {
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "scope",
+          "risk",
+          "floor",
+          "default"
+        ]
+      },
+      "ApprovalPolicySubjectDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "all",
+              "type",
+              "role",
+              "principal"
+            ],
+            "type": "string"
+          },
+          "principalType": {
+            "enum": [
+              "USER",
+              "AGENT",
+              "ASSISTANT"
+            ],
+            "type": "string"
+          },
+          "roleId": {
+            "type": "string"
+          },
+          "principalId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "CreateApprovalPolicyDto": {
+        "type": "object",
+        "properties": {
+          "permissionPattern": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "appliesTo": {
+            "$ref": "#/components/schemas/ApprovalPolicySubjectDto"
+          },
+          "mode": {
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ],
+            "type": "string"
+          },
+          "timeoutSec": {
+            "type": "number",
+            "nullable": true
+          },
+          "onTimeout": {
+            "enum": [
+              "reject",
+              "approve"
+            ],
+            "type": "string"
+          },
+          "requiredApprovals": {
+            "type": "number"
+          },
+          "approverMustHoldAction": {
+            "type": "boolean"
+          },
+          "requireDistinctApprover": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "permissionPattern",
+          "appliesTo",
+          "mode"
+        ]
+      },
+      "UpdateApprovalPolicyDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ],
+            "type": "string"
+          },
+          "timeoutSec": {
+            "type": "number",
+            "nullable": true
+          },
+          "onTimeout": {
+            "enum": [
+              "reject",
+              "approve"
+            ],
+            "type": "string"
+          },
+          "requiredApprovals": {
+            "type": "number"
+          },
+          "approverMustHoldAction": {
+            "type": "boolean"
+          },
+          "requireDistinctApprover": {
+            "type": "boolean"
+          }
+        }
       }
     }
   }

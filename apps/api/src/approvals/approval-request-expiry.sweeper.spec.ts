@@ -51,6 +51,7 @@ interface BuildOptions {
   lockThrowsId?: string;
   sweepEnabled?: boolean;
   executionThrows?: boolean;
+  stale?: ApprovalRequestRecord[];
 }
 
 function build(over: BuildOptions = {}) {
@@ -60,6 +61,8 @@ function build(over: BuildOptions = {}) {
     // rows than one tick may settle sees the same batch the real query would return.
     findDue: vi.fn<(now: Date, limit: number) => Promise<ApprovalRequestRecord[]>>()
       .mockImplementation(async (_now, limit) => due.slice(0, limit)),
+    findStaleApproved: vi.fn<(before: Date, limit: number) => Promise<ApprovalRequestRecord[]>>()
+      .mockImplementation(async (_before, limit) => (over.stale ?? []).slice(0, limit)),
     lockById: vi.fn<(id: string) => Promise<ApprovalRequestRecord | null>>(async (id) => {
       if (id === over.lockThrowsId) throw new Error('lock refused');
       if (over.locked !== undefined) return over.locked;
@@ -85,6 +88,7 @@ function build(over: BuildOptions = {}) {
     isInTransaction: vi.fn(() => true),
   };
   const config = { sweepEnabled: over.sweepEnabled ?? false, approvalSweepMs: 15_000 };
+  const events = { record: vi.fn().mockResolvedValue(undefined) };
 
   const sweeper = new ApprovalRequestExpirySweeper(
     tx as never,
@@ -92,8 +96,9 @@ function build(over: BuildOptions = {}) {
     audit as never,
     execution as never,
     config,
+    events as never,
   );
-  return { sweeper, requests, audit, execution, tx, config };
+  return { sweeper, requests, audit, execution, tx, config, events };
 }
 
 describe('ApprovalRequestExpirySweeper lifecycle', () => {
@@ -147,6 +152,65 @@ describe('ApprovalRequestExpirySweeper lifecycle', () => {
   });
 });
 
+describe('ApprovalRequestExpirySweeper.retryStale', () => {
+  it('uses the five-minute cutoff and caps the scan', async () => {
+    const b = build();
+    await b.sweeper.retryStale(NOW);
+    expect(b.requests.findStaleApproved).toHaveBeenCalledWith(new Date(NOW.getTime() - 300_000), MAX_PER_TICK);
+  });
+
+  it('executes every stale request sequentially and counts successes', async () => {
+    const stale = [request({ id: 'r1', status: 'approved' }), request({ id: 'r2', status: 'approved' })];
+    const b = build({ stale });
+    const order: string[] = [];
+    b.execution.execute.mockImplementation(async (id) => {
+      order.push(`start-${id}`);
+      await Promise.resolve();
+      order.push(`end-${id}`);
+      return request({ id, status: 'executed' });
+    });
+    expect(await b.sweeper.retryStale(NOW)).toEqual({ retried: 2, failed: 0 });
+    expect(order).toEqual(['start-r1', 'end-r1', 'start-r2', 'end-r2']);
+    expect(b.execution.execute.mock.calls).toEqual([['r1', NOW], ['r2', NOW]]);
+  });
+
+  it('does not count requests settled by another writer', async () => {
+    const b = build({ stale: [request({ status: 'approved' })] });
+    b.execution.execute.mockRejectedValue(new (await import('./domain/approval.errors')).ApprovalRequestNotPendingError('executed'));
+    expect(await b.sweeper.retryStale(NOW)).toEqual({ retried: 0, failed: 0 });
+  });
+
+  it('continues after an execution failure, counts it, and warns with its id', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    warn.mockClear();
+    const b = build({ stale: [request({ id: 'r1', status: 'approved' }), request({ id: 'r2', status: 'approved' })] });
+    b.execution.execute.mockRejectedValueOnce(new Error('boom'));
+    expect(await b.sweeper.retryStale(NOW)).toEqual({ retried: 1, failed: 1 });
+    expect(b.execution.execute).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('r1'));
+  });
+
+  it('runs tick then retry on the enabled interval', async () => {
+    vi.useFakeTimers();
+    const b = build({ sweepEnabled: true, due: [], stale: [] });
+    const calls: string[] = [];
+    vi.spyOn(b.sweeper, 'tick').mockImplementation(async () => { calls.push('tick'); return { expired: 0, approved: 0, failed: 0 }; });
+    vi.spyOn(b.sweeper, 'retryStale').mockImplementation(async () => { calls.push('retry'); return { retried: 0, failed: 0 }; });
+    b.sweeper.onModuleInit();
+    await vi.advanceTimersByTimeAsync(b.config.approvalSweepMs);
+    expect(calls).toEqual(['tick', 'retry']);
+    b.sweeper.onModuleDestroy();
+  });
+
+  it('does not start a timer when disabled', () => {
+    vi.useFakeTimers();
+    const b = build({ sweepEnabled: false });
+    b.sweeper.onModuleInit();
+    expect(vi.getTimerCount()).toBe(0);
+    b.sweeper.onModuleDestroy();
+  });
+});
+
 describe('ApprovalRequestExpirySweeper.tick', () => {
   it('runs as SYSTEM/approval and asks for at most MAX_PER_TICK due requests', async () => {
     const b = build({ due: [] });
@@ -169,6 +233,7 @@ describe('ApprovalRequestExpirySweeper.tick', () => {
     const result: ApprovalRequestExpiryResult = await b.sweeper.tick(NOW);
 
     expect(result).toEqual({ expired: 1, approved: 0, failed: 0 });
+    expect(b.events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'r1', status: 'expired' }));
     expect(b.tx.run).toHaveBeenCalledTimes(1);
     expect(b.requests.transition).toHaveBeenCalledWith('r1', 'pending', { status: 'expired', settledAt: NOW });
     expect(b.audit.record).toHaveBeenCalledWith({
@@ -187,6 +252,7 @@ describe('ApprovalRequestExpirySweeper.tick', () => {
     expect(b.requests.transition).toHaveBeenCalledWith('r1', 'pending', {
       status: 'approved', decidedAt: NOW, satisfiedBy: 'none',
     });
+    expect(b.events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'r1', status: 'approved' }));
     expect(b.audit.record).toHaveBeenCalledWith({
       key: 'system.approval.expire', resourceType: 'approval-request', resourceId: 'r1', projectId: 'p1',
       summary: 'approved on timeout label.delete',

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
 import { mcpConfig } from '../../config/mcp.config';
 import { CommentsModule } from '../../comments/comments.module';
 import { MemoryModule } from '../../memory/memory.module';
@@ -40,6 +41,7 @@ import { WorkspaceTools } from './tools/workspace-tools';
 /** Fleet S5b: the API-owned koda tools a THREAD session calls through the runner. Tool groups join as providers. */
 @Module({
   imports: [
+    ApprovalEngineModule,
     ProjectAccessModule, TicketsModule, CommentsModule, TicketLinksModule,
     // US-004: the services the fleet read tools call (each module exports its service only).
     FleetJobsModule, AnalyticsModule, ApprovalsModule, RunnersModule, LogsModule,

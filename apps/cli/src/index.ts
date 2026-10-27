@@ -27,6 +27,7 @@ import { roleBindingCommand } from './commands/role-binding';
 import { notificationsCommand } from './commands/notifications';
 import { ciWebhookCommand } from './commands/ci-webhook';
 import { fleetCommand } from './commands/fleet';
+import { approvalCommand } from './commands/approval';
 import { setJsonMode } from './utils/json-mode';
 import { installSignalHandlers } from './utils/signals';
 import { resolveSecret, API_KEY_SECRET, LOGIN_API_KEY_SECRET } from './utils/secret-input';
@@ -276,6 +277,9 @@ ciWebhookCommand(program);
 
 // Fleet command (runners, repos, dispatch, jobs)
 fleetCommand(program);
+
+// Approval requests
+approvalCommand(program);
 
 // Global error handling for uncaught exceptions
 process.on('uncaughtException', (error: Error) => {

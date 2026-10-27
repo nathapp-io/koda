@@ -41,9 +41,10 @@ function setup(patch: Partial<ApprovalRequestRecord> = {}) {
   const registry = new ApprovalCommandRegistry();
   const test = configurableTestCommand('label.delete');
   registry.register(test.command);
+  const events = { record: vi.fn().mockImplementation(async () => { reasons.push(currentBookkeepingReason()); }) };
   const service = new ApprovalExecutionService(tx as unknown as ITransactionManager,
-    repo as unknown as PrismaApprovalRequestRepository, permissions as unknown as PermissionService, registry);
-  return { request, state, repo, permissions, tx, registry, test, service, reasons };
+    repo as unknown as PrismaApprovalRequestRepository, permissions as unknown as PermissionService, registry, events as never);
+  return { request, state, repo, permissions, tx, registry, test, service, events, reasons };
 }
 
 describe('ApprovalExecutionService', () => {
@@ -58,12 +59,13 @@ describe('ApprovalExecutionService', () => {
 
     expect(s.test.state.calls).toEqual([{ labelId: 'l1' }]);
     expect(settled).toMatchObject({ status: 'executed', settledAt: now, result: { deleted: 1 } });
+    expect(s.events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'r1', status: 'executed' }));
     expect(seen).toEqual({
       actor: { type: 'AGENT', id: 'a1' }, origin: 'mcp', correlationId: 'corr-1',
       approval: { requiredMode: 'agent', satisfiedBy: 'human', approverType: 'USER', approverId: 'u1', requestId: 'r1' },
     });
     expect(s.repo.transition).toHaveBeenCalledExactlyOnceWith('r1', 'approved', { status: 'executed', settledAt: now, result: { deleted: 1 } });
-    expect(s.reasons).toEqual(['approval.request-settle']);
+    expect(s.reasons).toEqual(['approval.request-settle', 'approval.request-settle']);
   });
 
   it('stores null when the command has no toResult', async () => {
@@ -81,9 +83,10 @@ describe('ApprovalExecutionService', () => {
   it('settles no-command when nothing is registered', async () => {
     const s = setup();
     const empty = new ApprovalExecutionService(s.tx as unknown as ITransactionManager,
-      s.repo as unknown as PrismaApprovalRequestRepository, s.permissions as unknown as PermissionService, new ApprovalCommandRegistry());
+      s.repo as unknown as PrismaApprovalRequestRepository, s.permissions as unknown as PermissionService, new ApprovalCommandRegistry(), s.events as never);
     expect(await empty.execute('r1', now)).toMatchObject({ status: 'failed', result: { error: 'no-command' }, settledAt: now });
-    expect(s.reasons).toEqual(['approval.request-settle']);
+    expect(s.reasons).toEqual(['approval.request-settle', 'approval.request-settle']);
+    expect(s.events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'r1', status: 'failed' }));
   });
 
   it('settles input-hash-mismatch when the stored input changed', async () => {
@@ -144,7 +147,8 @@ describe('ApprovalExecutionService', () => {
     expect(s.repo.transition).toHaveBeenCalledExactlyOnceWith('r1', 'approved', {
       status: 'failed', settledAt: now, result: { error: 'execution-failed', name: 'Error' },
     });
-    expect(s.reasons).toEqual(['approval.request-settle']);
+    expect(s.reasons).toEqual(['approval.request-settle', 'approval.request-settle']);
+    expect(s.events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'r1', status: 'failed' }));
     expect(warn.mock.calls[0]?.[0]).toContain('r1');
   });
 

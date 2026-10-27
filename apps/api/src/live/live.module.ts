@@ -8,12 +8,13 @@ import { LiveStreamRegistry } from './live-stream-registry';
 import { MeLiveController } from './me-live.controller';
 import { ProjectEventBus } from './project-event-bus';
 import { TicketLiveSubscriber } from './ticket-live.subscriber';
+import { ApprovalRequestLiveSubscriber } from './approval-request-live.subscriber';
 import { UserEventBus } from './user-event-bus';
 
 @Module({
   imports: [OutboxModule, AuthModule, ProjectAccessModule],
   controllers: [LiveController, MeLiveController],
-  providers: [ProjectEventBus, ThreadEventBus, UserEventBus, TicketLiveSubscriber, LiveStreamRegistry],
+  providers: [ProjectEventBus, ThreadEventBus, UserEventBus, TicketLiveSubscriber, ApprovalRequestLiveSubscriber, LiveStreamRegistry],
   exports: [ProjectEventBus, ThreadEventBus, UserEventBus, LiveStreamRegistry],
 })
 export class LiveModule {}

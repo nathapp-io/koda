@@ -54,3 +54,10 @@ export class ApprovalDecideForbiddenError extends Error {
     this.name = 'ApprovalDecideForbiddenError'; Object.setPrototypeOf(this, new.target.prototype);
   }
 }
+
+export class ApprovalCancelForbiddenError extends Error {
+  constructor(readonly id: string) {
+    super(`Approval cancellation forbidden: ${id}`);
+    this.name = 'ApprovalCancelForbiddenError'; Object.setPrototypeOf(this, new.target.prototype);
+  }
+}

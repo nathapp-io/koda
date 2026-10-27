@@ -62,7 +62,7 @@ function holdsAction(deciderKeys: ReadonlySet<string>, permissionKey: string, is
 }
 
 /** `approval.decide@<pattern>`: the key itself, or a `<prefix>.*` the key falls under. */
-function matchesDecidePattern(pattern: string, permissionKey: string): boolean {
+export function matchesDecidePattern(pattern: string, permissionKey: string): boolean {
   if (pattern === permissionKey) return true;
   if (!pattern.endsWith(ANY_SUFFIX)) return false;
   return permissionKey.startsWith(`${pattern.slice(0, -ANY_SUFFIX.length)}.`);

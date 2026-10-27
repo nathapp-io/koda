@@ -43,6 +43,21 @@ describe('kodaMcpToolRegistrations', () => {
     expect(answer).toEqual({ content: [{ type: 'text', text: 'ok' }], isError: false });
   });
 
+  it('keeps the legacy fleet inbox visible under an alias and dispatches to its existing executor', async () => {
+    const visible = await visibleMcpToolNames({
+      registry: { get: (name: string) => name === 'koda_list_approvals' ? { key: 'fleet.approval.read' } as AssistantTool : undefined },
+      permissions: { projectIdsWithKey: vi.fn(async () => ({ all: false as const, projectIds: ['p1'] })) },
+    }, principal);
+    expect([...visible]).toEqual(['koda_list_fleet_approvals']);
+    const [registration] = kodaMcpToolRegistrations({ executeFor }, principal, visible);
+    expect(registration.name).toBe('koda_list_fleet_approvals');
+    await registration.handler({ project: 'web' });
+    expect(executeFor).toHaveBeenCalledWith(
+      { principal, origin: { kind: 'mcp' }, disabled: false },
+      { name: 'koda_list_approvals', input: { project: 'web' } },
+    );
+  });
+
   it('a handler whose executeFor throws logs the error and answers `error: <name> failed`', async () => {
     const logError = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     executeFor.mockRejectedValue(new Error('boom'));
