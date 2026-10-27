@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { runAsSystem } from '../../action-context/action-context';
-import { AppException, ForbiddenAppException, NotFoundAppException, ValidationAppException, type IPageOption } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException, ValidationAppException, type IPageOption } from '@nathapp/nestjs-common';
 import { IPageResult, ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { remapPage } from '../../common/dto/koda-page.query';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
@@ -9,8 +9,8 @@ import { FleetCommandType } from '../../common/enums';
 import type { LiveFleetApprovalEvent } from '../../live/live-event';
 import { isAgentPrincipal, type KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { PermissionService } from '../../permissions/permission.service';
-import { BudgetRoute, BudgetsService } from '../budgets/budgets.service';
-import { BUDGET_REPOSITORY, BudgetPolicyRecord, IBudgetRepository } from '../budgets/domain/budget.domain';
+import { BudgetsService } from '../budgets/budgets.service';
+import { BUDGET_REPOSITORY, IBudgetRepository } from '../budgets/domain/budget.domain';
 import { FLEET_JOB_REPOSITORY, IFleetJobRepository } from '../jobs/domain/fleet-job.domain';
 import { RunnerNotifier } from '../jobs/runner-notifier';
 import { FleetJobsService } from '../jobs/fleet-jobs.service';
@@ -23,6 +23,7 @@ import {
 import { ApprovalCountsDto } from './dto/approval-counts.dto';
 import type { DecideApprovalDto } from './dto/decide-approval.dto';
 import { FleetApprovalDto } from './dto/fleet-approval.dto';
+import { budgetRouteOf, errorText } from './fleet-ask-helpers';
 
 /** Which prefix a request came through (plan D230). Permissions P1 US-004: the project variant carries the project's id only. */
 export type ApprovalRoute = { kind: 'admin' } | { kind: 'project'; projectId: string };
@@ -42,24 +43,10 @@ function invalid(reason: string): never {
 
 const visible = (route: ApprovalRoute, a: FleetApprovalRecord): boolean => route.kind === 'admin' || a.projectId === route.projectId;
 
-/** Plan D229: the budgets service's ownership route follows the policy's scope, not the request prefix. */
-const budgetRouteOf = (p: BudgetPolicyRecord): BudgetRoute =>
-  p.projectId && (p.scopeType === 'project' || p.scopeType === 'repo') ? { kind: 'project', projectId: p.projectId } : { kind: 'admin' };
-
 type BashResult =
   | { kind: 'decided'; approval: FleetApprovalRecord; live: LiveFleetApprovalEvent[]; runnerId: string }
   | { kind: 'closed'; live: LiveFleetApprovalEvent[] }
   | { kind: 'not_pending' };
-
-/**
- * Plan D233: `error` is an i18n coordinate, not free text. `HttpException.initMessage()` falls back to the
- * class name when the response object carries no `message`, so `error.message` stores "Conflict App
- * Exception" and loses the args that say why (a duplicate active job's `activeJobId`); anything else, a
- * Prisma failure included, would store raw internal text into a persisted column. `args` are exactly the
- * values the exception handler interpolates into the user-facing message, so this discloses nothing new.
- */
-const errorText = (error: unknown): string =>
-  error instanceof AppException ? JSON.stringify({ code: error.prefix, args: error.args }) : 'unexpected error';
 
 /** S1.5 §2.3: list, get, decide and count approvals. Budget decides lock the policy before the approval (§1.4). */
 @Injectable()
