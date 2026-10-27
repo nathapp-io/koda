@@ -18,7 +18,7 @@ export interface AssistantActionRequestRecord {
 }
 export interface NewAssistantActionRequest extends Pick<AssistantActionRequestRecord, 'requestId' | 'threadId' | 'jobId' | 'toolCallId' | 'tool' | 'preview'> {}
 export interface LinkedApprovalRequest extends AssistantActionRequestRecord { request: { id: string; projectId: string | null; status: ApprovalRequestStatus; createdAt: Date; decidedAt: Date | null; settledAt: Date | null; result: unknown } }
-export type OwnApprovalRequest = { id: string; projectId: string | null; actorType: string; actorId: string; assistantAction: AssistantActionRequestRecord | null };
+export type OwnApprovalRequest = LinkedApprovalRequest['request'] & { permissionKey: string; actorType: string; actorId: string; assistantAction: AssistantActionRequestRecord | null };
 export interface AssistantActionRequestRepository {
   insert(link: NewAssistantActionRequest): Promise<AssistantActionRequestRecord>;
   findByRequest(requestId: string): Promise<AssistantActionRequestRecord | null>;

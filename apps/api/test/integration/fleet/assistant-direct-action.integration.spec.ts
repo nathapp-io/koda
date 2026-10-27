@@ -52,32 +52,31 @@ describeIntegration('direct assistant actions (PG)', () => {
       { type: 'USER', id: world.ids.outsider },
     ]);
   });
-  it('AC-12, AC-13: creates an agent-authored comment and one terminal none-mode action', async () => {
+  it('creates an agent-authored comment without an approval request or action suffix', async () => {
     const caller = await seedCaller();
     const ticket = await seedTicket();
     const result = await executor.executeFor(caller, { name: 'koda_add_comment', input: { project: 'web', ref: `WEB-${ticket.number}`, body: 'from mcp' } });
     expect(result.isError).toBe(false);
-    const comments = await prisma.comment.findMany({ where: { ticketId: ticket.id } });
+    const comments = await prisma.comment.findMany({ where: { ticketId: ticket.id }, take: 10 });
     expect(comments).toHaveLength(1);
     expect(comments[0]).toMatchObject({ authorAgentId: caller.principal.id, authorUserId: null, body: 'from mcp' });
-    const actions = await prisma.pendingAction.findMany({ where: { actorId: caller.principal.id } });
-    expect(actions).toHaveLength(1);
-    expect(actions[0]).toMatchObject({ status: 'EXECUTED', actorType: 'agent', actorId: caller.principal.id, origin: 'mcp', approvalMode: 'none', approvalId: null, threadId: null });
-    expect(result.content).toContain(`\naction ${actions[0]?.id}`);
+    expect(await prisma.approvalRequest.count({ where: { actorId: caller.principal.id } })).toBe(0);
+    expect(result.content).not.toContain('\naction ');
   });
   it('AC-14: hides the unrostered project without a comment or action', async () => {
     const caller = await seedCaller();
     const ticket = await seedTicket(world.opsProjectId);
     expect(await executor.executeFor(caller, { name: 'koda_add_comment', input: { project: 'ops', ref: `OPS-${ticket.number}`, body: 'from mcp' } })).toEqual({ content: 'not_found: project', isError: true });
     expect(await prisma.comment.count({ where: { ticketId: ticket.id } })).toBe(0);
-    expect(await prisma.pendingAction.count({ where: { projectId: world.opsProjectId, actorId: caller.principal.id } })).toBe(0);
+    expect(await prisma.approvalRequest.count({ where: { projectId: world.opsProjectId, actorId: caller.principal.id } })).toBe(0);
   });
   it('AC-15: another rostered agent cannot read the caller action', async () => {
     const caller = await seedCaller();
     const other = await seedCaller();
     const ticket = await seedTicket();
+    await prisma.approvalPolicy.create({ data: { selector: `${world.projectId}|comment.create|type:AGENT`, projectId: world.projectId, permissionPattern: 'comment.create', principalType: 'AGENT', mode: 'agent', updatedByType: 'SYSTEM', updatedById: 'test' } });
     await executor.executeFor(caller, { name: 'koda_add_comment', input: { project: 'web', ref: `WEB-${ticket.number}`, body: 'from mcp' } });
-    const action = await prisma.pendingAction.findFirstOrThrow({ where: { actorId: caller.principal.id } });
+    const action = await prisma.approvalRequest.findFirstOrThrow({ where: { actorId: caller.principal.id } });
     const input = { project: 'web', id: action.id };
     expect((await executor.executeFor(caller, { name: 'koda_get_action', input })).content).toContain(`action ${action.id}`);
     expect(await executor.executeFor(other, { name: 'koda_get_action', input })).toEqual({ content: 'not_found', isError: true });

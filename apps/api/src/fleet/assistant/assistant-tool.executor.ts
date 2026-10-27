@@ -16,7 +16,6 @@ import { ApprovalPolicyResolver } from '../../approvals/approval-policy.resolver
 import { bookkeeping } from '../../action-context/audit-coverage';
 import { ThreadEventBus } from '../../live/thread-event-bus';
 import { ASSISTANT_ACTION_REQUEST_REPOSITORY, MAX_PENDING_ACTIONS, type AssistantActionRequestRepository } from './requests/assistant-action-request.domain';
-import { approvalModeFor } from './actions/approval-policy';
 import { capText, fenceData, maskSecrets } from './assistant-tool-safety';
 import {
   ASSISTANT_TOOL_CALL_REPOSITORY, type AgentToolCallCreator, type AssistantToolCallRecord, type AssistantToolCallRepository,
@@ -369,13 +368,6 @@ export class AssistantToolExecutor {
   /** Preview before resolving thread policy; only a waiting write takes the thread lock. */
   private async writeTool(call: RunCall, tool: AssistantTool, caller: ToolCaller, scope: ToolScope, ctx: ToolContext): Promise<RunOutcome> {
     const name = tool.descriptor.name;
-    // MCP remains on its existing policy/direct path until US-009.
-    const mcpMode = caller.origin.kind === 'mcp'
-      ? approvalModeFor(caller.origin, name, isAgentPrincipal(caller.principal) ? 'agent' : 'user') : 'none';
-    if (mcpMode !== 'none') {
-      this.logger.error(`koda write tool ${name} refused approval mode ${mcpMode} for mcp`);
-      return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
-    }
     const prepare = tool.preview;
     if (!prepare) {
       this.logger.error(`koda write tool ${name} declares no preview; job ${call.jobId} answered error`);
@@ -394,14 +386,27 @@ export class AssistantToolExecutor {
       this.logger.error(`koda tool ${name} failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
       return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
     }
-    const mode = caller.origin.kind === 'thread'
-      ? (await this.resolver.resolve({ key: tool.key, projectId: scope.id, subject: { type: 'ASSISTANT', id: 'assistant' } })).mode
-      : mcpMode;
+    if (caller.origin.kind === 'mcp') return this.mcpWrite(call, tool, scope);
+    const mode = (await this.resolver.resolve({ key: tool.key, projectId: scope.id, subject: { type: 'ASSISTANT', id: 'assistant' } })).mode;
     if (mode !== 'none') return this.waitingWrite(call, tool, caller, scope, preview);
-    if (caller.origin.kind === 'thread') return this.directThreadWrite(call, tool, caller, scope, preview);
-    const actions = this.actions;
-    if (!actions) return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
-    return this.directWrite(call, tool, caller, scope, ctx, actions, preview);
+    return this.directThreadWrite(call, tool, caller, scope, preview);
+  }
+
+  /** MCP writes are the calling agent's own actions; pending requests need no thread bookkeeping. */
+  private async mcpWrite(call: RunCall, tool: AssistantTool, scope: ToolScope): Promise<RunOutcome> {
+    const name = tool.descriptor.name;
+    try {
+      const gated = await this.gate.gate<{ text: string }>(tool.key, {
+        projectId: scope.id, threadId: null, jobId: null, args: scope.input,
+      }, { projectId: scope.id });
+      if (gated.status === 'executed') return { outcome: 'ok', content: gated.result.text, projectId: scope.id };
+      return { ...refusal('pending', `pending ${gated.request.id}: awaiting approval; do not retry`), projectId: scope.id };
+    } catch (error) {
+      if (error instanceof NotFoundAppException) return { ...refusal('not_found', 'not_found'), projectId: scope.id };
+      if (error instanceof ToolActionError) return { ...refusal('error', capText(maskSecrets(error.text), RESULT_CAP_BYTES)), projectId: scope.id };
+      this.logger.error(`koda tool ${name} failed for job ${call.jobId}`, error instanceof Error ? error.stack : String(error));
+      return { ...refusal('error', `error: ${name} failed`), projectId: scope.id };
+    }
   }
 
   /** A none-mode thread write executes through the gate without an enclosing transaction or thread lock. */

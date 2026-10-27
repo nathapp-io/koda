@@ -153,7 +153,7 @@ describeIntegration('MCP route (PG, US-007)', () => {
     expect(malformed.isError).toBe(true);
     expect(textOf(malformed)).toBe('invalid_input: project');
 
-    const actionsBefore = await prisma.pendingAction.count({ where: { actorId: claude.id, tool: 'koda_add_comment' } });
+    const actionsBefore = await prisma.approvalRequest.count({ where: { actorId: claude.id, permissionKey: 'comment.create' } });
     const refusedWrite = await callTool('koda_add_comment', { project: 'BAD', ref: `WEB-${webTicket.number}`, body: 'never written' });
 
     expect(refusedWrite.isError).toBe(true);
@@ -177,19 +177,17 @@ describeIntegration('MCP route (PG, US-007)', () => {
     expect(writeRows.map((r) => [r.outcome, r.content, r.projectId, r.isError])).toEqual([
       ['invalid_input', 'invalid_input: project', null, true],
     ]);
-    expect(await prisma.pendingAction.count({ where: { actorId: claude.id, tool: 'koda_add_comment' } })).toBe(actionsBefore);
+    expect(await prisma.approvalRequest.count({ where: { actorId: claude.id, permissionKey: 'comment.create' } })).toBe(actionsBefore);
   });
 
-  it('AC-8, AC-9: koda_add_comment runs at once, names a none-mode action and stores the agent comment', async () => {
+  it('AC-8, AC-9: koda_add_comment runs at once without an action suffix or request', async () => {
+    const before = await prisma.approvalRequest.count({ where: { actorId: claude.id } });
     const answer = await callTool('koda_add_comment', { project: 'web', ref: `WEB-${webTicket.number}`, body: 'via mcp' });
-
     expect(answer.isError).toBe(false);
-    const actionId = /action (\S+)$/.exec(textOf(answer))?.[1];
-    expect(actionId).toBeDefined();
-    const action = await prisma.pendingAction.findUniqueOrThrow({ where: { id: actionId } });
-    expect(action.approvalMode).toBe('none');
     const comment = await prisma.comment.findFirstOrThrow({ where: { ticketId: webTicket.id, body: 'via mcp' } });
     expect(comment.authorAgentId).toBe(claude.id);
+    expect(textOf(answer)).toBe(`comment ${comment.id} added to WEB-${webTicket.number} /web/tickets/WEB-${webTicket.number}`);
+    expect(await prisma.approvalRequest.count({ where: { actorId: claude.id } })).toBe(before);
   });
 
   it('AC-10, AC-11 (US-004): koda_dispatch_job is refused for a viewer-only agent and leaves no job or action', async () => {
@@ -202,7 +200,7 @@ describeIntegration('MCP route (PG, US-007)', () => {
     // Permissions P1 US-004: the refusal names the tool's catalog key, and the viewer role holds the read keys only.
     expect(textOf(answer)).toBe('forbidden: koda_dispatch_job needs fleet.job.dispatch on web');
     expect(await prisma.fleetJob.count({ where: { feature } })).toBe(0);
-    expect(await prisma.pendingAction.count({ where: { actorId: dispatchAgent.id, tool: 'koda_dispatch_job' } })).toBe(0);
+    expect(await prisma.approvalRequest.count({ where: { actorId: dispatchAgent.id, permissionKey: 'fleet.job.dispatch' } })).toBe(0);
   });
 
   it('AC-12: the executor receives the agent principal and an mcp origin', async () => {
