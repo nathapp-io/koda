@@ -389,6 +389,35 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     ]);
   });
 
+  it('AC-13/AC-15 (F1): the job-end close settles every pending ask, past the 100-link page', async () => {
+    await enableRelay();
+    const total = 105;   // more than one page of MAX_PENDING_ASKS_PER_JOB
+    const { jobId, leaseEpoch } = await startRunning('job-end-many');
+    // Reported in three reports: a runner batch, not one oversized one.
+    for (let first = 0; first < total; first += 35) {
+      const events = Array.from({ length: Math.min(35, total - first) }, (_, i) => ({
+        seq: first + i + 2,
+        type: 'approval_request' as const,
+        payload: ask(`ask-${(0x10000 + first + i).toString(16)}`),
+      }));
+      await sync({ jobs: [{ jobId, leaseEpoch, events }] });
+    }
+    const links = await linksOf(jobId);
+    expect(links).toHaveLength(total);
+
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [
+      { seq: total + 2, type: 'state', payload: { to: 'UPLOADING' } },
+      { seq: total + 3, type: 'state', payload: { to: 'COMPLETED' } },
+    ] }] });
+
+    const settled = await prisma.approvalRequest.findMany({ where: { id: { in: links.map((l) => l.requestId) } } });
+    expect(settled).toHaveLength(total);
+    expect(settled.filter((r) => r.status === 'cancelled')).toHaveLength(total);
+    expect(settled.filter((r) => (r.result as { closedBy?: string } | null)?.closedBy === 'job_ended')).toHaveLength(total);
+    expect(await prisma.fleetApprovalAsk.count({ where: { jobId, resolvedBy: 'job_ended' } })).toBe(total);
+    expect(await prisma.fleetActivity.count({ where: { jobId, action: 'approval.cancelled' } })).toBe(total);
+  }, 120_000);
+
   it('a developer allows the ask on the engine: APPROVAL_ANSWER is delivered and the ack is accepted', async () => {
     await enableRelay();
     const { jobId, leaseEpoch } = await startRunning('loop');

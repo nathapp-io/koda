@@ -43,6 +43,13 @@ export interface IFleetApprovalAskRepository {
   lockByRequest(requestId: string): Promise<FleetApprovalAskRecord | null>;
   /** Links whose request is pending, oldest request first, at most MAX_PENDING_ASKS_PER_JOB (100). */
   findPendingForJob(jobId: string): Promise<FleetApprovalAskRecord[]>;
+  /**
+   * US-006 (F1): one page of a job's pending links for a sweep, keyset by `requestId` — pass the last id of the
+   * previous page. `requestId` is unique, so a page boundary can neither skip nor repeat a row, which is what lets
+   * a job-end sweep advance past a request another transaction holds. Ordered by `requestId`, not by request age:
+   * a sweep closes every ask, so it needs a total order on the cursor, not the oldest-first order above.
+   */
+  findPendingForJobPage(jobId: string, afterRequestId?: string, limit?: number): Promise<FleetApprovalAskRecord[]>;
   findPendingForPolicy(budgetPolicyId: string): Promise<FleetApprovalAskRecord | null>;
   setResolvedBy(requestId: string, resolvedBy: ApprovalResolvedBy): Promise<FleetApprovalAskRecord>;
   /** Replaces the outcome. */

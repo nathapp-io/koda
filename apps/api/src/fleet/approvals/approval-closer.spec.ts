@@ -1,8 +1,9 @@
-import { ApprovalCloser } from './approval-closer';
+import { ApprovalCloser, MAX_CLOSE_PAGES } from './approval-closer';
 import { mockAuditRecorder } from '../../common/test-helpers/global-stubs.module';
 import { approvalWebhookPayload } from './approval-payloads';
 import type { FleetApprovalRecord, NewFleetApproval } from './domain/approval.domain';
 import type { FleetApprovalAskRecord, NewFleetApprovalAsk } from './domain/fleet-approval-ask.domain';
+import { MAX_PENDING_ASKS_PER_JOB } from './domain/fleet-approval-ask.domain';
 import type { BudgetPolicyRecord } from '../budgets/domain/budget.domain';
 
 const NOW = new Date('2026-10-02T10:00:00.000Z');
@@ -64,8 +65,12 @@ function askStore() {
       return ask === undefined ? null : { ask, status: (views.get(ask.requestId)?.status ?? 'pending') as 'pending' };
     }),
     findApproval: vi.fn(async (requestId: string) => views.get(requestId) ?? null),
+    // The real reads are bounded: `findPendingForJob` is one page of the oldest requests, and the sweep pages
+    // through with `findPendingForJobPage`, whose keyset is the (unique) request id.
     findPendingForJob: vi.fn(async (jobId: string) =>
-      [...links.values()].filter((l) => l.jobId === jobId && views.get(l.requestId)?.status === 'pending')),
+      pendingOf(jobId).slice(0, MAX_PENDING_ASKS_PER_JOB).map((id) => links.get(id) as FleetApprovalAskRecord)),
+    findPendingForJobPage: vi.fn(async (jobId: string, after?: string, limit = MAX_PENDING_ASKS_PER_JOB) =>
+      pendingOf(jobId).filter((id) => after === undefined || id > after).slice(0, limit).map((id) => links.get(id) as FleetApprovalAskRecord)),
     setResolvedBy: vi.fn(async (requestId: string, resolvedBy: FleetApprovalAskRecord['resolvedBy']) => {
       const link = { ...(links.get(requestId) as FleetApprovalAskRecord), resolvedBy };
       links.set(requestId, link);
@@ -76,6 +81,14 @@ function askStore() {
     }),
     findProjectSlug: vi.fn(async () => 'web'),
   };
+
+  /** Pending links of one job, in the page order (`requestId` ascending). */
+  function pendingOf(jobId: string): string[] {
+    return [...links.values()]
+      .filter((l) => l.jobId === jobId && views.get(l.requestId)?.status === 'pending')
+      .map((l) => l.requestId)
+      .sort();
+  }
 }
 
 /** The engine's `ApprovalAskService`, as the closer uses it: it decides the ask and writes the request. */
@@ -321,6 +334,56 @@ describe('bash half on the approval engine (US-006)', () => {
   it('closeForJob answers [] when the job has no pending ask', async () => {
     expect(await closer.closeForJob(job, NOW)).toEqual([]);
     expect(asks.close).not.toHaveBeenCalled();
+  });
+
+  /** Opens `total` distinct pending asks on one job and clears the mocks the sweep assertions read. */
+  async function openMany(total: number): Promise<void> {
+    for (let i = 0; i < total; i += 1) {
+      await closer.openBash(job, ask({ naxAskId: `ask-${(0x1000 + i).toString(16).padStart(8, '0')}` }), 'r1', NOW);
+    }
+    asks.close.mockClear();
+    store.setResolvedBy.mockClear();
+  }
+
+  it('US-006 AC-13 (F1): closeForJob settles every pending ask of a job, past the 100-link page', async () => {
+    const total = MAX_PENDING_ASKS_PER_JOB + 30;
+    await openMany(total);
+
+    const live = await closer.closeForJob(job, NOW);
+
+    expect(asks.close).toHaveBeenCalledTimes(total);
+    expect(store.setResolvedBy).toHaveBeenCalledTimes(total);
+    expect(live).toHaveLength(total);
+  });
+
+  it('US-006 AC-14 (F1): a held ask is skipped and the sweep still reaches every ask past it', async () => {
+    const total = MAX_PENDING_ASKS_PER_JOB + 20;
+    await openMany(total);
+    // The third request of the sweep is held by an in-flight decide: the engine answers null for it.
+    let calls = 0;
+    asks.close.mockImplementation(async (requestId: string) => {
+      calls += 1;
+      return calls === 3 ? null : { id: requestId, status: 'cancelled' };
+    });
+
+    const live = await closer.closeForJob(job, NOW);
+
+    expect(asks.close).toHaveBeenCalledTimes(total);
+    expect(store.setResolvedBy).toHaveBeenCalledTimes(total - 1);
+    expect(live).toHaveLength(total - 1);
+  });
+
+  it('US-006 (F1): the sweep stops after MAX_CLOSE_PAGES even if the store never runs out of asks', async () => {
+    // A store that always answers a full page: the loop must still terminate on its own bound.
+    store.findPendingForJobPage.mockImplementation(async (_jobId: string, after?: string) =>
+      Array.from({ length: MAX_PENDING_ASKS_PER_JOB }, (_, index) => ({
+        requestId: `${after ?? 'start'}-${index}`, kind: 'bash' as const, projectId: 'p1', jobId: 'j1', leaseEpoch: 2,
+        naxAskId: `ask-${index}`, budgetPolicyId: null, resolvedBy: null, outcome: null, createdAt: NOW, updatedAt: NOW,
+      })));
+
+    await closer.closeForJob(job, NOW);
+
+    expect(store.findPendingForJobPage).toHaveBeenCalledTimes(MAX_CLOSE_PAGES);
   });
 
   it('expire still settles the legacy row until US-012', async () => {

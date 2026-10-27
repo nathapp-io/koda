@@ -17,6 +17,7 @@ import { checkBashDecision } from './bash-decision';
 import {
   APPROVAL_REPOSITORY, ApprovalDecision, ApprovalResolvedBy, FleetApprovalRecord, IApprovalRepository,
 } from './domain/approval.domain';
+import { MAX_PENDING_ASKS_PER_JOB } from './domain/fleet-approval-ask.domain';
 import { FleetApprovalAskStore } from './fleet-approval-ask.store';
 
 /** US-002: `responsibleUserId` is null when the job the approval belongs to was requested by an agent. */
@@ -64,6 +65,13 @@ const notOpenedReason = (job: BashJob, ask: BashAsk, now: Date): string | null =
   if (ask.deadlineAt.getTime() <= now.getTime()) return 'past deadline';
   return null;
 };
+
+/**
+ * US-006 (F1): the hard cap on the pages one job-end close walks — `MAX_PENDING_ASKS_PER_JOB` asks per page. A job
+ * cannot hold more asks than this in practice; past it the sweep stops and says so, and the engine's expiry still
+ * settles whatever is left.
+ */
+export const MAX_CLOSE_PAGES = 50;
 
 /** Plan D262: spec §2.5 activity actions for a closed approval. */
 const closedAction = (a: Pick<FleetApprovalRecord, 'status'>): string =>
@@ -176,19 +184,34 @@ export class ApprovalCloser {
   /**
    * Spec §1.4: the job left RUNNING, so nax has exited or is exiting; every pending ask of it is moot. A request held
    * by an in-flight decide or execute is skipped — the close must not block the job transition (US-006 AC-14).
+   *
+   * The read is paged (US-006 F1): a runner may relay more asks than one page holds, and an ask left pending by the
+   * first page would never be settled. The cursor is the last `requestId` of the page, so the sweep advances past a
+   * skipped (held) request instead of meeting it again.
    */
   async closeForJob(job: Pick<FleetJobRecord, 'id' | 'requestedById' | 'requestedByType'>, now: Date): Promise<LiveFleetApprovalEvent[]> {
     const live: LiveFleetApprovalEvent[] = [];
-    for (const link of await this.store.findPendingForJob(job.id)) {
-      const closed = await this.askService.close(link.requestId, { status: 'cancelled', reason: 'job_ended' }, now);
-      if (closed === null) continue;
-      await this.store.setResolvedBy(link.requestId, 'job_ended');
-      const view = await this.store.findApproval(link.requestId);
-      if (view === null) {
-        this.logger.warn(`Fleet ask ${link.requestId} closed job_ended but has no view`);
-        continue;
+    let after: string | undefined;
+    for (let page = 1; page <= MAX_CLOSE_PAGES; page += 1) {
+      const links = await this.store.findPendingForJobPage(job.id, after);
+      if (links.length === 0) break;
+      for (const link of links) {
+        const closed = await this.askService.close(link.requestId, { status: 'cancelled', reason: 'job_ended' }, now);
+        if (closed === null) continue;
+        await this.store.setResolvedBy(link.requestId, 'job_ended');
+        const view = await this.store.findApproval(link.requestId);
+        if (view === null) {
+          this.logger.warn(`Fleet ask ${link.requestId} closed job_ended but has no view`);
+          continue;
+        }
+        live.push(...(await this.recordResolved(view, jobSystemActor(job))));
       }
-      live.push(...(await this.recordResolved(view, jobSystemActor(job))));
+      const next = links.at(-1);
+      if (links.length < MAX_PENDING_ASKS_PER_JOB || next === undefined) break;
+      after = next.requestId;
+      if (page === MAX_CLOSE_PAGES) {
+        this.logger.warn(`Job ${job.id}: job-end close stopped after ${MAX_CLOSE_PAGES} pages; later asks stay pending until the sweeper expires them`);
+      }
     }
     return live;
   }

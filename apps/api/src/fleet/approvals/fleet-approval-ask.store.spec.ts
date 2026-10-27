@@ -26,6 +26,7 @@ function mockRepository() {
       ({ ask: record(), status: 'pending' })),
     lockByRequest: vi.fn(async (_requestId: string) => record()),
     findPendingForJob: vi.fn(async (_jobId: string) => [record()]),
+    findPendingForJobPage: vi.fn(async (_jobId: string, _after?: string, _limit?: number) => [record()]),
     findPendingForPolicy: vi.fn(async (_budgetPolicyId: string) => record()),
     setResolvedBy: vi.fn(async (_requestId: string, _resolvedBy: ApprovalResolvedBy) => record({ resolvedBy: 'job_ended' })),
     setOutcome: vi.fn(async (_requestId: string, _outcome: Record<string, unknown>) => record({ outcome: { requeueResults: [] } })),
@@ -59,6 +60,8 @@ describe('FleetApprovalAskStore', () => {
     expect(repository.lockByRequest).toHaveBeenCalledWith('req-1');
     expect(await store.findPendingForJob('job-1')).toEqual([record()]);
     expect(repository.findPendingForJob).toHaveBeenCalledWith('job-1');
+    expect(await store.findPendingForJobPage('job-1', 'req-1')).toEqual([record()]);
+    expect(repository.findPendingForJobPage).toHaveBeenCalledWith('job-1', 'req-1', undefined);
     expect(await store.findPendingForPolicy('policy-1')).toEqual(record());
     expect(repository.findPendingForPolicy).toHaveBeenCalledWith('policy-1');
     expect(await store.setResolvedBy('req-1', 'job_ended')).toEqual(record({ resolvedBy: 'job_ended' }));

@@ -136,6 +136,36 @@ describeDb('FleetApprovalAsk repository (PG)', () => {
     expect(bounded.map((link) => link.requestId)).toEqual(overflow.slice(0, MAX_PENDING_ASKS_PER_JOB));
   });
 
+  it('US-006 F1: findPendingForJobPage walks every pending link of a job, keyset by request id', async () => {
+    const ids = Array.from({ length: MAX_PENDING_ASKS_PER_JOB + 2 }, (_, index) => `f1-page-${index}`);
+    await db.approvalRequest.createMany({
+      data: ids.map((id) => ({
+        id, permissionKey: 'fleet.job.shell.escalate', projectId, actorType: 'AGENT', actorId: 'agent-1',
+        origin: 'runner', correlationId: randomUUID(), input: {}, inputHash: randomUUID(), requiredMode: 'human',
+        onTimeout: 'reject', approverMustHoldAction: true, requireDistinctApprover: false, status: 'pending',
+        expiresAt: new Date(Date.now() + 60_000), updatedAt: new Date(),
+      })),
+    });
+    await db.fleetApprovalAsk.createMany({
+      data: ids.map((requestId, index) => ({
+        requestId, kind: 'bash', projectId, jobId: 'job-f1-page', leaseEpoch: 1, naxAskId: `ask-f1-${index}`, updatedAt: new Date(),
+      })),
+    });
+    const ordered = [...ids].sort();
+
+    const first = await repository.findPendingForJobPage('job-f1-page');
+    expect(first.map((link) => link.requestId)).toEqual(ordered.slice(0, MAX_PENDING_ASKS_PER_JOB));
+    const cursor = first.at(-1);
+    if (cursor === undefined) throw new Error('expected a full first page');
+
+    const second = await repository.findPendingForJobPage('job-f1-page', cursor.requestId);
+    expect(second.map((link) => link.requestId)).toEqual(ordered.slice(MAX_PENDING_ASKS_PER_JOB));
+
+    // The cursor is exclusive and the page size is the caller's.
+    expect(await repository.findPendingForJobPage('job-f1-page', ordered[ordered.length - 1], 10)).toEqual([]);
+    expect(await repository.findPendingForJobPage('job-f1-page', undefined, 3)).toHaveLength(3);
+  });
+
   it('AC-6: findPendingForPolicy returns the pending link and ignores an expired request', async () => {
     const pending = await request();
     const expired = await request('expired');

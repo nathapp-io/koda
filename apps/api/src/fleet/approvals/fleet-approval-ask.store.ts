@@ -37,6 +37,11 @@ export class FleetApprovalAskStore {
     return this.asks.findPendingForJob(jobId);
   }
 
+  /** US-006 (F1): one keyset page of a job's pending links, for a sweep that must reach every ask. */
+  findPendingForJobPage(jobId: string, afterRequestId?: string, limit?: number): Promise<FleetApprovalAskRecord[]> {
+    return this.asks.findPendingForJobPage(jobId, afterRequestId, limit);
+  }
+
   findPendingForPolicy(budgetPolicyId: string): Promise<FleetApprovalAskRecord | null> {
     return this.asks.findPendingForPolicy(budgetPolicyId);
   }
