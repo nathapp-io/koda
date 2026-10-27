@@ -80,6 +80,17 @@ export class PrismaApprovalRequestRepository extends AbstractPrismaRepository<Ap
     return rows.length === 0 ? null : this.findById(id);
   }
 
+  /**
+   * SELECT ... FOR UPDATE SKIP LOCKED; null when the row is missing or held by another transaction.
+   *
+   * A held row belongs to an in-flight decide or execute, so the caller must not wait for it: the
+   * fleet takes the job or policy lock first, the opposite order to the engine's.
+   */
+  async lockByIdSkipLocked(id: string): Promise<ApprovalRequestRecord | null> {
+    const rows = await this.prisma.client.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "ApprovalRequest" WHERE "id" = ${id} FOR UPDATE SKIP LOCKED`;
+    return rows.length === 0 ? null : this.findById(id);
+  }
+
   async findPendingDuplicate(match: PendingApprovalMatch, now: Date): Promise<ApprovalRequestRecord | null> {
     const row = await this.prisma.client.approvalRequest.findFirst({ where: { ...match, status: 'pending', expiresAt: { gt: now } }, orderBy: { createdAt: 'asc' } });
     return row ? this.toDomain(row) : null;
