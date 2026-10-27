@@ -209,22 +209,14 @@ describe('AssistantToolExecutor as the assistant for a thread call (US-001, P2 U
   });
 
   /**
-   * Branch fix B1: an agent's thread write runs at once, so the only thing standing between a runner's retry and a
-   * duplicated comment, ticket batch or dispatch is the replay row — and reading it before executing and inserting it
-   * afterwards let two concurrent duplicates of one `(jobId, toolCallId)` both execute. The replay key is a critical
-   * section now: the second call awaits the winner's execution and then replays its stored row.
+   * Thread writes use the approval gate, while the executor's replay key still ensures duplicate calls only store
+   * one answer. The tool itself is executed by the gate's registered command, not by this executor.
    */
-  it('B1: two concurrent calls with one replay key make exactly one agent write and answer its stored row', async () => {
-    let writes = 0;
+  it('B1: concurrent calls with one replay key gate once and answer its stored row', async () => {
     const tool = commentTool();
-    vi.mocked(tool.execute).mockImplementation(async () => {
-      writes += 1;
-      // Keep the winner in flight long enough for the duplicate to reach its own permission check and preview.
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      return 'comment c1 added to WEB-1';
-    });
     const { executor, actions, rows, approval } = storingSetup(AGENT_CONTEXT, tool);
     approval.resolver.resolve.mockResolvedValue({ mode: 'none' });
+    approval.gate.gate.mockResolvedValue({ status: 'executed', result: { text: 'comment c1 added to WEB-1' } } as never);
     const input = { ref: 'WEB-1', body: 'x' };
 
     const [first, second] = await Promise.all([
@@ -232,9 +224,9 @@ describe('AssistantToolExecutor as the assistant for a thread call (US-001, P2 U
       executor.execute({ ...CALL, name: 'koda_add_comment', input }),
     ]);
 
-    expect(writes).toBe(1);
-    expect(tool.execute).toHaveBeenCalledTimes(1);
-    expect(actions.recordDirect).toHaveBeenCalledTimes(1);
+    expect(approval.gate.gate).toHaveBeenCalledTimes(1);
+    expect(tool.execute).not.toHaveBeenCalled();
+    expect(actions.recordDirect).not.toHaveBeenCalled();
     expect(rows).toHaveLength(1);
     expect(first.content).toContain('comment c1 added to WEB-1');
     expect(second).toEqual(first);
@@ -244,12 +236,14 @@ describe('AssistantToolExecutor as the assistant for a thread call (US-001, P2 U
     const tool = commentTool();
     const { executor, rows, approval } = storingSetup(AGENT_CONTEXT, tool);
     approval.resolver.resolve.mockResolvedValue({ mode: 'none' });
+    approval.gate.gate.mockResolvedValue({ status: 'executed', result: { text: 'comment c1 added to WEB-1' } } as never);
     const input = { ref: 'WEB-1', body: 'x' };
 
     const first = await executor.execute({ ...CALL, name: 'koda_add_comment', input });
     const second = await executor.execute({ ...CALL, name: 'koda_add_comment', input });
 
-    expect(tool.execute).toHaveBeenCalledTimes(1);
+    expect(approval.gate.gate).toHaveBeenCalledTimes(1);
+    expect(tool.execute).not.toHaveBeenCalled();
     expect(rows).toHaveLength(1);
     expect(second).toEqual(first);
   });
