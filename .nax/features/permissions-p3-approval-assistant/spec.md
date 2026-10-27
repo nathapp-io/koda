@@ -526,6 +526,7 @@ None.
 - `apps/api/src/notifications/fleet/fleet-notification-drafts.ts` — drops actionRequestedDraft.
 - `apps/api/src/notifications/fleet/fleet-notification-drafts.spec.ts` — the actionRequestedDraft cases are deleted with it.
 - `apps/api/src/notifications/fleet/fleet-subscribers.spec.ts` — the assistant_action ask cases (AC-10, AC-11/13/14/15 and the answered-before case) are deleted with the branch.
+- `apps/api/test/integration/permissions/enforce-fleet-approvals-budgets.integration.spec.ts` — gains the AC-1 case: GET /api/projects/:slug/fleet/approvals?type=assistant_action by a project member holding fleet.approval.read answers 400; the existing bash and budget cases are unchanged.
 - `openapi.json` — regenerated with bun run api:export-spec from the repo root; every approval type enum derived from APPROVAL_TYPES (the list query, the fleet approval DTO, the home dashboard DTO) loses assistant_action, and nothing else changes.
 
 ### Seams

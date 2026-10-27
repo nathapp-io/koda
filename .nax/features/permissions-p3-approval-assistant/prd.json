@@ -1,0 +1,1151 @@
+{
+  "project": "koda",
+  "feature": "permissions-p3-approval-assistant",
+  "branchName": "feat/permissions-p3-approval-assistant",
+  "createdAt": "2026-10-26T00:00:00.000Z",
+  "updatedAt": "2026-10-27T03:13:04.396Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "The thread link table and its repository",
+      "description": "**Goal** \u2014 Add the thread-only link between ApprovalRequest and assistant provenance, with a transactional repository.\n\n**Motivation** \u2014 `PendingAction` duplicates what `ApprovalRequest` now models (actor, on-behalf-of, mode, approver, status, result, expiry), and opens a second record, an `assistant_action` `FleetApproval`, so the fleet inbox can show it.\n\n**Approach** \u2014 Migration `20261105090000_assistant_action_request`. `ApprovalRequest` gains `assistantAction AssistantActionRequest?` and `ChatThread` gains `assistantActionRequests AssistantActionRequest[]`.\n\n`src/fleet/assistant/requests/assistant-action-request.domain.ts` holds `ASSISTANT_ACTION_REQUEST_REPOSITORY`, the record types and `MAX_PENDING_ACTIONS = 10` (from US-001 on, the import every reader uses). `PrismaAssistantActionRequestRepository` (same directory):\n- `insert(link)`: one row; answers it.\n- `findByRequest(requestId)`: the row or null.\n- `lockThread(threadId)`: `SELECT ... FOR UPDATE` on the `ChatThread` row; false when it is gone (the same query as `PrismaPendingActionRepository.lockThread`).\n- `lockByRequest(requestId)`: `SELECT ... FOR UPDATE` on the link row; null when gone.\n- `insertSystemNote(threadId, content)`: one `system` message with the next `seq` from `allocateThreadSeq`; answers its id (the same write as `PrismaPendingActionRepository.insertSystemNote`).\n- `markNoted(requestId, noteMessageId, at)`.\n- `countPendingInThread(threadId)`: rows of the thread whose request status is `pending`.\n- `findScopedInThread(requestId, projectId, threadId)`: the row with its request when the row's thread is `threadId` and the request's project is `projectId`, else null.\n- `findOwnRequest(requestId, projectId, actor)`: the `ApprovalRequest` whose id and project match and whose `actorType`/`actorId` are the actor's, with its link when one exists, else null.\n\n**The thread link is its own table, not columns on `ApprovalRequest`.** `AssistantActionRequest` (one row per thread request, keyed by `requestId`) holds the thread, job, tool call, tool name, preview and the note and delivery marks. These are thread bookkeeping, not approval state, and the engine stays free of thread knowledge. An MCP request gets no link row.\n\n**Scope** \u2014 In: add only the new Prisma model/relations, its migration, domain types, AbstractPrismaRepository implementation and private token/useExisting registration in AssistantModule; add the repository integration spec. Reuse transaction-scoped Prisma access and the existing sequence allocator. Out: command registration (US-002), outcome subscriber (US-003), executor/read switching (US-005 onward), and dropping PendingAction (US-011). Pending `PendingAction` rows are not migrated (design decision 2); the drop discards them. A pending request whose thread is deleted keeps its `ApprovalRequest` (only the link cascades); it can still be decided or expire. Deciding does not check `threadsEnabled` (the engine's decide route has no thread knowledge).\n\n**Interface** \u2014\n```prisma\nmodel AssistantActionRequest {\n  requestId          String    @id\n  threadId           String?\n  jobId              String?\n  toolCallId         String?\n  tool               String\n  preview            String    @db.Text\n  noteMessageId      String?\n  notedAt            DateTime?\n  deliveredAt        DateTime?\n  deliveredMessageId String?\n  createdAt          DateTime  @default(now())\n\n  request ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)\n  thread  ChatThread?     @relation(fields: [threadId], references: [id], onDelete: Cascade)\n\n  @@index([threadId])\n  @@index([threadId, deliveredAt])\n  @@index([deliveredMessageId])\n}\n```\n\nVerification: regenerate Prisma with `bun run db:generate` from the repo root. Run the repository's DB-backed specs outside the sandbox, including migration-backed setup; API type-check remains a verification step, not an acceptance criterion.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] After migrations, when insert stores a link for an existing ApprovalRequest with a thread, job, toolCallId, tool: 'koda_add_comment' and preview: 'p', then findByRequest(requestId) returns a row equal to those values with null notedAt, deliveredAt and deliveredMessageId.",
+        "AC-2 [integration] countPendingInThread(threadId) returns 2 for a thread with two linked pending requests and one linked rejected request, while a third pending request is linked to another thread.",
+        "AC-3 [integration] Inside a transaction, lockThread(threadId) returns true for an existing thread.",
+        "AC-4 [integration] lockThread returns false for a thread id that does not exist.",
+        "AC-5 [integration] Inside a transaction, lockByRequest(requestId) returns the link row.",
+        "AC-6 [integration] lockByRequest returns null for a request with no link.",
+        "AC-7 [integration] insertSystemNote(threadId, 'note') on a thread whose last message has seq 4 returns the id of a stored system message whose content is 'note' and whose seq is 5.",
+        "AC-8 [integration] After markNoted(requestId, 'm1', at), findByRequest returns noteMessageId 'm1' and notedAt equal to at.",
+        "AC-9 [integration] findScopedInThread(requestId, projectId, threadId) returns the link with its request's status when the link's thread is threadId and the request's project is projectId.",
+        "AC-10 [integration] findScopedInThread returns null when the link belongs to another thread.",
+        "AC-11 [integration] findScopedInThread returns null when the request belongs to another project.",
+        "AC-12 [integration] When ChatThread is deleted, then its link rows are deleted.",
+        "AC-13 [integration] findOwnRequest(requestId, projectId, { type: 'AGENT', id: 'a1' }) returns the request opened by agent a1 in that project, with a null link.",
+        "AC-14 [integration] findOwnRequest with actor AGENT/a2 for that request returns null."
+      ],
+      "tags": [
+        "permissions-p3-approval-assistant",
+        "api",
+        "prisma",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The additive schema and repository mirror existing Prisma mappers and row-lock queries; scoped project/thread/actor reads still require the security test-isolation override."
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/fleet/assistant/actions/prisma-pending-action.repository.ts",
+        "apps/api/src/approvals/prisma-approval-request.repository.ts",
+        "apps/api/src/fleet/assistant/assistant.module.ts",
+        ".nax/rules/api-repositories.md"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261105090000_assistant_action_request/migration.sql",
+        "apps/api/src/fleet/assistant/requests/assistant-action-request.domain.ts",
+        "apps/api/src/fleet/assistant/requests/prisma-assistant-action-request.repository.ts",
+        "apps/api/test/integration/fleet/assistant-action-request.repository.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a thread with a pending linked request is deleted, then the ApprovalRequest remains pending and readable by its requester.",
+        "findOwnRequest returns null when the actor matches but projectId does not match the request's project.",
+        "When an ApprovalRequest is deleted, then its AssistantActionRequest link is deleted."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "adds the `AssistantActionRequest` model and the `assistantAction` / `assistantActionRequests` relation fields on `ApprovalRequest` and `ChatThread`; no existing field changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.ts",
+          "reason": "provides `PrismaAssistantActionRequestRepository` and the `ASSISTANT_ACTION_REQUEST_REPOSITORY` alias."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-002",
+      "title": "One approval command per write tool",
+      "description": "**Goal** \u2014 Register the nine assistant write tools as validated, provenance-aware approval commands that reconstruct the requester's authority at execution.\n\n**Motivation** \u2014 The design (\u00a74) replaces `PendingAction` and `FleetApproval` with one request model and makes the assistant's tool executors registry entries, so REST (feature 5), MCP and threads share one mechanism.\n\n**Approach** \u2014 `AssistantToolCommands` (provider of `AssistantModule`) injects `AssistantToolRegistry` and `ApprovalCommandRegistry` and, in `onModuleInit`, registers one `ApprovalCommand` per registered write tool through `assistantToolCommand(tool, deps)`. It is listed after the tool group providers, so their `onModuleInit` registrations have run first.\n\n`execute` runs inside the engine's action context (the gate's on the direct path, the request's on the approved path):\n1. The principal is the context's `onBehalfOf` when the actor is `SYSTEM/assistant`, otherwise the actor (`USER` or `AGENT`). A user is loaded with `findUserActor` and built with `userPrincipal`, an agent with the new `findAgentActor` and `agentPrincipal` (both exported unchanged from `assistant-tool.executor.ts`). A missing principal, a disabled user, a `PAUSED` agent, or a principal `ProjectAccessService.resolveMembership` refuses in `projectId` throws `AssistantCommandRefusedError`.\n2. The project slug is read with the new `AssistantToolCallRepository.findProjectSlug(projectId)`; a null answer throws `NotFoundAppException({}, 'projects')`.\n3. `tool.execute` runs with a `ToolContext` built from the input: `projectId`, the slug, the principal, `threadId`, `jobId`, `now: new Date()`, a fresh fence token for `data`, and `can` checking the principal's key in `projectId` through `PermissionService.can`.\n4. The tool's text answers `{ text: capText(maskSecrets(text), RESULT_CAP_BYTES) }`. Every error is rethrown.\n\nOn the approved path the engine re-checks the principal's key before `execute` (`stillHoldsKey`). On the direct path the executor's own `can()` check before the preview is that check; the command does not repeat it.\n\n**The command input is domain-shaped plus provenance.** `{ projectId, threadId, jobId, args }`, where `args` is the tool's parsed input. It carries no preview and no tool name, so the REST gate of feature 5 can open the same command with `threadId: null, jobId: null`. `threadId` stays in the input because `koda_add_memory` and `koda_record_decision` record it as provenance.\n\n**An approved command's failure fails the request, rolls back, and keeps no tool text.** `ApprovalExecutionService` runs the command inside its settle transaction, and this transaction manager rolls back the outer transaction when any nested `run()` throws, even if the throw is caught (`PrismaTransactionManager`, SEC-16). So the command rethrows every tool error: `NotFoundAppException`, `ToolActionError` and anything else. The engine settles the request `failed` with `result: { error: 'execution-failed', name }`, and none of the tool's writes persist. On the approved path a batch is all-or-nothing, and the agent's note says `not_found` or `error: <tool> failed`; the tool's own failure sentence (2b1-D2, for example `KODA-1 cannot move from CLOSED to IN_PROGRESS`) is not carried. On the direct path the tool's text still reaches the agent.\n\n**Scope** \u2014 In: the command factory/types/error, command registrar, two repository lookups, unchanged principal helper exports, module registration, command unit tests and lookup integration tests. Register exactly comment.create, ticket.create, ticket.update, ticket.link.add, memory.create, memory.decision.record, fleet.job.dispatch, fleet.job.cancel and fleet.job.requeue. Implement findAgentActor as id/slug/status/type or null; findProjectSlug returns null for absent or soft-deleted projects. Add findAgentActor/findProjectSlug stubs to existing repository doubles in executor.spec.ts, executor.actor.spec.ts, executor.direct.spec.ts, executor.agent-caller.spec.ts, executor.caller.spec.ts, executor.workspace.spec.ts, tools/kb-tools.spec.ts and tools/workspace-tools.spec.ts without assertion changes. Add one DB-free AssistantModule test after module.init(), leaving existing tests unchanged. Out: routing live writes into the gate (US-005/006/009), creating thread links (US-001/005), outcome notes (US-003/008) and removing old execution methods (US-011).\n\n**Interface** \u2014\n```ts\nexport interface AssistantCommandInput {\n  projectId: string;\n  threadId: string | null;\n  jobId: string | null;\n  args: unknown;          // the tool's own parsed input\n}\n\nexport interface AssistantCommandResult {\n  text: string;           // masked, capped at RESULT_CAP_BYTES\n}\n\nexport function assistantToolCommand(tool: AssistantTool, deps: AssistantCommandDeps): ApprovalCommand<AssistantCommandInput, AssistantCommandResult> {\n  return {\n    key: tool.key,\n    parse: (input) => parseCommandInput(input, tool),          // shape checked, args: tool.parse(args)\n    execute: (input) => runToolCommand(tool, input, deps),     // principal, membership, ToolContext, tool.execute\n    toResult: (result) => result,\n  };\n}\n```\n\nRepository additions: `findAgentActor(agentId): Promise<AgentToolCallCreator | null>` and `findProjectSlug(projectId): Promise<string | null>`. Test all nine parsers accepting their own parsed sample outputs, because approved requests are re-parsed. Keep DI/module tests under src with external collaborators mocked; DB round-trips alone belong in test/integration.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] In assistant.module.spec.ts, after module.init(), ApprovalCommandRegistry.get(key) returns a command for every one of comment.create, ticket.create, ticket.update, ticket.link.add, memory.create, memory.decision.record, fleet.job.dispatch, fleet.job.cancel and fleet.job.requeue.",
+        "AC-2 [unit] assistantToolCommand(tool, deps).key equals tool.key.",
+        "AC-3 [unit] parse({ projectId: 'p1', threadId: 't1', jobId: 'j1', args }) returns { projectId: 'p1', threadId: 't1', jobId: 'j1', args: tool.parse(args) }.",
+        "AC-4 [unit] parse throws for an input whose projectId is missing, not a string or empty.",
+        "AC-5 [unit] parse throws for an input whose threadId or jobId is neither a string nor null.",
+        "AC-6 [unit] parse throws the tool's ToolInputError when tool.parse(args) throws it.",
+        "AC-7 [unit] For each of the nine write tools, parse of its own output for a valid sample input returns a value deep-equal to that output.",
+        "AC-8 [unit] execute inside an action context with actor SYSTEM/assistant and onBehalfOf user u1 calls tool.execute with a ToolContext whose actor.id is u1, whose projectId, threadId and jobId are the input's, and whose projectSlug is the slug findProjectSlug returns.",
+        "AC-9 [unit] execute inside an action context with actor AGENT/a1 and no onBehalfOf calls tool.execute with a ToolContext whose actor is agentPrincipal of the record findAgentActor('a1') returns.",
+        "AC-10 [unit] For each of a missing user, a disabled user, a PAUSED agent, and a principal resolveMembership refuses in the project, execute throws AssistantCommandRefusedError without calling tool.execute.",
+        "AC-11 [unit] When tool.execute returns a text holding a secret, execute returns { text } with the secret masked by maskSecrets and capped at RESULT_CAP_BYTES.",
+        "AC-12 [unit] For each of NotFoundAppException, ToolActionError and a plain Error thrown by tool.execute, execute rethrows that same error.",
+        "AC-13 [unit] toResult returns its argument unchanged.",
+        "AC-14 [integration] PrismaAssistantToolCallRepository.findAgentActor(id) returns { type: 'AGENT', id, slug, status } for an existing agent.",
+        "AC-15 [integration] PrismaAssistantToolCallRepository.findProjectSlug(id) returns the project's slug."
+      ],
+      "tags": [
+        "permissions-p3-approval-assistant",
+        "api",
+        "security",
+        "approval-commands"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A new wrapper integrates nine existing tools with an existing command registry and module-init ordering; principal reconstruction and membership refusal require strict security isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-command.registry.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.types.ts",
+        "apps/api/src/fleet/assistant/prisma-assistant-tool-call.repository.ts",
+        ".nax/rules/api-testing.md"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/commands/assistant-tool.command.ts",
+        "apps/api/src/fleet/assistant/commands/assistant-tool-commands.ts",
+        "apps/api/src/fleet/assistant/commands/assistant-tool.command.spec.ts",
+        "apps/api/test/integration/fleet/assistant-tool-call-lookups.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "execute throws AssistantCommandRefusedError without calling tool.execute when findAgentActor returns null.",
+        "findProjectSlug returns null for a soft-deleted project.",
+        "execute throws NotFoundAppException with prefix projects when findProjectSlug returns null.",
+        "ToolContext.can('ticket.update') returns PermissionService.can's allowed value for the reconstructed principal and input projectId."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool-call.domain.ts",
+          "reason": "`AssistantToolCallRepository` gains `findAgentActor` and `findProjectSlug`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/prisma-assistant-tool-call.repository.ts",
+          "reason": "implements `findAgentActor` (id, slug, status, null when absent) and `findProjectSlug` (the slug, null when absent or soft-deleted)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+          "reason": "exports `userPrincipal` and `agentPrincipal` unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.ts",
+          "reason": "provides `AssistantToolCommands` after the tool group providers."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.spec.ts",
+          "reason": "gains one test: after `module.init()`, `ApprovalCommandRegistry.get` answers a command for each of the nine write tool keys; existing tests are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.spec.ts",
+          "reason": "its `AssistantToolCallRepository` double gains `findAgentActor` and `findProjectSlug` stubs so it still satisfies the interface; no assertion changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.actor.spec.ts",
+          "reason": "its `AssistantToolCallRepository` double gains the two stubs; no assertion changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.direct.spec.ts",
+          "reason": "its `AssistantToolCallRepository` double gains the two stubs; no assertion changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.agent-caller.spec.ts",
+          "reason": "its `AssistantToolCallRepository` double gains the two stubs; no assertion changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.caller.spec.ts",
+          "reason": "its `AssistantToolCallRepository` double gains the two stubs; no assertion changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.workspace.spec.ts",
+          "reason": "its `AssistantToolCallRepository` double gains the two stubs; no assertion changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/kb-tools.spec.ts",
+          "reason": "its `AssistantToolCallRepository` double gains the two stubs; no assertion changes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/workspace-tools.spec.ts",
+          "reason": "its `AssistantToolCallRepository` double gains the two stubs; no assertion changes."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-003",
+      "title": "Outcome notes from request events",
+      "description": "**Goal** \u2014 Write exactly one terminal outcome note per linked request through the approval outbox subscriber.\n\n**Motivation** \u2014 `PendingAction` duplicates what `ApprovalRequest` now models (actor, on-behalf-of, mode, approver, status, result, expiry), and opens a second record, an `assistant_action` `FleetApproval`, so the fleet inbox can show it.\n\n**Approach** \u2014 `requestOutcomeNote({ requestId, tool, status, result })` answers, with `<text>` capped at `NOTE_RESULT_MAX` (500) characters plus `\u2026`:\n\n| Request status | Result | Note |\n|:--|:--|:--|\n| `executed` | `{ text }` | `Action <id> (<tool>) was approved and done: <text>` |\n| `failed` | `name` `NotFoundAppException` | `Action <id> (<tool>) was approved but failed: not_found` |\n| `failed` | any other | `Action <id> (<tool>) was approved but failed: error: <tool> failed` |\n| `rejected` | \u2014 | `Action <id> (<tool>) was rejected.` |\n| `expired` | \u2014 | `Action <id> (<tool>) expired without a decision.` |\n| `cancelled` | \u2014 | `Action <id> (<tool>) was cancelled.` |\n\n`AssistantActionOutcomeSubscriber` (registered on `FanOutPublisher` for `APPROVAL_REQUEST_CHANGED`; `AssistantModule` imports `OutboxCoreModule` for it) handles a payload whose status is one of those five:\n1. No link for `requestId`, or a link with no `threadId`: nothing.\n2. In one transaction: `lockThread(threadId)` (false: nothing), `lockByRequest(requestId)`, and if `notedAt` is set, nothing. Otherwise read the request (`ApprovalRequestQueries.findById`), insert the system note and `markNoted`.\n3. After the commit: a `message` frame with the note's id and a `thread` frame on `ThreadEventBus`.\n\nAny other status is ignored. A malformed payload is skipped with a `warn`.\n\n**Outcome notes are written by an outbox subscriber.** `approval_request_changed` is recorded in the transaction that changed the status, and the relay retries a failed handler. So the note is written once, after the change commits, however the request was settled (decided, executed, swept, cancelled). The note can appear one relay interval after the decision. The subscriber declares `@SystemWriter('system.thread.ingest')`, the key of the other system writer of thread transcript rows (`ThreadIngestHook`), and runs in the relay's own `runAsSystem('outbox')` context (an allowlisted unaudited surface); it does not open `runAsSystemWriter`.\n\n**Scope** \u2014 In: request-outcome-note helper/unit tests, subscriber/integration tests, AssistantModule OutboxCoreModule import and subscriber provider, and the system-writer map entry `[AssistantActionOutcomeSubscriber, 'system.thread.ingest']` with expected count 36 -> 37 and unchanged declared key set. Allow DB failures to reach fan-out/relay retries; only malformed/no-link/nonterminal/deleted-thread cases are no-ops. Out: delivering notes to the next agent turn (US-004), opening requests (US-005), and route-driven decision/failure/expiry coverage (US-008). An approved command that fails does not carry the tool's own failure sentence to the agent; the note names `not_found` or `error: <tool> failed`, and the request's `result` holds the error name. US-008 only: an outcome note lags the decision by one outbox relay interval.\n\n**Interface** \u2014 `requestOutcomeNote({ requestId, tool, status, result })`; `AssistantActionOutcomeSubscriber` registers for `APPROVAL_REQUEST_CHANGED` in module init and declares `@SystemWriter('system.thread.ingest')`. Read canonical request state through `ApprovalRequestQueries.findById`; keep noteMessageId/notedAt on the link, not on ApprovalRequest.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Publishing an approval_request_changed outbox record through FanOutPublisher.publish for a linked request settled executed with result { text: 'comment c1 added' } inserts one system message in the link's thread with content 'Action <requestId> (koda_add_comment) was approved and done: comment c1 added'.",
+        "AC-2 [integration] After that publish, the link's noteMessageId is the new message's id.",
+        "AC-3 [integration] Publishing the same record a second time inserts no second message.",
+        "AC-4 [integration] Publishing a record for a request with no link inserts no message.",
+        "AC-5 [integration] Publishing a record for a link whose threadId is null inserts no message.",
+        "AC-6 [integration] Publishing a record whose status is pending or approved for a linked request inserts no message.",
+        "AC-7 [integration] After the note commits, ThreadEventBus.publish receives, in this order, a message frame whose messageId is the note's id and a thread frame for the link's thread.",
+        "AC-8 [integration] Publishing a record for a linked request whose thread was deleted resolves without inserting a message.",
+        "AC-9 [unit] For a payload parseApprovalRequestChangedPayload returns null for, the subscriber logs one warn.",
+        "AC-10 [unit] requestOutcomeNote for status failed with result { error: 'execution-failed', name: 'NotFoundAppException' } returns 'Action r1 (koda_add_comment) was approved but failed: not_found'.",
+        "AC-11 [unit] requestOutcomeNote for status failed with result { error: 'permission-revoked' } returns 'Action r1 (koda_add_comment) was approved but failed: error: koda_add_comment failed'.",
+        "AC-12 [unit] For each of rejected, expired and cancelled, requestOutcomeNote returns the table's note for that status: 'Action r1 (koda_add_comment) was rejected.', 'Action r1 (koda_add_comment) expired without a decision.', or 'Action r1 (koda_add_comment) was cancelled.'.",
+        "AC-13 [unit] requestOutcomeNote for an executed request whose result text is 600 characters returns 'was approved and done: ' followed by the first 500 characters and '\u2026', after the action id and tool prefix."
+      ],
+      "tags": [
+        "permissions-p3-approval-assistant",
+        "api",
+        "outbox",
+        "threads"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Integrates canonical request events, transactional thread/link locking, retry-safe notes and post-commit live publication; no new authorization decision is introduced."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/actions/outcome-note.ts",
+        "apps/api/src/live/approval-request-live.subscriber.ts",
+        "apps/api/src/notifications/approvals/approval-requested.subscriber.ts",
+        "apps/api/src/approvals/approval-execution.service.ts",
+        "apps/api/src/permissions/system-writer.decorator.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/fleet/assistant/requests/request-outcome-note.ts",
+        "apps/api/src/fleet/assistant/requests/request-outcome-note.spec.ts",
+        "apps/api/src/fleet/assistant/requests/assistant-action-outcome.subscriber.ts",
+        "apps/api/test/integration/fleet/assistant-action-outcome.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a note insert fails before commit, then a later successful redelivery writes exactly one note and sets notedAt.",
+        "When markNoted fails, then neither the system message nor a message/thread live frame is committed or published."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.ts",
+          "reason": "provides `AssistantActionOutcomeSubscriber` and imports `OutboxCoreModule`."
+        },
+        {
+          "path": "apps/api/src/permissions/system-writer.decorator.spec.ts",
+          "reason": "the writer map gains `[AssistantActionOutcomeSubscriber, 'system.thread.ingest']`; the expected writer count goes from 36 to 37; the declared key set is unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-004",
+      "title": "Outcome delivery from requests",
+      "description": "**Goal** \u2014 Deliver terminal linked-request outcomes to the agent once and reconstruct the same handoff on every job assignment.\n\n**Motivation** \u2014 `PendingAction` duplicates what `ApprovalRequest` now models (actor, on-behalf-of, mode, approver, status, result, expiry), and opens a second record, an `assistant_action` `FleetApproval`, so the fleet inbox can show it.\n\n**Approach** \u2014 Delivery reads the link and request tables instead of `PendingAction`:\n- `PrismaChatThreadRepository.deliverOutcomeNotes(threadId, messageId, userText)`: the thread's links whose request status is one of the five and whose `deliveredAt` is null, oldest first, at most `MAX_DELIVERED_NOTES`; notes from `requestOutcomeNote`; `deliveryText`; the first `delivered` marked with `deliveredAt` and `deliveredMessageId`.\n- `PrismaFleetJobRepository.initialMessageText(message)`: the links delivered on `message.id`, rebuilt the same way.\n\n`DELIVERABLE_STATUSES` becomes the five lowercase request statuses.\n\nThe five statuses are `executed`, `failed`, `rejected`, `expired` and `cancelled`. Derive notes using the US-003 helper, not by reading transcript system messages; notes may not have been written by the relay yet. Preserve existing deliveryText UTF-8 byte limits, header, user-text suffix, first-fitting-prefix behavior, MAX_DELIVERED_NOTES and deterministic creation order. Mark only the prefix actually handed over and keep repeated assignments read-only. The existing sendMessage return is { message, jobId, deduplicated }, not a handoff-text DTO: message.content stays the plain user input. For live-session delivery assertions, observe the persisted THREAD_INPUT command's payload.text; for new-turn delivery, use a separate new-turn fixture and observe findThreadAssign(...).initialMessage.text. Do not add a return field or prepend outcome notes to stored user message content.\n\n**Scope** \u2014 In: outcome-delivery.ts/status assertion, the two repository delivery reads/marks, new assistant-request-delivery integration tests, and replacement fixtures in prisma-chat-thread.repository.spec.ts, prisma-fleet-job.repository.find-thread-assign.spec.ts, assistant-action-delivery.integration.spec.ts and assistant-action-send-delivery.integration.spec.ts. Preserve their once-only send and repeatable assign invariants while seeding requests/links instead of PendingAction or AssistantActionService. Out: the event subscriber/helper already delivered by US-003, pendingActions detail query (US-007), executor gating (US-005/006/009), and dropping old storage/helper files (US-011).\n\n**Interface** \u2014 `PrismaChatThreadRepository.deliverOutcomeNotes(threadId, messageId, userText)`; `PrismaFleetJobRepository.initialMessageText(message)`; `DELIVERABLE_STATUSES = ['executed', 'failed', 'rejected', 'expired', 'cancelled']`. The public send/assignment DTOs and deliveryText contract remain unchanged.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] DELIVERABLE_STATUSES equals ['executed', 'failed', 'rejected', 'expired', 'cancelled'].",
+        "AC-2 [integration] When PrismaChatThreadRepository.sendMessage is accepted into a RUNNING thread session with a runner and two undelivered linked requests settled executed and cancelled, its stored THREAD_INPUT command's payload.text equals the concatenation of 'Updates on actions you proposed:', a newline, both notes from requestOutcomeNote joined by a newline in creation order, a blank line, then the user's text.",
+        "AC-3 [integration] That send sets deliveredMessageId to the new message's id on both links.",
+        "AC-4 [integration] A second accepted sendMessage on the same thread stores a THREAD_INPUT command whose payload.text is the user's text unchanged, without the already-delivered outcome notes.",
+        "AC-5 [integration] A linked request still pending is not delivered and keeps a null deliveredAt.",
+        "AC-6 [integration] PrismaFleetJobRepository.findThreadAssign for the job of a message on which two links were delivered returns initialMessage.text equal to the text that send handed over.",
+        "AC-7 [integration] A second findThreadAssign for the same job returns the same initialMessage.text."
+      ],
+      "tags": [
+        "permissions-p3-approval-assistant",
+        "api",
+        "threads",
+        "delivery"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Replaces two existing delivery queries and one status constant while reusing the established formatter, byte cap and delivery marks; no authorization or new concurrency protocol is added."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/actions/outcome-delivery.ts",
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+        "apps/api/src/fleet/assistant/requests/request-outcome-note.ts",
+        "apps/api/src/fleet/jobs/prisma-fleet-job.repository.find-thread-assign.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/assistant-request-delivery.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When only the first of two outcome notes fits the handoff byte limit, then only the first link receives deliveredAt and deliveredMessageId.",
+        "When no outcome note fits alongside userText, then sendMessage hands over userText unchanged and leaves every link undelivered."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/actions/outcome-delivery.ts",
+          "reason": "`DELIVERABLE_STATUSES` becomes the five lowercase request statuses."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/outcome-delivery.spec.ts",
+          "reason": "an assertion pinning the four uppercase PendingAction statuses becomes one pinning the five lowercase request statuses."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+          "reason": "`deliverOutcomeNotes` reads and marks links joined to requests instead of PendingAction, with notes from `requestOutcomeNote`."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts",
+          "reason": "`initialMessageText` rebuilds notes from links delivered on the message."
+        },
+        {
+          "path": "apps/api/src/fleet/jobs/prisma-fleet-job.repository.find-thread-assign.spec.ts",
+          "reason": "fixtures that seed PendingAction rows to drive `initialMessageText` seed a request and a delivered link instead; the invariant (the assign rebuilds the same note text from the message's delivered outcomes) is unchanged, and note texts follow `requestOutcomeNote`."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/prisma-chat-thread.repository.spec.ts",
+          "reason": "delivery cases that seed PendingAction rows seed requests and links instead; the invariant (undelivered terminal outcomes are prefixed once, then marked on the message) is unchanged, and note texts follow `requestOutcomeNote`."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-action-delivery.integration.spec.ts",
+          "reason": "seeds requests and links instead of proposing through AssistantActionService; the delivery invariant is unchanged, note texts follow `requestOutcomeNote`, and cancelled joins the deliverable statuses."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-action-send-delivery.integration.spec.ts",
+          "reason": "seeds requests and links instead of PendingAction rows; the send-path delivery invariant is unchanged and note texts follow `requestOutcomeNote`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-005",
+      "title": "Waiting thread writes through the gate",
+      "description": "**Goal** \u2014 Resolve assistant policy and open waiting thread writes through ApprovalGate with a capped, transactional thread link and scoped action reads.\n\n**Motivation** \u2014 `approvalModeFor` (`src/fleet/assistant/actions/approval-policy.ts`) is a code default: a user's thread write waits for the user, everything else runs at once. Nothing reads a policy, so koda #301 (\"configurable approval policy per tool\") is still open.\n\n**Approach** \u2014 `AssistantToolExecutor.writeTool`, for an origin of kind `thread`, after the permission check and the preview (both unchanged):\n1. `mode = (await resolver.resolve({ key: tool.key, projectId, subject: { type: 'ASSISTANT', id: 'assistant' } })).mode`.\n2. **Any mode but `none`:** in one transaction: `lockThread(threadId)` (false answers `not_found`); `countPendingInThread(threadId) >= MAX_PENDING_ACTIONS` answers `refused: 10 actions are pending in this thread; wait for the user to decide them` with outcome `refused`; otherwise the gate opens or answers the pending request, and the link (`requestId`, `threadId`, `jobId`, `toolCallId`, the tool's name, the preview) is inserted unless one exists for that request, inside `bookkeeping('assistant.action-request-link', ...)`. The call answers `pending <requestId>: awaiting approval; do not retry`, outcome `pending`. After the commit, one `thread` frame is published on `ThreadEventBus` for a newly linked request.\n3. A throw from the gate or the transaction is caught outside the transaction and answers `error: <tool> failed`, with the stack logged.\n4. **`none`:** in US-005 the existing `directWrite` still runs (it records a `PendingAction` through `recordDirect`); US-006 replaces it.\n\n`koda_get_action` in a thread reads `findScopedInThread(id, ctx.projectId, ctx.threadId)` from US-005 on. Its lines: `action <id> <tool> <status>`, `requested <createdAt>`, `decided <decidedAt>` when set, `settled <settledAt>` when set, then `result:` and the fenced result `text` when the request has one. `ActionTools` injects both the link repository and `PENDING_ACTION_REPOSITORY` until US-009 moves the MCP read; from US-009 on it injects only the link repository.\n\nThe context is the one `executeUnstored` already opens (`SYSTEM/assistant`, on behalf of the requester, origin `thread`), so the gate's subject is `ASSISTANT`.\n\n**The mode is resolved before any lock.** The executor asks `ApprovalPolicyResolver.resolve` (newly exported by `ApprovalEngineModule`) for the call's mode first. A `none` write calls the gate with no transaction and no lock, so the tool runs exactly as the direct path ran it before: its writes are its own, a batch tool's partial writes stand, and no thread lock is held while a fleet tool takes a job lock (the ingest fold and job effects lock job, then thread). A waiting write takes the thread lock, checks the cap, opens the request through the gate and writes the link in one transaction that runs no tool. The one exception is a policy that changes between the executor's resolution and the gate's: a write resolved as waiting that the gate runs at once runs its tool inside that transaction.\n\nThe preceding none-path gate behavior is the US-006 integration; this story deliberately retains directWrite for that branch until then. A gate outcome of executed after a waiting-to-none policy change returns the executed result and does not fabricate a pending request or link.\n\n**The cap is checked before the gate's duplicate lookup.** With 10 linked requests pending, a retry of a pending write with a new `toolCallId` is refused rather than answered with the existing request id. The agent is told not to retry a pending write. The gate's duplicate key includes the input's `jobId`, so the same write asked in a new turn opens a second request, bounded by the cap.\n\n**An agent-created thread's write now waits.** The gate treats every assistant call as subject `ASSISTANT`, whose default is `human`, whether the requester is a user or an agent. Before this feature an agent's thread write ran at once. The agent (the on-behalf-of principal) may approve it with `koda_decide_approval`, and an admin can set an `ASSISTANT` policy of `none`.\n\n**Scope** \u2014 In: export ApprovalPolicyResolver from ApprovalEngineModule; inject gate, resolver, ASSISTANT_ACTION_REQUEST_REPOSITORY, ThreadEventBus and TRANSACTION_MANAGER into the executor; replace its waiting thread branch; switch thread koda_get_action reads; add bookkeeping reason assistant.action-request-link with text \"The thread link of a waiting assistant write: its thread, job, tool call, tool and preview; the request is `approval.request-open`.\" and pin EXPECTED_REASON_IDS. Keep permission, preview refusal and replay behavior unchanged. Add assistant-thread-gate integration tests and update executor.spec.ts, executor.agent-caller.spec.ts, write-tool-errors.spec.ts and tools/action-tools.spec.ts.\n\nReplace old proposal/approval fixtures in assistant-action-actor (only its two thread-request actor cases here), assistant-action-tools, assistant-actor-approve, assistant-add-memory-tool, assistant-cancel-job-tool, assistant-create-tickets-tool, assistant-dispatch-job-tool, assistant-link-tickets-tool, assistant-record-decision-tool, assistant-requeue-job-tool, assistant-update-ticket-tool and permissions-assistant-tools integration specs. Approve through POST /approvals/:id/decisions; assert ApprovalRequest/link instead of PendingAction, lowercase status and requester authorship. Approved tool failures assert result error name, and approved partial batches assert full rollback rather than partial text/writes. Delete assistant-actions-propose.integration.spec.ts. Remove audit-fleet-assistant-actions cases for the old decide/expire keys and assert request opening is bookkeeping; remove only the obsolete S5b assistant_action decide block from endpoint.e2e.spec.ts.\n\nOut: replacing direct thread writes (US-006), pendingActions detail and widened deciding coverage (US-007), asynchronous outcomes (US-008), MCP gating/read removal (US-009), and deleting PendingAction code (US-011). The fleet approvals inbox stops showing assistant actions: no `assistant_action` approval is opened after US-005. The web inbox's assistant panel stays in the code until `permissions-p3-web`, which lists `ApprovalRequest`s in the unified inbox. US-005 only: two concurrent waiting writes of one thread are serialised by the thread row lock, so they cannot both take the last cap slot; the concurrent race itself is not tested here (the lock is the 2a-D4 one, whose concurrency test is deleted with the propose service). Notifying the thread's requester of a new assistant request is not added: the thread card and the live `thread` frame show it, and approval-api's notification goes to users holding `approval.decide`.\n\n**Interface** \u2014 `gate(tool.key, { projectId, threadId, jobId, args }, { projectId })`; `findScopedInThread(id, ctx.projectId, ctx.threadId)`; `bookkeeping('assistant.action-request-link', ...)`. The pending tool result is `pending <requestId>: awaiting approval; do not retry`, with outcome pending and isError false.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] POST /api/fleet/runner/jobs/:jobId/tools/koda_add_comment for a user's thread job with no approval policy opens one ApprovalRequest with permissionKey comment.create, actor SYSTEM/assistant, onBehalfOf the job's requester, origin thread, requiredMode human and input { projectId, threadId, jobId, args: { ref, body } }.",
+        "AC-2 [integration] That call adds no comment.",
+        "AC-3 [integration] That call answers content 'pending <requestId>: awaiting approval; do not retry' with isError false.",
+        "AC-4 [integration] That call writes one AssistantActionRequest with the request's id, the thread, the job, the call's toolCallId, tool koda_add_comment and the tool's preview text.",
+        "AC-5 [integration] After the call commits, ThreadEventBus.publish receives one thread frame for the thread.",
+        "AC-6 [integration] With 10 linked pending requests in the thread, a write call answers 'refused: 10 actions are pending in this thread; wait for the user to decide them' and no request is added.",
+        "AC-7 [integration] A second write call in the thread with a different toolCallId and the same tool and arguments, while the first request is pending, answers content 'pending <the first requestId>: awaiting approval; do not retry' and no request is added.",
+        "AC-8 [integration] A write call on a thread job requested by an agent opens a pending request with actor SYSTEM/assistant, onBehalfOf AGENT/<agentId> and requiredMode human.",
+        "AC-9 [unit] On the waiting path, lockThread is called before gate, both inside one TRANSACTION_MANAGER.run callback.",
+        "AC-10 [unit] When lockThread returns false on the waiting path, the call answers content not_found and gate is not called.",
+        "AC-11 [unit] When the gate returns a pending request that already has a link, insert is not called and the call answers that request's id.",
+        "AC-12 [unit] When the gate throws on the waiting path, the call answers content 'error: koda_add_comment failed' with isError true and does not rethrow.",
+        "AC-13 [integration] koda_get_action through the runner route with the request id answers first line 'action <requestId> koda_add_comment pending' followed by a 'requested <createdAt ISO>' line.",
+        "AC-14 [integration] koda_get_action with the id of a request linked to another thread answers not_found.",
+        "AC-15 [unit] When the waiting-path transaction throws, the executor answers 'error: koda_add_comment failed' with isError true and logs the error stack outside the transaction."
+      ],
+      "tags": [
+        "permissions-p3-approval-assistant",
+        "api",
+        "security",
+        "threads",
+        "approval-gate"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Integrates existing gate and thread-lock mechanisms across executor, scoped reads and audit bookkeeping; lock/cap/dedup ordering and requester attribution make strict security tests necessary."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+        "apps/api/src/fleet/assistant/actions/assistant-action.service.ts",
+        "apps/api/src/approvals/approval-gate.service.ts",
+        "apps/api/src/approvals/approval-policy.resolver.ts",
+        "apps/api/src/fleet/assistant/tools/action-tools.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/assistant-thread-gate.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "With 10 pending links, a new toolCallId repeating an already-pending write is refused instead of returning the existing request id.",
+        "When identical write arguments are submitted from a new jobId in the same thread below the cap, then a second pending request is opened.",
+        "When a waiting-mode resolution is followed by an executed gate outcome after a policy change, then the executor returns result.text rather than a pending answer.",
+        "When preview throws ToolInputError or ToolForbiddenError, then the executor returns the existing invalid_input or forbidden refusal without opening a request."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/approvals/approval-engine.module.ts",
+          "reason": "exports `ApprovalPolicyResolver`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+          "reason": "the waiting branch of `writeTool` for thread origins goes through the resolver, the thread lock and the gate as in \"Waiting thread writes\"; the constructor gains the gate, the resolver, the link repository, `ThreadEventBus` and `TRANSACTION_MANAGER`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/action-tools.ts",
+          "reason": "`getActionTool` reads linked requests in a thread; `ActionTools` injects the link repository beside the PendingAction repository."
+        },
+        {
+          "path": "apps/api/src/action-context/audit-coverage.reasons.ts",
+          "reason": "adds `assistant.action-request-link`: \"The thread link of a waiting assistant write: its thread, job, tool call, tool and preview; the request is `approval.request-open`.\""
+        },
+        {
+          "path": "apps/api/src/action-context/audit-coverage.bookkeeping.spec.ts",
+          "reason": "`EXPECTED_REASON_IDS` gains `assistant.action-request-link`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.spec.ts",
+          "reason": "thread write cases that expected ActionProposer.propose expect the resolver call, then a gate call with `{ projectId, threadId, jobId, args }` and the pending answer; refusal and replay cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.agent-caller.spec.ts",
+          "reason": "the agent-requester thread write cases (AC-9, AC-10 and both B1 cases) that asserted recordDirect or propose now assert a pending request opened through the gate on behalf of the agent (subject ASSISTANT, default human)."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/write-tool-errors.spec.ts",
+          "reason": "thread cases that expected a proposal expect the gate's answers; the preview refusal cases are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/action-tools.spec.ts",
+          "reason": "`koda_get_action` thread cases read requests and links; the not_found invariant for another thread or project is unchanged; status texts are the lowercase request statuses."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-actions-propose.integration.spec.ts",
+          "reason": "delete: it pins AssistantActionService.propose, which this story stops calling; the lock, cap and duplicate behaviour is this story's AC-6, AC-7 and AC-11; the concurrency race is declared out of scope."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-action-actor.integration.spec.ts",
+          "reason": "the two thread-write cases assert the actor on the ApprovalRequest (SYSTEM/assistant on behalf of the requester) instead of the PendingAction; the remaining PendingAction and sweeper cases are left for US-011."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-action-tools.integration.spec.ts",
+          "reason": "koda_add_comment and koda_get_action through the runner route answer pending with a request id and read the request; every prisma.pendingAction assertion is replaced by its ApprovalRequest or link equivalent; status texts are lowercase."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-actor-approve.integration.spec.ts",
+          "reason": "approves through POST /approvals/:id/decisions as the on-behalf-of user; every prisma.pendingAction assertion is replaced by its ApprovalRequest equivalent; the written row's actor invariant is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-add-memory-tool.integration.spec.ts",
+          "reason": "the approve step goes through POST /approvals/:id/decisions; prisma.pendingAction assertions become ApprovalRequest assertions; the tool's write invariants are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-cancel-job-tool.integration.spec.ts",
+          "reason": "the approve step goes through POST /approvals/:id/decisions; prisma.pendingAction assertions become ApprovalRequest assertions; a failed-approve case asserts a failed request with its error name instead of the tool's text."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-create-tickets-tool.integration.spec.ts",
+          "reason": "the approve step goes through POST /approvals/:id/decisions; prisma.pendingAction assertions become ApprovalRequest assertions; a partial-batch-after-approval case asserts a failed request with none of the batch's tickets written."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-dispatch-job-tool.integration.spec.ts",
+          "reason": "the approve step goes through POST /approvals/:id/decisions; prisma.pendingAction assertions become ApprovalRequest assertions; a failed-approve case asserts a failed request with its error name instead of the tool's text."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-link-tickets-tool.integration.spec.ts",
+          "reason": "the approve step goes through POST /approvals/:id/decisions; prisma.pendingAction assertions become ApprovalRequest assertions; the partial-batch-after-approval case asserts a failed request with no link of the batch written instead of the tool's text."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-record-decision-tool.integration.spec.ts",
+          "reason": "the approve step goes through POST /approvals/:id/decisions; prisma.pendingAction assertions become ApprovalRequest assertions; the tool's write invariants are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-requeue-job-tool.integration.spec.ts",
+          "reason": "the approve step goes through POST /approvals/:id/decisions; prisma.pendingAction assertions become ApprovalRequest assertions; a failed-approve case asserts a failed request with its error name instead of the tool's text."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-update-ticket-tool.integration.spec.ts",
+          "reason": "the approve step goes through POST /approvals/:id/decisions; prisma.pendingAction assertions become ApprovalRequest assertions; the case asserting the transition refusal text after approval asserts a failed request with its error name instead."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/permissions-assistant-tools.integration.spec.ts",
+          "reason": "thread write cases answer pending with a request id; every prisma.pendingAction assertion (counts, lookups and status) is replaced by its ApprovalRequest equivalent; the permission refusal invariants are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/audit/audit-fleet-assistant-actions.integration.spec.ts",
+          "reason": "cases pinning fleet.approval.decide.assistant and system.assistant-action.expire are deleted (the engine's approval.decide and system.approval.expire replace them); a thread write's request open records no audit entry (bookkeeping)."
+        },
+        {
+          "path": "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts",
+          "reason": "the S5b 2a US-005 assistant_action decide block is deleted: nothing opens that approval type any more; the approvals routes' own blocks cover deciding."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-006",
+      "title": "Direct thread writes through the gate",
+      "description": "**Goal** \u2014 Execute none-mode thread writes through the shared gate without an outer transaction, thread lock or legacy action row.\n\n**Motivation** \u2014 A waiting write can only be `human` and only in a thread. An MCP write can only be `none`. The `self` and `agent` modes exist in the model but nothing serves them.\n\n**Approach** \u2014 **`none`:** `gate(tool.key, { projectId, threadId, jobId, args }, { projectId })` with no transaction. `executed` answers `result.text` with outcome `ok`. A thrown `NotFoundAppException` answers `not_found`, a `ToolActionError` its masked text with outcome `error`, anything else `error: <tool> failed` with the stack logged (the mapping `directWrite` applies today). If the gate answers `pending` (a policy changed between the two resolutions), the link is written as in the waiting path, without the cap. `directWrite` is no longer called for a thread origin.\n\n**A direct write records no extra row.** A `none` write runs inside the gate. Its audit entry, written by the domain service with the gate's `approval` block, is the record. The agent's answer loses the `action <id>` suffix, and `koda_get_action` reads requests only.\n\nThe MCP read becomes request-only in US-009; this story changes thread execution only. Resolve mode before any lock. A none write's domain services own their transactions, a batch tool's partial writes stand, and no thread lock is held while a fleet tool takes a job lock. Keep success masking/capping in the registered command and mask ToolActionError text on the direct error-mapping path.\n\n**Scope** \u2014 In: replace only the thread none branch in AssistantToolExecutor, update corresponding executor.spec.ts cases previously driven to recordDirect, and create assistant-thread-direct integration coverage using the US-005 thread-route fixture patterns. Preserve permission/preview/replay behavior. Handle policy changes to pending by writing the same provenance link and returning the pending answer, without applying the normal cap. Out: MCP replacement (US-009), deleting directWrite/ActionProposer (US-011), and approved-path all-or-nothing execution/failure-note verification (US-008).\n\n**Interface** \u2014 `gate(tool.key, { projectId, threadId, jobId, args }, { projectId })`; executed maps to `result.text`/outcome `ok`, pending maps to `pending <requestId>: awaiting approval; do not retry`/outcome `pending`.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] With a global ApprovalPolicy for comment.create on subject type ASSISTANT with mode none, a thread koda_add_comment call adds the comment and answers content 'comment <id> added to <ref> <path>' with no action line.",
+        "AC-2 [integration] With that none policy, the call opens no request and writes no link.",
+        "AC-3 [unit] When the resolver returns none, the executor calls gate without TRANSACTION_MANAGER.run and without lockThread.",
+        "AC-4 [unit] On the direct path, when the gate throws ToolActionError with text 'linked SB-1 https://x' and a second line 'failed at link 2: not_found', the call answers that text (masked) with isError true.",
+        "AC-5 [unit] On the direct path, when the gate throws NotFoundAppException, the call answers content not_found with isError true.",
+        "AC-6 [unit] On the direct path, when the gate throws a plain Error, the call answers content 'error: koda_add_comment failed' with isError true and logs the error.",
+        "AC-7 [unit] When the resolver returns none but the gate returns a pending request, the call inserts its link and answers 'pending <requestId>: awaiting approval; do not retry'.",
+        "AC-8 [integration] When a direct none-mode batch write throws ToolActionError after an earlier item committed, then the earlier item's write remains stored."
+      ],
+      "tags": [
+        "permissions-p3-approval-assistant",
+        "api",
+        "security",
+        "threads",
+        "approval-gate"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Updates one executor branch using the existing gate and error-mapping patterns; policy-race and transaction-boundary behavior remains authorization-sensitive and uses strict isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+        "apps/api/test/integration/fleet/assistant-thread-gate.integration.spec.ts",
+        "apps/api/src/approvals/approval-gate.service.ts",
+        "apps/api/src/fleet/assistant/commands/assistant-tool.command.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/assistant-thread-direct.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the resolver returns none and the gate opens a pending request after a policy change, then an existing backlog of 10 linked pending requests does not prevent the new request's link from being stored."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+          "reason": "the none branch of `writeTool` for thread origins calls the gate with no transaction as in \"Direct thread writes\"; `directWrite` is no longer called for a thread origin."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.spec.ts",
+          "reason": "thread cases driven to recordDirect drive the none branch through a resolver answering none and assert the gate's executed answer with no action line."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-007",
+      "title": "Thread detail and deciding thread requests",
+      "description": "**Goal** \u2014 Expose linked pending requests in thread detail and connect thread decisions to the existing approval engine's eligibility and execution.\n\n**Motivation** \u2014 A waiting write can only be `human` and only in a thread. An MCP write can only be `none`. The `self` and `agent` modes exist in the model but nothing serves them.\n\n**Approach** \u2014 The thread detail's `pendingActions` (`PrismaChatThreadRepository.pendingActions`) reads linked requests with status `pending`, scoped as today, oldest first, at most `MAX_PENDING_ACTIONS`. Each answers `id` = `approvalId` = the request id, `tool` and `preview` from the link, `projectSlug` of the request's project, `expiresAt` of the request, `createdAt` of the link. `PendingActionDto` keeps its shape.\n\nDeciding is the engine's `POST /approvals/:id/decisions` (approval-api), unchanged. US-007 pins who may decide and what an approve or reject writes; US-008 pins the notes, the failure outcomes and expiry through the relay and the engine's sweeper.\n\n**Who may decide a thread write widens from \"the requester only\" to the engine's eligibility.** The requester still may (decision 8). A principal holding `approval.decide` and the action's key may too (approval-core `decideEligibility`), for example a Project Admin. One holding `approval.decide` without the action's key may not (`approverMustHoldAction` defaults to true).\n\nPreserve scopeWhere fencing and the action project's slug, including WORKSPACE actions outside the home project. Approval by someone other than the requester must still execute as the frozen on-behalf-of requester, not the approver. A missing action permission returns 403 approvals.decideForbidden with reason missing-action-permission and leaves the request pending.\n\n**Scope** \u2014 In: move PrismaChatThreadRepository.pendingActions onto linked pending requests, import MAX_PENDING_ACTIONS from the requests domain, update repository detail mocks and threads.service/workspace-threads.service DTO doubles with equal request ids in id/approvalId, and rewrite assistant-action-detail integration fixtures. Add assistant-thread-decide integration tests through the unchanged approvals route. Delete assistant-actions-approve.integration.spec.ts and assistant-actions-decide.integration.spec.ts, whose fleet/creator-only contract is replaced. Out: asynchronous notes and failed/expired request outcomes (US-008), thread-card client wiring (US-010), and changing the engine's existing eligibility or route contract. A pending request whose thread is deleted keeps its `ApprovalRequest` (only the link cascades); it can still be decided or expire. Deciding does not check `threadsEnabled` (the engine's decide route has no thread knowledge). The `PendingActionDto.approvalId` description keeps its wording; the DTO is replaced by the unified inbox's types in `permissions-p3-web`. US-007 only: two concurrent approves of one request are serialised by the engine's `lockById` (approval-core); the loser answers 409 `approvals.notPending`. The assistant never decides requests: `SYSTEM/assistant` is refused by decide eligibility (approval-core).\n\n**Interface** \u2014 `PrismaChatThreadRepository.pendingActions` retains PendingActionDto shape with `id` = `approvalId` = request id; `POST /approvals/:id/decisions` accepts `{ decision: 'approve' }` or `{ decision: 'reject' }` through approval-api, unchanged.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] GET of the thread detail returns pendingActions with one entry whose id and approvalId are the request id, tool koda_add_comment, preview the link's preview, projectSlug the request's project slug and expiresAt the request's expiresAt.",
+        "AC-2 [integration] A linked request that was rejected is not in the detail's pendingActions.",
+        "AC-3 [integration] POST /api/approvals/<requestId>/decisions with { decision: 'approve' } by the thread's requester adds the comment authored by that requester.",
+        "AC-4 [integration] After that approve the request's status is executed.",
+        "AC-5 [integration] { decision: 'reject' } by the requester adds no comment.",
+        "AC-6 [integration] After that reject the request's status is rejected.",
+        "AC-7 [integration] After the requester's project binding is removed, their approve answers 403 approvals.decideForbidden with reason missing-action-permission.",
+        "AC-8 [integration] After that refused approve the request's status is still pending.",
+        "AC-9 [integration] A Project Admin of the project who is not the requester approves the request, and its status is executed.",
+        "AC-10 [integration] That admin's approve records approverId the admin on the request.",
+        "AC-11 [integration] A principal granted approval.decide without comment.create in the project gets 403 approvals.decideForbidden with reason missing-action-permission."
+      ],
+      "tags": [
+        "permissions-p3-approval-assistant",
+        "api",
+        "security",
+        "approvals",
+        "threads"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The production change is an existing scoped detail query over a new relation; unchanged decision services supply eligibility, with strict tests protecting widened decider access and requester attribution."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+        "apps/api/src/approvals/approval-requests.controller.ts",
+        "apps/api/src/approvals/approval-eligibility.ts",
+        "apps/api/src/fleet/assistant/requests/assistant-action-request.domain.ts",
+        "apps/api/test/integration/fleet/assistant-action-detail.integration.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/assistant-thread-decide.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a Project Admin approves another user's pending comment request, then the comment author remains the request's on-behalf-of user.",
+        "pendingActions returns no preview for a thread outside the supplied ThreadScope.",
+        "For a WORKSPACE thread acting in another project, pendingActions returns that request project's slug rather than the thread home project's slug."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/threads/prisma-chat-thread.repository.ts",
+          "reason": "`pendingActions` reads linked pending requests and imports `MAX_PENDING_ACTIONS` from the requests domain module."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/prisma-chat-thread.repository.spec.ts",
+          "reason": "the `PrismaChatThreadRepository.pendingActions (S5b US-004)` block mocks the link and request reads instead of `client.pendingAction.findMany`; `approvalId` is the request id (never null); the scope and order invariants are unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/threads.service.spec.ts",
+          "reason": "`pendingActions` doubles answer request ids in `id` and `approvalId`; the detail shape is unchanged."
+        },
+        {
+          "path": "apps/api/src/fleet/threads/workspace-threads.service.spec.ts",
+          "reason": "`pendingActions` doubles answer request ids in `id` and `approvalId`; the detail shape is unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-action-detail.integration.spec.ts",
+          "reason": "the detail's pendingActions comes from linked pending requests; fixtures seed requests and links; the scope and order invariants are unchanged."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-actions-approve.integration.spec.ts",
+          "reason": "delete: it approves through the assistant_action fleet approval, which is no longer opened; this story's ACs and US-008's pin approving, rejecting, a revoked requester, the widened decider and failed approvals through the approvals route."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-actions-decide.integration.spec.ts",
+          "reason": "delete: it pins the creator-only decide of AssistantActionDecisions, replaced by the engine's eligibility and this story's AC-7 to AC-11."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-008",
+      "title": "Decided thread requests: notes, failures and expiry",
+      "description": "**Goal** \u2014 Integrate real thread decisions, command failures and engine expiry with relay-driven terminal notes, including approved-batch rollback.\n\n**Motivation** \u2014 The design (\u00a74) replaces `PendingAction` and `FleetApproval` with one request model and makes the assistant's tool executors registry entries, so REST (feature 5), MCP and threads share one mechanism.\n\n**Approach** \u2014 Deciding is the engine's `POST /approvals/:id/decisions` (approval-api), unchanged. US-007 pins who may decide and what an approve or reject writes; US-008 pins the notes, the failure outcomes and expiry through the relay and the engine's sweeper.\n\n**An approved command's failure fails the request, rolls back, and keeps no tool text.** `ApprovalExecutionService` runs the command inside its settle transaction, and this transaction manager rolls back the outer transaction when any nested `run()` throws, even if the throw is caught (`PrismaTransactionManager`, SEC-16). So the command rethrows every tool error: `NotFoundAppException`, `ToolActionError` and anything else. The engine settles the request `failed` with `result: { error: 'execution-failed', name }`, and none of the tool's writes persist. On the approved path a batch is all-or-nothing, and the agent's note says `not_found` or `error: <tool> failed`; the tool's own failure sentence (2b1-D2, for example `KODA-1 cannot move from CLOSED to IN_PROGRESS`) is not carried. On the direct path the tool's text still reaches the agent.\n\nOutcome-note contract from US-003: `requestOutcomeNote({ requestId, tool, status, result })` answers, with `<text>` capped at `NOTE_RESULT_MAX` (500) characters plus `\u2026`:\n\n| Request status | Result | Note |\n|:--|:--|:--|\n| `executed` | `{ text }` | `Action <id> (<tool>) was approved and done: <text>` |\n| `failed` | `name` `NotFoundAppException` | `Action <id> (<tool>) was approved but failed: not_found` |\n| `failed` | any other | `Action <id> (<tool>) was approved but failed: error: <tool> failed` |\n| `rejected` | \u2014 | `Action <id> (<tool>) was rejected.` |\n| `expired` | \u2014 | `Action <id> (<tool>) expired without a decision.` |\n| `cancelled` | \u2014 | `Action <id> (<tool>) was cancelled.` |\n\n**Outcome notes are written by an outbox subscriber.** `approval_request_changed` is recorded in the transaction that changed the status, and the relay retries a failed handler. So the note is written once, after the change commits, however the request was settled (decided, executed, swept, cancelled). The note can appear one relay interval after the decision. The subscriber declares `@SystemWriter('system.thread.ingest')`, the key of the other system writer of thread transcript rows (`ThreadIngestHook`), and runs in the relay's own `runAsSystem('outbox')` context (an allowlisted unaudited surface); it does not open `runAsSystemWriter`.\n\nDrive real requests opened by the thread route, approve/reject through POST /api/approvals/:id/decisions, then explicitly dispatch OutboxRelay.dispatchPendingBatch before checking transcript notes. Soft-delete a pending comment's ticket to exercise NotFoundAppException. For koda_link_tickets, propose links to SB-1/SB-2 and soft-delete SB-2 before approval; confirm failure and absence of the earlier SB-1 link. Use the real ApprovalRequestExpirySweeper.tick after expiresAt; obtain this provided-but-not-exported provider with app.get(ApprovalRequestExpirySweeper, { strict: false }).\n\n**Scope** \u2014 In: author assistant-thread-outcomes.integration.spec.ts for the declared decision/subscriber/engine seam and delete assistant-actions-expiry.integration.spec.ts, which pins the removed legacy sweeper. This integration-focused story is an explicit binding spec slice; do not merge it or create a separate validation story. Production behavior comes from US-002/003/005/007 and the existing engine. Out: rebuilding the engine, changing its decide/expiry routes, authoring a second note writer, direct-path partial-write changes (US-006), and deleting the legacy sweeper implementation (US-011). An approved command that fails does not carry the tool's own failure sentence to the agent; the note names `not_found` or `error: <tool> failed`, and the request's `result` holds the error name. US-008 only: an outcome note lags the decision by one outbox relay interval.\n\n**Interface** \u2014 `ApprovalRequestExpirySweeper.tick`; `OutboxRelay.dispatchPendingBatch`; `POST /approvals/:id/decisions`; failed execution result `result: { error: 'execution-failed', name }`. Do not weaken real-DB rollback assertions or count sandbox skips as verification.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] After an approve by the requester and OutboxRelay.dispatchPendingBatch, the thread holds one note 'Action <requestId> (koda_add_comment) was approved and done: comment <id> added to <ref> <path>'.",
+        "AC-2 [integration] After a reject by the requester and the relay, the thread holds one note 'Action <requestId> (koda_add_comment) was rejected.'.",
+        "AC-3 [integration] After the request's ticket is soft-deleted, the requester's approve settles the request failed with result name NotFoundAppException.",
+        "AC-4 [integration] After that failed approve and the relay, the thread holds 'Action <requestId> (koda_add_comment) was approved but failed: not_found'.",
+        "AC-5 [integration] With koda_link_tickets pending for links on tickets SB-1 and SB-2, and SB-2 soft-deleted after the proposal, the approve settles the request failed.",
+        "AC-6 [integration] After that failed batch approve, SB-1 has no link from the batch.",
+        "AC-7 [integration] ApprovalRequestExpirySweeper.tick at a time past the request's expiresAt settles it expired.",
+        "AC-8 [integration] After that expiry and the relay, the thread holds 'Action <requestId> (koda_add_comment) expired without a decision.'."
+      ],
+      "tags": [
+        "permissions-p3-approval-assistant",
+        "api",
+        "security",
+        "outbox",
+        "transactions"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-007"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "This binding integration slice exercises existing route, relay and expiry helpers rather than creating engine logic; security-sensitive approved writes and rollback still warrant strict isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/approvals/approval-request-expiry.sweeper.ts",
+        "apps/api/test/integration/outbox/outbox-relay.integration.spec.ts",
+        "apps/api/src/fleet/assistant/tools/link-tickets-tool.ts",
+        "apps/api/src/fleet/assistant/requests/assistant-action-outcome.subscriber.ts",
+        "apps/api/src/approvals/approval-execution.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/assistant-thread-outcomes.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When a previously allowed requester loses the tool's key before approved execution, then the engine settles the request failed with result.error permission-revoked and writes no tool effect.",
+        "When a failed non-NotFound tool command's outcome is relayed, then its thread note contains 'error: <tool> failed' and not the tool's partial failure sentence."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/test/integration/fleet/assistant-actions-expiry.integration.spec.ts",
+          "reason": "delete: it pins PendingActionExpirySweeper; this story's AC-7 and AC-8 pin expiry through the engine's sweeper and the note."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-009",
+      "title": "MCP write calls through the gate",
+      "description": "**Goal** \u2014 Gate MCP writes as the calling agent's own actions and make MCP koda_get_action read only that actor's requests.\n\n**Motivation** \u2014 A waiting write can only be `human` and only in a thread. An MCP write can only be `none`. The `self` and `agent` modes exist in the model but nothing serves them.\n\n**Approach** \u2014 For an origin of kind `mcp`, `writeTool` keeps the permission check and the preview (whose `not_found`, `invalid_input` and `forbidden` refusals still answer before any request), then calls `gate(tool.key, { projectId, threadId: null, jobId: null, args }, { projectId })` with no transaction, no lock and no link. `executed` answers `result.text`. `pending` answers `pending <requestId>: awaiting approval; do not retry`, outcome `pending`. Errors map as on the direct thread path. The context is the MCP one `executeFor` already opens (actor `AGENT`, origin `mcp`).\n\n`koda_get_action` over MCP reads `findOwnRequest(id, projectId, { type: 'AGENT', id })`. The tool name in the first line is the link's when one exists, otherwise the request's `permissionKey`.\n\nDirect-path error mapping: A thrown `NotFoundAppException` answers `not_found`, a `ToolActionError` its masked text with outcome `error`, anything else `error: <tool> failed` with the stack logged (the mapping `directWrite` applies today).\n\n**A direct write records no extra row.** A `none` write runs inside the gate. Its audit entry, written by the domain service with the gate's `approval` block, is the record. The agent's answer loses the `action <id>` suffix, and `koda_get_action` reads requests only.\n\nUse the existing gate's AGENT/catalog default none unless a policy selects none/self/agent/human. Do not substitute ASSISTANT subject or an onBehalfOf principal for MCP. Preview text is not frozen or persisted for an unlinked MCP request. Format koda_get_action as `action <id> <tool> <status>`, `requested <createdAt>`, optional `decided <decidedAt>`, optional `settled <settledAt>`, then `result:` and fenced result.text only when present; statuses are lowercase.\n\n**Scope** \u2014 In: replace the MCP branch of writeTool and the MCP getActionTool query; remove PENDING_ACTION_REPOSITORY from ActionTools so only the new repository is injected. Add assistant-mcp-gate integration coverage through POST /api/mcp, preserving JSON-RPC/SSE transport and project permission checks. Rewrite executor.direct.spec.ts MCP cases previously mocking approvalModeFor/recordDirect to gate outcomes without an action suffix, deleting row-record-only cases; update tools/action-tools.spec.ts actor-scope reads. Rewrite assistant-direct-action.integration.spec.ts, including its actor-read case using an AGENT policy, mcp-route.integration.spec.ts and permissions-mcp-tools.integration.spec.ts; replace PendingAction assertions/counts with ApprovalRequest assertions/counts and keep existing refusal invariants. Delete assistant-direct-action-record.integration.spec.ts. Out: thread link behavior (US-005/006), deleting the remaining old executor paths/services (US-011), and implementing another agent decide tool (approval-api already supplies koda_decide_approval). US-009 only: an MCP request has no preview and no link row; `koda_list_approvals` and `GET /approvals/:id` show its frozen input. The `pendingApprovals` count of `koda_my_projects` keeps counting fleet approvals only; assistant requests join it with `permissions-p3-approval-fleet`.\n\n**Interface** \u2014 `gate(tool.key, { projectId, threadId: null, jobId: null, args }, { projectId })`; `findOwnRequest(id, projectId, { type: 'AGENT', id })`. `ActionTools` injects only `ASSISTANT_ACTION_REQUEST_REPOSITORY` for action reads after this story.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] koda_add_comment through POST /api/mcp by an agent with no approval policy adds the comment authored by the agent and answers the tool's text with no action line.",
+        "AC-2 [integration] That call opens no request.",
+        "AC-3 [integration] With a project ApprovalPolicy for comment.create on principal type AGENT with mode agent, the call opens one request with actor AGENT/<agentId>, no onBehalfOf, origin mcp and input { projectId, threadId: null, jobId: null, args }.",
+        "AC-4 [integration] That call answers 'pending <requestId>: awaiting approval; do not retry'.",
+        "AC-5 [integration] That call adds no comment.",
+        "AC-6 [integration] That pending request has no AssistantActionRequest row.",
+        "AC-7 [integration] The same call repeated while the request is pending answers the same request id.",
+        "AC-8 [integration] koda_get_action through POST /api/mcp with that request id by the same agent answers first line 'action <requestId> comment.create pending'.",
+        "AC-9 [integration] koda_get_action with that request id by another agent rostered on the project answers not_found.",
+        "AC-10 [integration] koda_add_comment through POST /api/mcp with a ticket ref that does not exist answers not_found from the preview and opens no request.",
+        "AC-11 [unit] When the gate throws a plain Error for an MCP write call, the call answers 'error: koda_add_comment failed' with isError true."
+      ],
+      "tags": [
+        "permissions-p3-approval-assistant",
+        "api",
+        "security",
+        "mcp",
+        "approval-gate"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Reuses the thread gate integration for MCP but changes both agent-owned request lookup and write routing across modules; actor isolation and permission-preserving refusals require strict security tests."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+        "apps/api/src/fleet/assistant/tools/action-tools.ts",
+        "apps/api/src/fleet/assistant/mcp/mcp.controller.ts",
+        "apps/api/test/integration/fleet/mcp-route.integration.spec.ts",
+        "apps/api/src/fleet/assistant/commands/assistant-tool.command.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/fleet/assistant-mcp-gate.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When an MCP preview throws ToolInputError, then the response keeps the tool's invalid_input refusal and no request is opened.",
+        "When an MCP gate execution throws ToolActionError, then the response contains the masked tool text with isError true.",
+        "When an MCP gate execution throws NotFoundAppException, then the response is not_found with isError true."
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+          "reason": "the MCP branch of `writeTool` goes through the gate as in \"MCP write calls\"."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/action-tools.ts",
+          "reason": "`getActionTool` reads the caller's own requests over MCP; `ActionTools` stops injecting the PendingAction repository."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.direct.spec.ts",
+          "reason": "its MCP cases that mock approvalModeFor and assert recordDirect (the recorded row, masking and recording failure) are rewritten to assert the gate's executed answer with no action line, or deleted where they pin the recorded row."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/tools/action-tools.spec.ts",
+          "reason": "`koda_get_action` MCP cases read the caller's own request; status texts are lowercase."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-direct-action.integration.spec.ts",
+          "reason": "its MCP write cases assert the tool's text without an action line and no PendingAction row; its AC-15 `koda_get_action` actor read reads an ApprovalRequest opened under an AGENT policy."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-direct-action-record.integration.spec.ts",
+          "reason": "delete: it pins the PendingAction row recordDirect wrote, which no longer exists; the direct path's audit entry is the record."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/mcp-route.integration.spec.ts",
+          "reason": "the MCP write case answers the tool's text without an action line; every prisma.pendingAction count is replaced by an ApprovalRequest count."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/permissions-mcp-tools.integration.spec.ts",
+          "reason": "MCP write cases answer without an action line; the prisma.pendingAction count is replaced by an ApprovalRequest count; the permission refusal invariants are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-010",
+      "title": "The thread card decides through the approvals route",
+      "description": "**Goal** \u2014 Make the thread action card decide ApprovalRequest ids through a minimal Nuxt composable instead of fleet approvals.\n\n**Motivation** \u2014 The design (\u00a74) replaces `PendingAction` and `FleetApproval` with one request model and makes the assistant's tool executors registry entries, so REST (feature 5), MCP and threads share one mechanism.\n\n**Approach** \u2014 `useApprovalRequests()` (new composable) exposes `decide(id, decision, comment?)`, which posts `{ decision }` (plus `comment` when it is a non-empty string) to `/approvals/<id>/decisions`. `ThreadActionCard.vue` decides through it with `action.id` and no longer uses `useFleetApprovals`.\n\nUse useApi/$api.post so SSR/browser auth, proxy paths and the Nathapp envelope behavior stay unchanged. Preserve preview interpolation, all existing i18n/countdown display, canDecide prop gating and duplicate-submit disabling. Successful decisions hide the card locally; an API rejection toasts extractApiError's message and leaves the card visible with both buttons enabled for retry. Do not use toActionBody's fleet-specific contract for the new decide call.\n\n**Scope** \u2014 In: new composable and its Jest tests, ThreadActionCard wiring, and the existing thread-action-card.spec.ts mock/approve/reject assertions switched from useFleetApprovals to useApprovalRequests. Use distinct id/approvalId fixture values to prove action.id is posted, and retain existing toast/hide/preview/disabled invariants. Out: changing API decision eligibility (US-007), replacing PendingActionDto, or removing the fleet approvals composable/inbox (permissions-p3-web). The fleet approvals inbox stops showing assistant actions: no `assistant_action` approval is opened after US-005. The web inbox's assistant panel stays in the code until `permissions-p3-web`, which lists `ApprovalRequest`s in the unified inbox.\n\n**Interface** \u2014 `useApprovalRequests()` exposes `decide(id, decision, comment?)`; POST `/approvals/<id>/decisions` receives `{ decision }` or `{ decision, comment }` for a non-empty comment. The card calls `useApprovalRequests().decide(action.id, decision)`.\n\nVerification: run the composable/card Jest specs, `bun run --cwd apps/web type-check` and `bun run --cwd apps/web lint`; these are verification commands, not acceptance criteria.",
+      "acceptanceCriteria": [
+        "AC-1 [unit] useApprovalRequests().decide('r1', 'approve') posts { decision: 'approve' } to /approvals/r1/decisions.",
+        "AC-2 [unit] decide('r1', 'reject', 'no') posts { decision: 'reject', comment: 'no' }.",
+        "AC-3 [unit] decide('r1', 'reject', '') posts { decision: 'reject' }.",
+        "AC-4 [unit] Clicking the card's approve button calls useApprovalRequests().decide with the action's id and 'approve'.",
+        "AC-5 [unit] Clicking the card's reject button calls decide with the action's id and 'reject'.",
+        "AC-6 [unit] After a successful decide the card is no longer rendered.",
+        "AC-7 [unit] When decide rejects with an API error, the card shows a toast with extractApiError's message.",
+        "AC-8 [unit] After that failed decide the card is still rendered with both buttons enabled.",
+        "AC-9 [unit] Mounting the card does not call useFleetApprovals."
+      ],
+      "tags": [
+        "permissions-p3-approval-assistant",
+        "web",
+        "security",
+        "threads",
+        "approvals"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Small composable/component integration, but it changes the approval decision submission surface and request-id binding, so the access-control security override applies."
+      },
+      "contextFiles": [
+        "apps/web/components/fleet/threads/ThreadActionCard.vue",
+        "apps/web/composables/useFleetApprovals.ts",
+        "apps/web/composables/useApi.ts",
+        "apps/web/tests/components/thread-action-card.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/web/composables/useApprovalRequests.ts",
+        "apps/web/tests/composables/useApprovalRequests.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/web/components/fleet/threads/ThreadActionCard.vue",
+          "reason": "decides through `useApprovalRequests().decide(action.id, decision)`."
+        },
+        {
+          "path": "apps/web/tests/components/thread-action-card.spec.ts",
+          "reason": "the useFleetApprovals mock becomes a useApprovalRequests mock; approve and reject assert decide with the action id; the toast and hide invariants are unchanged."
+        }
+      ],
+      "workdir": "apps/web",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-011",
+      "title": "Remove PendingAction",
+      "description": "**Goal** \u2014 Delete legacy PendingAction persistence and assistant-only approval machinery after all active paths have moved to requests.\n\n**Motivation** \u2014 `PendingAction` duplicates what `ApprovalRequest` now models (actor, on-behalf-of, mode, approver, status, result, expiry), and opens a second record, an `assistant_action` `FleetApproval`, so the fleet inbox can show it.\n\n**Approach** \u2014 US-011 deletes the assistant side: `PendingAction` (migration `20261105090100_drop_pending_action`, which also deletes `FleetApproval` rows of type `assistant_action`), `pending-action.domain.ts`, `prisma-pending-action.repository.ts`, `assistant-action.service.ts`, `assistant-action-decisions.ts`, `pending-action-expiry.sweeper.ts`, `approval-policy.ts`, `outcome-note.ts`, the executor's approve-path methods and `directWrite`, the system key `system.assistant-action.expire` (with its action-inventory row), and the bookkeeping reasons `assistant.action-proposal`, `assistant.direct-action-record` and `assistant.action-finalize`.\n\nDeletion only, apart from the destructive migration. Remove PendingAction and ChatThread.pendingActions from schema, not the new AssistantActionRequest relation. Drop old providers and ApprovalStoreModule import from AssistantModule. Remove attachActions, checkAction, executeAction, actionScope, proposeWrite, directWrite, approvalFor, approverTier and the ActionProposer field from the executor, and dead approve-path-only types/helpers. Keep registered-command execution, request links, replay protection and AssistantToolCall ledger. The migration deletes only assistant_action FleetApproval rows, keeps both other fleet approval types, and drops the old table without copying old records. Keep historical migrations.\n\n**Scope** \u2014 In: schema/drop migration; AssistantModule/provider and module-spec cleanup; executor/mocks/dead-method removal; catalog.ts system.assistant-action.expire removal; matching row removal in docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv and permissions/__snapshots__/role-matrix.json; system-writer map/count 37 -> 36; removal of the three bookkeeping reasons and EXPECTED_REASON_IDS entries. Keep assistant.action-request-link. Delete actions/assistant-action.service.ts, assistant-action-decisions.ts, pending-action-expiry.sweeper.ts, prisma-pending-action.repository.ts, pending-action.domain.ts, approval-policy.ts and outcome-note.ts.\n\nDelete their corresponding unit specs, actions/action-result-masking.spec.ts and assistant-tool.executor.actor.spec.ts, which only drive removed approve-path methods. Remove checkAction/executeAction/attachActions cases from executor.spec.ts, old approvalModeFor/ActionProposer setup from executor.direct.spec.ts and executor.agent-caller.spec.ts, and old setup/executeAction cases from write-tool-errors.spec.ts. Remove legacy table/repository/sweeper cases from assistant-action-actor.integration.spec.ts while preserving the two rewritten request-actor cases. Remove PendingAction/assistant_action fixtures and creator-only AC-13 from permissions/enforce-fleet-approvals-budgets.integration.spec.ts. Delete assistant-action-actor-migration.integration.spec.ts and pending-action-drop-legacy-columns-migration.integration.spec.ts, whose target table is removed. Remove module tests resolving PendingActionExpirySweeper, AssistantActionDecisions or AssistantActionPort through the old handler.\n\nOut: deleting AssistantActionPort and the fleet-side assistant_action branches/type (US-012); changing any remaining engine behavior; retiring fleet.approval.decide.assistant (permissions-p3-approval-fleet). `fleet.approval.decide.assistant` stays in the catalog and in `PENDING_SURFACE_KEYS`; it is retired with the other fleet approval keys in `permissions-p3-approval-fleet`. Pending `PendingAction` rows are not migrated (design decision 2); the drop discards them.\n\n**Interface** \u2014 Migration `20261105090100_drop_pending_action` discards PendingAction rows and deletes FleetApproval rows where type is `assistant_action`; no replacement public API is introduced. Existing new-engine interfaces from upstream stories are retained.\n\nVerification: exercise the migration against all three pre-drop fleet types, not just db push. Add the migration assertion in a separate scratch-schema describe block in the retained apps/api/test/integration/fleet/assistant-action-actor.integration.spec.ts. Reuse apps/api/test/helpers/migration-schema.ts's scratchSchemaBefore and applyMigration, then drop the scratch schema in teardown; no new test helper or test file is required. Verify deletion completeness through API type-check/lint and remaining unit/integration suites; do not turn those quality gates into ACs. The binding workdir stays apps/api even though the catalog inventory TSV is a root docs artifact.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] Applying migration 20261105090100_drop_pending_action to a database holding one FleetApproval of each of the three types deletes the assistant_action row and keeps the budget_override_required and nax_bash_escalate rows."
+      ],
+      "tags": [
+        "permissions-p3-approval-assistant",
+        "api",
+        "security",
+        "migration",
+        "cleanup"
+      ],
+      "dependencies": [
+        "US-004",
+        "US-006",
+        "US-008",
+        "US-009"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The deletion spans existing DI, authorization/audit inventories and a destructive SQL migration rather than a new architecture; strict isolation protects surviving approval paths and selective cleanup."
+      },
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/fleet/assistant/assistant.module.ts",
+        "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+        "apps/api/src/permissions/catalog.ts",
+        "apps/api/src/action-context/audit-coverage.reasons.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/prisma/migrations/20261105090100_drop_pending_action/migration.sql"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/prisma/schema.prisma",
+          "reason": "removes `PendingAction` and `ChatThread.pendingActions`."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.ts",
+          "reason": "drops the PendingAction providers and the ApprovalStoreModule import."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant.module.spec.ts",
+          "reason": "the tests that resolve PendingActionExpirySweeper, AssistantActionDecisions and AssistantActionPort (the sweeper's decisions handler, and the shared port between ApprovalsService and the decisions handler) are deleted with those providers."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.ts",
+          "reason": "drops attachActions, checkAction, executeAction, actionScope, proposeWrite, directWrite, approvalFor, approverTier and the ActionProposer field."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.spec.ts",
+          "reason": "cases for checkAction, executeAction and attachActions are deleted with those methods."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.actor.spec.ts",
+          "reason": "delete: every case drives checkAction or executeAction, which this story deletes, and it imports pending-action.domain."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.direct.spec.ts",
+          "reason": "the approvalModeFor mock and the remaining ActionProposer double are removed with those modules."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/assistant-tool.executor.agent-caller.spec.ts",
+          "reason": "the remaining ActionProposer double and attachActions call are removed with them."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/write-tool-errors.spec.ts",
+          "reason": "the attachActions setup and the executeAction cases are removed with those methods."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-action-actor.integration.spec.ts",
+          "reason": "the cases pinning the PendingAction table, PrismaPendingActionRepository and PendingActionExpirySweeper are deleted with them; the two request-actor cases stay."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/enforce-fleet-approvals-budgets.integration.spec.ts",
+          "reason": "the PendingAction and assistant_action approval fixtures, their cleanup, and the AC-13 assistant_action creator-only case are deleted; the engine's eligibility is pinned by approval-core and US-007."
+        },
+        {
+          "path": "apps/api/src/permissions/catalog.ts",
+          "reason": "removes `system.assistant-action.expire` from the inventory rows."
+        },
+        {
+          "path": "docs/superpowers/specs/2026-10-18-permission-action-inventory.tsv",
+          "reason": "drops the PendingActionExpirySweeper row (system.assistant-action.expire), which catalog.spec.ts checks against the catalog."
+        },
+        {
+          "path": "apps/api/src/permissions/system-writer.decorator.spec.ts",
+          "reason": "loses the PendingActionExpirySweeper entry; the expected writer count goes from 37 to 36."
+        },
+        {
+          "path": "apps/api/src/permissions/__snapshots__/role-matrix.json",
+          "reason": "loses the rows for system.assistant-action.expire."
+        },
+        {
+          "path": "apps/api/src/action-context/audit-coverage.reasons.ts",
+          "reason": "removes assistant.action-proposal, assistant.direct-action-record and assistant.action-finalize."
+        },
+        {
+          "path": "apps/api/src/action-context/audit-coverage.bookkeeping.spec.ts",
+          "reason": "EXPECTED_REASON_IDS loses the three reasons."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/assistant-action.service.spec.ts",
+          "reason": "delete: it tests assistant-action.service.ts, which this story deletes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/assistant-action-decisions.spec.ts",
+          "reason": "delete: it tests assistant-action-decisions.ts, which this story deletes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/pending-action-expiry.sweeper.spec.ts",
+          "reason": "delete: it tests pending-action-expiry.sweeper.ts, which this story deletes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/prisma-pending-action.repository.spec.ts",
+          "reason": "delete: it tests prisma-pending-action.repository.ts, which this story deletes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/approval-policy.spec.ts",
+          "reason": "delete: it tests approval-policy.ts, which this story deletes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/outcome-note.spec.ts",
+          "reason": "delete: it tests outcome-note.ts, which this story deletes."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/action-result-masking.spec.ts",
+          "reason": "delete: it pins masking in executeAction; the command's masking is US-002's AC."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/assistant-action-actor-migration.integration.spec.ts",
+          "reason": "delete: it pins a PendingAction column migration on a table this story drops."
+        },
+        {
+          "path": "apps/api/test/integration/fleet/pending-action-drop-legacy-columns-migration.integration.spec.ts",
+          "reason": "delete: it pins a PendingAction column drop on a table this story drops."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/assistant-action.service.ts",
+          "reason": "delete."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/assistant-action-decisions.ts",
+          "reason": "delete."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/pending-action-expiry.sweeper.ts",
+          "reason": "delete."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/prisma-pending-action.repository.ts",
+          "reason": "delete."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/pending-action.domain.ts",
+          "reason": "delete; its last importer moved to the requests domain module in US-007."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/approval-policy.ts",
+          "reason": "delete."
+        },
+        {
+          "path": "apps/api/src/fleet/assistant/actions/outcome-note.ts",
+          "reason": "delete."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    },
+    {
+      "id": "US-012",
+      "title": "Remove the assistant fleet approval type",
+      "description": "**Goal** \u2014 Remove the now-unused assistant_action fleet approval type and its port/notification plumbing while retaining bash and budget approvals.\n\n**Motivation** \u2014 `PendingAction` duplicates what `ApprovalRequest` now models (actor, on-behalf-of, mode, approver, status, result, expiry), and opens a second record, an `assistant_action` `FleetApproval`, so the fleet inbox can show it.\n\n**Approach** \u2014 US-012 deletes the fleet side: `assistant-action.port.ts`, `ApprovalCloser.openAssistant` and `AssistantActionAsk`, the `assistant_action` branch of `ApprovalsService.decide` and of `FleetApprovalRequestedSubscriber`, `actionRequestedDraft`, the assistant fields of the fleet approval notification payload, and `assistant_action` in `APPROVAL_TYPES` and the DTO enums derived from it.\n\nDeletion only: also remove AssistantApprovalChange, all AssistantActionPort injections/providers/exports and obsolete assistant-specific comments. FleetApprovalRequestedPayload and parseApprovalRequestedPayload lose requestedById, threadPath and tool for approval asks; do not remove similarly named fields from unrelated notification event types. Delete the requester-only actionRequestedDraft, not approvalDrafts or the bash/budget notification paths. Regenerate root openapi.json using the source DTO enums; never hand-edit generated schema/client code.\n\n**Scope** \u2014 In: delete assistant-action.port.ts and assistant-action.port.spec.ts; remove the assistant branch/injection and cases from approvals.service.ts/spec.ts; remove openAssistant, AssistantActionAsk, AssistantApprovalChange and their cases from approval-closer.ts/spec.ts; remove the port from approval-store.module.ts/spec.ts providers/exports. Remove assistant_action from domain/approval.domain.ts APPROVAL_TYPES and home/dto/home-dashboard.dto.ts's enum, and its obsolete comment in project-fleet-approvals.controller.ts. Drop the fleet notification subscriber branch, payload/parser fields, actionRequestedDraft and corresponding fleet-notification-events.spec.ts, fleet-notification-drafts.spec.ts and fleet-subscribers.spec.ts assistant-only cases (including answered-before handling). The list query and fleet approval DTO derive their enum from APPROVAL_TYPES. Preserve the remaining bash/budget cases. Add the declared 400 query-filter assertion to apps/api/test/integration/permissions/enforce-fleet-approvals-budgets.integration.spec.ts; use a project member holding fleet.approval.read so the request reaches query validation. This story creates no new file.\n\n`openapi.json` \u2014 regenerated with bun run api:export-spec from the repo root; every approval type enum derived from APPROVAL_TYPES (the list query, the fleet approval DTO, the home dashboard DTO) loses assistant_action, and nothing else changes. Follow repository CLI client regeneration rules when affected; never edit apps/cli/src/generated manually.\n\nOut: PendingAction deletion/migration already completed by US-011; moving the remaining fleet approvals to ApprovalRequest (permissions-p3-approval-fleet); removing web inbox assistant panels/policy UI (permissions-p3-web); retiring fleet permission keys. `fleet.approval.decide.assistant` stays in the catalog and in `PENDING_SURFACE_KEYS`; it is retired with the other fleet approval keys in `permissions-p3-approval-fleet`.\n\n**Interface** \u2014 `APPROVAL_TYPES` no longer includes `assistant_action`; `GET /api/projects/:slug/fleet/approvals?type=assistant_action` is rejected by the existing validated type filter with HTTP 400. No new endpoint or decision interface is introduced.\n\nVerification: API type-check/lint, remaining approvals/notification regressions and root `bun run api:export-spec`. Keep workdir apps/api as bound by the story structure, with root openapi.json as its generated contract artifact.",
+      "acceptanceCriteria": [
+        "AC-1 [integration] GET /api/projects/:slug/fleet/approvals?type=assistant_action by a project member answers 400."
+      ],
+      "tags": [
+        "permissions-p3-approval-assistant",
+        "api",
+        "security",
+        "fleet",
+        "openapi",
+        "cleanup"
+      ],
+      "dependencies": [
+        "US-011"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Removes legacy decision routing and cross-module notification/DI contracts and changes validated API enum behavior; authorization-route changes require security isolation."
+      },
+      "contextFiles": [
+        "apps/api/src/fleet/approvals/approvals.service.ts",
+        "apps/api/src/fleet/approvals/approval-closer.ts",
+        "apps/api/src/notifications/fleet/fleet-approval-requested.subscriber.ts",
+        "apps/api/src/fleet/approvals/dto/list-approvals.query.ts",
+        "apps/api/src/fleet/approvals/domain/approval.domain.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/fleet/approvals/assistant-action.port.ts",
+          "reason": "delete."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/assistant-action.port.spec.ts",
+          "reason": "delete: it tests assistant-action.port.ts, which this story deletes."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.service.ts",
+          "reason": "drops the assistant_action branch and AssistantActionPort."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approvals.service.spec.ts",
+          "reason": "the assistant_action decide cases are deleted with the branch."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.ts",
+          "reason": "drops openAssistant, AssistantActionAsk and AssistantApprovalChange."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-closer.spec.ts",
+          "reason": "the openAssistant cases are deleted with the method."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-store.module.ts",
+          "reason": "drops AssistantActionPort."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/approval-store.module.spec.ts",
+          "reason": "its provider and export lists lose AssistantActionPort."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/domain/approval.domain.ts",
+          "reason": "APPROVAL_TYPES loses assistant_action."
+        },
+        {
+          "path": "apps/api/src/fleet/approvals/project-fleet-approvals.controller.ts",
+          "reason": "the comment about the assistant_action ask goes with the type."
+        },
+        {
+          "path": "apps/api/src/home/dto/home-dashboard.dto.ts",
+          "reason": "the approval type enum loses assistant_action."
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-approval-requested.subscriber.ts",
+          "reason": "drops the assistant_action branch."
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-notification-events.ts",
+          "reason": "the approval payload loses requestedById, threadPath and tool."
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-notification-events.spec.ts",
+          "reason": "the assistant payload cases are deleted with the fields."
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-notification-drafts.ts",
+          "reason": "drops actionRequestedDraft."
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-notification-drafts.spec.ts",
+          "reason": "the actionRequestedDraft cases are deleted with it."
+        },
+        {
+          "path": "apps/api/src/notifications/fleet/fleet-subscribers.spec.ts",
+          "reason": "the assistant_action ask cases (AC-10, AC-11/13/14/15 and the answered-before case) are deleted with the branch."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated with bun run api:export-spec from the repo root; every approval type enum derived from APPROVAL_TYPES (the list query, the fleet approval DTO, the home dashboard DTO) loses assistant_action, and nothing else changes."
+        },
+        {
+          "path": "apps/api/test/integration/permissions/enforce-fleet-approvals-budgets.integration.spec.ts",
+          "reason": "gains the AC-1 case: GET /api/projects/:slug/fleet/approvals?type=assistant_action by a project member holding fleet.approval.read answers 400; the existing bash and budget cases are unchanged."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated"
+    }
+  ],
+  "analysis": "Goal and baseline: close #301 by moving the nine assistant write tools, in threads and over MCP, onto the already implemented P3 approval engine. This is an existing-code migration, not a second approval engine or a new policy API. The supplied source-root framework detection is inaccurate: the API uses NestJS/Fastify and Nathapp platform modules, and the web uses Nuxt/Vue, not Express/Next.js (.nax/mono/apps/api/context.md:25; .nax/mono/apps/web/context.md:24). The feature spec is committed at .nax/features/permissions-p3-approval-assistant/spec.md:1. Codebase-memory MCP is not exposed in this session; structural discovery therefore used direct reads and text searches against the supplied execution root. No code or tests were executed during PRD drafting. The nathapp-nestjs-patterns skill is also not exposed among the available tools/files; implementation agents must load it if available before writing NestJS code. Do not edit generated AGENTS.md or .nax/mono context files.\n\nExisting engine and integration seams: apps/api/src/approvals/approval-command.registry.ts:15 defines ApprovalCommand with key, parse, execute and optional toResult; parse must accept its own JSON-serialisable output. Registration rejects non-approvable and duplicate keys (same file:33). AssistantToolRegistry.list() already exposes registration order (apps/api/src/fleet/assistant/assistant-tool.registry.ts:25). AssistantModule already imports ApprovalEngineModule, but its providers still include the old proposal service, decisions handler, repository and expiry sweeper (apps/api/src/fleet/assistant/assistant.module.ts:43,67,86). Add AssistantToolCommands after the synchronous tool-group registrations and prove the actual module.init() seam in its DB-free module spec. Do not inject AssistantToolExecutor into the command provider just to get helpers: exporting userPrincipal/agentPrincipal unchanged avoids reviving the existing proposer/executor late-binding dependency. The nine permission keys are comment.create, ticket.create, ticket.update, ticket.link.add, memory.create, memory.decision.record, fleet.job.dispatch, fleet.job.cancel and fleet.job.requeue; do not register read tools or invent a parallel dispatcher.\n\nApprovalGate.gate already resolves subjects from currentContext, parses input, resolves policy, and either executes under an approval context or opens a request (apps/api/src/approvals/approval-gate.service.ts:39-95). SYSTEM/assistant with onBehalfOf maps to ASSISTANT; USER/AGENT actors use their own subjects. The resolver already defaults ASSISTANT to human and otherwise uses catalog defaults; ASSISTANT policies do not inherit principal role matches (apps/api/src/approvals/approval-policy.resolver.ts:19,30-59,64-71). It is provided but not exported by ApprovalEngineModule (apps/api/src/approvals/approval-engine.module.ts:24-34); US-005 exports the existing provider, not a new resolver instance. The gate's duplicate match is actor/on-behalf-of/key/project/frozen-input hash, with live pending expiry filtering; it is not protected by a unique index (apps/api/src/approvals/approval-gate.service.ts:98-141; apps/api/src/approvals/prisma-approval-request.repository.ts:79). Including jobId in command input intentionally separates identical writes in different turns. Do not add a new deduplication contract or replace the gate's existing one.\n\nExecution and actor attribution: the current executor already opens SYSTEM/assistant on behalf of the job's requester for a thread and the calling principal's own mcp context for MCP (apps/api/src/fleet/assistant/assistant-tool.executor.ts:196-231). Preserve these contexts, the replay mutex, the (jobId, toolCallId) stored-response behavior, permission-before-preview checks, explicit project resolution for WORKSPACE/MCP, and the separate AssistantToolCall ledger (same file:177-189,235-251,275-335,464-476). writeTool currently calls approvalModeFor and requires ActionProposer before preview (same file:362-411); proposeWrite accepts users only and directWrite records a PendingAction with an action-id suffix (same file:415-461). US-005 replaces waiting thread writes, US-006 replaces direct thread writes, and US-009 replaces MCP writes before US-011 deletes the obsolete branches. That staging is intentional; do not delete ActionProposer or MCP's old read in US-005. userPrincipal and agentPrincipal are module-private helpers to export unchanged (same file:570-607). AssistantToolCallRepository currently exposes only findUserActor, findByCall, record and findCallContext (apps/api/src/fleet/assistant/assistant-tool-call.domain.ts:64-71). Add findAgentActor and findProjectSlug to the interface, its Prisma implementation and every typed test double. findUserActor derives global role from role bindings, not User.role (apps/api/src/fleet/assistant/prisma-assistant-tool-call.repository.ts:81-94). Its existing requester helper already loads agent id/slug/status (same file:125-135); reuse the shape without changing requester attribution. The new project lookup must exclude soft-deleted projects.\n\nCommand contract and security: freeze only { projectId, threadId, jobId, args }, not preview, tool name or a serialized principal. The engine owns approval metadata; the command reconstructs its ToolContext from the action context, fresh actor data and project membership. Load the on-behalf-of principal only for SYSTEM/assistant; otherwise use the USER/AGENT actor. Refuse missing principals, disabled users, PAUSED agents and denied membership. Resolve the project slug afresh; use fresh time/fence and PermissionService.can scoped to the action project. ToolContext and error classes are defined at apps/api/src/fleet/assistant/assistant-tool.types.ts:16-49,64-91. Success text is masked and byte-capped at RESULT_CAP_BYTES (16,384; apps/api/src/fleet/assistant/assistant-tool.executor.ts:23). Every command error must propagate unchanged. ApprovalExecutionService already performs input-hash, command, parse and stillHoldsKey prechecks, executes inside a settle transaction, rolls back command failures and settles failed in a separate transaction with { error: 'execution-failed', name } (apps/api/src/approvals/approval-execution.service.ts:45-98,104-170). This differs deliberately from today's executeAction, which catches tool errors and returns partial text. Approved batches become atomic; direct batches retain already committed partial effects and masked ToolActionError text. Never catch a nested transaction failure inside the command: SEC-16 invalidates the outer transaction. Direct calls must not acquire a thread lock or an outer transaction, both to retain partial-write behavior and to avoid inversion with fleet job-then-thread locks. A policy can change between pre-resolution and gate resolution: waiting-to-none may execute inside the waiting transaction; none-to-waiting creates a link without the normal cap. These are specified exceptions, not reasons to hold locks on every write.\n\nPersistence and lifecycle: PendingAction currently owns duplicated approval state and nullable thread/job/call provenance (apps/api/prisma/schema.prisma:1113-1146), and ChatThread has pendingActions at schema.prisma:1218. ApprovalRequest already owns actor/on-behalf-of, frozen input, requiredMode, approver, result, expiry and lowercase statuses (schema.prisma:1621-1668). US-001 adds AssistantActionRequest, keyed by requestId, with only thread provenance/preview/note/delivery marks; add both relation fields and migration 20261105090000_assistant_action_request. Both link foreign keys cascade when their parent is deleted, but deleting a thread must delete only links, not ApprovalRequest. jobId, toolCallId and note/delivery message ids remain bookkeeping strings, not additional foreign keys. The new repository follows AbstractPrismaRepository with all four mappers and a private DI symbol (.nax/rules/api-repositories.md:12-51). Use generated Prisma client types, never @prisma/client, with transaction-scoped PrismaService access. Existing lockThread and insertSystemNote are the exact patterns to retain (apps/api/src/fleet/assistant/actions/prisma-pending-action.repository.ts:81-85,175-179). allocateThreadSeq already handles nextSeq lagging older messages and requires the caller's thread lock (apps/api/src/fleet/threads/domain/chat-thread.domain.ts:34-40). Waiting writes lock thread, then count pending links before calling the gate's duplicate lookup, then insert one missing link inside bookkeeping('assistant.action-request-link'). A new link gets one post-commit thread frame. The cap stays 10. A repeated toolCallId remains an executor replay; a different toolCallId with identical parsed input uses the gate duplicate while below the cap.\n\nReads and delivery dependencies: koda_get_action currently depends on two PendingAction scope queries and renders uppercase status/string result (apps/api/src/fleet/assistant/tools/action-tools.ts:84-111). US-005 changes thread reads to request-plus-link while temporarily retaining the MCP repository dependency; US-009 changes MCP to findOwnRequest for AGENT actor/project and removes the old injection. Render lowercase statuses, requested/optional decided/optional settled lines, and fence only a present result.text. For unlinked MCP requests use permissionKey instead of a tool display name. Scope filters must be part of the query: another thread/project/agent gets the same not_found as a missing id. PrismaChatThreadRepository.pendingActions currently filters via scopeWhere and sorts oldest-first with the cap, then reads each action's own project slug (apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:131-148). Preserve that WORKSPACE security fence when switching to linked pending requests in US-007. Its id and approvalId must both become the request id; keep PendingActionDto shape and its existing description. Current outcome delivery reads PendingAction and marks only the first byte-fitting notes on the new message (same file:429-445); job assignment rebuilds from deliveredMessageId, not stored transcript notes (apps/api/src/fleet/jobs/prisma-fleet-job.repository.ts:256-265). Move both reads together in US-004 so send and every assignment/requeue rebuild exactly the same content. Keep deliveryText's byte cap and MAX_DELIVERED_NOTES=20; only the deliverable statuses change to executed, failed, rejected, expired, cancelled (apps/api/src/fleet/assistant/actions/outcome-delivery.ts:2-32). Delivery derives from settled requests even if the asynchronous transcript note has not yet arrived.\n\nOutbox notes: ApprovalRequestEvents already records a content-free approval_request_changed payload in the status transaction; subscribers load result from queries instead of event payload (apps/api/src/approvals/approval-request-events.ts:6-65). ApprovalRequestQueries.findById is an unscoped system-reader seam (apps/api/src/approvals/approval-request.queries.ts:43-46). Mirror onModuleInit registration and malformed-payload warning from apps/api/src/live/approval-request-live.subscriber.ts:13-25, and the writing-subscriber pattern at apps/api/src/notifications/approvals/approval-requested.subscriber.ts:12-36. Do not copy the live subscriber's catch-all best-effort error swallowing: DB errors in the new note writer must reach the relay so it retries. FanOutPublisher runs every handler inside runAsSystem('outbox') and retries all handlers after any aggregate failure (apps/api/src/outbox/fan-out-publisher.ts:23-34,70-93). Declare @SystemWriter('system.thread.ingest') but do not call runAsSystemWriter. Under one transaction lock thread then link, check notedAt, re-read request, allocate/insert note and markNoted; only after commit publish message then thread frames. Ignore nonterminal statuses, missing links, null thread ids and deleted threads. Transcript note text must come from requestOutcomeNote, including generic failures except NotFoundAppException and a 500-character-plus-ellipsis result cap. Keep note bookkeeping separate from delivery bookkeeping. System-writer expectations go 36 -> 37 in US-003 and back to 36 after deleting PendingActionExpirySweeper in US-011 (apps/api/src/permissions/system-writer.decorator.spec.ts:46,103).\n\nDecision route and compatibility: use the existing POST /approvals/:id/decisions route; the controller checks visibility and delegates to ApprovalDecisionService (apps/api/src/approvals/approval-requests.controller.ts:67-88). Do not add a thread-specific decide endpoint. decideEligibility refuses nonprincipals, checks own/on-behalf-of permissions, scoped decide grants and mode tier in order; on-behalf-of contributes human even for an agent requester (apps/api/src/approvals/approval-eligibility.ts:48-107). The requester may decide without a separate approval.decide grant when still holding the action, while Project Admins and other eligible deciders may decide with the engine's permissions. Revoked action permission yields 403 approvals.decideForbidden/missing-action-permission and preserves pending status. Preserve requester authorship when a different admin approves. Expiry uses the existing engine sweeper, whose tick is public but whose provider is intentionally not exported (apps/api/src/approvals/approval-request-expiry.sweeper.ts:16-35,77-79; approval-engine.module.ts:21). Resolve it in integration tests using app.get(ApprovalRequestExpirySweeper, { strict: false }). Outcome notes appear after relay dispatch, not synchronously with decisions.\n\nWeb seam: ThreadActionCard currently imports useFleetApprovals and posts action.approvalId with a fleet body, while preserving a local decided flag, in-flight disabling, countdown and API-error toast (apps/web/components/fleet/threads/ThreadActionCard.vue:4,25-49). useFleetApprovals is tied to project/admin fleet routes and mutation counters (apps/web/composables/useFleetApprovals.ts:7-11,43-49); do not repurpose it or delete the fleet inbox. Add a minimal Nuxt-native useApprovalRequests using useApi's $api.post, whose wrapper already unwraps Nathapp envelopes and exposes extractApiError (apps/web/composables/useApi.ts:1-94). Post { decision } plus non-empty comment to /approvals/<id>/decisions and switch the card to action.id, with no call to useFleetApprovals. Preserve canDecide prop handling, interpolation-only previews, i18n, expiry display, disabled-while-submitting, hide-on-success and re-enabled-on-failure behavior; this feature does not widen the page's UI eligibility computation. Existing mount tests deliberately use different id and approvalId values, useful for pinning the new seam (apps/web/tests/components/thread-action-card.spec.ts:23-31,42-67,110-144). No layout/navigation/tokens changes or policy editor belong here.\n\nRemoval blast radius: the old AssistantActionService late-binds executor.attachActions and opens an assistant_action FleetApproval as a second record (apps/api/src/fleet/assistant/actions/assistant-action.service.ts:41-88). Delete old assistant model/code only after every caller/read/delivery path has moved. PendingAction import dependents include executor/specs, action-tools/specs, chat-thread repository/specs, fleet-job repository/assign specs and actions/* specs. Remove the seven obsolete implementation files, their tests, executor actor approve-path tests and the two legacy PendingAction migration tests in US-011; retain rewritten request-actor tests. Drop the system.assistant-action.expire catalog inventory entry (apps/api/src/permissions/catalog.ts:336), matching docs TSV and role-matrix snapshot, and the three obsolete bookkeeping reasons (apps/api/src/action-context/audit-coverage.reasons.ts:24-26). Keep the new assistant.action-request-link reason and the tool-call ledger. Migration 20261105090100_drop_pending_action must delete only FleetApproval rows of type assistant_action and drop PendingAction without copying rows; retain budget_override_required and nax_bash_escalate. Preserve historical migrations.\n\nUS-012 then removes AssistantActionPort from ApprovalStoreModule/providers/tests and ApprovalsService, its assistant_action decision branch (apps/api/src/fleet/approvals/approvals.service.ts:19,78,102), ApprovalCloser.openAssistant/AssistantActionAsk/AssistantApprovalChange (apps/api/src/fleet/approvals/approval-closer.ts:48-64,153-165), and fleet notification producer/consumer-only fields/draft. FleetApprovalRequestedSubscriber currently branches to a requester-only draft and must lose just that branch (apps/api/src/notifications/fleet/fleet-approval-requested.subscriber.ts:7-23,49-59); FleetApprovalRequestedPayload and parser contain requestedById/threadPath/tool only for it (apps/api/src/notifications/fleet/fleet-notification-events.ts:27-31,102-106). APPROVAL_TYPES currently has three entries (apps/api/src/fleet/approvals/domain/approval.domain.ts:4); ListApprovalsQuery validates against that constant (apps/api/src/fleet/approvals/dto/list-approvals.query.ts:8). Remove assistant_action from derived DTO enums including home-dashboard.dto.ts:23, not unrelated bash/budget behavior or the deferred fleet permission key. Regenerate committed root openapi.json; root scripts provide api:export-spec and generate (package.json:23-26). Follow repository CLI regeneration rules if contract changes affect the CLI; never manually edit generated clients. Binding workdirs remain apps/api even for US-011's root inventory TSV and US-012's root OpenAPI artifact.\n\nRegression/test implementation map: retain all original domain-write and permission-refusal invariants while replacing proposal fixtures/approval calls. US-002 updates AssistantToolCallRepository doubles in executor.spec, executor.actor.spec, executor.direct.spec, executor.agent-caller.spec, executor.caller.spec, executor.workspace.spec and tools/kb-tools.spec, tools/workspace-tools.spec without changing their assertions. US-004 updates outcome-delivery.spec, chat-thread repository specs, job find-thread-assign specs, assistant-action-delivery and assistant-action-send-delivery integration fixtures. US-005 changes executor/write-tool-errors/action-tools/agent-caller unit tests; runner action-tools and actor tests; actor-approve; add-memory, cancel-job, create-tickets, dispatch-job, link-tickets, record-decision, requeue-job and update-ticket integration specs; permissions-assistant-tools; audit-fleet-assistant-actions; and the legacy endpoint.e2e assistant decide block. Replace pendingAction assertions and uppercase statuses, and approved partial-batch expectations with failed request plus full rollback. Delete assistant-actions-propose there. US-007 updates thread-detail/service fixtures and deletes assistant-actions-approve/decide; US-008 deletes assistant-actions-expiry after covering real engine expiry. US-009 rewrites executor.direct/action-tools tests and assistant-direct-action, mcp-route, permissions-mcp-tools integration specs; deletes assistant-direct-action-record. US-011 removes obsolete tests/imports/fixtures, including enforce-fleet-approvals-budgets creator-only cases; US-012 removes corresponding port/closer/store/service and fleet-notification tests, retaining nonassistant regressions. Confirmed existing route fixtures at apps/api/test/integration/fleet/assistant-action-tools.integration.spec.ts:19-31,55-68 and mcp-route.integration.spec.ts:15-24,41-55 drive real runner fencing and MCP JSON-RPC/SSE respectively. New integration files listed per story supplement these rewrites rather than replacing their invariants.\n\nVerification and rollout: keep twelve exact stories and dependencies, including US-008's declared integration-focused slice and the two removal slices. US-001 and US-002 are independent foundations; subscriber -> delivery and command/link -> waiting -> direct/decide -> outcomes/MCP/web converge before deletion. All authorization-sensitive stories use three-session-tdd; the new note subscriber uses three-session-tdd-lite for its transactional lifecycle, and the existing delivery-query substitution uses tdd-simple. API module/DI tests stay DB-free under src/**/*.spec.ts with cleanup and GlobalStubsModule, as in apps/api/src/fleet/assistant/assistant.module.spec.ts:21-31; never move them into integration. DB-backed tests use canRunDbTests(), KODA_DB_TESTS=1 and run outside NAX_SANDBOXED=1; skipped sandbox runs are not verification (.nax/mono/apps/api/context.md:185-193). Use binding-based permission fixtures, not legacy membership rows (.nax/rules/api-testing.md:20), fixtureDb/withTestActor for guarded writes, createTestPrismaClient/createPgAdapter for clients, grantKeys from approval fixtures, and real OutboxRelay from @nathapp/nestjs-outbox, not a nonexistent local outbox-relay.ts. apps/api/test/integration/outbox/outbox-relay.integration.spec.ts:12,68-80 demonstrates committed record -> dispatchPendingBatch -> handler. Test migrations explicitly: db push resets used by most tests do not prove migration cleanup. Run bun run db:generate after schema edits, scoped unit/integration tests, API type-check/lint, web Jest/type-check/lint, then repo-root spec export. Do not run concurrent DB-mode suites against the same resettable test DB. No validation gate is an acceptance criterion. Rollout deliberately discards old pending rows, removes direct action-id suffixes and uppercase action statuses, stops showing assistant asks in the fleet inbox and changes agent-created thread writes from immediate to pending by default; communicate these intentional compatibility breaks. Do not migrate data, extend fleet counts, implement the unified inbox/policy pages or gate REST/CLI domain writes in this feature.\n\nRefine-pass preservation ledger (static review, not executed verification): all 111 explicit spec criteria remain in their original stories. Enumerated original ids: US-001 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14]; US-002 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15]; US-003 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13]; US-004 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7]; US-005 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14]; US-006 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7]; US-007 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11]; US-008 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8]; US-009 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11]; US-010 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9]; US-011 [AC-1]; US-012 [AC-1]. Assertions retain their qualifying scope/conditions, including the other-thread pending request in US-001 AC-2, existing user/agent records in US-001 AC-3 and US-002 AC-14, same-error identity in US-002 AC-12, unchanged toResult in US-002 AC-13, unchanged user text and repeated assignment in US-004 AC-4/7, and same-input/different-call-id/while-pending conditions in US-005 AC-7. No deprecated file-check tags occur. US-003 AC-13 keeps the complete note prefix rather than interpreting the spec's suffix example as the entire return string. US-005 AC-7 spells out the standard pending-answer suffix, preserving its original request-id reuse assertion.\n\nRefine-pass observability and negative paths: US-001 AC-4/6/10/11/14; US-002 AC-4/5/6/10/12; US-003 AC-4/5/6/8/9/10/11; US-004 AC-5; US-005 AC-6/10/12/14/15; US-006 AC-4/5/6/8; US-007 AC-7/8/11; US-008 AC-3/4/5/6; US-009 AC-9/10/11; US-010 AC-7/8; US-011 AC-2; US-012 AC-1 provide negative-path assertions. The draft's added US-005 AC-15 and US-006 AC-8 implement explicit failure-table behavior. This pass adds US-011 AC-2 to observe the removed table's undefined_table failure, and US-012 AC-2 to protect the retained type filters; these are audit hardening, not claimed original spec criteria. The PRD now contains 115 acceptanceCriteria in total. US-004 AC-2/4 now name the existing THREAD_INPUT payload.text observation instead of suggesting a returned handoff field: sendMessage returns { message, jobId, deduplicated } and keeps message.content plain, while a new-turn job reconstructs initialMessage.text (apps/api/src/fleet/threads/prisma-chat-thread.repository.ts:348-411). Existing test/helpers/migration-schema.ts:30-63 provides applyMigration/scratchSchemaBefore for US-011 without creating an invented helper or a new migration test file. Test the underlying PostgreSQL failure when Prisma wraps a raw SQL error. US-012's query tests must grant fleet.approval.read before exercising validation because ProjectMembershipGuard/RequiresGuard precede the query handler (apps/api/src/fleet/approvals/project-fleet-approvals.controller.ts:34-43).\n\nRefine-pass regression and scope review: sequence allocation, parser/actor mapping and error identity, idempotent note handling, once-only send/repeatable assign, scoped action reads, direct-path partial errors, requester authorship, approved rollback, MCP immediate writes and card toast/hide behavior all remain asserted rather than being replaced by test-existence gates. US-011 AC-1 retains both nonassistant fleet rows and AC-2 proves old storage is gone; US-012 AC-2 protects both remaining filters. All spec-recommended context files are included within the five-file limits. Files created by upstream stories are context only through the binding dependency closure; no story lists its own output as context. All twelve ids, workdirs and binding dependency arrays are unchanged. Complexity is reduced where the existing engine/repository patterns already solve the hard problem: US-001/004/006/007/008 are medium, US-002/005/009/011 are complex rather than expert. US-004 uses tdd-simple for two existing query substitutions; strict three-session-tdd remains on authorization-sensitive slices and US-003 retains three-session-tdd-lite for transactional outbox idempotency. No new approval engine, transport or additional test-helper abstraction is required.\n\nRefine-pass out-of-scope ledger: all 15 feature-level items are retained verbatim and separately in outOfScope: (1) fleet inbox transition/deferred web panel removal, (2) fleet-only my-project counts, (3) no new requester notification, (4) retained fleet.approval.decide.assistant key, (5) no PendingAction data copy, (6) retained DTO description, (7) generic approved-failure text, (8) request survives deleted thread/no threadsEnabled decide check, (9) later fleet/gate/web features, (10) US-005 concurrent cap race test exclusion, (11) US-007 concurrent-approve engine behavior, (12) US-008 relay latency, (13) US-009 no MCP preview/link, (14) assistant cannot decide, (15) no context/rules edits. Relevant boundaries are echoed in story Scope Out text, including deleted-thread retention in US-001/007 and the fleet inbox boundary in US-005/010. The spec has no additional story-local Out of scope block under acceptance criteria to hoist or relocate. Descriptions retain the original design contracts, with clarification only of staging, existing observation surfaces and retained test placement; no AC is contradicted by a deferred-scope statement.",
+  "outOfScope": [
+    "The fleet approvals inbox stops showing assistant actions: no `assistant_action` approval is opened after US-005. The web inbox's assistant panel stays in the code until `permissions-p3-web`, which lists `ApprovalRequest`s in the unified inbox.",
+    "The `pendingApprovals` count of `koda_my_projects` keeps counting fleet approvals only; assistant requests join it with `permissions-p3-approval-fleet`.",
+    "Notifying the thread's requester of a new assistant request is not added: the thread card and the live `thread` frame show it, and approval-api's notification goes to users holding `approval.decide`.",
+    "`fleet.approval.decide.assistant` stays in the catalog and in `PENDING_SURFACE_KEYS`; it is retired with the other fleet approval keys in `permissions-p3-approval-fleet`.",
+    "Pending `PendingAction` rows are not migrated (design decision 2); the drop discards them.",
+    "The `PendingActionDto.approvalId` description keeps its wording; the DTO is replaced by the unified inbox's types in `permissions-p3-web`.",
+    "An approved command that fails does not carry the tool's own failure sentence to the agent; the note names `not_found` or `error: <tool> failed`, and the request's `result` holds the error name.",
+    "A pending request whose thread is deleted keeps its `ApprovalRequest` (only the link cascades); it can still be decided or expire. Deciding does not check `threadsEnabled` (the engine's decide route has no thread knowledge).",
+    "Moving `FleetApproval` (bash asks, budget overrides) onto `ApprovalRequest` is `permissions-p3-approval-fleet`; gating REST and CLI writes is `permissions-p3-approval-gate`; the policy pages are `permissions-p3-web`.",
+    "US-005 only: two concurrent waiting writes of one thread are serialised by the thread row lock, so they cannot both take the last cap slot; the concurrent race itself is not tested here (the lock is the 2a-D4 one, whose concurrency test is deleted with the propose service).",
+    "US-007 only: two concurrent approves of one request are serialised by the engine's `lockById` (approval-core); the loser answers 409 `approvals.notPending`.",
+    "US-008 only: an outcome note lags the decision by one outbox relay interval.",
+    "US-009 only: an MCP request has no preview and no link row; `koda_list_approvals` and `GET /approvals/:id` show its frozen input.",
+    "The assistant never decides requests: `SYSTEM/assistant` is refused by decide eligibility (approval-core).",
+    "Editing `.nax/rules/` or `.nax/mono/` context files is not part of any story."
+  ],
+  "routingProfile": "native-codex"
+}
