@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-core",
   "branchName": "feat/permissions-p3-approval-gate-core",
   "createdAt": "2026-11-08T00:00:00.000Z",
-  "updatedAt": "2026-10-28T04:43:50.840Z",
+  "updatedAt": "2026-10-28T04:54:01.605Z",
   "userStories": [
     {
       "id": "US-001",
@@ -704,14 +704,17 @@
         "US-006",
         "US-008"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "expert",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Nested approvals require strict authorization order and separate transaction/failure ownership under concurrent cancellation, expiry and execution."
+        "reasoning": "Nested approvals require strict authorization order and separate transaction/failure ownership under concurrent cancellation, expiry and execution.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
       },
       "contextFiles": [
         "apps/api/src/approvals/approval-route.commands.ts",
@@ -739,7 +742,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "c2d72b07cfb14a1f73abbbc0077f3215a3c82b75"
     },
     {
       "id": "US-010",
