@@ -1,4 +1,8 @@
 import { Controller, Delete, Get, Param, Put, UseGuards } from '@nestjs/common';
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { TICKET_WATCH_ROUTE_VARIANTS } from './ticket-watch-route.commands';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { ForbiddenAppException, JsonResponse } from '@nathapp/nestjs-common';
@@ -31,7 +35,7 @@ function caller(principal: KodaPrincipal): UserPrincipal {
 @Controller('projects/:slug/tickets/:ref')
 @UseGuards(ProjectMembershipGuard, RequiresGuard)
 export class TicketWatchController {
-  constructor(private readonly service: TicketWatchService) {}
+  constructor(private readonly service: TicketWatchService, private readonly routeGate: ApprovalRouteGate) {}
 
   @Get('watchers')
   @Requires('ticket.watch.read')
@@ -44,22 +48,32 @@ export class TicketWatchController {
   }
 
   @Put('watch')
+  @ApprovalGated()
   @Requires('ticket.watch.set')
   @ApiOperation({ summary: 'Watch this ticket (receive its activity notifications)' })
   @ApiResponse({ status: 200, type: WatchStateDto })
   @ApiResponse({ status: 403, description: 'ticket.watch.set is missing, or the caller is not a user' })
   @ApiResponse({ status: 404, description: 'Ticket not found' })
   async watch(@Param('ref') ref: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.service.watch(ctx.project.id, ref, caller(principal).id));
+    caller(principal);
+    const input = { projectId: ctx.project.id, ref };
+    const outcome = await this.routeGate.run<WatchStateDto>({ key: 'ticket.watch.set', variant: TICKET_WATCH_ROUTE_VARIANTS.set, projectId: ctx.project.id, input });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Delete('watch')
+  @ApprovalGated()
   @Requires('ticket.watch.unset')
   @ApiOperation({ summary: 'Stop watching this ticket; assignments and mentions still notify' })
   @ApiResponse({ status: 200, type: WatchStateDto })
   @ApiResponse({ status: 403, description: 'ticket.watch.unset is missing, or the caller is not a user' })
   @ApiResponse({ status: 404, description: 'Ticket not found' })
   async unwatch(@Param('ref') ref: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.service.unwatch(ctx.project.id, ref, caller(principal).id));
+    caller(principal);
+    const input = { projectId: ctx.project.id, ref };
+    const outcome = await this.routeGate.run<WatchStateDto>({ key: 'ticket.watch.unset', variant: TICKET_WATCH_ROUTE_VARIANTS.unset, projectId: ctx.project.id, input });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 }
