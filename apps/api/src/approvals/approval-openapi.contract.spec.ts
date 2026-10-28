@@ -41,6 +41,10 @@ const gatedOperations = [
   ['delete', '/api/projects/{slug}'],
   ['delete', '/api/agents/{slug}'],
   ['delete', '/api/admin/skills/sources/{id}'],
+  ['delete', '/api/projects/{slug}/webhooks/{id}'],
+  ['delete', '/api/webhooks/{id}'],
+  ['delete', '/api/projects/{slug}/vcs'],
+  ['post', '/api/projects/{slug}/vcs/test'],
 ] as const;
 
 const reindexOperation = ['post', '/api/projects/{slug}/knowledge/repos/{repoId}/reindex'] as const;
