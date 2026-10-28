@@ -19,7 +19,8 @@ describe('KbDocumentDeletion', () => {
   const audit = { audited: vi.fn(async (fn: () => Promise<unknown>, entries: () => unknown) => { await fn(); return entries(); }) };
   let service: KbDocumentDeletion;
   let root: string;
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
+  let journal: KbDeletionJournal;
+  afterEach(() => { journal.onModuleDestroy(); rmSync(root, { recursive: true, force: true }); });
   beforeEach(() => {
     vi.resetAllMocks();
     rag.withDocumentWriteLock.mockImplementation(async (projectId, fn) => fn({
@@ -33,7 +34,7 @@ describe('KbDocumentDeletion', () => {
     permissions.can.mockResolvedValue({ allowed: true });
     audit.audited.mockImplementation(async (fn, entries) => { await fn(); return entries(); });
     root = mkdtempSync(join(tmpdir(), 'koda-kb-service-'));
-    const journal = new KbDeletionJournal({ lancedbPath: root, inMemoryOnly: false } as IRagConfig, rag as unknown as RagService, audit as unknown as AuditRecorder);
+    journal = new KbDeletionJournal({ lancedbPath: root, inMemoryOnly: false } as IRagConfig, rag as unknown as RagService, audit as unknown as AuditRecorder);
     service = new KbDocumentDeletion(rag as unknown as RagService, permissions as unknown as PermissionService, audit as unknown as AuditRecorder, journal);
   });
   it('AC-8: preflights every creator in both user sources', async () => {

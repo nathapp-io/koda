@@ -1,9 +1,9 @@
 import { Inject, Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { randomUUID } from 'node:crypto';
-import { closeSync, fsyncSync, mkdirSync, openSync, opendirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import type { Dir } from 'node:fs';
+import { closeSync, fsyncSync, mkdirSync, openSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { RAG_CFG, type IRagConfig } from '../config/rag.config';
 import { currentContext, NO_APPROVAL, runWithActionContext, type ActionContext } from '../action-context/action-context';
 import { AuditRecorder, type AuditRecordInput } from '../audit/audit-recorder.service';
@@ -23,19 +23,21 @@ interface DeleteIntent {
   context: ActionContext;
   sources: SourceIntent[];
 }
+interface CommittedIntent { sequence: number; payload: string }
 
 /**
- * Write-ahead intents live beside LanceDB on its persistent volume. Once fsynced, an intent is
- * committed to deleting those immutable row ids, never a future replacement of the same source.
- * The audit insert uses a stable primary key. Receipts survive both audit failure and rollback of
- * an enclosing approval transaction; only an independent recovery transaction may remove them.
+ * Only COMMITTED SQLite rows authorize recovery. A payload file or an uncommitted INSERT is
+ * never a commit witness. SQLite's rollback journal owns crash/failed-fsync rollback; recovery
+ * does not depend on our successfully renaming, deleting or fsyncing a rejected preparation.
+ * Stable audit ids protect against crash after the Postgres audit commit but before acknowledgment.
  */
 @Injectable()
 export class KbDeletionJournal implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(KbDeletionJournal.name);
   private readonly directory: string;
+  private database?: DatabaseSync;
   private recovering = false;
-  private cursor?: Dir;
+  private afterSequence = 0;
   private stopped = false;
 
   constructor(
@@ -64,35 +66,42 @@ export class KbDeletionJournal implements OnApplicationBootstrap, OnModuleDestro
     return intent;
   }
 
-  private persist(intent: DeleteIntent): void {
+  private ledger(): DatabaseSync {
+    if (this.stopped) throw new Error('KB deletion journal is closed');
+    if (this.database) return this.database;
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
-    // Persist the directory entry as well on the first operation after installation.
+    // Directory preparation is not commitment. If this fails there is no new ledger transaction.
     const parent = openSync(dirname(this.directory), 'r');
     try { fsyncSync(parent); } finally { closeSync(parent); }
-    const target = join(this.directory, `${intent.id}.json`);
-    const temp = `${target}.tmp`;
-    const fd = openSync(temp, 'wx', 0o600);
-    try { writeFileSync(fd, JSON.stringify(intent)); fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(temp, target);
+    const database = new DatabaseSync(join(this.directory, 'committed.sqlite'));
     try {
-      this.syncDirectory();
+      database.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=EXTRA; PRAGMA fullfsync=ON');
+      database.exec('CREATE TABLE IF NOT EXISTS intents (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, payload TEXT NOT NULL)');
+      this.database = database;
+      return database;
+    } catch (error) { database.close(); throw error; }
+  }
+
+  private persist(intent: DeleteIntent): void {
+    const database = this.ledger();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      database.prepare('INSERT INTO intents (id, payload) VALUES (?, ?)').run(intent.id, JSON.stringify(intent));
+      // EXTRA also syncs the rollback-journal unlink; returning from COMMIT is the durable authorization point.
+      // Until then, both other connections and a restart see no intent, even if cleanup fails.
+      database.exec('COMMIT');
     } catch (error) {
-      // The candidate was published but preparation never committed. Quarantine it before
-      // reporting failure so neither this process nor a restarted sweeper can execute it.
-      // Keep the failed preparation for diagnosis, not in the replayable .json namespace.
-      try {
-        renameSync(target, `${target}.aborted`);
-        this.syncDirectory();
-      } catch (abortError) {
-        throw new AggregateError([error, abortError], 'KB deletion preparation could not be durably aborted');
+      try { database.exec('ROLLBACK'); }
+      catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'KB deletion intent transaction failed');
+      } finally {
+        // Closing abandons any remaining transaction. Native recovery, not a quarantine rename,
+        // discards uncommitted state if the process exits before this cleanup can run.
+        this.database = undefined;
+        database.close();
       }
       throw error;
     }
-  }
-
-  private syncDirectory(): void {
-    const fd = openSync(this.directory, 'r');
-    try { fsyncSync(fd); } finally { closeSync(fd); }
   }
 
   async onApplicationBootstrap(): Promise<void> { await this.recover(); }
@@ -102,46 +111,34 @@ export class KbDeletionJournal implements OnApplicationBootstrap, OnModuleDestro
     if (this.recovering || this.stopped) return;
     this.recovering = true;
     try {
-      mkdirSync(this.directory, { recursive: true, mode: 0o700 });
-      this.cursor ??= opendirSync(this.directory);
-      // Continue this pass on the next tick, even when every attempted receipt fails. Never
-      // read ahead beyond the batch: doing so would silently skip the 101st receipt.
-      for (let scanned = 0; scanned < 100 && !this.stopped; scanned++) {
-        const file = this.cursor.readSync();
-        if (file === null) {
-          this.closeCursor();
-          break;
-        }
-        if (!file.isFile() || !file.name.endsWith('.json')) continue;
+      const database = this.ledger();
+      // Keyset pagination advances past failures, without retaining directory handles or names.
+      const batch = database.prepare('SELECT sequence, payload FROM intents WHERE sequence > ? ORDER BY sequence LIMIT 100')
+        .all(this.afterSequence) as unknown as CommittedIntent[];
+      for (const row of batch) {
+        if (this.stopped) break;
+        this.afterSequence = row.sequence;
         try {
-          const path = join(this.directory, file.name);
-          const intent = this.parse(readFileSync(path, 'utf8'));
+          const intent = this.parse(row.payload);
           await this.rag.withDocumentWriteLock(intent.projectId, async session => {
             for (const source of intent.sources) await session.deleteRows(source.ids);
             await runWithActionContext(intent.context, () => this.audit.audited(async () => undefined, () => intent.sources.map(source => source.audit)));
           }, { recovery: true });
-          // audited() has committed here: this sweep has no enclosing request transaction.
-          unlinkSync(path);
-          this.syncDirectory();
+          // The independent Postgres audit transaction has committed. Lost acknowledgments retry
+          // this exact intent with the same audit ids; they never widen to replacement row ids.
+          if (!this.stopped) database.prepare('DELETE FROM intents WHERE sequence = ?').run(row.sequence);
         } catch (error) {
-          this.logger.error(`KB deletion recovery failed for ${file.name}`, error instanceof Error ? error.stack : String(error));
+          this.logger.error(`KB deletion recovery failed for receipt ${row.sequence}`, error instanceof Error ? error.stack : String(error));
         }
       }
-    } catch (error) {
-      this.closeCursor();
-      throw error;
+      if (batch.length < 100) this.afterSequence = 0;
     } finally { this.recovering = false; }
-  }
-
-  private closeCursor(): void {
-    const cursor = this.cursor;
-    this.cursor = undefined;
-    cursor?.closeSync();
   }
 
   onModuleDestroy(): void {
     this.stopped = true;
-    this.closeCursor();
+    this.database?.close();
+    this.database = undefined;
   }
 
   private parse(raw: string): DeleteIntent {
@@ -154,5 +151,4 @@ export class KbDeletionJournal implements OnApplicationBootstrap, OnModuleDestro
     }
     return value;
   }
-
 }

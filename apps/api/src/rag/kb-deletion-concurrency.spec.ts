@@ -42,5 +42,5 @@ it.each(['doc', 'manual'] as const)('F2: a %s replacement queued between ownersh
     await Promise.all([deleting, replacing]);
     expect(await rag.findSourceCreators('p1', source, 's1')).toEqual([{ type: 'USER', id: 'other' }]);
     expect(await rag.findSourceCreators('p1', source === 'doc' ? 'manual' : 'doc', 's1')).toEqual([]);
-  } finally { release.resolve(); spy.mockRestore(); await vector.onModuleDestroy(); }
+  } finally { release.resolve(); spy.mockRestore(); journal.onModuleDestroy(); await vector.onModuleDestroy(); }
 });
