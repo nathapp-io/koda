@@ -23,29 +23,17 @@ import {
 } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse } from '@nathapp/nestjs-common';
+import type { CreateTicketLinkResult } from './ticket-links.service';
 import { TicketLinksService } from './ticket-links.service';
 import { CreateTicketLinkDto } from './dto/create-ticket-link.dto';
 import { TicketLinkResponseDto } from './dto/ticket-link-response.dto';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { RequiresGuard } from '../permissions/requires.guard';
 import { Requires } from '../permissions/requires.decorator';
-import type { PrincipalRef } from '../permissions/permissions.types';
-import { isAgentPrincipal, isUserPrincipal, type KodaPrincipal } from '../auth/principal/koda-principal.types';
+import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 interface Reply {
   statusCode: number;
-}
-
-/**
- * The creator recorded on a new link, as `TicketLinksService.create` takes it.
- *
- * A runner never reaches a ticket route (`CombinedAuthGuard` refuses it), and `undefined` makes the
- * service store a creatorless link rather than writing a half-typed reference.
- */
-function creatorRef(principal: KodaPrincipal): PrincipalRef | undefined {
-  if (isUserPrincipal(principal)) return { type: 'USER', id: principal.id };
-  if (isAgentPrincipal(principal)) return { type: 'AGENT', id: principal.id };
-  return undefined;
 }
 
 @ApiTags('ticket-links')
@@ -58,6 +46,7 @@ export class TicketLinksController {
   // US-006: `ProjectMembershipGuard` runs first (403 `projects` for a non-member), then the key.
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('ticket.link.add')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Create or return existing link for a ticket' })
   @ApiResponse({ status: 201, type: TicketLinkResponseDto })
   @ApiResponse({ status: 200, type: TicketLinkResponseDto })
@@ -69,9 +58,15 @@ export class TicketLinksController {
     @Param('ref') ref: string,
     @Body() dto: CreateTicketLinkDto,
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
     @Res({ passthrough: true }) res?: Reply,
   ) {
-    const result = await this.ticketLinksService.create(slug, ref, dto, creatorRef(principal));
+    const outcome = await this.routeGate.run<CreateTicketLinkResult>({
+      key: 'ticket.link.add', variant: TICKET_LINK_ROUTE_VARIANTS.add,
+      projectId: project.project.id, input: { slug, ref, link: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    const result = outcome.result;
     if (res && result.status === 200) {
       res.statusCode = result.status;
     }

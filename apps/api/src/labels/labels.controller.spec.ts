@@ -1,3 +1,4 @@
+import { JsonResponse } from '@nathapp/nestjs-common';
 import { ApprovalPending } from '../approvals/route/approval-pending';
 import { APPROVAL_GATED_METADATA } from '../approvals/route/approval-gated.decorator';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
@@ -549,5 +550,33 @@ describe('removeLabelFromHttp HTTP approval wrapper', () => {
     const error = await invoke().catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ApprovalPending);
     expect((error as ApprovalPending).request).toBe(request);
+  });
+});
+
+describe('US-007 label write wrappers', () => {
+  it.each(['create', 'update', 'assign'] as const)('%s gates input and maps executed and pending outcomes', async (action) => {
+    const run = vi.fn();
+    const service = { create: vi.fn(), update: vi.fn(), assignToTicket: vi.fn() };
+    const controller = new LabelsController(service as unknown as LabelsService, { run } as unknown as ApprovalRouteGate);
+    const project = { project: { id: 'p1', slug: 'alpha' } };
+    const principal = { actorType: 'agent', id: 'a1' } as import('../auth/principal/koda-principal.types').AgentPrincipal;
+    const invoke = () => action === 'create' ? controller.createFromHttp('alpha', { name: 'bug' }, principal, project)
+      : action === 'update' ? controller.updateFromHttp('alpha', 'l1', { name: 'defect' }, principal, project)
+      : controller.assignLabelFromHttp('alpha', 'AL-1', { labelId: 'l1' }, principal, project);
+    const calls = {
+      create: { key: 'label.create', variant: 'rest:labels.create', input: { slug: 'alpha', label: { name: 'bug' } } },
+      update: { key: 'label.update', variant: 'rest:labels.update', input: { slug: 'alpha', id: 'l1', patch: { name: 'defect' } } },
+      assign: { key: 'ticket.label.assign', variant: 'rest:ticket-labels.assign', input: { slug: 'alpha', ref: 'AL-1', assignment: { labelId: 'l1' } } },
+    };
+    const result = { id: 'result' };
+    run.mockResolvedValue({ status: 'executed', result });
+    expect(await invoke()).toEqual(JsonResponse.Ok(result));
+    expect(run).toHaveBeenCalledExactlyOnceWith({ ...calls[action], projectId: 'p1' });
+    const handler = action === 'create' ? controller.createFromHttp : action === 'update' ? controller.updateFromHttp : controller.assignLabelFromHttp;
+    expect(Reflect.getMetadata(APPROVAL_GATED_METADATA, handler)).toBe(true);
+    const request = { id: 'pending' };
+    run.mockResolvedValue({ status: 'pending', request });
+    await expect(invoke()).rejects.toMatchObject({ request });
+    for (const mock of Object.values(service)) expect(mock).not.toHaveBeenCalled();
   });
 });

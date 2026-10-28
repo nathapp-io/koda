@@ -90,6 +90,7 @@ export class LabelsController {
   @Post('projects/:slug/labels')
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('label.create')
+  @ApprovalGated()
   @HttpCode(201)
   @ApiOperation({ summary: 'Create a label for a project' })
   @ApiResponse({ status: 201, description: 'Label created' })
@@ -100,9 +101,14 @@ export class LabelsController {
     @Param('slug') slug: string,
     @Body() createLabelDto: CreateLabelDto,
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    const data = await this.create(slug, createLabelDto, principal);
-    return JsonResponse.Ok(data);
+    const outcome = await this.routeGate.run({
+      key: 'label.create', variant: LABEL_ROUTE_VARIANTS.create,
+      projectId: project.project.id, input: { slug, label: createLabelDto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Get('projects/:slug/labels')
@@ -120,6 +126,7 @@ export class LabelsController {
   @Patch('projects/:slug/labels/:id')
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('label.update')
+  @ApprovalGated()
   @HttpCode(200)
   @ApiOperation({ summary: 'Update a label' })
   @ApiResponse({ status: 200, description: 'Label updated' })
@@ -131,9 +138,14 @@ export class LabelsController {
     @Param('id') id: string,
     @Body() updateLabelDto: UpdateLabelDto,
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    const data = await this.update(slug, id, updateLabelDto, principal);
-    return JsonResponse.Ok(data);
+    const outcome = await this.routeGate.run({
+      key: 'label.update', variant: LABEL_ROUTE_VARIANTS.update,
+      projectId: project.project.id, input: { slug, id, patch: updateLabelDto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Delete('projects/:slug/labels/:id')
@@ -161,6 +173,7 @@ export class LabelsController {
   @Post('projects/:slug/tickets/:ref/labels')
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('ticket.label.assign')
+  @ApprovalGated()
   @HttpCode(201)
   @ApiOperation({ summary: 'Assign a label to a ticket' })
   @ApiResponse({ status: 201, description: 'Label assigned to ticket' })
@@ -172,9 +185,14 @@ export class LabelsController {
     @Param('ref') ref: string,
     @Body() assignLabelDto: AssignLabelDto,
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    const data = await this.assignLabel(slug, ref, assignLabelDto, principal);
-    return JsonResponse.Ok(data);
+    const outcome = await this.routeGate.run({
+      key: 'ticket.label.assign', variant: LABEL_ROUTE_VARIANTS.assign,
+      projectId: project.project.id, input: { slug, ref, assignment: assignLabelDto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Delete('projects/:slug/tickets/:ref/labels/:labelId')

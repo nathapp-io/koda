@@ -1,3 +1,4 @@
+import { JsonResponse } from '@nathapp/nestjs-common';
 import { ApprovalPending } from '../approvals/route/approval-pending';
 import { APPROVAL_GATED_METADATA } from '../approvals/route/approval-gated.decorator';
 import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
@@ -5,7 +6,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
 import { TicketLinksController } from './ticket-links.controller';
 import { TicketLinksService } from './ticket-links.service';
-import { CreateTicketLinkDto } from './dto/create-ticket-link.dto';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { PermissionService } from '../permissions/permission.service';
 import { REQUIRES_METADATA, RequiresMetadata } from '../permissions/requires.decorator';
@@ -109,50 +109,25 @@ describe('TicketLinksController', () => {
   });
 
   describe('POST /projects/:slug/tickets/:ref/links', () => {
-    it('passes the caller to service.create as a USER principal ref with status 201', async () => {
-      const dto: CreateTicketLinkDto = { url: 'https://github.com/owner/repo/pull/1' };
-      mockTicketLinksService.create.mockResolvedValue({ status: 201, link: mockLink });
-
-      const result = await controller.create('koda', 'KODA-1', dto, principal);
-
-      expect(service.create).toHaveBeenCalledWith('koda', 'KODA-1', dto, { type: 'USER', id: 'user-1' });
-      expect(result).toBeDefined();
-    });
-
-    it('converts an agent caller into an AGENT principal ref, keeping its id', async () => {
-      const dto: CreateTicketLinkDto = { url: 'https://github.com/owner/repo/pull/1' };
-      mockTicketLinksService.create.mockResolvedValue({ status: 201, link: mockLink });
-
-      await controller.create('koda', 'KODA-1', dto, makeAgentPrincipal());
-
-      expect(service.create).toHaveBeenCalledWith('koda', 'KODA-1', dto, { type: 'AGENT', id: 'agent-1' });
-    });
-
-    it('sets the reply status to 200 when the link already existed (deduplication)', async () => {
-      const dto: CreateTicketLinkDto = { url: 'https://github.com/owner/repo/pull/1' };
-      mockTicketLinksService.create.mockResolvedValue({ status: 200, link: mockLink });
+    it.each([200, 201])('AC-10: executed status %s returns only the link in the envelope', async (status) => {
+      const gate = module.get(ApprovalRouteGate);
+      vi.mocked(gate.run).mockResolvedValue({ status: 'executed', result: { status, link: mockLink } });
+      const dto = { url: mockLink.url };
+      const project = { project: { id: 'p1', slug: 'koda' } };
       const res = { statusCode: 201 };
-
-      await controller.create('koda', 'KODA-1', dto, principal, res);
-
-      expect(res.statusCode).toBe(200);
+      const result = await controller.create('koda', 'KODA-1', dto, principal, project, res);
+      expect(result).toEqual(JsonResponse.Ok(mockLink));
+      expect(res.statusCode).toBe(status);
+      expect(gate.run).toHaveBeenCalledExactlyOnceWith({ key: 'ticket.link.add', variant: 'rest:ticket-links.add', projectId: 'p1', input: { slug: 'koda', ref: 'KODA-1', link: dto } });
+      expect(service.create).not.toHaveBeenCalled();
+      expect(Reflect.getMetadata(APPROVAL_GATED_METADATA, controller.create)).toBe(true);
     });
-
-    it('leaves the reply status untouched for a new link', async () => {
-      const dto: CreateTicketLinkDto = { url: 'https://github.com/owner/repo/pull/1' };
-      mockTicketLinksService.create.mockResolvedValue({ status: 201, link: mockLink });
-      const res = { statusCode: 201 };
-
-      await controller.create('koda', 'KODA-1', dto, principal, res);
-
-      expect(res.statusCode).toBe(201);
-    });
-
-    it('propagates NotFoundException from service when ticket not found', async () => {
-      const dto: CreateTicketLinkDto = { url: 'https://github.com/owner/repo/pull/1' };
-      mockTicketLinksService.create.mockRejectedValue(new Error('Ticket not found'));
-
-      await expect(controller.create('koda', 'KODA-999', dto, principal)).rejects.toThrow();
+    it('throws the pending outcome without calling the service', async () => {
+      const gate = module.get(ApprovalRouteGate);
+      const pending = { id: 'request-1' };
+      vi.mocked(gate.run).mockResolvedValue({ status: 'pending', request: pending });
+      await expect(controller.create('koda', 'KODA-1', { url: mockLink.url }, makeAgentPrincipal(), { project: { id: 'p1', slug: 'koda' } })).rejects.toMatchObject({ request: pending });
+      expect(service.create).not.toHaveBeenCalled();
     });
   });
 
