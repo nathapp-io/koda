@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-high",
   "branchName": "feat/permissions-p3-approval-gate-high",
   "createdAt": "2026-10-28T00:00:00Z",
-  "updatedAt": "2026-10-28T09:31:12.587Z",
+  "updatedAt": "2026-10-28T09:55:20.077Z",
   "userStories": [
     {
       "id": "US-001",
@@ -369,14 +369,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Three destructive domains and many shared controller consumers change access-control entry points while preserving distinct deletion semantics."
+        "reasoning": "Three destructive domains and many shared controller consumers change access-control entry points while preserving distinct deletion semantics.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/projects/projects.service.ts",
@@ -472,7 +475,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f5b70308e2de381325dc866478ef854e30f24703"
     },
     {
       "id": "US-006",
