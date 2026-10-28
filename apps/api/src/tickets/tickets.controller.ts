@@ -299,6 +299,7 @@ export class TicketsController {
   @HttpCode(200)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('ticket.transition.verify')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Verify a ticket (CREATED → VERIFIED)' })
   @ApiResponse({ status: 200, description: 'Ticket verified', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
@@ -311,16 +312,20 @@ export class TicketsController {
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
-    const result = await this.verifyTicket(
-      slug, ref, this.requireCommentBody(dto.body), principal,
-    );
-    return JsonResponse.Ok(result.ticket);
+    const body = this.requireCommentBody(dto.body);
+    const outcome = await this.routeGate.run<TicketResponseDto>({
+      key: 'ticket.transition.verify', variant: TICKET_ROUTE_VARIANTS.verify,
+      projectId: project.project.id, input: { slug, ref, body },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':ref/start')
   @HttpCode(200)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('ticket.transition.start')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Start work on a ticket (VERIFIED → IN_PROGRESS)' })
   @ApiResponse({ status: 200, description: 'Ticket started', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
@@ -332,14 +337,19 @@ export class TicketsController {
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
-    const result = await this.startTicket(slug, ref, principal);
-    return JsonResponse.Ok(result.ticket);
+    const outcome = await this.routeGate.run<TicketResponseDto>({
+      key: 'ticket.transition.start', variant: TICKET_ROUTE_VARIANTS.start,
+      projectId: project.project.id, input: { slug, ref },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':ref/fix')
   @HttpCode(200)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('ticket.transition.fix')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Submit fix for verification (IN_PROGRESS → VERIFY_FIX)' })
   @ApiResponse({ status: 200, description: 'Fix submitted', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
@@ -352,10 +362,13 @@ export class TicketsController {
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
-    const result = await this.fixTicket(
-      slug, ref, this.requireCommentBody(dto.body), principal,
-    );
-    return JsonResponse.Ok(result.ticket);
+    const body = this.requireCommentBody(dto.body);
+    const outcome = await this.routeGate.run<TicketResponseDto>({
+      key: 'ticket.transition.fix', variant: TICKET_ROUTE_VARIANTS.fix,
+      projectId: project.project.id, input: { slug, ref, body },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':ref/verify-fix')

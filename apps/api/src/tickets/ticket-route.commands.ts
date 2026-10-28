@@ -9,6 +9,7 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { parseBody } from '../approvals/route/parse-body';
+import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 
 function routeBody(input: unknown, key: string): unknown {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) return undefined;
@@ -21,6 +22,9 @@ export const TICKET_ROUTE_VARIANTS = {
   update: 'rest:tickets.update',
   assign: 'rest:tickets.assign',
   delete: 'rest:tickets.delete',
+  verify: 'rest:tickets.verify',
+  start: 'rest:tickets.start',
+  fix: 'rest:tickets.fix',
 } as const;
 
 @Injectable()
@@ -28,6 +32,7 @@ export class TicketRouteCommands implements OnModuleInit {
   constructor(
     private readonly commands: ApprovalCommandRegistry,
     private readonly service: TicketsService,
+    private readonly transitions: TicketTransitionsService,
     private readonly loader: ActorPrincipalLoader,
   ) {}
 
@@ -60,6 +65,24 @@ export class TicketRouteCommands implements OnModuleInit {
         return { slug, ref, assignee: parseBody(AssignTicketDto, assignee) };
       },
       run: (principal, input) => this.service.assign(input.slug, input.ref, input.assignee, principal),
+      toResult: (result) => result,
+    }, this.loader));
+    this.commands.register(routeCommand<{ slug: string; ref: string; body: string }, Awaited<ReturnType<TicketTransitionsService['verify']>>['ticket']>({
+      key: 'ticket.transition.verify', variant: TICKET_ROUTE_VARIANTS.verify,
+      parse: (input) => parseRouteInput(input, ['slug', 'ref', 'body']),
+      run: async (principal, input) => (await this.transitions.verify(input.slug, input.ref, input.body, principal)).ticket,
+      toResult: (result) => result,
+    }, this.loader));
+    this.commands.register(routeCommand<{ slug: string; ref: string }, Awaited<ReturnType<TicketTransitionsService['start']>>['ticket']>({
+      key: 'ticket.transition.start', variant: TICKET_ROUTE_VARIANTS.start,
+      parse: (input) => parseRouteInput(input, ['slug', 'ref']),
+      run: async (principal, input) => (await this.transitions.start(input.slug, input.ref, principal)).ticket,
+      toResult: (result) => result,
+    }, this.loader));
+    this.commands.register(routeCommand<{ slug: string; ref: string; body: string }, Awaited<ReturnType<TicketTransitionsService['fix']>>['ticket']>({
+      key: 'ticket.transition.fix', variant: TICKET_ROUTE_VARIANTS.fix,
+      parse: (input) => parseRouteInput(input, ['slug', 'ref', 'body']),
+      run: async (principal, input) => (await this.transitions.fix(input.slug, input.ref, input.body, principal)).ticket,
       toResult: (result) => result,
     }, this.loader));
     this.commands.register(routeCommand<{ slug: string; ref: string }, Awaited<ReturnType<TicketsService['softDelete']>>>({

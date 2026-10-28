@@ -2,9 +2,39 @@ import { ValidationAppException } from '@nathapp/nestjs-common';
 import { ApprovalCommandRegistry } from '../approvals/approval-command.registry';
 import type { ActorPrincipalLoader } from '../auth/principal/actor-principal.loader';
 import type { TicketsService } from './tickets.service';
+import type { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 import { TicketRouteCommands, TICKET_ROUTE_VARIANTS } from './ticket-route.commands';
 
 describe('TicketRouteCommands', () => {
+  it('AC-8/9/10: registers and executes gated transition commands', async () => {
+    const registry = new ApprovalCommandRegistry();
+    const principal = { id: 'agent-1' };
+    const loader = { forContext: vi.fn().mockResolvedValue(principal) };
+    const resultTicket = { ref: 'AL-1', status: 'VERIFIED' };
+    const transitions = {
+      verify: vi.fn().mockResolvedValue({ ticket: resultTicket }),
+      start: vi.fn().mockResolvedValue({ ticket: resultTicket }),
+      fix: vi.fn().mockResolvedValue({ ticket: resultTicket }),
+    };
+    const service = {};
+    new TicketRouteCommands(registry, service as unknown as TicketsService, transitions as unknown as TicketTransitionsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
+    for (const [key, variant] of [
+      ['ticket.transition.verify', 'rest:tickets.verify'],
+      ['ticket.transition.start', 'rest:tickets.start'],
+      ['ticket.transition.fix', 'rest:tickets.fix'],
+    ]) expect(registry.get(key, variant)).toBeDefined();
+    const verify = registry.get('ticket.transition.verify', 'rest:tickets.verify');
+    if (!verify) throw new Error('Missing verify command');
+    const result = await verify.execute(verify.parse({ slug: 'alpha', ref: 'AL-1', body: 'ok' }));
+    expect(transitions.verify).toHaveBeenCalledExactlyOnceWith('alpha', 'AL-1', 'ok', principal);
+    expect(result).toBe(resultTicket);
+    const fix = registry.get('ticket.transition.fix', 'rest:tickets.fix');
+    if (!fix) throw new Error('Missing fix command');
+    expect(() => fix.parse({ slug: 'alpha', ref: 'AL-1' })).toThrow(ValidationAppException);
+    try { fix.parse({ slug: 'alpha', ref: 'AL-1' }); } catch (error) {
+      expect(error).toMatchObject({ response: { prefix: 'approvals.invalidInput' } });
+    }
+  });
   it('AC-8/9: registers and executes the REST assign command with its loaded principal', async () => {
     const registry = new ApprovalCommandRegistry();
     const principal = { id: 'agent-1' };
@@ -13,7 +43,7 @@ describe('TicketRouteCommands', () => {
       softDelete: vi.fn(),
       assign: vi.fn().mockResolvedValue({ ref: 'AL-1' }),
     };
-    const commands = new TicketRouteCommands(registry, service as unknown as TicketsService, loader as unknown as ActorPrincipalLoader);
+    const commands = new TicketRouteCommands(registry, service as unknown as TicketsService, {} as TicketTransitionsService, loader as unknown as ActorPrincipalLoader);
     commands.onModuleInit();
 
     expect(TICKET_ROUTE_VARIANTS.assign).toBe('rest:tickets.assign');
@@ -32,7 +62,7 @@ describe('TicketRouteCommands', () => {
     const registry = new ApprovalCommandRegistry();
     const loader = { forContext: vi.fn() };
     const service = { create: vi.fn(), update: vi.fn(), assign: vi.fn(), softDelete: vi.fn() };
-    new TicketRouteCommands(registry, service as unknown as TicketsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
+    new TicketRouteCommands(registry, service as unknown as TicketsService, {} as TicketTransitionsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
 
     expect(registry.get('ticket.create', 'rest:tickets.create')).toBeDefined();
     expect(registry.get('ticket.update', 'rest:tickets.update')).toBeDefined();
@@ -43,7 +73,7 @@ describe('TicketRouteCommands', () => {
     const principal = { id: 'a1' };
     const loader = { forContext: vi.fn().mockResolvedValue(principal) };
     const service = { softDelete: vi.fn().mockResolvedValue({ ref: 'AL-1' }) };
-    new TicketRouteCommands(registry, service as unknown as TicketsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
+    new TicketRouteCommands(registry, service as unknown as TicketsService, {} as TicketTransitionsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
     expect(TICKET_ROUTE_VARIANTS.delete).toBe('rest:tickets.delete');
     const command = registry.get('ticket.delete', 'rest:tickets.delete');
     if (!command) throw new Error('Missing command');
