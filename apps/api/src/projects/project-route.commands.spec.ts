@@ -37,12 +37,12 @@ describe('ProjectRouteCommands', () => {
     const command = registry.get('project.delete', PROJECT_ROUTE_VARIANTS.delete);
     if (!command) throw new Error('Missing command');
     const input = command.parse({ slug: 'alpha', projectId: 'target-1', extra: 1 });
-    expect(input).toEqual({ slug: 'alpha', projectId: 'target-1' });
+    expect(input).toEqual({ projectId: 'target-1' });
     expect(command.parse(input)).toEqual(input);
     const output = await command.execute(input);
     expect(loader.forContext).toHaveBeenCalledOnce();
     expect(service.softDeleteById).toHaveBeenCalledExactlyOnceWith('target-1');
     expect(output).toBeNull(); expect(command.toResult).toBeUndefined();
-    for (const invalid of [null, [], {}, { slug: '' }, { slug: 7 }, { slug: 'alpha' }, { slug: 'alpha', projectId: '' }, { slug: 'alpha', projectId: 7 }]) expect(() => command.parse(invalid)).toThrow(ValidationAppException);
+    for (const invalid of [null, [], {}, { slug: '' }, { slug: 7 }, { slug: 'alpha' }, { projectId: '' }, { projectId: 7 }]) expect(() => command.parse(invalid)).toThrow(ValidationAppException);
   });
 });

@@ -43,9 +43,11 @@ export class ProjectRouteCommands implements OnModuleInit {
       run: async (_principal, input) => this.service.update(input.slug, input.patch),
       toResult: (result) => result,
     }, this.loader));
-    this.commands.register(routeCommand<{ slug: string; projectId: string }, null>({
+    this.commands.register(routeCommand<{ projectId: string }, null>({
       key: 'project.delete', variant: PROJECT_ROUTE_VARIANTS.delete,
-      parse: (input) => parseRouteInput(input, ['slug', 'projectId']),
+      // This command mutates by immutable id, never by slug. Drop legacy stored slugs too:
+      // retaining one would incorrectly trigger the executor's slug-lookup identity fence.
+      parse: (input) => parseRouteInput(input, ['projectId']),
       run: async (_principal, input) => {
         await this.service.softDeleteById(input.projectId);
         return null;

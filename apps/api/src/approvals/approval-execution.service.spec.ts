@@ -1,3 +1,6 @@
+import { ProjectRouteCommands, PROJECT_ROUTE_VARIANTS } from '../projects/project-route.commands';
+import type { ProjectsService } from '../projects/projects.service';
+import type { ActorPrincipalLoader } from '../auth/principal/actor-principal.loader';
 import { VcsConnectionService } from '../vcs/vcs-connection.service';
 import { FleetReposService } from '../fleet/repos/fleet-repos.service';
 import { FleetRepoRouteCommands } from '../fleet/repos/fleet-repo-route.commands';
@@ -65,6 +68,23 @@ function setup(patch: Partial<ApprovalRequestRecord> = {}) {
 }
 
 describe('ApprovalExecutionService', () => {
+  it.each([{ projectId: 'p1' }, { projectId: 'p1', slug: 'old-slug' }])(
+    'executes ID-based project deletion without fencing an unused slug (%j)', async (frozen) => {
+      const s = setup({ permissionKey: 'project.delete', variant: PROJECT_ROUTE_VARIANTS.delete,
+        input: frozen, inputHash: approvalInputHash(frozen) });
+      s.permissions.effectiveKeys.mockResolvedValue(new Set(['project.delete']));
+      const softDeleteById = vi.fn().mockResolvedValue({ id: 'p1' });
+      const loader = { forContext: vi.fn().mockResolvedValue({ actorType: 'agent', id: 'a1' }) };
+      new ProjectRouteCommands(s.registry, { softDeleteById } as unknown as ProjectsService,
+        loader as unknown as ActorPrincipalLoader).onModuleInit();
+      const fence = vi.fn().mockRejectedValue(new Error('project was renamed'));
+      Object.assign(s.repo, { lockProjectSlug: fence });
+
+      expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed', result: null });
+      expect(fence).not.toHaveBeenCalled();
+      expect(softDeleteById).toHaveBeenCalledExactlyOnceWith('p1');
+    },
+  );
   it.each(['project.update', 'ticket.create', 'ticket.update', 'ticket.assign', 'ticket.transition.start', 'comment.create', 'label.create', 'label.update', 'ticket.label.assign', 'ticket.link.add', 'member.add', 'invite.cancel'])(
     'fences %s against a renamed project and reused slug before mutation', async (key) => {
       const frozen = { slug: 'old-slug' };

@@ -35,7 +35,7 @@ describe('admin delete HTTP handler mappings', () => {
         key: `${domain}.delete`,
         variant: domain === 'project' ? 'rest:projects.delete' : domain === 'agent' ? 'rest:agents.delete' : 'rest:admin-skill-sources.delete',
         projectId: domain === 'project' ? 'p1' : null,
-        input: domain === 'skill.source' ? { id: 'alpha' } : domain === 'project' ? { slug: 'alpha', projectId: 'p1' } : { slug: 'alpha', agentId: 'target-1' },
+        input: domain === 'skill.source' ? { id: 'alpha' } : domain === 'project' ? { projectId: 'p1' } : { slug: 'alpha', agentId: 'target-1' },
       });
       if (domain === 'agent') expect(output).toMatchObject({ data: result });
       else expect(output).toBeUndefined();
