@@ -293,7 +293,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
 
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/tickets/KODA-1/assign')
-      .send({ userId: 'user-2' });
+      .send({ userId: 'cuser2' });
 
     expect(res.status).toBe(403);
     expect(ticketsService.assign).not.toHaveBeenCalled();
@@ -302,7 +302,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
   it('AC8 boundary: POST /api/projects/:slug/tickets/:ref/assign returns 200 for a member DEVELOPER user', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/tickets/KODA-1/assign')
-      .send({ userId: 'user-2' });
+      .send({ userId: 'cuser2' });
 
     expect(res.status).toBe(200);
     expect(membershipRepo.findBySlug).toHaveBeenCalledWith('alpha');
@@ -329,7 +329,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
 
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/tickets/KODA-1/assign')
-      .send({ userId: 'user-2' });
+      .send({ userId: 'cuser2' });
 
     expect(res.status).toBe(200);
     expect(can).toHaveBeenCalledWith(currentPrincipal, PROJECT_ACCESS_KEY, { projectId: 'proj-1' });
@@ -359,7 +359,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
 
     const res = await request(app.getHttpServer())
       .post('/api/projects/alpha/tickets/KODA-1/assign')
-      .send({ userId: 'user-2' });
+      .send({ userId: 'cuser2' });
 
     expect(res.status).toBe(403);
     expect(can).toHaveBeenCalledWith(currentPrincipal, PROJECT_ACCESS_KEY, { projectId: 'proj-1' });
