@@ -147,7 +147,7 @@ describe('ApprovalGate', () => {
     expect(outcome).toMatchObject({ status: 'pending', request: { id: expect.any(String) } });
     expect(requests.findPendingDuplicate).toHaveBeenCalledExactlyOnceWith({
       actorType: 'AGENT', actorId: 'a1', onBehalfOfType: null, onBehalfOfId: null,
-      permissionKey: 'label.delete', projectId: 'p1', inputHash: approvalInputHash(input),
+      permissionKey: 'label.delete', projectId: 'p1', inputHash: approvalInputHash(input), variant: null,
     }, now);
     expect(transactions.run).toHaveBeenCalledTimes(1);
     expect(requests.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
@@ -160,6 +160,8 @@ describe('ApprovalGate', () => {
     }));
     expect(testCommand.state.calls).toEqual([]);
     expect(events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ status: 'pending', permissionKey: 'label.delete' }));
+    // AC-8 (unit leg): a primary request carries no variant, not a variant set to null.
+    expect('variant' in (requests.create.mock.calls[0]?.[0] ?? {})).toBe(false);
   });
 
   it('returns the still-pending duplicate instead of opening a second request', async () => {
@@ -232,5 +234,31 @@ describe('ApprovalGate', () => {
       actor: { type: 'SYSTEM', id: 'assistant' }, onBehalfOf: { type: 'USER', id: 'u8' },
       origin: 'thread', requiredMode: 'human',
     }));
+  });
+
+  it('AC-14: refuses a variant pair with no command before resolving or opening a request', async () => {
+    registry.register(configurableTestCommand('label.delete', { variant: 'rest:labels.delete' }).command);
+
+    await expect(agent(() => gate.gate('label.delete', input, { ...opts, variant: 'rest:none' }, now)))
+      .rejects.toEqual(new UnregisteredApprovalCommandError('label.delete'));
+    expect(resolve).not.toHaveBeenCalled();
+    expect(requests.findPendingDuplicate).not.toHaveBeenCalled();
+    expect(requests.create).not.toHaveBeenCalled();
+  });
+
+  it('opens a variant request with the variant on the record and the duplicate match', async () => {
+    const variant = configurableTestCommand('label.delete', { variant: 'rest:labels.delete' });
+    registry.register(variant.command);
+    resolve.mockResolvedValue({ mode: 'agent', floor: 'none', policy: null, source: 'default' });
+
+    const outcome = await agent(() => gate.gate('label.delete', input, { ...opts, variant: 'rest:labels.delete' }, now));
+
+    expect(outcome).toMatchObject({ status: 'pending', request: { permissionKey: 'label.delete', variant: 'rest:labels.delete' } });
+    expect(requests.findPendingDuplicate).toHaveBeenCalledExactlyOnceWith({
+      actorType: 'AGENT', actorId: 'a1', onBehalfOfType: null, onBehalfOfId: null,
+      permissionKey: 'label.delete', projectId: 'p1', inputHash: approvalInputHash(input), variant: 'rest:labels.delete',
+    }, now);
+    expect(testCommand.state.calls).toEqual([]);
+    expect(variant.state.calls).toEqual([]);
   });
 });

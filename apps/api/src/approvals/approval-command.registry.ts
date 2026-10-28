@@ -7,15 +7,30 @@
  * the engine runs the executor, so one mechanism serves REST, MCP and threads.
  *
  * The registry holds no database access and no business rules: `register` only refuses a key that
- * cannot be approvable and a second command for a key. Owning modules register in `onModuleInit`, so
- * this feature registers none in production; specs register a command under an approvable key.
+ * cannot be approvable, a malformed variant and a second command for one `(key, variant)` pair.
+ * Owning modules register in `onModuleInit`, so this feature registers none in production; specs
+ * register a command under an approvable key.
+ *
+ * Commands are keyed by `(key, variant ?? null)`: a key has at most one primary command (no variant)
+ * and any number of named variants beside it. A variant is how one key serves several entry points
+ * with different input — a REST route and the assistant tool both write `ticket.create`, and each
+ * parses its own body. A primary and a variant of one key never answer for each other.
  */
 import { Injectable } from '@nestjs/common';
 import { findCatalogEntry } from '../permissions/catalog';
 
+/** The longest variant the registry accepts, in characters. */
+const VARIANT_MAX_LENGTH = 100;
+
 export interface ApprovalCommand<TInput = unknown, TResult = unknown, TDecision = unknown> {
   /** A catalog key with `approval.approvable === true`. */
   key: string;
+  /**
+   * This command's name within its key, e.g. `rest:labels.delete`. Absent for the key's primary
+   * command, which is what a request opened without a variant runs. Never empty, at most 100
+   * characters.
+   */
+  variant?: string;
   /**
    * Validates the caller's input. The returned value must be JSON-serialisable, and `parse` must
    * accept its own output: an approved request re-parses the input frozen when it was opened.
@@ -39,25 +54,48 @@ export interface ApprovalCommand<TInput = unknown, TResult = unknown, TDecision 
   toResult?(result: TResult): unknown;
   /** Runs after the execution transaction committed, under the request's context; a throw is logged only. */
   afterCommit?(input: TInput, decision: TDecision | undefined, result: TResult): Promise<void>;
+  /**
+   * The command re-checks its own authorisation when it runs, so the execution's "the actor still
+   * holds the key" pre-check does not apply to its requests. Only the REST decision command sets it:
+   * `recordDecision` re-runs the engine's decide eligibility — the self-confirmation exception
+   * included — inside the decision transaction, which is stricter than the key re-check. Without it
+   * a requester that may only confirm its own request would be refused as `permission-revoked` for
+   * not holding `approval.decide`, after a human approved the decision.
+   */
+  skipKeyRecheck?: boolean;
 }
 
 @Injectable()
 export class ApprovalCommandRegistry {
-  private readonly commands = new Map<string, ApprovalCommand>();
+  /**
+   * Keyed by the command's key, then by its variant (`null` for the primary command). Two maps, not
+   * one joined string: a joined key would let a primary key spelled like `<key>#<variant>` answer
+   * another pair's command.
+   */
+  private readonly commands = new Map<string, Map<string | null, ApprovalCommand>>();
 
   register(command: ApprovalCommand): void {
     const entry = findCatalogEntry(command.key);
     if (entry === undefined || !entry.approval.approvable) {
       throw new Error(`approval command key is not approvable: ${command.key}`);
     }
-    if (this.commands.has(command.key)) {
-      throw new Error(`approval command already registered: ${command.key}`);
+    const { variant } = command;
+    if (variant !== undefined && (variant.length === 0 || variant.length > VARIANT_MAX_LENGTH)) {
+      throw new Error(`approval command variant is invalid: ${command.key}`);
+    }
+    const registered = this.commands.get(command.key);
+    if (registered?.has(variant ?? null) === true) {
+      throw new Error(
+        `approval command already registered: ${variant === undefined ? command.key : `${command.key}#${variant}`}`,
+      );
     }
 
-    this.commands.set(command.key, command);
+    if (registered === undefined) this.commands.set(command.key, new Map([[variant ?? null, command]]));
+    else registered.set(variant ?? null, command);
   }
 
-  get(key: string): ApprovalCommand | undefined {
-    return this.commands.get(key);
+  /** The command registered for `(key, variant ?? null)`; undefined when that pair has none. */
+  get(key: string, variant?: string): ApprovalCommand | undefined {
+    return this.commands.get(key)?.get(variant ?? null);
   }
 }

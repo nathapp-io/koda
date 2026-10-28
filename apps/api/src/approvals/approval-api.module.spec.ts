@@ -3,6 +3,7 @@ import { GlobalStubsModule } from '../common/test-helpers/global-stubs.module';
 import { ApprovalApiModule } from './approval-api.module';
 import { ApprovalRequestsController } from './approval-requests.controller';
 import { ApprovalPoliciesController } from './approval-policies.controller';
+import { ApprovalRouteCommands } from './approval-route.commands';
 
 describe('ApprovalApiModule', () => {
   let moduleRef: TestingModule;
@@ -11,5 +12,6 @@ describe('ApprovalApiModule', () => {
     moduleRef = await Test.createTestingModule({ imports: [GlobalStubsModule, ApprovalApiModule] }).compile();
     expect(moduleRef.get(ApprovalRequestsController)).toBeInstanceOf(ApprovalRequestsController);
     expect(moduleRef.get(ApprovalPoliciesController)).toBeInstanceOf(ApprovalPoliciesController);
+    expect(moduleRef.get(ApprovalRouteCommands)).toBeInstanceOf(ApprovalRouteCommands);
   });
 });

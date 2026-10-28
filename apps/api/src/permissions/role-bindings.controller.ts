@@ -1,7 +1,10 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
-import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
+import { JsonResponse, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { parseQuery, toPageResult } from '../common/dto/koda-page.query';
 import {
@@ -9,8 +12,10 @@ import {
   ListRoleBindingsQuery,
   RoleBindingDto,
 } from './dto/role-binding.dto';
+import { MembershipService } from './membership.service';
+import { bindingGateKey, PERMISSION_ROUTE_VARIANTS } from './permission-route.commands';
 import { RoleAdminService } from './role-admin.service';
-import type { BindingFilter } from './permissions.types';
+import type { BindingFilter, RoleBindingView } from './permissions.types';
 import { Requires } from './requires.decorator';
 
 /**
@@ -22,12 +27,20 @@ import { Requires } from './requires.decorator';
  * `ForbiddenAppException({}, 'permissions')` when `can` denies. `RoleAdminService` owns the check
  * order (route keys, lookups, self-binding, escalation, owner lock); this controller only maps the
  * HTTP shapes onto it.
+ *
+ * Permissions P3e-1 (US-004): the constructor gains `MembershipService` and `ApprovalRouteGate` — the
+ * delete route reads the stored binding through the first and asks the gate under the key the stored
+ * row names. The two write handlers themselves are gated in US-005.
  */
 @ApiTags('role-bindings')
 @ApiBearerAuth()
 @Controller('role-bindings')
 export class RoleBindingsController {
-  constructor(private readonly roles: RoleAdminService) {}
+  constructor(
+    private readonly roles: RoleAdminService,
+    private readonly membership: MembershipService,
+    private readonly routeGate: ApprovalRouteGate,
+  ) {}
 
   @Get()
   @Requires('role.read', { enforcedBy: 'service' })
@@ -71,6 +84,7 @@ export class RoleBindingsController {
 
   @Post()
   @Requires(['role.binding.manage', 'role.binding.global', 'role.binding.owner'], { mode: 'any', enforcedBy: 'service' })
+  @ApprovalGated()
   @HttpCode(201)
   @ApiOperation({
     summary: 'Grant a role to a principal (role.binding.global or role.binding.manage, plus role.binding.owner for the owner role)',
@@ -79,13 +93,22 @@ export class RoleBindingsController {
   @ApiResponse({ status: 400, description: 'A GLOBAL role with a project id, or a principal type the role cannot serve' })
   @ApiResponse({ status: 403, description: 'A missing key, a self-binding, or a grant above the caller\'s own keys' })
   @ApiResponse({ status: 404, description: 'Unknown role, project or principal' })
-  async create(@Body() dto: CreateRoleBindingDto, @Principal() principal: KodaPrincipal) {
-    const binding = await this.roles.createBinding(principal, dto);
-    return JsonResponse.Ok(RoleBindingDto.from(binding));
+  @ApiResponse({ status: 202, description: 'Approval required; the binding write is pending' })
+  async create(@Body() dto: CreateRoleBindingDto) {
+    const projectId = dto.projectId ?? null;
+    const outcome = await this.routeGate.run<RoleBindingView>({
+      key: bindingGateKey({ roleKey: dto.roleKey, projectId }),
+      variant: PERMISSION_ROUTE_VARIANTS.bindingCreate,
+      projectId,
+      input: dto,
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(RoleBindingDto.from(outcome.result));
   }
 
   @Delete(':id')
   @Requires(['role.binding.manage', 'role.binding.global', 'role.binding.owner'], { mode: 'any', enforcedBy: 'service' })
+  @ApprovalGated()
   @HttpCode(204)
   @ApiOperation({
     summary: 'Remove a binding, authorised from the stored row (role.binding.global or role.binding.manage, plus role.binding.owner for the owner role)',
@@ -96,7 +119,17 @@ export class RoleBindingsController {
     description: 'A missing key, a self-binding, a grant above the caller\'s own keys, or the last owner',
   })
   @ApiResponse({ status: 404, description: 'Binding not found' })
-  async remove(@Param('id') id: string, @Principal() principal: KodaPrincipal) {
-    await this.roles.removeBinding(principal, id);
+  @ApiResponse({ status: 202, description: 'Approval required; the binding removal is pending' })
+  async remove(@Param('id') id: string) {
+    const binding = await this.membership.findBinding(id);
+    if (!binding) throw new NotFoundAppException({}, 'permissions.bindingNotFound');
+    const outcome = await this.routeGate.run<null>({
+      key: bindingGateKey({ roleKey: binding.roleKey, projectId: binding.projectId }),
+      variant: PERMISSION_ROUTE_VARIANTS.bindingDelete,
+      projectId: binding.projectId,
+      input: { id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return undefined;
   }
 }

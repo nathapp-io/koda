@@ -12,6 +12,8 @@ export interface PendingApprovalMatch {
   actorType: ApprovalRequestRecord['actor']['type']; actorId: string;
   onBehalfOfType: 'USER' | 'AGENT' | null; onBehalfOfId: string | null;
   permissionKey: string; projectId: string | null; inputHash: string;
+  /** The request's variant, or `null` for the key's primary command (a null column matches). */
+  variant: string | null;
 }
 export type NewApprovalDecision = Omit<ApprovalDecisionRecord, 'id' | 'decidedAt' | 'comment' | 'params'> & {
   comment?: string | null; decidedAt?: Date; params?: unknown;
@@ -25,15 +27,21 @@ export class PrismaApprovalRequestRepository extends AbstractPrismaRepository<Ap
     return (client as Record<string, unknown>).approvalRequest as PrismaModelDelegate<ApprovalRequest, string>;
   }
   protected toDomain(model: ApprovalRequest): ApprovalRequestRecord {
-    const { actorType, actorId, onBehalfOfType, onBehalfOfId, updatedAt: _updatedAt, ...fields } = model;
+    const { actorType, actorId, onBehalfOfType, onBehalfOfId, variant, updatedAt: _updatedAt, ...fields } = model;
     return {
       ...fields,
+      // Absent when the column is null (the key's primary command), so a record read back from the
+      // database and one built in memory by the gate have the same shape.
+      ...(variant !== null ? { variant } : {}),
       actor: { type: actorType as ApprovalRequestRecord['actor']['type'], id: actorId },
       onBehalfOf: onBehalfOfType !== null && onBehalfOfId !== null
         ? { type: onBehalfOfType as 'USER' | 'AGENT', id: onBehalfOfId } : null,
     } as ApprovalRequestRecord;
   }
-  protected toPersistenceCreate(record: ApprovalRequestRecord) { return this.toPersistenceUpdate(record); }
+  protected toPersistenceCreate(record: ApprovalRequestRecord) {
+    // An absent variant persists as NULL: the primary command's row.
+    return { ...this.toPersistenceUpdate(record), variant: record.variant ?? null };
+  }
   protected toPersistenceUpdate(patch: Partial<ApprovalRequestRecord>) {
     const { actor, onBehalfOf, input, result, ...fields } = patch;
     return {

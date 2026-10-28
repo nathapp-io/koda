@@ -4,7 +4,8 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { TRANSACTION_MANAGER, type ITransactionManager } from '@nathapp/nestjs-data';
 import { runWithActionContext, type ActionApproval, type ActionContextInput } from '../action-context/action-context';
 import { bookkeeping } from '../action-context/audit-coverage';
-import { PermissionService } from '../permissions/permission.service';
+import { holdsNarrowedDecide, PermissionService } from '../permissions/permission.service';
+import { AfterCommitService } from '../permissions/after-commit.service';
 import { ApprovalCommandRegistry, type ApprovalCommand } from './approval-command.registry';
 import { canonicalJson } from './canonical-json';
 import type { ApprovalRequestRecord } from './domain/approval.domain';
@@ -51,6 +52,10 @@ export class ApprovalExecutionService {
     private readonly permissions: PermissionService,
     private readonly registry: ApprovalCommandRegistry,
     private readonly events: ApprovalRequestEvents,
+    // The execution transaction is the owner of every write its command makes, permissions included:
+    // a role or binding command's cache invalidation must wait for this commit, or a read in the
+    // window caches pre-commit keys under the new cache generation.
+    private readonly afterCommit: AfterCommitService,
   ) {}
 
   async execute(requestId: string, now: Date = new Date()): Promise<ApprovalRequestRecord> {
@@ -70,13 +75,19 @@ export class ApprovalExecutionService {
   }
 
   private async precheck(request: ApprovalRequestRecord): Promise<Prechecked> {
-    const command = this.registry.get(request.permissionKey);
+    // The pair the request was opened for: a variant request whose command is gone has no command,
+    // even while the key's primary command is still registered.
+    const command = this.registry.get(request.permissionKey, request.variant);
     if (command === undefined) return { ok: false, error: 'no-command' };
 
     const hash = createHash('sha256').update(canonicalJson(request.input), 'utf8').digest('hex');
     if (hash !== request.inputHash) return { ok: false, error: 'input-hash-mismatch' };
 
-    if (!(await this.stillHoldsKey(request))) return { ok: false, error: 'permission-revoked' };
+    // A command that authorises itself when it runs (the REST decision) is not re-checked by key:
+    // its run re-reads the decider's keys and refuses on its own, self-confirmation included.
+    if (command.skipKeyRecheck !== true && !(await this.stillHoldsKey(request))) {
+      return { ok: false, error: 'permission-revoked' };
+    }
 
     let parsed: unknown;
     try {
@@ -122,7 +133,8 @@ export class ApprovalExecutionService {
 
     const scope = request.projectId === null ? 'global' : { projectId: request.projectId };
     const keys = await this.permissions.effectiveKeys(principal, scope);
-    return keys.has(request.permissionKey) || keys.has(`${request.permissionKey}${OWN_SUFFIX}`);
+    return keys.has(request.permissionKey) || keys.has(`${request.permissionKey}${OWN_SUFFIX}`) ||
+      (request.permissionKey === 'approval.decide' && holdsNarrowedDecide(keys));
   }
 
   /**
@@ -158,7 +170,11 @@ export class ApprovalExecutionService {
     let callbackFailure: { error: unknown } | undefined;
     let raw: { result: unknown } | undefined;
     try {
-      const settled = await withCommittedEffects(() => this.txManager.run(async () => {
+      // This transaction owns every write the command makes, so it also owns their after-commit
+      // work: a role or binding command's permission-cache invalidation is deferred here and runs
+      // once the commit ended. Flushed before it, a concurrent read would recompute the pre-commit
+      // keys and cache them under the new generation, keeping revoked access for one TTL.
+      const settled = await this.afterCommit.scope(() => withCommittedEffects(() => this.txManager.run(async () => {
         try {
           const locked = await this.requests.lockById(request.id);
           if (!locked) throw new ApprovalRequestNotFoundError(request.id);
@@ -181,7 +197,7 @@ export class ApprovalExecutionService {
           callbackFailure = { error };
           throw error;
         }
-      }));
+      })));
 
       return { settled, raw };
     } catch (error) {

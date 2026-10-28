@@ -48,6 +48,13 @@ export class ApprovalRequestExpiredError extends Error {
     this.name = 'ApprovalRequestExpiredError'; Object.setPrototypeOf(this, new.target.prototype);
   }
 }
+/** A deferred decision lost its pending inner request, not the outer execution's row lock. */
+export class DeferredDecisionRefusedError extends Error {
+  constructor(readonly reason: 'not-pending' | 'expired', readonly status?: string) {
+    super(`Deferred decision refused: ${reason}`);
+    this.name = 'DeferredDecisionRefusedError'; Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
 export class ApprovalDecideForbiddenError extends Error {
   constructor(readonly reason: EligibilityRefusal) {
     super(`Approval decision forbidden: ${reason}`);

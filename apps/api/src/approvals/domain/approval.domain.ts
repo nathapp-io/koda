@@ -35,7 +35,14 @@ export interface ApprovalPolicyRecord {
 }
 
 export interface ApprovalRequestRecord {
-  id: string; permissionKey: string; projectId: string | null;
+  id: string; permissionKey: string;
+  /**
+   * The registered command's variant this request runs (US-001), e.g. `rest:labels.delete`. Absent
+   * when the request runs its key's primary command — which is what every request opened before
+   * variants existed, and every assistant and fleet ask, carries.
+   */
+  variant?: string;
+  projectId: string | null;
   actor: { type: 'USER' | 'AGENT' | 'SYSTEM'; id: string };
   onBehalfOf: { type: 'USER' | 'AGENT'; id: string } | null;
   origin: ActionOrigin; correlationId: string; input: unknown; inputHash: string;

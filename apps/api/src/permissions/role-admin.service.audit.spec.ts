@@ -1,5 +1,6 @@
 import { expandEntries } from './entry-matcher';
 import { RoleAdminService } from './role-admin.service';
+import { AfterCommitService } from './after-commit.service';
 import type { RoleBindingView } from './permissions.types';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
@@ -17,7 +18,7 @@ describe('RoleAdminService binding audit callback', () => {
       { findOne: vi.fn().mockResolvedValue({ key: roleKey, scope: projectId ? 'PROJECT' : 'GLOBAL', permissions: [] }) } as never,
       { projectExists: vi.fn().mockResolvedValue(true), principalExists: vi.fn().mockResolvedValue(true) } as never,
       permissions as never,
-      {} as never, membership as never, audit as never,
+      {} as never, membership as never, audit as never, new AfterCommitService(),
     );
     await service.createBinding(actor, { principalType: 'USER', principalId: 'target', roleKey, projectId });
     const callback = membership.createBinding.mock.calls[0][2];

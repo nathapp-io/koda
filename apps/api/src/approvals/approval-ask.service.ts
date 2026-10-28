@@ -150,6 +150,8 @@ function newAsk(ask: OpenAsk, parsed: unknown, resolved: ResolvedApproval, now: 
   return {
     id: randomUUID(),
     permissionKey: ask.key,
+    // An ask carries no variant: it runs the key's primary command, never a REST route's variant, so
+    // the two fleet asks keep the one command they registered.
     projectId: ask.projectId,
     actor: { type: 'SYSTEM', id: ask.component },
     onBehalfOf: ask.onBehalfOf,

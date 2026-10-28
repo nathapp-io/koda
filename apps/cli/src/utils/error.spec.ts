@@ -13,18 +13,22 @@ jest.mock('chalk', () => ({
 }));
 
 import { handleApiError } from './error';
+import { ApprovalPendingError } from './approval-pending';
 import { setJsonMode } from './json-mode';
 
 describe('error', () => {
   const originalExit = process.exit;
   const originalError = console.error;
+  const originalLog = console.log;
 
   let exitCode: number | undefined;
   let errorOutput: string[];
+  let logOutput: string[];
 
   beforeEach(() => {
     exitCode = undefined;
     errorOutput = [];
+    logOutput = [];
 
     process.exit = jest.fn((code?: string | number) => {
       exitCode = typeof code === 'string' ? parseInt(code, 10) : code;
@@ -34,15 +38,54 @@ describe('error', () => {
     console.error = jest.fn((...args) => {
       errorOutput.push(args.join(' '));
     });
+    console.log = jest.fn((...args) => {
+      logOutput.push(args.join(' '));
+    });
   });
 
   afterEach(() => {
     process.exit = originalExit;
     console.error = originalError;
+    console.log = originalLog;
     setJsonMode(false);
   });
 
   describe('handleApiError', () => {
+    const request = {
+      id: 'r1',
+      permissionKey: 'role.manage',
+      requiredMode: 'human',
+      status: 'pending',
+      expiresAt: '2026-11-09T00:00:00.000Z',
+    };
+
+    it('AC-4/5/6: reports pending approval to stderr and exits 5', () => {
+      try {
+        handleApiError(new ApprovalPendingError(request));
+      } catch {
+        // Expected to throw process.exit
+      }
+
+      expect(errorOutput).toEqual([
+        'Approval required: role.manage waits for human approval (request r1, expires 2026-11-09T00:00:00.000Z).',
+        'Follow it with: koda approval show r1',
+      ]);
+      expect(exitCode).toBe(5);
+    });
+
+    it('AC-7: emits pending approval JSON to stdout only', () => {
+      setJsonMode(true);
+      try {
+        handleApiError(new ApprovalPendingError(request));
+      } catch {
+        // Expected to throw process.exit
+      }
+
+      expect(logOutput).toEqual([JSON.stringify({ pending: request }, null, 2)]);
+      expect(errorOutput).toEqual([]);
+      expect(exitCode).toBe(5);
+    });
+
     it('logs API error to stderr', () => {
       const error = new Error('API request failed');
 

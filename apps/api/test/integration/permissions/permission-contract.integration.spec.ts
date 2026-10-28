@@ -20,6 +20,8 @@ import {
   type PermissionDeclarations,
 } from '../../../src/permissions/test-helpers/permission-contract';
 import { routeSurface } from '../../../src/permissions/route-surface';
+import { PERMISSION_CATALOG } from '../../../src/permissions/catalog';
+import { PENDING_GATE_ROUTES } from '../../../src/permissions/pending-gate-routes';
 import { bootHttpApp } from '../../helpers/http-app';
 import { resetDb } from '../../helpers/reset-db';
 
@@ -52,13 +54,35 @@ describeIntegration('permission contract over the booted API (US-007)', () => {
     await app?.close();
   });
 
-  it('AC-6: finds no contract violation in the booted app', () => {
+  it('AC-14: finds no contract violation in the booted app', () => {
     // The walk must cover the whole app: an empty collection would report every catalog key as
     // unused, but a partial one could hide a route. These counts keep the assertion honest.
     expect(declarations.routes.length).toBeGreaterThan(200);
     expect(declarations.tools.length).toBeGreaterThan(0);
     expect(declarations.systemWriters.length).toBeGreaterThanOrEqual(30);
     expect(findContractViolations(declarations)).toEqual([]);
+  });
+
+  it('AC-13: collects exactly twelve gated routes over the booted app', () => {
+    expect(declarations.routes.filter((route) => route.gated)).toHaveLength(12);
+  });
+
+  it('US-010: pending gate map matches every remaining approvable write route and rollout rule', () => {
+    const catalog = new Map(PERMISSION_CATALOG.map((entry) => [entry.key, entry]));
+    const expected = declarations.routes
+      .filter((route) => ['POST', 'PUT', 'PATCH', 'DELETE'].includes(route.method) && !route.gated)
+      .flatMap((route) => {
+        const keys = (route.requires?.keys ?? []).filter((key) => catalog.get(key)?.approval.approvable);
+        if (keys.length === 0) return [];
+        const feature = keys.some((key) => catalog.get(key)?.approval.default !== 'none')
+          ? 'gate-high'
+          : keys.every((key) => /^(fleet|thread|testhook)\./.test(key))
+            ? 'gate-fleet'
+            : 'gate-core-domains';
+        return [[route.route, feature] as const];
+      })
+      .sort(([left], [right]) => left.localeCompare(right));
+    expect([...PENDING_GATE_ROUTES]).toEqual(expected);
   });
 
   it('AC-7: declares runner.sync, thread.read, role.binding.owner and system.schedule.dispatch', () => {

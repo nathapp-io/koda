@@ -1,8 +1,12 @@
 import { AppException, ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
-import { ApprovalPolicyConflictError, ApprovalPolicyNotFoundError, ApprovalPolicySelfApplicationError, InvalidApprovalPolicyError, ApprovalCancelForbiddenError, ApprovalDecideForbiddenError, ApprovalDecisionParamsInvalidError, ApprovalRequestExpiredError, ApprovalRequestNotFoundError, ApprovalRequestNotPendingError } from './domain/approval.errors';
+import { DeferredDecisionRefusedError, ApprovalPolicyConflictError, ApprovalPolicyNotFoundError, ApprovalPolicySelfApplicationError, InvalidApprovalPolicyError, ApprovalCancelForbiddenError, ApprovalDecideForbiddenError, ApprovalDecisionParamsInvalidError, ApprovalRequestExpiredError, ApprovalRequestNotFoundError, ApprovalRequestNotPendingError } from './domain/approval.errors';
 
 export function rethrowApprovalError(error: unknown): never {
+  if (error instanceof DeferredDecisionRefusedError) {
+    if (error.reason === 'not-pending') throw new ConflictAppException({ status: error.status }, 'approvals.notPending');
+    throw new ConflictAppException({}, 'approvals.expired');
+  }
   if (error instanceof ApprovalRequestNotFoundError) throw new NotFoundAppException({}, 'approvals.requestNotFound');
   if (error instanceof ApprovalRequestNotPendingError) throw new ConflictAppException({ status: error.status }, 'approvals.notPending');
   if (error instanceof ApprovalRequestExpiredError) throw new ConflictAppException({}, 'approvals.expired');

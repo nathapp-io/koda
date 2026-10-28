@@ -71,9 +71,13 @@ import { canRunDbTests } from '../../helpers/test-environment';
     expect(res.body.message).toBe(sentence('policyConflict', '409'));
   });
   it('AC-8: bogus subject is 400', async () => { await post({ ...body, appliesTo: { kind: 'bogus' } }).expect(400); });
-  it('AC-12: globally granted REST agent cannot create self-applying policy', async () => {
-    const res = await post(body, agent.apiKey).expect(403);
-    expect(res.body.message).toBe(sentence('policySelfApplication', '403'));
+  it('AC-12: globally granted REST agent self-applying policy fails after approval', async () => {
+    const opened = await post(body, agent.apiKey).expect(202);
+    const requestId = opened.body.data.id as string;
+    const decided = await request(server()).post(`/api/approvals/${requestId}/decisions`)
+      .set('Authorization', `Bearer ${world.tokens.root}`).send({ decision: 'approve' }).expect(200);
+    expect(decided.body.data.status).toBe('failed');
+    expect(decided.body.data.result).toMatchObject({ name: 'ApprovalPolicySelfApplicationError' });
   });
   it('AC-15: service list retains its array contract', async () => {
     const global = await create(null); await create(world.projectId);

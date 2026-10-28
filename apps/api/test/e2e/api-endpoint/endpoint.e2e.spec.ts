@@ -20,6 +20,7 @@ import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { MembershipService } from '../../../src/permissions/membership.service';
 import { expectBindingOnlyFixtures, grantBaseline, grantRole, revokeProjectRoles } from '../../../src/permissions/test-helpers/permission-fixtures';
+import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import { PrismaClient } from '../../../src/generated/prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 import { SKILL_RESOLVER, SkillResolver } from '../../../src/skills/skill-resolver';
@@ -373,6 +374,25 @@ describeIntegration('API Integration Tests', () => {
     it('POST /api/approvals/:id/cancel without credentials returns 401', async () => {
       await request(httpServer).post('/api/approvals/unknown/cancel').send({}).expect(401);
     });
+    it('POST /api/approvals/:id/decisions immediately rejects and keeps the non-pending conflict', async () => {
+      const row = await prismaClient().approvalRequest.create({ data: {
+        permissionKey: 'label.delete', actorType: 'USER', actorId: memberUserId,
+        origin: 'rest', correlationId: 'decision-endpoint', input: {}, inputHash: 'decision-endpoint',
+        requiredMode: 'agent', onTimeout: 'reject', approverMustHoldAction: true,
+        requireDistinctApprover: false, expiresAt: new Date(Date.now() + 60_000),
+      } });
+      try {
+        const response = await request(httpServer).post(`/api/approvals/${row.id}/decisions`)
+          .set('Authorization', `Bearer ${userAccessToken}`).send({ decision: 'reject', comment: 'no' }).expect(200);
+        expect(body(response)).toMatchObject({ id: row.id, status: 'rejected', decisions: [{ decision: 'reject', comment: 'no' }] });
+        const again = await request(httpServer).post(`/api/approvals/${row.id}/decisions`)
+          .set('Authorization', `Bearer ${userAccessToken}`).send({ decision: 'approve' }).expect(409);
+        refusal(again, 'approvals.notPending.409', { status: 'rejected' });
+      } finally { await prismaClient().approvalRequest.delete({ where: { id: row.id } }); }
+    });
+    it('POST /api/approvals/:id/decisions without credentials returns 401', async () => {
+      await request(httpServer).post('/api/approvals/unknown/decisions').send({ decision: 'approve' }).expect(401);
+    });
   });
 
   describe('Global approval policies', () => {
@@ -392,6 +412,18 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`).expect(200);
       expect(body<{ keys: { key: string }[] }>(keys).keys.map(({ key }) => key)).toContain('label.delete');
     });
+    it('AC-6: agent with global approval.policy.manage gets exactly 202 for global policy creation', async () => {
+      const created = await request(httpServer).post('/api/agents').set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Pending policy agent', slug: 'pending-policy-agent', maxConcurrentTickets: 1, capabilities: [] }).expect(201);
+      const agent = body<{ agent: { id: string }; apiKey: string }>(created);
+      await grantKeys(prismaClient(), { type: 'AGENT', id: agent.agent.id }, ['approval.policy.manage'], null);
+      await app.get(MembershipService).invalidatePermissions();
+      const res = await request(httpServer).post('/api/approval-policies').set('Authorization', `Bearer ${agent.apiKey}`)
+        .send({ permissionPattern: 'label.delete', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human' })
+        .expect(202);
+      expect(body<{ permissionKey: string; projectId: string | null }>(res)).toMatchObject({ permissionKey: 'approval.policy.manage', projectId: null });
+    });
+
     it('creates a global policy and rejects a duplicate', async () => {
       const policy = { permissionPattern: 'label.delete', appliesTo: { kind: 'type', principalType: 'AGENT' }, mode: 'human' };
       const res = await request(httpServer).post('/api/approval-policies')
@@ -5068,6 +5100,24 @@ describeIntegration('API Integration Tests', () => {
       refusal(await roles(roleMemberToken).expect(403), 'permissions.403');
     });
 
+    it('POST /api/roles — 403 for an agent without global role.manage', async () => {
+      await request(httpServer).post('/api/roles').set(auth(agentApiKey)).send({
+        key: 'e2e-agent-denied',
+        name: 'Agent denied',
+        scope: 'PROJECT',
+        permissions: ['ticket.read'],
+      }).expect(403);
+    });
+
+    it('AC-5: agent with global role.manage gets exactly 202 for role creation', async () => {
+      await grantKeys(db(), { type: 'AGENT', id: agentId }, ['role.manage'], null);
+      await app.get(MembershipService).invalidatePermissions();
+      const res = await createRole(agentApiKey, {
+        key: 'e2e-agent-pending-role', name: 'Agent pending', scope: 'PROJECT', permissions: ['ticket.read'],
+      }).expect(202);
+      expect(body<{ permissionKey: string; projectId: string | null }>(res)).toMatchObject({ permissionKey: 'role.manage', projectId: null });
+    });
+
     it('POST /api/roles — 201 creates a PROJECT role', async () => {
       const res = await createRole(roleOwnerToken, {
         key: 'e2e-qa',
@@ -5215,6 +5265,18 @@ describeIntegration('API Integration Tests', () => {
 
       refusal(res, 'permissions.roleNotFound.404');
       expect(await db().roleBinding.count({ where: { principalId: agentId } })).toBe(before);
+    });
+
+    it('AC-7: agent with project role.binding.manage gets exactly 202 deleting a project binding', async () => {
+      const projectId = await projectIdOf(projectSlug);
+      await grantKeys(db(), { type: 'AGENT', id: agentId }, ['role.binding.manage'], projectId);
+      await app.get(MembershipService).invalidatePermissions();
+      const viewer = await db().role.findUniqueOrThrow({ where: { key: 'viewer' } });
+      const binding = await db().roleBinding.create({
+        data: { principalType: 'USER', principalId: memberUserId, roleId: viewer.id, projectId, grantedByType: 'USER', grantedById: memberUserId },
+      });
+      const res = await deleteBinding(agentApiKey, binding.id).expect(202);
+      expect(body<{ permissionKey: string; projectId: string | null }>(res)).toMatchObject({ permissionKey: 'role.binding.manage', projectId });
     });
 
     it('DELETE /api/role-bindings/{id} — 204 removes a project binding', async () => {

@@ -5,11 +5,14 @@ import { parseQuery, remapPage } from '../common/dto/koda-page.query';
 import { Requires } from '../permissions/requires.decorator';
 import { RequiresGuard } from '../permissions/requires.guard';
 import { ApprovalPolicyService } from './approval-policy.service';
+import { ApprovalRouteGate } from './route/approval-route-gate';
+import { ApprovalPending } from './route/approval-pending';
+import { ApprovalGated } from './route/approval-gated.decorator';
+import { APPROVAL_ROUTE_VARIANTS } from './approval-route.commands';
 import { rethrowApprovalError } from './approval-http-errors';
 import { approvableKeys } from './approvable-keys';
 import { ApprovalPolicyDto, ApprovableKeyDto, CreateApprovalPolicyDto, UpdateApprovalPolicyDto } from './dto/approval-policy.dto';
 import { ApprovalPolicyNotFoundError } from './domain/approval.errors';
-import { toPolicySubject } from './dto/approval-policy-subject.dto';
 import { ListApprovalPoliciesQuery } from './dto/list-approval-policies.query';
 
 @ApiTags('approvals')
@@ -17,7 +20,7 @@ import { ListApprovalPoliciesQuery } from './dto/list-approval-policies.query';
 @ApiExtraModels(ApprovalPolicyDto, ApprovableKeyDto)
 @Controller('approval-policies')
 export class ApprovalPoliciesController {
-  constructor(private readonly policies: ApprovalPolicyService) {}
+  constructor(private readonly policies: ApprovalPolicyService, private readonly routeGate: ApprovalRouteGate) {}
 
   @Get()
   @UseGuards(RequiresGuard)
@@ -59,6 +62,7 @@ export class ApprovalPoliciesController {
   }
 
   @Post()
+  @ApprovalGated()
   @HttpCode(201)
   @UseGuards(RequiresGuard)
   @Requires('approval.policy.manage')
@@ -72,11 +76,16 @@ export class ApprovalPoliciesController {
   @ApiResponse({ status: 409, description: 'Policy pattern and subject already exist' })
   async create(@Body() dto: CreateApprovalPolicyDto) {
     try {
-      return JsonResponse.Ok(ApprovalPolicyDto.from(await this.policies.create({ ...dto, appliesTo: toPolicySubject(dto.appliesTo), projectId: null })));
+      const outcome = await this.routeGate.run<Awaited<ReturnType<ApprovalPolicyService['create']>>>({
+        key: 'approval.policy.manage', variant: APPROVAL_ROUTE_VARIANTS.policyCreate, projectId: null, input: dto,
+      });
+      if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+      return JsonResponse.Ok(ApprovalPolicyDto.from(outcome.result));
     } catch (error) { rethrowApprovalError(error); }
   }
 
   @Patch(':id')
+  @ApprovalGated()
   @UseGuards(RequiresGuard)
   @Requires('approval.policy.manage')
   @ApiOperation({ summary: 'Update a global approval policy' })
@@ -91,11 +100,16 @@ export class ApprovalPoliciesController {
       if (!Object.values(dto).some((value) => value !== undefined)) throw new ValidationAppException({}, 'approvals.emptyPolicyPatch');
       const policy = await this.policies.get(id);
       if (policy.projectId !== null) throw new ApprovalPolicyNotFoundError(id);
-      return JsonResponse.Ok(ApprovalPolicyDto.from(await this.policies.update(id, dto)));
+      const outcome = await this.routeGate.run<Awaited<ReturnType<ApprovalPolicyService['update']>>>({
+        key: 'approval.policy.manage', variant: APPROVAL_ROUTE_VARIANTS.policyUpdate, projectId: null, input: { id, patch: dto },
+      });
+      if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+      return JsonResponse.Ok(ApprovalPolicyDto.from(outcome.result));
     } catch (error) { rethrowApprovalError(error); }
   }
 
   @Delete(':id')
+  @ApprovalGated()
   @HttpCode(204)
   @UseGuards(RequiresGuard)
   @Requires('approval.policy.manage')
@@ -108,7 +122,10 @@ export class ApprovalPoliciesController {
     try {
       const policy = await this.policies.get(id);
       if (policy.projectId !== null) throw new ApprovalPolicyNotFoundError(id);
-      await this.policies.remove(id);
+      const outcome = await this.routeGate.run<void>({
+        key: 'approval.policy.manage', variant: APPROVAL_ROUTE_VARIANTS.policyDelete, projectId: null, input: { id },
+      });
+      if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     } catch (error) { rethrowApprovalError(error); }
   }
 }

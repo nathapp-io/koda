@@ -19,8 +19,10 @@ import { APPROVAL_POLICY_REPOSITORY, APPROVAL_REQUEST_REPOSITORY } from './domai
 import { PrismaApprovalPolicyRepository } from './prisma-approval-policy.repository';
 import { PrismaApprovalRequestRepository } from './prisma-approval-request.repository';
 import { OutboxService } from '@nathapp/nestjs-outbox';
+import { AfterCommitService } from '../permissions/after-commit.service';
 import { ApprovalRequestEvents } from './approval-request-events';
 import { ApprovalRequestQueries } from './approval-request.queries';
+import { ApprovalRouteGate } from './route/approval-route-gate';
 
 @Global()
 @Module({ providers: [
@@ -28,12 +30,14 @@ import { ApprovalRequestQueries } from './approval-request.queries';
   { provide: OutboxService, useValue: { record: vi.fn().mockResolvedValue(undefined) } },
   { provide: PermissionService, useValue: { roleIdsAt: vi.fn().mockResolvedValue([]), roleIdsAnywhere: vi.fn().mockResolvedValue([]) } },
   { provide: PrismaService, useValue: createMockPrismaService({ fn: vi.fn }) },
+  // The global PermissionsModule provides this in production; the engine's execution opens its scope.
+  { provide: AfterCommitService, useValue: new AfterCommitService() },
   { provide: TRANSACTION_MANAGER, useValue: {
     run: vi.fn((fn: () => Promise<unknown>) => fn()), getClient: vi.fn(), isInTransaction: vi.fn(() => false),
   } },
   // The sweeper reads the fleet sweep window; a stub keeps the module DB-free and starts no timer.
   { provide: FLEET_CFG, useValue: { sweepEnabled: false, approvalSweepMs: 15_000 } },
-], exports: [PrismaService, TRANSACTION_MANAGER, PermissionService, AuditRecorder, OutboxService, FLEET_CFG] })
+], exports: [PrismaService, TRANSACTION_MANAGER, PermissionService, AuditRecorder, OutboxService, FLEET_CFG, AfterCommitService] })
 class ExternalStubsModule {}
 
 @Injectable()
@@ -55,6 +59,7 @@ class EngineConsumer {
     readonly commands: ApprovalCommandRegistry,
     readonly queries: ApprovalRequestQueries,
     readonly asks: ApprovalAskService,
+    readonly routeGate: ApprovalRouteGate,
   ) {}
 }
 @Module({ imports: [ApprovalEngineModule], providers: [PolicyConsumer, RegistryConsumer, EngineConsumer] })
@@ -122,5 +127,15 @@ describe('ApprovalEngineModule', () => {
     const consumer = moduleRef.get(EngineConsumer);
     expect(consumer.asks).toBeInstanceOf(ApprovalAskService);
     expect(consumer.asks).toBe(moduleRef.get(ApprovalAskService));
+  });
+  it('US-003: provides and exports one ApprovalRouteGate wired to the gate and the permission service', async () => {
+    moduleRef = await Test.createTestingModule({ imports: [ExternalStubsModule, ConsumerModule] }).compile();
+
+    const routeGate = moduleRef.get(ApprovalRouteGate);
+    expect(routeGate).toBeInstanceOf(ApprovalRouteGate);
+    // The consumer proves the export: a route module imports the engine and resolves this.
+    expect(moduleRef.get(EngineConsumer).routeGate).toBe(routeGate);
+    // Constructed, not merely registered: a missing ApprovalGate or PermissionService would throw here.
+    expect(routeGate).toHaveProperty('run');
   });
 });

@@ -52,6 +52,11 @@ export interface TestCommandAudit {
 export interface TestCommandDeps {
   prisma?: TestCommandPrisma;
   audit?: TestCommandAudit;
+  /**
+   * The variant this command registers under, e.g. `rest:labels.delete`. Absent registers the key's
+   * primary command; a spec that needs both registers one of each.
+   */
+  variant?: string;
 }
 
 /** The `parseDecision` switch: while set, the command carries the hook with this behaviour. */
@@ -123,6 +128,11 @@ export function configurableTestCommand(key: string, deps: TestCommandDeps = {})
 
   const command: ApprovalCommand<TestCommandInput, string> = {
     key,
+    // A getter alongside the hooks, not a spread of them: `deps.variant` is fixed for the command's
+    // lifetime, and the registry reads it once at registration.
+    get variant(): string | undefined {
+      return deps.variant;
+    },
     parse(input: unknown): TestCommandInput {
       parseCount += 1;
       if (state.parseThrows || exceededParseBudget(state, parseCount)) throw new TypeError(PARSE_REFUSED);

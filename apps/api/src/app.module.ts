@@ -46,6 +46,7 @@ import { ActionContextModule } from './action-context/action-context.module';
 import { HomeModule } from './home/home.module';
 import { SkillsModule } from './skills/skills.module';
 import { PermissionsModule } from './permissions/permissions.module';
+import { PermissionsApiModule } from './permissions/permissions-api.module';
 import { AuditLogModule } from './audit/audit-log.module';
 import { ApprovalEngineModule } from './approvals/approval-engine.module';
 import { ApprovalApiModule } from './approvals/approval-api.module';
@@ -146,6 +147,8 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     SkillsModule,
     // Permissions P1a: imports the module so SystemRoleSeeder seeds the system roles at bootstrap.
     PermissionsModule,
+    // Permissions P3e-1 (US-004): the gated role and binding routes, beside the engine they ask.
+    PermissionsApiModule,
     AuditLogModule,
     ApprovalEngineModule,
     ApprovalApiModule,

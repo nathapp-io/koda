@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import { AUTH_REPOSITORY } from './domain/auth.domain';
+import { ActorPrincipalLoader } from './principal/actor-principal.loader';
 
 /**
  * Split out from AuthModule so PrismaAuthRepository can also be imported by the
@@ -11,7 +12,7 @@ import { AUTH_REPOSITORY } from './domain/auth.domain';
  */
 @Module({
   imports: [PrismaModule],
-  providers: [PrismaAuthRepository, { provide: AUTH_REPOSITORY, useExisting: PrismaAuthRepository }],
-  exports: [PrismaAuthRepository, AUTH_REPOSITORY],
+  providers: [PrismaAuthRepository, ActorPrincipalLoader, { provide: AUTH_REPOSITORY, useExisting: PrismaAuthRepository }],
+  exports: [PrismaAuthRepository, ActorPrincipalLoader, AUTH_REPOSITORY],
 })
 export class AuthRepositoryModule {}

@@ -4,6 +4,10 @@
   "invalidPolicy": { "400": "Invalid approval policy: {violation}", "-2": "Invalid approval policy: {violation}" },
   "policyConflict": { "409": "An approval policy for this pattern and subject already exists" },
   "policyNotFound": { "404": "Approval policy not found" },
+  "invalidInput": {
+    "400": "Invalid input for the approval request",
+    "-2": "Invalid input for the approval request"
+  },
   "emptyPolicyPatch": { "400": "The policy update sets no field", "-2": "The policy update sets no field" },
   "policySelfApplication": { "403": "An agent cannot change an approval policy that applies to itself", "40003": "An agent cannot change an approval policy that applies to itself" },
   "requestNotFound": { "404": "Approval request not found" },

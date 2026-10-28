@@ -9,6 +9,12 @@ import { RequiresGuard } from '../permissions/requires.guard';
 import type { PrincipalRef } from '../permissions/permissions.types';
 import { ApprovalRequestQueries } from './approval-request.queries';
 import { ApprovalDecisionService } from './approval-decision.service';
+import { ApprovalExecutionService } from './approval-execution.service';
+import { ApprovalRouteGate } from './route/approval-route-gate';
+import { ApprovalPending } from './route/approval-pending';
+import { ApprovalGated } from './route/approval-gated.decorator';
+import { APPROVAL_ROUTE_VARIANTS } from './approval-route.commands';
+import type { ApprovalRequestRecord } from './domain/approval.domain';
 import { DecideApprovalRequestDto } from './dto/decide-approval-request.dto';
 import { rethrowApprovalError } from './approval-http-errors';
 import { ListApprovalRequestsQuery } from './dto/list-approval-requests.query';
@@ -21,7 +27,12 @@ const ref = (principal: KodaPrincipal): PrincipalRef => ({ type: principal.actor
 @ApiExtraModels(ApprovalRequestSummaryDto, ApprovalRequestDto)
 @Controller('approvals')
 export class ApprovalRequestsController {
-  constructor(private readonly queries: ApprovalRequestQueries, private readonly decisions: ApprovalDecisionService) {}
+  constructor(
+    private readonly queries: ApprovalRequestQueries,
+    private readonly decisions: ApprovalDecisionService,
+    private readonly routeGate: ApprovalRouteGate,
+    private readonly execution: ApprovalExecutionService,
+  ) {}
 
   @Get()
   @UseGuards(RequiresGuard)
@@ -65,6 +76,7 @@ export class ApprovalRequestsController {
   }
 
   @Post(':id/decisions')
+  @ApprovalGated()
   @HttpCode(200)
   @UseGuards(RequiresGuard)
   @Requires('approval.decide', { enforcedBy: 'service' })
@@ -81,8 +93,14 @@ export class ApprovalRequestsController {
   @ApiResponse({ status: 409, description: 'Request is not pending or has expired' })
   async decide(@Principal() principal: KodaPrincipal, @Param('id') id: string, @Body() dto: DecideApprovalRequestDto) {
     try {
-      await this.queries.get(ref(principal), id);
-      const request = await this.decisions.decide(id, dto.decision, dto.comment ?? null, undefined, dto.params);
+      const visible = await this.queries.get(ref(principal), id);
+      await this.decisions.assertMayDecide(id);
+      const outcome = await this.routeGate.run<ApprovalRequestRecord>({
+        key: 'approval.decide', variant: APPROVAL_ROUTE_VARIANTS.decide, projectId: visible.request.projectId,
+        input: { requestId: id, decision: dto.decision, comment: dto.comment ?? null, params: dto.params }, keyCheck: false,
+      });
+      if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+      const request = dto.decision === 'approve' ? await this.execution.execute(id) : outcome.result;
       return JsonResponse.Ok(ApprovalRequestDto.from({ request, decisions: await this.queries.decisionsFor(request.id) }));
     } catch (error) { rethrowApprovalError(error); }
   }

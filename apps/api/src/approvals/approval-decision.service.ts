@@ -31,10 +31,26 @@ export class ApprovalDecisionService {
    *   client answering "no params" and one omitting the field decide the same way.
    */
   async decide(requestId: string, decision: 'approve' | 'reject', comment: string | null, now = new Date(), params?: unknown): Promise<ApprovalRequestRecord> {
-    const decided = await this.record(requestId, decision, comment, now, params ?? undefined);
+    const decided = await this.recordDecision(requestId, decision, comment, now, params ?? undefined);
     // The decision is committed before the command runs, in its own transaction, so a failing
     // command leaves the approval on record and settles the request as failed.
     return decision === 'approve' ? this.execution.execute(requestId) : decided;
+  }
+
+  /** Read-only eligibility check used before a decision is deferred behind another approval. */
+  async assertMayDecide(requestId: string): Promise<void> {
+    const request = await this.requests.findById(requestId);
+    if (!request) throw new ApprovalRequestNotFoundError(requestId);
+
+    const context = currentContext();
+    if (!context) throw new Error('approval decision needs an action context');
+    const decider = context.actor;
+    const keys = decider.type === 'USER' || decider.type === 'AGENT'
+      ? await this.permissions.effectiveKeys({ type: decider.type, id: decider.id }, request.projectId ? { projectId: request.projectId } : 'global')
+      : new Set<string>();
+    const eligibility = decideEligibility(request, decider, keys);
+    if (eligibility.ok === false) throw new ApprovalDecideForbiddenError(eligibility.reason);
+    if (decider.type !== 'USER' && decider.type !== 'AGENT') throw new ApprovalDecideForbiddenError('not-a-principal');
   }
 
   async cancel(requestId: string, now = new Date()): Promise<ApprovalRequestRecord> {
@@ -62,7 +78,7 @@ export class ApprovalDecisionService {
     });
   }
 
-  private record(requestId: string, decision: 'approve' | 'reject', comment: string | null, now: Date, params: unknown): Promise<ApprovalRequestRecord> {
+  recordDecision(requestId: string, decision: 'approve' | 'reject', comment: string | null, now: Date, params?: unknown): Promise<ApprovalRequestRecord> {
     // The decide transaction's OWNER. A rejection's command hook may queue a committed effect (the
     // fleet's runner wake, a live publication); wrapping the complete `run()`, not its callback, is
     // what holds those effects until the decision and the rows the hook wrote have really committed,
@@ -84,8 +100,9 @@ export class ApprovalDecisionService {
       // Keep the persistence boundary principal-only even if eligibility is replaced by a test seam.
       if (decider.type !== 'USER' && decider.type !== 'AGENT') throw new ApprovalDecideForbiddenError('not-a-principal');
 
-      const command = this.registry.get(request.permissionKey);
-      const { parsedInput, parsed } = parseDecisionParams(command, decision, params, request.input);
+      // The pair the request was opened for: a variant request never runs the key's primary command.
+      const command = this.registry.get(request.permissionKey, request.variant);
+      const { parsedInput, parsed } = parseDecisionParams(command, decision, params ?? undefined, request.input);
 
       await this.requests.createDecision({
         requestId, deciderType: decider.type, deciderId: decider.id, decision, comment, decidedAt: now,

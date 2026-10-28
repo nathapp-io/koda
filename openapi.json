@@ -11213,6 +11213,39 @@
         ]
       }
     },
+    "/api/permissions/catalog": {
+      "get": {
+        "operationId": "PermissionCatalogController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Every role key, sorted by key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PermissionCatalogEntryDto"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "role.read permission required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The role-grantable permission keys with their scope, risk and ownability (role.read)",
+        "tags": [
+          "permissions"
+        ]
+      }
+    },
     "/api/roles": {
       "get": {
         "operationId": "RolesController_list",
@@ -11265,6 +11298,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RoleDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
                 }
               }
             }
@@ -11324,6 +11375,24 @@
               }
             }
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "400": {
             "description": "Unknown or out-of-scope permission entry, or a system-role rename"
           },
@@ -11357,6 +11426,24 @@
           }
         ],
         "responses": {
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "204": {
             "description": "Deleted"
           },
@@ -11497,6 +11584,24 @@
               }
             }
           },
+          "202": {
+            "description": "Approval required; the binding write is pending\n\nThe write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "400": {
             "description": "A GLOBAL role with a project id, or a principal type the role cannot serve"
           },
@@ -11532,6 +11637,24 @@
           }
         ],
         "responses": {
+          "202": {
+            "description": "Approval required; the binding removal is pending\n\nThe write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "204": {
             "description": "Removed"
           },
@@ -11550,39 +11673,6 @@
         "summary": "Remove a binding, authorised from the stored row (role.binding.global or role.binding.manage, plus role.binding.owner for the owner role)",
         "tags": [
           "role-bindings"
-        ]
-      }
-    },
-    "/api/permissions/catalog": {
-      "get": {
-        "operationId": "PermissionCatalogController_list",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "Every role key, sorted by key",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/PermissionCatalogEntryDto"
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "role.read permission required"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "The role-grantable permission keys with their scope, risk and ownability (role.read)",
-        "tags": [
-          "permissions"
         ]
       }
     },
@@ -11990,6 +12080,24 @@
               }
             }
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "400": {
             "description": "Invalid decision body"
           },
@@ -12208,6 +12316,24 @@
               }
             }
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "400": {
             "description": "Invalid approval policy"
           },
@@ -12323,6 +12449,24 @@
               }
             }
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "400": {
             "description": "Invalid or empty policy update"
           },
@@ -12362,6 +12506,24 @@
           }
         ],
         "responses": {
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "204": {
             "description": "Global policy deleted"
           },
@@ -12534,6 +12696,24 @@
               }
             }
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "400": {
             "description": "Invalid approval policy"
           },
@@ -12666,6 +12846,24 @@
               }
             }
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "400": {
             "description": "Invalid or empty policy update"
           },
@@ -12713,6 +12911,24 @@
           }
         ],
         "responses": {
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "204": {
             "description": "Project policy deleted"
           },
@@ -21204,6 +21420,54 @@
           "password"
         ]
       },
+      "PermissionCatalogEntryDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "`resource.verb[.qualifier]`",
+            "example": "ticket.delete"
+          },
+          "scope": {
+            "enum": [
+              "global",
+              "project",
+              "any"
+            ],
+            "type": "string"
+          },
+          "risk": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "type": "string"
+          },
+          "principals": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "user",
+                "agent"
+              ]
+            }
+          },
+          "ownable": {
+            "type": "boolean",
+            "description": "A role may grant this key in its `X.own` form"
+          }
+        },
+        "required": [
+          "key",
+          "scope",
+          "risk",
+          "principals",
+          "ownable"
+        ]
+      },
       "RoleDto": {
         "type": "object",
         "properties": {
@@ -21262,6 +21526,127 @@
           "locked",
           "permissions",
           "expandedKeys"
+        ]
+      },
+      "ApprovalRequestSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "permissionKey": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "actorType": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "AGENT",
+              "SYSTEM"
+            ]
+          },
+          "actorId": {
+            "type": "string"
+          },
+          "onBehalfOfType": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "onBehalfOfId": {
+            "type": "string",
+            "nullable": true
+          },
+          "origin": {
+            "type": "string"
+          },
+          "requiredMode": {
+            "type": "string",
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "expired",
+              "cancelled",
+              "executed",
+              "failed"
+            ]
+          },
+          "satisfiedBy": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ]
+          },
+          "approverType": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "approverId": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "settledAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "permissionKey",
+          "projectId",
+          "actorType",
+          "actorId",
+          "onBehalfOfType",
+          "onBehalfOfId",
+          "origin",
+          "requiredMode",
+          "status",
+          "satisfiedBy",
+          "approverType",
+          "approverId",
+          "expiresAt",
+          "decidedAt",
+          "settledAt",
+          "createdAt"
         ]
       },
       "CreateRoleDto": {
@@ -21412,175 +21797,6 @@
           "projectId",
           "grantedByType",
           "grantedById",
-          "createdAt"
-        ]
-      },
-      "PermissionCatalogEntryDto": {
-        "type": "object",
-        "properties": {
-          "key": {
-            "type": "string",
-            "description": "`resource.verb[.qualifier]`",
-            "example": "ticket.delete"
-          },
-          "scope": {
-            "enum": [
-              "global",
-              "project",
-              "any"
-            ],
-            "type": "string"
-          },
-          "risk": {
-            "enum": [
-              "low",
-              "medium",
-              "high",
-              "critical"
-            ],
-            "type": "string"
-          },
-          "principals": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "user",
-                "agent"
-              ]
-            }
-          },
-          "ownable": {
-            "type": "boolean",
-            "description": "A role may grant this key in its `X.own` form"
-          }
-        },
-        "required": [
-          "key",
-          "scope",
-          "risk",
-          "principals",
-          "ownable"
-        ]
-      },
-      "ApprovalRequestSummaryDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "permissionKey": {
-            "type": "string"
-          },
-          "projectId": {
-            "type": "string",
-            "nullable": true
-          },
-          "actorType": {
-            "type": "string",
-            "enum": [
-              "USER",
-              "AGENT",
-              "SYSTEM"
-            ]
-          },
-          "actorId": {
-            "type": "string"
-          },
-          "onBehalfOfType": {
-            "type": "string",
-            "nullable": true,
-            "enum": [
-              "USER",
-              "AGENT"
-            ]
-          },
-          "onBehalfOfId": {
-            "type": "string",
-            "nullable": true
-          },
-          "origin": {
-            "type": "string"
-          },
-          "requiredMode": {
-            "type": "string",
-            "enum": [
-              "none",
-              "self",
-              "agent",
-              "human"
-            ]
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "approved",
-              "rejected",
-              "expired",
-              "cancelled",
-              "executed",
-              "failed"
-            ]
-          },
-          "satisfiedBy": {
-            "type": "string",
-            "nullable": true,
-            "enum": [
-              "none",
-              "self",
-              "agent",
-              "human"
-            ]
-          },
-          "approverType": {
-            "type": "string",
-            "nullable": true,
-            "enum": [
-              "USER",
-              "AGENT"
-            ]
-          },
-          "approverId": {
-            "type": "string",
-            "nullable": true
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "decidedAt": {
-            "type": "string",
-            "nullable": true,
-            "format": "date-time"
-          },
-          "settledAt": {
-            "type": "string",
-            "nullable": true,
-            "format": "date-time"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "permissionKey",
-          "projectId",
-          "actorType",
-          "actorId",
-          "onBehalfOfType",
-          "onBehalfOfId",
-          "origin",
-          "requiredMode",
-          "status",
-          "satisfiedBy",
-          "approverType",
-          "approverId",
-          "expiresAt",
-          "decidedAt",
-          "settledAt",
           "createdAt"
         ]
       },

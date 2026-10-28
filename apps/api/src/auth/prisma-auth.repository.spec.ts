@@ -27,6 +27,27 @@ describe('PrismaAuthRepository agent methods', () => {
   it('findAgentCapabilities returns capability strings', async () => {
     expect(await repo.findAgentCapabilities('a1')).toEqual(['read:tickets']);
   });
+
+  it('findAgentById selects the actor fields by id', async () => {
+    const findUnique = vi.fn().mockResolvedValue(mockAgent);
+    const db = createMock<PrismaService>({ client: { agent: { findUnique } } as any });
+    const repository = new PrismaAuthRepository(db as any, txManager);
+    await expect(repository.findAgentById('a1')).resolves.toEqual(mockAgent);
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { id: 'a1' }, select: { id: true, slug: true, status: true, apiKeyHash: true },
+    });
+  });
+
+  it('hasGlobalAdminBinding counts only global user owner/admin bindings', async () => {
+    const count = vi.fn().mockResolvedValue(1);
+    const db = createMock<PrismaService>({ client: { roleBinding: { count } } as any });
+    const repository = new PrismaAuthRepository(db as any, txManager);
+    await expect(repository.hasGlobalAdminBinding('u1')).resolves.toBe(true);
+    expect(count).toHaveBeenCalledWith({ where: {
+      principalType: 'USER', principalId: 'u1', projectId: null,
+      role: { key: { in: ['owner', 'admin'] } },
+    } });
+  });
 });
 
 describe('PrismaAuthRepository.findAnyUserAndCreate bootstrap race', () => {

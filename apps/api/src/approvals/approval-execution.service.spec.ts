@@ -4,7 +4,8 @@ import { RunnerNotifier } from '../fleet/jobs/runner-notifier';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
 import { currentContext, type ActionContext } from '../action-context/action-context';
 import { currentBookkeepingReason } from '../action-context/audit-coverage';
-import type { PermissionService } from '../permissions/permission.service';
+import { holdsNarrowedDecide, type PermissionService } from '../permissions/permission.service';
+import { AfterCommitService } from '../permissions/after-commit.service';
 import { ApprovalCommandRegistry } from './approval-command.registry';
 import { ApprovalExecutionService } from './approval-execution.service';
 import { approvalInputHash } from './approval-input';
@@ -52,12 +53,107 @@ function setup(patch: Partial<ApprovalRequestRecord> = {}) {
   const test = configurableTestCommand('label.delete');
   registry.register(test.command);
   const events = { record: vi.fn().mockImplementation(async () => { reasons.push(currentBookkeepingReason()); }) };
+  // The real deferral queue: the execution transaction owns it, exactly as it does in production.
+  const afterCommit = new AfterCommitService();
   const service = new ApprovalExecutionService(tx as unknown as ITransactionManager,
-    repo as unknown as PrismaApprovalRequestRepository, permissions as unknown as PermissionService, registry, events as never);
-  return { request, state, repo, permissions, tx, registry, test, service, events, reasons };
+    repo as unknown as PrismaApprovalRequestRepository, permissions as unknown as PermissionService, registry, events as never,
+    afterCommit);
+  return { request, state, repo, permissions, tx, registry, test, service, events, reasons, afterCommit };
 }
 
 describe('ApprovalExecutionService', () => {
+  it('AC-6: accepts a narrowed decide key when rechecking an approval.decide request', async () => {
+    const s = setup({ permissionKey: 'approval.decide' });
+    const command = configurableTestCommand('approval.decide');
+    s.registry.register(command.command);
+    s.permissions.effectiveKeys.mockResolvedValue(new Set(['approval.decide@label.*']));
+
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
+    expect(command.state.calls).toEqual([{ labelId: 'l1' }]);
+  });
+
+  it('AC-7: does not use a narrowed decide key to recheck label.delete', async () => {
+    const s = setup();
+    s.permissions.effectiveKeys.mockResolvedValue(new Set(['approval.decide@label.*']));
+
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'failed', result: { error: 'permission-revoked' } });
+    expect(s.test.state.calls).toEqual([]);
+  });
+
+  it('AC-8: identifies narrowed decide keys but not the bare decide key', () => {
+    expect(holdsNarrowedDecide(new Set(['approval.decide@fleet.*']))).toBe(true);
+    expect(holdsNarrowedDecide(new Set(['approval.decide']))).toBe(false);
+  });
+
+  describe('a command that authorises itself (B2)', () => {
+    function selfAuthorising(patch: Partial<ApprovalRequestRecord> = {}) {
+      const s = setup({ permissionKey: 'approval.decide', variant: 'rest:approvals.decide', ...patch });
+      const decide = configurableTestCommand('approval.decide', { variant: 'rest:approvals.decide' });
+      decide.command.skipKeyRecheck = true;
+      s.registry.register(decide.command);
+      // The requester may confirm its own `self`-mode request: it holds the inner action key only.
+      s.permissions.effectiveKeys.mockResolvedValue(new Set(['label.delete']));
+      return { s, decide };
+    }
+
+    it('runs the request the actor may only confirm, instead of refusing it as permission-revoked', async () => {
+      const { s, decide } = selfAuthorising();
+
+      expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
+      expect(decide.state.calls).toHaveLength(1);
+      expect(s.permissions.effectiveKeys).not.toHaveBeenCalled();
+    });
+
+    it('still refuses a primary command when the actor no longer holds the key', async () => {
+      const s = setup({ permissionKey: 'approval.decide' });
+      const decide = configurableTestCommand('approval.decide');
+      s.registry.register(decide.command);
+      s.permissions.effectiveKeys.mockResolvedValue(new Set(['label.delete']));
+
+      expect(await s.service.execute('r1', now)).toMatchObject({ status: 'failed', result: { error: 'permission-revoked' } });
+      expect(decide.state.calls).toEqual([]);
+    });
+  });
+
+  describe('the execution transaction owns the after-commit scope (B1)', () => {
+    it('flushes a permission write’s deferred invalidation only after the transaction committed', async () => {
+      const s = setup();
+      const flushed: string[] = [];
+      let committed = false;
+      s.tx.run.mockImplementation(async (fn: () => Promise<unknown>) => {
+        const value = await fn();
+        committed = true;
+        return value;
+      });
+      const execute = s.test.command.execute;
+      s.test.command.execute = async (value) => {
+        // What a role or binding command's service does inside this transaction: defer the drop.
+        expect(s.afterCommit.defer(async () => { flushed.push(`committed=${committed}`); })).toBe(true);
+        expect(flushed).toEqual([]);
+        return execute(value);
+      };
+
+      expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
+
+      expect(flushed).toEqual(['committed=true']);
+    });
+
+    it('drops a deferred invalidation when the execution transaction rolled back', async () => {
+      const s = setup();
+      const flushed: string[] = [];
+      s.test.command.execute = async () => {
+        s.afterCommit.defer(async () => { flushed.push('flushed'); });
+        throw new Error('boom');
+      };
+
+      expect(await s.service.execute('r1', now)).toMatchObject({ status: 'failed', result: { error: 'execution-failed' } });
+
+      // Nothing was stored, so nothing may drop: the failed settlement transaction must not flush either.
+      expect(flushed).toEqual([]);
+      expect(s.tx.run).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('runs the command under the request context and settles it executed', async () => {
     const s = setup({ onBehalfOf: null });
     let seen: ActionContext | undefined;
@@ -138,10 +234,28 @@ describe('ApprovalExecutionService', () => {
   it('settles no-command when nothing is registered', async () => {
     const s = setup();
     const empty = new ApprovalExecutionService(s.tx as unknown as ITransactionManager,
-      s.repo as unknown as PrismaApprovalRequestRepository, s.permissions as unknown as PermissionService, new ApprovalCommandRegistry(), s.events as never);
+      s.repo as unknown as PrismaApprovalRequestRepository, s.permissions as unknown as PermissionService, new ApprovalCommandRegistry(), s.events as never,
+      s.afterCommit);
     expect(await empty.execute('r1', now)).toMatchObject({ status: 'failed', result: { error: 'no-command' }, settledAt: now });
     expect(s.reasons).toEqual(['approval.request-settle', 'approval.request-settle']);
     expect(s.events.record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'r1', status: 'failed' }));
+  });
+
+  it('AC-11 (unit leg): a stored variant with no registered command settles no-command, never the primary', async () => {
+    const s = setup({ variant: 'rest:gone' });
+
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'failed', result: { error: 'no-command' } });
+    expect(s.test.state.calls).toEqual([]);
+  });
+
+  it('AC-10 (unit leg): runs the variant command the request names, not the primary', async () => {
+    const s = setup({ variant: 'rest:labels.delete' });
+    const variant = configurableTestCommand('label.delete', { variant: 'rest:labels.delete' });
+    s.registry.register(variant.command);
+
+    expect(await s.service.execute('r1', now)).toMatchObject({ status: 'executed' });
+    expect(variant.state.calls).toEqual([{ labelId: 'l1' }]);
+    expect(s.test.state.calls).toEqual([]);
   });
 
   it('settles input-hash-mismatch when the stored input changed', async () => {
