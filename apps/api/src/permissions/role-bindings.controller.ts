@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from '@ne
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { parseQuery, toPageResult } from '../common/dto/koda-page.query';
 import {
@@ -9,6 +10,7 @@ import {
   ListRoleBindingsQuery,
   RoleBindingDto,
 } from './dto/role-binding.dto';
+import { MembershipService } from './membership.service';
 import { RoleAdminService } from './role-admin.service';
 import type { BindingFilter } from './permissions.types';
 import { Requires } from './requires.decorator';
@@ -22,12 +24,20 @@ import { Requires } from './requires.decorator';
  * `ForbiddenAppException({}, 'permissions')` when `can` denies. `RoleAdminService` owns the check
  * order (route keys, lookups, self-binding, escalation, owner lock); this controller only maps the
  * HTTP shapes onto it.
+ *
+ * Permissions P3e-1 (US-004): the constructor gains `MembershipService` and `ApprovalRouteGate` — the
+ * delete route reads the stored binding through the first and asks the gate under the key the stored
+ * row names. The two write handlers themselves are gated in US-005.
  */
 @ApiTags('role-bindings')
 @ApiBearerAuth()
 @Controller('role-bindings')
 export class RoleBindingsController {
-  constructor(private readonly roles: RoleAdminService) {}
+  constructor(
+    private readonly roles: RoleAdminService,
+    private readonly membership: MembershipService,
+    private readonly routeGate: ApprovalRouteGate,
+  ) {}
 
   @Get()
   @Requires('role.read', { enforcedBy: 'service' })

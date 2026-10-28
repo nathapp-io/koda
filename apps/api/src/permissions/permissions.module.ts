@@ -9,8 +9,6 @@ import { PermissionService } from './permission.service';
 import { PrismaRoleBindingRepository } from './prisma-role-binding.repository';
 import { PrismaRoleRepository } from './prisma-role.repository';
 import { RoleAdminService } from './role-admin.service';
-import { RoleBindingsController } from './role-bindings.controller';
-import { RolesController } from './roles.controller';
 import {
   ROLE_BINDING_REPOSITORY,
   ROLE_REPOSITORY,
@@ -31,11 +29,15 @@ import { SystemRoleSeeder } from './system-role.seeder';
  * `onModuleInit` is the owner bootstrap's fail-fast (US-004): in production an installation with no
  * `KODA_OWNER_EMAIL` cannot be configured later — the first registration is already taken — so the API
  * refuses to start instead of creating an Owner nobody chose.
+ *
+ * Permissions P3e-1 (US-004): the role and binding routes live in `PermissionsApiModule`, which needs
+ * the approval engine. This module stays free of that import, so every feature that reads
+ * `PermissionService` never drags the engine in.
  */
 @Global()
 @Module({
   imports: [PrismaModule],
-  controllers: [RolesController, RoleBindingsController, PermissionCatalogController],
+  controllers: [PermissionCatalogController],
   providers: [
     PrismaRoleRepository,
     { provide: ROLE_REPOSITORY, useExisting: PrismaRoleRepository },
