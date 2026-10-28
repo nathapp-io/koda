@@ -9,6 +9,7 @@ import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FLEET_CAPS, FleetHttpWorld, insertRunner, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
 import { PlacementService } from '../../../src/fleet/jobs/placement.service';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
@@ -75,8 +76,12 @@ describeIntegration('fleet dashboard API (PG)', () => {
     ids.opsQueued = (await job(ops, { feature: 'ops-queued', selectorLabels: ['gpu'], queuedAt: minutesAgo(4) })).id;
     ids.doneRecent = (await job(web, { feature: 'done-recent', state: 'COMPLETED', finishedAt: minutesAgo(60) })).id;
     await job(web, { feature: 'done-old', state: 'COMPLETED', finishedAt: minutesAgo(60 * 25) });
-    await prisma.fleetApproval.create({
-      data: { type: 'nax_bash_escalate', projectId: world.projectId, jobId: ids.silent, payload: {}, requestedAt: minutesAgo(3) },
+    // Permissions P3 US-011: the dashboard's pending count reads the engine's pending asks of the job (its
+    // `FleetApprovalAsk` link), not the legacy row.
+    await seedFleetAsk(prisma, {
+      kind: 'bash', projectId: world.projectId, createdAt: minutesAgo(3),
+      input: { jobId: ids.silent, leaseEpoch: 1, naxAskId: 'ask-dash-silent', payload: { command: 'bun run test', commandTruncated: false, options: ['allow'] } },
+      link: { jobId: ids.silent, leaseEpoch: 1, naxAskId: 'ask-dash-silent' },
     });
 
     const gone = await prisma.project.create({ data: { name: 'gone', slug: 'gone', key: 'GONE', deletedAt: new Date() } });

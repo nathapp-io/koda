@@ -49,6 +49,8 @@ function makeRepo() {
       job = { ...job, id, ...patch } as FleetJobRecord;
       return job;
     }),
+    createCommand: vi.fn(async (c: { runnerId: string; jobId: string; type: string; leaseEpoch: number; payload: object }) =>
+      ({ id: `cmd-${++nextEventId}`, createdAt: NOW, deliveredAt: null, ackedAt: null, ackResult: null, ...c })),
   };
 }
 
@@ -98,6 +100,41 @@ describe('JobReportProcessor approval_request (S1.5 §2.2)', () => {
     const { processor, closer } = makeProcessor(repo);
     await processor.process('r1', report(runningJob.id, 2), NOW);
     expect(closer.openBash).not.toHaveBeenCalled();
+  });
+
+  it('US-006 AC-8: an ask the policy resolves to none is answered with an APPROVAL_ANSWER command in the report transaction', async () => {
+    const repo = makeRepo();
+    repo.seed({ ...runningJob, bashMode: 'escalate' });
+    const { processor, closer } = makeProcessor(repo);
+    closer.openBash.mockResolvedValueOnce({ approval: null, live: [], answer: { naxAskId: 'ask-1f2e3d4c', choice: 'allow' } });
+
+    const outcome = await processor.process('r1', report(runningJob.id, runningJob.leaseEpoch), NOW);
+
+    expect(repo.createCommand).toHaveBeenCalledWith({
+      runnerId: 'r1', jobId: 'job-1', type: 'APPROVAL_ANSWER', leaseEpoch: 1,
+      payload: { approvalId: null, naxAskId: 'ask-1f2e3d4c', choice: 'allow' },
+    });
+    expect(outcome.approvalLive).toEqual([]);
+    expect(outcome.ack).toEqual({ jobId: 'job-1', ackedSeq: 1 });
+  });
+
+  it('US-006 AC-9: the denied immediate answer keeps the choice in the command payload', async () => {
+    const repo = makeRepo();
+    repo.seed({ ...runningJob, bashMode: 'escalate' });
+    const { processor, closer } = makeProcessor(repo);
+    closer.openBash.mockResolvedValueOnce({ approval: null, live: [], answer: { naxAskId: 'ask-1f2e3d4c', choice: 'deny' } });
+
+    await processor.process('r1', report(runningJob.id, runningJob.leaseEpoch), NOW);
+
+    expect(repo.createCommand).toHaveBeenCalledWith(expect.objectContaining({ payload: { approvalId: null, naxAskId: 'ask-1f2e3d4c', choice: 'deny' } }));
+  });
+
+  it('writes no APPROVAL_ANSWER when the ask was opened as a pending request', async () => {
+    const repo = makeRepo();
+    repo.seed({ ...runningJob, bashMode: 'escalate' });
+    const { processor } = makeProcessor(repo);
+    await processor.process('r1', report(runningJob.id, runningJob.leaseEpoch), NOW);
+    expect(repo.createCommand).not.toHaveBeenCalled();
   });
 });
 

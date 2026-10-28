@@ -43,6 +43,7 @@ describe('ApprovalAskService', () => {
   let requests: {
     create: ReturnType<typeof vi.fn<(record: ApprovalRequestRecord) => Promise<ApprovalRequestRecord>>>;
     lockById: ReturnType<typeof vi.fn<(id: string) => Promise<ApprovalRequestRecord | null>>>;
+    lockByIdSkipLocked: ReturnType<typeof vi.fn<(id: string) => Promise<ApprovalRequestRecord | null>>>;
     transition: ReturnType<typeof vi.fn<(id: string, from: ApprovalRequestStatus, patch: Partial<ApprovalRequestRecord>) => Promise<ApprovalRequestRecord | null>>>;
   };
   let events: { record: ReturnType<typeof vi.fn> };
@@ -61,6 +62,7 @@ describe('ApprovalAskService', () => {
     requests = {
       create: vi.fn(async (record: ApprovalRequestRecord) => record),
       lockById: vi.fn<(id: string) => Promise<ApprovalRequestRecord | null>>().mockResolvedValue(null),
+      lockByIdSkipLocked: vi.fn<(id: string) => Promise<ApprovalRequestRecord | null>>().mockResolvedValue(null),
       transition: vi.fn<(id: string, from: ApprovalRequestStatus, patch: Partial<ApprovalRequestRecord>) => Promise<ApprovalRequestRecord | null>>().mockResolvedValue(null),
     };
     events = { record: vi.fn().mockResolvedValue(undefined) };
@@ -238,17 +240,30 @@ describe('ApprovalAskService', () => {
     return created();
   };
 
+  it('AC-5: locks a pending ask with SKIP LOCKED, never with the blocking lock', async () => {
+    const record = await pendingRecord();
+    requests.lockByIdSkipLocked.mockResolvedValue(record);
+    requests.transition.mockResolvedValue({ ...record, status: 'cancelled' });
+
+    await expect(asks.close(record.id, { status: 'cancelled', reason: 'job_ended' }, now))
+      .resolves.toMatchObject({ id: record.id, status: 'cancelled' });
+
+    // A blocking lock would wait on the decide or execute that holds the row: the close answers null.
+    expect(requests.lockByIdSkipLocked).toHaveBeenCalledExactlyOnceWith(record.id);
+    expect(requests.lockById).not.toHaveBeenCalled();
+  });
+
   it('AC-6: returns null when the request is gone without transitioning', async () => {
     const result = await asks.close('missing', { status: 'cancelled', reason: 'job_ended' }, now);
 
     expect(result).toBeNull();
-    expect(requests.lockById).toHaveBeenCalledExactlyOnceWith('missing');
+    expect(requests.lockByIdSkipLocked).toHaveBeenCalledExactlyOnceWith('missing');
     expect(requests.transition).not.toHaveBeenCalled();
   });
 
   it('AC-7: returns null for a non-pending request without transitioning', async () => {
     const record = await pendingRecord();
-    requests.lockById.mockResolvedValue({ ...record, status: 'executed' });
+    requests.lockByIdSkipLocked.mockResolvedValue({ ...record, status: 'executed' });
 
     await expect(asks.close(record.id, { status: 'cancelled', reason: 'job_ended' }, now)).resolves.toBeNull();
     expect(requests.transition).not.toHaveBeenCalled();
@@ -259,7 +274,7 @@ describe('ApprovalAskService', () => {
     ['AC-9: principal request is not an ask', { type: 'AGENT', id: 'a1' } as const],
   ])('%s', async (_title, actor) => {
     const record = await pendingRecord();
-    requests.lockById.mockResolvedValue({ ...record, actor });
+    requests.lockByIdSkipLocked.mockResolvedValue({ ...record, actor });
 
     await expect(asks.close(record.id, { status: 'cancelled', reason: 'job_ended' }, now))
       .rejects.toThrow('approval ask close: not an ask');
@@ -268,7 +283,7 @@ describe('ApprovalAskService', () => {
 
   it.each(['', 'x'.repeat(65)])('AC-10/11: rejects invalid reason %j', async (reason) => {
     const record = await pendingRecord();
-    requests.lockById.mockResolvedValue(record);
+    requests.lockByIdSkipLocked.mockResolvedValue(record);
 
     await expect(asks.close(record.id, { status: 'cancelled', reason }, now))
       .rejects.toThrow('approval ask close: invalid reason');
@@ -277,7 +292,7 @@ describe('ApprovalAskService', () => {
 
   it('AC-12: throws when transition loses despite the locked pending row', async () => {
     const record = await pendingRecord();
-    requests.lockById.mockResolvedValue(record);
+    requests.lockByIdSkipLocked.mockResolvedValue(record);
     requests.transition.mockResolvedValue(null);
     events.record.mockClear();
 
@@ -291,6 +306,7 @@ describe('ApprovalAskService', () => {
 
     await expect(asks.close('r1', { status: 'cancelled', reason: 'job_ended' }, now))
       .rejects.toThrow("approval ask needs the caller's transaction");
+    expect(requests.lockByIdSkipLocked).not.toHaveBeenCalled();
     expect(requests.lockById).not.toHaveBeenCalled();
   });
 });

@@ -5,6 +5,7 @@ export type LiveListener = (event: LiveEvent) => void;
 
 interface Subscription {
   readonly listener: LiveListener;
+  readonly delivered: Set<string>;
 }
 
 /**
@@ -18,7 +19,7 @@ export class ProjectEventBus {
   private subscriptions: ReadonlyMap<string, readonly Subscription[]> = new Map();
 
   subscribe(projectId: string, listener: LiveListener): () => void {
-    const subscription: Subscription = { listener };
+    const subscription: Subscription = { listener, delivered: new Set() };
     this.subscriptions = new Map([...this.subscriptions, [projectId, [...this.forProject(projectId), subscription]]]);
     return () => this.remove(projectId, subscription);
   }
@@ -33,6 +34,29 @@ export class ProjectEventBus {
     }
   }
 
+  /** Outbox-backed producers: successful listeners see a frame once, failed listeners can retry independently. */
+  publishRetryable(event: LiveEvent): void {
+    const failures: unknown[] = [];
+    for (const subscription of this.forProject(event.projectId)) {
+      if (subscription.delivered.has(event.id)) continue;
+      try {
+        subscription.listener(event);
+        subscription.delivered.add(event.id);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length > 0) throw new AggregateError(failures, failures.map((e) => e instanceof Error ? e.message : String(e)).join('; '));
+  }
+
+  /**
+   * Eviction boundary: call only after the producer's publication marker durably commits. Until then every delivered
+   * id must survive unrelated traffic, even during a prolonged outage. Unsubscribe releases all of a consumer's ids.
+   */
+  acknowledgeRetryable(event: Pick<LiveEvent, 'projectId' | 'id'>): void {
+    for (const subscription of this.forProject(event.projectId)) subscription.delivered.delete(event.id);
+  }
+
   listenerCount(projectId: string): number {
     return this.forProject(projectId).length;
   }
@@ -42,6 +66,7 @@ export class ProjectEventBus {
   }
 
   private remove(projectId: string, subscription: Subscription): void {
+    subscription.delivered.clear();
     const remaining = this.forProject(projectId).filter((s) => s !== subscription);
     const next = new Map(this.subscriptions);
     if (remaining.length > 0) next.set(projectId, remaining);

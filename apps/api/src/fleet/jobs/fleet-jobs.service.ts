@@ -27,7 +27,7 @@ import { RunnerNotifier } from './runner-notifier';
 import { PERMANENT_MISFITS, toPlacementJob } from './placement-rules';
 import { PlacementService } from './placement.service';
 import { DuplicateActiveJobError, FLEET_JOB_REPOSITORY, FleetJobFilters, FleetJobRecord, IFleetJobRepository } from './domain/fleet-job.domain';
-import { APPROVAL_REPOSITORY, type IApprovalRepository } from '../approvals/domain/approval.domain';
+import { FleetApprovalAskStore } from '../approvals/fleet-approval-ask.store';
 import { DispatchFleetJobDto } from './dto/dispatch-fleet-job.dto';
 import { DispatchResultDto, FleetJobDto } from './dto/fleet-job.dto';
 import { FleetJobEventDto } from './dto/fleet-job-event.dto';
@@ -56,7 +56,7 @@ export class FleetJobsService {
     private readonly notifier: RunnerNotifier,
     private readonly budgets: BudgetGate,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
-    @Inject(APPROVAL_REPOSITORY) private readonly approvals: Pick<IApprovalRepository, 'countPendingByJob'>,
+    private readonly approvals: FleetApprovalAskStore,
     private readonly fleetTickets: FleetTicketsService,
     private readonly ticketEffects: FleetJobTicketEffects,
     @Inject(CONFIG_EDIT_REPOSITORY) private readonly configEdits: Pick<IConfigEditRepository, 'findByJobId'>,

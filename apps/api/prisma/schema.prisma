@@ -912,42 +912,12 @@ model BudgetIncident {
   spentUsd    Decimal  @db.Decimal(12, 4)
   amountUsd   Decimal  @db.Decimal(12, 4)
   actorId     String?
-  approvalId  String? // FleetApproval id (S1.5); no FK
+  approvalId  String? // ApprovalRequest id (P3d); no FK
   createdAt   DateTime @default(now())
 
   policy BudgetPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
 
   @@index([policyId, createdAt])
-}
-
-/// S1.5 C8 typed approval (spec 2026-10-02 §1.1). Partial unique (policyId) WHERE status = 'pending' is raw SQL.
-/// policyId has no FK: a deleted policy closes its approval (policy_deleted) and the row stays as history.
-model FleetApproval {
-  id          String    @id @default(cuid())
-  type        String // budget_override_required | nax_bash_escalate
-  status      String    @default("pending") // pending | approved | rejected | expired | cancelled
-  projectId   String?
-  jobId       String?
-  leaseEpoch  Int?
-  naxAskId    String?
-  policyId    String?
-  payload     Json
-  outcome     Json?
-  requestedAt DateTime
-  expiresAt   DateTime?
-  decision    String?
-  decidedById String?
-  decidedAt   DateTime?
-  resolvedBy  String? // user | timeout | job_ended | superseded | manual_resume | window_reset | policy_deleted
-  comment     String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  @@unique([jobId, leaseEpoch, naxAskId])
-  @@index([projectId, status, requestedAt])
-  @@index([status, expiresAt])
-  @@index([jobId, status])
-  @@index([policyId])
 }
 
 /// S1b §3.1 C4 schedule: drives one feature to done with RUNs. repoId and pinnedRunnerId have no foreign key
@@ -1666,6 +1636,17 @@ model FleetApprovalAsk {
   budgetPolicyId String?
   resolvedBy     String?   // user | timeout | job_ended | superseded | manual_resume | window_reset | policy_deleted
   outcome        Json?
+  /// Permissions P3 US-007 (fix rounds 2-3): the complete close a policy action intended for this ask — resolution,
+  /// status, actor and outcome. A close stamps every pending ask of the policy before it starts, so an ask it could not
+  /// settle (the request was held, or the call hit its bound) is drained later by the durable continuation with the same
+  /// attribution and outcome, not just the reason.
+  pendingClose   Json?
+  /// Permissions P3 US-009: the last engine status whose fleet outputs — the activity row, the resolved webhook and the
+  /// live event — were recorded. A redelivery of that status records nothing; the table goes with US-012.
+  recordedStatus String?
+  /// US-009: the last engine status whose live frame was published, written only after the publication. Independent of
+  /// `recordedStatus`, so an undelivered frame is republished on the next delivery.
+  publishedStatus String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   request        ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
@@ -1673,4 +1654,6 @@ model FleetApprovalAsk {
   @@unique([jobId, leaseEpoch, naxAskId])
   @@index([jobId])
   @@index([budgetPolicyId])
+  // Durable least-recently-attempted ordering for the job-end continuation.
+  @@index([updatedAt, requestId])
 }

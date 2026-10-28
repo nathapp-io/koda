@@ -61,7 +61,7 @@ export class ApprovalAskService {
   constructor(
     private readonly registry: ApprovalCommandRegistry,
     @Inject(ApprovalPolicyResolver) private readonly resolver: Pick<ApprovalPolicyResolver, 'resolve'>,
-    @Inject(APPROVAL_REQUEST_REPOSITORY) private readonly requests: Pick<PrismaApprovalRequestRepository, 'create' | 'lockById' | 'transition'>,
+    @Inject(APPROVAL_REQUEST_REPOSITORY) private readonly requests: Pick<PrismaApprovalRequestRepository, 'create' | 'lockByIdSkipLocked' | 'transition'>,
     private readonly events: ApprovalRequestEvents,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
@@ -99,7 +99,17 @@ export class ApprovalAskService {
     return { status: 'pending', request };
   }
 
-  /** Inside the caller's transaction; null when the request is gone or not pending. */
+  /**
+   * Inside the caller's transaction; null when the request is gone, not pending, or held by an
+   * in-flight decide or execute.
+   *
+   * A fleet close holds the job's or the budget policy's lock first, while the engine's decide and
+   * execute lock the request first and take that same job or policy lock from the command. To keep
+   * the two orders from deadlocking, the request is taken with `FOR UPDATE SKIP LOCKED`: a held
+   * request is being decided or executed, so it will not stay pending in the normal case and
+   * skipping the close is the right outcome. The holder rolling back (a refused decide) leaves the
+   * request pending; a bash ask then expires at its deadline.
+   */
   async close(
     requestId: string,
     close: { status: 'cancelled' | 'expired'; reason: string },
@@ -109,7 +119,7 @@ export class ApprovalAskService {
       throw new Error("approval ask needs the caller's transaction");
     }
 
-    const locked = await this.requests.lockById(requestId);
+    const locked = await this.requests.lockByIdSkipLocked(requestId);
     if (!locked || locked.status !== 'pending') return null;
     if (locked.actor.type !== 'SYSTEM' || locked.actor.id === 'assistant') {
       throw new Error('approval ask close: not an ask');

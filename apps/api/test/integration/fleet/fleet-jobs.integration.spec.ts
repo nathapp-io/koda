@@ -9,6 +9,7 @@ import { PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, insertRunner, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
 import { ProjectEventBus } from '../../../src/live/project-event-bus';
 import type { LiveEvent } from '../../../src/live/live-event';
 import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
@@ -107,5 +108,43 @@ describeIntegration('fleet jobs (PG)', () => {
     const anyJob = await prisma.fleetJob.findFirstOrThrow({ where: { projectId } });
     await request(server).get(`/api/projects/web/fleet/jobs/${anyJob.id}`).set(auth('viewer')).expect(200);
     await request(server).get(`/api/projects/ops/fleet/jobs/${anyJob.id}`).set(auth('root')).expect(404);
+  });
+
+  /**
+   * Permissions P3 US-011: `pendingApprovals` counts the engine's pending asks of the job (its
+   * `FleetApprovalAsk` links), so a settled ask is not counted and a legacy `FleetApproval` row would not be one.
+   */
+  const ask = (jobId: string, naxAskId: string, status: 'pending' | 'executed') => seedFleetAsk(prisma, {
+    kind: 'bash', projectId, status,
+    input: { jobId, leaseEpoch: 1, naxAskId, payload: { command: 'bun run test', commandTruncated: false, options: ['allow'] } },
+    link: { jobId, leaseEpoch: 1, naxAskId },
+    ...(status === 'pending'
+      ? {}
+      : { decisions: [{ deciderType: 'USER' as const, deciderId: world.ids.root, decision: 'approve' as const, params: { choice: 'allow' } }] }),
+  });
+  /** A QUEUED job of `web` with one pending and one settled bash ask. */
+  async function jobWithAsks(feature: string): Promise<string> {
+    const created = data<{ job: { id: string } }>(await dispatch('dev', { feature }).expect(201));
+    await ask(created.job.id, `${feature}-pending`, 'pending');
+    await ask(created.job.id, `${feature}-settled`, 'executed');
+    return created.job.id;
+  }
+
+  it('US-011 AC-6: the list reports pendingApprovals 1 for a job with one pending and one settled bash ask', async () => {
+    const jobId = await jobWithAsks('asks-list');
+
+    const list = data<{ records: Array<{ id: string; pendingApprovals: number }> }>(
+      await request(server).get('/api/projects/web/fleet/jobs?feature=asks-list').set(auth('viewer')).expect(200));
+
+    expect(list.records.map((r) => [r.id, r.pendingApprovals])).toEqual([[jobId, 1]]);
+  });
+
+  it('US-011 AC-7: the detail reports pendingApprovals 1 for the same job', async () => {
+    const jobId = await jobWithAsks('asks-detail');
+
+    const one = data<{ id: string; pendingApprovals: number }>(
+      await request(server).get(`/api/projects/web/fleet/jobs/${jobId}`).set(auth('viewer')).expect(200));
+
+    expect(one).toEqual(expect.objectContaining({ id: jobId, pendingApprovals: 1 }));
   });
 });

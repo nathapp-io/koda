@@ -3,27 +3,37 @@ import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1.5 slice 2a — relay loop over HTTP: report ask -> approval -> decide -> APPROVAL_ANSWER -> ack -> delivery;
  * expiry; job-end cleanup; idempotent re-report; placement relay misfit.
+ *
+ * Permissions P3 US-006: the ask is an `ApprovalRequest` with a `FleetApprovalAsk` link, so the relay assertions read
+ * those two tables and a decide goes through the engine route (`POST /api/approvals/:id/decisions`). The fleet decide
+ * adapter and the delivery recorder are US-010/US-008.
+ *
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-approval-relay.integration.spec.ts
  */
 import request from 'supertest';
 import { NathApplication } from '@nathapp/nestjs-app';
-import { PrismaClient } from '../../../src/generated/prisma/client';
+import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import type { ApprovalRequestEventPayload, SyncRequest, SyncResponse } from '@nathapp/fleet-protocol';
-import { ApprovalExpirySweeper } from '../../../src/fleet/approvals/approval-expiry-sweeper';
+import { ApprovalPolicyService } from '../../../src/approvals/approval-policy.service';
+import { ApprovalRequestExpirySweeper } from '../../../src/approvals/approval-request-expiry.sweeper';
+import { MAX_ASKS_CLOSED_PER_CALL } from '../../../src/fleet/approvals/approval-closer';
+import { ApprovalJobEndSweeper } from '../../../src/fleet/approvals/approval-job-end.sweeper';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, FLEET_CAPS, seedFleetHttpWorld, syncBody } from '../../helpers/fleet-fixtures';
+import { OutboxRelay } from '@nathapp/nestjs-outbox';
+import { grantBaseline, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { resetDb } from '../../helpers/reset-db';
-import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
+import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 20_000 }); // idle syncs here (no commands, no acks) wait the full FLEET_SYNC_WAIT_MS
 
-const ask = (naxAskId: string, deadlineMs = 300_000): ApprovalRequestEventPayload => ({
+const ask = (naxAskId: string, deadlineMs = 300_000, over: Partial<ApprovalRequestEventPayload> = {}): ApprovalRequestEventPayload => ({
   naxAskId, deadlineAt: new Date(Date.now() + deadlineMs).toISOString(), command: 'bun run test', commandTruncated: false,
   maskedCount: 0, root: '/work/repo', stage: 'execution', storyId: 'US-001', featureName: 'relay', reason: 'matched ask rule',
-  options: ['allow', 'allow-remember', 'deny'],
+  options: ['allow', 'allow-remember', 'deny'], ...over,
 });
 
 describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
@@ -33,16 +43,47 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
   let world: Awaited<ReturnType<typeof seedFleetHttpWorld>>;
   let runner: { runnerId: string; apiKey: string };
   const saved = process.env.FLEET_SYNC_WAIT_MS;
+  /** The relay capability this file last pushed for the shared runner; `null` until a case states one. */
+  let relayEnabled: boolean | null = null;
+  /** The runner's enrollment capabilities: what `afterEach` restores, whatever a case pushed. */
+  let baselineCapabilities: Prisma.InputJsonValue;
 
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
   const sync = async (over: Partial<SyncRequest> = {}) =>
     data<SyncResponse>(await request(server).post('/api/fleet/runner/sync').set(auth(runner.apiKey)).send(syncBody({ protocolVersion: 2, ...over })).expect(200));
+  /**
+   * The relay capability is runner state, not a per-case fixture: a case that needs it says so, and `afterEach` puts the
+   * runner back to the enrollment baseline, so a case never inherits another's capabilities and the no-relay case below
+   * keeps its meaning in any order (and under `--sequence.shuffle`).
+   */
+  const setRelay = async (relay: boolean): Promise<void> => {
+    if (relayEnabled === relay) return;
+    await sync({ capabilities: relay ? { ...FLEET_CAPS, approvals: { relay: true } } : FLEET_CAPS });
+    relayEnabled = relay;
+  };
+  const enableRelay = (): Promise<void> => setRelay(true);
+  const disableRelay = (): Promise<void> => setRelay(false);
   const dispatch = (body: object, expected = 201) =>
     request(server).post('/api/projects/web/fleet/jobs').set(auth(world.tokens.dev)).send({ repoId: world.repoId, command: 'RUN', maxCostUsd: 5, ...body }).expect(expected);
-  const approvals = async (jobId: string) =>
-    data<{ records: Array<Record<string, unknown>> }>(await request(server).get(`/api/projects/web/fleet/approvals?jobId=${jobId}`).set(auth(world.tokens.dev)).expect(200)).records;
-  const decide = (id: string, token: string, decision: string) =>
-    request(server).post(`/api/projects/web/fleet/approvals/${id}/decide`).set(auth(token)).send({ decision });
+
+  /** The ask links of a job, oldest request first. */
+  const linksOf = (jobId: string) =>
+    prisma.fleetApprovalAsk.findMany({ where: { jobId }, orderBy: [{ createdAt: 'asc' }, { requestId: 'asc' }] });
+  const requestsOf = async (jobId: string) =>
+    Promise.all((await linksOf(jobId)).map((link) => prisma.approvalRequest.findUniqueOrThrow({ where: { id: link.requestId } })));
+  const requestOf = (id: string) => prisma.approvalRequest.findUniqueOrThrow({ where: { id } });
+  /** The engine's decide route: a developer holds `approval.decide@fleet.job.shell.escalate` in `web`. */
+  const decide = (id: string, token: string, body: object = { decision: 'approve' }) =>
+    request(server).post(`/api/approvals/${id}/decisions`).set(auth(token)).send(body);
+  /** The fleet activity rows of one job, optionally only one action. */
+  const activity = (jobId: string, action?: string) =>
+    prisma.fleetActivity.findMany({ where: { jobId, ...(action === undefined ? {} : { action }) }, orderBy: { createdAt: 'asc' } });
+  /** The `runner.sync` audit entries of one resource, optionally only those whose summary starts with a prefix. */
+  const auditRows = (resourceId: string, summaryStartsWith?: string) =>
+    prisma.auditEntry.findMany({
+      where: { resourceId, key: 'runner.sync', ...(summaryStartsWith === undefined ? {} : { summary: { startsWith: summaryStartsWith } }) },
+      orderBy: { createdAt: 'asc' },
+    });
 
   /**
    * One repo and one runner: placement refuses a second job on a busy repo (`busy_repo`), so every test that starts a
@@ -55,14 +96,54 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     ] }] });
 
   /** ASSIGN -> ack -> RUNNING at seq 1; returns the job id and its epoch. */
-  async function startRunning(feature: string, body: object = {}): Promise<{ jobId: string; leaseEpoch: number }> {
-    const jobId = data<{ job: { id: string } }>(await dispatch({ feature, bashMode: 'escalate', approvalTimeoutSec: 600, ...body })).job.id;
+  async function startRunning(
+    feature: string,
+    body: { bashMode?: string; approvalTimeoutSec?: number } = {},
+  ): Promise<{ jobId: string; leaseEpoch: number }> {
+    const bashMode = body.bashMode ?? 'escalate';
+    const approvalTimeoutSec = body.approvalTimeoutSec ?? 600;
+    const jobId = data<{ job: { id: string } }>(await dispatch({ feature, bashMode, approvalTimeoutSec })).job.id;
     const assign = (await sync({ freeSlots: 1 })).commands.find((c) => c.type === 'ASSIGN' && c.jobId === jobId);
-    if (!assign) throw new Error('no ASSIGN');
-    expect(assign.payload).toEqual(expect.objectContaining({ bashMode: 'escalate', approvalTimeoutSec: 600 }));
+    if (!assign) throw new Error(`no ASSIGN for ${feature}`);
+    expect(assign.payload).toEqual(expect.objectContaining({ bashMode, approvalTimeoutSec }));
     await sync({ commandAcks: [{ commandId: assign.commandId, leaseEpoch: assign.leaseEpoch, result: 'ok' }],
       jobs: [{ jobId, leaseEpoch: assign.leaseEpoch, events: [{ seq: 1, type: 'state', payload: { to: 'RUNNING' } }] }] });
     return { jobId, leaseEpoch: assign.leaseEpoch };
+  }
+
+  /** A project policy that resolves `fleet.job.shell.escalate` to `none`, for the length of `fn`. */
+  async function withoutApprovalForShell(fn: () => Promise<void>): Promise<void> {
+    const policies = app.get(ApprovalPolicyService, { strict: false });
+    const policy = await withTestActor({ type: 'USER', id: world.ids.root }, () =>
+      policies.create({ projectId: world.projectId, permissionPattern: 'fleet.job.shell.escalate', appliesTo: { kind: 'all' }, mode: 'none' }));
+    try {
+      await fn();
+    } finally {
+      await prisma.approvalPolicy.delete({ where: { id: policy.id } });
+    }
+  }
+
+  /**
+   * Holds `SELECT ... FOR UPDATE` on a request row from another connection while `fn` runs, then rolls back: the
+   * fleet's close must skip a request an in-flight decide or execute holds (US-006 AC-14).
+   */
+  async function whileRequestHeld<T>(requestId: string, fn: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    let locked!: () => void;
+    const isLocked = new Promise<void>((resolve) => { locked = resolve; });
+    const holder = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "ApprovalRequest" WHERE "id" = ${requestId} FOR UPDATE`;
+      locked();
+      await released;
+    }, { maxWait: 10_000, timeout: 30_000 });
+    await isLocked;
+    try {
+      return await fn();
+    } finally {
+      release();
+      await holder;
+    }
   }
 
   beforeAll(async () => {
@@ -73,14 +154,36 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     prisma = fixtureDb(app);
     world = await seedFleetHttpWorld(server, prisma);
     runner = await enrollRunner(server, world.tokens.root, 'relay-1');
-    await prisma.webhook.create({
-      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['fleet.approval.requested', 'fleet.approval.resolved']) },
-    });
+    baselineCapabilities = (await prisma.runner.findUniqueOrThrow({
+      where: { id: runner.runnerId }, select: { capabilities: true },
+    })).capabilities as Prisma.InputJsonValue;
   });
   afterAll(async () => {
     await app.close();
     if (saved === undefined) delete process.env.FLEET_SYNC_WAIT_MS;
     else process.env.FLEET_SYNC_WAIT_MS = saved;
+  });
+  /**
+   * Placement refuses a job whose repo, or whose runner slot, is already busy (`busy_repo` / `capacity`), so a test
+   * that dies before its `finish` used to turn every later test of this file into a misleading `no ASSIGN` failure
+   * (review fix round 1). Closing whatever a test left non-terminal keeps the failure count naming real failures.
+   * This is fixture hygiene, not a job transition: no runner report produces it, and `finish` is still the path every
+   * passing test takes.
+   *
+   * The runner is shared by every case, so its capabilities are reset here too (M2): a case that turns the relay on
+   * must not hand that capability — or a still-busy slot — to the next one.
+   */
+  afterEach(async () => {
+    if (relayEnabled !== null) {
+      await prisma.runner.update({ where: { id: runner.runnerId }, data: { capabilities: baselineCapabilities } });
+      relayEnabled = null;
+    }
+    const active = await prisma.fleetJob.findMany({
+      where: { state: { in: ['QUEUED', 'ASSIGNED', 'RUNNING', 'UPLOADING'] } },
+      select: { id: true },
+    });
+    if (active.length === 0) return;
+    await prisma.fleetJob.updateMany({ where: { id: { in: active.map((job) => job.id) } }, data: { state: 'CANCELLED' } });
   });
 
   it('writes need an action context', async () => {
@@ -88,7 +191,7 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
   });
 
   it('a runner without the relay: a pinned escalate dispatch is 422, an unpinned one waits QUEUED (D270)', async () => {
-    await sync();   // first sync: runner online with FLEET_CAPS (no relay)
+    await disableRelay();   // this case states the capability it needs: online with FLEET_CAPS and no relay
     const pinned = await dispatch({ feature: 'pinned', bashMode: 'escalate', pinnedRunnerId: runner.runnerId }, 422);
     expect(JSON.stringify(pinned.body)).toContain('approvals_relay');
     const jobId = data<{ job: { id: string } }>(await dispatch({ feature: 'waits', bashMode: 'gated' })).job.id;
@@ -97,94 +200,405 @@ describeIntegration('fleet approval relay (S1.5 2a, PG)', () => {
     await request(server).post(`/api/projects/web/fleet/jobs/${jobId}/cancel`).set(auth(world.tokens.dev)).expect(200);
   });
 
-  it('report ask -> pending approval -> DEVELOPER allows -> APPROVAL_ANSWER -> ack ok -> delivery', async () => {
-    await sync({ capabilities: { ...FLEET_CAPS, approvals: { relay: true } } });
-    const { jobId, leaseEpoch } = await startRunning('loop');
+  it('AC-1: a relayed ask opens one engine request for the job requester and one link', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('open');
     await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-0000000a') }] }] });
 
-    const [pending] = await approvals(jobId);
-    expect(pending).toEqual(expect.objectContaining({ type: 'nax_bash_escalate', status: 'pending', jobId }));
-    const job = data<{ pendingApprovals: number }>(await request(server).get(`/api/projects/web/fleet/jobs/${jobId}`).set(auth(world.tokens.dev)).expect(200));
-    expect(job.pendingApprovals).toBe(1);
-
-    await decide(String(pending.id), world.tokens.viewer, 'allow').expect(403);
-    await decide(String(pending.id), world.tokens.dev, 'allow').expect(200);
-    await decide(String(pending.id), world.tokens.dev, 'deny').expect(409);
-
-    const answer = (await sync()).commands.find((c) => c.type === 'APPROVAL_ANSWER' && c.jobId === jobId);
-    expect(answer?.payload).toEqual({ approvalId: pending.id, naxAskId: 'ask-0000000a', choice: 'allow' });
-    await sync({ commandAcks: [{ commandId: answer!.commandId, leaseEpoch, result: 'ok' }] });
-    const [decided] = await approvals(jobId);
-    expect(decided).toEqual(expect.objectContaining({ status: 'approved', decision: 'allow', outcome: { delivery: expect.objectContaining({ result: 'ok' }) } }));
-
-    // Webhooks: one requested then one resolved, and neither carries the command text (A8).
-    const hooks = await prisma.outboxEvent.findMany({
-      where: {
-        type: 'webhook_delivery',
-        AND: [
-          { payload: { contains: '"event":"fleet.approval.' } },
-          { payload: { contains: `"jobId":"${jobId}"` } },
-        ],
-      },
-      orderBy: { createdAt: 'asc' },
+    const [link] = await linksOf(jobId);
+    const [opened] = await requestsOf(jobId);
+    expect(link).toMatchObject({ kind: 'bash', jobId, leaseEpoch, naxAskId: 'ask-0000000a', projectId: world.projectId, resolvedBy: null });
+    expect(opened).toMatchObject({
+      id: link.requestId, permissionKey: 'fleet.job.shell.escalate', status: 'pending',
+      actorType: 'SYSTEM', actorId: 'runner', origin: 'runner',
+      onBehalfOfType: 'USER', onBehalfOfId: world.ids.dev, projectId: world.projectId,
     });
-    expect(hooks.map((h) => h.payload)).toEqual([
-      expect.stringContaining('"event":"fleet.approval.requested"'),
-      expect.stringContaining('"event":"fleet.approval.resolved"'),
-    ]);
-    for (const h of hooks) expect(h.payload).not.toContain('bun run test');
+    // The relayed payload is the ask's own input: nax's text, never the job's.
+    expect((opened.input as Record<string, unknown>)['payload']).toMatchObject({ command: 'bun run test', storyId: 'US-001' });
 
     await finish(jobId, leaseEpoch, 3);
   });
 
-  it('a re-reported ask (same seq, or a new seq with the same naxAskId) stays one approval', async () => {
+  it('AC-2: approvalTimeoutSec 60 with the deadline 10 minutes away expires the request 60s after the relay', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('cap-timeout', { approvalTimeoutSec: 60 });
+    const before = Date.now();
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-0000000b', 600_000) }] }] });
+    const after = Date.now();
+
+    const [request] = await requestsOf(jobId);
+    expect(request!.expiresAt.getTime()).toBeGreaterThanOrEqual(before + 60_000);
+    expect(request!.expiresAt.getTime()).toBeLessThanOrEqual(after + 60_000);
+
+    await finish(jobId, leaseEpoch, 3);
+  });
+
+  it('AC-3: approvalTimeoutSec 600 with the deadline 30s away expires the request at the deadline', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('cap-deadline', { approvalTimeoutSec: 600 });
+    const deadlineAt = new Date(Date.now() + 30_000).toISOString();
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-0000000c', 0, { deadlineAt }) }] }] });
+
+    const [request] = await requestsOf(jobId);
+    expect(request!.expiresAt.toISOString()).toBe(deadlineAt);
+
+    await finish(jobId, leaseEpoch, 3);
+  });
+
+  it('AC-4: a second sync re-reporting the same ask leaves one request and one link', async () => {
+    await enableRelay();
     const { jobId, leaseEpoch } = await startRunning('idem');
-    const event = { seq: 2, type: 'approval_request' as const, payload: ask('ask-0000000b') };
+    const event = { seq: 2, type: 'approval_request' as const, payload: ask('ask-0000000d') };
     await sync({ jobs: [{ jobId, leaseEpoch, events: [event] }] });
     await sync({ jobs: [{ jobId, leaseEpoch, events: [event] }] });
     await sync({ jobs: [{ jobId, leaseEpoch, events: [{ ...event, seq: 3 }] }] });
-    expect(await approvals(jobId)).toHaveLength(1);
+
+    expect(await linksOf(jobId)).toHaveLength(1);
+    expect(await requestsOf(jobId)).toHaveLength(1);
+    // One open audit entry: the re-reported ask is the same ask, not a second open.
+    const [link] = await linksOf(jobId);
+    expect(await auditRows(link!.requestId, 'bash ask')).toMatchObject([{ summary: 'bash ask opened, pending' }]);
+
     await finish(jobId, leaseEpoch, 4);
   });
 
-  it('an unanswered ask expires through the sweeper; a decide after it is 409 and leaves it expired', async () => {
-    const { jobId, leaseEpoch } = await startRunning('expiry');
-    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-0000000c', 2_000) }] }] });
-    const result = await app.get(ApprovalExpirySweeper).tick(new Date(Date.now() + 5_000));
-    expect(result.expired).toBeGreaterThanOrEqual(1);
-    const [expired] = await approvals(jobId);
-    expect(expired).toEqual(expect.objectContaining({ status: 'expired', resolvedBy: 'timeout' }));
-    await decide(String(expired.id), world.tokens.dev, 'allow').expect(409);
+  it('AC-5: an ask relayed for a job in raw bash mode creates no request and audits "bash ask not opened: raw mode"', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('raw', { bashMode: 'raw' });
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-0000000e') }] }] });
+
+    expect(await linksOf(jobId)).toHaveLength(0);
+    expect(await auditRows(jobId, 'bash ask')).toMatchObject([{ summary: 'bash ask not opened: raw mode', resourceType: 'fleet-job' }]);
+
     await finish(jobId, leaseEpoch, 3);
   });
 
-  it('an ask past its deadline on arrival is born expired', async () => {
+  it('AC-6: an ask whose deadline has passed creates no request and audits "bash ask not opened: past deadline"', async () => {
+    await enableRelay();
     const { jobId, leaseEpoch } = await startRunning('late');
-    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-0000000d', -1_000) }] }] });
-    expect((await approvals(jobId))[0]).toEqual(expect.objectContaining({ status: 'expired', resolvedBy: 'timeout' }));
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-0000000f', -1_000) }] }] });
+
+    expect(await linksOf(jobId)).toHaveLength(0);
+    expect(await auditRows(jobId, 'bash ask')).toMatchObject([{ summary: 'bash ask not opened: past deadline', resourceType: 'fleet-job' }]);
+
     await finish(jobId, leaseEpoch, 3);
   });
 
-  it('the job leaving RUNNING cancels its asks job_ended and withdraws an unsent answer', async () => {
-    const { jobId, leaseEpoch } = await startRunning('ending');
-    await sync({ jobs: [{ jobId, leaseEpoch, events: [
-      { seq: 2, type: 'approval_request', payload: ask('ask-0000000e') },
-      { seq: 3, type: 'approval_request', payload: ask('ask-0000000f') },
+  it('AC-7: an ask reported after the job left RUNNING in the same sync creates no request', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('ending-ask');
+    const res = await sync({ jobs: [{ jobId, leaseEpoch, events: [
+      { seq: 2, type: 'state', payload: { to: 'UPLOADING' } },
+      { seq: 3, type: 'state', payload: { to: 'COMPLETED' } },
+      { seq: 4, type: 'approval_request', payload: ask('ask-00000010') },
     ] }] });
-    const [first] = (await approvals(jobId)).filter((a) => a.status === 'pending');
-    await decide(String(first.id), world.tokens.dev, 'deny').expect(200);   // answer queued, not yet synced down
-    const after = await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 4, type: 'state', payload: { to: 'UPLOADING' } }] }] });
-    expect(after.commands.some((c) => c.type === 'APPROVAL_ANSWER' && c.jobId === jobId)).toBe(false);
-    const rows = await approvals(jobId);
-    expect(rows.find((a) => a.id !== first.id)).toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'job_ended' }));
-    await finish(jobId, leaseEpoch, 5, true);
+
+    expect(res.jobAcks).toContainEqual({ jobId, ackedSeq: 4 });
+    expect(await linksOf(jobId)).toHaveLength(0);
+    expect(await auditRows(jobId, 'bash ask')).toMatchObject([{ summary: 'bash ask not opened: job not running', resourceType: 'fleet-job' }]);
+    expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: jobId } })).state).toBe('COMPLETED');
+  });
+
+  it('AC-8: a policy that resolves the ask to none writes no request and one APPROVAL_ANSWER allow', async () => {
+    await enableRelay();
+    await withoutApprovalForShell(async () => {
+      const { jobId, leaseEpoch } = await startRunning('no-approval');
+      await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000011') }] }] });
+
+      expect(await linksOf(jobId)).toHaveLength(0);
+      expect(await prisma.approvalRequest.count({ where: { input: { path: ['naxAskId'], equals: 'ask-00000011' } } })).toBe(0);
+      const commands = await prisma.fleetCommand.findMany({ where: { jobId, type: 'APPROVAL_ANSWER' } });
+      expect(commands).toHaveLength(1);
+      expect(commands[0]!.payload).toEqual({ approvalId: null, naxAskId: 'ask-00000011', choice: 'allow' });
+      expect(await auditRows(jobId, 'bash ask')).toMatchObject([{ summary: 'bash ask answered allow: no approval needed' }]);
+
+      await finish(jobId, leaseEpoch, 3);
+    });
+  });
+
+  it('AC-9: with that policy and a truncated command the immediate answer is deny', async () => {
+    await enableRelay();
+    await withoutApprovalForShell(async () => {
+      const { jobId, leaseEpoch } = await startRunning('no-approval-truncated');
+      await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000012', 300_000, { commandTruncated: true }) }] }] });
+
+      const commands = await prisma.fleetCommand.findMany({ where: { jobId, type: 'APPROVAL_ANSWER' } });
+      expect(commands).toHaveLength(1);
+      expect(commands[0]!.payload).toEqual({ approvalId: null, naxAskId: 'ask-00000012', choice: 'deny' });
+
+      await finish(jobId, leaseEpoch, 3);
+    });
+  });
+
+  it('AC-10: the pending open records approval.requested as the runner, responsible for the job requester', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('activity');
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000013') }] }] });
+    const [link] = await linksOf(jobId);
+
+    const rows = await activity(jobId, 'approval.requested');
+    expect(rows).toMatchObject([{ action: 'approval.requested', entityType: 'approval', entityId: link!.requestId, actorType: 'RUNNER', actorId: runner.runnerId, responsibleUserId: world.ids.dev }]);
+
+    await finish(jobId, leaseEpoch, 3);
+  });
+
+  it('AC-11: the pending open dispatches fleet.approval.requested to the project webhook with the request id', async () => {
+    await enableRelay();
+    // Only this case needs a subscription: every other relay here would otherwise queue a delivery to an
+    // unreachable host, which is noise (and outbox work) the rest of the file does not read.
+    const webhook = await prisma.webhook.create({
+      data: { projectId: world.projectId, url: 'https://hooks.example.com/koda', secret: 's'.repeat(32), events: JSON.stringify(['fleet.approval.requested', 'fleet.approval.resolved']) },
+    });
+    try {
+      const { jobId, leaseEpoch } = await startRunning('webhook');
+      await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000014') }] }] });
+      const [link] = await linksOf(jobId);
+
+      const deliveries = await prisma.outboxEvent.findMany({
+        where: {
+          type: 'webhook_delivery',
+          AND: [{ payload: { contains: '"event":"fleet.approval.requested"' } }, { payload: { contains: `"jobId":"${jobId}"` } }],
+        },
+      });
+      expect(deliveries).toHaveLength(1);
+      expect(deliveries[0]!.payload).toContain(`"approvalId":"${link!.requestId}"`);
+      // A8: the webhook never carries the command text.
+      expect(deliveries[0]!.payload).not.toContain('bun run test');
+
+      await finish(jobId, leaseEpoch, 3);
+    } finally {
+      await prisma.webhook.delete({ where: { id: webhook.id } });
+    }
+  });
+
+  it('AC-12: the pending open records one fleet_approval_requested outbox event keyed by the request id', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('outbox');
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000015') }] }] });
+    const [link] = await linksOf(jobId);
+
+    const events = await prisma.outboxEvent.findMany({ where: { type: 'fleet_approval_requested', eventId: link!.requestId } });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ projectId: world.projectId, eventId: link!.requestId });
+
+    await finish(jobId, leaseEpoch, 3);
+  });
+
+  it('AC-13: a report moving the job to COMPLETED settles its pending ask cancelled/job_ended and stamps the link', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('job-end');
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000016') }] }] });
+    const [link] = await linksOf(jobId);
+
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [
+      { seq: 3, type: 'state', payload: { to: 'UPLOADING' } },
+      { seq: 4, type: 'state', payload: { to: 'COMPLETED' } },
+    ] }] });
+
+    expect(await requestOf(link!.requestId)).toMatchObject({ status: 'cancelled', result: { closedBy: 'job_ended' } });
+    expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId: link!.requestId } })).resolvedBy).toBe('job_ended');
+  });
+
+  it('AC-14: while another transaction holds the ask row, the COMPLETED report commits and the ask stays pending', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('held');
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000017') }] }] });
+    const [link] = await linksOf(jobId);
+
+    const res = await whileRequestHeld(link!.requestId, () =>
+      sync({ jobs: [{ jobId, leaseEpoch, events: [
+        { seq: 3, type: 'state', payload: { to: 'UPLOADING' } },
+        { seq: 4, type: 'state', payload: { to: 'COMPLETED' } },
+      ] }] }));
+
+    expect(res.jobAcks).toContainEqual({ jobId, ackedSeq: 4 });
+    expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: jobId } })).state).toBe('COMPLETED');
+    expect((await requestOf(link!.requestId)).status).toBe('pending');
+    expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId: link!.requestId } })).resolvedBy).toBeNull();
+  });
+
+  it('AC-15: the job-end close records a fleet activity row approval.cancelled', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('job-end-activity');
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000018') }] }] });
+    const [link] = await linksOf(jobId);
+
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [
+      { seq: 3, type: 'state', payload: { to: 'UPLOADING' } },
+      { seq: 4, type: 'state', payload: { to: 'COMPLETED' } },
+    ] }] });
+
+    expect(await activity(jobId, 'approval.cancelled')).toMatchObject([
+      expect.objectContaining({ action: 'approval.cancelled', entityType: 'approval', entityId: link!.requestId, actorType: 'SYSTEM', responsibleUserId: world.ids.dev }),
+    ]);
+  });
+
+  it('AC-13/AC-15 (F1): the job-end close stays bounded in the transition transaction and the sweeper drains the rest', async () => {
+    await enableRelay();
+    const total = 205;   // three pages of MAX_PENDING_ASKS_PER_JOB, more than one bounded close settles
+    const { jobId, leaseEpoch } = await startRunning('job-end-many');
+    // Reported in three reports: a runner batch, not one oversized one.
+    for (let first = 0; first < total; first += 35) {
+      const events = Array.from({ length: Math.min(35, total - first) }, (_, i) => ({
+        seq: first + i + 2,
+        type: 'approval_request' as const,
+        payload: ask(`ask-${(0x10000 + first + i).toString(16)}`),
+      }));
+      await sync({ jobs: [{ jobId, leaseEpoch, events }] });
+    }
+    const links = await linksOf(jobId);
+    expect(links).toHaveLength(total);
+    const settledCount = () => prisma.approvalRequest.count({
+      where: { id: { in: links.map((l) => l.requestId) }, status: 'cancelled' },
+    });
+
+    const res = await sync({ jobs: [{ jobId, leaseEpoch, events: [
+      { seq: total + 2, type: 'state', payload: { to: 'UPLOADING' } },
+      { seq: total + 3, type: 'state', payload: { to: 'COMPLETED' } },
+    ] }] });
+
+    // The transition committed (no interactive-transaction timeout) and settled only its bounded share of asks.
+    expect(res.jobAcks).toContainEqual({ jobId, ackedSeq: total + 3 });
+    expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: jobId } })).state).toBe('COMPLETED');
+    expect(await settledCount()).toBe(MAX_ASKS_CLOSED_PER_CALL);
+
+    // The durable continuation finishes the job, in its own transactions, without another runner report.
+    const sweeper = app.get(ApprovalJobEndSweeper, { strict: false });
+    for (let tick = 0; tick < 5 && (await settledCount()) < total; tick += 1) await sweeper.tick(new Date());
+
+    expect(await settledCount()).toBe(total);
+    const settled = await prisma.approvalRequest.findMany({ where: { id: { in: links.map((l) => l.requestId) } } });
+    expect(settled.filter((r) => (r.result as { closedBy?: string } | null)?.closedBy === 'job_ended')).toHaveLength(total);
+    expect(await prisma.fleetApprovalAsk.count({ where: { jobId, resolvedBy: 'job_ended' } })).toBe(total);
+    expect(await prisma.fleetActivity.count({ where: { jobId, action: 'approval.cancelled' } })).toBe(total);
+  }, 120_000);
+
+  it('a developer allows the ask on the engine: APPROVAL_ANSWER is delivered and the ack is accepted', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('loop');
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000019') }] }] });
+    const [link] = await linksOf(jobId);
+
+    // A viewer holds no decide key for this ask, so the engine route does not even show it to them (404, never 403).
+    await decide(link!.requestId, world.tokens.viewer).expect(404);
+    await decide(link!.requestId, world.tokens.dev).expect(200);
+    await decide(link!.requestId, world.tokens.dev).expect(409);
+
+    const answer = (await sync()).commands.find((c) => c.type === 'APPROVAL_ANSWER' && c.jobId === jobId);
+    expect(answer?.payload).toEqual({ approvalId: link!.requestId, naxAskId: 'ask-00000019', choice: 'allow' });
+    const ackedAt = new Date();
+    await sync({ commandAcks: [{ commandId: answer!.commandId, leaseEpoch, result: 'ok' }] });
+    expect((await requestOf(link!.requestId)).status).toBe('executed');
+    expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId: link!.requestId } })).outcome)
+      .toEqual({ delivery: { result: 'ok', detail: null, at: expect.any(String) } });
+    const delivery = (await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId: link!.requestId } })).outcome as { delivery: { at: string } };
+    expect(new Date(delivery.delivery.at).getTime()).toBeGreaterThanOrEqual(ackedAt.getTime());
+    expect(new Date(delivery.delivery.at).getTime()).toBeLessThanOrEqual(Date.now());
+
+    await finish(jobId, leaseEpoch, 3);
+  });
+
+  /**
+   * Permissions P3 US-012 AC-1 (regression pin): the deletion of `FleetApproval` must leave the whole fleet loop
+   * intact — relay opens the ask, the fleet decide adapter allows it, the runner acks the answer, and the fleet GET
+   * reports the request and the stored delivery. The pin runs over the fleet routes, not the engine's, so it also
+   * covers the adapters the deletion touches.
+   */
+  it('US-012 AC-1: a relayed ask allowed on the fleet route and acked ok reads back approved with delivery ok', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('fleet-pin');
+    // A nax ask id of its own: US-011 AC-14 relays `ask-0000001b` on its own job (fix round 1).
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-00000020') }] }] });
+    const [link] = await linksOf(jobId);
+
+    const decided = data<{ id: string; status: string; decision: string }>(await request(server)
+      .post(`/api/projects/web/fleet/approvals/${link!.requestId}/decide`)
+      .set(auth(world.tokens.dev)).send({ decision: 'allow' }).expect(200));
+    expect(decided).toEqual(expect.objectContaining({ id: link!.requestId, status: 'approved', decision: 'allow' }));
+
+    const answer = (await sync()).commands.find((c) => c.type === 'APPROVAL_ANSWER' && c.jobId === jobId);
+    expect(answer?.payload).toEqual({ approvalId: link!.requestId, naxAskId: 'ask-00000020', choice: 'allow' });
+    await sync({ commandAcks: [{ commandId: answer!.commandId, leaseEpoch, result: 'ok' }] });
+
+    const read = data<{ status: string; outcome: { delivery: { result: string } } }>(await request(server)
+      .get(`/api/projects/web/fleet/approvals/${link!.requestId}`).set(auth(world.tokens.dev)).expect(200));
+    expect(read.status).toBe('approved');
+    expect(read.outcome.delivery.result).toBe('ok');
+
+    await finish(jobId, leaseEpoch, 3);
+  });
+
+  it('an unanswered ask expires through the engine sweeper; a decide after it is 409 and leaves it expired', async () => {
+    await enableRelay();
+    const { jobId, leaseEpoch } = await startRunning('expiry');
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-0000001a', 2_000) }] }] });
+    const [link] = await linksOf(jobId);
+
+    const result = await app.get(ApprovalRequestExpirySweeper, { strict: false }).tick(new Date(Date.now() + 5_000));
+
+    expect(result.expired).toBeGreaterThanOrEqual(1);
+    expect(await requestOf(link!.requestId)).toMatchObject({ status: 'expired' });
+    await decide(link!.requestId, world.tokens.dev).expect(409);
+    expect((await requestOf(link!.requestId)).status).toBe('expired');
+
+    await finish(jobId, leaseEpoch, 3);
+  });
+
+  /**
+   * Permissions P3 US-011 (AC-14): the relayed ask reaches every global admin through the fleet's notification, and
+   * the *relay* — not a hand-picked event — carries both events of the ask: the fleet's announcement and the engine's
+   * `approval_request_changed`. The engine subscriber must skip the fleet keys (US-001), so an admin holds exactly one
+   * notification for the ask; a duplicate from the engine path would be a second row with the same source id.
+   *
+   * The earlier cases of this file never run the relay, so their pending events are marked published first: the batch
+   * this test leases then holds only the ask's own two events (a stale webhook delivery would otherwise retry here).
+   */
+  it('US-011 AC-14: the outbox relay tells every global admin once, through the fleet approval only', async () => {
+    await enableRelay();
+    const secondAdmin = await prisma.user.create({ data: { email: 'relay-admin2@koda.test', passwordHash: 'x' } });
+    await grantBaseline(prisma, { type: 'USER', id: secondAdmin.id });
+    await grantRole(prisma, { type: 'USER', id: secondAdmin.id }, 'admin', null);
+    await prisma.outboxEvent.updateMany({ where: { status: { in: ['pending', 'processing'] } }, data: { status: 'published', publishedAt: new Date() } });
+
+    const { jobId, leaseEpoch } = await startRunning('notify');
+    await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: ask('ask-0000001b') }] }] });
+    const [link] = await linksOf(jobId);
+
+    // Both events of this ask are in the outbox: the engine's change (keyed `<requestId>:<status>`) and the fleet's
+    // announcement (keyed by the request id).
+    const events = await prisma.outboxEvent.findMany({
+      where: { OR: [{ eventId: link!.requestId }, { eventId: { startsWith: `${link!.requestId}:` } }] },
+      select: { id: true, type: true },
+    });
+    expect(events.map((e) => e.type).sort()).toEqual(['approval_request_changed', 'fleet_approval_requested']);
+
+    // The real relay: it leases pending rows and runs every registered handler for them.
+    const relay = app.get(OutboxRelay, { strict: false });
+    const settled = async () => prisma.outboxEvent.count({ where: { id: { in: events.map((e) => e.id) }, status: { in: ['published', 'dead'] } } });
+    for (let pass = 0; pass < 10 && (await settled()) < events.length; pass += 1) await relay.dispatchPendingBatch();
+    expect(await prisma.outboxEvent.findMany({ where: { id: { in: events.map((e) => e.id) } }, select: { status: true } }))
+      .toEqual([{ status: 'published' }, { status: 'published' }]);
+
+    for (const adminId of [world.ids.root, secondAdmin.id]) {
+      // One row per admin for this ask, whichever subscriber wrote it: the fleet's.
+      expect(await prisma.notification.findMany({ where: { userId: adminId, sourceId: link!.requestId } })).toEqual([
+        expect.objectContaining({ kind: 'approval_requested', sourceType: 'fleet_approval', link: '/admin/fleet/approvals' }),
+      ]);
+    }
+    // No engine approval notification for a fleet ask (it would be `sourceType: 'approval_request'`), and the job's
+    // requester is not an approver.
+    expect(await prisma.notification.count({ where: { sourceType: 'approval_request', sourceId: link!.requestId } })).toBe(0);
+    expect(await prisma.notification.count({ where: { userId: world.ids.dev, sourceId: link!.requestId } })).toBe(0);
+
+    await finish(jobId, leaseEpoch, 3);
   });
 
   it('a malformed ask is a rejected event, not a sync failure (D269)', async () => {
+    await enableRelay();
     const { jobId, leaseEpoch } = await startRunning('malformed');
     const res = await sync({ jobs: [{ jobId, leaseEpoch, events: [{ seq: 2, type: 'approval_request', payload: { ...ask('ask-00000010'), options: [] } }] }] });
     expect(res.jobAcks).toContainEqual({ jobId, ackedSeq: 2 });
-    expect(await approvals(jobId)).toHaveLength(0);
+    expect(await linksOf(jobId)).toHaveLength(0);
     await finish(jobId, leaseEpoch, 3);
   });
 

@@ -33,6 +33,7 @@ import type { PrincipalRef } from '../../../src/permissions/permissions.types';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, loginToken, resetThrottle, TEST_PASSWORD } from '../../helpers/http-app';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
+import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
@@ -139,9 +140,12 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
       },
     });
 
+  /** A pending fleet ask on the approval engine: the counts read `ApprovalRequest` + its link. */
   const approvalRow = (projectId: string) =>
-    prisma.fleetApproval.create({
-      data: { type: 'nax_bash_escalate', status: 'pending', projectId, payload: {}, requestedAt: DUE },
+    seedFleetAsk(prisma, {
+      kind: 'bash', projectId, createdAt: DUE,
+      input: { jobId: `count-${(n += 1)}`, leaseEpoch: 0, naxAskId: `count-ask-${n}`, payload: {} },
+      link: { jobId: `count-${n}`, leaseEpoch: 0, naxAskId: `count-ask-${n}` },
     });
 
   const schedule = (over: Partial<Prisma.JobScheduleUncheckedCreateInput> = {}) =>
@@ -211,7 +215,8 @@ describeIntegration('fleet consumers read bindings (US-004, PG)', () => {
     await prisma.fleetJob.deleteMany();
     await prisma.jobSchedule.deleteMany();
     await prisma.fleetActivity.deleteMany();
-    await prisma.fleetApproval.deleteMany();
+    await prisma.fleetApprovalAsk.deleteMany();
+    await prisma.approvalRequest.deleteMany();
   });
 
   it('writes need an action context', async () => {

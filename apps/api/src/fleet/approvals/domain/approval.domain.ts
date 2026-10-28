@@ -1,6 +1,3 @@
-import type { IPageOption } from '@nathapp/nestjs-common';
-import type { IPageResult } from '@nathapp/nestjs-data';
-
 export const APPROVAL_TYPES = ['budget_override_required', 'nax_bash_escalate'] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -12,6 +9,36 @@ export type ApprovalDecision = (typeof APPROVAL_DECISIONS)[number];
 
 export const APPROVAL_RESOLVED_BY = ['user', 'timeout', 'job_ended', 'superseded', 'manual_resume', 'window_reset', 'policy_deleted'] as const;
 export type ApprovalResolvedBy = (typeof APPROVAL_RESOLVED_BY)[number];
+
+/**
+ * Permissions P3 (US-002): the engine key of each fleet approval type. The fleet row is a view over an
+ * `ApprovalRequest`, so the type is decided by the key the request was opened with.
+ */
+export const FLEET_ASK_KEY = {
+  nax_bash_escalate: 'fleet.job.shell.escalate',
+  budget_override_required: 'fleet.budget.override',
+} as const;
+export const FLEET_ASK_KEYS: readonly string[] = Object.values(FLEET_ASK_KEY);
+
+/**
+ * The reverse of `FLEET_ASK_KEY`: the type a request is labelled with, from the key it was opened with.
+ * The readers that query `ApprovalRequest` directly (home, assistant project counts) label a row with it
+ * instead of copying the mapping.
+ */
+export const FLEET_ASK_TYPE: Readonly<Record<string, ApprovalType>> = Object.freeze({
+  [FLEET_ASK_KEY.nax_bash_escalate]: 'nax_bash_escalate',
+  [FLEET_ASK_KEY.budget_override_required]: 'budget_override_required',
+});
+
+/** The fleet type of a permission key, or null when the key is not a fleet ask's. */
+export function fleetTypeOfKey(permissionKey: string): ApprovalType | null {
+  // An own-property check, not a lookup: a key such as `constructor` or `toString` would otherwise answer an
+  // inherited `Object.prototype` member instead of null.
+  return Object.hasOwn(FLEET_ASK_TYPE, permissionKey) ? FLEET_ASK_TYPE[permissionKey] ?? null : null;
+}
+
+/** A link resolution that makes the fleet status `cancelled` whatever the request status. */
+export const CANCELLING_RESOLUTIONS: readonly ApprovalResolvedBy[] = ['job_ended', 'superseded', 'policy_deleted', 'window_reset'];
 
 /** Ceiling on how many cancelled jobs one approval may offer for re-queue. */
 export const MAX_REQUEUE_CANDIDATES = 200;
@@ -39,28 +66,6 @@ export interface FleetApprovalRecord {
   updatedAt: Date;
 }
 
-export interface NewFleetApproval {
-  type: ApprovalType;
-  projectId: string | null;
-  policyId: string | null;
-  payload: Record<string, unknown>;
-  requestedAt: Date;
-  jobId?: string | null;
-  leaseEpoch?: number | null;
-  naxAskId?: string | null;
-  expiresAt?: Date | null;
-}
-
-export interface ApprovalResolution {
-  status: Exclude<ApprovalStatus, 'pending'>;
-  resolvedBy: ApprovalResolvedBy;
-  decidedAt: Date;
-  decision?: ApprovalDecision | null;
-  decidedById?: string | null;
-  comment?: string | null;
-  outcome?: Record<string, unknown> | null;
-}
-
 export interface ApprovalFilters {
   projectId?: string;
   status?: ApprovalStatus;
@@ -80,37 +85,4 @@ export interface PendingCount {
   projectId: string;
   slug: string;
   pending: number;
-}
-
-export const APPROVAL_REPOSITORY = Symbol('APPROVAL_REPOSITORY');
-
-/** S1.5 §1.1. Lock order (§1.4): a caller that also locks a BudgetPolicy locks it first. */
-export interface IApprovalRepository {
-  create(data: NewFleetApproval): Promise<FleetApprovalRecord>;
-  findById(id: string): Promise<FleetApprovalRecord | null>;
-  /** SELECT ... FOR UPDATE (inside txManager.run); null when the approval is gone. */
-  lockById(id: string): Promise<FleetApprovalRecord | null>;
-  findPendingForPolicy(policyId: string): Promise<FleetApprovalRecord | null>;
-  /** S1.5 2a: re-reported asks are idempotent on (jobId, leaseEpoch, naxAskId). */
-  findByAsk(jobId: string, leaseEpoch: number, naxAskId: string): Promise<FleetApprovalRecord | null>;
-  /** Pending bash approvals of one job, oldest first. */
-  findPendingForJob(jobId: string): Promise<FleetApprovalRecord[]>;
-  /** Pending bash approvals whose expiresAt has passed, soonest first. */
-  findExpiredPending(now: Date, limit: number): Promise<FleetApprovalRecord[]>;
-  /** Pending approval count per job id; jobs with none are absent. */
-  countPendingByJob(jobIds: readonly string[]): Promise<Map<string, number>>;
-  resolve(id: string, r: ApprovalResolution): Promise<FleetApprovalRecord>;
-  setOutcome(id: string, outcome: Record<string, unknown>): Promise<FleetApprovalRecord>;
-  /** Newest first. */
-  findPage(f: ApprovalFilters, page: IPageOption): Promise<IPageResult<FleetApprovalRecord>>;
-  /** Only projects with a pending approval, in slug order. */
-  countPending(projectIds: readonly string[]): Promise<PendingCount[]>;
-  /**
-   * US-006: every live project's pending approvals, grouped by project, in slug order — the set a
-   * principal with a global `fleet.approval.read` grant counts. A soft-deleted project is left out.
-   */
-  countPendingAllProjects(): Promise<PendingCount[]>;
-  countPendingUnscoped(): Promise<number>;
-  findRequeueCandidates(policyId: string, since: Date, limit: number): Promise<RequeueCandidate[]>;
-  findProjectSlug(projectId: string): Promise<string | null>;
 }

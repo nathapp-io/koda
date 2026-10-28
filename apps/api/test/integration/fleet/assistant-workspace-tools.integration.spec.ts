@@ -21,6 +21,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { enrollRunner, seedFleetHttpWorld, type FleetHttpWorld } from '../../helpers/fleet-fixtures';
 import { seedThreadJobFor, type ThreadJobSeed } from '../../helpers/thread-fixtures';
+import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
 import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
 // The nax sandbox withholds host Postgres/Docker.
@@ -45,6 +46,8 @@ describeIntegration('koda_my_projects and workspace-scoped tools (PG, US-003)', 
   let noneJob: string;
   let adminJob: string;
   let richSlug: string;
+  /** The `rich` project's pending fleet ask (permissions P3 US-011 AC-11). */
+  let richPendingAsk: string;
   /** The ids of the users the setup creates, so the sentinel can name every one of them. */
   const createdUserIds: string[] = [];
 
@@ -157,13 +160,39 @@ describeIntegration('koda_my_projects and workspace-scoped tools (PG, US-003)', 
     await job(rich.id, richUser.id, 'FAILED', 'failed-8d', new Date(now - 8 * DAY_MS));
     await job(rich.id, richUser.id, 'COMPLETED', 'completed-today', new Date(now));
 
-    // AC-5: one pending and one approved approval.
-    await prisma.fleetApproval.createMany({
-      data: [
-        { type: 'nax_bash_escalate', status: 'pending', projectId: rich.id, payload: {}, requestedAt: new Date(now - DAY_MS) },
-        { type: 'nax_bash_escalate', status: 'approved', projectId: rich.id, payload: {}, requestedAt: new Date(now - DAY_MS) },
-      ],
+    // AC-5, US-011 AC-11: one pending and one approved fleet ask, plus a pending request of another key that
+    // is not a fleet ask. Permissions P3 US-011: the count reads the engine, so only the first counts.
+    const pendingAsk = await seedFleetAsk(prisma, {
+      kind: 'bash', projectId: rich.id,
+      input: { jobId: 'job-ask-rich', leaseEpoch: 1, naxAskId: 'ask-rich-pending', payload: { command: 'ls', commandTruncated: false, options: ['allow'] } },
+      link: { jobId: 'job-ask-rich', leaseEpoch: 1, naxAskId: 'ask-rich-pending' },
     });
+    await seedFleetAsk(prisma, {
+      kind: 'bash', projectId: rich.id, status: 'executed',
+      input: { jobId: 'job-ask-rich', leaseEpoch: 1, naxAskId: 'ask-rich-approved', payload: { command: 'ls', commandTruncated: false, options: ['allow'] } },
+      link: { jobId: 'job-ask-rich', leaseEpoch: 1, naxAskId: 'ask-rich-approved' },
+      decisions: [{ deciderType: 'USER', deciderId: richUser.id, decision: 'approve', params: { choice: 'allow' } }],
+    });
+    await prisma.approvalRequest.create({
+      data: {
+        permissionKey: 'ticket.delete', projectId: rich.id, actorType: 'USER', actorId: richUser.id, origin: 'rest',
+        correlationId: 'corr-rich-delete', input: { ticketId: 'ticket-rich' }, inputHash: 'hash-rich-delete',
+        requiredMode: 'human', onTimeout: 'reject', approverMustHoldAction: true, requireDistinctApprover: false,
+        status: 'pending', expiresAt: new Date(now + DAY_MS),
+      },
+    });
+    // US-011 (fix round 1): a fleet-key request with no `FleetApprovalAsk` link is not a fleet row — the approval list
+    // cannot show it, so the count must not promise it either.
+    await prisma.approvalRequest.create({
+      data: {
+        permissionKey: 'fleet.job.shell.escalate', projectId: rich.id, actorType: 'SYSTEM', actorId: 'runner', origin: 'runner',
+        correlationId: 'corr-rich-unlinked', input: { jobId: 'job-rich-unlinked', leaseEpoch: 1, naxAskId: 'ask-rich-unlinked', payload: { command: 'ls', commandTruncated: false, options: ['allow'] } },
+        inputHash: 'hash-rich-unlinked', requiredMode: 'agent', onTimeout: 'reject',
+        approverMustHoldAction: true, requireDistinctApprover: false,
+        status: 'pending', expiresAt: new Date(now + DAY_MS),
+      },
+    });
+    richPendingAsk = pendingAsk.requestId;
 
     devJob = await workspaceJob(dev.id);
     orderedJob = await workspaceJob(ordered.id);
@@ -227,6 +256,21 @@ describeIntegration('koda_my_projects and workspace-scoped tools (PG, US-003)', 
 
   it('AC-5: only the pending approval counts', async () => {
     const result = await call(richJob, 'ac5', {});
+
+    expect(lineOf(result.content, richSlug)).toContain('pending_approvals: 1');
+  });
+
+  it('US-011 AC-11: only the linked fleet ask counts, not a ticket.delete request nor an unlinked fleet-key request', async () => {
+    // Three pending requests live in the project: the fleet ask with its link, a `ticket.delete` request of another
+    // key, and a fleet-key request without a link (fix round 1). Only the first is a fleet approval row.
+    const ask = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: richPendingAsk }, select: { projectId: true } });
+    expect(await prisma.approvalRequest.count({ where: { projectId: ask.projectId, status: 'pending' } })).toBe(3);
+    expect(await prisma.fleetApprovalAsk.count({ where: { projectId: ask.projectId } })).toBe(2); // the pending ask and the settled one
+    expect(await prisma.approvalRequest.count({
+      where: { projectId: ask.projectId, status: 'pending', permissionKey: { in: ['fleet.job.shell.escalate', 'fleet.budget.override'] } },
+    })).toBe(2);
+
+    const result = await call(richJob, 'ac11', {});
 
     expect(lineOf(result.content, richSlug)).toContain('pending_approvals: 1');
   });

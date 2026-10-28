@@ -1,7 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { ApprovalResolvedBy } from './domain/approval.domain';
+import type { IPageOption } from '@nathapp/nestjs-common';
+import type { IPageResult } from '@nathapp/nestjs-data';
+import type { ApprovalFilters, ApprovalResolvedBy, FleetApprovalRecord, PendingCount, RequeueCandidate } from './domain/approval.domain';
 import {
-  FLEET_APPROVAL_ASK_REPOSITORY, FleetApprovalAskRecord, FleetAskWithStatus, IFleetApprovalAskRepository, NewFleetApprovalAsk,
+  FLEET_APPROVAL_ASK_REPOSITORY, FleetApprovalAskRecord, FleetAskWithStatus, IFleetApprovalAskRepository, JobEndAsk,
+  NewFleetApprovalAsk, PersistedPolicyClose, PolicyAskClose,
 } from './domain/fleet-approval-ask.domain';
 
 /**
@@ -35,15 +38,84 @@ export class FleetApprovalAskStore {
     return this.asks.findPendingForJob(jobId);
   }
 
-  findPendingForPolicy(budgetPolicyId: string): Promise<FleetApprovalAskRecord | null> {
-    return this.asks.findPendingForPolicy(budgetPolicyId);
+  /** US-006 (F1): one keyset page of a job's pending links, for a sweep that must reach every ask. */
+  findPendingForJobPage(jobId: string, afterRequestId?: string, limit?: number): Promise<FleetApprovalAskRecord[]> {
+    return this.asks.findPendingForJobPage(jobId, afterRequestId, limit);
+  }
+
+  /** An audited, durable scheduling attempt that rotates past failing asks and skips held rows. */
+  claimEndedJobAsks(limit: number): Promise<JobEndAsk[]> {
+    return this.asks.claimEndedJobAsks(limit);
+  }
+
+  /**
+   * US-007 (fix round 1): one page of a policy's pending links, keyset by request id, so a held ask cannot hide a
+   * newer one. The close reads pages of these, never a single "the pending ask".
+   */
+  findPendingForPolicyPage(budgetPolicyId: string, afterRequestId?: string, limit?: number): Promise<FleetApprovalAskRecord[]> {
+    return this.asks.findPendingForPolicyPage(budgetPolicyId, afterRequestId, limit);
+  }
+
+  /**
+   * US-007 (fix rounds 2-4): stamp the close a policy action intends on every pending ask of the policy that has no
+   * intent yet — the first action to reach an ask owns its settlement — and answer how many asks are still pending.
+   */
+  markPendingPolicyAsks(budgetPolicyId: string, close: PersistedPolicyClose): Promise<number> {
+    return this.asks.markPendingPolicyAsks(budgetPolicyId, close);
+  }
+
+  /** The durable policy-close queue: one bounded, skip-locked, least-recently-attempted batch. */
+  claimPendingPolicyAsks(limit: number): Promise<PolicyAskClose[]> {
+    return this.asks.claimPendingPolicyAsks(limit);
   }
 
   setResolvedBy(requestId: string, resolvedBy: ApprovalResolvedBy): Promise<FleetApprovalAskRecord> {
     return this.asks.setResolvedBy(requestId, resolvedBy);
   }
 
+  /** US-009: the acknowledgement that the frame was published — written after the publish, so an undelivered one retries. */
+  setPublishedStatus(requestId: string, publishedStatus: string): Promise<FleetApprovalAskRecord> {
+    return this.asks.setPublishedStatus(requestId, publishedStatus);
+  }
+
+  /** US-009: the claim that makes a redelivered engine event's activity row and webhook a no-op. */
+  setRecordedStatus(requestId: string, recordedStatus: string): Promise<FleetApprovalAskRecord> {
+    return this.asks.setRecordedStatus(requestId, recordedStatus);
+  }
+
   setOutcome(requestId: string, outcome: Record<string, unknown>): Promise<FleetApprovalAskRecord> {
     return this.asks.setOutcome(requestId, outcome);
+  }
+
+  findApproval(requestId: string): Promise<FleetApprovalRecord | null> {
+    return this.asks.findApproval(requestId);
+  }
+
+  findPage(f: ApprovalFilters, page: IPageOption): Promise<IPageResult<FleetApprovalRecord>> {
+    return this.asks.findPage(f, page);
+  }
+
+  countPending(projectIds: readonly string[]): Promise<PendingCount[]> {
+    return this.asks.countPending(projectIds);
+  }
+
+  countPendingAllProjects(): Promise<PendingCount[]> {
+    return this.asks.countPendingAllProjects();
+  }
+
+  countPendingUnscoped(): Promise<number> {
+    return this.asks.countPendingUnscoped();
+  }
+
+  countPendingByJob(jobIds: readonly string[]): Promise<Map<string, number>> {
+    return this.asks.countPendingByJob(jobIds);
+  }
+
+  findRequeueCandidates(policyId: string, since: Date, limit: number): Promise<RequeueCandidate[]> {
+    return this.asks.findRequeueCandidates(policyId, since, limit);
+  }
+
+  findProjectSlug(projectId: string): Promise<string | null> {
+    return this.asks.findProjectSlug(projectId);
   }
 }

@@ -2,7 +2,6 @@ import { Reflector } from '@nestjs/core';
 import { PERMISSION_CATALOG } from './catalog';
 import { SYSTEM_WRITER_METADATA, SystemWriter } from './system-writer.decorator';
 import { EmailDispatcher } from '../email/email-dispatcher';
-import { ApprovalExpirySweeper } from '../fleet/approvals/approval-expiry-sweeper';
 import { ApprovalRequestExpirySweeper } from '../approvals/approval-request-expiry.sweeper';
 import { BudgetSweeper } from '../fleet/budgets/budget-sweeper';
 import { BundleIngestSweeper } from '../fleet/ingest/bundle-ingest.sweeper';
@@ -40,8 +39,7 @@ import { FanOutPublisher } from '../outbox/fan-out-publisher';
 
 const writers = new Map<Function, string>([
   [EmailDispatcher, 'system.email.dispatch'],
-  [ApprovalExpirySweeper, 'system.approval.expire'],
-  // US-012: the approval engine's own expiry sweep; two classes may declare one key.
+  // US-012: the approval engine's own expiry sweep is the only declarer of the key.
   [ApprovalRequestExpirySweeper, 'system.approval.expire'],
   [BudgetSweeper, 'system.budget.window-reset'],
   [BundleIngestSweeper, 'system.ingest.drain'],
@@ -100,7 +98,7 @@ describe('@SystemWriter', () => {
   it('AC-4: reads the complete class-to-key declaration map', () => {
     const actual = new Map([...writers].map(([writer]) => [writer.name, reflector.get<string>(SYSTEM_WRITER_METADATA, writer)]));
     const expected = new Map([...writers].map(([writer, key]) => [writer.name, key]));
-    expect(writers).toHaveLength(36);
+    expect(writers).toHaveLength(35);
     expect(actual).toEqual(expected);
   });
 

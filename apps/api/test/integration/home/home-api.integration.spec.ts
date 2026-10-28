@@ -9,6 +9,7 @@ import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data } from '../../helpers/http-app';
 import { FleetHttpWorld, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
 import { expectBindingOnlyFixtures, grantRole } from '../../../src/permissions/test-helpers/permission-fixtures';
 import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
@@ -20,7 +21,7 @@ interface HomeSnapshot {
   needsYou: {
     tickets: Array<{ id: string; ref: string; projectSlug: string; status: string }>;
     ticketsTotal: number;
-    approvals: Array<{ id: string; type: string; projectSlug: string | null }>;
+    approvals: Array<{ id: string; type: string; projectSlug: string | null; jobId: string | null }>;
     approvalsTotal: number;
     jobs: Array<{ id: string; state: string; reason: string; pendingApprovals: number }>;
     jobsTotal: number;
@@ -37,6 +38,9 @@ describeIntegration('home dashboard API (PG)', () => {
   let webId: string;
   let opsId: string;
   let ticketNo = 0;
+  /** The two engine requests the needs-you section lists (permissions P3 US-011). */
+  let bashAsk: { requestId: string };
+  let budgetAsk: { requestId: string };
 
   const auth = (who: keyof FleetHttpWorld['tokens']) => ({ Authorization: `Bearer ${world.tokens[who]}` });
   const home = async (who: keyof FleetHttpWorld['tokens']) =>
@@ -74,15 +78,28 @@ describeIntegration('home dashboard API (PG)', () => {
     // (root sees it, dev must not), and a failure older than the 7-day window (history, not needs-you).
     const now = new Date();
     await job(webId, world.repoId, { feature: 'failed-recent', state: 'FAILED', finishedAt: new Date(now.getTime() - 3_600_000), stateReason: 'tests_red' });
-    const blocked = await job(webId, world.repoId, { feature: 'blocked-on-approval', state: 'QUEUED', queuedAt: new Date(now.getTime() - 7_200_000) });
+    // Permissions P3 US-011: `/home` lists the ask of the job's requester, so the blocked job is dev's own.
+    const blocked = await job(webId, world.repoId, {
+      feature: 'blocked-on-approval', state: 'QUEUED', queuedAt: new Date(now.getTime() - 7_200_000), requestedById: world.ids.dev,
+    });
     await job(opsId, world.foreignRepoId, { feature: 'failed-ops', state: 'FAILED', finishedAt: new Date(now.getTime() - 1_800_000) });
     await job(webId, world.repoId, { feature: 'failed-old', state: 'FAILED', finishedAt: new Date(now.getTime() - 8 * 86_400_000) });
 
-    await prisma.fleetApproval.create({
-      data: { type: 'nax_bash_escalate', projectId: webId, jobId: blocked.id, payload: {}, requestedAt: new Date(now.getTime() - 3_600_000) },
+    // Permissions P3 US-011: the asks are engine requests with a `FleetApprovalAsk` link. `requestedAt` is the
+    // request's `createdAt`, the job comes from the link, and a budget ask may own no project.
+    bashAsk = await seedFleetAsk(prisma, {
+      kind: 'bash', projectId: webId, createdAt: new Date(now.getTime() - 3_600_000),
+      input: { jobId: blocked.id, leaseEpoch: 1, naxAskId: 'ask-home-bash', payload: { command: 'bun run test', commandTruncated: false, options: ['allow'] } },
+      link: { jobId: blocked.id, leaseEpoch: 1, naxAskId: 'ask-home-bash' },
     });
-    await prisma.fleetApproval.create({
-      data: { type: 'budget_override_required', payload: {}, requestedAt: new Date(now.getTime() - 1_800_000) },
+    budgetAsk = await seedFleetAsk(prisma, {
+      kind: 'budget', projectId: null, createdAt: new Date(now.getTime() - 1_800_000),
+      input: {
+        policyId: 'policy-home', scopeType: 'global', scopeId: null, windowKind: 'day',
+        windowStart: new Date(now.getTime() - 86_400_000).toISOString(), spentUsd: '10.5', amountUsd: '20',
+        requestedAt: new Date(now.getTime() - 1_800_000).toISOString(),
+      },
+      link: { budgetPolicyId: 'policy-home' },
     });
 
     // Activity across the three timeline tables, plus one event in ops.
@@ -130,6 +147,19 @@ describeIntegration('home dashboard API (PG)', () => {
     expect(v.activity.map((e) => e.eventType).sort()).toEqual(['agent_event', 'decision_event', 'ticket_event']);
   });
 
+  it("US-011 AC-9: the job requester's home lists the pending ask with its request id and the link's job", async () => {
+    const v = await home('dev');
+
+    expect(v.needsYou.approvals).toEqual([
+      expect.objectContaining({
+        id: bashAsk.requestId, type: 'nax_bash_escalate', projectSlug: 'web',
+        jobId: v.needsYou.jobs.find((j) => j.reason === 'blocked')?.id,
+      }),
+    ]);
+    // The ask is the blocked job's, so the row it blocks carries the count.
+    expect(v.needsYou.jobs.find((j) => j.reason === 'blocked')?.pendingApprovals).toBe(1);
+  });
+
   it('gives a global admin every live project plus unscoped approvals', async () => {
     const v = await home('root');
     expect(v.projects.map((p) => p.slug).sort()).toEqual(['ops', 'web']);
@@ -140,6 +170,17 @@ describeIntegration('home dashboard API (PG)', () => {
     expect(v.needsYou.approvals.find((a) => a.projectSlug === null)).toMatchObject({ type: 'budget_override_required' });
     expect(v.needsYou.jobsTotal).toBe(3);
     expect(v.activity.some((e) => e.projectSlug === 'ops')).toBe(true);
+  });
+
+  it('US-011 AC-10: the admin approvals count includes the pending budget ask that has no project', async () => {
+    const v = await home('root');
+
+    expect(v.needsYou.approvalsTotal).toBe(2);
+    // Newest request first: the budget ask (no project, no job) then the job's bash ask.
+    expect(v.needsYou.approvals.map((a) => [a.id, a.projectSlug])).toEqual([
+      [budgetAsk.requestId, null],
+      [bashAsk.requestId, 'web'],
+    ]);
   });
 
   it('returns an empty snapshot for a signed-in user with no memberships', async () => {

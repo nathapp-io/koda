@@ -78,6 +78,52 @@ describe('ProjectEventBus', () => {
     expect(Logger.prototype.error).toHaveBeenCalled();
   });
 
+  it('retryable delivery rejects failures but deduplicates successful consumers on redelivery', () => {
+    const bus = new ProjectEventBus();
+    const good = vi.fn();
+    const bad = vi.fn().mockImplementationOnce(() => { throw new Error('socket failed'); });
+    bus.subscribe('p1', good);
+    bus.subscribe('p1', bad);
+    expect(() => bus.publishRetryable(event('p1'))).toThrow('socket failed');
+    expect(() => bus.publishRetryable(event('p1'))).not.toThrow();
+    bus.publishRetryable(event('p1'));
+    expect(good).toHaveBeenCalledTimes(1);
+    expect(bad).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['publication', 'acknowledgement'])('retains an unacknowledged frame through >1024 intervening frames after %s failure', (failure) => {
+    const bus = new ProjectEventBus();
+    const good = vi.fn();
+    const bad = vi.fn((frame: LiveEvent) => {
+      if (failure === 'publication' && frame.id === 'held') throw new Error('socket failed');
+    });
+    bus.subscribe('p1', good);
+    bus.subscribe('p1', bad);
+    try { bus.publishRetryable(event('p1', 'held')); } catch (error) {
+      expect(failure).toBe('publication');
+      expect(error).toBeInstanceOf(AggregateError);
+    }
+    for (let i = 0; i < 1100; i++) bus.publishRetryable(event('p1', String(i)));
+    good.mockClear();
+    bad.mockImplementation(() => undefined);
+    bus.publishRetryable(event('p1', 'held'));
+    expect(good).not.toHaveBeenCalled();
+  });
+
+  it('releases deduplication state only after durable acknowledgement or unsubscribe', () => {
+    const bus = new ProjectEventBus();
+    const listener = vi.fn();
+    const unsubscribe = bus.subscribe('p1', listener);
+    bus.publishRetryable(event('p1'));
+    bus.acknowledgeRetryable(event('p1'));
+    // The producer's durable marker now prevents retries; the bus no longer owns this id.
+    bus.publishRetryable(event('p1'));
+    expect(listener).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    bus.publishRetryable(event('p1'));
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
   it('the same listener function subscribed twice gets two independent subscriptions', () => {
     const bus = new ProjectEventBus();
     const listener = vi.fn();

@@ -1,6 +1,11 @@
 import { canRunDbTests } from '../../helpers/test-environment';
 /**
  * Fleet S1.5 slice 1a — approvals over HTTP: both prefixes, permissions, decide, re-queue, counts, webhooks (PG).
+ *
+ * Permissions P3 (US-007 fix round 1): the list, get, decide and counts routes read the approval engine
+ * (`ApprovalRequest` + `FleetApprovalAsk`), so every case below seeds with `seedFleetAsk` and asserts on the engine
+ * request and its link.
+ *
  * Run: cd apps/api && bun run test:scoped test/integration/fleet/fleet-approvals-api.integration.spec.ts
  */
 import request from 'supertest';
@@ -14,13 +19,16 @@ import { BudgetEvaluator } from '../../../src/fleet/budgets/budget-evaluator';
 import { expectBindingOnlyFixtures } from '../../../src/permissions/test-helpers/permission-fixtures';
 import enFleet from '../../../src/i18n/en/fleet.json';
 import { expectGuardActive, fixtureDb, withTestActor } from '../../helpers/action-context';
+import { seedFleetAsk, type SeedFleetAskSpec } from '../../helpers/fleet-ask-fixtures';
+import { outboxRecord } from '../../helpers/outbox-record';
+import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 
 // The nax sandbox withholds host Postgres/Docker.
 const describeIntegration = canRunDbTests() ? describe : describe.skip;
 
 vi.setConfig({ testTimeout: 30_000 });
 
-interface Approval { id: string; status: string; decision: string | null; resolvedBy: string | null; outcome: { resumedAmountUsd?: string; requeueResults?: Array<{ jobId: string; ok: boolean; error?: string }> } | null; requeueCandidates?: Array<{ jobId: string }>; requeueCandidatesTruncated?: boolean }
+interface Approval { id: string; type: string; status: string; jobId: string | null; decision: string | null; resolvedBy: string | null; outcome: { resumedAmountUsd?: string; requeueResults?: Array<{ jobId: string; ok: boolean; error?: string }> } | null; requeueCandidates?: Array<{ jobId: string }>; requeueCandidatesTruncated?: boolean }
 interface Page<T> { total: number; records: T[] }
 
 /** The two race branches the concurrency cases can legitimately lose to, by i18n key. */
@@ -37,6 +45,7 @@ describeIntegration('fleet approvals API (PG)', () => {
   let approvals: ApprovalsService;
   let padmin: string;
   let padminId: string;
+  let publisher: FanOutPublisher;
   let n = 0;
   const as = (token: string) => ({ Authorization: `Bearer ${token}` });
   const tok = (who: keyof FleetHttpWorld['tokens']) => as(world.tokens[who]);
@@ -47,6 +56,17 @@ describeIntegration('fleet approvals API (PG)', () => {
   });
   /** One evaluation as the budget sweeper runs it: the wrapped entry production reaches `evaluate` from. */
   const evaluate = (policyId: string) => withTestActor({ type: 'SYSTEM', id: 'budget' }, () => evaluator.evaluate(policyId));
+  /**
+   * Runs the outbox relay over the pending events of one type. The fleet's decision outputs are recorded from
+   * `approval_request_changed` (US-009 / fix round 2), so a test that asserts them has to deliver the event.
+   */
+  const deliver = async (type: string): Promise<void> => {
+    for (const row of await prisma.outboxEvent.findMany({ where: { type }, orderBy: { createdAt: 'asc' } })) {
+      await publisher.publish(outboxRecord(row.type, JSON.parse(row.payload), {
+        id: row.id, metadata: { projectId: row.projectId, eventId: row.eventId },
+      }));
+    }
+  };
   const PROJECT = '/api/projects/web/fleet/approvals';
   const ADMIN = '/api/fleet/approvals';
 
@@ -56,7 +76,14 @@ describeIntegration('fleet approvals API (PG)', () => {
       maxCostUsd: new Prisma.Decimal(5), selectorLabels: [], requestedById: world.ids.dev, state: 'COMPLETED', firstStartedAt: new Date(), ...over,
     },
   });
-  /** A paused project policy with its pending approval, one queued job the stop cancels, and the approval id. */
+  /** The policy's pending budget asks as engine request ids, oldest first. */
+  const policyAsks = (policyId: string) => prisma.fleetApprovalAsk.findMany({ where: { budgetPolicyId: policyId }, orderBy: { requestId: 'asc' } });
+  const pendingPolicyAsks = async (policyId: string): Promise<number> => {
+    const links = await policyAsks(policyId);
+    if (links.length === 0) return 0;
+    return prisma.approvalRequest.count({ where: { id: { in: links.map((l) => l.requestId) }, status: 'pending' } });
+  };
+  /** A paused project policy with its pending ask, one queued job the stop cancels, and the request id. */
   const stopped = async (scope: 'project' | 'global' = 'project') => {
     const policy = await prisma.budgetPolicy.create({
       data: scope === 'project'
@@ -66,8 +93,8 @@ describeIntegration('fleet approvals API (PG)', () => {
     await job({ costSpentUsd: 10 });
     const queued = await job({ state: 'QUEUED', firstStartedAt: null });
     await evaluate(policy.id);
-    const approval = await prisma.fleetApproval.findFirstOrThrow({ where: { policyId: policy.id, status: 'pending' } });
-    return { policy, queued, approvalId: approval.id };
+    const [link] = await policyAsks(policy.id);
+    return { policy, queued, approvalId: link.requestId };
   };
 
   beforeAll(async () => {
@@ -92,6 +119,7 @@ describeIntegration('fleet approvals API (PG)', () => {
     ).items.map((a) => a.slug)).toContain(agent.slug);
     evaluator = app.get(BudgetEvaluator);
     approvals = app.get(ApprovalsService);
+    publisher = app.get(FanOutPublisher);
     await request(server).post('/api/admin/users').set(tok('root')).send({ email: 'padmin@koda.test', name: 'padmin', password: TEST_PASSWORD, role: 'MEMBER' }).expect(201);
     await request(server).post('/api/projects/web/members').set(tok('root')).send({ email: 'padmin@koda.test', roleKey: 'project-admin' }).expect(201);
     padmin = await loginToken(server, 'padmin@koda.test');
@@ -105,7 +133,8 @@ describeIntegration('fleet approvals API (PG)', () => {
   });
   beforeEach(async () => {
     await prisma.budgetPolicy.deleteMany();
-    await prisma.fleetApproval.deleteMany();
+    await prisma.fleetApprovalAsk.deleteMany();
+    await prisma.approvalRequest.deleteMany();
     await prisma.fleetCommand.deleteMany();
     await prisma.fleetJob.deleteMany();
     await prisma.outboxEvent.deleteMany();
@@ -151,11 +180,12 @@ describeIntegration('fleet approvals API (PG)', () => {
   it('an authenticated project agent cannot decide a budget override', async () => {
     const { approvalId, policy, queued } = await stopped();
     const decision = { decision: 'raise_budget_and_resume', amountUsd: 25, requeueJobIds: [queued.id] };
-    // US-006: the refusal is now `ApprovalsService.decide`'s key check (`fleet.approval.decide.budget`),
-    // which no agent role grants; the decision below is never reached, so the ask keeps its state.
+    // The refusal is the engine's eligibility check (the agent holds neither `fleet.budget.override` nor
+    // `approval.decide@fleet.budget.override` in the project), answered before the body is validated, so the ask
+    // keeps its state.
     await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(agent.apiKey)).send(decision).expect(403);
-    expect(await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approvalId } }))
-      .toEqual(expect.objectContaining({ status: 'pending', decision: null, decidedById: null }));
+    expect((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('pending');
+    expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId: approvalId } })).resolvedBy).toBeNull();
     expect((await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } })).pausedAt).not.toBeNull();
     expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: queued.id } })).state).toBe('CANCELLED');
     await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send(decision).expect(200);
@@ -163,16 +193,14 @@ describeIntegration('fleet approvals API (PG)', () => {
 
   it('an authenticated project agent allows a bash approval of a user\'s job', async () => {
     const running = await job({ state: 'RUNNING', runnerId: runner.id, leaseEpoch: 1, bashMode: 'escalate' });
-    const approval = await prisma.fleetApproval.create({ data: {
-      type: 'nax_bash_escalate', projectId: world.projectId, jobId: running.id, leaseEpoch: running.leaseEpoch,
-      naxAskId: 'agent-guard-ask', requestedAt: new Date(), expiresAt: new Date(Date.now() + 300_000),
-      payload: { command: 'bun run test', commandTruncated: false, options: ['allow', 'deny'] },
-    } });
-    // US-006: a Developer agent holds `fleet.approval.decide.bash`, and the job's requester is a user, so
-    // the self-decide rule does not apply.
-    await request(server).post(`${PROJECT}/${approval.id}/decide`).set(as(agent.apiKey)).send({ decision: 'allow' }).expect(200);
-    expect(await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approval.id } }))
-      .toEqual(expect.objectContaining({ status: 'approved', decision: 'allow', decidedById: agent.id }));
+    const { requestId } = await seedFleetAsk(prisma, {
+      kind: 'bash', projectId: world.projectId, onBehalfOf: { type: 'USER', id: world.ids.dev }, expiresAt: new Date(Date.now() + 300_000),
+      input: { jobId: running.id, leaseEpoch: running.leaseEpoch, naxAskId: 'agent-guard-ask', payload: { command: 'bun run test', commandTruncated: false, options: ['allow', 'deny'] } },
+      link: { jobId: running.id, leaseEpoch: running.leaseEpoch, naxAskId: 'agent-guard-ask' },
+    });
+    await request(server).post(`${PROJECT}/${requestId}/decide`).set(as(agent.apiKey)).send({ decision: 'allow' }).expect(200);
+    // The engine ran the bash command: the request executed and the answer is queued for the job's runner.
+    expect((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: requestId } })).status).toBe('executed');
     expect(await prisma.fleetCommand.count({ where: { jobId: running.id, type: 'APPROVAL_ANSWER' } })).toBe(1);
   });
 
@@ -215,7 +243,10 @@ describeIntegration('fleet approvals API (PG)', () => {
     const after = await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } });
     expect(after).toEqual(expect.objectContaining({ pausedAt: null, amountUsd: new Prisma.Decimal(25.5) }));
     expect((await prisma.fleetJob.findUniqueOrThrow({ where: { id: queued.id } })).state).toBe('QUEUED');
+    // The resumed incident still names the ask it answered: the close answers the request id.
     expect((await prisma.budgetIncident.findFirstOrThrow({ where: { policyId: policy.id, kind: 'resumed' } })).approvalId).toBe(approvalId);
+    // The decision's fleet outputs come from the durable outbox event (permissions P3 US-009).
+    await deliver('approval_request_changed');
     expect(await prisma.outboxEvent.count({ where: { payload: { contains: '"event":"fleet.approval.resolved"' } } })).toBe(1);
   });
 
@@ -237,7 +268,7 @@ describeIntegration('fleet approvals API (PG)', () => {
     await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send({ decision: 'raise_budget_and_resume' }).expect(400);
     await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send({ decision: 'raise_budget_and_resume', amountUsd: 5 }).expect(400);
     await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send({ decision: 'raise_budget_and_resume', amountUsd: 25, requeueJobIds: ['nope'] }).expect(400);
-    expect((await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('pending');
+    expect((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: approvalId } })).status).toBe('pending');
   });
 
   it('admin prefix on a project policy resumes it (review focus 5)', async () => {
@@ -250,70 +281,59 @@ describeIntegration('fleet approvals API (PG)', () => {
     const { approvalId, policy } = await stopped();
     await request(server).delete(`/api/projects/web/fleet/budgets/${policy.id}`).set(as(padmin)).expect(204);
     await request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send({ decision: 'keep_paused' }).expect(409);
-    // Review focus 3 also covers the delete's own half: the approval is closed, not left pending or
-    // approved, and with no human decision attached, so the later decide fails on state, not on a missing policy.
-    const closed = await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approvalId } });
-    expect(closed).toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'policy_deleted', decidedById: null }));
+    // Review focus 3 also covers the delete's own half: the ask is closed, not left pending or approved, and with no
+    // human decision attached, so the later decide fails on state, not on a missing policy.
+    expect(await prisma.approvalRequest.findUniqueOrThrow({ where: { id: approvalId } }))
+      .toEqual(expect.objectContaining({ status: 'cancelled', result: { closedBy: 'policy_deleted' }, approverId: null }));
+    expect((await prisma.fleetApprovalAsk.findUniqueOrThrow({ where: { requestId: approvalId } })).resolvedBy).toBe('policy_deleted');
   });
 
+  /**
+   * Review focus 1 is the policy -> request lock nesting: `evaluate` takes the budget policy first and then the ask
+   * rows, while the engine's decide takes the request first and its command takes the policy. The fleet side reads
+   * the ask with `FOR UPDATE SKIP LOCKED`, so the two orders cannot form a cycle; what this pins is that they do not
+   * (a deadlock surfaces as a 500) and that whichever interleaving happened leaves a state the fleet can explain:
+   * a paused policy has exactly one pending ask, and an unpaused one has none.
+   */
   it('concurrent evaluate and decide over HTTP: no deadlock (review focus 1)', async () => {
     const { approvalId, policy } = await stopped();
-    // Review focus 1 is the policy -> approval lock nesting (spec §1.4), so `evaluate` has to reach the
-    // approval row here. A policy left paused short-circuits at `isEffectivelyPaused` and never opens
-    // or closes an approval, so both calls would contend on the policy row alone and prove nothing.
-    // Task 4's D228 shape: clear the pause, keep the amount, so the same window spend still hard-stops.
+    // A policy left paused short-circuits at `isEffectivelyPaused` and never opens or closes an ask, so the pause is
+    // cleared (D228 shape: same amount, same window spend) for `evaluate` to reach the ask rows at all.
     await prisma.budgetPolicy.update({ where: { id: policy.id }, data: { pausedAt: null, pausedWindowStart: null } });
     const [res] = await Promise.all([
       request(server).post(`${PROJECT}/${approvalId}/decide`).set(as(padmin)).send({ decision: 'raise_budget_and_resume', amountUsd: 40 }),
       evaluate(policy.id),
       evaluate(policy.id),
     ]);
-    // The decide can never win this race to a 200: it holds the policy lock from its first query, so the
-    // pause it needs is either already superseded (approval not pending) or the one the test just cleared
-    // (budget not paused). Both paths nest policy -> approval, so one commits and the other answers 409;
-    // a reversed nesting would deadlock here and surface as a 500 instead.
-    expect(res.status).toBe(409);
-    // The status alone cannot tell those two apart, so on a slower box this would quietly degrade into a
-    // check of the fixture. The message names the branch: a deadlock or any other 409 fails here.
-    expect(RACE_CONFLICTS).toContain(res.body.message);
-    // Whichever promise took the policy lock first, the stop that got through superseded the pending
-    // approval (system close: no human decision) and opened a fresh pending one in its place.
-    expect(await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approvalId } }))
-      .toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'superseded', decidedById: null }));
-    expect(await prisma.fleetApproval.count({ where: { policyId: policy.id, status: 'pending' } })).toBe(1);
+
+    // Either the decide resumed the policy between the two stops (200) or a stop superseded its ask first (409); a
+    // deadlock or any other failure would be a 500 here.
+    expect([200, 409]).toContain(res.status);
+    if (res.status === 409) expect(RACE_CONFLICTS).toContain(res.body.message);
+    const paused = (await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } })).pausedAt;
+    expect(await pendingPolicyAsks(policy.id)).toBe(paused === null ? 0 : 1);
     // One hard stop per policy per window (D228): the second `evaluate` sees the pause the first committed.
     expect(await prisma.budgetIncident.count({ where: { policyId: policy.id, kind: 'hard_stop' } })).toBe(1);
   });
 
   /**
-   * Additive to the HTTP case above, which is what exercises the route (ProjectMembershipGuard, the DTO
-   * validation pipe, `route(ctx)`/`ctx.role`, `requireUser`) — but it reaches Postgres so much later than
-   * the in-process `evaluate` that reversing `decide`'s two lock lines still passes it: ~0% mutant
-   * detection. Here both transactions open in one tick, so they really are concurrent on the database.
+   * Additive to the HTTP case above, which is what exercises the route (ProjectMembershipGuard, the DTO validation
+   * pipe, `route(ctx)`/`ctx.role`, `requireUser`) — but it reaches Postgres so much later than the in-process
+   * `evaluate` that reversing the lock order still passes it: ~0% mutant detection. Here both transactions open in one
+   * tick, so they really are concurrent on the database.
    *
-   * One `decide` and one `evaluate`, deliberately, and only because a second `evaluate` adds no
-   * concurrency signal to this pair. The cycle under test is `decide` and this `evaluate` alone:
-   * `evaluate` takes the policy lock first and then wants the approval row, while `decide` takes the
-   * policy lock first too and then wants the same approval row, so a reversed nesting anywhere in that
-   * pair is what has to deadlock.
+   * This is a **real but probabilistic** guard: nothing holds either row back until both transactions are in flight,
+   * so whether they actually overlap is left to connection scheduling. A green run is evidence, a red run is proof;
+   * do not read it as "the lock order is verified".
    *
-   * This is a **real but probabilistic** guard, and it is probabilistic purely because there is no
-   * barrier: nothing holds either row back until both transactions are in flight, so whether they
-   * actually overlap is left to connection scheduling. A green run is evidence, a red run is proof; do
-   * not read it as "the lock order is verified". A true barrier (hold the policy row from a third
-   * connection, fire, release) would be deterministic, but that is a redesign and is not warranted here.
-   *
-   * Postgres picks the deadlock victim, so it is not knowable in advance which of the two promises
-   * rejects — hence `Promise.allSettled` and the loop over both results rather than an await on one.
-   *
-   * The regex below matches the error *text*, not an error code, and that is load-bearing: both lock
-   * statements are `$queryRaw ... FOR UPDATE`, so a `40P01` raised there reaches the test as Prisma
-   * `P2010` (raw query failed), never `P2034` (transaction conflict). Tightening the regex to an error
-   * code would stop matching and silently turn this into a test that always passes.
+   * The regex below matches the error *text*, not an error code, and that is load-bearing: both lock statements are
+   * `$queryRaw ... FOR UPDATE`, so a `40P01` raised there reaches the test as Prisma `P2010` (raw query failed), never
+   * `P2034` (transaction conflict). Tightening the regex to an error code would stop matching and silently turn this
+   * into a test that always passes.
    */
   it('concurrent in-process decide and evaluate: no deadlock, and never a P2034 (review focus 1)', async () => {
     const { approvalId, policy } = await stopped();
-    // Same D228 shape as the HTTP case above: clear the pause so `evaluate` reaches the approval row.
+    // Same D228 shape as the HTTP case above: clear the pause so `evaluate` reaches the ask rows.
     await prisma.budgetPolicy.update({ where: { id: policy.id }, data: { pausedAt: null, pausedWindowStart: null } });
     const [decideResult, evaluateResult] = await Promise.allSettled([
       // The in-process `decide` stands in for the admin route, so it runs as the admin who decides.
@@ -321,19 +341,12 @@ describeIntegration('fleet approvals API (PG)', () => {
         approvals.decide({ id: world.ids.root, principal: rootPrincipal() }, { kind: 'admin' }, approvalId, { decision: 'raise_budget_and_resume', amountUsd: 40 })),
       evaluate(policy.id),
     ]);
-    // The only rejection allowed is the decided-conflict, which is the same 409 the HTTP case sees. With a
-    // reversed nesting the loser blocks on lock 1 while the winner takes lock 2, the cycle is a deadlock,
-    // and Postgres answers `40P01` — which arrives here as Prisma `P2010` on the raw lock query, so the
-    // match has to be on that text (see the doc comment).
+    // The only rejection allowed is a fleet conflict (the ask was already superseded, or the policy already resumed).
     for (const r of [decideResult, evaluateResult]) {
       if (r.status === 'rejected') expect(String(r.reason)).not.toMatch(/P2034|40P01|deadlock/i);
     }
-    // One interleaving happened, and it is self-consistent: `evaluate` takes the policy lock from its
-    // first statement while `decide` still owes one round trip to its own pre-lock read, so the stop
-    // supersedes `approvalId` and opens its replacement (one hard stop per policy per window, D228).
-    expect(await prisma.fleetApproval.findUniqueOrThrow({ where: { id: approvalId } }))
-      .toEqual(expect.objectContaining({ status: 'cancelled', resolvedBy: 'superseded', decidedById: null }));
-    expect(await prisma.fleetApproval.count({ where: { policyId: policy.id, status: 'pending' } })).toBe(1);
+    const paused = (await prisma.budgetPolicy.findUniqueOrThrow({ where: { id: policy.id } })).pausedAt;
+    expect(await pendingPolicyAsks(policy.id)).toBe(paused === null ? 0 : 1);
     expect(await prisma.budgetIncident.count({ where: { policyId: policy.id, kind: 'hard_stop' } })).toBe(1);
   });
 
@@ -346,5 +359,84 @@ describeIntegration('fleet approvals API (PG)', () => {
     const forRoot = data<{ total: number; unscoped: number }>(await request(server).get('/api/fleet/approval-counts').set(tok('root')).expect(200));
     expect(forRoot.unscoped).toBe(1);
     expect(data<{ total: number }>(await request(server).get('/api/fleet/approval-counts').set(tok('outsider')).expect(200)).total).toBe(0);
+  });
+
+  /**
+   * Permissions P3 US-011: the list, the detail page and the counts read the approval engine, so every case below
+   * seeds with `seedFleetAsk` and reads the engine request id back out of the fleet DTO.
+   */
+  const bashAsk = (jobId: string, over: Partial<SeedFleetAskSpec> = {}) => {
+    const naxAskId = over.link?.naxAskId ?? `ask-api-${++n}`;
+    return seedFleetAsk(prisma, {
+      kind: 'bash', projectId: world.projectId, expiresAt: new Date(Date.now() + 300_000),
+      input: { jobId, leaseEpoch: 1, naxAskId, payload: { command: 'bun run test', commandTruncated: false, options: ['allow', 'deny'] } },
+      link: { jobId, leaseEpoch: 1, naxAskId },
+      ...over,
+    });
+  };
+
+  it('US-011 AC-1: lists a seeded pending bash ask as its request row, with the link\'s job', async () => {
+    const running = await job({ state: 'RUNNING', runnerId: runner.id, leaseEpoch: 1, bashMode: 'escalate' });
+    const { requestId } = await bashAsk(running.id);
+
+    const page = data<Page<Approval>>(await request(server).get(PROJECT).set(tok('viewer')).expect(200));
+
+    expect(page.records).toEqual([
+      expect.objectContaining({ id: requestId, type: 'nax_bash_escalate', status: 'pending', jobId: running.id }),
+    ]);
+  });
+
+  it('US-011 AC-2: as an admin, status=approved answers the executed bash ask and not the rejected one', async () => {
+    const running = await job({ state: 'RUNNING', runnerId: runner.id, leaseEpoch: 1 });
+    const executed = await bashAsk(running.id, {
+      status: 'executed', settledAt: new Date(),
+      decisions: [{ deciderType: 'USER', deciderId: world.ids.root, decision: 'approve', params: { choice: 'allow' } }],
+    });
+    const rejected = await bashAsk(running.id, {
+      status: 'rejected',
+      decisions: [{ deciderType: 'USER', deciderId: world.ids.root, decision: 'reject' }],
+    });
+
+    const page = data<Page<Approval>>(await request(server).get(`${ADMIN}?status=approved`).set(tok('root')).expect(200));
+
+    expect(page.records.map((a) => a.id)).toEqual([executed.requestId]);
+    expect(page.records.map((a) => a.id)).not.toContain(rejected.requestId);
+  });
+
+  it('US-011 AC-3: a pending budget ask includes its one re-queue candidate, untruncated', async () => {
+    const { approvalId, queued } = await stopped();
+
+    const one = data<Approval>(await request(server).get(`${PROJECT}/${approvalId}`).set(tok('viewer')).expect(200));
+
+    expect(one.requeueCandidates?.map((c) => c.jobId)).toEqual([queued.id]);
+    expect(one.requeueCandidatesTruncated).toBe(false);
+  });
+
+  it("US-011 AC-4: another project's ask is a 404 naming fleet.approvals", async () => {
+    const running = await job({ state: 'RUNNING' });
+    const { requestId } = await bashAsk(running.id);
+
+    const res = await request(server).get(`/api/projects/ops/fleet/approvals/${requestId}`).set(tok('root')).expect(404);
+
+    expect(res.body.message).toBe(enFleet.approvals['404']);
+  });
+
+  it('US-011 AC-5: an admin counts one pending ask in each of two projects', async () => {
+    const web = await bashAsk('job-counts-web', { link: { jobId: 'job-counts-web', leaseEpoch: 1, naxAskId: 'ask-counts-web' } });
+    const ops = await seedFleetAsk(prisma, {
+      kind: 'bash', projectId: world.opsProjectId,
+      input: { jobId: 'job-counts-ops', leaseEpoch: 1, naxAskId: 'ask-counts-ops', payload: { command: 'ls', commandTruncated: false, options: ['allow'] } },
+      link: { jobId: 'job-counts-ops', leaseEpoch: 1, naxAskId: 'ask-counts-ops' },
+    });
+
+    const counts = data<{ total: number; unscoped: number; projects: Array<{ projectId: string; slug: string; pending: number }> }>(
+      await request(server).get('/api/fleet/approval-counts').set(tok('root')).expect(200));
+
+    expect(counts.total).toBe(2);
+    expect(counts.projects).toEqual([
+      { projectId: world.opsProjectId, slug: 'ops', pending: 1 },
+      { projectId: world.projectId, slug: 'web', pending: 1 },
+    ]);
+    expect(web.requestId).not.toBe(ops.requestId);
   });
 });

@@ -146,6 +146,20 @@ export class BudgetsService {
     return this.toDto(resumed, now);
   }
 
+  /**
+   * Permissions P3 US-010: the read-only half of `resume`, so the fleet decide route answers today's 409
+   * `fleet.budgetNotPaused` / 400 `fleet.budgetAmountNotAboveSpend` with the ask still pending. `resume` keeps its own
+   * checks: this one takes no lock and writes nothing.
+   */
+  async assertResumable(policyId: string, amountUsd: number, now = new Date()): Promise<void> {
+    const policy = await this.repo.findById(policyId);
+    if (!policy) throw new NotFoundAppException({}, 'fleet.budgets');
+    if (!policy.pausedAt) throw new ConflictAppException({}, 'fleet.budgetNotPaused');
+    const spent = await this.repo.windowSpend(policy, spendSince(policy.windowKind, now));
+    const amount = String(amountUsd);
+    if (!isAboveSpend(amount, spent)) throw new ValidationAppException({ amountUsd: amount, spentUsd: spent }, 'fleet.budgetAmountNotAboveSpend');
+  }
+
   private async resolveScope(route: BudgetRoute, dto: Pick<CreateBudgetPolicyDto, 'scopeType' | 'scopeId'>): Promise<{ scopeType: BudgetScopeType; scopeId: string | null; projectId: string | null }> {
     const allowed = route.kind === 'admin' ? ADMIN_SCOPES : PROJECT_SCOPES;
     if (!allowed.includes(dto.scopeType)) fail(`scopeType ${dto.scopeType} is managed on the other route`);

@@ -80,16 +80,83 @@ export class PrismaApprovalRequestRepository extends AbstractPrismaRepository<Ap
     return rows.length === 0 ? null : this.findById(id);
   }
 
+  /**
+   * SELECT ... FOR UPDATE SKIP LOCKED; null when the row is missing or held by another transaction.
+   *
+   * A held row belongs to an in-flight decide or execute, so the caller must not wait for it: the
+   * fleet takes the job or policy lock first, the opposite order to the engine's.
+   */
+  async lockByIdSkipLocked(id: string): Promise<ApprovalRequestRecord | null> {
+    const rows = await this.prisma.client.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "ApprovalRequest" WHERE "id" = ${id} FOR UPDATE SKIP LOCKED`;
+    return rows.length === 0 ? null : this.findById(id);
+  }
+
   async findPendingDuplicate(match: PendingApprovalMatch, now: Date): Promise<ApprovalRequestRecord | null> {
     const row = await this.prisma.client.approvalRequest.findFirst({ where: { ...match, status: 'pending', expiresAt: { gt: now } }, orderBy: { createdAt: 'asc' } });
     return row ? this.toDomain(row) : null;
   }
 
   async findDue(now: Date, limit: number): Promise<ApprovalRequestRecord[]> {
-    const rows = await this.prisma.client.approvalRequest.findMany({
-      where: { status: 'pending', expiresAt: { lte: now } }, orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }], take: limit,
-    });
+    // Job-end cancellation owns ended-job asks, even past their deadline. A policy action's stamped close owns its ask
+    // too (B2): expiring it would drop the resume's resolution, actor and outcome that the durable continuation replays.
+    // Filter BEFORE LIMIT so a large cancellation backlog cannot starve unrelated timeouts. All joins use primary keys.
+    const rows = await this.prisma.client.$queryRaw<ApprovalRequest[]>`
+      SELECT r.* FROM "ApprovalRequest" r
+      WHERE r."status" = 'pending' AND r."expiresAt" <= ${now}
+        AND NOT EXISTS (
+          SELECT 1 FROM "FleetApprovalAsk" a JOIN "FleetJob" j ON j."id" = a."jobId"
+          WHERE a."requestId" = r."id" AND a."kind" = 'bash' AND j."state" <> 'RUNNING'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM "FleetApprovalAsk" a
+          WHERE a."requestId" = r."id" AND a."pendingClose" IS NOT NULL
+        )
+      ORDER BY r."expiresAt" ASC, r."id" ASC LIMIT ${limit}
+    `;
     return rows.map((row) => this.toDomain(row));
+  }
+
+  /**
+   * Recheck timeout ownership after locking the request; the due scan may predate a job's end or a policy action.
+   * Lock order is request then job or policy, like execution. Job transitions skip held requests, so they can
+   * commit while we wait for the job lock; we then see their committed state. Holding the job lock
+   * until settlement also prevents a RUNNING check racing a subsequent transition.
+   * No link (or a deleted job) retains normal engine expiry, as do budget and non-fleet requests.
+   *
+   * B2: a policy action stamps the close it intends on the ask while holding the policy lock, and the durable
+   * continuation — not timeout policy — settles the asks carrying one. The policy is locked before that stamp is read
+   * (the same order every fleet close takes), so a stamp that lands between the due scan and this recheck still wins and
+   * the ask keeps its resume instead of expiring it away.
+   */
+  async canSettleTimeout(requestId: string): Promise<boolean> {
+    await this.lockBudgetPolicyOf(requestId);
+    if (await this.hasStampedClose(requestId)) return false;
+    const jobs = await this.prisma.client.$queryRaw<Array<{ state: string }>>`
+      SELECT j."state" FROM "FleetApprovalAsk" a JOIN "FleetJob" j ON j."id" = a."jobId"
+      WHERE a."requestId" = ${requestId} AND a."kind" = 'bash'
+      FOR UPDATE OF j
+    `;
+    return jobs.length === 0 || jobs[0]?.state === 'RUNNING';
+  }
+
+  /**
+   * `FOR UPDATE` on the ask's budget policy, taken before its stamped close is read. A bash ask, a link without a
+   * policy and a policy another transaction is deleting lock nothing: a deleted policy's stamp is already committed.
+   */
+  private async lockBudgetPolicyOf(requestId: string): Promise<void> {
+    await this.prisma.client.$queryRaw<Array<{ id: string }>>`
+      SELECT p."id" FROM "FleetApprovalAsk" a JOIN "BudgetPolicy" p ON p."id" = a."budgetPolicyId"
+      WHERE a."requestId" = ${requestId} AND a."kind" = 'budget'
+      FOR UPDATE OF p
+    `;
+  }
+
+  /** Whether a policy action stamped the close it owes this ask (B2): its settlement belongs to the continuation. */
+  private async hasStampedClose(requestId: string): Promise<boolean> {
+    const link = await this.prisma.client.fleetApprovalAsk.findUnique({
+      where: { requestId }, select: { pendingClose: true },
+    });
+    return link !== null && link.pendingClose !== null;
   }
 
   async findStaleApproved(before: Date, limit: number): Promise<ApprovalRequestRecord[]> {

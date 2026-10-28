@@ -64,7 +64,8 @@ describeIntegration('fleet budget and approval notifications (PG)', () => {
   });
   beforeEach(async () => {
     await prisma.budgetPolicy.deleteMany();
-    await prisma.fleetApproval.deleteMany();
+    await prisma.fleetApprovalAsk.deleteMany();
+    await prisma.approvalRequest.deleteMany();
     await prisma.fleetJob.deleteMany();
     await prisma.outboxEvent.deleteMany();
     await prisma.notification.deleteMany();
@@ -109,15 +110,24 @@ describeIntegration('fleet budget and approval notifications (PG)', () => {
     expect(await events('fleet_approval_requested')).toHaveLength(0);
   });
 
-  it('hard stop: the override ask reaches admins while pending; an answered ask notifies nobody', async () => {
+  it('hard stop: the override ask reaches every global admin while pending, and a settled ask notifies nobody', async () => {
     const p = await policy({ hardStop: true });
     await spent(12);
     await evaluator.evaluate(p.id);
+
+    // Permissions P3 US-007: the ask is an `ApprovalRequest`, and the announcement is keyed by its id.
+    const [row] = await events('fleet_approval_requested');
+    const ask = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: row.eventId } });
+    expect(ask).toMatchObject({ permissionKey: 'fleet.budget.override', status: 'pending', projectId: world.projectId });
+    expect(row.projectId).toBe(world.projectId);
+
     await deliver('fleet_approval_requested');
-    const ask = (await notes(world.ids.root)).find((x) => x.kind === 'approval_requested');
-    expect(ask).toMatchObject({ category: 'FLEET_NEEDS_YOU', link: '/admin/fleet/approvals', title: 'Approval needed: budget override on project WEB' });
+    const pendingNote = (await notes(world.ids.root)).find((x) => x.kind === 'approval_requested');
+    expect(pendingNote).toMatchObject({ category: 'FLEET_NEEDS_YOU', link: '/admin/fleet/approvals', title: 'Approval needed: budget override on project WEB' });
+
+    // An answered ask notifies nobody: the delivery re-reads the ask and acts only while it is pending.
     await prisma.notification.deleteMany();
-    await prisma.fleetApproval.updateMany({ data: { status: 'approved', decidedAt: new Date() } });
+    await prisma.approvalRequest.update({ where: { id: ask.id }, data: { status: 'executed', settledAt: new Date() } });
     await deliver('fleet_approval_requested');
     expect(await notes(world.ids.root)).toEqual([]);
   });

@@ -8,6 +8,7 @@ import { Prisma, PrismaClient } from '../../../src/generated/prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp } from '../../helpers/http-app';
 import { insertRunner, seedFleetBase } from '../../helpers/fleet-fixtures';
+import { seedFleetAsk } from '../../helpers/fleet-ask-fixtures';
 import { PrismaDashboardRepository } from '../../../src/fleet/dashboard/prisma-dashboard.repository';
 import { expectGuardActive, fixtureDb } from '../../helpers/action-context';
 
@@ -95,17 +96,30 @@ describeIntegration('fleet dashboard repository (PG)', () => {
     expect(recent[1]).toEqual(expect.objectContaining({ runnerName: null, stateReason: 'boom' }));
   });
 
-  it('summarises pending approvals per job: count and oldest ask', async () => {
+  it('US-011 AC-8: summarises pending engine asks per job: count and the older link createdAt', async () => {
     const target = await job(web, { feature: 'asks', state: 'RUNNING', runnerId });
-    const ask = (requestedAt: Date, status = 'pending') => prisma.fleetApproval.create({
-      data: { type: 'nax_bash_escalate', status, projectId: web.projectId, jobId: target.id, payload: {}, requestedAt },
-    });
-    await ask(minutesAgo(3));
-    await ask(minutesAgo(1));
-    await ask(minutesAgo(9), 'approved');
-    expect(await repo.pendingSummaryByJob([target.id, 'nope'])).toEqual([{ jobId: target.id, count: 2, oldestRequestedAt: expect.any(Date) }]);
-    const [summary] = await repo.pendingSummaryByJob([target.id]);
-    expect(Math.round((Date.now() - summary.oldestRequestedAt.getTime()) / 60_000)).toBe(3);
+    const older = minutesAgo(3);
+    const newer = minutesAgo(1);
+    // Permissions P3 US-011: the ask is an engine request; the link is written in its transaction, so the link's
+    // `createdAt` is the ask's age.
+    const ask = (createdAt: Date, status: 'pending' | 'executed') => {
+      const naxAskId = `ask-${createdAt.getTime()}`;
+      return seedFleetAsk(prisma, {
+        kind: 'bash', projectId: web.projectId, createdAt, status,
+        input: { jobId: target.id, leaseEpoch: 1, naxAskId, payload: { command: 'ls', commandTruncated: false, options: ['allow'] } },
+        link: { jobId: target.id, leaseEpoch: 1, naxAskId },
+        ...(status === 'pending'
+          ? {}
+          : { decisions: [{ deciderType: 'USER' as const, deciderId: web.adminId, decision: 'approve' as const }] }),
+      });
+    };
+    await ask(older, 'pending');
+    await ask(newer, 'pending');
+    await ask(minutesAgo(9), 'executed');
+
+    expect(await repo.pendingSummaryByJob([target.id, 'nope'])).toEqual([
+      { jobId: target.id, count: 2, oldestRequestedAt: older },
+    ]);
     expect(await repo.pendingSummaryByJob([])).toEqual([]);
   });
 

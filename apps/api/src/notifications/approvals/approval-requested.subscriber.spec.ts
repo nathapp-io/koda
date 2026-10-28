@@ -79,6 +79,28 @@ describe('ApprovalRequestedSubscriber', () => {
     expect(findById).not.toHaveBeenCalled();
     expect(deliver).not.toHaveBeenCalled();
   });
+  it('AC-6: a pending fleet bash ask notifies nobody through the engine', async () => {
+    await handler({ ...payload, permissionKey: 'fleet.job.shell.escalate' });
+    expect(findById).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
+  });
+  it('AC-7: a pending fleet budget ask notifies nobody through the engine', async () => {
+    await handler({ ...payload, permissionKey: 'fleet.budget.override' });
+    expect(findById).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
+  });
+  it('AC-8: a pending payload for a non-fleet key with one eligible user still delivers once', async () => {
+    findById.mockResolvedValue({ ...request, permissionKey: 'ticket.delete' });
+    principalIdsWithKey.mockResolvedValue(['u1']);
+    effectiveKeys.mockResolvedValue(new Set(['approval.decide', 'ticket.delete']));
+
+    await handler({ ...payload, permissionKey: 'ticket.delete' });
+
+    expect(findById).toHaveBeenCalledExactlyOnceWith('r1');
+    expect(deliver).toHaveBeenCalledExactlyOnceWith([
+      { ...draft, title: 'Approval needed: ticket.delete', params: { key: 'ticket.delete' } },
+    ]);
+  });
   it('AC-9: ignores sources already cancelled', async () => {
     findById.mockResolvedValue({ ...request, status: 'cancelled' });
     await handler(payload);

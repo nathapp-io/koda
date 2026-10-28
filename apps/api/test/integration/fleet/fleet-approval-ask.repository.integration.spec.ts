@@ -26,6 +26,9 @@ describeDb('FleetApprovalAsk repository (PG)', () => {
   beforeAll(async () => {
     scratch = await scratchSchemaBefore(process.env.DATABASE_URL as string, 'fleet_ask_repo', MIGRATION);
     await applyMigration(scratch.db, MIGRATION);
+    await applyMigration(scratch.db, '20261106100000_job_end_ask_queue');
+    await applyMigration(scratch.db, '20261106110000_ask_close_intent_and_recorded_status');
+    await applyMigration(scratch.db, '20261106120000_ask_live_publication');
     db = scratch.db;
     // The repository reads `prisma.client`, the transaction-aware proxy: route it through the real
     // transaction manager so `FOR UPDATE` runs inside a real PG transaction.
@@ -36,6 +39,37 @@ describeDb('FleetApprovalAsk repository (PG)', () => {
 
   afterAll(async () => {
     await scratch?.drop();
+  });
+
+  it('US-007 fix round 2: the shipped migration adds the close intent and the recorder idempotency key', async () => {
+    const rows = await db.$queryRaw<Array<{ column_name: string }>>`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'FleetApprovalAsk'
+        AND column_name IN ('pendingClose', 'recordedStatus')
+      ORDER BY column_name
+    `;
+    expect(rows.map((r) => r.column_name)).toEqual(['pendingClose', 'recordedStatus']);
+  });
+
+  it('F5 round 4: the shipped publication marker persists independently of recorded outputs', async () => {
+    const requestId = await request();
+    await repository.insert(ask(requestId, { naxAskId: 'published-marker' }));
+    await repository.setPublishedStatus(requestId, 'executed');
+    expect(await repository.findByRequest(requestId)).toMatchObject({ publishedStatus: 'executed', recordedStatus: null });
+    const indexes = await db.$queryRaw<Array<{ indexdef: string }>>`
+      SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'FleetApproval_updatedAt_id_idx'
+    `;
+    expect(indexes).toHaveLength(1);
+    expect(indexes[0]?.indexdef).toContain('USING btree ("updatedAt", id)');
+  });
+
+  it('F1 round 4: the shipped migration indexes the durable attempt order and unique tie-breaker', async () => {
+    const rows = await db.$queryRaw<Array<{ indexdef: string }>>`
+      SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema()
+      AND indexname = 'FleetApprovalAsk_updatedAt_requestId_idx'
+    `;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.indexdef).toContain('USING btree ("updatedAt", "requestId")');
   });
 
   /** A stored approval request; the link table's request row must exist, its project need not. */
@@ -136,14 +170,44 @@ describeDb('FleetApprovalAsk repository (PG)', () => {
     expect(bounded.map((link) => link.requestId)).toEqual(overflow.slice(0, MAX_PENDING_ASKS_PER_JOB));
   });
 
-  it('AC-6: findPendingForPolicy returns the pending link and ignores an expired request', async () => {
+  it('US-006 F1: findPendingForJobPage walks every pending link of a job, keyset by request id', async () => {
+    const ids = Array.from({ length: MAX_PENDING_ASKS_PER_JOB + 2 }, (_, index) => `f1-page-${index}`);
+    await db.approvalRequest.createMany({
+      data: ids.map((id) => ({
+        id, permissionKey: 'fleet.job.shell.escalate', projectId, actorType: 'AGENT', actorId: 'agent-1',
+        origin: 'runner', correlationId: randomUUID(), input: {}, inputHash: randomUUID(), requiredMode: 'human',
+        onTimeout: 'reject', approverMustHoldAction: true, requireDistinctApprover: false, status: 'pending',
+        expiresAt: new Date(Date.now() + 60_000), updatedAt: new Date(),
+      })),
+    });
+    await db.fleetApprovalAsk.createMany({
+      data: ids.map((requestId, index) => ({
+        requestId, kind: 'bash', projectId, jobId: 'job-f1-page', leaseEpoch: 1, naxAskId: `ask-f1-${index}`, updatedAt: new Date(),
+      })),
+    });
+    const ordered = [...ids].sort();
+
+    const first = await repository.findPendingForJobPage('job-f1-page');
+    expect(first.map((link) => link.requestId)).toEqual(ordered.slice(0, MAX_PENDING_ASKS_PER_JOB));
+    const cursor = first.at(-1);
+    if (cursor === undefined) throw new Error('expected a full first page');
+
+    const second = await repository.findPendingForJobPage('job-f1-page', cursor.requestId);
+    expect(second.map((link) => link.requestId)).toEqual(ordered.slice(MAX_PENDING_ASKS_PER_JOB));
+
+    // The cursor is exclusive and the page size is the caller's.
+    expect(await repository.findPendingForJobPage('job-f1-page', ordered[ordered.length - 1], 10)).toEqual([]);
+    expect(await repository.findPendingForJobPage('job-f1-page', undefined, 3)).toHaveLength(3);
+  });
+
+  it('AC-6: findPendingForPolicyPage returns the pending link and ignores an expired request', async () => {
     const pending = await request();
     const expired = await request('expired');
     await repository.insert(ask(pending, { kind: 'budget', jobId: null, leaseEpoch: null, naxAskId: null, budgetPolicyId: 'policy-6' }));
     await repository.insert(ask(expired, { kind: 'budget', jobId: null, leaseEpoch: null, naxAskId: null, budgetPolicyId: 'policy-6-expired' }));
 
-    expect(await repository.findPendingForPolicy('policy-6')).toMatchObject({ requestId: pending, budgetPolicyId: 'policy-6' });
-    expect(await repository.findPendingForPolicy('policy-6-expired')).toBeNull();
+    expect(await repository.findPendingForPolicyPage('policy-6')).toMatchObject([{ requestId: pending, budgetPolicyId: 'policy-6' }]);
+    expect(await repository.findPendingForPolicyPage('policy-6-expired')).toEqual([]);
   });
 
   it('AC-7: lockByRequest returns the locked link inside a transaction and null without one', async () => {

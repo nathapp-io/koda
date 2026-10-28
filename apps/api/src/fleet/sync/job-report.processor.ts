@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { bookkeeping } from '../../action-context/audit-coverage';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { FleetCommandType } from '../../common/enums';
 import { Prisma } from '../../generated/prisma/client';
 import type { LiveFleetApprovalEvent, LiveFleetJobEvent } from '../../live/live-event';
 import { FleetActivityService } from '../activity/fleet-activity.service';
@@ -123,6 +124,15 @@ export class JobReportProcessor {
     if (effect.kind === 'approval') {
       // Spec §2.2: inside the report transaction, after the lease fence; the job row is locked (lock order job -> approval).
       const change = await this.approvals.openBash(job, effect.ask, runnerId, now);
+      // US-006: the engine needed no approval, so the fleet answers nax itself. The closer holds no job
+      // repository (FleetJobsModule imports ApprovalStoreModule), and the runner reporting the ask is the
+      // one syncing now: it takes the command on its next sync, so nothing wakes it.
+      if (change.answer) {
+        await this.repo.createCommand({
+          runnerId, jobId: job.id, type: FleetCommandType.APPROVAL_ANSWER, leaseEpoch: job.leaseEpoch,
+          payload: { approvalId: null, naxAskId: change.answer.naxAskId, choice: change.answer.choice },
+        });
+      }
       return { job, approvalLive: change.live, mirrored: false };
     }
     if (effect.kind === 'transition' && canTransition(job.state, effect.to, 'runner')) {
