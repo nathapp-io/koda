@@ -32,6 +32,29 @@ describe('ApprovalRouteCommands global policies', () => {
     expect((error as ValidationAppException).prefix).toBe('approvals.emptyPolicyPatch');
   });
 
+  it('AC-10 registers the three project policy command variants', () => {
+    expect(registry.get('approval.policy.manage', APPROVAL_ROUTE_VARIANTS.projectPolicyCreate)).toBeDefined();
+    expect(registry.get('approval.policy.manage', APPROVAL_ROUTE_VARIANTS.projectPolicyUpdate)).toBeDefined();
+    expect(registry.get('approval.policy.manage', APPROVAL_ROUTE_VARIANTS.projectPolicyDelete)).toBeDefined();
+  });
+
+  it('AC-8 rechecks project ownership when executing a deferred update', async () => {
+    policies.get.mockResolvedValue({ id: 'policy1', projectId: 'another-project' });
+    const command = registry.get('approval.policy.manage', APPROVAL_ROUTE_VARIANTS.projectPolicyUpdate);
+    const input = command?.parse({ projectId: 'project1', id: 'policy1', patch: { mode: 'human' } });
+    await expect(command?.execute(input)).rejects.toBeInstanceOf(ApprovalPolicyNotFoundError);
+    expect(policies.update).not.toHaveBeenCalled();
+  });
+
+  it('AC-9 creates a project policy using the frozen project id', async () => {
+    const command = registry.get('approval.policy.manage', APPROVAL_ROUTE_VARIANTS.projectPolicyCreate);
+    const input = command?.parse({ projectId: 'project1', policy: {
+      permissionPattern: 'label.delete', appliesTo: { kind: 'type', principalType: 'USER' }, mode: 'agent',
+    } });
+    await command?.execute(input);
+    expect(policies.create).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'project1' }));
+  });
+
   it('AC-11 refuses deleting project policy and does not remove it', async () => {
     policies.get.mockResolvedValue({ id: 'p1', projectId: 'p1' });
     const command = registry.get('approval.policy.manage', APPROVAL_ROUTE_VARIANTS.policyDelete);

@@ -8,10 +8,13 @@ import { CurrentProject } from '../projects/current-project.decorator';
 import type { ProjectContext } from '../projects/project-context';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { ApprovalPolicyService } from './approval-policy.service';
+import { ApprovalRouteGate } from './route/approval-route-gate';
+import { ApprovalPending } from './route/approval-pending';
+import { ApprovalGated } from './route/approval-gated.decorator';
+import { APPROVAL_ROUTE_VARIANTS } from './approval-route.commands';
 import { rethrowApprovalError } from './approval-http-errors';
 import { approvableKeys } from './approvable-keys';
 import { ApprovalPolicyDto, ApprovableKeyDto, CreateApprovalPolicyDto, UpdateApprovalPolicyDto } from './dto/approval-policy.dto';
-import { toPolicySubject } from './dto/approval-policy-subject.dto';
 import { ApprovalPolicyNotFoundError } from './domain/approval.errors';
 import { ListApprovalPoliciesQuery } from './dto/list-approval-policies.query';
 
@@ -21,7 +24,7 @@ import { ListApprovalPoliciesQuery } from './dto/list-approval-policies.query';
 @ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
 @Controller('projects/:slug/approval-policies')
 export class ProjectApprovalPoliciesController {
-  constructor(private readonly policies: ApprovalPolicyService) {}
+  constructor(private readonly policies: ApprovalPolicyService, private readonly routeGate: ApprovalRouteGate) {}
 
   @Get()
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
@@ -63,6 +66,7 @@ export class ProjectApprovalPoliciesController {
   }
 
   @Post()
+  @ApprovalGated()
   @HttpCode(201)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('approval.policy.manage')
@@ -75,11 +79,18 @@ export class ProjectApprovalPoliciesController {
   @ApiResponse({ status: 403, description: 'Permission denied or self-applying agent policy' })
   @ApiResponse({ status: 409, description: 'Policy pattern and subject already exist' })
   async create(@Body() dto: CreateApprovalPolicyDto, @CurrentProject() ctx: ProjectContext) {
-    try { return JsonResponse.Ok(ApprovalPolicyDto.from(await this.policies.create({ ...dto, appliesTo: toPolicySubject(dto.appliesTo), projectId: ctx.project.id }))); }
-    catch (error) { rethrowApprovalError(error); }
+    try {
+      const outcome = await this.routeGate.run<Awaited<ReturnType<ApprovalPolicyService['create']>>>({
+        key: 'approval.policy.manage', variant: APPROVAL_ROUTE_VARIANTS.projectPolicyCreate,
+        projectId: ctx.project.id, input: { projectId: ctx.project.id, policy: dto },
+      });
+      if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+      return JsonResponse.Ok(ApprovalPolicyDto.from(outcome.result));
+    } catch (error) { rethrowApprovalError(error); }
   }
 
   @Patch(':id')
+  @ApprovalGated()
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('approval.policy.manage')
   @ApiOperation({ summary: 'Update a project approval policy' })
@@ -94,11 +105,17 @@ export class ProjectApprovalPoliciesController {
       if (!Object.values(dto).some((value) => value !== undefined)) throw new ValidationAppException({}, 'approvals.emptyPolicyPatch');
       const policy = await this.policies.get(id);
       if (policy.projectId !== ctx.project.id) throw new ApprovalPolicyNotFoundError(id);
-      return JsonResponse.Ok(ApprovalPolicyDto.from(await this.policies.update(id, dto)));
+      const outcome = await this.routeGate.run<Awaited<ReturnType<ApprovalPolicyService['update']>>>({
+        key: 'approval.policy.manage', variant: APPROVAL_ROUTE_VARIANTS.projectPolicyUpdate,
+        projectId: ctx.project.id, input: { projectId: ctx.project.id, id, patch: dto },
+      });
+      if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+      return JsonResponse.Ok(ApprovalPolicyDto.from(outcome.result));
     } catch (error) { rethrowApprovalError(error); }
   }
 
   @Delete(':id')
+  @ApprovalGated()
   @HttpCode(204)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('approval.policy.manage')
@@ -111,7 +128,11 @@ export class ProjectApprovalPoliciesController {
     try {
       const policy = await this.policies.get(id);
       if (policy.projectId !== ctx.project.id) throw new ApprovalPolicyNotFoundError(id);
-      await this.policies.remove(id);
+      const outcome = await this.routeGate.run<void>({
+        key: 'approval.policy.manage', variant: APPROVAL_ROUTE_VARIANTS.projectPolicyDelete,
+        projectId: ctx.project.id, input: { projectId: ctx.project.id, id },
+      });
+      if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     } catch (error) { rethrowApprovalError(error); }
   }
 }

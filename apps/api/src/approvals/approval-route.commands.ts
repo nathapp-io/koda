@@ -16,12 +16,18 @@ export const APPROVAL_ROUTE_VARIANTS = {
   policyCreate: 'rest:approval-policies.create',
   policyUpdate: 'rest:approval-policies.update',
   policyDelete: 'rest:approval-policies.delete',
+  projectPolicyCreate: 'rest:project-approval-policies.create',
+  projectPolicyUpdate: 'rest:project-approval-policies.update',
+  projectPolicyDelete: 'rest:project-approval-policies.delete',
 } as const;
 
 const POLICY_KEY = 'approval.policy.manage';
 
 type PolicyUpdateInput = { id: string; patch: UpdateApprovalPolicyDto };
 type PolicyDeleteInput = { id: string };
+type ProjectPolicyCreateInput = { projectId: string; policy: CreateApprovalPolicyDto };
+type ProjectPolicyUpdateInput = { projectId: string; id: string; patch: UpdateApprovalPolicyDto };
+type ProjectPolicyDeleteInput = { projectId: string; id: string };
 
 @Injectable()
 export class ApprovalRouteCommands implements OnModuleInit {
@@ -63,6 +69,52 @@ export class ApprovalRouteCommands implements OnModuleInit {
         const policy = await this.policies.get(id);
         if (policy.projectId !== null) throw new ApprovalPolicyNotFoundError(id);
         return this.policies.update(id, patch);
+      },
+    }, this.principalLoader));
+
+    this.registry.register(routeCommand({
+      key: POLICY_KEY,
+      variant: APPROVAL_ROUTE_VARIANTS.projectPolicyCreate,
+      parse: (input): ProjectPolicyCreateInput => {
+        const envelope = requireObject(input);
+        return { projectId: requireId(envelope.projectId), policy: parseBody(CreateApprovalPolicyDto, envelope.policy) };
+      },
+      run: (_principal, { projectId, policy }) => this.policies.create({
+        ...policy, appliesTo: toPolicySubject(policy.appliesTo), projectId,
+      }),
+    }, this.principalLoader));
+
+    this.registry.register(routeCommand({
+      key: POLICY_KEY,
+      variant: APPROVAL_ROUTE_VARIANTS.projectPolicyUpdate,
+      parse: (input): ProjectPolicyUpdateInput => {
+        const envelope = requireObject(input);
+        const projectId = requireId(envelope.projectId);
+        const id = requireId(envelope.id);
+        const patch = parseBody(UpdateApprovalPolicyDto, envelope.patch);
+        if (!Object.values(patch).some((value) => value !== undefined)) {
+          throw new ValidationAppException({}, 'approvals.emptyPolicyPatch');
+        }
+        return { projectId, id, patch };
+      },
+      run: async (_principal, { projectId, id, patch }) => {
+        const policy = await this.policies.get(id);
+        if (policy.projectId !== projectId) throw new ApprovalPolicyNotFoundError(id);
+        return this.policies.update(id, patch);
+      },
+    }, this.principalLoader));
+
+    this.registry.register(routeCommand({
+      key: POLICY_KEY,
+      variant: APPROVAL_ROUTE_VARIANTS.projectPolicyDelete,
+      parse: (input): ProjectPolicyDeleteInput => {
+        const envelope = requireObject(input);
+        return { projectId: requireId(envelope.projectId), id: requireId(envelope.id) };
+      },
+      run: async (_principal, { projectId, id }) => {
+        const policy = await this.policies.get(id);
+        if (policy.projectId !== projectId) throw new ApprovalPolicyNotFoundError(id);
+        await this.policies.remove(id);
       },
     }, this.principalLoader));
 
