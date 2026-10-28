@@ -30,6 +30,14 @@ const gatedOperations = [
   ['patch', '/api/projects/{slug}/fleet/budgets/{id}'],
   ['delete', '/api/projects/{slug}/fleet/budgets/{id}'],
   ['post', '/api/projects/{slug}/fleet/budgets/{id}/resume'],
+  ['post', '/api/fleet/repos'],
+  ['delete', '/api/fleet/repos/{id}'],
+  ['post', '/api/fleet/repos/{id}/check'],
+  ['patch', '/api/fleet/runners/{id}'],
+  ['delete', '/api/fleet/runners/{id}'],
+  ['delete', '/api/fleet/analytics'],
+  ['delete', '/api/projects/{slug}/fleet/schedules/{id}'],
+  ['post', '/api/projects/{slug}/fleet/repos/{repoId}/drift-checks'],
 ] as const;
 
 const reindexOperation = ['post', '/api/projects/{slug}/knowledge/repos/{repoId}/reindex'] as const;
@@ -55,7 +63,7 @@ describe('OpenAPI pending response contract', () => {
     expect(openapi.paths['/api/approvals/{id}/decisions']?.post?.responses).toHaveProperty('202');
   });
 
-  it('AC-4: 202 responses exist on exactly the twenty gated operations and existing reindex operation', () => {
+  it('AC-4: 202 responses exist on exactly the currently shipped gated operations and existing reindex operation', () => {
     const expected = [...gatedOperations, reindexOperation].map(([method, path]) => `${method} ${path}`).sort();
     expect(operationsWith202()).toEqual(expected);
   });
