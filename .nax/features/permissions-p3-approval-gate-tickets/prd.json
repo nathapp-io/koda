@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-tickets",
   "branchName": "feat/permissions-p3-approval-gate-tickets",
   "createdAt": "2026-10-28T00:00:00.000Z",
-  "updatedAt": "2026-10-28T16:21:46.848Z",
+  "updatedAt": "2026-10-28T16:29:24.130Z",
   "userStories": [
     {
       "id": "US-001",
@@ -665,14 +665,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "New registrations and DI across two modules plus grant escalation and invite state/scope fencing are security-critical."
+        "reasoning": "New registrations and DI across two modules plus grant escalation and invite state/scope fencing are security-critical.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/projects/members/project-members.service.ts",
@@ -730,7 +733,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "92dda1d4e6304db0f24927363aed7b6e097c161f"
     },
     {
       "id": "US-010",
