@@ -209,6 +209,21 @@ export class ProjectsService {
     return this.projectRepo.findAllIds();
   }
 
+  /** Approval commands freeze this id; the repository tests identity and mutates atomically. */
+  async softDeleteById(id: string): Promise<ProjectResponseDto> {
+    const deletedProject = await this.audit.audited(
+      async () => {
+        const deleted = await this.projectRepo.softDeleteById(id);
+        if (!deleted) throw new NotFoundAppException({}, 'projects');
+        return deleted;
+      },
+      (deleted) => ({ key: 'project.delete', resourceType: 'project', resourceId: deleted.id, projectId: deleted.id, summary: `deleted ${deleted.key}` }),
+    );
+    this.ragService.clearProjectCaches(deletedProject.id);
+    this.hybridRetrieverService?.invalidateGraphifyEnabledCache(deletedProject.id);
+    return ProjectResponseDto.from(deletedProject);
+  }
+
   async softDelete(slug: string) {
     // Find the project
     const project = await this.projectRepo.findBySlug(slug);

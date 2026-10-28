@@ -139,7 +139,7 @@ export class ProjectsController {
       key: 'project.delete',
       variant: PROJECT_ROUTE_VARIANTS.delete,
       projectId: ctx.project.id,
-      input: { slug },
+      input: { slug, projectId: ctx.project.id },
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return undefined;

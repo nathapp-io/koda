@@ -264,7 +264,7 @@ describe('ProjectsController', () => {
   describe('remove', () => {
     it('gates project deletion with the guard-resolved project id', async () => {
       expect(await controller.remove('alpha', { project: { id: 'proj-1', slug: 'alpha' } })).toBeUndefined();
-      expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({ key: 'project.delete', variant: 'rest:projects.delete', projectId: 'proj-1', input: { slug: 'alpha' } });
+      expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({ key: 'project.delete', variant: 'rest:projects.delete', projectId: 'proj-1', input: { slug: 'alpha', projectId: 'proj-1' } });
       expect(projectsService.softDelete).not.toHaveBeenCalled();
     });
   });

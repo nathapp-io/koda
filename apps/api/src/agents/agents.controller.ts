@@ -186,11 +186,12 @@ export class AgentsController {
   @ApiResponse({ status: 403, description: 'agent.delete is missing' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
   async remove(@Param('slug') slug: string) {
+    const target = await this.agentsService.findBySlug(slug);
     const outcome = await this.routeGate.run<AgentResponseDto>({
       key: 'agent.delete',
       variant: AGENT_ROUTE_VARIANTS.delete,
       projectId: null,
-      input: { slug },
+      input: { slug, agentId: target.id },
     });
     if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
     return JsonResponse.Ok(outcome.result);

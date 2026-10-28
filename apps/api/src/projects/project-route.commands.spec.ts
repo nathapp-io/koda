@@ -8,7 +8,7 @@ describe('ProjectRouteCommands', () => {
   function build() {
     const registry = new ApprovalCommandRegistry();
     const result = { slug: 'alpha' };
-    const service = { softDelete: vi.fn().mockResolvedValue(result) };
+    const service = { softDeleteById: vi.fn().mockResolvedValue(result) };
     const loader = { forContext: vi.fn().mockResolvedValue({ id: 'a1' }) };
     new ProjectRouteCommands(registry, service as unknown as ProjectsService, loader as unknown as ActorPrincipalLoader).onModuleInit();
     return { registry, service, loader, result };
@@ -21,13 +21,13 @@ describe('ProjectRouteCommands', () => {
     const { registry, service, loader } = build();
     const command = registry.get('project.delete', PROJECT_ROUTE_VARIANTS.delete);
     if (!command) throw new Error('Missing command');
-    const input = command.parse({ slug: 'alpha', extra: 1 });
-    expect(input).toEqual({ slug: 'alpha' });
+    const input = command.parse({ slug: 'alpha', projectId: 'target-1', extra: 1 });
+    expect(input).toEqual({ slug: 'alpha', projectId: 'target-1' });
     expect(command.parse(input)).toEqual(input);
     const output = await command.execute(input);
     expect(loader.forContext).toHaveBeenCalledOnce();
-    expect(service.softDelete).toHaveBeenCalledExactlyOnceWith('alpha');
+    expect(service.softDeleteById).toHaveBeenCalledExactlyOnceWith('target-1');
     expect(output).toBeNull(); expect(command.toResult).toBeUndefined();
-    for (const invalid of [null, [], {}, { slug: '' }, { slug: 7 }]) expect(() => command.parse(invalid)).toThrow(ValidationAppException);
+    for (const invalid of [null, [], {}, { slug: '' }, { slug: 7 }, { slug: 'alpha' }, { slug: 'alpha', projectId: '' }, { slug: 'alpha', projectId: 7 }]) expect(() => command.parse(invalid)).toThrow(ValidationAppException);
   });
 });

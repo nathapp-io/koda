@@ -63,6 +63,15 @@ export class PrismaProjectRepository {
     return this.toDomain(model);
   }
 
+  /** One statement binds the deletion to the authorized identity, even if its slug changes. */
+  async softDeleteById(id: string): Promise<ProjectDomain | null> {
+    const [model] = await this.prisma.client.project.updateManyAndReturn({
+      where: { id, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+    return model ? this.toDomain(model) : null;
+  }
+
   async findAllIds(): Promise<{ id: string }[]> {
     return this.prisma.client.project.findMany({ where: { deletedAt: null }, select: { id: true } });
   }

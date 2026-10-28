@@ -61,6 +61,30 @@ describeIntegration('gated project, agent and skill-source deletes', () => {
     expect((await approve(summary.id)).status).toBe('executed');
     expect((await db.project.findUniqueOrThrow({ where: { id: p.id } })).deletedAt).toBeInstanceOf(Date);
   });
+  it('F2: approval deletes the authorized project id after rename and slug reuse', async () => {
+    const original = await project();
+    await grantKeys(db, { type: 'AGENT', id: actor.id }, ['project.read', 'project.delete'], original.id);
+    await app.get(PermissionCache).invalidate();
+    const summary = pending(await remove(`projects/${original.slug}`));
+    await db.project.update({ where: { id: original.id }, data: { slug: `renamed-${randomUUID()}` } });
+    const replacement = await project();
+    await db.project.update({ where: { id: replacement.id }, data: { slug: original.slug } });
+    expect((await approve(summary.id)).status).toBe('executed');
+    expect((await db.project.findUniqueOrThrow({ where: { id: replacement.id } })).deletedAt).toBeNull();
+    expect((await db.project.findUniqueOrThrow({ where: { id: original.id } })).deletedAt).toBeInstanceOf(Date);
+  });
+  it('F3: approval fails rather than deleting a replacement agent with the same slug', async () => {
+    const original = await seedFleetHttpAgent(server(), world.tokens.root);
+    const summary = pending(await remove(`agents/${original.slug}`));
+    await remove(`agents/${original.slug}`, world.tokens.root).expect(200);
+    const replacement = data<{ agent: { id: string } }>(await request(server()).post('/api/agents')
+      .auth(world.tokens.root, { type: 'bearer' }).send({ name: 'Replacement', slug: original.slug }).expect(201)).agent;
+    expect(replacement.id).not.toBe(original.id);
+    expect(await approve(summary.id)).toMatchObject({ status: 'failed', result: {
+      error: 'execution-failed', name: new NotFoundAppException({}, 'agents').name,
+    } });
+    expect(await db.agent.findUnique({ where: { id: replacement.id } })).not.toBeNull();
+  });
   it('AC-2: root project deletion preserves 204 and opens no request', async () => {
     const p = await project();
     await remove(`projects/${p.slug}`, world.tokens.root).expect(204);

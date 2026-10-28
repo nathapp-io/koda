@@ -17,10 +17,10 @@ export class AgentRouteCommands implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    this.commands.register(routeCommand<{ slug: string }, AgentResponseDto>({
+    this.commands.register(routeCommand<{ slug: string; agentId: string }, AgentResponseDto>({
       key: 'agent.delete', variant: AGENT_ROUTE_VARIANTS.delete,
-      parse: (input) => parseRouteInput(input, ['slug']),
-      run: (_principal, input) => this.service.remove(input.slug),
+      parse: (input) => parseRouteInput(input, ['slug', 'agentId']),
+      run: (_principal, input) => this.service.removeById(input.agentId),
       toResult: (result) => result,
     }, this.loader));
   }

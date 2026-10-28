@@ -16,11 +16,11 @@ export class ProjectRouteCommands implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    this.commands.register(routeCommand<{ slug: string }, null>({
+    this.commands.register(routeCommand<{ slug: string; projectId: string }, null>({
       key: 'project.delete', variant: PROJECT_ROUTE_VARIANTS.delete,
-      parse: (input) => parseRouteInput(input, ['slug']),
+      parse: (input) => parseRouteInput(input, ['slug', 'projectId']),
       run: async (_principal, input) => {
-        await this.service.softDelete(input.slug);
+        await this.service.softDeleteById(input.projectId);
         return null;
       },
     }, this.loader));

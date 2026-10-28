@@ -15,7 +15,8 @@ describe('admin delete HTTP handler mappings', () => {
     function build() {
       const run = vi.fn();
       const gate = { run } as unknown as ApprovalRouteGate;
-      const service = { softDelete: vi.fn(), remove: vi.fn(), deleteSource: vi.fn() };
+      const findBySlug = vi.fn().mockResolvedValue({ id: 'target-1', slug: 'alpha' });
+      const service = { findBySlug, softDelete: vi.fn(), remove: vi.fn(), deleteSource: vi.fn() };
       const controller = domain === 'project'
         ? new ProjectsController(service as unknown as ProjectsService, {} as ImpactAnalysisService, {} as AgentsService, {} as PermissionService, gate)
         : domain === 'agent' ? new AgentsController(service as unknown as AgentsService, gate)
@@ -34,11 +35,12 @@ describe('admin delete HTTP handler mappings', () => {
         key: `${domain}.delete`,
         variant: domain === 'project' ? 'rest:projects.delete' : domain === 'agent' ? 'rest:agents.delete' : 'rest:admin-skill-sources.delete',
         projectId: domain === 'project' ? 'p1' : null,
-        input: domain === 'skill.source' ? { id: 'alpha' } : { slug: 'alpha' },
+        input: domain === 'skill.source' ? { id: 'alpha' } : domain === 'project' ? { slug: 'alpha', projectId: 'p1' } : { slug: 'alpha', agentId: 'target-1' },
       });
       if (domain === 'agent') expect(output).toMatchObject({ data: result });
       else expect(output).toBeUndefined();
-      for (const mock of Object.values(service)) expect(mock).not.toHaveBeenCalled();
+      for (const mock of [service.softDelete, service.remove, service.deleteSource]) expect(mock).not.toHaveBeenCalled();
+      if (domain === 'agent') expect(service.findBySlug).toHaveBeenCalledExactlyOnceWith('alpha');
       expect(Reflect.getMetadata(APPROVAL_GATED_METADATA, controller.remove)).toBe(true);
     });
     it(`${domain}: throws ApprovalPending with the request unchanged`, async () => {
