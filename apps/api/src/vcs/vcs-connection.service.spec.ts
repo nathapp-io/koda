@@ -1,3 +1,4 @@
+import { withCommittedEffects } from '../common/committed-effects';
 import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
@@ -91,6 +92,28 @@ describe('VcsConnectionService', () => {
   let mockRepo: Mocked<IVcsRepository>;
   let mockPolling: ReturnType<typeof createMockPollingService>;
   const ENCRYPTION_KEY = 'test-key-32-chars-exactly-padded!!';
+
+  it('prepares provider testing before settlement, then rejects a changed connection without more HTTP', async () => {
+    mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection());
+    const testConnection = vi.fn(async () => ({ ok: true }));
+    (createVcsProvider as Mock).mockReturnValue({ testConnection });
+    const run = await service.prepareTestConnection('proj-1', ENCRYPTION_KEY);
+    expect(testConnection).toHaveBeenCalledTimes(1);
+    expect(await run()).toMatchObject({ ok: true });
+    mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection({ repoName: 'changed' }));
+    await expect(run()).rejects.toBeInstanceOf(ValidationAppException);
+    expect(testConnection).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['settlement', 'commit'])('retains polling when the owning %s fails', async () => {
+    mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection());
+    await expect(withCommittedEffects(async () => {
+      await service.delete('proj-1');
+      expect(mockPolling.unschedulePolling).not.toHaveBeenCalled();
+      throw new Error('owner failed');
+    })).rejects.toThrow('owner failed');
+    expect(mockPolling.unschedulePolling).not.toHaveBeenCalled();
+  });
 
   beforeEach(async () => {
     mockRepo = createMockRepo();

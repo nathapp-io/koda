@@ -1,3 +1,4 @@
+import { ApprovalRouteGate } from '../../../src/approvals/route/approval-route-gate';
 import { PermissionService } from '../../../src/permissions/permission.service';
 import type { Mocked } from 'vitest';
 /**
@@ -145,6 +146,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
     module = await Test.createTestingModule({
       controllers: [VcsController],
       providers: [
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn() } },
         { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true }) } },
         { provide: VcsSyncService, useValue: mockSyncServiceInstance },
         { provide: VcsConnectionService, useValue: mockVcsConnectionServiceInstance },

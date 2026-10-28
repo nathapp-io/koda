@@ -23,6 +23,23 @@ describe('FleetReposService', () => {
     repo.findProject.mockResolvedValue({ id: 'p1', slug: 'p' });
   });
 
+  it('prepared checks refuse a target changed during HTTP without calling the forge again', async () => {
+    repo.findById.mockResolvedValue(created());
+    github.verifyRepo.mockResolvedValue({});
+    const run = await make().prepareCheck('fr1');
+    repo.findById.mockResolvedValue(created({ owner: 'other' }));
+    await expect(run()).rejects.toBeInstanceOf(ConflictAppException);
+    expect(github.verifyRepo).toHaveBeenCalledTimes(1);
+  });
+
+  it('prepared creates recheck the project before writing', async () => {
+    github.verifyRepo.mockResolvedValue({ owner: 'acme', name: 'app', defaultBranch: 'trunk', installationId: 77n });
+    const run = await make().prepareCreate('u1', { projectSlug: 'p', provider: 'github', owner: 'acme', name: 'app' });
+    repo.findProject.mockResolvedValue(null);
+    await expect(run()).rejects.toBeInstanceOf(NotFoundAppException);
+    expect(repo.create).not.toHaveBeenCalled();
+  });
+
   it('registers a GitHub repo under its canonical name and serialises the BigInt as a string', async () => {
     github.verifyRepo.mockResolvedValue({ owner: 'acme', name: 'app', defaultBranch: 'trunk', installationId: BigInt(77) });
     repo.create.mockResolvedValue(created());

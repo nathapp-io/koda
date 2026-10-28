@@ -15,7 +15,7 @@ import { resetDb } from '../../helpers/reset-db';
 import { canRunDbTests } from '../../helpers/test-environment';
 
 /** The variant a REST route for `DELETE /labels/:id` registers (US-001's naming: `rest:<path>.<verb>`). */
-const VARIANT = 'rest:labels.delete';
+const VARIANT = 'rest:variants-probe';
 const input = { labelId: 'l1' };
 const now = new Date('2026-11-05T09:00:00Z');
 

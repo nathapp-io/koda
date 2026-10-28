@@ -169,6 +169,14 @@ export class ApprovalExecutionService {
     // the callback succeeded, is reported to the caller and never settles the request.
     let callbackFailure: { error: unknown } | undefined;
     let raw: { result: unknown } | undefined;
+    let prepared: (() => Promise<unknown>) | undefined;
+    try {
+      prepared = await command.prepare?.(parsed, decision);
+    } catch (error) {
+      return { settled: await this.settle(request.id, {
+        status: 'failed', settledAt: now, result: { error: 'execution-failed', name: errorName(error) },
+      }) };
+    }
     try {
       // This transaction owns every write the command makes, so it also owns their after-commit
       // work: a role or binding command's permission-cache invalidation is deferred here and runs
@@ -180,7 +188,19 @@ export class ApprovalExecutionService {
           if (!locked) throw new ApprovalRequestNotFoundError(request.id);
           if (locked.status !== 'approved') throw new ApprovalRequestNotPendingError(locked.status);
 
-          const result = await command.execute(parsed, decision);
+          // Preparation can be slow: authority must still hold when we take the request lock.
+          if (prepared && command.skipKeyRecheck !== true && !(await this.stillHoldsKey(locked))) {
+            const revoked = await bookkeeping('approval.request-settle', async () => {
+              const row = await this.requests.transition(request.id, 'approved', {
+                status: 'failed', settledAt: now, result: { error: 'permission-revoked' },
+              });
+              if (row) await this.events.record(row);
+              return row;
+            });
+            if (!revoked) throw new ApprovalRequestNotPendingError(locked.status);
+            return revoked;
+          }
+          const result = await (prepared ? prepared() : command.execute(parsed, decision));
           raw = { result };
           const settled = await bookkeeping('approval.request-settle', async () => {
             const transitioned = await this.requests.transition(request.id, 'approved', {

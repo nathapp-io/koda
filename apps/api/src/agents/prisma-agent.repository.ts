@@ -3,6 +3,7 @@ import { PrismaClient } from '../generated/prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TicketStatus } from '../common/enums';
 import { KodaError } from '../common/koda-error';
+import { isRecordNotFound } from '../common/utils/prisma-errors';
 import { lockProjectAgents } from '../common/utils/advisory-lock';
 import { accessibleProjectIds, agentHasProjectAccess, listProjectMemberships } from '../permissions/membership.queries';
 import { MAX_OPEN_TICKET_REFS } from '../permissions/open-agent-tickets.queries';
@@ -78,6 +79,16 @@ export class PrismaAgentRepository {
 
   async deleteBySlug(slug: string) {
     return this.db.agent.delete({ where: { slug } });
+  }
+
+  /** Delete and return the target by identity; never resolve its reusable slug at execution. */
+  async deleteById(id: string) {
+    try {
+      return await this.db.agent.delete({ where: { id }, include: { capabilities: true } });
+    } catch (error) {
+      if (isRecordNotFound(error)) return null;
+      throw error;
+    }
   }
 
   /**

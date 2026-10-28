@@ -38,6 +38,13 @@ export class PrismaAuditEntryRepository extends AbstractPrismaRepository<AuditEn
   }
   protected toPersistenceUpdate(): never { throw new Error('audit entries are append-only'); }
 
+  /** A journal replay may follow an already committed insert (crash before receipt removal). */
+  async createOnce(record: AuditEntryRecord & { id: string }): Promise<void> {
+    await this.prisma.client.auditEntry.createMany({
+      data: [{ ...this.toPersistenceCreate(record), id: record.id }], skipDuplicates: true,
+    });
+  }
+
   async findPage(filters: AuditEntryFilters, page: IPageOption): Promise<IPageResult<AuditEntryRecord>> {
     const where: Prisma.AuditEntryWhereInput = {
       ...(filters.key !== undefined ? { key: filters.key } : {}),

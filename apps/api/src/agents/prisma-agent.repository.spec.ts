@@ -61,6 +61,24 @@ describe('PrismaAgentRepository.createCapabilities (US-005)', () => {
     vi.clearAllMocks();
   });
 
+  it('F3: deletes exactly the frozen agent id and returns its capabilities', async () => {
+    const row = { id: 'original', slug: 'renamed', capabilities: [] };
+    const deleteAgent = vi.fn().mockResolvedValue(row);
+    prisma.client.agent = { delete: deleteAgent };
+    expect(await repository.deleteById('original')).toBe(row);
+    expect(deleteAgent).toHaveBeenCalledExactlyOnceWith({ where: { id: 'original' }, include: { capabilities: true } });
+  });
+
+  it('F3: maps a missing id to null but propagates other DB errors', async () => {
+    const { Prisma } = await import('../generated/prisma/client');
+    const deleteAgent = vi.fn().mockRejectedValue(new Prisma.PrismaClientKnownRequestError('gone', { code: 'P2025', clientVersion: 'test' }));
+    prisma.client.agent = { delete: deleteAgent };
+    expect(await repository.deleteById('original')).toBeNull();
+    const error = new Error('database down');
+    deleteAgent.mockRejectedValue(error);
+    await expect(repository.deleteById('original')).rejects.toBe(error);
+  });
+
   it('AC-10: issues one agentCapabilityEntry.createMany on the ambient client and no role write', async () => {
     await repository.createCapabilities('agent-1', ['nax', 'typescript']);
 

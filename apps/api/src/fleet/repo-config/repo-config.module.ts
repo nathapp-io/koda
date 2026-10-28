@@ -1,4 +1,7 @@
 import { Module } from '@nestjs/common';
+import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../../auth/auth-repository.module';
+import { RepoConfigRouteCommands } from './repo-config-route.commands';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ProjectAccessModule } from '../../projects/project-access.module';
 import { FLEET_CFG, IFleetConfig } from '../../config/fleet.config';
@@ -29,9 +32,10 @@ export function selectRepoFilesReader(
 
 /** Fleet S3 (spec docs/superpowers/specs/2026-10-07-fleet-s3-repo-config-and-credential-board-design.md). */
 @Module({
-  imports: [PrismaModule, ProjectAccessModule, FleetActivityModule, GitBrokerModule, FleetJobsModule, SyncModule, ConfigEditStoreModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ProjectAccessModule, FleetActivityModule, GitBrokerModule, FleetJobsModule, SyncModule, ConfigEditStoreModule],
   controllers: [ProjectRepoConfigController, ProjectJobConfigEditController, RunnerConfigEditController, FleetConfigTestHooksController],
   providers: [
+    RepoConfigRouteCommands,
     GithubFleetRepoFilesReader, GitlabFleetRepoFilesReader, FleetRepoFilesRouter, FakeFleetRepoFilesReader,
     {
       provide: FLEET_REPO_FILES_READER,

@@ -3,6 +3,10 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags }
 import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
+import { REPO_CONFIG_ROUTE_VARIANTS } from './repo-config-route.commands';
 import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
 import { CurrentProject } from '../../projects/current-project.decorator';
@@ -19,7 +23,10 @@ import { NaxFileContentDto, NaxFileListDto, RegenerateConfigDto, SubmitConfigEdi
 // Permissions P1d (US-007): each route declares `ProjectMembershipGuard, RequiresGuard` in one
 // `@UseGuards`, so the membership guard resolves `request.projectContext` before the key check.
 export class ProjectRepoConfigController {
-  constructor(private readonly configJobs: ConfigJobsService) {}
+  constructor(
+    private readonly configJobs: ConfigJobsService,
+    private readonly routeGate: ApprovalRouteGate,
+  ) {}
 
   @Get('nax-files')
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
@@ -76,10 +83,16 @@ export class ProjectRepoConfigController {
   @HttpCode(201)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('fleet.repo.drift.check')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Queue a read-only CONFIG_DRIFT job (fleet.repo.drift.check)' })
   @ApiResponse({ status: 201, type: DispatchResultDto })
   @ApiResponse({ status: 403, description: 'fleet.repo.drift.check is missing' })
-  async submitDrift(@Param('repoId') repoId: string, @CurrentProject() ctx: ProjectContext, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.configJobs.submitDrift(principal.id, ctx.project.id, repoId));
+  async submitDrift(@Param('repoId') repoId: string, @CurrentProject() ctx: ProjectContext) {
+    const outcome = await this.routeGate.run<DispatchResultDto>({
+      key: 'fleet.repo.drift.check', variant: REPO_CONFIG_ROUTE_VARIANTS.driftCheck,
+      projectId: ctx.project.id, input: { projectId: ctx.project.id, repoId },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 }

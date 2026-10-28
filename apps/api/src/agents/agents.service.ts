@@ -262,6 +262,21 @@ export class AgentsService {
     return AgentResponseDto.from(agent);
   }
 
+  /** The REST approval path targets the id resolved when the request opened, not a reused slug. */
+  async removeById(id: string): Promise<AgentResponseDto> {
+    const agent = await this.membership.afterCommit(() => this.audit.audited(
+      async () => {
+        const deleted = await this.agentRepo.deleteById(id);
+        if (!deleted) throw new NotFoundAppException({}, 'agents');
+        await this.membership.removeAllBindings({ type: 'AGENT', id });
+        return deleted;
+      },
+      (deleted) => ({ key: 'agent.delete', resourceType: 'agent', resourceId: deleted.id, projectId: null, summary: `deleted ${deleted.slug}` }),
+    ));
+    await this.agentAuthProvider?.invalidateByTag(`AGENT:${id}`);
+    return AgentResponseDto.from(agent);
+  }
+
   private static readonly PRIORITY_RANK: Record<string, number> = {
     CRITICAL: 4,
     HIGH: 3,

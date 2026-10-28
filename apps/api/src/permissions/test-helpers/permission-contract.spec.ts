@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PERMISSION_CATALOG, PENDING_SURFACE_KEYS } from '../catalog';
-import { PENDING_GATE_ROUTES, type PendingGateFeature } from '../pending-gate-routes';
+import { PENDING_GATE_ROUTES, SECRET_GATE_ROUTES, type PendingGateFeature } from '../pending-gate-routes';
 import type { RequiresMetadata } from '../requires.decorator';
 import {
   findContractViolations as findContractViolationsWithAllowlist,
@@ -93,7 +93,7 @@ describe('permission contract checker', () => {
   });
 
   it('AC-5: reports a pending gate route absent from declarations', () => {
-    const violations = findContractViolations(declarations(), [], new Set(), new Map([['POST /gone', 'gate-high']]));
+    const violations = findContractViolations(declarations(), [], new Set(), new Map([['POST /gone', 'gate-secret']]));
     contains(violations, { kind: 'stale-pending-gate-route', route: 'POST /gone' });
   });
 
@@ -117,8 +117,27 @@ describe('permission contract checker', () => {
     }
   });
 
-  it('AC-10: assigns high-risk project deletion to gate-high', () => {
-    expect(PENDING_GATE_ROUTES.get('DELETE /projects/:slug')).toBe('gate-high');
+  it('AC-6: explicitly lists exactly the secret-bearing routes', () => {
+    expect(SECRET_GATE_ROUTES).toEqual(new Set([
+      'POST /fleet/enrollments',
+      'POST /projects/:slug/vcs',
+      'PATCH /projects/:slug/vcs',
+      'POST /projects/:slug/vcs/webhook-secret/rotate',
+      'POST /projects/:slug/webhooks',
+      'PATCH /projects/:slug/webhooks/:id',
+    ]));
+  });
+
+  it('AC-7: assigns every explicit secret route to gate-secret', () => {
+    for (const route of SECRET_GATE_ROUTES) expect(PENDING_GATE_ROUTES.get(route)).toBe('gate-secret');
+  });
+
+  it('AC-1 (US-010): has no gate-high pending assignments', () => {
+    expect([...PENDING_GATE_ROUTES.values()]).not.toContain('gate-high');
+  });
+
+  it('AC-10: has no pending entry for gated project deletion', () => {
+    expect(PENDING_GATE_ROUTES.get('DELETE /projects/:slug')).toBeUndefined();
   });
 
   it('AC-11: assigns project ticket creation to gate-core-domains', () => {

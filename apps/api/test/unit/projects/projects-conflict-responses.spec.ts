@@ -1,3 +1,4 @@
+import { ApprovalRouteGate } from '../../../src/approvals/route/approval-route-gate';
 /**
  * US-004: project create/update conflict responses at the HTTP boundary.
  *
@@ -95,6 +96,7 @@ describe('US-004: project conflict responses', () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       controllers: [ProjectsController],
       providers: [
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
         ProjectsService,
         { provide: AuditRecorder, useValue: { audited: vi.fn(async (fn: () => Promise<unknown>) => fn()) } },
         ProjectAccessService,

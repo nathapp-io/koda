@@ -1,3 +1,4 @@
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import { mockAuditRecorder } from '../common/test-helpers/global-stubs.module';
 import type { Mock } from 'vitest';
@@ -226,6 +227,7 @@ describe('POST /api/agents (US-003)', () => {
     testingModule = await Test.createTestingModule({
       controllers: [AgentsController],
       providers: [
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
         AgentsService,
         { provide: AuditRecorder, useValue: mockAuditRecorder },
         PrismaAgentRepository,

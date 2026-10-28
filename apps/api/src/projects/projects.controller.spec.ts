@@ -1,3 +1,4 @@
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
@@ -111,6 +112,7 @@ describe('ProjectsController route permission metadata (US-007)', () => {
 
 describe('ProjectsController', () => {
   let controller: ProjectsController;
+  let routeGate: ApprovalRouteGate;
   // US-002: the list route is `findAllForPrincipal(principal)`; the mock carries
   // that member explicitly so these tests type against the finished service.
   let projectsService: Mocked<ProjectsService> & { findAllForPrincipal: Mock };
@@ -145,6 +147,7 @@ describe('ProjectsController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ProjectsController],
       providers: [
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
         { provide: ProjectsService, useValue: projectsService },
         { provide: ImpactAnalysisService, useValue: impactAnalysisService },
         { provide: AgentsService, useValue: agentsService },
@@ -158,6 +161,7 @@ describe('ProjectsController', () => {
     }).compile();
 
     controller = module.get<ProjectsController>(ProjectsController);
+    routeGate = module.get(ApprovalRouteGate);
   });
 
   afterEach(() => {
@@ -258,12 +262,10 @@ describe('ProjectsController', () => {
   });
 
   describe('remove', () => {
-    it('soft-deletes a project', async () => {
-      projectsService.softDelete.mockResolvedValue(undefined);
-
-      await controller.remove('alpha');
-
-      expect(projectsService.softDelete).toHaveBeenCalledWith('alpha');
+    it('gates project deletion with the guard-resolved project id', async () => {
+      expect(await controller.remove('alpha', { project: { id: 'proj-1', slug: 'alpha' } })).toBeUndefined();
+      expect(routeGate.run).toHaveBeenCalledExactlyOnceWith({ key: 'project.delete', variant: 'rest:projects.delete', projectId: 'proj-1', input: { slug: 'alpha', projectId: 'proj-1' } });
+      expect(projectsService.softDelete).not.toHaveBeenCalled();
     });
   });
 

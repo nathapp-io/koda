@@ -1,3 +1,7 @@
+import { TICKET_ROUTE_VARIANTS } from './ticket-route.commands';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
 import {
   Controller,
   Post,
@@ -59,6 +63,7 @@ export class TicketsController {
   constructor(
     private ticketsService: TicketsService,
     private transitionsService: TicketTransitionsService,
+    private readonly routeGate: ApprovalRouteGate,
   ) {}
 
   // Public methods for testing (called directly in tests)
@@ -236,6 +241,7 @@ export class TicketsController {
   @Delete(':ref')
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('ticket.delete')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Soft delete a ticket' })
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 403, description: 'ticket.delete is missing' })
@@ -243,11 +249,14 @@ export class TicketsController {
   async softDelete(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
-    const data = await this.deleteTicket(slug, ref, principal);
-    return JsonResponse.Ok(data);
+    const outcome = await this.routeGate.run<TicketResponseDto>({
+      key: 'ticket.delete', variant: TICKET_ROUTE_VARIANTS.delete,
+      projectId: project.project.id, input: { slug, ref },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':ref/assign')

@@ -3,7 +3,7 @@ import { GUARDS_METADATA, METHOD_METADATA } from '@nestjs/common/constants';
 import type { ModulesContainer } from '@nestjs/core';
 import { AssistantToolRegistry } from '../../fleet/assistant/assistant-tool.registry';
 import { APPROVAL_GATED_METADATA } from '../../approvals/route/approval-gated.decorator';
-import { PENDING_GATE_ROUTES, type PendingGateFeature } from '../pending-gate-routes';
+import { PENDING_GATE_ROUTES, SECRET_GATE_ROUTES, type PendingGateFeature } from '../pending-gate-routes';
 import { PERMISSION_CATALOG, PENDING_SURFACE_KEYS, type PermissionCatalogEntry } from '../catalog';
 import { routeSurface } from '../route-surface';
 import { REQUIRES_METADATA, type RequiresMetadata } from '../requires.decorator';
@@ -235,4 +235,31 @@ export function findContractViolations(
   }
 
   return violations;
+}
+
+/** Derives the rollout allowlist expected for every ungated approvable write declaration. */
+export function expectedPendingGateRoutes(
+  routes: readonly RouteDeclaration[],
+  catalog: readonly PermissionCatalogEntry[] = PERMISSION_CATALOG,
+): [string, string][] {
+  const catalogByKey = new Map(catalog.map((entry) => [entry.key, entry]));
+  const writeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+  return routes
+    .filter((route) => writeMethods.has(route.method) && !route.gated)
+    .flatMap((route) => {
+      const approvableKeys = (route.requires?.keys ?? [])
+        .filter((key) => catalogByKey.get(key)?.approval.approvable === true);
+      if (approvableKeys.length === 0) return [];
+
+      const feature = SECRET_GATE_ROUTES.has(route.route)
+        ? 'gate-secret'
+        : approvableKeys.some((key) => catalogByKey.get(key)?.approval.default !== 'none')
+          ? 'gate-high'
+          : approvableKeys.every((key) => /^(fleet|thread|testhook)\./.test(key))
+            ? 'gate-fleet'
+            : 'gate-core-domains';
+      return [[route.route, feature] as [string, string]];
+    })
+    .sort(([left], [right]) => left.localeCompare(right));
 }

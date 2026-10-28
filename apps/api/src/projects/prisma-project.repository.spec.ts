@@ -56,6 +56,22 @@ describe('PrismaProjectRepository — brief (US-001)', () => {
     expect(project?.brief).toBe('Koda is a fleet platform.');
   });
 
+  it('F2: soft-deletes atomically by immutable id, never by slug', async () => {
+    const updateManyAndReturn = vi.fn().mockResolvedValue([{ ...row, deletedAt: new Date() }]);
+    prisma.client.project.updateManyAndReturn = updateManyAndReturn;
+    const deleted = await repository.softDeleteById('proj-1');
+    expect(updateManyAndReturn).toHaveBeenCalledExactlyOnceWith({
+      where: { id: 'proj-1', deletedAt: null }, data: { deletedAt: expect.any(Date) },
+    });
+    expect(deleted).toMatchObject({ id: 'proj-1', deletedAt: expect.any(Date) });
+    expect(prisma.client.project.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('F2: a missing or already deleted id returns null', async () => {
+    prisma.client.project.updateManyAndReturn = vi.fn().mockResolvedValue([]);
+    expect(await repository.softDeleteById('missing')).toBeNull();
+  });
+
   it('maps a null brief as null', async () => {
     (prisma.client.project.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({ ...row, brief: null });
 

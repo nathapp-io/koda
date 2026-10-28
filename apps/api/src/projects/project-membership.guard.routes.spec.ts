@@ -1,3 +1,5 @@
+import { KbDocumentDeletion } from '../rag/kb-document-deletion.service';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import type { Mock } from 'vitest';
 /**
  * US-001 — ProjectMembershipGuard applied to the project-scoped routes.
@@ -187,6 +189,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     testingModule = await Test.createTestingModule({
       controllers: [TicketsController, ProjectsController, RagController],
       providers: [
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
         { provide: TicketsService, useValue: ticketsService },
         { provide: TicketTransitionsService, useValue: transitionsService },
         { provide: ProjectsService, useValue: projectsService },
@@ -205,6 +208,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
         // the ones a case marks as refused (`refusedKeys`).
         { provide: PermissionService, useValue: { can } },
         { provide: AuditRecorder, useValue: mockAuditRecorder },
+        { provide: KbDocumentDeletion, useValue: { preflight: vi.fn().mockResolvedValue([]), delete: vi.fn() } },
         // Permissions P1 US-004: the membership guard builds no ability; it resolves the project identity only.
       ],
     }).compile();

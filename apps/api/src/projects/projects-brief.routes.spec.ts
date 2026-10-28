@@ -1,3 +1,4 @@
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 /**
  * US-001 — the project brief over a real Fastify HTTP server.
  *
@@ -105,6 +106,7 @@ describe('PATCH /api/projects/:slug — the project brief (US-001)', () => {
     testingModule = await Test.createTestingModule({
       controllers: [ProjectsController],
       providers: [
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
         ProjectsService,
         { provide: AuditRecorder, useValue: { audited: vi.fn(async (fn: () => Promise<unknown>) => fn()) } },
         PrismaProjectRepository,

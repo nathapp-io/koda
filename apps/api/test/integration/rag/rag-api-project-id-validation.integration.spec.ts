@@ -1,3 +1,5 @@
+import { ApprovalRouteGate } from '../../../src/approvals/route/approval-route-gate';
+import { KbDocumentDeletion } from '../../../src/rag/kb-document-deletion.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -96,6 +98,8 @@ describe('RagController — Project ID Validation at API Boundary (AC6)', () => 
         // US-007: the KB routes carry permission keys; this spec asserts the slug/projectId contract only.
         { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) } },
         { provide: AuditRecorder, useValue: mockAuditRecorder },
+        { provide: KbDocumentDeletion, useValue: { preflight: vi.fn().mockResolvedValue([]), delete: vi.fn() } },
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: { deleted: true } }) } },
       ],
     }).compile();
 

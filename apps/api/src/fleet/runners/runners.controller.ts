@@ -1,9 +1,11 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse } from '@nathapp/nestjs-common';
+import { ApprovalGated } from '../../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../../approvals/route/approval-route-gate';
+import { RUNNER_ROUTE_VARIANTS } from './runner-route.commands';
 import { parseQuery, toPageResult } from '../../common/dto/koda-page.query';
-import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { Requires } from '../../permissions/requires.decorator';
 import { RequiresGuard } from '../../permissions/requires.guard';
 import { RunnersService } from './runners.service';
@@ -20,7 +22,10 @@ import { ListRunnersQuery } from './dto/list-runners.query';
 @ApiBearerAuth()
 @Controller('fleet/runners')
 export class RunnersController {
-  constructor(private readonly runners: RunnersService) {}
+  constructor(
+    private readonly runners: RunnersService,
+    private readonly routeGate: ApprovalRouteGate,
+  ) {}
 
   @Get()
   @UseGuards(RequiresGuard)
@@ -46,20 +51,36 @@ export class RunnersController {
   @Patch(':id')
   @UseGuards(RequiresGuard)
   @Requires('fleet.runner.update')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Enable/disable a runner or change its labels or capacity (fleet.runner.update, global)' })
   @ApiResponse({ status: 200, type: RunnerDto })
   @ApiResponse({ status: 403, description: 'fleet.runner.update is missing globally' })
-  async update(@Param('id') id: string, @Body() dto: UpdateRunnerDto, @Principal() principal: KodaPrincipal) {
-    return JsonResponse.Ok(await this.runners.update(principal.id, id, dto));
+  async update(@Param('id') id: string, @Body() dto: UpdateRunnerDto) {
+    const outcome = await this.routeGate.run<RunnerDto>({
+      key: 'fleet.runner.update',
+      variant: RUNNER_ROUTE_VARIANTS.update,
+      projectId: null,
+      input: { id, patch: dto },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Delete(':id')
   @HttpCode(204)
   @UseGuards(RequiresGuard)
   @Requires('fleet.runner.delete')
+  @ApprovalGated()
   @ApiOperation({ summary: "Delete a runner; revokes its key (fleet.runner.delete, global)" })
   @ApiResponse({ status: 403, description: 'fleet.runner.delete is missing globally' })
-  async remove(@Param('id') id: string, @Principal() principal: KodaPrincipal): Promise<void> {
-    await this.runners.remove(principal.id, id);
+  async remove(@Param('id') id: string): Promise<void> {
+    const outcome = await this.routeGate.run<null>({
+      key: 'fleet.runner.delete',
+      variant: RUNNER_ROUTE_VARIANTS.delete,
+      projectId: null,
+      input: { id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return undefined;
   }
 }

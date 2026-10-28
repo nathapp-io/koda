@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 /**
  * Boot the full API (AppFactory + real guards/pipes/filters) for HTTP-level
  * integration tests. Same wiring as test/integration/projects/project-memory.
@@ -27,10 +30,14 @@ export interface HttpAppOptions {
  * process under maxWorkers: 1).
  */
 export async function bootHttpApp(opts: HttpAppOptions): Promise<NathApplication> {
+  // A KB delete now persists recovery intents even when its vector table is in memory.
+  const kbRoot = mkdtempSync(join(tmpdir(), 'koda-http-kb-'));
   const previous = {
+    LANCEDB_PATH: process.env.LANCEDB_PATH,
     REGISTRATION_ENABLED: process.env.REGISTRATION_ENABLED,
     KODA_OWNER_EMAIL: process.env.KODA_OWNER_EMAIL,
   };
+  process.env.LANCEDB_PATH = kbRoot;
   process.env.REGISTRATION_ENABLED = String(opts.registrationEnabled);
   if (opts.ownerEmail) process.env.KODA_OWNER_EMAIL = opts.ownerEmail;
   else delete process.env.KODA_OWNER_EMAIL;
@@ -41,7 +48,15 @@ export async function bootHttpApp(opts: HttpAppOptions): Promise<NathApplication
     app.setJwtAuthGuard(app.get(CombinedAuthGuard));
     app.useAppGlobalPrefix().useAppGlobalPipes().useAppGlobalFilters().useAppGlobalGuards();
     await app.init();
+    const close = app.close.bind(app);
+    app.close = async () => {
+      try { return await close(); }
+      finally { rmSync(kbRoot, { recursive: true, force: true }); }
+    };
     return app;
+  } catch (error) {
+    rmSync(kbRoot, { recursive: true, force: true });
+    throw error;
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];

@@ -31,7 +31,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { SkillsService } from '../../../src/skills/skills.service';
 import { seedThreadJob } from '../../helpers/thread-fixtures';
-import { FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { FleetHttpWorld, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
 import { buildThreadInstructions, renderBriefBlock } from '../../../src/fleet/threads/thread-instructions';
 import type { ThreadSkillSource } from '../../../src/skills/skill-catalog.domain';
 import { GitHubAppClient } from '../../../src/fleet/git-broker/github-app-client';
@@ -999,6 +1000,23 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(204);
     });
+
+    it('AC-10 (US-010): an agent deletes its own comment with exactly 202', async () => {
+      const project = await prismaClient().project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await grantKeys(prismaClient(), { type: 'AGENT', id: agentId }, ['comment.delete.own', 'project.read'], project.id);
+      await app.get(MembershipService).invalidatePermissions();
+      const ownComment = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/${bugTicketRef}/comments`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .send({ body: 'Agent-owned comment for approval gate coverage.', type: 'GENERAL' })
+        .expect(201);
+      const ownCommentId = body<{ id: string }>(ownComment).id;
+
+      await request(httpServer)
+        .delete(`/api/comments/${ownCommentId}`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .expect(202);
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────
@@ -1027,10 +1045,12 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('DELETE .../labels/:labelId — removes label from ticket', async () => {
+      const requestsBefore = await prismaClient().approvalRequest.count();
       await request(httpServer)
         .delete(`/api/projects/${projectSlug}/tickets/${labelTicketRef}/labels/${labelId}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(204);
+      expect(await prismaClient().approvalRequest.count()).toBe(requestsBefore);
     });
   });
 
@@ -1064,6 +1084,7 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('DELETE .../tickets/:ref — soft-deletes ticket', async () => {
+      const requestsBefore = await prismaClient().approvalRequest.count();
       const res = await request(httpServer)
         .delete(`/api/projects/${projectSlug}/tickets/${updateTicketRef}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
@@ -1071,6 +1092,7 @@ describeIntegration('API Integration Tests', () => {
 
       const data = body<{ deletedAt: string | null }>(res);
       expect(data.deletedAt).not.toBeNull();
+      expect(await prismaClient().approvalRequest.count()).toBe(requestsBefore);
     });
 
     it('GET deleted ticket — 404', async () => {
@@ -1249,11 +1271,15 @@ describeIntegration('API Integration Tests', () => {
       deleteProjectSlug = body<{ slug: string }>(res).slug;
     });
 
-    it('DELETE /api/projects/:slug — soft-deletes project', async () => {
+    it('DELETE /api/projects/:slug — human executes the approval-gated soft delete without a request', async () => {
+      const db = prismaClient();
+      const requestsBefore = await db.approvalRequest.count();
       await request(httpServer)
         .delete(`/api/projects/${deleteProjectSlug}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(204);
+      expect((await db.project.findUniqueOrThrow({ where: { slug: deleteProjectSlug } })).deletedAt).toBeInstanceOf(Date);
+      expect(await db.approvalRequest.count()).toBe(requestsBefore);
     });
 
     it('GET deleted project → 404', async () => {
@@ -1370,7 +1396,9 @@ describeIntegration('API Integration Tests', () => {
       deleteAgentSlug = body<{ agent: { slug: string } }>(res).agent.slug;
     });
 
-    it('DELETE /api/agents/:slug — deletes agent, returns 200', async () => {
+    it('DELETE /api/agents/:slug — human executes the approval-gated hard delete, returns 200', async () => {
+      const db = prismaClient();
+      const requestsBefore = await db.approvalRequest.count();
       const res = await request(httpServer)
         .delete(`/api/agents/${deleteAgentSlug}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
@@ -1378,6 +1406,8 @@ describeIntegration('API Integration Tests', () => {
 
       const data = body<{ slug: string }>(res);
       expect(data.slug).toBe(deleteAgentSlug);
+      expect(await db.agent.findUnique({ where: { slug: deleteAgentSlug } })).toBeNull();
+      expect(await db.approvalRequest.count()).toBe(requestsBefore);
     });
 
     it('GET /api/agents/:slug — 404 after delete', async () => {
@@ -1462,10 +1492,29 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('DELETE /api/projects/:slug/labels/:id — removes label', async () => {
+      const requestsBefore = await prismaClient().approvalRequest.count();
       await request(httpServer)
         .delete(`/api/projects/${projectSlug}/labels/${deleteLabelId}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(204);
+      expect(await prismaClient().approvalRequest.count()).toBe(requestsBefore);
+    });
+
+    it('AC-9 (US-010): an agent with label.delete and project.read gets exactly 202', async () => {
+      const project = await prismaClient().project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      await grantKeys(prismaClient(), { type: 'AGENT', id: agentId }, ['label.delete', 'project.read'], project.id);
+      await app.get(MembershipService).invalidatePermissions();
+      const created = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/labels`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'agent-pending-delete', color: '#aa0000' })
+        .expect(201);
+      const id = body<{ id: string }>(created).id;
+
+      await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/labels/${id}`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .expect(202);
     });
 
     it('GET .../labels — deleted label no longer appears', async () => {
@@ -1994,12 +2043,14 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('DELETE .../links/:linkId — returns 204 with no body on valid deletion', async () => {
+      const requestsBefore = await prismaClient().approvalRequest.count();
       await request(httpServer)
         .delete(
           `/api/projects/${projectSlug}/tickets/${bugTicketRef}/links/${ticketLinkId}`,
         )
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(204);
+      expect(await prismaClient().approvalRequest.count()).toBe(requestsBefore);
     });
 
     it('DELETE .../links/:linkId — returns 404 when linkId does not exist on that ticket', async () => {
@@ -5464,4 +5515,58 @@ describeIntegration('API Integration Tests', () => {
   it('writes need an action context', async () => {
     await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
+});
+
+/** Independent smoke lifecycle: both budget prefixes retain their executed statuses and key refusals. */
+describeIntegration('budget approval lifecycle', () => {
+  let app: NathApplication;
+  let db: PrismaClient;
+  let world: FleetHttpWorld;
+  let agent: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  let keyless: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  const server = () => app.getHttpServer();
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    db = fixtureDb(app);
+    world = await seedFleetHttpWorld(server(), db);
+    agent = await seedFleetHttpAgent(server(), world.tokens.root);
+    keyless = await seedFleetHttpAgent(server(), world.tokens.root);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['fleet.budget.create', 'fleet.budget.update', 'fleet.budget.delete', 'fleet.budget.resume'], null);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['project.read'], world.projectId);
+    await app.get(MembershipService).invalidatePermissions();
+  }, 60_000);
+  afterAll(async () => { await app?.close(); });
+  beforeEach(() => { resetThrottle(app); });
+
+  for (const project of [false, true]) {
+    it(`${project ? 'project' : 'global'} budget writes use approvals; keyless writes remain 403`, async () => {
+      const base = project ? '/api/projects/web/fleet/budgets' : '/api/fleet/budgets';
+      if (project) {
+        await grantKeys(db, { type: 'AGENT', id: keyless.id }, ['project.read'], world.projectId);
+        await app.get(MembershipService).invalidatePermissions();
+      }
+      const policy = { scopeType: project ? 'project' : 'global', windowKind: 'lifetime', amountUsd: 10 };
+      const refused = await request(server()).post(base).set(auth(keyless.apiKey)).send(policy).expect(403);
+      refusal(refused, 'permissions.40003');
+      const opened = data<{ id: string }>(await request(server()).post(base).set(auth(agent.apiKey)).send(policy).expect(202));
+      const decided = data<{ result: { id: string }; status: string }>(await request(server()).post(`/api/approvals/${opened.id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200));
+      expect(decided.status).toBe('executed');
+      const id = decided.result.id;
+      await request(server()).patch(`${base}/${id}`).set(auth(keyless.apiKey)).send({ amountUsd: 42 }).expect(403);
+      const patch = data<{ id: string }>(await request(server()).patch(`${base}/${id}`).set(auth(agent.apiKey)).send({ amountUsd: 42 }).expect(202));
+      await request(server()).post(`/api/approvals/${patch.id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200);
+      expect(String((await db.budgetPolicy.findUniqueOrThrow({ where: { id } })).amountUsd)).toBe('42');
+      await db.budgetPolicy.update({ where: { id }, data: { pausedAt: new Date(), pausedWindowStart: new Date(0) } });
+      await request(server()).post(`${base}/${id}/resume`).set(auth(keyless.apiKey)).send({}).expect(403);
+      const resume = data<{ id: string }>(await request(server()).post(`${base}/${id}/resume`).set(auth(agent.apiKey)).send({}).expect(202));
+      await request(server()).post(`/api/approvals/${resume.id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200);
+      expect((await db.budgetPolicy.findUniqueOrThrow({ where: { id } })).pausedAt).toBeNull();
+      await request(server()).delete(`${base}/${id}`).set(auth(keyless.apiKey)).expect(403);
+      const remove = data<{ id: string }>(await request(server()).delete(`${base}/${id}`).set(auth(agent.apiKey)).expect(202));
+      await request(server()).post(`/api/approvals/${remove.id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200);
+      expect(await db.budgetPolicy.findUnique({ where: { id } })).toBeNull();
+    });
+  }
 });

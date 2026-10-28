@@ -8,6 +8,8 @@ import { findCatalogEntry } from '../permissions/catalog';
 import { AUDIT_SUMMARY_MAX, type KodaAuditMetadata } from './domain/audit-entry.domain';
 
 export interface AuditRecordInput {
+  /** Stable id for a durable cross-store intent; replay inserts it at most once. */
+  id?: string;
   key: string;
   resourceType: string;
   resourceId: string;
@@ -64,7 +66,7 @@ export class AuditRecorder {
       resourceId: input.resourceId,
       correlationId: context?.correlationId ?? randomUUID(),
       timestamp: new Date(),
-      metadata: { ...metadata },
+      metadata: { ...metadata, ...(input.id ? { recordId: input.id } : {}) },
     });
     noteAuditEntry();
   }

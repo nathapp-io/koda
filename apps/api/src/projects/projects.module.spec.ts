@@ -1,3 +1,4 @@
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import { Test, TestingModule } from '@nestjs/testing';
 import { MePermissionsController } from './me-permissions.controller';
 import { ProjectsController } from './projects.controller';
@@ -17,6 +18,7 @@ describe('ProjectsModule — DI wiring', () => {
       // dependencies must resolve from the same container as the projects controller's.
       controllers: [ProjectsController, MePermissionsController],
       providers: [
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
         { provide: ProjectsService, useValue: {} },
         { provide: AgentsService, useValue: {} },
         { provide: MemoryGovernanceService, useValue: {} },

@@ -629,6 +629,36 @@ describe('CommentsService', () => {
     });
   });
 
+  describe('resolveCommentProject', () => {
+    it('returns the owning project id after membership resolution', async () => {
+      givenComment(mockComment);
+
+      await expect(service.resolveCommentProject('comment-123', mockUserPrincipal)).resolves.toBe('proj-123');
+      expect(mockAccessService.resolveMembership).toHaveBeenCalledWith('proj-123', mockUserPrincipal);
+    });
+
+    it('hides comments whose ticket is soft-deleted', async () => {
+      mockCommentRepo.findOwningProjectAndTicket.mockResolvedValue({
+        ...OWNING_RESOLUTION,
+        ticket: { ...OWNING_TICKET, deletedAt: new Date() },
+      });
+
+      const error = await service.resolveCommentProject('comment-123', mockUserPrincipal).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(NotFoundAppException);
+      expect(error).toMatchObject({ response: { prefix: 'comments' } });
+      expect(mockAccessService.resolveMembership).not.toHaveBeenCalled();
+    });
+
+    it('hides membership denial as a comments 404', async () => {
+      givenComment(mockComment);
+      mockAccessService.resolveMembership.mockRejectedValueOnce(new ForbiddenAppException({}, 'projects'));
+
+      const error = await service.resolveCommentProject('comment-123', mockUser456Principal).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(NotFoundAppException);
+      expect(error).toMatchObject({ response: { prefix: 'comments' } });
+    });
+  });
+
   describe('update', () => {
     it('runs the repository update inside one audited callback', async () => {
       givenComment(mockComment);

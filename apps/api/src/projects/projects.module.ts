@@ -1,3 +1,6 @@
+import { ProjectRouteCommands } from './project-route.commands';
+import { ApprovalEngineModule } from '../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../auth/auth-repository.module';
 import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { MePermissionsController } from './me-permissions.controller';
@@ -12,6 +15,8 @@ import { AgentsModule } from '../agents/agents.module';
 
 @Module({
   imports: [
+    ApprovalEngineModule,
+    AuthRepositoryModule,
     PrismaModule,
     ProjectAccessModule,
     RagModule,
@@ -27,6 +32,7 @@ import { AgentsModule } from '../agents/agents.module';
   // PermissionsModule is global, so the reverse import would be a cycle for one route.
   controllers: [ProjectsController, MePermissionsController],
   providers: [
+    ProjectRouteCommands,
     PrismaProjectRepository,
     { provide: PROJECT_REPOSITORY, useExisting: PrismaProjectRepository },
     ProjectsService,

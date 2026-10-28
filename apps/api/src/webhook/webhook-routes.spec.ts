@@ -1,3 +1,4 @@
+import { ApprovalRouteGate, type RouteGateCall } from '../approvals/route/approval-route-gate';
 /**
  * US-003 — webhook create/update over a real HTTP pipeline (Fastify, in-process).
  *
@@ -275,6 +276,19 @@ describe('webhook routes (US-003)', () => {
       controllers: [WebhookController],
       providers: [
         WebhookService,
+        {
+          provide: ApprovalRouteGate,
+          inject: [WebhookService],
+          useFactory: (service: WebhookService) => ({
+            run: async ({ variant, input }: RouteGateCall) => {
+              const ids = input as { projectId: string; id: string };
+              if (variant === 'rest:project-webhooks.delete') await service.removeForProject(ids.projectId, ids.id);
+              else if (variant === 'rest:webhooks.delete') await service.remove(ids.id);
+              else throw new Error('Unexpected webhook command');
+              return { status: 'executed', result: null };
+            },
+          }),
+        },
         { provide: AuditRecorder, useValue: { audited: async (fn: () => Promise<unknown>) => fn(), record: vi.fn() } },
         PrismaWebhookRepository,
         OutboundUrlGuard,

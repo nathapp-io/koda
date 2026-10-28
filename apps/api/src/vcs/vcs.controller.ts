@@ -1,3 +1,7 @@
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { VCS_ROUTE_VARIANTS } from './vcs-route.commands';
 import {
   Controller,
   Post,
@@ -54,6 +58,7 @@ export class VcsController {
     private readonly prSyncService: VcsPrSyncService,
     private readonly projectsService: ProjectsService,
     @Inject(VCS_CFG) private readonly vcsConfig: IVcsConfig,
+    private readonly routeGate: ApprovalRouteGate,
   ) {}
 
   private throwEncryptionKeyNotConfigured(): never {
@@ -138,17 +143,24 @@ export class VcsController {
    */
   @Delete()
   @Requires('vcs.connection.delete')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Delete VCS connection for a project' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - project access and vcs.connection.delete required' })
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteConnection(
     @Param('slug') slug: string,
+    @CurrentProject() ctx: ProjectContext,
   ): Promise<void> {
-    // Get project by slug
-    const project = await this.projectsService.findBySlug(slug);
-
-    return this.vcsService.delete(project.id);
+    const projectId = ctx.project.id;
+    const outcome = await this.routeGate.run({
+      key: 'vcs.connection.delete',
+      variant: VCS_ROUTE_VARIANTS.delete,
+      projectId,
+      input: { projectId },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return undefined;
   }
 
   /**
@@ -157,23 +169,25 @@ export class VcsController {
    */
   @Post('/test')
   @Requires('vcs.connection.test')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Test the VCS connection for a project' })
   @ApiResponse({ status: 200, type: TestConnectionResultDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - project access and vcs.connection.test required' })
   async testConnection(
     @Param('slug') slug: string,
+    @CurrentProject() ctx: ProjectContext,
   ) {
-    // Get project by slug
-    const project = await this.projectsService.findBySlug(slug);
-
-    // Get encryption key from config
-    const encryptionKey = this.vcsConfig.encryptionKey;
-    if (!encryptionKey) {
-      this.throwEncryptionKeyNotConfigured();
-    }
-
-    return JsonResponse.Ok(await this.vcsService.testConnection(project.id, encryptionKey));
+    if (!this.vcsConfig.encryptionKey) this.throwEncryptionKeyNotConfigured();
+    const projectId = ctx.project.id;
+    const outcome = await this.routeGate.run<TestConnectionResultDto>({
+      key: 'vcs.connection.test',
+      variant: VCS_ROUTE_VARIANTS.test,
+      projectId,
+      input: { projectId },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   /**

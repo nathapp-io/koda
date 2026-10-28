@@ -1,3 +1,5 @@
+import { ApprovalRouteGate } from '../../../src/approvals/route/approval-route-gate';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 import { PermissionService } from '../../../src/permissions/permission.service';
 import type { Mocked } from 'vitest';
 /**
@@ -40,6 +42,8 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 
 describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
   let controller: VcsController;
+  let gate: { run: ReturnType<typeof vi.fn> };
+  const projectContext = () => ({ project: { id: projectId, slug: projectSlug } });
   let vcsService: Mocked<VcsConnectionService>;
   let projectsService: Mocked<ProjectsService>;
   let configService: Mocked<ConfigService>;
@@ -74,6 +78,8 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
   };
 
   beforeEach(async () => {
+    mockVcsConfig.encryptionKey = encryptionKey;
+    gate = { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) };
     // Create mock services
     const mockVcsServiceInstance = {
       create: vi.fn(),
@@ -99,6 +105,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     module = await Test.createTestingModule({
       controllers: [VcsController],
       providers: [
+        { provide: ApprovalRouteGate, useValue: gate },
         { provide: PermissionService, useValue: { can: vi.fn().mockResolvedValue({ allowed: true }) } },
         { provide: VcsConnectionService, useValue: mockVcsServiceInstance },
         { provide: VcsSyncService, useValue: {} },
@@ -267,20 +274,20 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
   describe('DELETE /projects/:slug/vcs (deleteConnection)', () => {
     it('AC7: returns 204 No Content when deletion succeeds', async () => {
-      vcsService.delete.mockResolvedValue(undefined);
+      gate.run.mockResolvedValue({ status: 'executed', result: null });
 
-      const result = await controller.deleteConnection(projectSlug);
+      const result = await controller.deleteConnection(projectSlug, projectContext());
 
-      expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
-      expect(vcsService.delete).toHaveBeenCalledWith(projectId);
+      expect(projectsService.findBySlug).not.toHaveBeenCalled();
+      expect(gate.run).toHaveBeenCalledWith({ key: 'vcs.connection.delete', variant: 'rest:vcs.delete', projectId, input: { projectId } });
       expect(result).toBeUndefined();
     });
 
     it('AC8: returns 404 when no connection exists', async () => {
-      vcsService.delete.mockRejectedValue(new NotFoundAppException('No connection', 'vcs_not_found'));
+      gate.run.mockRejectedValue(new NotFoundAppException('No connection', 'vcs_not_found'));
 
-      await expect(controller.deleteConnection(projectSlug)).rejects.toThrow(NotFoundAppException);
-      expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
+      await expect(controller.deleteConnection(projectSlug, projectContext())).rejects.toThrow(NotFoundAppException);
+      expect(projectsService.findBySlug).not.toHaveBeenCalled();
     });
   });
 
@@ -289,18 +296,24 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
   // ─────────────────────────────────────────────────────────────────
 
   describe('POST /projects/:slug/vcs/test (testConnection)', () => {
+    it('missing key is refused before the gate', async () => {
+      mockVcsConfig.encryptionKey = null;
+      await expect(controller.testConnection(projectSlug, projectContext())).rejects.toMatchObject({ prefix: 'vcs' });
+      await expect(controller.testConnection(projectSlug, projectContext())).rejects.toThrow(ValidationAppException);
+      expect(gate.run).not.toHaveBeenCalled();
+    });
     it('AC9: returns 200 with TestConnectionResultDto when testing connection', async () => {
       const testResult: TestConnectionResultDto = {
         ok: true,
         latencyMs: 125,
       };	
 
-      vcsService.testConnection.mockResolvedValue(testResult);
+      gate.run.mockResolvedValue({ status: 'executed', result: testResult });
 
-      const result = await controller.testConnection(projectSlug);
+      const result = await controller.testConnection(projectSlug, projectContext());
 
-      expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
-      expect(vcsService.testConnection).toHaveBeenCalledWith(projectId, encryptionKey);
+      expect(projectsService.findBySlug).not.toHaveBeenCalled();
+      expect(gate.run).toHaveBeenCalledWith({ key: 'vcs.connection.test', variant: 'rest:vcs.test', projectId, input: { projectId } });
       expect(result.data).toEqual(testResult);
       expect(result.data).toHaveProperty('ok');
       expect(result.data).toHaveProperty('latencyMs');
@@ -314,9 +327,9 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
         latencyMs: 156,
       };
 
-      vcsService.testConnection.mockResolvedValue(testResult);
+      gate.run.mockResolvedValue({ status: 'executed', result: testResult });
 
-      const result = await controller.testConnection(projectSlug);
+      const result = await controller.testConnection(projectSlug, projectContext());
 
       expect((result.data as TestConnectionResultDto).ok).toBe(true);
       expect((result.data as TestConnectionResultDto).latencyMs).toBeGreaterThanOrEqual(0);
@@ -330,19 +343,19 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
         error: 'Invalid token',
       };
 
-      vcsService.testConnection.mockResolvedValue(testResult);
+      gate.run.mockResolvedValue({ status: 'executed', result: testResult });
 
-      const result = await controller.testConnection(projectSlug);
+      const result = await controller.testConnection(projectSlug, projectContext());
 
       expect((result.data as TestConnectionResultDto).ok).toBe(false);
       expect((result.data as TestConnectionResultDto).error).toBe('Invalid token');
     });
 
     it('throws 404 when no connection exists', async () => {
-      vcsService.testConnection.mockRejectedValue(new NotFoundAppException('No connection', 'vcs_not_found'));
+      gate.run.mockRejectedValue(new NotFoundAppException('No connection', 'vcs_not_found'));
 
-      await expect(controller.testConnection(projectSlug)).rejects.toThrow(NotFoundAppException);
-      expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
+      await expect(controller.testConnection(projectSlug, projectContext())).rejects.toThrow(NotFoundAppException);
+      expect(projectsService.findBySlug).not.toHaveBeenCalled();
     });
   });
 
@@ -375,9 +388,9 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
         latencyMs: 200,
       };
 
-      vcsService.testConnection.mockResolvedValue(testResult);
+      gate.run.mockResolvedValue({ status: 'executed', result: testResult });
 
-      const result = await controller.testConnection(projectSlug);
+      const result = await controller.testConnection(projectSlug, projectContext());
 
       expect(result.data).toHaveProperty('ok');
       expect(result.data).toHaveProperty('latencyMs');
@@ -432,9 +445,9 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     });
 
     it('propagates NotFoundAppException (404) from service on delete', async () => {
-      vcsService.delete.mockRejectedValue(new NotFoundAppException('Connection not found'));
+      gate.run.mockRejectedValue(new NotFoundAppException('Connection not found'));
 
-      await expect(controller.deleteConnection(projectSlug)).rejects.toThrow(NotFoundAppException);
+      await expect(controller.deleteConnection(projectSlug, projectContext())).rejects.toThrow(NotFoundAppException);
     });
   });
 

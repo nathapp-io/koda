@@ -19,6 +19,8 @@ export interface RouteCommandSpec<TInput, TResult> {
   parse(input: unknown): TInput;
   /** The action, as the principal the loader rebuilt from the action context. */
   run(principal: UserPrincipal | AgentPrincipal, input: TInput): Promise<TResult>;
+  /** External reads outside the approval transaction; the returned callback rechecks targets. */
+  prepare?(principal: UserPrincipal | AgentPrincipal, input: TInput): Promise<() => Promise<TResult>>;
   /** What `ApprovalRequest.result` stores; omitted means null. */
   toResult?(result: TResult): unknown;
   /**
@@ -46,6 +48,16 @@ export function routeCommand<TInput, TResult>(
     parse: (input) => spec.parse(input),
     execute: async (input) => spec.run(await loader.forContext(), input),
   };
+  const { prepare } = spec;
+  if (prepare !== undefined) {
+    command.prepare = async (input) => {
+      const mutate = await prepare(await loader.forContext(), input);
+      return async () => {
+        await loader.forContext(); // re-load the requester after potentially slow provider work
+        return mutate();
+      };
+    };
+  }
   const { toResult } = spec;
   if (toResult !== undefined) command.toResult = (result) => toResult(result);
   if (spec.skipKeyRecheck === true) command.skipKeyRecheck = true;

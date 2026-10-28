@@ -1,3 +1,6 @@
+import { TicketLinkRouteCommands } from './ticket-link-route.commands';
+import { ApprovalEngineModule } from '../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../auth/auth-repository.module';
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ProjectAccessModule } from '../projects/project-access.module';
@@ -12,9 +15,10 @@ import { TICKET_LINK_REPOSITORY } from './domain/ticket-link.domain';
  * whole `ProjectsModule`. `PermissionService` comes from the global `PermissionsModule`.
  */
 @Module({
-  imports: [PrismaModule, ProjectAccessModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ProjectAccessModule],
   controllers: [TicketLinksController],
   providers: [
+    TicketLinkRouteCommands,
     PrismaTicketLinkRepository,
     { provide: TICKET_LINK_REPOSITORY, useExisting: PrismaTicketLinkRepository },
     TicketLinksService,

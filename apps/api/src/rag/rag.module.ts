@@ -1,3 +1,8 @@
+import { KbDeletionJournal } from './kb-deletion-journal';
+import { ApprovalEngineModule } from '../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../auth/auth-repository.module';
+import { KbDocumentDeletion } from './kb-document-deletion.service';
+import { KbRouteCommands } from './kb-route.commands';
 import { Injectable, Logger, Module, OnModuleInit, Optional } from '@nestjs/common';
 import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
 import { RAG_CFG, IRagConfig } from '../config/rag.config';
@@ -69,7 +74,7 @@ class EntityStoreWarmup implements OnModuleInit {
 }
 
 @Module({
-  imports: [ScheduleModule.forRoot(), OutboxModule, PrismaModule, ProjectAccessModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, ScheduleModule.forRoot(), OutboxModule, PrismaModule, ProjectAccessModule],
   controllers: [RagController],
   providers: [
     PrismaRagRepository,
@@ -85,6 +90,9 @@ class EntityStoreWarmup implements OnModuleInit {
       inject: [RAG_CFG, EmbeddingService],
     },
     RagService,
+    KbDocumentDeletion,
+    KbDeletionJournal,
+    KbRouteCommands,
     VectorStore,
     EmbeddingService,
     HybridRetrieverService,

@@ -1,3 +1,6 @@
+import { KbDocumentDeletion } from './kb-document-deletion.service';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { ApprovalPending } from '../approvals/route/approval-pending';
 import type { Mock, Mocked } from 'vitest';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
@@ -64,6 +67,9 @@ describe('RagController', () => {
     return result;
   }), record: vi.fn() };
 
+  const deletion = { preflight: vi.fn() };
+  const gate = { run: vi.fn() };
+  let module: TestingModule;
   const mockFindProjectBySlug = vi.fn();
   const mockUpdateGraphifyLastImportedAt = vi.fn();
 
@@ -76,6 +82,8 @@ describe('RagController', () => {
   };
 
   beforeEach(async () => {
+    deletion.preflight.mockReset().mockResolvedValue([]);
+    gate.run.mockReset().mockResolvedValue({ status: 'executed', result: { deleted: true } });
     can = vi.fn().mockResolvedValue(allow);
 
     ragService = {
@@ -92,9 +100,11 @@ describe('RagController', () => {
       search: vi.fn(),
     } as unknown as Mocked<HybridRetrieverService>;
 
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       controllers: [RagController],
       providers: [
+        { provide: KbDocumentDeletion, useValue: deletion },
+        { provide: ApprovalRouteGate, useValue: gate },
         { provide: RagService, useValue: ragService },
         { provide: HybridRetrieverService, useValue: hybridRetrieverService },
         { provide: PrismaRagRepository, useValue: mockRagRepository },
@@ -110,7 +120,8 @@ describe('RagController', () => {
     controller = module.get<RagController>(RagController);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await module.close();
     vi.clearAllMocks();
   });
 
@@ -310,94 +321,32 @@ describe('RagController', () => {
   });
 
   describe('deleteDocument', () => {
-    it('deletes the user rows of that sourceId in both user sources once every row is the caller\'s', async () => {
+    it('preflights before the gate and wraps the executed result', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.findSourceCreators.mockResolvedValue([createdBy('user-dev')]);
-      ragService.deleteBySource.mockResolvedValue(undefined);
-
-      const result = await controller.deleteDocument('alpha', 'doc-1', {}, devUser);
-
-      // US-006: the route keys deletes by (source, sourceId); without a `source` query it names both user sources
-      // and never the ticket or code rows.
-      expect(ragService.deleteBySource).toHaveBeenNthCalledWith(1, 'proj-1', 'doc', 'doc-1');
-      expect(ragService.deleteBySource).toHaveBeenNthCalledWith(2, 'proj-1', 'manual', 'doc-1');
-      expect(ragService.deleteBySource).toHaveBeenCalledTimes(2);
-      expect((result as any).data).toEqual({ deleted: true });
-    });
-
-    it('answers 200 when no user row matches the id', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.findSourceCreators.mockResolvedValue([]);
-      ragService.deleteBySource.mockResolvedValue(undefined);
-
-      const result = await controller.deleteDocument('alpha', 'absent', {}, devUser);
-
-      expect((result as any).data).toEqual({ deleted: true });
-    });
-
-    it('deletes only the source the query names', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.findSourceCreators.mockResolvedValue([]);
-      ragService.deleteBySource.mockResolvedValue(undefined);
-
-      await controller.deleteDocument('alpha', 'doc-1', { source: 'manual' }, devUser);
-
-      expect(ragService.findSourceCreators).toHaveBeenCalledTimes(1);
-      expect(ragService.findSourceCreators).toHaveBeenCalledWith('proj-1', 'manual', 'doc-1');
-      expect(ragService.deleteBySource).toHaveBeenCalledTimes(1);
-      expect(ragService.deleteBySource).toHaveBeenCalledWith('proj-1', 'manual', 'doc-1');
-    });
-
-    it('refuses a row another user created, and deletes nothing', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.findSourceCreators.mockResolvedValue([createdBy('user-other')]);
-      can.mockResolvedValue(notOwner);
-
-      await expect(controller.deleteDocument('alpha', 'theirs', { source: 'doc' }, devUser)).rejects.toThrow(
-        ForbiddenAppException,
-      );
-
-      // The check names the row's creator, so a `.own` grant passes only on the caller's own rows.
-      expect(can).toHaveBeenCalledWith(devUser, 'kb.document.delete', {
-        projectId: 'proj-1',
-        resource: { createdBy: { type: 'USER', id: 'user-other' } },
+      gate.run.mockImplementation(async () => {
+        expect(deletion.preflight).toHaveBeenCalledWith(devUser, 'proj-1', 's1', 'manual');
+        return { status: 'executed', result: { deleted: true } };
       });
-      expect(ragService.deleteBySource).not.toHaveBeenCalled();
+      const result = await controller.deleteDocument('alpha', 's1', { source: 'manual' }, devUser);
+      expect(gate.run).toHaveBeenCalledWith({ key: 'kb.document.delete', variant: 'rest:kb-documents.delete', projectId: 'proj-1', input: { projectId: 'proj-1', sourceId: 's1', source: 'manual' } });
+      expect(result.data).toEqual({ deleted: true });
     });
-
-    it('refuses a system row with no creator to a caller holding only the own key', async () => {
+    it('maps pending to ApprovalPending', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.findSourceCreators.mockResolvedValue([null]);
-      can.mockResolvedValue(notOwner);
-
-      await expect(controller.deleteDocument('alpha', 'sys-1', {}, devUser)).rejects.toThrow(ForbiddenAppException);
-
-      expect(can).toHaveBeenCalledWith(devUser, 'kb.document.delete', {
-        projectId: 'proj-1',
-        resource: { createdBy: null },
-      });
-      expect(ragService.deleteBySource).not.toHaveBeenCalled();
+      gate.run.mockResolvedValue({ status: 'pending', request: { id: 'request-1' } });
+      await expect(controller.deleteDocument('alpha', 's1', {}, devUser)).rejects.toThrow(ApprovalPending);
     });
-
-    it('preflights both sources before deleting either one', async () => {
+    it('refuses ownership before the gate', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
-      // The doc rows are the caller's; only the manual row belongs to someone else.
-      ragService.findSourceCreators.mockResolvedValueOnce([]).mockResolvedValueOnce([createdBy('user-other')]);
-      can.mockResolvedValue(notOwner);
-
-      await expect(controller.deleteDocument('alpha', 'mixed', {}, devUser)).rejects.toThrow(ForbiddenAppException);
-
-      expect(ragService.findSourceCreators).toHaveBeenCalledTimes(2);
-      expect(ragService.deleteBySource).not.toHaveBeenCalled();
+      deletion.preflight.mockRejectedValue(new ForbiddenAppException({}, 'permissions'));
+      await expect(controller.deleteDocument('alpha', 's1', {}, devUser)).rejects.toThrow(ForbiddenAppException);
+      expect(gate.run).not.toHaveBeenCalled();
     });
-
-    it('answers 400 before deleting when the sourceId is not filter-safe', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.findSourceCreators.mockRejectedValue(new ValidationAppException());
-
-      await expect(controller.deleteDocument('alpha', "x'y", {}, devUser)).rejects.toThrow(ValidationAppException);
-
-      expect(ragService.deleteBySource).not.toHaveBeenCalled();
+    it('resolves missing projects before preflight or gate with rag', async () => {
+      mockFindProjectBySlug.mockResolvedValue(null);
+      await expect(controller.deleteDocument('missing', 's1', {}, devUser)).rejects.toMatchObject({ response: { prefix: 'rag' } });
+      expect(deletion.preflight).not.toHaveBeenCalled();
+      expect(gate.run).not.toHaveBeenCalled();
     });
   });
 

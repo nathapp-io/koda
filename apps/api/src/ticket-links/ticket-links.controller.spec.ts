@@ -1,3 +1,6 @@
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { APPROVAL_GATED_METADATA } from '../approvals/route/approval-gated.decorator';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
 import { TicketLinksController } from './ticket-links.controller';
@@ -81,10 +84,12 @@ describe('TicketLinksController', () => {
 
   const principal: KodaPrincipal = makeUserPrincipal();
 
+  let module: TestingModule;
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       controllers: [TicketLinksController],
       providers: [
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn() } },
         { provide: TicketLinksService, useValue: mockTicketLinksService },
         // ProjectMembershipGuard is instantiated by the DI container even though these tests call
         // the handlers directly, so its ProjectAccessService dependency must resolve.
@@ -98,7 +103,8 @@ describe('TicketLinksController', () => {
     service = module.get<TicketLinksService>(TicketLinksService);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await module?.close();
     vi.clearAllMocks();
   });
 
@@ -185,37 +191,42 @@ describe('TicketLinksController', () => {
   });
 
   describe('DELETE /projects/:slug/tickets/:ref/links/:linkId', () => {
-    it('passes the full principal to service.remove with the correct params', async () => {
-      mockTicketLinksService.remove.mockResolvedValue(undefined);
-
-      await controller.remove('koda', 'KODA-1', 'link-123', principal);
-
-      expect(service.remove).toHaveBeenCalledWith('koda', 'KODA-1', 'link-123', principal);
-    });
-
-    it('passes an agent principal through unchanged', async () => {
-      mockTicketLinksService.remove.mockResolvedValue(undefined);
-      const agent = makeAgentPrincipal();
-
-      await controller.remove('koda', 'KODA-1', 'link-123', agent);
-
-      expect(service.remove).toHaveBeenCalledWith('koda', 'KODA-1', 'link-123', agent);
-    });
-
-    it('propagates NotFoundException from service when linkId not found on ticket', async () => {
-      mockTicketLinksService.remove.mockRejectedValue(new Error('Link not found'));
-
-      await expect(
-        controller.remove('koda', 'KODA-1', 'nonexistent-link', principal),
-      ).rejects.toThrow();
-    });
-
-    it('returns void (no body) on successful deletion', async () => {
-      mockTicketLinksService.remove.mockResolvedValue(undefined);
-
-      const result = await controller.remove('koda', 'KODA-1', 'link-123', principal);
-
+    it('gates the frozen identifiers and returns no body after execution', async () => {
+      const gate = module.get(ApprovalRouteGate);
+      vi.mocked(gate.run).mockResolvedValue({ status: 'executed', result: null });
+      const result = await controller.remove('koda', 'KODA-1', 'link-123', { project: { id: 'p1', slug: 'koda' } });
+      expect(gate.run).toHaveBeenCalledExactlyOnceWith({ key: 'ticket.link.remove', variant: 'rest:ticket-links.remove', projectId: 'p1', input: { slug: 'koda', ref: 'KODA-1', linkId: 'link-123' } });
+      expect(service.remove).not.toHaveBeenCalled();
       expect(result).toBeUndefined();
     });
+  });
+});
+
+describe('remove HTTP approval wrapper', () => {
+  function build() {
+    const run = vi.fn();
+    const gate = { run } as unknown as ApprovalRouteGate;
+    const service = { softDelete: vi.fn(), delete: vi.fn(), removeFromTicket: vi.fn(), remove: vi.fn() };
+    const controller = new TicketLinksController(service as unknown as TicketLinksService, gate);
+    const project = { project: { id: 'p1', slug: 'alpha' } };
+    return { run, service, controller, invoke: () => controller.remove('alpha', 'AL-1', 'k1', project) };
+  }
+  it('maps execution and gates the frozen identifiers in CurrentProject scope', async () => {
+    const { run, service, controller, invoke } = build();
+    const result = { ref: 'AL-1' };
+    run.mockResolvedValue({ status: 'executed', result });
+    const output = await invoke();
+    expect(run).toHaveBeenCalledExactlyOnceWith({ key: 'ticket.link.remove', variant: 'rest:ticket-links.remove', projectId: 'p1', input: { slug: 'alpha', ref: 'AL-1', linkId: 'k1' } });
+    expect(output).toBeUndefined();
+    for (const mock of Object.values(service)) expect(mock).not.toHaveBeenCalled();
+    expect(Reflect.getMetadata(APPROVAL_GATED_METADATA, controller.remove)).toBe(true);
+  });
+  it('throws ApprovalPending with the unchanged request', async () => {
+    const { run, invoke } = build();
+    const request = { id: 'approval-1' };
+    run.mockResolvedValue({ status: 'pending', request });
+    const error = await invoke().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ApprovalPending);
+    expect((error as ApprovalPending).request).toBe(request);
   });
 });

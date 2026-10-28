@@ -19,6 +19,10 @@ import { CommentsService } from './comments.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { COMMENT_ROUTE_VARIANTS } from './comment-route.commands';
 import { Principal } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
@@ -29,7 +33,10 @@ import { Requires } from '../permissions/requires.decorator';
 @ApiBearerAuth()
 @Controller()
 export class CommentsController {
-  constructor(private commentsService: CommentsService) {}
+  constructor(
+    private commentsService: CommentsService,
+    private readonly routeGate: ApprovalRouteGate,
+  ) {}
 
   // Public methods for testing (called directly in tests)
   async create(
@@ -119,7 +126,8 @@ export class CommentsController {
 
   @Delete('comments/:id')
   @HttpCode(204)
-  // US-005: same as PATCH — the service checks comment.delete on the row's author.
+  @ApprovalGated()
+  // US-005: the command checks comment.delete on the row's author when it executes.
   @Requires('comment.delete', { enforcedBy: 'service' })
   @ApiOperation({ summary: 'Delete a comment' })
   @ApiResponse({ status: 204, description: 'Comment deleted' })
@@ -129,6 +137,14 @@ export class CommentsController {
     @Param('id') id: string,
     @Principal() principal: KodaPrincipal,
   ) {
-    await this.delete(id, principal);
+    const projectId = await this.commentsService.resolveCommentProject(id, principal);
+    const outcome = await this.routeGate.run<null>({
+      key: 'comment.delete',
+      variant: COMMENT_ROUTE_VARIANTS.delete,
+      projectId,
+      input: { id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return undefined;
   }
 }
