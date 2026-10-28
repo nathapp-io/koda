@@ -5087,6 +5087,15 @@ describeIntegration('API Integration Tests', () => {
       refusal(await roles(roleMemberToken).expect(403), 'permissions.403');
     });
 
+    it('POST /api/roles — 403 for an agent without global role.manage', async () => {
+      await request(httpServer).post('/api/roles').set(auth(agentApiKey)).send({
+        key: 'e2e-agent-denied',
+        name: 'Agent denied',
+        scope: 'PROJECT',
+        permissions: ['ticket.read'],
+      }).expect(403);
+    });
+
     it('POST /api/roles — 201 creates a PROJECT role', async () => {
       const res = await createRole(roleOwnerToken, {
         key: 'e2e-qa',
