@@ -1,9 +1,7 @@
 import type { NathApplication } from '@nathapp/nestjs-app';
 import { ApprovalCommandRegistry } from '../../../src/approvals/approval-command.registry';
 import { ApprovalDecisionService } from '../../../src/approvals/approval-decision.service';
-import { ApprovalExecutionService } from '../../../src/approvals/approval-execution.service';
 import { ApprovalGate } from '../../../src/approvals/approval-gate.service';
-import { PrismaApprovalRequestRepository } from '../../../src/approvals/prisma-approval-request.repository';
 import { grantKeys } from '../../../src/approvals/test-helpers/approval-fixtures';
 import {
   configurableTestCommand,
@@ -26,8 +24,6 @@ const now = new Date('2026-11-05T09:00:00Z');
   let db: ReturnType<typeof fixtureDb>;
   let gate: ApprovalGate;
   let decisions: ApprovalDecisionService;
-  let executions: ApprovalExecutionService;
-  let requests: PrismaApprovalRequestRepository;
   /** The key's primary command: what every request without a variant runs. */
   let labels: ConfigurableTestCommand;
   /** The REST route's variant of the same key. */
@@ -42,10 +38,6 @@ const now = new Date('2026-11-05T09:00:00Z');
     return outcome.request;
   };
   const decide = (id: string) => withTestActor(user, () => decisions.decide(id, 'approve', null, now));
-  /** Moves a pending request to approved through the repository, as a decide would. */
-  const moveToApproved = (id: string) => withTestActor(user, () => requests.transition(id, 'pending', {
-    status: 'approved', decidedAt: now, satisfiedBy: 'human', approverType: 'USER', approverId: 'u1',
-  }));
   const stored = (id: string) => db.approvalRequest.findUniqueOrThrow({ where: { id } });
   /** A decider who holds both `approval.decide` and the action key. */
   const eligible = () => grantRole(db, user, 'project-admin', 'p1');
@@ -57,8 +49,6 @@ const now = new Date('2026-11-05T09:00:00Z');
     await db.project.create({ data: { id: 'p1', slug: 'variants-p1', key: 'VARS', name: 'Variants project' } });
     gate = app.get(ApprovalGate, { strict: false });
     decisions = app.get(ApprovalDecisionService, { strict: false });
-    executions = app.get(ApprovalExecutionService, { strict: false });
-    requests = app.get(PrismaApprovalRequestRepository, { strict: false });
     labels = configurableTestCommand('label.delete');
     restLabels = configurableTestCommand('label.delete', { variant: VARIANT });
     const registry = app.get(ApprovalCommandRegistry, { strict: false });
@@ -118,14 +108,21 @@ const now = new Date('2026-11-05T09:00:00Z');
   });
 
   it('AC-11: approving a request whose variant names no registered command settles failed with no-command', async () => {
+    await eligible();
     const request = await open(VARIANT);
     // The command a stored variant names can be gone by the time the request is approved.
     await db.approvalRequest.update({ where: { id: request.id }, data: { variant: 'rest:gone' } });
-    await moveToApproved(request.id);
 
-    const settled = await executions.execute(request.id, now);
+    const settled = await decide(request.id);
 
     expect(settled).toMatchObject({ status: 'failed', result: { error: 'no-command' } });
+    // An eligible approver is not blocked by the missing variant: the approval is on record, and the
+    // execution that follows settles the request failed.
+    expect(await db.approvalDecision.count({ where: { requestId: request.id } })).toBe(1);
+    expect(await stored(request.id)).toMatchObject({
+      status: 'failed', result: { error: 'no-command' },
+      satisfiedBy: 'human', approverType: 'USER', approverId: 'u1', decidedAt: now,
+    });
     expect(labels.state.calls).toEqual([]);
     expect(restLabels.state.calls).toEqual([]);
   });
