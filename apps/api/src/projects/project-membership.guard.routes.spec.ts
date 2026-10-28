@@ -1,3 +1,4 @@
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import type { Mock } from 'vitest';
 /**
  * US-001 — ProjectMembershipGuard applied to the project-scoped routes.
@@ -187,6 +188,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
     testingModule = await Test.createTestingModule({
       controllers: [TicketsController, ProjectsController, RagController],
       providers: [
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
         { provide: TicketsService, useValue: ticketsService },
         { provide: TicketTransitionsService, useValue: transitionsService },
         { provide: ProjectsService, useValue: projectsService },

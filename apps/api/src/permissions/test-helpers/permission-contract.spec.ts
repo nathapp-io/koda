@@ -132,8 +132,8 @@ describe('permission contract checker', () => {
     for (const route of SECRET_GATE_ROUTES) expect(PENDING_GATE_ROUTES.get(route)).toBe('gate-secret');
   });
 
-  it('AC-10: assigns high-risk project deletion to gate-high', () => {
-    expect(PENDING_GATE_ROUTES.get('DELETE /projects/:slug')).toBe('gate-high');
+  it('AC-10: has no pending entry for gated project deletion', () => {
+    expect(PENDING_GATE_ROUTES.get('DELETE /projects/:slug')).toBeUndefined();
   });
 
   it('AC-11: assigns project ticket creation to gate-core-domains', () => {

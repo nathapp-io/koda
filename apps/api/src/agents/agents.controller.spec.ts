@@ -1,3 +1,4 @@
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
@@ -80,6 +81,7 @@ describe('AgentsController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AgentsController],
       providers: [
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn().mockResolvedValue({ status: 'executed', result: null }) } },
         { provide: AgentsService, useValue: mockAgentsService },
         { provide: PermissionService, useValue: mockPermissions },
       ],

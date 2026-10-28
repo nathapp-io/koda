@@ -1,3 +1,6 @@
+import { AgentRouteCommands } from './agent-route.commands';
+import { ApprovalEngineModule } from '../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../auth/auth-repository.module';
 import { Module, OnModuleInit } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { AgentsController } from './agents.controller';
@@ -14,9 +17,10 @@ import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AGENT_REPOSITORY } from './domain/agent.domain';
 
 @Module({
-  imports: [PrismaModule, KodaDomainWriterModule, AuthModule, ContextModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, KodaDomainWriterModule, AuthModule, ContextModule],
   controllers: [AgentsController],
   providers: [
+    AgentRouteCommands,
     PrismaAgentRepository,
     { provide: AGENT_REPOSITORY, useExisting: PrismaAgentRepository },
     AgentsService,

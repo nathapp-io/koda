@@ -1,3 +1,7 @@
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { PROJECT_ROUTE_VARIANTS } from './project-route.commands';
 import {
   Controller,
   Get,
@@ -47,6 +51,7 @@ export class ProjectsController {
     private impactAnalysisService: ImpactAnalysisService,
     private agentsService: AgentsService,
     private permissions: PermissionService,
+    private readonly routeGate: ApprovalRouteGate,
   ) {}
 
   @Post()
@@ -123,13 +128,21 @@ export class ProjectsController {
   @HttpCode(204)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('project.delete')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Soft delete a project' })
   @ApiResponse({ status: 204, description: 'Project soft deleted successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Not a project member, or project.delete is missing' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  async remove(@Param('slug') slug: string): Promise<void> {
-    await this.projectsService.softDelete(slug);
+  async remove(@Param('slug') slug: string, @CurrentProject() ctx: ProjectContext): Promise<void> {
+    const outcome = await this.routeGate.run<null>({
+      key: 'project.delete',
+      variant: PROJECT_ROUTE_VARIANTS.delete,
+      projectId: ctx.project.id,
+      input: { slug },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return undefined;
   }
 
   @Get(':slug/codeintel/impact')

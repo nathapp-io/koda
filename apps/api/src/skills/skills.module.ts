@@ -1,3 +1,6 @@
+import { SkillSourceRouteCommands } from './skill-source-route.commands';
+import { ApprovalEngineModule } from '../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../auth/auth-repository.module';
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ProjectAccessModule } from '../projects/project-access.module';
@@ -11,9 +14,10 @@ import { SKILL_RESOLVER } from './skill-resolver';
 import { SkillsService } from './skills.service';
 
 @Module({
-  imports: [PrismaModule, GitBrokerModule, ProjectAccessModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, GitBrokerModule, ProjectAccessModule],
   controllers: [AdminSkillsController, ProjectSkillsController],
   providers: [
+    SkillSourceRouteCommands,
     PrismaSkillCatalogRepository,
     { provide: SKILL_CATALOG_REPOSITORY, useExisting: PrismaSkillCatalogRepository },
     { provide: SKILL_RESOLVER, useClass: GitHubSkillResolver },

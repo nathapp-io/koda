@@ -1,3 +1,7 @@
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { SKILL_SOURCE_ROUTE_VARIANTS } from './skill-source-route.commands';
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
@@ -13,7 +17,7 @@ import { SkillsService } from './skills.service';
 @Controller('admin/skills/sources')
 @UseGuards(RequiresGuard)
 export class AdminSkillsController {
-  constructor(private readonly skills: SkillsService) {}
+  constructor(private readonly skills: SkillsService, private readonly routeGate: ApprovalRouteGate) {}
 
   @Get()
   @Requires('skill.source.read')
@@ -51,11 +55,19 @@ export class AdminSkillsController {
   @Delete(':id')
   @HttpCode(204)
   @Requires('skill.source.delete')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Delete a registered skill source (global admin)' })
   @ApiResponse({ status: 204, description: 'Skill source deleted' })
   @ApiResponse({ status: 403, description: 'Global admin required' })
   @ApiResponse({ status: 404, description: 'Skill source not found' })
   async remove(@Param('id') id: string): Promise<void> {
-    await this.skills.deleteSource(id);
+    const outcome = await this.routeGate.run<null>({
+      key: 'skill.source.delete',
+      variant: SKILL_SOURCE_ROUTE_VARIANTS.delete,
+      projectId: null,
+      input: { id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return undefined;
   }
 }

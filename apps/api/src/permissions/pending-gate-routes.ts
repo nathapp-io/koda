@@ -12,10 +12,7 @@ export const SECRET_GATE_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 const ROUTE_ASSIGNMENTS = `
-DELETE /admin/skills/sources/:id=gate-high
-DELETE /agents/:slug=gate-high
 DELETE /comments/:id=gate-high
-DELETE /projects/:slug=gate-high
 DELETE /projects/:slug/invites/:id=gate-core-domains
 DELETE /projects/:slug/kb/documents/:sourceId=gate-high
 DELETE /projects/:slug/labels/:id=gate-high

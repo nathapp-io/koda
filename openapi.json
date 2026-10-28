@@ -510,6 +510,24 @@
           "200": {
             "description": "Agent deleted successfully"
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "401": {
             "description": "Unauthorized"
           },
@@ -1578,6 +1596,24 @@
           }
         ],
         "responses": {
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "204": {
             "description": "Project soft deleted successfully"
           },
@@ -10755,6 +10791,24 @@
           }
         ],
         "responses": {
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "204": {
             "description": "Skill source deleted"
           },
@@ -13517,6 +13571,127 @@
           "capabilities"
         ]
       },
+      "ApprovalRequestSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "permissionKey": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "actorType": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "AGENT",
+              "SYSTEM"
+            ]
+          },
+          "actorId": {
+            "type": "string"
+          },
+          "onBehalfOfType": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "onBehalfOfId": {
+            "type": "string",
+            "nullable": true
+          },
+          "origin": {
+            "type": "string"
+          },
+          "requiredMode": {
+            "type": "string",
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "expired",
+              "cancelled",
+              "executed",
+              "failed"
+            ]
+          },
+          "satisfiedBy": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ]
+          },
+          "approverType": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "approverId": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "settledAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "permissionKey",
+          "projectId",
+          "actorType",
+          "actorId",
+          "onBehalfOfType",
+          "onBehalfOfId",
+          "origin",
+          "requiredMode",
+          "status",
+          "satisfiedBy",
+          "approverType",
+          "approverId",
+          "expiresAt",
+          "decidedAt",
+          "settledAt",
+          "createdAt"
+        ]
+      },
       "AddDocumentDto": {
         "type": "object",
         "properties": {
@@ -15774,127 +15949,6 @@
           "updatedById",
           "createdAt",
           "updatedAt"
-        ]
-      },
-      "ApprovalRequestSummaryDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "permissionKey": {
-            "type": "string"
-          },
-          "projectId": {
-            "type": "string",
-            "nullable": true
-          },
-          "actorType": {
-            "type": "string",
-            "enum": [
-              "USER",
-              "AGENT",
-              "SYSTEM"
-            ]
-          },
-          "actorId": {
-            "type": "string"
-          },
-          "onBehalfOfType": {
-            "type": "string",
-            "nullable": true,
-            "enum": [
-              "USER",
-              "AGENT"
-            ]
-          },
-          "onBehalfOfId": {
-            "type": "string",
-            "nullable": true
-          },
-          "origin": {
-            "type": "string"
-          },
-          "requiredMode": {
-            "type": "string",
-            "enum": [
-              "none",
-              "self",
-              "agent",
-              "human"
-            ]
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "approved",
-              "rejected",
-              "expired",
-              "cancelled",
-              "executed",
-              "failed"
-            ]
-          },
-          "satisfiedBy": {
-            "type": "string",
-            "nullable": true,
-            "enum": [
-              "none",
-              "self",
-              "agent",
-              "human"
-            ]
-          },
-          "approverType": {
-            "type": "string",
-            "nullable": true,
-            "enum": [
-              "USER",
-              "AGENT"
-            ]
-          },
-          "approverId": {
-            "type": "string",
-            "nullable": true
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "decidedAt": {
-            "type": "string",
-            "nullable": true,
-            "format": "date-time"
-          },
-          "settledAt": {
-            "type": "string",
-            "nullable": true,
-            "format": "date-time"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "permissionKey",
-          "projectId",
-          "actorType",
-          "actorId",
-          "onBehalfOfType",
-          "onBehalfOfId",
-          "origin",
-          "requiredMode",
-          "status",
-          "satisfiedBy",
-          "approverType",
-          "approverId",
-          "expiresAt",
-          "decidedAt",
-          "settledAt",
-          "createdAt"
         ]
       },
       "CreateBudgetPolicyDto": {

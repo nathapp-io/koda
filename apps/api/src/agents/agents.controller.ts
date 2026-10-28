@@ -1,4 +1,9 @@
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { AGENT_ROUTE_VARIANTS } from './agent-route.commands';
 import { Controller, Post, Get, Patch, Delete, Body, Param, Query, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
+import { AgentResponseDto } from './dto/agent-response.dto';
 import { AgentsService } from './agents.service';
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { UpdateAgentDto } from './dto/update-agent.dto';
@@ -26,7 +31,7 @@ import { Requires } from '../permissions/requires.decorator';
 @Controller('agents')
 @Throttle({ default: { limit: 10, ttl: 60000 } })
 export class AgentsController {
-  constructor(private agentsService: AgentsService) {}
+  constructor(private agentsService: AgentsService, private readonly routeGate: ApprovalRouteGate) {}
 
 
   // Public methods for testing (called directly in tests)
@@ -174,14 +179,21 @@ export class AgentsController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(RequiresGuard)
   @Requires('agent.delete')
+  @ApprovalGated()
   @ApiOperation({ summary: 'Delete (soft-delete) an agent' })
   @ApiResponse({ status: 200, description: 'Agent deleted successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'agent.delete is missing' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
-  async remove(@Param('slug') slug: string, @Principal() principal: KodaPrincipal) {
-    const data = await this.deleteAgent(slug, principal);
-    return JsonResponse.Ok(data);
+  async remove(@Param('slug') slug: string) {
+    const outcome = await this.routeGate.run<AgentResponseDto>({
+      key: 'agent.delete',
+      variant: AGENT_ROUTE_VARIANTS.delete,
+      projectId: null,
+      input: { slug },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return JsonResponse.Ok(outcome.result);
   }
 
   @Post(':slug/rotate-key')

@@ -1250,11 +1250,15 @@ describeIntegration('API Integration Tests', () => {
       deleteProjectSlug = body<{ slug: string }>(res).slug;
     });
 
-    it('DELETE /api/projects/:slug — soft-deletes project', async () => {
+    it('DELETE /api/projects/:slug — human executes the approval-gated soft delete without a request', async () => {
+      const db = prismaClient();
+      const requestsBefore = await db.approvalRequest.count();
       await request(httpServer)
         .delete(`/api/projects/${deleteProjectSlug}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(204);
+      expect((await db.project.findUniqueOrThrow({ where: { slug: deleteProjectSlug } })).deletedAt).toBeInstanceOf(Date);
+      expect(await db.approvalRequest.count()).toBe(requestsBefore);
     });
 
     it('GET deleted project → 404', async () => {
@@ -1371,7 +1375,9 @@ describeIntegration('API Integration Tests', () => {
       deleteAgentSlug = body<{ agent: { slug: string } }>(res).agent.slug;
     });
 
-    it('DELETE /api/agents/:slug — deletes agent, returns 200', async () => {
+    it('DELETE /api/agents/:slug — human executes the approval-gated hard delete, returns 200', async () => {
+      const db = prismaClient();
+      const requestsBefore = await db.approvalRequest.count();
       const res = await request(httpServer)
         .delete(`/api/agents/${deleteAgentSlug}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
@@ -1379,6 +1385,8 @@ describeIntegration('API Integration Tests', () => {
 
       const data = body<{ slug: string }>(res);
       expect(data.slug).toBe(deleteAgentSlug);
+      expect(await db.agent.findUnique({ where: { slug: deleteAgentSlug } })).toBeNull();
+      expect(await db.approvalRequest.count()).toBe(requestsBefore);
     });
 
     it('GET /api/agents/:slug — 404 after delete', async () => {
