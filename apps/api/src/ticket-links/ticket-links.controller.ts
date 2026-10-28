@@ -1,3 +1,9 @@
+import { CurrentProject } from '../projects/current-project.decorator';
+import { ProjectContext } from '../projects/project-context';
+import { TICKET_LINK_ROUTE_VARIANTS } from './ticket-link-route.commands';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
 import {
   Controller,
   Post,
@@ -46,7 +52,7 @@ function creatorRef(principal: KodaPrincipal): PrincipalRef | undefined {
 @ApiBearerAuth()
 @Controller('projects/:slug/tickets/:ref/links')
 export class TicketLinksController {
-  constructor(private readonly ticketLinksService: TicketLinksService) {}
+  constructor(private readonly ticketLinksService: TicketLinksService, private readonly routeGate: ApprovalRouteGate) {}
 
   @Post()
   // US-006: `ProjectMembershipGuard` runs first (403 `projects` for a non-member), then the key.
@@ -91,9 +97,9 @@ export class TicketLinksController {
   @Delete(':linkId')
   @HttpCode(204)
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
-  // US-006: the row's creator is only known after the link lookup, so `TicketLinksService.remove`
-  // makes the check — and an unknown link stays a 404 `ticket-links` instead of a 403.
+  // The gate checks key possession first; row ownership is checked at command execution.
   @Requires('ticket.link.remove', { enforcedBy: 'service' })
+  @ApprovalGated()
   @ApiOperation({ summary: 'Delete a ticket link by id' })
   @ApiResponse({ status: 204, description: 'Link deleted' })
   @ApiResponse({ status: 403, description: "Not a project member, or ticket.link.remove is missing (or it is someone else's link and only .own is held)" })
@@ -102,8 +108,13 @@ export class TicketLinksController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Param('linkId') linkId: string,
-    @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ): Promise<void> {
-    await this.ticketLinksService.remove(slug, ref, linkId, principal);
+    const outcome = await this.routeGate.run({
+      key: 'ticket.link.remove', variant: TICKET_LINK_ROUTE_VARIANTS.remove,
+      projectId: project.project.id, input: { slug, ref, linkId },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return undefined;
   }
 }

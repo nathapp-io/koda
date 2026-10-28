@@ -1,3 +1,6 @@
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { APPROVAL_GATED_METADATA } from '../approvals/route/approval-gated.decorator';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
 import { LabelsController } from './labels.controller';
@@ -114,10 +117,12 @@ describe('LabelsController', () => {
     removeFromTicket: vi.fn(),
   };
 
+  let module: TestingModule;
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       controllers: [LabelsController],
       providers: [
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn() } },
         { provide: LabelsService, useValue: mockLabelsService },
         // US-001: the route-level ProjectMembershipGuard is instantiated by the DI
         // container even though these tests call the handlers directly, so its
@@ -133,7 +138,8 @@ describe('LabelsController', () => {
     service = module.get<LabelsService>(LabelsService);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await module?.close();
     vi.clearAllMocks();
   });
 
@@ -485,5 +491,63 @@ describe('LabelsController', () => {
         controller.removeLabel('koda', 'KODA-1', 'label-123', mockMemberUser)
       ).rejects.toThrow();
     });
+  });
+});
+
+describe('deleteFromHttp HTTP approval wrapper', () => {
+  function build() {
+    const run = vi.fn();
+    const gate = { run } as unknown as ApprovalRouteGate;
+    const service = { softDelete: vi.fn(), delete: vi.fn(), removeFromTicket: vi.fn(), remove: vi.fn() };
+    const controller = new LabelsController(service as unknown as LabelsService, gate);
+    const project = { project: { id: 'p1', slug: 'alpha' } };
+    return { run, service, controller, invoke: () => controller.deleteFromHttp('alpha', 'l1', project) };
+  }
+  it('maps execution and gates the frozen identifiers in CurrentProject scope', async () => {
+    const { run, service, controller, invoke } = build();
+    const result = { ref: 'AL-1' };
+    run.mockResolvedValue({ status: 'executed', result });
+    const output = await invoke();
+    expect(run).toHaveBeenCalledExactlyOnceWith({ key: 'label.delete', variant: 'rest:labels.delete', projectId: 'p1', input: { slug: 'alpha', id: 'l1' } });
+    expect(output).toBeUndefined();
+    for (const mock of Object.values(service)) expect(mock).not.toHaveBeenCalled();
+    expect(Reflect.getMetadata(APPROVAL_GATED_METADATA, controller.deleteFromHttp)).toBe(true);
+  });
+  it('throws ApprovalPending with the unchanged request', async () => {
+    const { run, invoke } = build();
+    const request = { id: 'approval-1' };
+    run.mockResolvedValue({ status: 'pending', request });
+    const error = await invoke().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ApprovalPending);
+    expect((error as ApprovalPending).request).toBe(request);
+  });
+});
+
+describe('removeLabelFromHttp HTTP approval wrapper', () => {
+  function build() {
+    const run = vi.fn();
+    const gate = { run } as unknown as ApprovalRouteGate;
+    const service = { softDelete: vi.fn(), delete: vi.fn(), removeFromTicket: vi.fn(), remove: vi.fn() };
+    const controller = new LabelsController(service as unknown as LabelsService, gate);
+    const project = { project: { id: 'p1', slug: 'alpha' } };
+    return { run, service, controller, invoke: () => controller.removeLabelFromHttp('alpha', 'AL-1', 'l1', project) };
+  }
+  it('maps execution and gates the frozen identifiers in CurrentProject scope', async () => {
+    const { run, service, controller, invoke } = build();
+    const result = { ref: 'AL-1' };
+    run.mockResolvedValue({ status: 'executed', result });
+    const output = await invoke();
+    expect(run).toHaveBeenCalledExactlyOnceWith({ key: 'ticket.label.remove', variant: 'rest:ticket-labels.remove', projectId: 'p1', input: { slug: 'alpha', ref: 'AL-1', labelId: 'l1' } });
+    expect(output).toBeUndefined();
+    for (const mock of Object.values(service)) expect(mock).not.toHaveBeenCalled();
+    expect(Reflect.getMetadata(APPROVAL_GATED_METADATA, controller.removeLabelFromHttp)).toBe(true);
+  });
+  it('throws ApprovalPending with the unchanged request', async () => {
+    const { run, invoke } = build();
+    const request = { id: 'approval-1' };
+    run.mockResolvedValue({ status: 'pending', request });
+    const error = await invoke().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ApprovalPending);
+    expect((error as ApprovalPending).request).toBe(request);
   });
 });

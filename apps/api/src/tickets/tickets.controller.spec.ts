@@ -1,3 +1,6 @@
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { APPROVAL_GATED_METADATA } from '../approvals/route/approval-gated.decorator';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
 import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
@@ -123,11 +126,13 @@ describe('TicketsController', () => {
   /** RequiresGuard resolves PermissionService when the route-level guards are instantiated. */
   const mockPermissions = { can: vi.fn().mockResolvedValue({ allowed: true, reason: 'granted' }) };
 
+  let module: TestingModule;
   beforeEach(async () => {
     mockPermissions.can.mockReset().mockResolvedValue({ allowed: true, reason: 'granted' });
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       controllers: [TicketsController],
       providers: [
+        { provide: ApprovalRouteGate, useValue: { run: vi.fn() } },
         { provide: TicketsService, useValue: mockTicketsService },
         { provide: TicketTransitionsService, useValue: mockTransitionsService },
         { provide: ProjectsService, useValue: mockProjectsService },
@@ -142,7 +147,8 @@ describe('TicketsController', () => {
     service = module.get<TicketsService>(TicketsService);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await module?.close();
     vi.clearAllMocks();
   });
 
@@ -698,5 +704,34 @@ describe('TicketsController', () => {
       expect(mockTransitionsService.close).toHaveBeenCalledWith('koda', 'KODA-1', 'dup', mockMemberUser);
       expect(res).toEqual(expect.objectContaining({ data: { id: 't1', status: 'CLOSED' } }));
     });
+  });
+});
+
+describe('softDelete HTTP approval wrapper', () => {
+  function build() {
+    const run = vi.fn();
+    const gate = { run } as unknown as ApprovalRouteGate;
+    const service = { softDelete: vi.fn(), delete: vi.fn(), removeFromTicket: vi.fn(), remove: vi.fn() };
+    const controller = new TicketsController(service as unknown as TicketsService, {} as TicketTransitionsService, gate);
+    const project = { project: { id: 'p1', slug: 'alpha' } };
+    return { run, service, controller, invoke: () => controller.softDelete('alpha', 'AL-1', project) };
+  }
+  it('maps execution and gates the frozen identifiers in CurrentProject scope', async () => {
+    const { run, service, controller, invoke } = build();
+    const result = { ref: 'AL-1' };
+    run.mockResolvedValue({ status: 'executed', result });
+    const output = await invoke();
+    expect(run).toHaveBeenCalledExactlyOnceWith({ key: 'ticket.delete', variant: 'rest:tickets.delete', projectId: 'p1', input: { slug: 'alpha', ref: 'AL-1' } });
+    expect(output).toMatchObject({ data: result });
+    for (const mock of Object.values(service)) expect(mock).not.toHaveBeenCalled();
+    expect(Reflect.getMetadata(APPROVAL_GATED_METADATA, controller.softDelete)).toBe(true);
+  });
+  it('throws ApprovalPending with the unchanged request', async () => {
+    const { run, invoke } = build();
+    const request = { id: 'approval-1' };
+    run.mockResolvedValue({ status: 'pending', request });
+    const error = await invoke().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ApprovalPending);
+    expect((error as ApprovalPending).request).toBe(request);
   });
 });

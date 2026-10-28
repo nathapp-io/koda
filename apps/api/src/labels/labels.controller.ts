@@ -1,3 +1,9 @@
+import { CurrentProject } from '../projects/current-project.decorator';
+import { ProjectContext } from '../projects/project-context';
+import { LABEL_ROUTE_VARIANTS } from './label-route.commands';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { ApprovalGated } from '../approvals/route/approval-gated.decorator';
 import {
   Controller,
   Post,
@@ -30,7 +36,7 @@ import { Requires } from '../permissions/requires.decorator';
 @ApiBearerAuth()
 @Controller()
 export class LabelsController {
-  constructor(private labelsService: LabelsService) {}
+  constructor(private labelsService: LabelsService, private readonly routeGate: ApprovalRouteGate) {}
 
   // Public methods for testing (called directly in tests)
   async create(
@@ -133,6 +139,7 @@ export class LabelsController {
   @Delete('projects/:slug/labels/:id')
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('label.delete')
+  @ApprovalGated()
   @HttpCode(204)
   @ApiOperation({ summary: 'Delete a label' })
   @ApiResponse({ status: 204, description: 'Label deleted' })
@@ -141,9 +148,14 @@ export class LabelsController {
   async deleteFromHttp(
     @Param('slug') slug: string,
     @Param('id') id: string,
-    @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    return this.delete(slug, id, principal);
+    const outcome = await this.routeGate.run({
+      key: 'label.delete', variant: LABEL_ROUTE_VARIANTS.delete,
+      projectId: project.project.id, input: { slug, id },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return undefined;
   }
 
   @Post('projects/:slug/tickets/:ref/labels')
@@ -168,6 +180,7 @@ export class LabelsController {
   @Delete('projects/:slug/tickets/:ref/labels/:labelId')
   @UseGuards(ProjectMembershipGuard, RequiresGuard)
   @Requires('ticket.label.remove')
+  @ApprovalGated()
   @HttpCode(204)
   @ApiOperation({ summary: 'Remove a label from a ticket' })
   @ApiResponse({ status: 204, description: 'Label removed from ticket' })
@@ -177,8 +190,13 @@ export class LabelsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Param('labelId') labelId: string,
-    @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    return this.removeLabel(slug, ref, labelId, principal);
+    const outcome = await this.routeGate.run({
+      key: 'ticket.label.remove', variant: LABEL_ROUTE_VARIANTS.remove,
+      projectId: project.project.id, input: { slug, ref, labelId },
+    });
+    if (outcome.status === 'pending') throw new ApprovalPending(outcome.request);
+    return undefined;
   }
 }

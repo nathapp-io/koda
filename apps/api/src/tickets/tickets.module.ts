@@ -1,3 +1,6 @@
+import { TicketRouteCommands } from './ticket-route.commands';
+import { ApprovalEngineModule } from '../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../auth/auth-repository.module';
 import { Module } from '@nestjs/common';
 import { TicketsController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
@@ -14,9 +17,10 @@ import { ProjectsModule } from '../projects/projects.module';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [AuthModule, RagModule, WebhookModule, VcsModule, TicketLinksModule, EventsModule, OutboxModule, ProjectsModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, AuthModule, RagModule, WebhookModule, VcsModule, TicketLinksModule, EventsModule, OutboxModule, ProjectsModule],
   controllers: [TicketsController],
   providers: [
+    TicketRouteCommands,
     PrismaTicketsRepository,
     { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
     TicketsService,

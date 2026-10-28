@@ -1028,10 +1028,12 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('DELETE .../labels/:labelId — removes label from ticket', async () => {
+      const requestsBefore = await prismaClient().approvalRequest.count();
       await request(httpServer)
         .delete(`/api/projects/${projectSlug}/tickets/${labelTicketRef}/labels/${labelId}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(204);
+      expect(await prismaClient().approvalRequest.count()).toBe(requestsBefore);
     });
   });
 
@@ -1065,6 +1067,7 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('DELETE .../tickets/:ref — soft-deletes ticket', async () => {
+      const requestsBefore = await prismaClient().approvalRequest.count();
       const res = await request(httpServer)
         .delete(`/api/projects/${projectSlug}/tickets/${updateTicketRef}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
@@ -1072,6 +1075,7 @@ describeIntegration('API Integration Tests', () => {
 
       const data = body<{ deletedAt: string | null }>(res);
       expect(data.deletedAt).not.toBeNull();
+      expect(await prismaClient().approvalRequest.count()).toBe(requestsBefore);
     });
 
     it('GET deleted ticket — 404', async () => {
@@ -1471,10 +1475,12 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('DELETE /api/projects/:slug/labels/:id — removes label', async () => {
+      const requestsBefore = await prismaClient().approvalRequest.count();
       await request(httpServer)
         .delete(`/api/projects/${projectSlug}/labels/${deleteLabelId}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(204);
+      expect(await prismaClient().approvalRequest.count()).toBe(requestsBefore);
     });
 
     it('GET .../labels — deleted label no longer appears', async () => {
@@ -2003,12 +2009,14 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('DELETE .../links/:linkId — returns 204 with no body on valid deletion', async () => {
+      const requestsBefore = await prismaClient().approvalRequest.count();
       await request(httpServer)
         .delete(
           `/api/projects/${projectSlug}/tickets/${bugTicketRef}/links/${ticketLinkId}`,
         )
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(204);
+      expect(await prismaClient().approvalRequest.count()).toBe(requestsBefore);
     });
 
     it('DELETE .../links/:linkId — returns 404 when linkId does not exist on that ticket', async () => {
