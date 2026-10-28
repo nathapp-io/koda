@@ -47,6 +47,12 @@ export class CommentsService {
     return { project, ticket };
   }
 
+  /** Resolve a comment to its project id for the HTTP approval gate. */
+  async resolveCommentProject(commentId: string, principal: KodaPrincipal): Promise<string> {
+    const { projectId } = await this.assertCommentProjectMembership(commentId, principal);
+    return projectId;
+  }
+
   /**
    * US-002: resolve a comment to its owning project so the slug-less mutation
    * paths can gate by membership before the key check (Permissions P1 US-005).

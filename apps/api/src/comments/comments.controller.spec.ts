@@ -7,6 +7,9 @@ import { UpdateCommentDto } from './dto/update-comment.dto';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { PermissionService } from '../permissions/permission.service';
 import { REQUIRES_METADATA, RequiresMetadata } from '../permissions/requires.decorator';
+import { ApprovalRouteGate } from '../approvals/route/approval-route-gate';
+import { ApprovalPending } from '../approvals/route/approval-pending';
+import { APPROVAL_GATED_METADATA } from '../approvals/route/approval-gated.decorator';
 
 describe('CommentsController route permission metadata (US-005)', () => {
   /** Every route on this controller declares its catalog key with @Requires. */
@@ -49,6 +52,9 @@ describe('CommentsController route permission metadata (US-005)', () => {
 });
 
 describe('CommentsController', () => {
+  it('marks the HTTP deletion route as approval-gated', () => {
+    expect(Reflect.getMetadata(APPROVAL_GATED_METADATA, CommentsController.prototype.deleteFromHttp)).toBe(true);
+  });
   let controller: CommentsController;
   let service: CommentsService;
 
@@ -118,13 +124,16 @@ describe('CommentsController', () => {
     findById: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
+    resolveCommentProject: vi.fn(),
   };
+  const mockRouteGate = { run: vi.fn() };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [CommentsController],
       providers: [
         { provide: CommentsService, useValue: mockCommentsService },
+        { provide: ApprovalRouteGate, useValue: mockRouteGate },
         // US-001: the route-level ProjectMembershipGuard is instantiated by the DI
         // container even though these tests call the handlers directly, so its
         // ProjectAccessService dependency must resolve.
@@ -142,6 +151,27 @@ describe('CommentsController', () => {
   afterEach(() => {
     vi.clearAllMocks();
   });
+
+  it('resolves project scope before gating and preserves the executed 204 result', async () => {
+    mockCommentsService.resolveCommentProject.mockResolvedValue('project-1');
+    mockRouteGate.run.mockResolvedValue({ status: 'executed', result: null });
+
+    await expect(controller.deleteFromHttp('c1', mockMemberUser)).resolves.toBeUndefined();
+
+    expect(mockCommentsService.resolveCommentProject).toHaveBeenCalledWith('c1', mockMemberUser);
+    expect(mockRouteGate.run).toHaveBeenCalledExactlyOnceWith({
+      key: 'comment.delete', variant: 'rest:comments.delete', projectId: 'project-1', input: { id: 'c1' },
+    });
+  });
+
+  it('throws ApprovalPending when the deletion waits for approval', async () => {
+    const pendingRequest = { id: 'approval-1' };
+    mockCommentsService.resolveCommentProject.mockResolvedValue('project-1');
+    mockRouteGate.run.mockResolvedValue({ status: 'pending', request: pendingRequest });
+
+    await expect(controller.deleteFromHttp('c1', mockMemberUser)).rejects.toBeInstanceOf(ApprovalPending);
+  });
+
 
   describe('POST /api/projects/:slug/tickets/:ref/comments', () => {
     it('should create a comment on a ticket', async () => {

@@ -333,12 +333,15 @@ describeIntegration('comment, label and watcher route keys (US-005)', () => {
   // AC-9 — an agent's legacy roster row is a viewer, so it deletes its own comment
   // -------------------------------------------------------------------------
 
-  it('AC-9: an agent with only a roster row deletes its own comment', async () => {
+  it('AC-9: an agent with only a roster row requests approval to delete its own comment', async () => {
     const ref = await createTicket();
     const id = await commentBy('p1-legacy-agent', ref, 'agent wrote this');
 
-    await request(server).delete(`/api/comments/${id}`).set(auth('p1-legacy-agent')).expect(204);
+    const response = await request(server).delete(`/api/comments/${id}`).set(auth('p1-legacy-agent')).expect(202);
+    const pending = data<{ id: string; permissionKey: string; projectId: string }>(response);
+    expect(pending).toEqual(expect.objectContaining({ permissionKey: 'comment.delete', projectId: p1Id }));
 
+    await request(server).post(`/api/approvals/${pending.id}/decisions`).set(auth('root')).send({ decision: 'approve' }).expect(200);
     await expect(commentById(ref, id)).resolves.toBeUndefined();
   }, TIMEOUT);
 
