@@ -68,7 +68,7 @@ export interface GrantTarget {
 const OWN_SUFFIX = '.own';
 const APPROVAL_DECIDE = 'approval.decide';
 const APPROVAL_DECIDE_PREFIX = 'approval.decide@';
-const OWNER_ROLE_KEY = 'owner';
+export const OWNER_ROLE_KEY = 'owner';
 const ADMIN_ROLE_KEY = 'admin';
 const OWNER_BINDING_KEY = 'role.binding.owner';
 const PROJECT_SCOPE: RoleScope = 'PROJECT';

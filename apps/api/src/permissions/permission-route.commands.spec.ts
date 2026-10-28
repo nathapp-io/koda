@@ -8,13 +8,19 @@ import { ValidationAppException } from '@nathapp/nestjs-common';
 import { ApprovalCommandRegistry, type ApprovalCommand } from '../approvals/approval-command.registry';
 import type { AgentPrincipal } from '../auth/principal/koda-principal.types';
 import type { ActorPrincipalLoader } from '../auth/principal/actor-principal.loader';
-import { PERMISSION_ROUTE_VARIANTS, PermissionRouteCommands } from './permission-route.commands';
+import { bindingGateKey, PERMISSION_ROUTE_VARIANTS, PermissionRouteCommands } from './permission-route.commands';
 import type { RoleAdminService } from './role-admin.service';
 import type { RoleDomain } from './permissions.types';
 
 const agent: AgentPrincipal = {
   actorType: 'agent', id: 'agent-1', name: 'qa-agent', slug: 'qa-agent', status: 'ACTIVE',
   capabilities: [], blacklisted: false, revoked: false, authorities: [], extra: { slug: 'qa-agent' },
+};
+
+const createdBinding = {
+  id: 'binding-1', principalType: 'USER' as const, principalId: 'user-1', roleId: 'role-1',
+  roleKey: 'viewer', projectId: 'project-1', grantedByType: 'AGENT', grantedById: 'agent-1',
+  createdAt: new Date('2025-01-01T00:00:00.000Z'),
 };
 
 const createdRole: RoleDomain = {
@@ -24,7 +30,7 @@ const createdRole: RoleDomain = {
 
 interface Harness {
   registry: ApprovalCommandRegistry;
-  roles: { createRole: ReturnType<typeof vi.fn>; updateRole: ReturnType<typeof vi.fn>; deleteRole: ReturnType<typeof vi.fn> };
+  roles: { createRole: ReturnType<typeof vi.fn>; updateRole: ReturnType<typeof vi.fn>; deleteRole: ReturnType<typeof vi.fn>; createBinding: ReturnType<typeof vi.fn>; removeBinding: ReturnType<typeof vi.fn> };
   loader: { forContext: ReturnType<typeof vi.fn> };
 }
 
@@ -34,6 +40,8 @@ function build(): Harness {
     createRole: vi.fn(async () => createdRole),
     updateRole: vi.fn(async () => ({ ...createdRole, name: 'Renamed' })),
     deleteRole: vi.fn(async () => undefined),
+    createBinding: vi.fn(async () => createdBinding),
+    removeBinding: vi.fn(async () => undefined),
   };
   const loader = { forContext: vi.fn(async () => agent) };
   const commands = new PermissionRouteCommands(
@@ -47,8 +55,12 @@ function build(): Harness {
 
 /** The registered command for one role variant; a missing registration fails the test, not the read. */
 function commandOf(registry: ApprovalCommandRegistry, variant: string): ApprovalCommand {
-  const command = registry.get('role.manage', variant);
-  if (command === undefined) throw new Error(`no command registered for role.manage#${variant}`);
+  return requiredCommand(registry, 'role.manage', variant);
+}
+
+function requiredCommand(registry: ApprovalCommandRegistry, key: string, variant: string): ApprovalCommand {
+  const command = registry.get(key, variant);
+  if (command === undefined) throw new Error(`no command registered for ${key}#${variant}`);
   return command;
 }
 
@@ -69,14 +81,57 @@ function expectInvalidInput(command: ApprovalCommand, input: unknown): void {
   expect((error as ValidationAppException).prefix).toBe('approvals.invalidInput');
 }
 
+describe('bindingGateKey', () => {
+  it('selects owner, global and project binding keys from the target', () => {
+    expect(bindingGateKey({ roleKey: 'owner', projectId: null })).toBe('role.binding.owner');
+    expect(bindingGateKey({ roleKey: 'admin', projectId: null })).toBe('role.binding.global');
+    expect(bindingGateKey({ roleKey: 'viewer', projectId: 'p1' })).toBe('role.binding.manage');
+  });
+});
+
 describe('PermissionRouteCommands', () => {
   it('registers the three role variants under role.manage', () => {
     const { registry } = build();
 
-    for (const variant of Object.values(PERMISSION_ROUTE_VARIANTS)) {
+    for (const variant of [PERMISSION_ROUTE_VARIANTS.roleCreate, PERMISSION_ROUTE_VARIANTS.roleUpdate, PERMISSION_ROUTE_VARIANTS.roleDelete]) {
       expect(commandOf(registry, variant)).toMatchObject({ key: 'role.manage', variant });
     }
     expect(registry.get('role.manage')).toBeUndefined();
+  });
+
+  it('registers both binding variants under each target key', () => {
+    const { registry } = build();
+    for (const key of ['role.binding.owner', 'role.binding.global', 'role.binding.manage']) {
+      for (const variant of [PERMISSION_ROUTE_VARIANTS.bindingCreate, PERMISSION_ROUTE_VARIANTS.bindingDelete]) {
+        expect(registry.get(key, variant)).toMatchObject({ key, variant });
+      }
+    }
+  });
+
+  it('parses binding creation and projects its DTO result', async () => {
+    const { registry, roles, loader } = build();
+    const command = requiredCommand(registry, 'role.binding.manage', PERMISSION_ROUTE_VARIANTS.bindingCreate);
+    const parsed = command.parse({ principalType: 'USER', principalId: 'user-1', roleKey: 'viewer', projectId: 'project-1', extra: 1 });
+    expect(parsed).toEqual({ principalType: 'USER', principalId: 'user-1', roleKey: 'viewer', projectId: 'project-1' });
+    await expect(command.execute(parsed)).resolves.toBe(createdBinding);
+    expect(roles.createBinding).toHaveBeenCalledWith(agent, parsed);
+    expect(loader.forContext).toHaveBeenCalledTimes(1);
+    expect(command.toResult?.(createdBinding)).toMatchObject({ id: 'binding-1', roleKey: 'viewer', projectId: 'project-1' });
+  });
+
+  it('parses binding removal, dropping extra fields, and returns null', async () => {
+    const { registry, roles } = build();
+    const command = requiredCommand(registry, 'role.binding.global', PERMISSION_ROUTE_VARIANTS.bindingDelete);
+    const parsed = command.parse({ id: 'binding-1', extra: true });
+    expect(parsed).toEqual({ id: 'binding-1' });
+    await expect(command.execute(parsed)).resolves.toBeNull();
+    expect(roles.removeBinding).toHaveBeenCalledWith(agent, 'binding-1');
+  });
+
+  it('rejects malformed binding removal inputs', () => {
+    const { registry } = build();
+    const command = requiredCommand(registry, 'role.binding.global', PERMISSION_ROUTE_VARIANTS.bindingDelete);
+    for (const input of [{}, { id: '' }, null, []]) expectInvalidInput(command, input);
   });
 
   it('parses the create body and creates the role as the context principal', async () => {

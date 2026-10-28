@@ -4,9 +4,10 @@ import { ApprovalCommandRegistry } from '../approvals/approval-command.registry'
 import { parseBody } from '../approvals/route/parse-body';
 import { routeCommand } from '../approvals/route/route-command';
 import { ActorPrincipalLoader } from '../auth/principal/actor-principal.loader';
+import { CreateRoleBindingDto, RoleBindingDto } from './dto/role-binding.dto';
 import { CreateRoleDto, RoleDto, UpdateRoleDto } from './dto/role.dto';
 import type { RoleDomain } from './permissions.types';
-import { RoleAdminService } from './role-admin.service';
+import { OWNER_ROLE_KEY, RoleAdminService } from './role-admin.service';
 
 /**
  * US-004: the REST entry points of the role writes, as engine commands.
@@ -21,6 +22,8 @@ export const PERMISSION_ROUTE_VARIANTS = {
   roleCreate: 'rest:roles.create',
   roleUpdate: 'rest:roles.update',
   roleDelete: 'rest:roles.delete',
+  bindingCreate: 'rest:role-bindings.create',
+  bindingDelete: 'rest:role-bindings.delete',
 } as const;
 
 /** The catalog key every role write asks under. */
@@ -76,7 +79,36 @@ export class PermissionRouteCommands implements OnModuleInit {
         return null;
       },
     }, this.loader));
+
+    const bindingKeys = ['role.binding.owner', 'role.binding.global', 'role.binding.manage'] as const;
+    for (const key of bindingKeys) {
+      this.commands.register(routeCommand<CreateRoleBindingDto, ReturnType<typeof RoleBindingDto.from>>({
+        key,
+        variant: PERMISSION_ROUTE_VARIANTS.bindingCreate,
+        parse: (input) => parseBody(CreateRoleBindingDto, input),
+        run: (principal, input) => this.roles.createBinding(principal, input),
+        toResult: (binding) => RoleBindingDto.from(binding),
+      }, this.loader));
+
+      this.commands.register(routeCommand<RoleDeleteInput, null>({
+        key,
+        variant: PERMISSION_ROUTE_VARIANTS.bindingDelete,
+        parse: (input) => parseIdInput(input),
+        run: async (principal, input) => {
+          await this.roles.removeBinding(principal, input.id);
+          return null;
+        },
+      }, this.loader));
+    }
   }
+}
+
+/**
+ * The key selected from the actual binding target, before gate or service execution.
+ */
+export function bindingGateKey(target: { roleKey: string; projectId: string | null }): string {
+  if (target.roleKey === OWNER_ROLE_KEY) return 'role.binding.owner';
+  return target.projectId === null ? 'role.binding.global' : 'role.binding.manage';
 }
 
 /**
