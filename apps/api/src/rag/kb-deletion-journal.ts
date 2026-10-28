@@ -1,7 +1,8 @@
-import { Inject, Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { randomUUID } from 'node:crypto';
 import { closeSync, fsyncSync, mkdirSync, openSync, opendirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import type { Dir } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { RAG_CFG, type IRagConfig } from '../config/rag.config';
 import { currentContext, NO_APPROVAL, runWithActionContext, type ActionContext } from '../action-context/action-context';
@@ -30,10 +31,12 @@ interface DeleteIntent {
  * an enclosing approval transaction; only an independent recovery transaction may remove them.
  */
 @Injectable()
-export class KbDeletionJournal implements OnApplicationBootstrap {
+export class KbDeletionJournal implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(KbDeletionJournal.name);
   private readonly directory: string;
   private recovering = false;
+  private cursor?: Dir;
+  private stopped = false;
 
   constructor(
     @Inject(RAG_CFG) config: IRagConfig,
@@ -71,7 +74,20 @@ export class KbDeletionJournal implements OnApplicationBootstrap {
     const fd = openSync(temp, 'wx', 0o600);
     try { writeFileSync(fd, JSON.stringify(intent)); fsyncSync(fd); } finally { closeSync(fd); }
     renameSync(temp, target);
-    this.syncDirectory();
+    try {
+      this.syncDirectory();
+    } catch (error) {
+      // The candidate was published but preparation never committed. Quarantine it before
+      // reporting failure so neither this process nor a restarted sweeper can execute it.
+      // Keep the failed preparation for diagnosis, not in the replayable .json namespace.
+      try {
+        renameSync(target, `${target}.aborted`);
+        this.syncDirectory();
+      } catch (abortError) {
+        throw new AggregateError([error, abortError], 'KB deletion preparation could not be durably aborted');
+      }
+      throw error;
+    }
   }
 
   private syncDirectory(): void {
@@ -83,33 +99,49 @@ export class KbDeletionJournal implements OnApplicationBootstrap {
 
   @Interval(30_000)
   async recover(): Promise<void> {
-    if (this.recovering) return;
+    if (this.recovering || this.stopped) return;
     this.recovering = true;
     try {
       mkdirSync(this.directory, { recursive: true, mode: 0o700 });
-      const dir = opendirSync(this.directory);
-      try {
-        // Bounded sweep; a failed receipt stays durable and is retried, never discarded.
-        let processed = 0;
-        for (let file = dir.readSync(); file !== null && processed < 100; file = dir.readSync()) {
-          if (!file.isFile() || !file.name.endsWith('.json')) continue;
-          processed++;
-          try {
-            const path = join(this.directory, file.name);
-            const intent = this.parse(readFileSync(path, 'utf8'));
-            await this.rag.withDocumentWriteLock(intent.projectId, async session => {
-              for (const source of intent.sources) await session.deleteRows(source.ids);
-              await runWithActionContext(intent.context, () => this.audit.audited(async () => undefined, () => intent.sources.map(source => source.audit)));
-            }, { recovery: true });
-            // audited() has committed here: this sweep has no enclosing request transaction.
-            unlinkSync(path);
-            this.syncDirectory();
-          } catch (error) {
-            this.logger.error(`KB deletion recovery failed for ${file.name}`, error instanceof Error ? error.stack : String(error));
-          }
+      this.cursor ??= opendirSync(this.directory);
+      // Continue this pass on the next tick, even when every attempted receipt fails. Never
+      // read ahead beyond the batch: doing so would silently skip the 101st receipt.
+      for (let scanned = 0; scanned < 100 && !this.stopped; scanned++) {
+        const file = this.cursor.readSync();
+        if (file === null) {
+          this.closeCursor();
+          break;
         }
-      } finally { dir.closeSync(); }
+        if (!file.isFile() || !file.name.endsWith('.json')) continue;
+        try {
+          const path = join(this.directory, file.name);
+          const intent = this.parse(readFileSync(path, 'utf8'));
+          await this.rag.withDocumentWriteLock(intent.projectId, async session => {
+            for (const source of intent.sources) await session.deleteRows(source.ids);
+            await runWithActionContext(intent.context, () => this.audit.audited(async () => undefined, () => intent.sources.map(source => source.audit)));
+          }, { recovery: true });
+          // audited() has committed here: this sweep has no enclosing request transaction.
+          unlinkSync(path);
+          this.syncDirectory();
+        } catch (error) {
+          this.logger.error(`KB deletion recovery failed for ${file.name}`, error instanceof Error ? error.stack : String(error));
+        }
+      }
+    } catch (error) {
+      this.closeCursor();
+      throw error;
     } finally { this.recovering = false; }
+  }
+
+  private closeCursor(): void {
+    const cursor = this.cursor;
+    this.cursor = undefined;
+    cursor?.closeSync();
+  }
+
+  onModuleDestroy(): void {
+    this.stopped = true;
+    this.closeCursor();
   }
 
   private parse(raw: string): DeleteIntent {
