@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { AuditRecorder } from '../../audit/audit-recorder.service';
 import { fieldsSummary } from '../../audit/audit-summary';
+import { committedEffect } from '../../common/committed-effects';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { ConflictAppException } from '../../common/exceptions/conflict-app.exception';
@@ -73,7 +74,7 @@ export class BudgetsService {
       if (error instanceof DuplicateBudgetPolicyError) throw new ConflictAppException({}, 'fleet.budgets');
       throw error;
     }
-    this.evaluator.signal([created.scopeKey]); // plan D165
+    committedEffect(() => this.evaluator.signal([created.scopeKey])); // The approval execution may own the commit.
     return this.toDto(created, now);
   }
 
@@ -98,7 +99,7 @@ export class BudgetsService {
       });
       return after;
     });
-    this.evaluator.signal([updated.scopeKey]); // plan D165
+    committedEffect(() => this.evaluator.signal([updated.scopeKey])); // plan D165, after the owning commit
     return this.toDto(updated, now);
   }
 
@@ -112,7 +113,7 @@ export class BudgetsService {
       await this.audit.record({ key: 'fleet.budget.delete', resourceType: 'fleet-budget', resourceId: policy.id, projectId: policy.projectId, summary: policy.pausedAt !== null ? 'deleted while paused' : 'deleted' });
       return closed.live;
     });
-    this.approvalLive.publish(live);
+    committedEffect(() => this.approvalLive.publish(live));
   }
 
   /**
@@ -142,7 +143,7 @@ export class BudgetsService {
       if (!opts.approvalId) await this.audit.record({ key: 'fleet.budget.resume', resourceType: 'fleet-budget', resourceId: after.id, projectId: after.projectId, summary: 'resumed' });
       return { resumed: after, live: closed.live };
     });
-    this.approvalLive.publish(live);
+    committedEffect(() => this.approvalLive.publish(live));
     return this.toDto(resumed, now);
   }
 
