@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-tickets",
   "branchName": "feat/permissions-p3-approval-gate-tickets",
   "createdAt": "2026-10-28T00:00:00.000Z",
-  "updatedAt": "2026-10-28T16:29:24.130Z",
+  "updatedAt": "2026-10-28T16:38:07.296Z",
   "userStories": [
     {
       "id": "US-001",
@@ -763,14 +763,17 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "One new command provider follows the existing route-command pattern in a module already importing the engine; preserving user-only authorization requires security-isolated TDD."
+        "reasoning": "One new command provider follows the existing route-command pattern in a module already importing the engine; preserving user-only authorization requires security-isolated TDD.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
       },
       "contextFiles": [
         "apps/api/src/notifications/ticket-watch.service.ts",
@@ -810,7 +813,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "744dbf9fffa9c7423c609e084d8e124b264634c8"
     },
     {
       "id": "US-011",
