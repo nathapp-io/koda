@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
+import { ApprovalEngineModule } from '../../approvals/approval-engine.module';
+import { AuthRepositoryModule } from '../../auth/auth-repository.module';
+import { BudgetRouteCommands } from './budget-route.commands';
 import { ProjectAccessModule } from '../../projects/project-access.module';
 import { WebhookModule } from '../../webhook/webhook.module';
 import { FleetActivityModule } from '../activity/fleet-activity.module';
@@ -15,9 +18,9 @@ import { BudgetIncidentRecorder } from './budget-incident.recorder';
 
 /** S1b §2 C1 budgets (plan D160): evaluator, sweeper, management routes. */
 @Module({
-  imports: [PrismaModule, ProjectAccessModule, BudgetStoreModule, ApprovalStoreModule, FleetJobsModule, FleetActivityModule, WebhookModule],
+  imports: [ApprovalEngineModule, AuthRepositoryModule, PrismaModule, ProjectAccessModule, BudgetStoreModule, ApprovalStoreModule, FleetJobsModule, FleetActivityModule, WebhookModule],
   controllers: [FleetBudgetsController, ProjectFleetBudgetsController],
-  providers: [BudgetEvaluator, BudgetIncidentRecorder, BudgetSweeper, BudgetsService],
+  providers: [BudgetRouteCommands, BudgetEvaluator, BudgetIncidentRecorder, BudgetSweeper, BudgetsService],
   exports: [BudgetEvaluator, BudgetsService],
 })
 export class BudgetsModule {}

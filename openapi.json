@@ -5127,6 +5127,24 @@
               }
             }
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "400": {
             "description": "fleet.budgetInput: wrong scope for this route"
           },
@@ -5185,6 +5203,24 @@
               }
             }
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "403": {
             "description": "fleet.budget.update is missing globally"
           },
@@ -5215,6 +5251,24 @@
           }
         ],
         "responses": {
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "204": {
             "description": "Deleted"
           },
@@ -5266,6 +5320,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BudgetPolicyDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
                 }
               }
             }
@@ -5368,6 +5440,24 @@
               }
             }
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "403": {
             "description": "fleet.budget.create is missing"
           },
@@ -5431,6 +5521,24 @@
               }
             }
           },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "403": {
             "description": "fleet.budget.update is missing"
           },
@@ -5469,6 +5577,24 @@
           }
         ],
         "responses": {
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "204": {
             "description": "Deleted"
           },
@@ -5528,6 +5654,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BudgetPolicyDto"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The write waits for approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ret": {
+                      "type": "number"
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalRequestSummaryDto"
+                    }
+                  }
                 }
               }
             }
@@ -15488,6 +15632,127 @@
           "updatedAt"
         ]
       },
+      "ApprovalRequestSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "permissionKey": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "actorType": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "AGENT",
+              "SYSTEM"
+            ]
+          },
+          "actorId": {
+            "type": "string"
+          },
+          "onBehalfOfType": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "onBehalfOfId": {
+            "type": "string",
+            "nullable": true
+          },
+          "origin": {
+            "type": "string"
+          },
+          "requiredMode": {
+            "type": "string",
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "expired",
+              "cancelled",
+              "executed",
+              "failed"
+            ]
+          },
+          "satisfiedBy": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "none",
+              "self",
+              "agent",
+              "human"
+            ]
+          },
+          "approverType": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "USER",
+              "AGENT"
+            ]
+          },
+          "approverId": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "settledAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "permissionKey",
+          "projectId",
+          "actorType",
+          "actorId",
+          "onBehalfOfType",
+          "onBehalfOfId",
+          "origin",
+          "requiredMode",
+          "status",
+          "satisfiedBy",
+          "approverType",
+          "approverId",
+          "expiresAt",
+          "decidedAt",
+          "settledAt",
+          "createdAt"
+        ]
+      },
       "CreateBudgetPolicyDto": {
         "type": "object",
         "properties": {
@@ -21526,127 +21791,6 @@
           "locked",
           "permissions",
           "expandedKeys"
-        ]
-      },
-      "ApprovalRequestSummaryDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "permissionKey": {
-            "type": "string"
-          },
-          "projectId": {
-            "type": "string",
-            "nullable": true
-          },
-          "actorType": {
-            "type": "string",
-            "enum": [
-              "USER",
-              "AGENT",
-              "SYSTEM"
-            ]
-          },
-          "actorId": {
-            "type": "string"
-          },
-          "onBehalfOfType": {
-            "type": "string",
-            "nullable": true,
-            "enum": [
-              "USER",
-              "AGENT"
-            ]
-          },
-          "onBehalfOfId": {
-            "type": "string",
-            "nullable": true
-          },
-          "origin": {
-            "type": "string"
-          },
-          "requiredMode": {
-            "type": "string",
-            "enum": [
-              "none",
-              "self",
-              "agent",
-              "human"
-            ]
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "approved",
-              "rejected",
-              "expired",
-              "cancelled",
-              "executed",
-              "failed"
-            ]
-          },
-          "satisfiedBy": {
-            "type": "string",
-            "nullable": true,
-            "enum": [
-              "none",
-              "self",
-              "agent",
-              "human"
-            ]
-          },
-          "approverType": {
-            "type": "string",
-            "nullable": true,
-            "enum": [
-              "USER",
-              "AGENT"
-            ]
-          },
-          "approverId": {
-            "type": "string",
-            "nullable": true
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "decidedAt": {
-            "type": "string",
-            "nullable": true,
-            "format": "date-time"
-          },
-          "settledAt": {
-            "type": "string",
-            "nullable": true,
-            "format": "date-time"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "permissionKey",
-          "projectId",
-          "actorType",
-          "actorId",
-          "onBehalfOfType",
-          "onBehalfOfId",
-          "origin",
-          "requiredMode",
-          "status",
-          "satisfiedBy",
-          "approverType",
-          "approverId",
-          "expiresAt",
-          "decidedAt",
-          "settledAt",
-          "createdAt"
         ]
       },
       "CreateRoleDto": {

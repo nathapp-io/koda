@@ -31,7 +31,8 @@ import { resetDb } from '../../helpers/reset-db';
 import { FLEET_CFG, IFleetConfig } from '../../../src/config/fleet.config';
 import { SkillsService } from '../../../src/skills/skills.service';
 import { seedThreadJob } from '../../helpers/thread-fixtures';
-import { FleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { FleetHttpWorld, seedFleetHttpAgent, seedFleetHttpWorld } from '../../helpers/fleet-fixtures';
+import { bootHttpApp, data, resetThrottle } from '../../helpers/http-app';
 import { buildThreadInstructions, renderBriefBlock } from '../../../src/fleet/threads/thread-instructions';
 import type { ThreadSkillSource } from '../../../src/skills/skill-catalog.domain';
 import { GitHubAppClient } from '../../../src/fleet/git-broker/github-app-client';
@@ -5464,4 +5465,58 @@ describeIntegration('API Integration Tests', () => {
   it('writes need an action context', async () => {
     await expect(expectGuardActive(app)).resolves.toBeUndefined();
   });
+});
+
+/** Independent smoke lifecycle: both budget prefixes retain their executed statuses and key refusals. */
+describeIntegration('budget approval lifecycle', () => {
+  let app: NathApplication;
+  let db: PrismaClient;
+  let world: FleetHttpWorld;
+  let agent: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  let keyless: Awaited<ReturnType<typeof seedFleetHttpAgent>>;
+  const server = () => app.getHttpServer();
+  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+  beforeAll(async () => {
+    await resetDb();
+    app = await bootHttpApp({ registrationEnabled: true, ownerEmail: null });
+    db = fixtureDb(app);
+    world = await seedFleetHttpWorld(server(), db);
+    agent = await seedFleetHttpAgent(server(), world.tokens.root);
+    keyless = await seedFleetHttpAgent(server(), world.tokens.root);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['fleet.budget.create', 'fleet.budget.update', 'fleet.budget.delete', 'fleet.budget.resume'], null);
+    await grantKeys(db, { type: 'AGENT', id: agent.id }, ['project.read'], world.projectId);
+    await app.get(MembershipService).invalidatePermissions();
+  }, 60_000);
+  afterAll(async () => { await app?.close(); });
+  beforeEach(() => { resetThrottle(app); });
+
+  for (const project of [false, true]) {
+    it(`${project ? 'project' : 'global'} budget writes use approvals; keyless writes remain 403`, async () => {
+      const base = project ? '/api/projects/web/fleet/budgets' : '/api/fleet/budgets';
+      if (project) {
+        await grantKeys(db, { type: 'AGENT', id: keyless.id }, ['project.read'], world.projectId);
+        await app.get(MembershipService).invalidatePermissions();
+      }
+      const policy = { scopeType: project ? 'project' : 'global', windowKind: 'lifetime', amountUsd: 10 };
+      const refused = await request(server()).post(base).set(auth(keyless.apiKey)).send(policy).expect(403);
+      refusal(refused, 'permissions.40003');
+      const opened = data<{ id: string }>(await request(server()).post(base).set(auth(agent.apiKey)).send(policy).expect(202));
+      const decided = data<{ result: { id: string }; status: string }>(await request(server()).post(`/api/approvals/${opened.id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200));
+      expect(decided.status).toBe('executed');
+      const id = decided.result.id;
+      await request(server()).patch(`${base}/${id}`).set(auth(keyless.apiKey)).send({ amountUsd: 42 }).expect(403);
+      const patch = data<{ id: string }>(await request(server()).patch(`${base}/${id}`).set(auth(agent.apiKey)).send({ amountUsd: 42 }).expect(202));
+      await request(server()).post(`/api/approvals/${patch.id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200);
+      expect(String((await db.budgetPolicy.findUniqueOrThrow({ where: { id } })).amountUsd)).toBe('42');
+      await db.budgetPolicy.update({ where: { id }, data: { pausedAt: new Date(), pausedWindowStart: new Date(0) } });
+      await request(server()).post(`${base}/${id}/resume`).set(auth(keyless.apiKey)).send({}).expect(403);
+      const resume = data<{ id: string }>(await request(server()).post(`${base}/${id}/resume`).set(auth(agent.apiKey)).send({}).expect(202));
+      await request(server()).post(`/api/approvals/${resume.id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200);
+      expect((await db.budgetPolicy.findUniqueOrThrow({ where: { id } })).pausedAt).toBeNull();
+      await request(server()).delete(`${base}/${id}`).set(auth(keyless.apiKey)).expect(403);
+      const remove = data<{ id: string }>(await request(server()).delete(`${base}/${id}`).set(auth(agent.apiKey)).expect(202));
+      await request(server()).post(`/api/approvals/${remove.id}/decisions`).set(auth(world.tokens.root)).send({ decision: 'approve' }).expect(200);
+      expect(await db.budgetPolicy.findUnique({ where: { id } })).toBeNull();
+    });
+  }
 });
