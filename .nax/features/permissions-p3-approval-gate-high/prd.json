@@ -3,7 +3,7 @@
   "feature": "permissions-p3-approval-gate-high",
   "branchName": "feat/permissions-p3-approval-gate-high",
   "createdAt": "2026-10-28T00:00:00Z",
-  "updatedAt": "2026-10-28T10:51:31.221Z",
+  "updatedAt": "2026-10-28T11:49:04.112Z",
   "userStories": [
     {
       "id": "US-001",
@@ -813,14 +813,17 @@
         "US-001",
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Extracting multi-source deletion and preserving preflight versus execution-time ownership/audit semantics is security-critical across service, command and controller boundaries."
+        "reasoning": "Extracting multi-source deletion and preserving preflight versus execution-time ownership/audit semantics is security-critical across service, command and controller boundaries.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/rag/rag.controller.ts",
@@ -874,7 +877,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "356a9e6f251b7442171339d21bfc6d77c742e8a0"
     },
     {
       "id": "US-010",
