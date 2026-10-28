@@ -21,7 +21,7 @@ import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectResponseDto } from './dto/project-response.dto';
-import { JsonResponse } from '@nathapp/nestjs-common';
+import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -134,10 +134,14 @@ export class ProjectsController {
   ) {
     const { slug: parsedSlug } = parseRouteInput({ slug }, ['slug']);
     const patch = parseBody(UpdateProjectDto, updateProjectDto ?? {});
-    // Secret changes retain the pre-gate route behavior until gate-secret ships. Never
-    // put plaintext authentication material in ApprovalRequest.input (including mixed patches).
+    // Only token-only changes retain the pre-gate behavior until gate-secret ships.
+    // Reject mixed patches: ordinary settings must not bypass approval, and plaintext
+    // authentication material must never enter ApprovalRequest.input.
     if (patch.ciWebhookToken !== undefined) {
-      return JsonResponse.Ok(await this.projectsService.update(slug, patch));
+      if (Object.entries(patch).some(([key, value]) => key !== 'ciWebhookToken' && value !== undefined)) {
+        throw new ValidationAppException({}, 'approvals.invalidInput');
+      }
+      return JsonResponse.Ok(await this.projectsService.update(parsedSlug, patch));
     }
     const outcome = await this.routeGate.run<ProjectResponseDto>({
       key: 'project.update',
